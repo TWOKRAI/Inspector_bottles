@@ -18,7 +18,6 @@ def main(queue_manager):
 
         frames = queue_manager.memory_manager.read_images("camera_data", id_memory)
 
-
         detector.get_trackbar_values()
 
         # Обработка кадра

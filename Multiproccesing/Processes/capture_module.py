@@ -49,7 +49,11 @@ class VideoServer:
 
     def _process_client(self, queue_manager):
         """Обработка данных от клиента"""
+        #start_frame = time.time()
         params, frame = self.server.receive()
+
+        #elapsed = time.time() - start_frame
+        #print(f"Время захвата кадра {elapsed * 1000} мс")
         
         # Обработка подтверждения параметров
         if params and params[0] == "ACK":
