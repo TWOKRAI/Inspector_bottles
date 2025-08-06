@@ -97,8 +97,8 @@ def main(queue_manager=None):
     server = VideoServer(
         host='192.168.1.10', 
         port=5000,
-        #resolution=(1920, 1080),
-        resolution=(640, 480),
+        resolution=(1920, 1080),
+        #resolution=(640, 480),
         quality=95,
         framerate=100
     )
