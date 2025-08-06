@@ -56,10 +56,10 @@ class QueueManager:
         self.memory_manager = ImageMemoryManager()
         memory_names = {
             'camera_data': (1, (1080, 1920, 3), np.uint8),
-            'camera_data_out': (1, (720, 1280, 3), np.uint8),
-            'process_data': (6, (720, 1280, 3), np.uint8), 
+            'camera_data_out': (1, (1080, 1920, 3), np.uint8),
+            'process_data': (6, (1080, 1920, 3), np.uint8), 
             'neuroun_data': (21, (72, 72, 3), np.uint8),
-            'display_data': (1, (720, 1280, 3), np.uint8),
+            'display_data': (1, (1080, 1920, 3), np.uint8),
         }
         self.memory_manager.create_memory_dict(memory_names, coll=12)
         self.total_modules = 0
