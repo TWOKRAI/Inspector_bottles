@@ -8,7 +8,6 @@ def main(queue_manager):
     print(f'processing_module: RUN')
 
     detector = ColorDetector()
-    
 
     while True:
         data_frame = queue_manager.input_processing.get()

@@ -5,8 +5,6 @@ import cv2
 def main(queue_manager):
     print(f'render_module: RUN')
 
-    i = 0 
-
     while True:
         data_frame = queue_manager.input_render.get()
         
