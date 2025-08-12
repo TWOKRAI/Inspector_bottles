@@ -1,3 +1,4 @@
+import threading
 import time
 import cv2
 
@@ -29,6 +30,27 @@ class Capture_process:
             self.server.start()
 
             print(f'Сервер запущен на {self.server.host}:{self.server.port}')
+
+
+    def _init_threding(self):
+        self.control_thread = threading.Thread(target=self.control_update_thread)
+        self.main_thread = threading.Thread(target=self.process_stream)
+
+
+    def _control_update_thread(self):
+        while not self.queue_manager.stop_event.is_set() and not self.stop_proccess:
+            # try:
+            #     #self.control_camera = self.queue_manager.control_camera.get(timeout=1)
+            #     self.control_camera = self.queue_manager.control_camera.get_nowait()
+            # except Empty:
+            #     time.sleep(0.1)
+            #     continue
+
+            self.queue_manager.control_camera_event.wait() 
+            self.control_camera = self.queue_manager.control_camera.get()
+            self.queue_manager.control_camera_event.clear() 
+
+            self.get_control()
 
 
     def _accept_connection(self):
