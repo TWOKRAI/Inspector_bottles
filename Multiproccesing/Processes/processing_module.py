@@ -19,6 +19,11 @@ def main(queue_manager):
 
         detector.get_trackbar_values()
 
+        param = {'fps': detector.fps}
+
+        queue_manager.remove_old_if_full(queue_manager.control_capture)
+        queue_manager.control_capture.put(param)
+
         # Обработка кадра
         processed_frame, mask = detector.process_frame(frames[0])
 

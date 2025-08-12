@@ -8,7 +8,11 @@ from Utils.timer import Timer
 
 
 class Capture_process:
-    def __init__(self):
+    def __init__(self, queue_manager):
+        self.queue_manager = queue_manager
+
+        self.stop_proccess = False
+
         self.connection_active = False
 
         self.resolution=(1920, 1080)
@@ -16,6 +20,11 @@ class Capture_process:
         self.fps_counter = FrameFPS(update_interval=1.0)
 
         self.video_stream = 0
+
+        self.local_controls_parametrs = {
+                    'fps': 50, 
+                    'delta': 120,
+                    }
 
         if self.video_stream == 0:
             self.cap = cv2.VideoCapture(0)
@@ -32,25 +41,68 @@ class Capture_process:
             print(f'Сервер запущен на {self.server.host}:{self.server.port}')
 
 
-    def _init_threding(self):
-        self.control_thread = threading.Thread(target=self.control_update_thread)
-        self.main_thread = threading.Thread(target=self.process_stream)
+        self._init_threading()
 
 
-    def _control_update_thread(self):
+    def _init_threading(self):
+        self.control_thread = threading.Thread(target=self._control_threading)
+        self.main_thread = threading.Thread(target=self._main_threading)
+
+
+    def start_thread(self):
+        self.main_thread.start()
+        self.control_thread.start()
+
+
+    def stop_thread(self):
+        self.main_thread.join()
+        self.control_thread.join()
+
+        """Остановка сервера"""
+        if self.video_stream == 1:  
+            self.server.stop()
+            print("Сервер остановлен")
+
+        #self.camera.release()
+
+        #print('Процесс RTSPStreamProcessor остановлен')
+
+
+    def _control_threading(self):
         while not self.queue_manager.stop_event.is_set() and not self.stop_proccess:
-            # try:
-            #     #self.control_camera = self.queue_manager.control_camera.get(timeout=1)
-            #     self.control_camera = self.queue_manager.control_camera.get_nowait()
-            # except Empty:
-            #     time.sleep(0.1)
-            #     continue
+            controls_parametrs = self.queue_manager.control_capture.get()
 
-            self.queue_manager.control_camera_event.wait() 
-            self.control_camera = self.queue_manager.control_camera.get()
-            self.queue_manager.control_camera_event.clear() 
+            self.update_parametrs(controls_parametrs)
 
-            self.get_control()
+
+    def update_parametrs(self, incoming_parametrs):
+        for key in incoming_parametrs:
+            if key in self.local_controls_parametrs:
+                self.local_controls_parametrs[key] = incoming_parametrs[key]
+        
+        self.fps = self.local_controls_parametrs['fps']
+        self.delta = self.local_controls_parametrs['delta']
+        
+        print('self.fps', self.fps, 'self.delta', self.delta)
+
+
+    def _main_threading(self):
+        while not self.queue_manager.stop_event.is_set() and not self.stop_proccess:
+            if self.video_stream == 1:
+                print("Ожидание подключения клиента...")
+                self._accept_connection()
+            else:
+                self.connection_active = True
+
+            try:
+                while self.connection_active:
+                    self._process_client()
+            except ConnectionError:
+                print("Соединение разорвано")
+                self._reset_connection()
+            except Exception as e:
+                print(f"Критическая ошибка: {str(e)}")
+                break
 
 
     def _accept_connection(self):
@@ -65,27 +117,7 @@ class Capture_process:
             self.connection_active = False
 
 
-    def run(self, queue_manager=None):
-        while True:
-            if self.video_stream == 1:
-                print("Ожидание подключения клиента...")
-                self._accept_connection()
-            else:
-                self.connection_active = True
-
-            try:
-                while self.connection_active:
-                    self._process_client(queue_manager)
-            except ConnectionError:
-                print("Соединение разорвано")
-                self._reset_connection()
-            except Exception as e:
-                print(f"Критическая ошибка: {str(e)}")
-                self.stop()
-                break
-
-
-    def _process_client(self, queue_manager):
+    def _process_client(self):
         """Обработка данных от клиента"""
         #start_frame = time.time()
 
@@ -104,7 +136,7 @@ class Capture_process:
         
         # Обработка видеокадра
         if frame is not None:
-            self._process_frame(frame, queue_manager)
+            self._process_frame(frame)
         
         # Проверка активности соединения
         if self.video_stream == 1:
@@ -112,20 +144,21 @@ class Capture_process:
                 raise ConnectionError("Соединение разорвано")
 
 
-    def _process_frame(self, frame, queue_manager):
+    def _process_frame(self, frame):
         """Обработка и сохранение кадра"""
         fps = self.fps_counter.update()
         if fps > 0:
-            print(f"FPS: {fps:.2f}")
+            #print(f"FPS: {fps:.2f}")
+            pass
         
-        if queue_manager:
+        if self.queue_manager:
             frames = [frame]
             id_memory = 0
-            queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
+            self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
             
             data_frame = {'id_memory': id_memory, 'time': time.time()}
-            queue_manager.input_processing.put(data_frame)
-            queue_manager.input_capture.get()
+            self.queue_manager.input_processing.put(data_frame)
+            self.queue_manager.input_capture.get()
 
 
     def _reset_connection(self):
@@ -136,22 +169,15 @@ class Capture_process:
         self.connection_active = False
 
 
-    def stop(self):
-        """Остановка сервера"""
-        if self.video_stream == 1:  
-            self.server.stop()
-            print("Сервер остановлен")
-
-
 def main(queue_manager=None):
-    capture = Capture_process()
+    capture = Capture_process(queue_manager)
     
     try:
-        capture.run(queue_manager)
+        capture.start_thread()
     except KeyboardInterrupt:
         pass
     finally:
-        capture.stop()
+        capture.stop_thread()
 
 
 if __name__ == "__main__":

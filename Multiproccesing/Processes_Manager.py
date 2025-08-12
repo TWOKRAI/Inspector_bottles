@@ -167,6 +167,4 @@ class MultiProcessManager:
 
     def stop_processes(self):
         """Корректно останавливает все процессы"""
-        self.stop_event.set()  # Сигнал остановки
-        self.queue_manager.stop_event.set()  # Остановка менеджера очередей
         self.join_processes()  # Ожидание завершения

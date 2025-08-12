@@ -15,7 +15,7 @@ def main(queue_manager):
         timer_start = data_frame['time']
 
         elapsed = time.time() - timer_start
-        print(f"Таймер  {elapsed * 1000} мс")
+        #print(f"Таймер  {elapsed * 1000} мс")
 
         if len(frames) > 0:
             # Отображаем изображение
