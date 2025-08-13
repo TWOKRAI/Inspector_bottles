@@ -16,6 +16,7 @@ class QueueManager:
             'control_capture': 1,
             'control_processing': 1,
             'control_communication': 1,
+            'control_graph': 1,
             'input_render': self.buffer_size,
             'output_render': self.buffer_size,
             'input_capture': self.buffer_size,
@@ -24,6 +25,8 @@ class QueueManager:
             'output_processing': self.buffer_size,
             'input_communication': self.buffer_size,
             'output_communication': self.buffer_size,
+            'input_graph': self.buffer_size,
+            'output_graph': self.buffer_size,
         }
         
         # Конфигурация событий: [список имен]

@@ -27,6 +27,7 @@ class MultiProcessManager:
         self.capture_enable = True
         self.processing_enable = True
         self.communication_enable = False
+        self.graph_enable = True
 
 
     def import_modules(self):
@@ -37,6 +38,7 @@ class MultiProcessManager:
             'proc_processing': 'Multiproccesing.Processes.processing_module',
             'proc_render': 'Multiproccesing.Processes.render_module',
             'proc_communication': 'Multiproccesing.Processes.communication_module', 
+            'proc_graph': 'Multiproccesing.Processes.graph_module', 
         }
 
         # Настройка счетчика модулей
@@ -147,6 +149,15 @@ class MultiProcessManager:
                     priority='normal'
                 )
                 self.processes.append(communication_process)
+            
+            if self.graph_enable:
+                graph_process = self.create_process(
+                    target_func=modules['proc_graph'], 
+                    args=(self.queue_manager,),
+                    name='proc_graph',
+                    priority='normal'
+                )
+                self.processes.append(graph_process)
 
 
     def start_processes(self):

@@ -15,6 +15,8 @@ class Capture_process(ProcessModule):
                     'fps': 50, 
                     'delta': 120,
                     }
+        
+        self.get_parameters()
 
         self.connection_active = False
 
@@ -130,8 +132,8 @@ class Capture_process(ProcessModule):
 
 
 def main(queue_manager=None):
-    capture = Capture_process(name='Capture_process', 
+    process = Capture_process(name='Capture_process', 
                               queue_manager=queue_manager, 
                               control_queue=queue_manager.control_capture)
-    capture.run()
+    process.run()
     

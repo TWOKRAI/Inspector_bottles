@@ -9,17 +9,19 @@ class RenderProcess(ProcessModule):
     def __init__(self, name='Process', queue_manager=None, control_queue=None):
         super().__init__(name, queue_manager, control_queue)
 
-        self.local_controls_parametrs = {
+        self.local_controls_parameters = {
                     'fps': 50, 
                     'delta': 120,
                     }
+        
+        self.get_parameters()
 
         self.timer = Timer('read_frame')
 
 
     def get_parametrs(self):
-        self.fps = self.local_controls_parametrs['fps']
-        self.delta = self.local_controls_parametrs['delta']
+        self.fps = self.local_controls_parameters['fps']
+        self.delta = self.local_controls_parameters['delta']
         
         print('self.fps', self.fps, 'self.delta', self.delta)
 
@@ -53,7 +55,7 @@ class RenderProcess(ProcessModule):
 
 
 def main(queue_manager=None):
-    capture = RenderProcess(name='Render_process', 
+    process = RenderProcess(name='Render_process', 
                                 queue_manager=queue_manager, 
                                 control_queue=None)
-    capture.run()
+    process.run()

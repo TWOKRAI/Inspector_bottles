@@ -10,17 +10,19 @@ class OperationProcess(ProcessModule):
     def __init__(self, name='Process', queue_manager=None, control_queue=None):
         super().__init__(name, queue_manager, control_queue)
 
-        self.local_controls_parametrs = {
+        self.local_controls_parameters = {
                     'fps': 50, 
-                    'delta': 120,
+                    'delta': 10,
                     }
+
+        self.get_parameters()
 
         self.timer = Timer('read_frame')
 
 
     def get_parametrs(self):
-        self.fps = self.local_controls_parametrs['fps']
-        self.delta = self.local_controls_parametrs['delta']
+        self.fps = self.local_controls_parameters['fps']
+        self.delta = self.local_controls_parameters['delta']
         
         print('self.fps', self.fps, 'self.delta', self.delta)
 
@@ -42,6 +44,10 @@ class OperationProcess(ProcessModule):
             self.queue_manager.remove_old_if_full(self.queue_manager.control_capture)
             self.queue_manager.control_capture.put(param)
 
+            param = {'delta': self.detector.delta}
+            self.queue_manager.remove_old_if_full(self.queue_manager.control_graph)
+            self.queue_manager.control_graph.put(param)     
+
             # Обработка кадра
             processed_frame, mask = self.detector.process_frame(frames[0])
 
@@ -58,7 +64,7 @@ class OperationProcess(ProcessModule):
 
 
 def main(queue_manager=None):
-    capture = OperationProcess(name='Operation_process', 
+    process = OperationProcess(name='Operation_process', 
                                 queue_manager=queue_manager, 
                                 control_queue=None)
-    capture.run()
+    process.run()
