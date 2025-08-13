@@ -1,17 +1,15 @@
-import threading
 import time
 import cv2
 
+from .process_module import Process_module
 from Camera_module.socket_module import StreamServer
 from Camera_module.frame_fps import FrameFPS
 from Utils.timer import Timer
 
 
-class Capture_process:
+class Capture_process(Process_module):
     def __init__(self, queue_manager):
-        self.queue_manager = queue_manager
-
-        self.stop_proccess = False
+        super().__init__(queue_manager)
 
         self.connection_active = False
 
@@ -41,68 +39,28 @@ class Capture_process:
             print(f'Сервер запущен на {self.server.host}:{self.server.port}')
 
 
-        self._init_threading()
-
-
-    def _init_threading(self):
-        self.control_thread = threading.Thread(target=self._control_threading)
-        self.main_thread = threading.Thread(target=self._main_threading)
-
-
-    def start_thread(self):
-        self.main_thread.start()
-        self.control_thread.start()
-
-
-    def stop_thread(self):
-        self.main_thread.join()
-        self.control_thread.join()
-
-        """Остановка сервера"""
-        if self.video_stream == 1:  
-            self.server.stop()
-            print("Сервер остановлен")
-
-        #self.camera.release()
-
-        #print('Процесс RTSPStreamProcessor остановлен')
-
-
-    def _control_threading(self):
-        while not self.queue_manager.stop_event.is_set() and not self.stop_proccess:
-            controls_parametrs = self.queue_manager.control_capture.get()
-
-            self.update_parametrs(controls_parametrs)
-
-
-    def update_parametrs(self, incoming_parametrs):
-        for key in incoming_parametrs:
-            if key in self.local_controls_parametrs:
-                self.local_controls_parametrs[key] = incoming_parametrs[key]
-        
+    def get_parametrs(self):
         self.fps = self.local_controls_parametrs['fps']
         self.delta = self.local_controls_parametrs['delta']
         
         print('self.fps', self.fps, 'self.delta', self.delta)
 
 
-    def _main_threading(self):
-        while not self.queue_manager.stop_event.is_set() and not self.stop_proccess:
-            if self.video_stream == 1:
-                print("Ожидание подключения клиента...")
-                self._accept_connection()
-            else:
-                self.connection_active = True
+    def main(self):
+        if self.video_stream == 1:
+            print("Ожидание подключения клиента...")
+            self._accept_connection()
+        else:
+            self.connection_active = True
 
-            try:
-                while self.connection_active:
-                    self._process_client()
-            except ConnectionError:
-                print("Соединение разорвано")
-                self._reset_connection()
-            except Exception as e:
-                print(f"Критическая ошибка: {str(e)}")
-                break
+        try:
+            while self.connection_active:
+                self._process_client()
+        except ConnectionError:
+            print("Соединение разорвано")
+            self._reset_connection()
+        except Exception as e:
+            print(f"Критическая ошибка: {str(e)}")
 
 
     def _accept_connection(self):
