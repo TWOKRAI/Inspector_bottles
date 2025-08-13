@@ -6,9 +6,9 @@ from color_process import ColorDetector
 from Utils.timer import Timer
 
 
-class Operation_process(ProcessModule):
-    def __init__(self, queue_manager):
-        super().__init__(queue_manager)
+class OperationProcess(ProcessModule):
+    def __init__(self, name='Process', queue_manager=None, control_queue=None):
+        super().__init__(name, queue_manager, control_queue)
 
         self.local_controls_parametrs = {
                     'fps': 50, 
@@ -58,5 +58,7 @@ class Operation_process(ProcessModule):
 
 
 def main(queue_manager=None):
-    capture = Operation_process(queue_manager)
+    capture = OperationProcess(name='Operation_process', 
+                                queue_manager=queue_manager, 
+                                control_queue=None)
     capture.run()

@@ -8,10 +8,10 @@ from Utils.timer import Timer
 
 
 class Capture_process(ProcessModule):
-    def __init__(self, queue_manager):
-        super().__init__(queue_manager)
+    def __init__(self, name='Process', queue_manager=None, control_queue=None):
+        super().__init__(name, queue_manager, control_queue)
 
-        self.local_controls_parametrs = {
+        self.local_controls_parameters = {
                     'fps': 50, 
                     'delta': 120,
                     }
@@ -21,6 +21,7 @@ class Capture_process(ProcessModule):
         self.resolution=(1920, 1080)
 
         self.fps_counter = FrameFPS(update_interval=1.0)
+        self.fps = 0
 
         self.video_stream = 0
 
@@ -41,11 +42,11 @@ class Capture_process(ProcessModule):
         self.timer = Timer('read_frame')
 
 
-    def get_parametrs(self):
-        self.fps = self.local_controls_parametrs['fps']
-        self.delta = self.local_controls_parametrs['delta']
+    def get_parameters(self):
+        self.fps = self.local_controls_parameters['fps']
+        self.delta = self.local_controls_parameters['delta']
         
-        print('self.fps', self.fps, 'self.delta', self.delta)
+        #print('self.fps', self.fps, 'self.delta', self.delta)
 
 
     def main(self):
@@ -91,7 +92,7 @@ class Capture_process(ProcessModule):
                 print("Клиент подтвердил получение параметров")
                 return
 
-        self.timer.elapsed_time(print_log=True)
+        #self.timer.elapsed_time(print_log=True)
 
         # Обработка видеокадра
         if frame is not None:
@@ -105,9 +106,9 @@ class Capture_process(ProcessModule):
 
     def _process_frame(self, frame):
         """Обработка и сохранение кадра"""
-        fps = self.fps_counter.update()
-        if fps > 0:
-            #print(f"FPS: {fps:.2f}")
+        self.fps  = self.fps_counter.update()
+        if self.fps  > 0:
+            print(f"FPS: {self.fps :.2f}")
             pass
         
         if self.queue_manager:
@@ -117,7 +118,7 @@ class Capture_process(ProcessModule):
             
             data_frame = {'id_memory': id_memory, 'time': time.time()}
             self.queue_manager.input_processing.put(data_frame)
-            self.queue_manager.input_capture.get()
+            #self.queue_manager.input_capture.get()
 
 
     def _reset_connection(self):
@@ -129,6 +130,8 @@ class Capture_process(ProcessModule):
 
 
 def main(queue_manager=None):
-    capture = Capture_process(queue_manager)
+    capture = Capture_process(name='Capture_process', 
+                              queue_manager=queue_manager, 
+                              control_queue=queue_manager.control_capture)
     capture.run()
     
