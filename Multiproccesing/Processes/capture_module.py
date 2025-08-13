@@ -1,15 +1,20 @@
 import time
 import cv2
 
-from .process_module import Process_module
+from .process_module import ProcessModule
 from Camera_module.socket_module import StreamServer
 from Camera_module.frame_fps import FrameFPS
 from Utils.timer import Timer
 
 
-class Capture_process(Process_module):
+class Capture_process(ProcessModule):
     def __init__(self, queue_manager):
         super().__init__(queue_manager)
+
+        self.local_controls_parametrs = {
+                    'fps': 50, 
+                    'delta': 120,
+                    }
 
         self.connection_active = False
 
@@ -18,11 +23,6 @@ class Capture_process(Process_module):
         self.fps_counter = FrameFPS(update_interval=1.0)
 
         self.video_stream = 0
-
-        self.local_controls_parametrs = {
-                    'fps': 50, 
-                    'delta': 120,
-                    }
 
         if self.video_stream == 0:
             self.cap = cv2.VideoCapture(0)
@@ -37,6 +37,8 @@ class Capture_process(Process_module):
             self.server.start()
 
             print(f'Сервер запущен на {self.server.host}:{self.server.port}')
+
+        self.timer = Timer('read_frame')
 
 
     def get_parametrs(self):
@@ -77,7 +79,7 @@ class Capture_process(Process_module):
 
     def _process_client(self):
         """Обработка данных от клиента"""
-        #start_frame = time.time()
+        self.timer.start()
 
         if self.video_stream == 0:
             ret, frame = self.cap.read()
@@ -89,9 +91,8 @@ class Capture_process(Process_module):
                 print("Клиент подтвердил получение параметров")
                 return
 
-        #elapsed = time.time() - start_frame
-        #print(f"Время захвата кадра {elapsed * 1000} мс")
-        
+        self.timer.elapsed_time(print_log=True)
+
         # Обработка видеокадра
         if frame is not None:
             self._process_frame(frame)
@@ -129,14 +130,5 @@ class Capture_process(Process_module):
 
 def main(queue_manager=None):
     capture = Capture_process(queue_manager)
+    capture.run()
     
-    try:
-        capture.start_thread()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        capture.stop_thread()
-
-
-if __name__ == "__main__":
-    main()
