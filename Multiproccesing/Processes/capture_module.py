@@ -111,7 +111,7 @@ class Capture_process(ProcessModule):
         """Обработка и сохранение кадра"""
         self.fps  = self.fps_counter.update()
         if self.fps  > 0:
-            print(f"FPS: {self.fps :.2f}")
+            #print(f"FPS: {self.fps :.2f}")
             self.intraval += self.fps_counter.update_interval
 
             data_fps = [self.intraval, self.fps]

@@ -1,5 +1,3 @@
-# import matplotlib.pyplot as plt
-
 import matplotlib
 matplotlib.use('Agg')  # Устанавливаем до импорта plt
 import matplotlib.pyplot as plt
