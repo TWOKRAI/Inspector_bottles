@@ -24,6 +24,7 @@ class Capture_process(ProcessModule):
 
         self.fps_counter = FrameFPS(update_interval=1.0)
         self.fps = 0
+        self.intraval = 0
 
         self.video_stream = 0
 
@@ -111,6 +112,11 @@ class Capture_process(ProcessModule):
         self.fps  = self.fps_counter.update()
         if self.fps  > 0:
             print(f"FPS: {self.fps :.2f}")
+            self.intraval += self.fps_counter.update_interval
+
+            data_fps = [self.intraval, self.fps]
+            data = {'fps': data_fps}
+            self.queue_manager.input_graph.put(data)
             pass
         
         if self.queue_manager:

@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from PIL import Image
+import cv2
 
 from .process_module import ProcessModule
 from Visualization.plotter import AdvancedPlotter
@@ -20,25 +21,34 @@ class GraphProcess(ProcessModule):
 
         self.get_parameters()
 
+        self.all_data_graph = {'fps': [[], []]}
+        self.graph = 'fps'
+
         
     def get_parameters(self):
         self.delta = self.local_controls_parameters['delta']
         
-        print('self.delta', self.delta)
+        #print('self.delta', self.delta)
 
 
     def main(self):
         while not self.should_stop():
-            x = np.linspace(0, 10, 100)
-            y1 = np.sin(x) + self.delta
-            y2 = np.cos(x)
+            
+            data_xy = self.all_data_graph[self.graph]
+
+            x = data_xy[0]
+            y = data_xy[1]
+
+            # x = np.linspace(0, 10, 100)
+            # y1 = np.sin(x) + self.delta
+            # y2 = np.cos(x)
             
             # Создание и настройка графика с использованием цепочки вызовов
             plotter = (
                 AdvancedPlotter(style='ggplot', figsize=(10, 5))
-                .add_line(x, y1, label="sin(x)", color='blue', linestyle='-')
-                .add_line(x, y2, label="cos(x)", color='red', linestyle='--')
-                .configure(title="Тригонометрические функции", xlabel="X", ylabel="Y")
+                .add_line(x, y, label=f"{self.graph}", color='blue', linestyle='-')
+                #.add_line(x, y2, label="cos(x)", color='red', linestyle='--')
+                .configure(title="График", xlabel="time", ylabel=f"{self.graph}")
             )
 
             #plotter.plot()
@@ -46,8 +56,24 @@ class GraphProcess(ProcessModule):
               # Получение графика как numpy array
             plot_array = plotter.plot_to_numpy()
             
+            cv2.imshow('plot_array', plot_array)
+            cv2.waitKey(1)  # Ждем нажатия любой клавиши
+
             # Сохранение для проверки
-            Image.fromarray(plot_array).save("plot_numpy.png")
+            #Image.fromarray(plot_array).save("plot_numpy.png")
+
+            self.accept_data()
+
+
+    def accept_data(self):
+        data_graph = self.queue_manager.input_graph.get()
+
+        print(data_graph)
+
+        for key, value in data_graph.items():
+            if key in self.all_data_graph:
+                self.all_data_graph[key][0].append(value[0])
+                self.all_data_graph[key][1].append(value[1])
 
 
 def main(queue_manager=None):
