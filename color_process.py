@@ -19,10 +19,11 @@ class ColorDetector:
         
         self.create_trackbar_window()
     
+
     def create_trackbar_window(self):
         """Создает окно с трекбарами для настройки параметров"""
         cv2.namedWindow(self.window_name)
-        cv2.resizeWindow(self.window_name, 800, 400)
+        cv2.resizeWindow(self.window_name, 900, 500)
         
         # Создание трекбаров с текущими значениями
         cv2.createTrackbar('H Min', self.window_name, self.h_min, 179, lambda x: None)
@@ -36,6 +37,10 @@ class ColorDetector:
 
         cv2.createTrackbar('fps', self.window_name, self.dilate, 100, lambda x: None)
         cv2.createTrackbar('delta', self.window_name, self.dilate, 100, lambda x: None)
+
+        cv2.createTrackbar('min_x', self.window_name, 0, 100, lambda x: None)
+        cv2.createTrackbar('max_x', self.window_name, 100, 500, lambda x: None)
+
     
     def get_trackbar_values(self):
         """Считывает текущие значения с трекбаров"""
@@ -50,6 +55,9 @@ class ColorDetector:
 
         self.fps = cv2.getTrackbarPos('fps', self.window_name)
         self.delta = cv2.getTrackbarPos('delta', self.window_name)
+
+        self.min_x = cv2.getTrackbarPos('min_x', self.window_name)
+        self.max_x = cv2.getTrackbarPos('max_x', self.window_name)
 
     
     def process_frame(self, frame):

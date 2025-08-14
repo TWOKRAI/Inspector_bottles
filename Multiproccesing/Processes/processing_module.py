@@ -44,7 +44,8 @@ class OperationProcess(ProcessModule):
             self.queue_manager.remove_old_if_full(self.queue_manager.control_capture)
             self.queue_manager.control_capture.put(param)
 
-            param = {'delta': self.detector.delta}
+            param = {'min_x': self.detector.min_x,
+                     'max_x': self.detector.max_x,}
             self.queue_manager.remove_old_if_full(self.queue_manager.control_graph)
             self.queue_manager.control_graph.put(param)     
 
