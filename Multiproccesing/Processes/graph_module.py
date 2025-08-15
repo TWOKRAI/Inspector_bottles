@@ -29,15 +29,19 @@ class GraphProcess(ProcessModule):
                                'process_processing': [[], []],
                                'process_render': [[], []],
                                'process_graph': [[], []],
-                               'process_comunnication': [[], []],}
+                               'process_comunnication': [[], []],
+                               
+                               'time_input_processing': [[], []],}
         
-        self.all_data_state = {'fps': False,
-                            'time_cycle': True,
-                            'process_capture': True,
-                            'process_processing': True,
-                            'process_render': True,
-                            'process_graph': True,
-                            'process_comunnication': False,}
+        self.all_data_state = {'fps': [False, 'мс'],
+                            'time_cycle': [True, 'мс'],
+                            'process_capture': [True, 'мс'],
+                            'process_processing': [True, 'мс'],
+                            'process_render': [True, 'мс'],
+                            'process_graph': [False, 'мс'],
+                            'process_comunnication': [False, 'мс'],
+
+                            'time_input_processing': [False, 'мс'],}
 
 
         self.graph = 'fps'
@@ -71,8 +75,9 @@ class GraphProcess(ProcessModule):
             
             # Перебираем все возможные графики
             for graph_name in self.all_data_state:
+                graph_parametrs = self.all_data_state[graph_name]
                 # Проверяем, активен ли график
-                if self.all_data_state[graph_name]:
+                if graph_parametrs[0]:
                     # Получаем данные для этого графика
                     data_xy = self.all_data_graph.get(graph_name, [[], []])
                     if not data_xy[0] or not data_xy[1]:
@@ -84,6 +89,7 @@ class GraphProcess(ProcessModule):
                     
                     # Добавляем линию графика
                     if x and y:
+                        graph_name = f'{graph_name}, {graph_parametrs[1]}'
                         plotter.add_line(x, y, label=graph_name, linestyle='-')
                         has_data = True
             
@@ -95,7 +101,7 @@ class GraphProcess(ProcessModule):
             plotter.configure(
                 title="Графики производительности",
                 xlabel="Время",
-                ylabel="Значение",
+                ylabel=f"Значение, {graph_parametrs[1]}",
                 legend_position='bottom'
             )
             

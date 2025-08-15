@@ -93,10 +93,11 @@ class Capture_process(ProcessModule):
 
     def _process_client(self):
         """Обработка данных от клиента"""
-        #self.timer.start()
+        self.timer_read_frame.start()
 
         if self.video_stream == 0:
             ret, frame = self.cap.read()
+            #cv2.imwrite('test.jpg', frame)
         elif self.video_stream == 1:
             params, frame = self.server.receive()
 
@@ -104,8 +105,10 @@ class Capture_process(ProcessModule):
             if params and params[0] == "ACK":
                 print("Клиент подтвердил получение параметров")
                 return
+        elif self.video_stream == 2:
+            frame = cv2.imread('test.jpg')
 
-        #self.timer.elapsed_time(print_log=True)
+        #self.timer_read_frame.elapsed_time(print_log=True)
 
         # Обработка видеокадра
         if frame is not None:
@@ -134,7 +137,7 @@ class Capture_process(ProcessModule):
             id_memory = 0
             self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
             
-            data_frame = {'id_memory': id_memory, 'time': self.start_cycle}
+            data_frame = {'time_send': time.time(), 'id_memory': id_memory, 'time': self.start_cycle}
             self.queue_manager.input_processing.put(data_frame)
             #self.queue_manager.input_capture.get()
 

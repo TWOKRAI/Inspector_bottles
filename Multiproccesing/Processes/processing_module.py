@@ -32,10 +32,10 @@ class OperationProcess(ProcessModule):
         self.detector = ColorDetector()
 
         while not self.should_stop():
-            self.timer_process.start()
-
             data_frame = self.queue_manager.input_processing.get()
+            self.timer_process.start()
             
+            time_input_data = data_frame['time_send']
             id_memory = data_frame['id_memory']
             #print(f'processing_module: {id_memory}')
 
@@ -49,6 +49,7 @@ class OperationProcess(ProcessModule):
 
             param = {'min_x': self.detector.min_x,
                      'max_x': self.detector.max_x,}
+            
             self.queue_manager.remove_old_if_full(self.queue_manager.control_graph)
             self.queue_manager.control_graph.put(param)     
 
@@ -64,7 +65,9 @@ class OperationProcess(ProcessModule):
             cv2.imshow('Mask', mask)
             cv2.waitKey(1)
 
-            data = {'process_processing': self.timer_process.get_data()}
+            time_send = time.time()
+            data = {'process_processing': self.timer_process.get_data(),
+                    'time_input_processing': [time_send, time_send - time_input_data]}
             self.queue_manager.input_graph.put(data)
         
         cv2.destroyAllWindows()

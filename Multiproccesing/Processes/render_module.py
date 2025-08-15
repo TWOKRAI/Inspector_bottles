@@ -30,9 +30,8 @@ class RenderProcess(ProcessModule):
     def main(self):
         i = 0
         while not self.should_stop():
-            self.timer_process.start()
-
             data_frame = self.queue_manager.input_render.get()
+            self.timer_process.start()
             
             id_memory = data_frame['id_memory']
             #print(f'processing_module: {id_memory}')
@@ -40,9 +39,7 @@ class RenderProcess(ProcessModule):
             frames = self.queue_manager.memory_manager.read_images("process_data", id_memory)
             timer_start = data_frame['time']
 
-            real_time = time.time()
-            elapsed = time.time() - timer_start
-            elapsed = elapsed * 1000
+
             #print(f"Таймер  {elapsed * 1000} мс")
             
 
@@ -62,6 +59,10 @@ class RenderProcess(ProcessModule):
             data = {'process_render': self.timer_process.get_data()}
             self.queue_manager.input_graph.put(data)
             
+            real_time = time.time()
+            elapsed = time.time() - timer_start
+            elapsed = elapsed * 1000
+
             data_cycle = [real_time, elapsed]
             data = {'time_cycle': data_cycle}
             self.queue_manager.input_graph_cycle.put(data)

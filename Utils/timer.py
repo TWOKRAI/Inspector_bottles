@@ -22,7 +22,6 @@ class Timer:
             return 0
         
         self.real_time = time.time()
-        
         self.elapsed = self.real_time - self.start_time
 
         if print_log:
@@ -33,6 +32,6 @@ class Timer:
 
     def get_data(self):
         self.real_time = time.time()
-        self.elapsed = self.real_time - self.start_time
-        
+        self.elapsed = (self.real_time - self.start_time) * 1000
+
         return [self.real_time, self.elapsed]
