@@ -16,6 +16,7 @@ class RenderProcess(ProcessModule):
         
         self.get_parameters()
 
+        self.timer_process = Timer('time_process')
         self.timer = Timer('read_frame')
 
 
@@ -27,7 +28,10 @@ class RenderProcess(ProcessModule):
 
 
     def main(self):
+        i = 0
         while not self.should_stop():
+            self.timer_process.start()
+
             data_frame = self.queue_manager.input_render.get()
             
             id_memory = data_frame['id_memory']
@@ -36,8 +40,13 @@ class RenderProcess(ProcessModule):
             frames = self.queue_manager.memory_manager.read_images("process_data", id_memory)
             timer_start = data_frame['time']
 
+            real_time = time.time()
             elapsed = time.time() - timer_start
+            elapsed = elapsed * 1000
             #print(f"Таймер  {elapsed * 1000} мс")
+            
+
+            i += 1
 
             if len(frames) > 0:
                 # Отображаем изображение
@@ -47,9 +56,16 @@ class RenderProcess(ProcessModule):
                 print("Не удалось загрузить изображение.")
             
             #self.queue_manager.input_capture.put(id_memory)
-                
+
             #queue_manager.input_render.put(id_memory)
-        
+
+            data = {'process_render': self.timer_process.get_data()}
+            self.queue_manager.input_graph.put(data)
+            
+            data_cycle = [real_time, elapsed]
+            data = {'time_cycle': data_cycle}
+            self.queue_manager.input_graph_cycle.put(data)
+
         cv2.destroyAllWindows()
         print(f'processing_module: STOP')
 

@@ -26,6 +26,8 @@ class AdvancedPlotter:
         self.ylabel = "Y"
         self.grid = True
         self.legend = True
+        self.legend_position = 'top'
+
         
     def add_line(self, x, y, label=None, color=None, linestyle='-', marker=None):
         """Добавить линию на график"""
@@ -39,19 +41,29 @@ class AdvancedPlotter:
         })
         return self  # Возвращаем self для цепочки вызовов
     
-    def configure(self, title=None, xlabel=None, ylabel=None, grid=None, legend=None):
+    def configure(self, title=None, xlabel=None, ylabel=None, grid=None, legend=None, legend_position=None):
         """Конфигурация параметров графика"""
         if title: self.title = title
         if xlabel: self.xlabel = xlabel
         if ylabel: self.ylabel = ylabel
         if grid is not None: self.grid = grid
         if legend is not None: self.legend = legend
+        if legend_position is not None: self.legend_position = legend_position
         return self  # Возвращаем self для цепочки вызовов
     
     @contextlib.contextmanager
     def _create_figure(self):
         """Контекстный менеджер для создания фигуры"""
         plt.style.use(self.style if self.style != 'seaborn' else 'seaborn-v0_8')
+
+        # Увеличиваем размер фигуры для внешней легенды
+        figsize_adjusted = list(self.figsize)
+        if self.legend_position == 'top' or self.legend_position == 'bottom':
+            figsize_adjusted[1] *= 1.2  # +20% высоты
+        elif self.legend_position == 'left' or self.legend_position == 'right':
+            figsize_adjusted[0] *= 1.3  # +30% ширины
+
+
         fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
         
         try:
@@ -71,8 +83,33 @@ class AdvancedPlotter:
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             if self.grid: ax.grid(alpha=0.4)
-            if self.legend and any(line['label'] for line in self.lines): 
-                ax.legend()
+
+            if self.legend and any(line['label'] for line in self.lines):
+                if self.legend_position == 'inside':
+                    ax.legend()
+                else:
+                    # Выносим легенду за пределы графика
+                    if self.legend_position == 'top':
+                        ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.05), 
+                                 ncol=3, fancybox=True, shadow=True)
+                    elif self.legend_position == 'bottom':
+                        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), 
+                                 ncol=3, fancybox=True, shadow=True)
+                    elif self.legend_position == 'left':
+                        ax.legend(loc='center right', bbox_to_anchor=(-0.25, 0.5))
+                    elif self.legend_position == 'right':
+                        ax.legend(loc='center left', bbox_to_anchor=(1.05, 0.5))
+                    
+                    # Регулируем отступы
+                    plt.tight_layout()
+                    if self.legend_position == 'top':
+                        fig.subplots_adjust(top=0.85)
+                    elif self.legend_position == 'bottom':
+                        fig.subplots_adjust(bottom=0.25)
+                    elif self.legend_position == 'left':
+                        fig.subplots_adjust(left=0.25)
+                    elif self.legend_position == 'right':
+                        fig.subplots_adjust(right=0.75)
             
             yield fig, ax
             

@@ -26,6 +26,7 @@ class QueueManager:
             'input_communication': self.buffer_size,
             'output_communication': self.buffer_size,
             'input_graph': self.buffer_size,
+            'input_graph_cycle': self.buffer_size,
             'output_graph': self.buffer_size,
         }
         

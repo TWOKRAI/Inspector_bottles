@@ -5,6 +5,8 @@ class Timer:
     def __init__(self, name):
         self.name = name
         self.start_time = None
+        self.real_time = None
+        self.elapsed = None
 
 
     def start(self):
@@ -19,9 +21,18 @@ class Timer:
             #print(f"Таймер {self.name} не был запущен.")
             return 0
         
-        elapsed = time.time() - self.start_time
+        self.real_time = time.time()
+        
+        self.elapsed = self.real_time - self.start_time
 
         if print_log:
-            print(f"Таймер {self.name} {elapsed * 1000} мс")
+            print(f"Таймер {self.name} {self.elapsed * 1000} мс")
         
-        return elapsed
+        return self.elapsed
+    
+
+    def get_data(self):
+        self.real_time = time.time()
+        self.elapsed = self.real_time - self.start_time
+        
+        return [self.real_time, self.elapsed]

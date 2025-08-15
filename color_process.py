@@ -38,8 +38,8 @@ class ColorDetector:
         cv2.createTrackbar('fps', self.window_name, self.dilate, 100, lambda x: None)
         cv2.createTrackbar('delta', self.window_name, self.dilate, 100, lambda x: None)
 
-        cv2.createTrackbar('min_x', self.window_name, 0, 100, lambda x: None)
-        cv2.createTrackbar('max_x', self.window_name, 100, 500, lambda x: None)
+        cv2.createTrackbar('min_x', self.window_name, 0, 500, lambda x: None)
+        cv2.createTrackbar('max_x', self.window_name, 500, 500, lambda x: None)
 
     
     def get_trackbar_values(self):

@@ -24,7 +24,7 @@ class Capture_process(ProcessModule):
 
         self.fps_counter = FrameFPS(update_interval=1.0)
         self.fps = 0
-        self.intraval = 0
+        self.interval = 0
 
         self.video_stream = 0
 
@@ -42,8 +42,10 @@ class Capture_process(ProcessModule):
 
             print(f'Сервер запущен на {self.server.host}:{self.server.port}')
 
-        self.timer = Timer('read_frame')
-
+        self.start_cycle = time.time()
+        self.timer_process = Timer('time_process')
+        self.timer_read_frame = Timer('read_frame')
+        
 
     def get_parameters(self):
         self.fps = self.local_controls_parameters['fps']
@@ -61,7 +63,15 @@ class Capture_process(ProcessModule):
 
         try:
             while self.connection_active:
+                self.start_cycle = time.time()
+
+                self.timer_process.start()
+
                 self._process_client()
+                
+                data = {'process_capture': self.timer_process.get_data()}
+                self.queue_manager.input_graph.put(data)
+
         except ConnectionError:
             print("Соединение разорвано")
             self._reset_connection()
@@ -83,7 +93,7 @@ class Capture_process(ProcessModule):
 
     def _process_client(self):
         """Обработка данных от клиента"""
-        self.timer.start()
+        #self.timer.start()
 
         if self.video_stream == 0:
             ret, frame = self.cap.read()
@@ -112,9 +122,9 @@ class Capture_process(ProcessModule):
         self.fps  = self.fps_counter.update()
         if self.fps  > 0:
             #print(f"FPS: {self.fps :.2f}")
-            self.intraval += self.fps_counter.update_interval
+            self.interval += self.fps_counter.update_interval
 
-            data_fps = [self.intraval, self.fps]
+            data_fps = [time.time(), self.fps]
             data = {'fps': data_fps}
             self.queue_manager.input_graph.put(data)
             pass
@@ -124,7 +134,7 @@ class Capture_process(ProcessModule):
             id_memory = 0
             self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
             
-            data_frame = {'id_memory': id_memory, 'time': time.time()}
+            data_frame = {'id_memory': id_memory, 'time': self.start_cycle}
             self.queue_manager.input_processing.put(data_frame)
             #self.queue_manager.input_capture.get()
 

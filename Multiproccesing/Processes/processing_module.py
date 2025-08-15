@@ -17,6 +17,7 @@ class OperationProcess(ProcessModule):
 
         self.get_parameters()
 
+        self.timer_process = Timer('time_process')
         self.timer = Timer('read_frame')
 
 
@@ -31,6 +32,8 @@ class OperationProcess(ProcessModule):
         self.detector = ColorDetector()
 
         while not self.should_stop():
+            self.timer_process.start()
+
             data_frame = self.queue_manager.input_processing.get()
             
             id_memory = data_frame['id_memory']
@@ -60,6 +63,9 @@ class OperationProcess(ProcessModule):
             # Отображение результатов
             cv2.imshow('Mask', mask)
             cv2.waitKey(1)
+
+            data = {'process_processing': self.timer_process.get_data()}
+            self.queue_manager.input_graph.put(data)
         
         cv2.destroyAllWindows()
 
