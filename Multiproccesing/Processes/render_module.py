@@ -1,5 +1,4 @@
 import time
-import cv2
 
 from .process_module import ProcessModule
 from Utils.timer import Timer
@@ -16,7 +15,7 @@ class RenderProcess(ProcessModule):
         
         self.get_parameters()
 
-        self.timer_process = Timer('time_process')
+        self.timer_process = Timer('time_process_render')
         self.timer = Timer('read_frame')
 
 
@@ -28,10 +27,15 @@ class RenderProcess(ProcessModule):
 
 
     def main(self):
+        import cv2
+
         i = 0
         while not self.should_stop():
             data_frame = self.queue_manager.input_render.get()
             self.timer_process.start()
+
+            time_input_data = self.timer_process.start_time
+            time_send_data = data_frame['time_send']
             
             id_memory = data_frame['id_memory']
             #print(f'processing_module: {id_memory}')
@@ -39,9 +43,7 @@ class RenderProcess(ProcessModule):
             frames = self.queue_manager.memory_manager.read_images("process_data", id_memory)
             timer_start = data_frame['time']
 
-
             #print(f"Таймер  {elapsed * 1000} мс")
-            
 
             i += 1
 
@@ -56,16 +58,26 @@ class RenderProcess(ProcessModule):
 
             #queue_manager.input_render.put(id_memory)
 
-            data = {'process_render': self.timer_process.get_data()}
-            self.queue_manager.input_graph.put(data)
-            
             real_time = time.time()
             elapsed = time.time() - timer_start
             elapsed = elapsed * 1000
-
             data_cycle = [real_time, elapsed]
-            data = {'time_cycle': data_cycle}
-            self.queue_manager.input_graph_cycle.put(data)
+
+            self.timer_process.get_data()
+            time_send = self.timer_process.real_time
+            data = {'process_render': self.timer_process.result,
+                    'time_input_render': [time_send, abs(time_input_data - time_send_data) * 1000],
+                    'time_cycle': data_cycle
+                    }
+            self.queue_manager.input_graph.put(data)
+            
+            # real_time = time.time()
+            # elapsed = time.time() - timer_start
+            # elapsed = elapsed * 1000
+
+            # data_cycle = [real_time, elapsed]
+            # data = {'time_cycle': data_cycle}
+            # self.queue_manager.input_graph_cycle.put(data)
 
         cv2.destroyAllWindows()
         print(f'processing_module: STOP')

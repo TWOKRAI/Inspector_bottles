@@ -7,6 +7,7 @@ class Timer:
         self.start_time = None
         self.real_time = None
         self.elapsed = None
+        self.result = None
 
 
     def start(self):
@@ -34,4 +35,6 @@ class Timer:
         self.real_time = time.time()
         self.elapsed = (self.real_time - self.start_time) * 1000
 
-        return [self.real_time, self.elapsed]
+        self.result = [self.real_time, self.elapsed]
+
+        return self.result

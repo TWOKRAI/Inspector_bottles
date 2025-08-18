@@ -1,5 +1,4 @@
 import time
-import cv2
 
 from .process_module import ProcessModule
 from Camera_module.socket_module import StreamServer
@@ -28,8 +27,21 @@ class Capture_process(ProcessModule):
 
         self.video_stream = 0
 
+        self.start_cycle = time.time()
+        self.timer_process = Timer('time_process_capture')
+        self.timer_read_frame = Timer('read_frame')
+        
+
+    def get_parameters(self):
+        self.fps = self.local_controls_parameters['fps']
+        self.delta = self.local_controls_parameters['delta']
+        
+        #print('self.fps', self.fps, 'self.delta', self.delta)
+
+
+    def initialization_camera(self):
         if self.video_stream == 0:
-            self.cap = cv2.VideoCapture(0)
+            self.cap = self.cv2.VideoCapture(0)
         elif self.video_stream == 1:
             host='0.0.0.0'
             port=5000
@@ -42,19 +54,13 @@ class Capture_process(ProcessModule):
 
             print(f'Сервер запущен на {self.server.host}:{self.server.port}')
 
-        self.start_cycle = time.time()
-        self.timer_process = Timer('time_process')
-        self.timer_read_frame = Timer('read_frame')
-        
-
-    def get_parameters(self):
-        self.fps = self.local_controls_parameters['fps']
-        self.delta = self.local_controls_parameters['delta']
-        
-        #print('self.fps', self.fps, 'self.delta', self.delta)
-
 
     def main(self):
+        import cv2
+        self.cv2 = cv2
+
+        self.initialization_camera()
+
         if self.video_stream == 1:
             print("Ожидание подключения клиента...")
             self._accept_connection()
@@ -68,8 +74,10 @@ class Capture_process(ProcessModule):
                 self.timer_process.start()
 
                 self._process_client()
-                
-                data = {'process_capture': self.timer_process.get_data()}
+
+                data = {'process_capture': self.timer_process.get_data(),
+                        'time_read_frame': self.timer_read_frame.result,
+                        'fps': [time.time(), self.fps]}
                 self.queue_manager.input_graph.put(data)
 
         except ConnectionError:
@@ -106,8 +114,9 @@ class Capture_process(ProcessModule):
                 print("Клиент подтвердил получение параметров")
                 return
         elif self.video_stream == 2:
-            frame = cv2.imread('test.jpg')
+            frame = self.cv2.imread('test.jpg')
 
+        self.timer_read_frame.get_data()
         #self.timer_read_frame.elapsed_time(print_log=True)
 
         # Обработка видеокадра
@@ -125,11 +134,7 @@ class Capture_process(ProcessModule):
         self.fps  = self.fps_counter.update()
         if self.fps  > 0:
             #print(f"FPS: {self.fps :.2f}")
-            self.interval += self.fps_counter.update_interval
-
-            data_fps = [time.time(), self.fps]
-            data = {'fps': data_fps}
-            self.queue_manager.input_graph.put(data)
+            #self.interval += self.fps_counter.update_interval
             pass
         
         if self.queue_manager:

@@ -1,8 +1,6 @@
 import time
-import cv2
 
 from .process_module import ProcessModule
-from color_process import ColorDetector
 from Utils.timer import Timer
 
 
@@ -17,7 +15,7 @@ class OperationProcess(ProcessModule):
 
         self.get_parameters()
 
-        self.timer_process = Timer('time_process')
+        self.timer_process = Timer('time_process_processing')
         self.timer = Timer('read_frame')
 
 
@@ -29,13 +27,19 @@ class OperationProcess(ProcessModule):
 
 
     def main(self):
+        import cv2
+        from color_process import ColorDetector
+
         self.detector = ColorDetector()
+        self.detector.get_trackbar_values()
 
         while not self.should_stop():
             data_frame = self.queue_manager.input_processing.get()
             self.timer_process.start()
             
-            time_input_data = data_frame['time_send']
+            time_input_data = self.timer_process.start_time 
+            time_send_data = data_frame['time_send']
+            
             id_memory = data_frame['id_memory']
             #print(f'processing_module: {id_memory}')
 
@@ -43,6 +47,18 @@ class OperationProcess(ProcessModule):
 
             self.detector.get_trackbar_values()
 
+            # Обработка кадра
+            processed_frame, mask = self.detector.process_frame(frames[0])
+
+            frames = [processed_frame]
+            
+            self.queue_manager.memory_manager.write_images(frames, "process_data", id_memory)
+            data_frame['time_send'] = time.time()
+            self.queue_manager.input_render.put(data_frame)
+
+            # Отображение результатов
+            #cv2.imshow('Mask', mask)
+        
             param = {'fps': self.detector.fps}
             self.queue_manager.remove_old_if_full(self.queue_manager.control_capture)
             self.queue_manager.control_capture.put(param)
@@ -51,26 +67,17 @@ class OperationProcess(ProcessModule):
                      'max_x': self.detector.max_x,}
             
             self.queue_manager.remove_old_if_full(self.queue_manager.control_graph)
-            self.queue_manager.control_graph.put(param)     
+            self.queue_manager.control_graph.put(param)    
 
-            # Обработка кадра
-            processed_frame, mask = self.detector.process_frame(frames[0])
-
-            frames = [processed_frame]
-            
-            self.queue_manager.memory_manager.write_images(frames, "process_data", id_memory)
-            self.queue_manager.input_render.put(data_frame)
-
-            # Отображение результатов
-            cv2.imshow('Mask', mask)
             cv2.waitKey(1)
 
             time_send = time.time()
             data = {'process_processing': self.timer_process.get_data(),
-                    'time_input_processing': [time_send, time_send - time_input_data]}
+                    'time_input_processing': [time_send, abs(time_input_data - time_send_data) * 1000]}
             self.queue_manager.input_graph.put(data)
+
         
-        cv2.destroyAllWindows()
+       # cv2.destroyAllWindows()
 
 
 def main(queue_manager=None):

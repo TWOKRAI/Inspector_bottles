@@ -31,9 +31,10 @@ class GraphProcess(ProcessModule):
                                'process_graph': [[], []],
                                'process_comunnication': [[], []],
                                
-                               'time_input_processing': [[], []],}
+                               'time_input_processing': [[], []],
+                               'time_input_render': [[], []],}
         
-        self.all_data_state = {'fps': [False, 'мс'],
+        self.all_data_state = {'fps': [True, 'мс'],
                             'time_cycle': [True, 'мс'],
                             'process_capture': [True, 'мс'],
                             'process_processing': [True, 'мс'],
@@ -41,7 +42,8 @@ class GraphProcess(ProcessModule):
                             'process_graph': [False, 'мс'],
                             'process_comunnication': [False, 'мс'],
 
-                            'time_input_processing': [False, 'мс'],}
+                            'time_input_processing': [True, 'мс'],
+                            'time_input_render': [True, 'мс'],}
 
 
         self.graph = 'fps'
@@ -155,6 +157,9 @@ class GraphProcess(ProcessModule):
         with self.lock:
             for key, value in data_graph.items():
                 if key in self.all_data_graph:
+                    if value[1] == 0 and len(self.all_data_graph[key][0]) > 0:
+                        value[1] = self.all_data_graph[key][1][-1]
+
                     # Добавляем данные с ограничением длины
                     self.all_data_graph[key][0].append(value[0] - self.real_time)
                     self.all_data_graph[key][1].append(value[1])
