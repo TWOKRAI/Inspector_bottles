@@ -612,8 +612,8 @@ if __name__ == "__main__":
     # Конфигурация частей бутылки
     bottle_config = {
         "bottle": {
-            "file": "bottle2.png",
-            "position": (0, 130),
+            "file": "bottle3.png",
+            "position": (0, 90),
             "angle": 0,
             "scale": 1.0,
             "visible": True,
@@ -800,136 +800,17 @@ if __name__ == "__main__":
         result = composer.compose()
         
 
-        # # Создаем копию изображения для обработки
-        # processed_img = result.copy()
-
-        # # 1. Создаем маску для области между линиями
-        # mask = np.zeros((CANVAS_HEIGHT, CANVAS_WIDTH), dtype=np.uint8)
-        # mask[:, LINE_LEFT:LINE_RIGHT] = 255
-
-        # # 2. Выделяем не-зеленые объекты
-        # hsv = cv2.cvtColor(processed_img, cv2.COLOR_BGRA2BGR)
-        # hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
-
-
-        # # Создаем массивы для нижнего и верхнего порогов
-        # lower_green = np.array([l_h, l_s, l_v])
-        # upper_green = np.array([u_h, u_s, u_v])
-        
-        # green_mask = cv2.inRange(hsv, lower_green, upper_green)
-        # non_green_mask = cv2.bitwise_not(green_mask)
-
-        # # 3. Объединяем с маской области между линиями
-        # final_mask = cv2.bitwise_and(non_green_mask, non_green_mask, mask=mask)
-
-        # # Рисуем вертикальные линии
-        # cv2.line(processed_img, (LINE_LEFT, 0), (LINE_LEFT, CANVAS_HEIGHT), (120, 120, 100), 2)
-        # cv2.line(processed_img, (LINE_RIGHT, 0), (LINE_RIGHT, CANVAS_HEIGHT), (120, 120, 100), 2)
-        # cv2.line(processed_img, (LINE_LEFT_INNER, 0), (LINE_LEFT_INNER, CANVAS_HEIGHT), (255, 0, 0), 2)
-        # cv2.line(processed_img, (LINE_RIGHT_INNER, 0), (LINE_RIGHT_INNER, CANVAS_HEIGHT), (255, 0, 0), 2)
-
-        # # Рисуем горизонтальные линии
-        # cv2.line(processed_img, (0, TOP_LINE_Y1), (CANVAS_WIDTH, TOP_LINE_Y1), (255, 255, 0), 2)
-        # cv2.line(processed_img, (0, TOP_LINE_Y2), (CANVAS_WIDTH, TOP_LINE_Y2), (0, 255, 255), 2)
-        # cv2.line(processed_img, (0, BOTTOM_LINE_Y1), (CANVAS_WIDTH, BOTTOM_LINE_Y1), (255, 0, 255), 2)
-        # cv2.line(processed_img, (0, BOTTOM_LINE_Y2), (CANVAS_WIDTH, BOTTOM_LINE_Y2), (255, 0, 255), 2)
-
-        # final_mask = final_mask[:TOP_LINE_Y2]
-        # contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # # Создаем копию без аннотаций для вырезки
-        # clean_img = result.copy()  # Используем оригинальное изображение без рисованных элементов
-
-        # # Список для сохранения вырезанных областей
-        # cropped_regions = []
-
-        # for contour in contours:
-        #     if cv2.contourArea(contour) > 100:
-        #         x, y, w, h = cv2.boundingRect(contour)
-        #         center_x = x + w // 2
-                
-        #         # Отрисовка объекта в зависимости от положения
-        #         if LINE_LEFT_INNER <= center_x <= LINE_RIGHT_INNER:
-        #             cv2.drawContours(processed_img, [contour], -1, (0, 255, 0), 2)
-        #             cv2.putText(processed_img, "Bottle", (x, y-10), 
-        #                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-        #             # Координаты прямоугольника
-        #             x1 = center_x - BOTTLE_WIDTH // 2
-        #             y1 = y
-        #             x2 = x1 + BOTTLE_WIDTH
-        #             y2 = y1 + BOTTLE_HEIGHT
-
-        #             # Вырезаем область
-        #             cropp_bottle = clean_img[y1:y2, x1:x2]
-
-        #             all_bottle_count += 1 
-
-        #             if cropp_bottle.shape[0] > 20 and cropp_bottle.shape[1] > 20:
-        #                 # ВЫРЕЗАЕМ ДВЕ ОБЛАСТИ ИЗ ОРИГИНАЛЬНОГО ИЗОБРАЖЕНИЯ
-
-        #                 # 1. Верхняя область (между TOP_LINE_Y1 и TOP_LINE_Y2)
-        #                 top_region = clean_img[TOP_LINE_Y1:TOP_LINE_Y2, center_x-70:center_x+70]
-                        
-        #                 # 2. Нижняя область (между BOTTOM_LINE_Y1 и BOTTOM_LINE_Y2)
-        #                 bottom_region = clean_img[BOTTOM_LINE_Y1:BOTTOM_LINE_Y2, center_x - BOTTLE_WIDTH // 2 - 10:center_x + BOTTLE_WIDTH // 2 + 10]
-
-                        
-        #                 # Сохраняем вырезанные области
-        #                 cropped_regions.append(top_region)
-        #                 cropped_regions.append(bottom_region)
-                        
-        #                 # Показываем вырезанные области
-        #                 if top_region.size > 0:
-        #                     cv2.imshow("Top Region", top_region)
-        #                 if bottom_region.size > 0:
-        #                     cv2.imshow("Bottom Region", bottom_region)
-
-        #             # Рисуем прямоугольник
-        #             cv2.rectangle(processed_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-
-
-        # cv2.putText(processed_img, f"All bottle: {all_bottle_count}", (30, 30), 
-        #                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
-        # cv2.putText(processed_img, f"Speed: {speed} | Spacing: {bottle_spacing}", (30, 70), 
-        #                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
-                    
         # Отображаем результат
         cv2.imshow("Bottle Conveyor", result)
         #cv2.imshow("Mask Controls", np.zeros((100, 500, 3), dtype=np.uint8))  # Пустое окно для трекбаров
 
         # Управление скоростью (ESC для выхода)
         key = cv2.waitKey(1)
-        # if key == 27:  # ESC
-        #     break
-        # elif key == ord('+'):
-        #     SPEED += 1
-        # elif key == ord('-') and SPEED > 1:
-        #     SPEED -= 1
-        # elif key == ord('v'):
-        #     # Переключаем видимость этикетки для всех бутылок
-        #     for bottle in bottles:
-        #         current = bottle.parts["label"]["layer"].visible
-        #         bottle.update_part("label", "visible", not current)
-        # elif key == ord('l'):  # Переместить левую линию
-        #     LINE_LEFT = max(0, LINE_LEFT - 10)
-        # elif key == ord('L'):  # Переместить левую линию
-        #     LINE_LEFT = min(LINE_RIGHT - 50, LINE_LEFT + 10)
-        # elif key == ord('r'):  # Переместить правую линию
-        #     LINE_RIGHT = max(LINE_LEFT + 50, LINE_RIGHT - 10)
-        # elif key == ord('R'):  # Переместить правую линию
-        #     LINE_RIGHT = min(CANVAS_WIDTH, LINE_RIGHT + 10)
-        # elif key == ord('s'):  # Уменьшить интервал между бутылками
-        #     bottle_spacing = max(0, bottle_spacing - 10)
-        #     cv2.setTrackbarPos("Bottle Spacing", "Mask Controls", bottle_spacing)
-        # elif key == ord('S'):  # Увеличить интервал между бутылками
-        #     bottle_spacing += 10
-        #     cv2.setTrackbarPos("Bottle Spacing", "Mask Controls", bottle_spacing)
-
+        if key == 27:  # ESC
+            break
+   
         fps  = fps_counter.update()
         if fps  > 0:
             print(f"FPS: {fps :.2f}")
-
-
 
     cv2.destroyAllWindows()
