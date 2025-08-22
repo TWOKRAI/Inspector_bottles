@@ -17,3 +17,6 @@ venv.bak/
 .vscode/
 *.swp
 *.swo
+
+
+/dataset

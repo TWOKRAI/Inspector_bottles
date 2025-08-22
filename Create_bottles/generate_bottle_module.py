@@ -10,6 +10,7 @@ class LayerImage:
     def __init__(self, image_path):
         # Загрузка изображения с альфа-каналом
         self.original = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+
         if self.original is None:
             raise ValueError(f"Не удалось загрузить изображение: {image_path}")
         
