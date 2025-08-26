@@ -26,6 +26,7 @@ class MultiProcessManager:
         self.backend_enable = True
         self.capture_enable = True
         self.processing_enable = True
+        self.cap_level_enable = True
         self.communication_enable = False
         self.graph_enable = True
 
@@ -36,6 +37,7 @@ class MultiProcessManager:
             'proc_ui': 'Multiproccesing.Processes.ui_module',
             'proc_capture': 'Multiproccesing.Processes.capture_module',
             'proc_processing': 'Multiproccesing.Processes.processing_module',
+            'proc_cap_level': 'Multiproccesing.Processes.operation_cap_level',
             'proc_render': 'Multiproccesing.Processes.render_module',
             'proc_communication': 'Multiproccesing.Processes.communication_module', 
             'proc_graph': 'Multiproccesing.Processes.graph_module', 
@@ -112,7 +114,7 @@ class MultiProcessManager:
                 # Процесс визуализации
                 render_process = self.create_process(
                     target_func=modules['proc_render'],
-                    args=(self.queue_manager,),
+                    args=(self.queue_manager, self.queue_manager.control_render),
                     name='proc_render',
                     priority='high'
                 )
@@ -124,7 +126,7 @@ class MultiProcessManager:
             if self.capture_enable:
                 capture_process = self.create_process(
                     target_func=modules['proc_capture'],
-                    args=(self.queue_manager,),
+                    args=(self.queue_manager, self.queue_manager.control_capture),
                     name='proc_capture',
                     priority='high'
                 )
@@ -134,17 +136,67 @@ class MultiProcessManager:
             if self.processing_enable:
                 processing_process = self.create_process(
                     target_func=modules['proc_processing'],
-                    args=(self.queue_manager,),
+                    args=(self.queue_manager, self.queue_manager.control_processing),
                     name='proc_processing',
                     priority='high'
                 )
                 self.processes.append(processing_process)
 
+            if self.cap_level_enable:
+                cap_level_process_1 = self.create_process(
+                    target_func=modules['proc_cap_level'],
+                    args=(self.queue_manager, 
+                            self.queue_manager.control_cap_level_1,
+                            self.queue_manager.input_cap_level_1,
+                            1,
+                            ),
+
+                    name='proc_cap_level_1',
+                    priority='high'
+                )
+                self.processes.append(cap_level_process_1)
+
+                cap_level_process_2 = self.create_process(
+                    target_func=modules['proc_cap_level'],
+                    args=(self.queue_manager, 
+                            self.queue_manager.control_cap_level_2,
+                            self.queue_manager.input_cap_level_2,
+                            2
+                            ),
+                    name='proc_cap_level_2',
+                    priority='high'
+                )
+                self.processes.append(cap_level_process_2)
+
+                cap_level_process_3 = self.create_process(
+                    target_func=modules['proc_cap_level'],
+                    args=(self.queue_manager, 
+                            self.queue_manager.control_cap_level_3,
+                            self.queue_manager.input_cap_level_3,
+                            3,
+                            ),
+                    name='proc_cap_level_3',
+                    priority='high'
+                )
+                self.processes.append(cap_level_process_3)
+                
+                cap_level_process_4 = self.create_process(
+                    target_func=modules['proc_cap_level'],
+                    args=(self.queue_manager, 
+                            self.queue_manager.control_cap_level_4,
+                            self.queue_manager.input_cap_level_4,
+                            4,
+                          ),
+                    name='proc_cap_level_4',
+                    priority='high'
+                )
+                self.processes.append(cap_level_process_4)
+
             # Процесс связи с оборудованием
             if self.communication_enable:
                 communication_process = self.create_process(
                     target_func=modules['proc_communication'], 
-                    args=(self.queue_manager,),
+                    args=(self.queue_manager, self.queue_manager.control_communication),
                     name='proc_communication',
                     priority='normal'
                 )
@@ -153,7 +205,7 @@ class MultiProcessManager:
             if self.graph_enable:
                 graph_process = self.create_process(
                     target_func=modules['proc_graph'], 
-                    args=(self.queue_manager,),
+                    args=(self.queue_manager, self.queue_manager.control_graph),
                     name='proc_graph',
                     priority='normal'
                 )

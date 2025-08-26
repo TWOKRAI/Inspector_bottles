@@ -7,7 +7,7 @@ from .Memory_Manager import ImageMemoryManager
 
 class QueueManager:
     def __init__(self):
-        self.buffer_size = 30
+        self.buffer_size = 50
         
         # Конфигурация всех очередей: {имя: размер_буфера}
         self.queues_config = {
@@ -15,14 +15,25 @@ class QueueManager:
             'control_render': 1,
             'control_capture': 1,
             'control_processing': 1,
+            'control_cap_level_1': 1,
+            'control_cap_level_2': 1,
+            'control_cap_level_3': 1,
+            'control_cap_level_4': 1,
             'control_communication': 1,
             'control_graph': 1,
+            
             'input_render': self.buffer_size,
             'output_render': self.buffer_size,
             'input_capture': self.buffer_size,
             'output_capture': self.buffer_size,
             'input_processing': self.buffer_size,
             'output_processing': self.buffer_size,
+
+            'input_cap_level_1': self.buffer_size,
+            'input_cap_level_2': self.buffer_size,
+            'input_cap_level_3': self.buffer_size,
+            'input_cap_level_4': self.buffer_size,
+
             'input_communication': self.buffer_size,
             'output_communication': self.buffer_size,
             'input_graph': self.buffer_size,
@@ -59,11 +70,22 @@ class QueueManager:
         # Менеджер памяти
         self.memory_manager = ImageMemoryManager()
         memory_names = {
-            'camera_data': (1, (1080, 1920, 3), np.uint8),
-            'camera_data_out': (1, (1080, 1920, 3), np.uint8),
-            'process_data': (6, (1080, 1920, 3), np.uint8), 
+            'camera_data': (1, (1100, 1920, 3), np.uint8),
+            'camera_data_out': (1, (1100, 1920, 3), np.uint8),
+            'process_data': (6, (1100, 1920, 3), np.uint8), 
+
+            'process_data_cap_1': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_cap_2': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_cap_3': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_cap_4': (1, (1100, 1920, 3), np.uint8), 
+
+            'process_data_level_1': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_level_2': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_level_3': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_level_4': (1, (1100, 1920, 3), np.uint8), 
+
             'neuroun_data': (21, (72, 72, 3), np.uint8),
-            'display_data': (1, (1080, 1920, 3), np.uint8),
+            'display_data': (1, (1100, 1920, 3), np.uint8),
         }
         self.memory_manager.create_memory_dict(memory_names, coll=12)
         self.total_modules = 0

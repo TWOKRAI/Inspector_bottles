@@ -4,6 +4,62 @@ from typing import List, Tuple, Optional, Dict, Callable, Any
 from enum import Enum
 
 
+def detect_horizontal_lines(image_bw, 
+                           canny_threshold1=30, 
+                           canny_threshold2=90,
+                           hough_threshold=50,
+                           theta=np.pi/180,
+                           min_line_length=50,
+                           max_line_gap=20,
+                           angle_tolerance=5,
+                           morph_size=10):
+    """
+    Обнаруживает горизонтальные линии на черно-белом изображении
+    
+    Параметры:
+        debug: если True, показывает промежуточные этапы обработки
+    """
+
+    all_image = {}
+    
+    # 3. Детектирование границ
+    edges = cv2.Canny(image_bw, canny_threshold1, canny_threshold2)
+
+    all_image['edges'] = edges
+    
+    if morph_size > 0:
+        # 4. Морфологические операции для усиления линий
+        kernel_horizontal = np.ones((1, morph_size), np.uint8)
+        enhanced = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_horizontal)
+    else:
+        enhanced = edges
+    
+    all_image['enhanced'] = enhanced
+    
+    # 5. Применяем преобразование Хафа
+    lines = cv2.HoughLinesP(
+        enhanced,
+        rho=1,
+        theta=theta,
+        threshold=hough_threshold,
+        minLineLength=min_line_length,
+        maxLineGap=max_line_gap
+    )
+    
+    horizontal_lines = []
+    
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            
+            # Фильтр горизонтальных линий (0° и 180° ± допуск)
+            if (abs(angle) < angle_tolerance) or (abs(angle) > 180 - angle_tolerance):
+                horizontal_lines.append((x1, y1, x2, y2))
+    
+    return horizontal_lines, all_image
+
+
 class GrayConversionMethod(Enum):
     """Методы преобразования в оттенки серого"""
     DEFAULT = "default"

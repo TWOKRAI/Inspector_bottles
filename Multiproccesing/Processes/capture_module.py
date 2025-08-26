@@ -25,7 +25,8 @@ class Capture_process(ProcessModule):
         self.fps = 0
         self.interval = 0
 
-        self.video_stream = 0
+        self.video_stream = 1
+        self.frame_test = None
 
         self.start_cycle = time.time()
         self.timer_process = Timer('time_process_capture')
@@ -40,28 +41,33 @@ class Capture_process(ProcessModule):
 
 
     def initialization_camera(self):
-        if self.video_stream == 0:
-            self.cap = self.cv2.VideoCapture(0)
-        elif self.video_stream == 1:
-            host='0.0.0.0'
-            port=5000
-            quality=95,
-            framerate=100
-            self.params = (4, self.resolution[0], self.resolution[1], quality, framerate)
+        match self.video_stream:
+            case 0:
+                self.frame_test = self.cv2.imread("Create_bottles\image.jpg")
+            case 1:
+                self.cap = self.cv2.VideoCapture(0)
+            case 2: 
+                host='0.0.0.0'
+                port=5000
+                quality=95,
+                framerate=100
+                self.params = (4, self.resolution[0], self.resolution[1], quality, framerate)
 
-            self.server = StreamServer(host=host, port=port)
-            self.server.start()
+                self.server = StreamServer(host=host, port=port)
+                self.server.start()
 
-            print(f'Сервер запущен на {self.server.host}:{self.server.port}')
+                print(f'Сервер запущен на {self.server.host}:{self.server.port}')
 
 
     def main(self):
         import cv2
         self.cv2 = cv2
 
+        self.frame_test = self.cv2.imread("Create_bottles\image.jpg")
+
         self.initialization_camera()
 
-        if self.video_stream == 1:
+        if self.video_stream == 2:
             print("Ожидание подключения клиента...")
             self._accept_connection()
         else:
@@ -77,7 +83,8 @@ class Capture_process(ProcessModule):
 
                 data = {'process_capture': self.timer_process.get_data(),
                         'time_read_frame': self.timer_read_frame.result,
-                        'fps': [time.time(), self.fps]}
+                        'fps_capture': [time.time(), self.fps]
+                        }
                 self.queue_manager.input_graph.put(data)
 
         except ConnectionError:
@@ -104,17 +111,20 @@ class Capture_process(ProcessModule):
         self.timer_read_frame.start()
 
         if self.video_stream == 0:
+            frame = self.frame_test
+        elif self.video_stream == 1:
             ret, frame = self.cap.read()
             #cv2.imwrite('test.jpg', frame)
-        elif self.video_stream == 1:
+        elif self.video_stream == 2:
             params, frame = self.server.receive()
 
             # Обработка подтверждения параметров
             if params and params[0] == "ACK":
                 print("Клиент подтвердил получение параметров")
                 return
-        elif self.video_stream == 2:
-            frame = self.cv2.imread('test.jpg')
+            
+        frame = self.frame_test
+
 
         self.timer_read_frame.get_data()
         #self.timer_read_frame.elapsed_time(print_log=True)
@@ -124,7 +134,7 @@ class Capture_process(ProcessModule):
             self._process_frame(frame)
         
         # Проверка активности соединения
-        if self.video_stream == 1:
+        if self.video_stream == 2:
             if params is None and frame is None:
                 raise ConnectionError("Соединение разорвано")
 
@@ -142,22 +152,25 @@ class Capture_process(ProcessModule):
             id_memory = 0
             self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
             
-            data_frame = {'time_send': time.time(), 'id_memory': id_memory, 'time': self.start_cycle}
+            data_frame = {'name_process': 'proc_capture',
+                            'time_send': time.time(), 
+                            'id_memory': id_memory, 
+                            'time': self.start_cycle}
             self.queue_manager.input_processing.put(data_frame)
-            #self.queue_manager.input_capture.get()
+            self.queue_manager.input_capture.get()
 
 
     def _reset_connection(self):
         """Сброс состояния соединения"""
-        if self.video_stream == 1:
+        if self.video_stream == 2:
             self.server._close_connection()
         
         self.connection_active = False
 
 
-def main(queue_manager=None):
+def main(queue_manager=None, control_queue=None):
     process = Capture_process(name='Capture_process', 
                               queue_manager=queue_manager, 
-                              control_queue=queue_manager.control_capture)
+                              control_queue=control_queue)
     process.run()
     

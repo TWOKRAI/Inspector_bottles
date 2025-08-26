@@ -23,27 +23,46 @@ class GraphProcess(ProcessModule):
         # Инициализация структур данных
         self.lock = threading.Lock()
 
-        self.all_data_graph = {'fps': [[], []],
+        self.all_data_graph = {'fps_capture': [[], []],
+                               'fps_render': [[], []],
                                'time_cycle': [[], []],
                                'process_capture': [[], []],
                                'process_processing': [[], []],
+                               'process_cap_level_1': [[], []],
+                               'process_cap_level_2': [[], []],
+                               'process_cap_level_3': [[], []],
+                               'process_cap_level_4': [[], []],
                                'process_render': [[], []],
                                'process_graph': [[], []],
                                'process_comunnication': [[], []],
                                
                                'time_input_processing': [[], []],
+                               'time_input_cap_level_1': [[], []],
+                               'time_input_cap_level_2': [[], []],
+                               'time_input_cap_level_3': [[], []],
+                               'time_input_cap_level_4': [[], []],
                                'time_input_render': [[], []],}
         
-        self.all_data_state = {'fps': [True, 'мс'],
-                            'time_cycle': [True, 'мс'],
-                            'process_capture': [True, 'мс'],
-                            'process_processing': [True, 'мс'],
-                            'process_render': [True, 'мс'],
-                            'process_graph': [False, 'мс'],
-                            'process_comunnication': [False, 'мс'],
+        self.all_data_state = {'fps_capture': [True, 'мс'],
+                                'fps_render': [True, 'мс'],
+                                'time_cycle': [True, 'мс'],
+                                'process_capture': [True, 'мс'],
+                                'process_processing': [True, 'мс'],
+                                'process_cap_level_1': [True, 'мс'],
+                                'process_cap_level_2': [True, 'мс'],
+                                'process_cap_level_3': [True, 'мс'],
+                                'process_cap_level_4': [True, 'мс'],
+                                'process_render': [True, 'мс'],
+                                'process_graph': [False, 'мс'],
+                                'process_comunnication': [False, 'мс'],
 
-                            'time_input_processing': [True, 'мс'],
-                            'time_input_render': [True, 'мс'],}
+                                'time_input_processing': [True, 'мс'],
+                                'time_input_cap_level_1': [True, 'мс'],
+                                'time_input_cap_level_2': [True, 'мс'],
+                                'time_input_cap_level_3': [True, 'мс'],
+                                'time_input_cap_level_4': [True, 'мс'],
+                                'time_input_render': [True, 'мс'],
+                            }
 
 
         self.graph = 'fps'
@@ -86,8 +105,8 @@ class GraphProcess(ProcessModule):
                         continue
                         
                     # Применяем ограничения по диапазону
-                    x = data_xy[0][max(0, self.min_x):min(len(data_xy[0]), self.max_x)]
-                    y = data_xy[1][max(0, self.min_x):min(len(data_xy[0]), self.max_x)]
+                    x = data_xy[0][max(20, self.min_x):min(len(data_xy[0]), self.max_x)]
+                    y = data_xy[1][max(20, self.min_x):min(len(data_xy[0]), self.max_x)]
                     
                     # Добавляем линию графика
                     if x and y:
@@ -172,8 +191,8 @@ class GraphProcess(ProcessModule):
             self.data_changed = True
 
 
-def main(queue_manager=None):
+def main(queue_manager=None, control_queue=None):
     process = GraphProcess(name='Graph_process', 
                                 queue_manager=queue_manager, 
-                                control_queue=queue_manager.control_graph)
+                                control_queue=control_queue)
     process.run()
