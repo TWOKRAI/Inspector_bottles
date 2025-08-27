@@ -74,15 +74,15 @@ class QueueManager:
             'camera_data_out': (1, (1100, 1920, 3), np.uint8),
             'process_data': (6, (1100, 1920, 3), np.uint8), 
 
-            'process_data_cap_1': (1, (1100, 1920, 3), np.uint8), 
-            'process_data_cap_2': (1, (1100, 1920, 3), np.uint8), 
-            'process_data_cap_3': (1, (1100, 1920, 3), np.uint8), 
-            'process_data_cap_4': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_cap_1': (1, (157, 210, 1), np.uint8), 
+            'process_data_cap_2': (1, (157, 210, 1), np.uint8), 
+            'process_data_cap_3': (1, (157, 210, 1), np.uint8), 
+            'process_data_cap_4': (1, (157, 210, 1), np.uint8), 
 
-            'process_data_level_1': (1, (1100, 1920, 3), np.uint8), 
-            'process_data_level_2': (1, (1100, 1920, 3), np.uint8), 
-            'process_data_level_3': (1, (1100, 1920, 3), np.uint8), 
-            'process_data_level_4': (1, (1100, 1920, 3), np.uint8), 
+            'process_data_level_1': (1, (470, 170, 1), np.uint8), 
+            'process_data_level_2': (1, (470, 170, 1), np.uint8), 
+            'process_data_level_3': (1, (470, 170, 1), np.uint8), 
+            'process_data_level_4': (1, (470, 170, 1), np.uint8), 
 
             'neuroun_data': (21, (72, 72, 3), np.uint8),
             'display_data': (1, (1100, 1920, 3), np.uint8),

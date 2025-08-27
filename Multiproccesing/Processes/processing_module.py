@@ -66,6 +66,7 @@ class OperationProcess(ProcessModule):
             frames = self.queue_manager.memory_manager.read_images("camera_data", id_memory)
 
             frame = frames[0]
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             image_frame = frame_gray[:300, :]
             
@@ -76,12 +77,6 @@ class OperationProcess(ProcessModule):
 
             # Обработка кадра
             #processed_frame, mask = self.detector.process_frame(frames[0])
-            
-            list_crop_cap = []
-            list_crop_level = []
-            data_frame_crop = {}
-
-            data_frame_crop['id_memory'] = id_memory
 
             i = 1
             for pos in centers:
@@ -125,26 +120,32 @@ class OperationProcess(ProcessModule):
                 self.queue_manager.memory_manager.write_images([image_crop_cap], f"process_data_cap_{i}", id_memory)
                 self.queue_manager.memory_manager.write_images([image_crop_level], f"process_data_level_{i}", id_memory)
 
+                data_frame_crop = {}
+                
                 match i:
                     case 1:
+                        data_frame_crop['id_memory'] = id_memory
                         data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
                         data_frame_crop['level_pos'] = (level_x1, level_y1)
                         data_frame_crop['time_send'] = time.time()
                         
                         self.queue_manager.input_cap_level_1.put(data_frame_crop)
                     case 2:
+                        data_frame_crop['id_memory'] = id_memory
                         data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
                         data_frame_crop['level_pos'] = (level_x1, level_y1)
                         data_frame_crop['time_send'] = time.time()
                         
                         self.queue_manager.input_cap_level_2.put(data_frame_crop)
                     case 3:
+                        data_frame_crop['id_memory'] = id_memory
                         data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
                         data_frame_crop['level_pos'] = (level_x1, level_y1)
                         data_frame_crop['time_send'] = time.time()
 
                         self.queue_manager.input_cap_level_3.put(data_frame_crop)
                     case 4:
+                        data_frame_crop['id_memory'] = id_memory
                         data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
                         data_frame_crop['level_pos'] = (level_x1, level_y1)
                         data_frame_crop['time_send'] = time.time()
@@ -153,12 +154,19 @@ class OperationProcess(ProcessModule):
 
                 i += 1
 
+            
+
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             frames = [frame]
             self.queue_manager.memory_manager.write_images(frames, "process_data", id_memory)
+            
+            data_frame['id_memory'] = id_memory
             data_frame['time_send'] = time.time()
             data_frame['name_process'] = 'proc_processing'
 
             self.queue_manager.input_render.put(data_frame)
+
+            #self.timer_process.elapsed_time(print_log=True)
 
             # Отображение результатов
             #cv2.imshow('Mask', mask)

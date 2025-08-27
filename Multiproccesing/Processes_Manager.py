@@ -152,7 +152,7 @@ class MultiProcessManager:
                             ),
 
                     name='proc_cap_level_1',
-                    priority='high'
+                    priority='normal'
                 )
                 self.processes.append(cap_level_process_1)
 
@@ -164,7 +164,7 @@ class MultiProcessManager:
                             2
                             ),
                     name='proc_cap_level_2',
-                    priority='high'
+                    priority='normal'
                 )
                 self.processes.append(cap_level_process_2)
 
@@ -176,7 +176,7 @@ class MultiProcessManager:
                             3,
                             ),
                     name='proc_cap_level_3',
-                    priority='high'
+                    priority='normal'
                 )
                 self.processes.append(cap_level_process_3)
                 
@@ -188,7 +188,7 @@ class MultiProcessManager:
                             4,
                           ),
                     name='proc_cap_level_4',
-                    priority='high'
+                    priority='normal'
                 )
                 self.processes.append(cap_level_process_4)
 

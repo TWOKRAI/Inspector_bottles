@@ -51,17 +51,13 @@ class RenderProcess(ProcessModule):
 
                 all_data[data['name_process']] = data
 
-                print(data['name_process'])
-
                 if len(all_data) == 5:
                     break
-                    
-            print('собрал')
 
             self.timer_process.start()
 
             data_frame = all_data.pop('proc_processing')
-            timer_start = data_frame['time']
+            timer_start = data_frame['time_start_cycle']
 
             time_input_data = self.timer_process.start_time
             time_send_data = data_frame['time_send']
@@ -73,6 +69,13 @@ class RenderProcess(ProcessModule):
             frame = frames[0]
             
             #print(all_data)
+
+            
+            cv2.line(frame, (0, level_max), (frame.shape[1], level_max), (120, 120, 0), 6) 
+            cv2.line(frame, (0, level_normal), (frame.shape[1], level_normal), (120, 120, 0), 3)  
+            cv2.line(frame, (0, level_min), (frame.shape[1], level_min), (120, 120, 0), 6) 
+
+
 
             for _, data_crop in all_data.items():
                 lines_cap = data_crop["lines_cap"]
@@ -91,8 +94,6 @@ class RenderProcess(ProcessModule):
                     cv2.line(frame, (x1, y1), (x2, y2), (120, 0, 180), 3) 
 
                 if len(lines_level) > 0:
-                    lines_level.sort(key=lambda line: line[1]) 
-
                     top_line = lines_level[0]
                     x1, y1, x2, y2 = top_line
 
@@ -115,37 +116,36 @@ class RenderProcess(ProcessModule):
 
                 #print(f"Таймер  {elapsed * 1000} мс")
 
-                i += 1
+                #i += 1
 
-                if len(frames) > 0:
-                    # Отображаем изображение
-                    cv2.imshow('Image', frame)
-                    cv2.waitKey(1)  # Ждем нажатия любой клавиши
-                else:
-                    print("Не удалось загрузить изображение.")
-                
-                self.queue_manager.input_capture.put(id_memory)
+            
+            # Отображаем изображение
+            cv2.imshow('Image', frame)
+            cv2.waitKey(1)  # Ждем нажатия любой клавиши
 
-                #self.queue_manager.input_render.put(id_memory)
+            self.fps  = self.fps_counter.update() 
 
-                real_time = time.time()
-                elapsed = time.time() - timer_start
-                elapsed = elapsed * 1000
-                data_cycle = [real_time, elapsed]
+            if self.fps > 0:
+                print('FPS:', self.fps)
 
-                self.fps  = self.fps_counter.update()
+            self.queue_manager.input_capture.put(id_memory)
 
-                if self.fps  > 0:
-                    print(self.fps)
+            #self.queue_manager.input_render.put(id_memory)
 
-                self.timer_process.get_data()
-                time_send = self.timer_process.real_time
-                data = {'process_render': self.timer_process.result,
-                        'time_input_render': [time_send, abs(time_input_data - time_send_data) * 1000],
-                        'time_cycle': data_cycle,
-                        'fps_render': [time.time(), self.fps]
-                        }
-                self.queue_manager.input_graph.put(data)
+            real_time = time.time()
+            elapsed = time.time() - timer_start
+            elapsed = elapsed * 1000
+            data_cycle = [real_time, elapsed]
+
+
+            self.timer_process.get_data()
+            time_send = self.timer_process.real_time
+            data = {'process_render': self.timer_process.result,
+                    'time_input_render': [time_send, abs(time_input_data - time_send_data) * 1000],
+                    'time_cycle': data_cycle,
+                    'fps_render': [time.time(), self.fps]
+                    }
+            self.queue_manager.input_graph.put(data)
 
                 
                 # real_time = time.time()

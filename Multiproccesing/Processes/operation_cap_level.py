@@ -46,7 +46,6 @@ class CapLevelProcess(ProcessModule):
             frames_cap = self.queue_manager.memory_manager.read_images(f"process_data_cap_{self.num}", id_memory)
             frames_level = self.queue_manager.memory_manager.read_images(f"process_data_level_{self.num}", id_memory)
             
-
             #cv2.imwrite('test.jpg', image_with_rect_2)
 
             #image_equ = cv2.equalizeHist(image_crop_level)
@@ -54,11 +53,31 @@ class CapLevelProcess(ProcessModule):
             frame_cap = frames_cap[0]
 
             # 2. Гауссово размытие для уменьшения шума
-            image_blurred = cv2.GaussianBlur(frame_cap, (3, 3), 0)
+            image_cap_blurred = cv2.GaussianBlur(frame_cap, (3, 3), 0)
+
+            # Обнаружение линий с визуализацией этапов
+            lines_cap, all_images = detect_horizontal_lines(
+                image_cap_blurred,
+                canny_threshold1=70,
+                canny_threshold2=30,
+                theta=np.pi/360,
+                hough_threshold=70,
+                min_line_length=10,
+                max_line_gap=50,
+                angle_tolerance=30,
+                morph_size=2,
+            )
+            
+            data_frame_crop['lines_cap'] = lines_cap
+
+
+            frame_level = frames_level[0]
+
+            image_level_blurred = cv2.GaussianBlur(frame_level, (3, 3), 0)
 
             # Обнаружение линий с визуализацией этапов
             lines_level, all_images = detect_horizontal_lines(
-                image_blurred,
+                image_level_blurred,
                 canny_threshold1=15,
                 canny_threshold2=20,
                 theta=np.pi/180,
@@ -73,23 +92,6 @@ class CapLevelProcess(ProcessModule):
                 lines_level.sort(key=lambda line: line[1]) 
 
             data_frame_crop['lines_level'] = lines_level
-
-            frame_level = frames_level[0]
-
-            # Обнаружение линий с визуализацией этапов
-            lines_cap, all_images = detect_horizontal_lines(
-                frame_level,
-                canny_threshold1=70,
-                canny_threshold2=30,
-                theta=np.pi/360,
-                hough_threshold=70,
-                min_line_length=10,
-                max_line_gap=50,
-                angle_tolerance=30,
-                morph_size=2,
-            )
-
-            data_frame_crop['lines_cap'] = lines_cap
 
             data_frame_crop['name_process'] = f'proc_crop_{self.num}'
 

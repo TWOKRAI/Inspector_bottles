@@ -155,7 +155,7 @@ class Capture_process(ProcessModule):
             data_frame = {'name_process': 'proc_capture',
                             'time_send': time.time(), 
                             'id_memory': id_memory, 
-                            'time': self.start_cycle}
+                            'time_start_cycle': self.start_cycle}
             self.queue_manager.input_processing.put(data_frame)
             self.queue_manager.input_capture.get()
 

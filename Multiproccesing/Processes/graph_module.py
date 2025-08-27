@@ -43,25 +43,25 @@ class GraphProcess(ProcessModule):
                                'time_input_cap_level_4': [[], []],
                                'time_input_render': [[], []],}
         
-        self.all_data_state = {'fps_capture': [True, 'мс'],
-                                'fps_render': [True, 'мс'],
+        self.all_data_state = {'fps_capture': [False, 'мс'],
+                                'fps_render': [False, 'мс'],
                                 'time_cycle': [True, 'мс'],
                                 'process_capture': [True, 'мс'],
                                 'process_processing': [True, 'мс'],
-                                'process_cap_level_1': [True, 'мс'],
-                                'process_cap_level_2': [True, 'мс'],
-                                'process_cap_level_3': [True, 'мс'],
-                                'process_cap_level_4': [True, 'мс'],
+                                'process_cap_level_1': [False, 'мс'],
+                                'process_cap_level_2': [False,'мс'],
+                                'process_cap_level_3': [False, 'мс'],
+                                'process_cap_level_4': [False, 'мс'],
                                 'process_render': [True, 'мс'],
                                 'process_graph': [False, 'мс'],
                                 'process_comunnication': [False, 'мс'],
 
-                                'time_input_processing': [True, 'мс'],
-                                'time_input_cap_level_1': [True, 'мс'],
-                                'time_input_cap_level_2': [True, 'мс'],
-                                'time_input_cap_level_3': [True, 'мс'],
-                                'time_input_cap_level_4': [True, 'мс'],
-                                'time_input_render': [True, 'мс'],
+                                'time_input_processing': [False, 'мс'],
+                                'time_input_cap_level_1': [False, 'мс'],
+                                'time_input_cap_level_2': [False, 'мс'],
+                                'time_input_cap_level_3': [False, 'мс'],
+                                'time_input_cap_level_4': [False, 'мс'],
+                                'time_input_render': [False, 'мс'],
                             }
 
 
