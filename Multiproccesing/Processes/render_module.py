@@ -40,6 +40,9 @@ class RenderProcess(ProcessModule):
         level_normal = 330
         level_min = 360
 
+        cap_high = 60
+        cap_low = 70
+
         while not self.should_stop():
             d = 0
 
@@ -70,47 +73,55 @@ class RenderProcess(ProcessModule):
             
             #print(all_data)
 
-            
             cv2.line(frame, (0, level_max), (frame.shape[1], level_max), (120, 120, 0), 6) 
-            cv2.line(frame, (0, level_normal), (frame.shape[1], level_normal), (120, 120, 0), 3)  
+            #cv2.line(frame, (0, level_normal), (frame.shape[1], level_normal), (120, 120, 0), 3)  
             cv2.line(frame, (0, level_min), (frame.shape[1], level_min), (120, 120, 0), 6) 
 
-
+            cv2.line(frame, (0, cap_high), (frame.shape[1], cap_high), (120, 120, 0), 2) 
+            cv2.line(frame, (0, cap_low), (frame.shape[1], cap_low), (120, 120, 0), 2) 
 
             for _, data_crop in all_data.items():
                 lines_cap = data_crop["lines_cap"]
-                cap_pos = data_crop["cap_pos"]
+                cap_pos_1 = data_crop["cap_pos_1"]
+                cap_pos_2 = data_crop["cap_pos_2"]
                 
+                level_state = data_crop["level_state"]
                 lines_level = data_crop["lines_level"]
-                level_pos = data_crop["level_pos"]
+                level_pos_1 = data_crop["level_pos_1"]
+                level_pos_2 = data_crop["level_pos_2"]
+                center_pos = data_crop["center_pos"]
+
+                cv2.line(frame, (center_pos[0], 0), (center_pos[0], frame.shape[1]), color=(128, 128, 128), thickness=7)
 
                 for line in lines_cap:
                     x1, y1, x2, y2 = line
-                    x1 = x1 + cap_pos[0]
-                    y1 = y1 + cap_pos[1]
-                    x2 = x2 + cap_pos[0]
-                    y2 = y2 + cap_pos[1]
+                    x1 = x1 + cap_pos_1[0]
+                    y1 = y1 + cap_pos_1[1]
+                    x2 = x2 + cap_pos_1[0]
+                    y2 = y2 + cap_pos_1[1]
 
                     cv2.line(frame, (x1, y1), (x2, y2), (120, 0, 180), 3) 
+                                
+                cv2.rectangle(frame, (cap_pos_1[0], cap_pos_1[1]), (cap_pos_2[0], cap_pos_2[1]), color=(0, 255, 255), thickness=3)
 
                 if len(lines_level) > 0:
                     top_line = lines_level[0]
                     x1, y1, x2, y2 = top_line
 
                     # Корректируем координаты
-                    x1 = x1 + level_pos[0] - 100
-                    y1 = y1 + level_pos[1]
-                    x2 = x2 + level_pos[0] + 100
-                    y2 = y2 + level_pos[1]
+                    x1 = x1 + level_pos_1[0] - 100
+                    y1 = y1 + level_pos_1[1]
+                    x2 = x2 + level_pos_1[0] + 100
+                    y2 = y2 + level_pos_1[1]
 
-                    y_middle = (y1+y2) / 2
-
-                    if y_middle > level_min or y_middle < level_max:
+                    if level_state == 'good':
                         color = (0, 0, 255)
-                    else:
+                    elif level_state == 'bad':
                         color = (255, 0, 0)
                     
                     cv2.line(frame, (x1, y1), (x2, y2), color, 6)  # Синий в BGR
+
+                cv2.rectangle(frame, (level_pos_1[0], level_pos_1[1]), (level_pos_2[0], level_pos_2[1]), color=(128, 128, 128), thickness=3)
 
                 #timer_start = data_frame['time']
 
@@ -118,9 +129,11 @@ class RenderProcess(ProcessModule):
 
                 #i += 1
 
+            frame_resize = cv2.resize(frame, (0,0), fx=0.7, fy=0.7)
+
             
             # Отображаем изображение
-            cv2.imshow('Image', frame)
+            cv2.imshow('Image', frame_resize)
             cv2.waitKey(1)  # Ждем нажатия любой клавиши
 
             self.fps  = self.fps_counter.update() 

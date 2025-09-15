@@ -121,40 +121,26 @@ class OperationProcess(ProcessModule):
                 self.queue_manager.memory_manager.write_images([image_crop_level], f"process_data_level_{i}", id_memory)
 
                 data_frame_crop = {}
-                
+
+                data_frame_crop['id_memory'] = id_memory
+                data_frame_crop['center_pos'] = pos
+                data_frame_crop['cap_pos_1'] = (cap_x1, cap_y1)
+                data_frame_crop['cap_pos_2'] = (cap_x2, cap_y2)
+                data_frame_crop['level_pos_1'] = (level_x1, level_y1)
+                data_frame_crop['level_pos_2'] = (level_x2, level_y2)
+                data_frame_crop['time_send'] = time.time()
+        
                 match i:
                     case 1:
-                        data_frame_crop['id_memory'] = id_memory
-                        data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
-                        data_frame_crop['level_pos'] = (level_x1, level_y1)
-                        data_frame_crop['time_send'] = time.time()
-                        
                         self.queue_manager.input_cap_level_1.put(data_frame_crop)
-                    case 2:
-                        data_frame_crop['id_memory'] = id_memory
-                        data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
-                        data_frame_crop['level_pos'] = (level_x1, level_y1)
-                        data_frame_crop['time_send'] = time.time()
-                        
+                    case 2:       
                         self.queue_manager.input_cap_level_2.put(data_frame_crop)
                     case 3:
-                        data_frame_crop['id_memory'] = id_memory
-                        data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
-                        data_frame_crop['level_pos'] = (level_x1, level_y1)
-                        data_frame_crop['time_send'] = time.time()
-
                         self.queue_manager.input_cap_level_3.put(data_frame_crop)
                     case 4:
-                        data_frame_crop['id_memory'] = id_memory
-                        data_frame_crop['cap_pos'] = (cap_x1, cap_y1)
-                        data_frame_crop['level_pos'] = (level_x1, level_y1)
-                        data_frame_crop['time_send'] = time.time()
-                        
                         self.queue_manager.input_cap_level_4.put(data_frame_crop)
 
                 i += 1
-
-            
 
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             frames = [frame]

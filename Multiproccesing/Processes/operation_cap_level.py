@@ -14,8 +14,10 @@ class CapLevelProcess(ProcessModule):
         self.input_queue = input_queue
 
         self.local_controls_parameters = {
-                    'fps': 50, 
-                    'delta': 10,
+                    'level_high': 300, 
+                    'level_low': 360,
+                    'cap_high': 300, 
+                    'cap_low': 360,
                     }
 
         self.get_parameters()
@@ -24,7 +26,9 @@ class CapLevelProcess(ProcessModule):
         self.timer = Timer('read_frame')
 
 
-    def get_parametrs(self):
+    def get_parameters(self):
+        self.level_low = self.local_controls_parameters['level_low']
+        self.level_high = self.local_controls_parameters['level_high']
         pass
 
 
@@ -68,7 +72,13 @@ class CapLevelProcess(ProcessModule):
                 morph_size=2,
             )
             
+            lines_cap.sort(key=lambda line: line[1]) 
+
             data_frame_crop['lines_cap'] = lines_cap
+
+            level_pos_1 = data_frame_crop['level_pos_1']
+            
+            top_line = lines_cap[0]
 
 
             frame_level = frames_level[0]
@@ -91,8 +101,27 @@ class CapLevelProcess(ProcessModule):
             if len(lines_level) > 0:
                 lines_level.sort(key=lambda line: line[1]) 
 
-            data_frame_crop['lines_level'] = lines_level
+                level_pos_1 = data_frame_crop['level_pos_1']
 
+                top_line = lines_level[0]
+                x1, y1, x2, y2 = top_line
+
+                y1 = y1 + level_pos_1[1]
+                y2 = y2 + level_pos_1[1]
+                    
+                y_middle = (y1+y2) / 2
+
+                if y_middle > self.level_low or y_middle < self.level_high:
+                    level_state = 'good'
+                    #color = (0, 0, 255)
+                else:
+                    level_state = 'bad'
+                    #color = (255, 0, 0)s
+
+            
+            data_frame_crop['level_state'] = level_state
+            data_frame_crop['lines_level'] = lines_level
+            
             data_frame_crop['name_process'] = f'proc_crop_{self.num}'
 
             time_send = time.time()
