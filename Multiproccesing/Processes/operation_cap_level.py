@@ -78,6 +78,9 @@ class CapLevelProcess(ProcessModule):
 
             level_pos_1 = data_frame_crop['level_pos_1']
             
+            if len(lines_cap) == 0:
+                continue
+
             top_line = lines_cap[0]
 
 

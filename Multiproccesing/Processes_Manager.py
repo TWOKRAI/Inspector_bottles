@@ -20,10 +20,10 @@ class MultiProcessManager:
         
         # Конфигурационные флаги
         self.frontend_enable = True
-        self.ui_enable = False
-        self.render_enable = True
+        self.ui_enable = True
+        self.render_enable = False
         
-        self.backend_enable = True
+        self.backend_enable = False
         self.capture_enable = True
         self.processing_enable = True
         self.cap_level_enable = True

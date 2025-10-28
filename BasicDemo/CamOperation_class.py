@@ -16,8 +16,8 @@ import socket
 
 sys.path.append("../MvImport")
 
-from CameraParams_header import *
-from MvCameraControl_class import *
+from BasicDemo.CameraParams_header import *
+from BasicDemo.MvCameraControl_class import *
 
 
 # s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -172,6 +172,8 @@ class CameraOperation:
         # self.mask_min_level = mask_min_level
         # self.mask_max_level = mask_max_level
 
+        self.stOutFrame = ctypes.c_long(0)
+
     # 打开相机
     def Open_device(self):
 
@@ -240,6 +242,48 @@ class CameraOperation:
             return MV_OK
 
         return MV_E_CALLORDER
+    
+    def Start_grabbing2(self):
+        ret = self.obj_cam.MV_CC_StartGrabbing()
+        if ret != 0:
+            return ret
+        self.b_start_grabbing = True
+        print("start grabbing successfully!")
+        
+        # Инициализация структуры для получения кадра
+        self.stOutFrame = MV_FRAME_OUT()
+        memset(byref(self.stOutFrame), 0, sizeof(self.stOutFrame))
+        
+        return MV_OK
+
+
+    def frame_get(self):
+        ret = self.obj_cam.MV_CC_GetImageBuffer(self.stOutFrame, 1000)
+        if ret != 0:
+            print("no data, ret = " + To_hex_str(ret))
+            return None
+
+        # Если буфер для сохранения еще не создан, создаем его
+        if self.buf_save_image is None:
+            self.buf_save_image = (c_ubyte * self.stOutFrame.stFrameInfo.nFrameLen)()
+        self.st_frame_info = self.stOutFrame.stFrameInfo
+
+        # Копируем данные
+        self.buf_lock.acquire()
+        cdll.msvcrt.memcpy(byref(self.buf_save_image), self.stOutFrame.pBufAddr, self.st_frame_info.nFrameLen)
+        self.buf_lock.release()
+
+        # Преобразуем в numpy array
+        frame = np.frombuffer(self.buf_save_image, dtype=np.uint8)
+        # Предполагается, что изображение имеет размер 960x1280 и тип BayerGR8, поэтому конвертируем в BGR
+        frame = frame.reshape(960, 1280)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BayerGR2BGR)
+
+        # Освобождаем буфер камеры
+        self.obj_cam.MV_CC_FreeImageBuffer(self.stOutFrame)
+
+        return frame
+
 
     # 停止取图
     def Stop_grabbing(self):

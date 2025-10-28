@@ -130,6 +130,14 @@ class QueueManager:
         print('Сброс всех событий')
 
 
+    def remove_old_frame_if_full(self, queue):
+        if queue.full():
+            try:
+                queue.get_nowait()
+            except Empty:
+                pass
+
+
 if __name__ == '__main__':
     # Создание менеджера
     manager = QueueManager()

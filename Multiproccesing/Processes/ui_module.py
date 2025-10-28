@@ -1,15 +1,10 @@
-import time
+from App.main_app import WindowManager
 
 
-def main(queue_manager):
-    print(f'ui_module: RUN')
-
-    i = 0
-
-    while True:
-        print(f'ui_module: {i}')
-        i += 1
-
-        time.sleep(1)
+def main(queue_manager=None, control_queue=None):
+    window_manager = WindowManager(name='Capture_process', 
+                              queue_manager=queue_manager, 
+                              control_queue=control_queue)
     
-    print(f'ui_module: STOP')
+    window_manager.run()
+    

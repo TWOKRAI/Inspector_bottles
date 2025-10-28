@@ -6,6 +6,11 @@ from Camera_module.frame_fps import FrameFPS
 from Utils.timer import Timer
 
 
+from BasicDemo.CamOperation_class import CameraOperation
+from BasicDemo.MvCameraControl_class import *
+
+
+
 class Capture_process(ProcessModule):
     def __init__(self, name='Process', queue_manager=None, control_queue=None):
         super().__init__(name, queue_manager, control_queue)
@@ -57,6 +62,11 @@ class Capture_process(ProcessModule):
                 self.server.start()
 
                 print(f'Сервер запущен на {self.server.host}:{self.server.port}')
+            case 3:
+                ret = self.gige_camera_start() 
+
+                if ret:
+                    print(f'Камера запущена')
 
 
     def main(self):
@@ -122,15 +132,18 @@ class Capture_process(ProcessModule):
             if params and params[0] == "ACK":
                 print("Клиент подтвердил получение параметров")
                 return
+        elif self.video_stream == 3:
+            frame = self.gige_camera_get()
             
-        frame = self.frame_test
-
+        #frame = self.frame_test
 
         self.timer_read_frame.get_data()
         #self.timer_read_frame.elapsed_time(print_log=True)
 
         # Обработка видеокадра
         if frame is not None:
+            self.cv2.imwrite('test.jpg', frame)
+
             self._process_frame(frame)
         
         # Проверка активности соединения
@@ -166,6 +179,24 @@ class Capture_process(ProcessModule):
             self.server._close_connection()
         
         self.connection_active = False
+
+    
+    def gige_camera_start(self):
+        self.cam = MvCamera()
+        self.deviceList = MV_CC_DEVICE_INFO_LIST()
+
+        self.nSelCamIndex = 0
+
+        self.obj_cam_operation = CameraOperation(self.cam, self.deviceList, self.nSelCamIndex)
+        ret = self.obj_cam_operation.Start_grabbing2()
+
+        return ret
+
+
+    def gige_camera_get(self):
+        frame = self.obj_cam_operation.frame_get()
+
+        return frame
 
 
 def main(queue_manager=None, control_queue=None):
