@@ -1,8 +1,8 @@
 import time
 
 from .process_module import ProcessModule
-from Camera_module.socket_module import StreamServer
-from Camera_module.frame_fps import FrameFPS
+from Camera_module2.socket_module import StreamServer
+from Camera_module2.frame_fps import FrameFPS
 from Utils.timer import Timer
 
 

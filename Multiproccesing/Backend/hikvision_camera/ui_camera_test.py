@@ -16,16 +16,18 @@ import time
 import os
 # sys.path.append(os.path.join(os.path.dirname(__file__), 'camera_process'))
 
-from camera_process.clean_camera_process import CleanCameraProcessManager
+from .camera_process.camera_proc import CameraManager
 
 
-class CleanCameraTest(QMainWindow):
+class CameraTest(QMainWindow):
     """
     Чистое тестовое приложение БЕЗ обработки изображения
     """
     
-    def __init__(self):
+    def __init__(self, queue_manager = None):
         super().__init__()
+
+        self.queue_manager = queue_manager
         
         # Менеджер камеры
         self.camera_manager = None
@@ -196,7 +198,7 @@ class CleanCameraTest(QMainWindow):
             self.status_label.setText("Status: Searching for devices...")
             QApplication.processEvents()
             
-            result = CleanCameraProcessManager.enum_devices()
+            result = CameraManager.enum_devices()
             
             if result.get('status') == 'error':
                 error = result.get('error', 'Unknown error')
@@ -257,7 +259,7 @@ class CleanCameraTest(QMainWindow):
             QApplication.processEvents()
             
             # Создаем менеджер камеры
-            self.camera_manager = CleanCameraProcessManager()
+            self.camera_manager = CameraManager(self.queue_manager)
             
             # Запускаем процесс камеры
             if not self.camera_manager.start_process(camera_index):
@@ -583,7 +585,7 @@ class CleanCameraTest(QMainWindow):
         print("Application closed")
 
 
-def main():
+def main(queue_manager):
     """Главная функция"""
     app = QApplication(sys.argv)
     
@@ -594,7 +596,7 @@ def main():
     print("Features: Frame Rate, Exposure, Gain settings + Real-time FPS")
     print("="*60)
     
-    window = CleanCameraTest()
+    window = CameraTest(queue_manager=queue_manager)
     window.show()
     
     sys.exit(app.exec_())

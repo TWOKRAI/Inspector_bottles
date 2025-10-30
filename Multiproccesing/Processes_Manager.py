@@ -20,11 +20,11 @@ class MultiProcessManager:
         
         # Конфигурационные флаги
         self.frontend_enable = True
-        self.ui_enable = False
+        self.ui_enable = True
         self.render_enable = True
         
         self.backend_enable = True
-        self.capture_enable = True
+        self.capture_enable = False
         self.processing_enable = True
         self.cap_level_enable = True
         self.communication_enable = False
@@ -34,9 +34,9 @@ class MultiProcessManager:
     def import_modules(self):
         """Динамически импортирует модули процессов"""
         modules = {
-            'proc_ui': 'Multiproccesing.Processes.ui_module',
+            'proc_ui': 'Multiproccesing.Backend.hikvision_camera.ui_camera_test',
             'proc_capture': 'Multiproccesing.Processes.capture_module',
-            'proc_processing': 'Multiproccesing.Processes.processing_module',
+            'proc_processing': 'Multiproccesing.Backend.Operation_crop.processing_crop',
             'proc_cap_level': 'Multiproccesing.Processes.operation_cap_level',
             'proc_render': 'Multiproccesing.Processes.render_module',
             'proc_communication': 'Multiproccesing.Processes.communication_module', 

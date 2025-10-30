@@ -12,11 +12,11 @@ import ctypes
 from ctypes import *
 import queue
 
-from MvCameraControl_class import MvCamera, MV_CC_DEVICE_INFO_LIST, POINTER, MV_CC_DEVICE_INFO
-from MvCameraControl_class import MV_FRAME_OUT, MV_DISPLAY_FRAME_INFO, MVCC_FLOATVALUE
-from MvCameraControl_class import MV_GIGE_DEVICE, MV_USB_DEVICE
-from MvErrorDefine_const import MV_OK, MV_E_CALLORDER, MV_E_PARAMETER
-from CameraParams_header import *
+from .MvCameraControl_class import MvCamera, MV_CC_DEVICE_INFO_LIST, POINTER, MV_CC_DEVICE_INFO
+from .MvCameraControl_class import MV_FRAME_OUT, MV_DISPLAY_FRAME_INFO, MVCC_FLOATVALUE
+from .MvCameraControl_class import MV_GIGE_DEVICE, MV_USB_DEVICE
+from .MvErrorDefine_const import MV_OK, MV_E_CALLORDER, MV_E_PARAMETER
+from .CameraParams_header import *
 
 
 class CleanCameraProcessManager:

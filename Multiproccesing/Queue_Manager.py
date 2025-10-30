@@ -39,6 +39,10 @@ class QueueManager:
             'input_graph': self.buffer_size,
             'input_graph_cycle': self.buffer_size,
             'output_graph': self.buffer_size,
+
+            'cmd_queue': self.buffer_size,
+            'response_queue': self.buffer_size,
+            'frame_queue': 2,
         }
         
         # Конфигурация событий: [список имен]
@@ -70,9 +74,10 @@ class QueueManager:
         # Менеджер памяти
         self.memory_manager = ImageMemoryManager()
         memory_names = {
-            'camera_data': (1, (1100, 1920, 3), np.uint8),
-            'camera_data_out': (1, (1100, 1920, 3), np.uint8),
-            'process_data': (6, (1100, 1920, 3), np.uint8), 
+            'camera_data': (1, (1240, 1624, 3), np.uint8),
+            
+            'camera_data_out': (1, (1240, 1624, 3), np.uint8),
+            'process_data': (6, (1240, 1624, 3), np.uint8), 
 
             'process_data_cap_1': (1, (157, 210, 1), np.uint8), 
             'process_data_cap_2': (1, (157, 210, 1), np.uint8), 
@@ -85,7 +90,7 @@ class QueueManager:
             'process_data_level_4': (1, (470, 170, 1), np.uint8), 
 
             'neuroun_data': (21, (72, 72, 3), np.uint8),
-            'display_data': (1, (1100, 1920, 3), np.uint8),
+            'display_data': (1, (1240, 1624, 3), np.uint8),
         }
         self.memory_manager.create_memory_dict(memory_names, coll=12)
         self.total_modules = 0
