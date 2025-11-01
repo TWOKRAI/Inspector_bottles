@@ -44,7 +44,7 @@ class OperationProcess(ProcessModule):
             ],
             contour_filter_method=ContourFilterMethod.AREA,
             threshold_params={"thresh": 190, 
-                            "maxval": 255, 
+                            "maxval": 255,   
                             "type": cv2.THRESH_BINARY_INV},
             filter_params={"min_area": 1000}
         )

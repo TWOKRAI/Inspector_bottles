@@ -3,7 +3,7 @@ import cv2
 import threading
 import time
 
-from .process_module import ProcessModule
+from Multiproccesing.Processes.process_module import ProcessModule
 from Visualization.plotter import AdvancedPlotter
 from Utils.timer import Timer
 

@@ -34,13 +34,13 @@ class MultiProcessManager:
     def import_modules(self):
         """Динамически импортирует модули процессов"""
         modules = {
-            'proc_ui': 'Multiproccesing.Backend.hikvision_camera.ui_camera_test',
+            'proc_ui': 'Services.hikvision_camera.ui_camera_test',
             'proc_capture': 'Multiproccesing.Processes.capture_module',
-            'proc_processing': 'Multiproccesing.Backend.Operation_crop.processing_crop',
+            'proc_processing': 'Services.Operation_crop.processing_crop',
             'proc_cap_level': 'Multiproccesing.Processes.operation_cap_level',
             'proc_render': 'Multiproccesing.Processes.render_module',
             'proc_communication': 'Multiproccesing.Processes.communication_module', 
-            'proc_graph': 'Multiproccesing.Processes.graph_module', 
+            'proc_graph': 'Services.graph.graph_module', 
         }
 
         # Настройка счетчика модулей

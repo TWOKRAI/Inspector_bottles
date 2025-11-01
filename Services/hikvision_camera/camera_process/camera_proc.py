@@ -11,12 +11,15 @@ import time
 import ctypes
 from ctypes import *
 import queue
+import cv2
 
 from .MvCameraControl_class import MvCamera, MV_CC_DEVICE_INFO_LIST, POINTER, MV_CC_DEVICE_INFO
 from .MvCameraControl_class import MV_FRAME_OUT, MV_DISPLAY_FRAME_INFO, MVCC_FLOATVALUE
 from .MvCameraControl_class import MV_GIGE_DEVICE, MV_USB_DEVICE
 from .MvErrorDefine_const import MV_OK, MV_E_CALLORDER, MV_E_PARAMETER
 from .CameraParams_header import *
+
+from Utils.frame_fps import FrameFPS
 
 
 class CameraManager:
@@ -38,6 +41,7 @@ class CameraManager:
         self.frame_queue = self.queue_manager.frame_queue  # Очередь кадров (маленький буфер)
         
         self.is_running = False
+
         
     @staticmethod
     def enum_devices():
@@ -316,6 +320,9 @@ class CleanCameraWorker:
         self.buf_lock = threading.Lock()
 
         self.frame_counter = 0
+
+        self.frame_fps = FrameFPS()
+
         
     def run(self):
         """Основной цикл работы процесса"""
@@ -675,10 +682,16 @@ class CleanCameraWorker:
                     
                     # Отправляем в очередь (если есть место)
                     try:
+                        #cv2.imwrite('frame_test.jpg', frame)
+
                         self.frame_queue.put_nowait(frame)
                         frames = [frame]
                         id_memory = 1 
                         self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
+
+                        self.frame_fps.update()
+
+                        self.frame_fps.get_fps()
 
                         data_frame = {
                             'id_memory': id_memory,

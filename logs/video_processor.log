@@ -1,0 +1,97 @@
+2025-11-01 10:52:54,146 - ProcessModule.VideoProcessingSystem - DEBUG - Added log handler: file (rotating_file)
+2025-11-01 10:52:54,148 - ProcessModule.VideoProcessingSystem - INFO - Manager integration setup completed
+2025-11-01 10:52:54,150 - ProcessModule.VideoProcessingSystem - INFO - Worker 'data_analyzer' started
+2025-11-01 10:52:54,150 - ProcessModule.VideoProcessingSystem - INFO - Workers initialized
+2025-11-01 10:52:54,152 - ProcessModule.VideoProcessingSystem - INFO - Data analyzer worker started
+2025-11-01 10:52:54,152 - ProcessModule.VideoProcessingSystem - INFO - LoggerManager started
+2025-11-01 10:52:54,154 - ProcessModule.VideoProcessingSystem - INFO - Command processor thread started
+2025-11-01 10:52:54,155 - ProcessModule.VideoProcessingSystem - INFO - Health monitor thread started
+2025-11-01 10:52:54,155 - ProcessModule.VideoProcessingSystem - INFO - System stats thread started
+2025-11-01 10:52:54,155 - ProcessModule.VideoProcessingSystem - INFO - Maintenance thread started
+2025-11-01 10:52:56,158 - ProcessModule.VideoProcessingSystem - INFO - Starting video processing
+2025-11-01 10:52:56,159 - ProcessModule.VideoProcessingSystem - INFO - Worker 'video_capture' started
+2025-11-01 10:52:56,159 - ProcessModule.VideoProcessingSystem - INFO - Worker 'frame_processor' started
+2025-11-01 10:52:56,161 - ProcessModule.VideoProcessingSystem - INFO - Video capture worker started
+2025-11-01 10:52:56,161 - ProcessModule.VideoProcessingSystem - DEBUG - Camera initialized
+2025-11-01 10:52:56,161 - ProcessModule.VideoProcessingSystem - INFO - Frame processor worker started
+2025-11-01 10:52:56,500 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:56,939 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:57,377 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:57,817 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:58,257 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:58,695 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:59,136 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:52:59,576 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:00,016 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:00,456 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:00,895 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:01,334 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:01,771 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:02,208 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:02,646 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:03,084 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:03,523 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:03,961 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:04,161 - ProcessModule.VideoProcessingSystem - WARNING - System degraded: 1 non-critical systems degraded
+2025-11-01 10:53:04,401 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:04,839 - ProcessModule.VideoProcessingSystem - ERROR - Frame capture error: float division by zero
+2025-11-01 10:53:05,172 - ProcessModule.VideoProcessingSystem - INFO - Stopping video processing
+2025-11-01 10:53:05,177 - ProcessModule.VideoProcessingSystem - INFO - Video capture worker stopped
+2025-11-01 10:53:05,178 - ProcessModule.VideoProcessingSystem - INFO - Worker 'video_capture' stopped
+2025-11-01 10:53:05,192 - ProcessModule.VideoProcessingSystem - INFO - Frame processor worker stopped
+2025-11-01 10:53:05,193 - ProcessModule.VideoProcessingSystem - INFO - Worker 'frame_processor' stopped
+2025-11-01 10:53:07,197 - ProcessModule.VideoProcessingSystem - INFO - LoggerManager stopped
+2025-11-01 10:53:09,156 - ProcessModule.VideoProcessingSystem - INFO - Data analyzer worker stopped
+2025-11-01 10:53:09,156 - ProcessModule.VideoProcessingSystem - INFO - Worker 'data_analyzer' stopped
+2025-11-01 11:12:46,562 - ProcessModule.VideoProcessingSystem - DEBUG - Added log handler: file (rotating_file)
+2025-11-01 11:12:46,563 - ProcessModule.VideoProcessingSystem - INFO - Manager integration setup completed
+2025-11-01 11:12:46,565 - ProcessModule.VideoProcessingSystem - INFO - Worker 'data_analyzer' started
+2025-11-01 11:12:46,565 - ProcessModule.VideoProcessingSystem - INFO - Workers initialized
+2025-11-01 11:12:46,566 - ProcessModule.VideoProcessingSystem - INFO - Data analyzer worker started
+2025-11-01 11:12:46,566 - ProcessModule.VideoProcessingSystem - INFO - LoggerManager started
+2025-11-01 11:12:46,569 - ProcessModule.VideoProcessingSystem - INFO - Command processor thread started
+2025-11-01 11:12:46,569 - ProcessModule.VideoProcessingSystem - INFO - Health monitor thread started
+2025-11-01 11:12:46,570 - ProcessModule.VideoProcessingSystem - INFO - System stats thread started
+2025-11-01 11:12:46,570 - ProcessModule.VideoProcessingSystem - INFO - Maintenance thread started
+2025-11-01 11:12:48,573 - ProcessModule.VideoProcessingSystem - INFO - Starting video processing
+2025-11-01 11:12:48,574 - ProcessModule.VideoProcessingSystem - INFO - Worker 'video_capture' started
+2025-11-01 11:12:48,575 - ProcessModule.VideoProcessingSystem - INFO - Worker 'frame_processor' started
+2025-11-01 11:12:48,577 - ProcessModule.VideoProcessingSystem - INFO - Video capture worker started
+2025-11-01 11:12:48,578 - ProcessModule.VideoProcessingSystem - DEBUG - Camera initialized
+2025-11-01 11:12:48,578 - ProcessModule.VideoProcessingSystem - INFO - Frame processor worker started
+2025-11-01 11:12:51,950 - ProcessModule.VideoProcessingSystem - DEBUG - Captured 100 frames
+2025-11-01 11:12:55,343 - ProcessModule.VideoProcessingSystem - DEBUG - Captured 200 frames
+2025-11-01 11:12:57,587 - ProcessModule.VideoProcessingSystem - INFO - Stopping video processing
+2025-11-01 11:12:57,611 - ProcessModule.VideoProcessingSystem - INFO - Video capture worker stopped
+2025-11-01 11:12:57,612 - ProcessModule.VideoProcessingSystem - INFO - Worker 'video_capture' stopped
+2025-11-01 11:12:57,627 - ProcessModule.VideoProcessingSystem - INFO - Frame processor worker stopped
+2025-11-01 11:12:57,628 - ProcessModule.VideoProcessingSystem - INFO - Worker 'frame_processor' stopped
+2025-11-01 11:12:59,632 - ProcessModule.VideoProcessingSystem - INFO - LoggerManager stopped
+2025-11-01 11:13:01,568 - ProcessModule.VideoProcessingSystem - INFO - Data analyzer worker stopped
+2025-11-01 11:13:01,569 - ProcessModule.VideoProcessingSystem - INFO - Worker 'data_analyzer' stopped
+2025-11-01 11:17:36,518 - ProcessModule.VideoProcessingSystem - DEBUG - Added log handler: file (rotating_file)
+2025-11-01 11:17:36,519 - ProcessModule.VideoProcessingSystem - INFO - Manager integration setup completed
+2025-11-01 11:17:36,520 - ProcessModule.VideoProcessingSystem - INFO - Worker 'data_analyzer' started
+2025-11-01 11:17:36,520 - ProcessModule.VideoProcessingSystem - INFO - Workers initialized
+2025-11-01 11:17:36,521 - ProcessModule.VideoProcessingSystem - INFO - Data analyzer worker started
+2025-11-01 11:17:36,522 - ProcessModule.VideoProcessingSystem - INFO - LoggerManager started
+2025-11-01 11:17:36,525 - ProcessModule.VideoProcessingSystem - INFO - Command processor thread started
+2025-11-01 11:17:36,526 - ProcessModule.VideoProcessingSystem - INFO - Health monitor thread started
+2025-11-01 11:17:36,526 - ProcessModule.VideoProcessingSystem - INFO - System stats thread started
+2025-11-01 11:17:36,527 - ProcessModule.VideoProcessingSystem - INFO - Maintenance thread started
+2025-11-01 11:17:38,530 - ProcessModule.VideoProcessingSystem - INFO - Starting video processing
+2025-11-01 11:17:38,531 - ProcessModule.VideoProcessingSystem - INFO - Worker 'video_capture' started
+2025-11-01 11:17:38,532 - ProcessModule.VideoProcessingSystem - INFO - Worker 'frame_processor' started
+2025-11-01 11:17:38,534 - ProcessModule.VideoProcessingSystem - INFO - Video capture worker started
+2025-11-01 11:17:38,535 - ProcessModule.VideoProcessingSystem - DEBUG - Camera initialized
+2025-11-01 11:17:38,535 - ProcessModule.VideoProcessingSystem - INFO - Frame processor worker started
+2025-11-01 11:17:41,908 - ProcessModule.VideoProcessingSystem - DEBUG - Captured 100 frames
+2025-11-01 11:17:45,277 - ProcessModule.VideoProcessingSystem - DEBUG - Captured 200 frames
+2025-11-01 11:17:47,544 - ProcessModule.VideoProcessingSystem - INFO - Stopping video processing
+2025-11-01 11:17:47,567 - ProcessModule.VideoProcessingSystem - INFO - Video capture worker stopped
+2025-11-01 11:17:47,568 - ProcessModule.VideoProcessingSystem - INFO - Worker 'video_capture' stopped
+2025-11-01 11:17:47,579 - ProcessModule.VideoProcessingSystem - INFO - Frame processor worker stopped
+2025-11-01 11:17:47,580 - ProcessModule.VideoProcessingSystem - INFO - Worker 'frame_processor' stopped
+2025-11-01 11:17:49,584 - ProcessModule.VideoProcessingSystem - INFO - LoggerManager stopped
+2025-11-01 11:17:51,525 - ProcessModule.VideoProcessingSystem - INFO - Data analyzer worker stopped
+2025-11-01 11:17:51,526 - ProcessModule.VideoProcessingSystem - INFO - Worker 'data_analyzer' stopped

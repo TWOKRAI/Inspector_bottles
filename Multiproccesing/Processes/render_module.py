@@ -3,7 +3,7 @@ import time
 from .process_module import ProcessModule
 from Utils.timer import Timer
 
-from Camera_module2.frame_fps import FrameFPS
+from Utils.frame_fps import FrameFPS
 
 
 class RenderProcess(ProcessModule):
