@@ -24,7 +24,7 @@ class MultiProcessManager:
         self.render_enable = True
         
         self.backend_enable = True
-        self.capture_enable = False
+        self.capture_enable = True
         self.processing_enable = True
         self.cap_level_enable = True
         self.communication_enable = False
@@ -34,8 +34,8 @@ class MultiProcessManager:
     def import_modules(self):
         """Динамически импортирует модули процессов"""
         modules = {
-            'proc_ui': 'Services.hikvision_camera.ui_camera_test',
-            'proc_capture': 'Multiproccesing.Processes.capture_module',
+            'proc_ui': 'Services.hikvision_camera.ui_camera_test_2',
+            'proc_capture': 'Services.hikvision_camera.camera_process.camera_proc_2',
             'proc_processing': 'Services.Operation_crop.processing_crop',
             'proc_cap_level': 'Multiproccesing.Processes.operation_cap_level',
             'proc_render': 'Multiproccesing.Processes.render_module',
@@ -126,7 +126,7 @@ class MultiProcessManager:
             if self.capture_enable:
                 capture_process = self.create_process(
                     target_func=modules['proc_capture'],
-                    args=(self.queue_manager, self.queue_manager.control_capture),
+                    args=(self.queue_manager,),
                     name='proc_capture',
                     priority='high'
                 )

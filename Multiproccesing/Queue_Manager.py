@@ -21,6 +21,8 @@ class QueueManager:
             'control_cap_level_4': 1,
             'control_communication': 1,
             'control_graph': 1,
+            'ui_to_camera': 10,
+            'camera_to_ui': 10,
             
             'input_render': self.buffer_size,
             'output_render': self.buffer_size,
