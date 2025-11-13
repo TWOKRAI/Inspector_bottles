@@ -1,15 +1,27 @@
-import time
+from multiprocessing import Queue
 from command_manager import CommandManager
 from worker_manager import WorkerManager, ThreadConfig, ThreadPriority
 from logger_manager_batch import LoggerManager
 from module_message import SystemMessage, MessageFactory, MessageType
 
+
 class ProcessModule:
-    def __init__(self, name: str = 'Process'):
+    def __init__(self, name: str, process_manager: None, config: dict = None):
         self.name = name
+        self.process_manager = process_manager
         self.stop_process = False
+        self.config = config or {}
+        self.stop_process = False
+
         self.managers = {}
         
+        self.queues = {
+            'system': Queue(maxsize=100),    
+            'data': Queue(maxsize=50),       
+            'broadcast': Queue(maxsize=20),  
+            'costoum': Queue(maxsize=20),  
+        }
+
         # Обязательная инициализация
         self._init_core_managers()
         self._init_system_threads()
@@ -17,6 +29,9 @@ class ProcessModule:
         # Опциональная инициализация
         self._init_custom_managers()
         self._init_application_threads()
+
+        # Регистрация в ProcessManager
+        self.process_manager.register_process(self)
     
     def _init_core_managers(self):
         self.worker_manager = WorkerManager(self.name)

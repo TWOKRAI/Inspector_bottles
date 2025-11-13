@@ -1,7 +1,7 @@
 # module_message.py
 import time
 import uuid
-from typing import Any, Optional, Dict, Union
+from typing import Any, Optional, Dict, Union, List
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -14,30 +14,44 @@ class MessageType(Enum):
     CONFIG = "config"
     RESPONSE = "response"
 
+class MessageTarget(Enum):
+    ALL_PROCESSES = "all_processes"
+    SPECIFIC_PROCESSES = "specific_processes"
+    PROCESS_GROUP = "process_group"
+
 @dataclass
 class SystemMessage:
-    """Базовый класс для всех сообщений в системе"""
     msg_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     msg_type: MessageType = MessageType.EVENT
     sender: str = "system"
-    target: Optional[str] = None
+    
+    # Новая система таргетирования
+    target_type: MessageTarget = MessageTarget.SPECIFIC_PROCESSES
+    target_processes: Union[str, List[str]] = None  # "all", "process_name", ["p1", "p2"]
+    
     data: Any = None
     timestamp: float = field(default_factory=time.time)
     priority: int = 1
     metadata: Dict[str, Any] = field(default_factory=dict)
     
-    # Универсальные методы
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'msg_id': self.msg_id,
-            'msg_type': self.msg_type.value,
-            'sender': self.sender,
-            'target': self.target,
-            'data': self.data,
-            'timestamp': self.timestamp,
-            'priority': self.priority,
-            'metadata': self.metadata
-        }
+    def get_target_processes(self) -> List[str]:
+        """Получение списка процессов-получателей"""
+        if self.target_type == MessageTarget.ALL_PROCESSES:
+            return []  # Пустой список = всем процессам
+        elif self.target_type == MessageTarget.SPECIFIC_PROCESSES:
+            if isinstance(self.target_processes, str):
+                return [self.target_processes]
+            elif isinstance(self.target_processes, list):
+                return self.target_processes
+        return []
+    
+    def is_for_all_processes(self) -> bool:
+        return self.target_type == MessageTarget.ALL_PROCESSES
+    
+    def is_for_specific_process(self, process_name: str) -> bool:
+        if self.is_for_all_processes():
+            return True
+        return process_name in self.get_target_processes()
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SystemMessage':
