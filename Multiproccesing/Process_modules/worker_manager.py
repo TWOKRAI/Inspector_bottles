@@ -66,7 +66,6 @@ class WorkerManager:
             auto_start: Запускать ли автоматически
             daemon: Демонический ли поток
             **worker_config: Дополнительная конфигурация worker'а
-            
         Returns:
             bool: Успешно ли создан worker
         """

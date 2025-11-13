@@ -391,8 +391,7 @@ class CommandProcessor:
 
 
 
-
-    # Создание процессора команд
+# Создание процессора команд
 command_processor = CommandProcessor("VideoProcessor")
 
 # Обработчики команд

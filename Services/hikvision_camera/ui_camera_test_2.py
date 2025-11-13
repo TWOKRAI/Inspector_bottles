@@ -478,23 +478,6 @@ class CameraUI(QMainWindow):
         print("UI closed")
 
 
-# def ui_process_main(queue_manager):
-#     """Главная функция UI процесса"""
-#     app = QApplication(sys.argv)
-    
-#     print("="*60)
-#     print("Independent Camera Processes")
-#     print("="*60)
-#     print("UI and Camera are separate processes")
-#     print("Communication via QueueManager")
-#     print("="*60)
-    
-#     window = CameraUI(queue_manager)
-#     window.show()
-    
-#     sys.exit(app.exec_())
-
-
 def main(queue_manager=None):
     """Главная функция UI процесса"""
     app = QApplication(sys.argv)
