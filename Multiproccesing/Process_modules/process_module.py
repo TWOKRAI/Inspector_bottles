@@ -1,124 +1,116 @@
-import threading
-import queue
 import time
-from typing import Dict, Any, List, Optional, Callable
+from command_manager import CommandManager
+from worker_manager import WorkerManager, ThreadConfig, ThreadPriority
+from logger_manager_batch import LoggerManager
+from module_message import SystemMessage, MessageFactory, MessageType
 
 class ProcessModule:
-    """
-    Минимальный базовый класс для всех процессов.
-    Только самая основная функциональность.
-    """
-    
-    def __init__(self, name: str = 'Process', 
-                 queue_manager = None, 
-                 control_queue: Optional[queue.Queue] = None):
-        """
-        Args:
-            name: Имя процесса
-            queue_manager: Менеджер очередей
-            control_queue: Очередь для управляющих команд
-        """
+    def __init__(self, name: str = 'Process'):
         self.name = name
-        self.queue_manager = queue_manager
-        self.control_queue = control_queue
-        
-        # Базовые флаги управления
         self.stop_process = False
-        self.threads = []
-        
-        # Менеджеры будут созданы в дочерних классах
         self.managers = {}
         
-        # Инициализация
-        self._init_managers()
-        self._init_threads()
+        # Обязательная инициализация
+        self._init_core_managers()
+        self._init_system_threads()
         
-    def _init_managers(self):
-        """Инициализация менеджеров - для переопределения"""
-        # Дочерние классы будут создавать здесь конкретные менеджеры
-        # и добавлять их в self.managers
-        pass
+        # Опциональная инициализация
+        self._init_custom_managers()
+        self._init_application_threads()
+    
+    def _init_core_managers(self):
+        self.worker_manager = WorkerManager(self.name)
+        self.command_manager = CommandManager(self.name)
+        self.logger_manager = LoggerManager()
         
-    def _init_threads(self):
-        """Инициализация потоков - для переопределения"""
-        # Дочерние классы будут создавать здесь свои потоки
-        pass
+        self.register_manager("workers", self.worker_manager)
+        self.register_manager("commands", self.command_manager)
+        self.register_manager("logger", self.logger_manager)
+        
+        # Настраиваем интеграцию между менеджерами
+        self._setup_managers_integration()
 
-    def register_thread(self, name: str, target: Callable, daemon: bool = False) -> threading.Thread:
-        """Регистрация нового потока"""
-        thread = threading.Thread(
-            name=f"{self.name}_{name}",
-            target=target,
-            daemon=daemon
+    def _init_message_handlers(self):
+        """Регистрация обработчиков различных типов сообщений"""
+        self.message_handlers = {
+            MessageType.LOG: self._handle_log_message,
+            MessageType.EVENT: self._handle_event_message,
+            MessageType.METRIC: self._handle_metric_message,
+        }
+    
+    def _setup_managers_integration(self):
+        """Настройка взаимодействия менеджеров через сообщения"""
+        # CommandManager отправляет логи через LoggerManager
+        def log_from_command(message, *args):
+            if hasattr(message, 'log_level'):
+                self.logger_manager.handle_log_message(message)
+        
+        self.command_manager.callbacks['message_failed'].append(log_from_command)
+    
+    def _handle_log_message(self, log_message: SystemMessage):
+        """Обработка лог-сообщений"""
+        self.logger_manager.handle_log_message(log_message)
+    
+    def _handle_event_message(self, event_message: SystemMessage):
+        """Обработка событий"""
+        # Можно добавить логику обработки событий
+        print(f"Event: {event_message.data}")
+    
+    def _handle_metric_message(self, metric_message: SystemMessage):
+        """Обработка метрик"""
+        # Можно интегрировать с будущим MetricsManager
+        print(f"Metric: {metric_message.data}")
+    
+    def send_message(self, message: SystemMessage, output_queue: str = None):
+        """Универсальная отправка сообщений"""
+        return self.command_manager.send_message(message, output_queue)
+    
+    def log(self, level: str, message: str, module: str = None):
+        """Удобный метод для логирования"""
+        log_msg = MessageFactory.create_log(
+            self.name, level, message, module or self.name
         )
-        self.threads.append(thread)
-        return thread
+        self.logger_manager.handle_log_message(log_msg)
 
+    def _init_custom_managers(self):
+        pass
+    
+    def _init_system_threads(self):
+        # Поток для команд (высокий приоритет)
+        self.worker_manager.create_worker(
+            "command_processor",
+            self.command_manager.process_loop,
+            ThreadConfig(priority=ThreadPriority.SYSTEM),
+            auto_start=True
+        )
+        
+        # Поток для логирования (реальное время)
+        self.worker_manager.create_worker(
+            "log_processor",
+            self.logger_manager.process_logs,
+            ThreadConfig(priority=ThreadPriority.REALTIME),
+            auto_start=True
+        )
+    
+    def _init_application_threads(self):
+        pass
+    
     def register_manager(self, name: str, manager):
-        """Регистрация менеджера"""
         self.managers[name] = manager
-
+    
     def run(self):
-        """Запуск процесса"""
         print(f"[{self.name}] Starting process")
-        
-        # Запуск менеджеров
-        self._start_managers()
-        
-        # Запуск потоков
-        for thread in self.threads:
-            thread.start()
-            print(f"[{self.name}] Started thread: {thread.name}")
-            
+        # Все потоки уже запущены через WorkerManager
         print(f"[{self.name}] Process started successfully")
-
-    def _start_managers(self):
-        """Запуск всех менеджеров"""
-        for name, manager in self.managers.items():
-            if hasattr(manager, 'start'):
-                manager.start()
-                print(f"[{self.name}] Started manager: {name}")
-
+    
     def stop(self):
-        """Корректная остановка процесса"""
         print(f"[{self.name}] Stopping process")
         self.stop_process = True
-        
-        # Остановка менеджеров
-        self._stop_managers()
-        
-        # Остановка потоков
-        for thread in self.threads:
-            if thread.is_alive():
-                thread.join(timeout=5.0)
-                if thread.is_alive():
-                    print(f"[{self.name}] WARNING: Thread {thread.name} didn't stop in time")
-                    
+        self.worker_manager.stop_all_workers()
         print(f"[{self.name}] Process stopped")
-
-    def _stop_managers(self):
-        """Остановка всех менеджеров"""
-        for name, manager in self.managers.items():
-            if hasattr(manager, 'stop'):
-                try:
-                    manager.stop()
-                    print(f"[{self.name}] Stopped manager: {name}")
-                except Exception as e:
-                    print(f"[{self.name}] Error stopping manager {name}: {e}")
-
-    def should_stop(self) -> bool:
-        """Проверка условий остановки"""
-        return (
-            self.stop_process or 
-            (self.queue_manager.stop_event.is_set() 
-             if self.queue_manager and hasattr(self.queue_manager, 'stop_event') else False)
-        )
-
+    
     def get_manager(self, name: str):
-        """Получение менеджера по имени"""
         return self.managers.get(name)
-
-    def main(self):
-        """Основная логика процесса (для переопределения)"""
-        # Заглушка - в реальном процессе здесь будет основная работа
-        time.sleep(0.1)
+    
+    def should_stop(self) -> bool:
+        return self.stop_process

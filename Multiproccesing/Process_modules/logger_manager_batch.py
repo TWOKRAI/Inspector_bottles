@@ -11,12 +11,16 @@ from collections import defaultdict
 import queue
 import heapq
 
+from module_message import CommandMessage, SystemMessage, MessageType, MessageFactory, LogMessage
+
+
 class LogLevel(Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
 
 @dataclass
 class LogGroup:
@@ -29,6 +33,14 @@ class LogGroup:
     backup_count: int = 5
     batch_interval: float = 1.0  # Интервал батчинга в секундах
     batch_size: int = 100  # Максимальный размер батча
+
+
+    # Добавляем в LogGroup метод should_log
+    def should_log(self, level: LogLevel, module: str) -> bool:
+        """Проверка, должен ли лог быть записан в эту группу"""
+        return (level in self.levels and 
+                (not self.modules or module in self.modules))
+
 
 class AdaptiveBatcher:
     """
@@ -167,7 +179,7 @@ class AdaptiveBatcher:
             timer.cancel()
         self.batch_timers.clear()
 
-class OptimizedLogRouter:
+class LoggerManager:
     """
     Оптимизированный роутер логов с адаптивным батчингом.
     """
@@ -183,8 +195,7 @@ class OptimizedLogRouter:
         
         self.default_format = default_format
         self.enable_batching = enable_batching
-        self.is_running = False
-        
+
         # Группы и обработчики
         self.groups: Dict[str, LogGroup] = {}
         self.handlers: Dict[str, logging.Handler] = {}
@@ -195,10 +206,6 @@ class OptimizedLogRouter:
         
         if self.batcher:
             self.batcher.flush_callback = self._write_batch
-        
-        # Потоки
-        self.router_thread = None
-        self.writer_thread = None
         
         # Статистика
         self.stats = {
@@ -235,8 +242,6 @@ class OptimizedLogRouter:
     
     def route_log(self, level: LogLevel, message: str, module: str = "main"):
         """Маршрутизация лога с учетом батчинга"""
-        if not self.is_running:
-            return
         
         log_record = {
             'timestamp': time.time(),
@@ -257,20 +262,6 @@ class OptimizedLogRouter:
         for group_name, group in self.groups.items():
             if group.should_log(record['level'], record['module']):
                 self._write_single_log(group_name, record)
-    
-    def _router_worker(self):
-        """Рабочий поток для маршрутизации логов"""
-        while self.is_running or not self.log_queue.empty():
-            try:
-                record = self.log_queue.get(timeout=1.0)
-                self._route_to_groups(record)
-                self.log_queue.task_done()
-                
-                # Обновляем статистику очереди
-                self.stats['queue_size'] = self.log_queue.qsize()
-                
-            except queue.Empty:
-                continue
     
     def _route_to_groups(self, record: Dict):
         """Маршрутизация записи в соответствующие группы"""
@@ -351,36 +342,7 @@ class OptimizedLogRouter:
         # В данной реализации запись происходит в основном потоке
         # но можно вынести в отдельный для дополнительной оптимизации
         pass
-    
-    def start(self):
-        """Запуск оптимизированного роутера"""
-        self.is_running = True
-        
-        # Запускаем поток маршрутизации
-        self.router_thread = threading.Thread(
-            target=self._router_worker,
-            daemon=True,
-            name="LogRouter-Router"
-        )
-        self.router_thread.start()
-    
-    def stop(self):
-        """Остановка с принудительным сбросом всех батчей"""
-        self.is_running = False
-        
-        # Сбрасываем все батчи
-        if self.batcher:
-            self.batcher.flush_all()
-        
-        # Ждем завершения обработки очереди
-        try:
-            self.log_queue.join()
-        except:
-            pass
-        
-        # Закрываем обработчики
-        for handler in self.handlers.values():
-            handler.close()
+  
     
     def get_performance_stats(self) -> Dict[str, Any]:
         """Получение статистики производительности"""
@@ -403,13 +365,52 @@ class OptimizedLogRouter:
         
         return base_stats
 
+    def process_logs(self, stop_event, pause_event):
+        """WorkerManager будет запускать этот метод в потоке"""
+        while not stop_event.is_set():
+            if pause_event.is_set():
+                time.sleep(0.1)
+                continue
+                
+        try:
+            record = self.log_queue.get_nowait()
+            self._route_to_groups(record)
+        except queue.Empty:
+            time.sleep(0.01)
+
+    def process_log_messages(self, stop_event, pause_event):
+        """Обработка лог-сообщений из SystemMessage"""
+        while not stop_event.is_set():
+            if pause_event.is_set():
+                time.sleep(0.1)
+                continue
+                
+            # Можно добавить входную очередь для лог-сообщений
+            # Пока используем старый метод для совместимости
+            time.sleep(0.01)   
+
+    # Добавляем метод для обработки LogMessage
+    def handle_log_message(self, log_message: LogMessage):
+        """Обработка LogMessage"""
+        if log_message.msg_type != MessageType.LOG:
+            return
+            
+        level_name = log_message.log_level.upper()
+        try:
+            level = LogLevel[level_name]
+            self.route_log(level, log_message.log_message, log_message.sender)
+        except KeyError:
+            # Если уровень не распознан, используем INFO
+            self.route_log(LogLevel.INFO, log_message.log_message, log_message.sender)
+
+
 
 if __name__ == "__main__":    
 # Пример использования с разными стратегиями батчинга
     def setup_optimized_logging():
         """Настройка логирования с разными стратегиями батчинга для разных групп"""
         
-        router = OptimizedLogRouter(
+        router = LoggerManager(
             base_log_dir="logs/optimized",
             enable_batching=True
         )
@@ -484,4 +485,4 @@ if __name__ == "__main__":
         router.stop()
 
 
-performance_test()
+    performance_test()
