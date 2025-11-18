@@ -93,7 +93,15 @@ class MultiProcessManager:
             self.process_priorities[process] = priority
         
         return process
-
+    
+    def register_process(self, process: Process, priority: str = 'normal'):
+        """Регистрация процесса с приоритетом"""
+        self.processes.append(process)
+        self.process_priorities[process] = priority
+    
+    def register_queues(self, process: ProcessModule):
+        """Регистрация очередей процесса в менеджере очередей"""
+        self.queue_manager.register_process_queues(process.name, process.queues)
 
     def initialize_processes(self):
         """Инициализирует процессы на основе конфигурации"""
