@@ -1,1051 +1,210 @@
-import time
-import logging
-from typing import Dict, List, Any, Optional, Callable, Union
-from enum import Enum
-from collections import defaultdict
-
-class RouterMode(Enum):
-    INTERNAL = "internal"
-    EXTERNAL = "external"
-
-class RoutingStrategy(Enum):
-    UNICAST = "unicast"
-    MULTICAST = "multicast" 
-    GROUP = "group"
-    BROADCAST = "broadcast"
-
-class DeliveryStatus(Enum):
-    PENDING = "pending"
-    DELIVERED = "delivered"
-    FAILED = "failed"
-    INVALID = "invalid"
-
-
-from typing import Dict, Any
-
-class PriorityManager:
-    """Менеджер приоритетов сообщений"""
-    
-    def __init__(self):
-        self.priority_levels = {
-            'critical': 0,
-            'high': 1,
-            'normal': 2,
-            'low': 3,
-            'background': 4
-        }
-    
-    def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Обработка приоритета сообщения"""
-        priority = message.get('priority', 'normal')
-        
-        if isinstance(priority, str):
-            priority_value = self.priority_levels.get(priority, 2)
-        else:
-            # Если priority число, нормализуем его к нашим уровням
-            priority_value = max(0, min(4, int(priority)))
-        
-        message['_priority_value'] = priority_value
-        return message
-    
-    def get_priority_name(self, priority_value: int) -> str:
-        """Получение имени приоритета по значению"""
-        for name, value in self.priority_levels.items():
-            if value == priority_value:
-                return name
-        return 'normal'
-
-
-import time
-from typing import Dict, Any, Optional
-from enum import Enum
-
-class DeliveryManager:
-    """Менеджер гарантий доставки"""
-    
-    def __init__(self):
-        self.pending_messages: Dict[str, Dict] = {}
-        self.delivery_timeout = 30.0  # секунд
-    
-    def track_message(self, message_id: str, message: Dict, send_function: Callable) -> bool:
-        """Отслеживание сообщения с гарантией доставки"""
-        if not message.get('need_ack'):
-            return True
-            
-        self.pending_messages[message_id] = {
-            'message': message,
-            'send_function': send_function,
-            'timestamp': time.time(),
-            'status': 'pending'
-        }
-        return True
-    
-    def acknowledge_message(self, message_id: str) -> bool:
-        """Подтверждение доставки сообщения"""
-        if message_id in self.pending_messages:
-            self.pending_messages[message_id]['status'] = 'acknowledged'
-            return True
-        return False
-    
-    def check_timeouts(self):
-        """Проверка таймаутов доставки"""
-        current_time = time.time()
-        timed_out = []
-        
-        for msg_id, info in self.pending_messages.items():
-            if (current_time - info['timestamp']) > self.delivery_timeout:
-                timed_out.append(msg_id)
-        
-        for msg_id in timed_out:
-            del self.pending_messages[msg_id]
-    
-    def get_pending_count(self) -> int:
-        """Количество ожидающих подтверждения сообщений"""
-        return len(self.pending_messages)
-
-
-import time
-from typing import Dict, List, Any
-from collections import defaultdict
-
-class UniversalBatcher:
-    """Универсальный батчер для группировки сообщений"""
-    
-    def __init__(self):
-        self.batches: Dict[str, List[Dict]] = defaultdict(list)
-        self.batch_configs = {
-            'default': {'max_size': 100, 'max_time': 1.0}
-        }
-    
-    def add_message(self, message: Dict[str, Any], batch_key: str = None) -> bool:
-        """Добавление сообщения в батч"""
-        if batch_key is None:
-            batch_key = self._generate_batch_key(message)
-        
-        self.batches[batch_key].append(message)
-        
-        # Проверяем, не пора ли отправить батч
-        config = self.batch_configs.get('default')
-        if (len(self.batches[batch_key]) >= config['max_size']):
-            return self.flush_batch(batch_key)
-        
-        return True
-    
-    def flush_batch(self, batch_key: str) -> bool:
-        """Отправка батча сообщений"""
-        if batch_key not in self.batches or not self.batches[batch_key]:
-            return False
-        
-        batch = self.batches[batch_key]
-        # TODO: Реализовать отправку батча
-        print(f"Flushing batch {batch_key} with {len(batch)} messages")
-        
-        # Очищаем батч после отправки
-        self.batches[batch_key] = []
-        return True
-    
-    def flush_all(self) -> bool:
-        """Отправка всех батчей"""
-        success = True
-        for batch_key in list(self.batches.keys()):
-            if not self.flush_batch(batch_key):
-                success = False
-        return success
-    
-    def _generate_batch_key(self, message: Dict) -> str:
-        """Генерация ключа для группировки сообщений"""
-        msg_type = message.get('type', 'unknown')
-        priority = message.get('_priority_value', 2)
-        return f"{msg_type}_p{priority}"
-
-class UniversalRouterManager:
-    """
-    Универсальный менеджер маршрутизации сообщений
-    """
-    
-    def __init__(self, router_id: str, config: Dict[str, Any] = None):
-        self.router_id = router_id
-        self.config = config or {}
-        self.is_external = (router_id != "internal")
-        
-        # Регистрация методов отправки и обработки
-        self.send_methods: Dict[str, Callable] = {}
-        self.receive_handlers: Dict[str, Callable] = {}
-        
-        # Менеджеры
-        self.batcher = UniversalBatcher()
-        self.priority_manager = PriorityManager()
-        self.delivery_manager = DeliveryManager()
-        
-        # Валидация сообщений
-        self.required_fields = ['id', 'type', 'sender']
-        
-        # Логирование
-        self.logger = logging.getLogger(f"Router_{router_id}")
-        self.setup_logging()
-        
-        # Статистика
-        self.stats = {
-            'messages_processed': 0,
-            'messages_delivered': 0,
-            'messages_failed': 0,
-            'messages_invalid': 0
-        }
-    
-    def setup_logging(self):
-        """Настройка логирования (временная, потом интегрируем с LoggerManager)"""
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                f'%(asctime)s - Router_{self.router_id} - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-            self.logger.setLevel(logging.INFO)
-    
-    def register_send_method(self, method_name: str, send_function: Callable) -> bool:
-        """Регистрация метода отправки"""
-        try:
-            self.send_methods[method_name] = send_function
-            self.logger.info(f"Registered send method: {method_name}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to register send method {method_name}: {e}")
-            return False
-    
-    def register_receive_handler(self, message_type: str, handler_function: Callable) -> bool:
-        """Регистрация обработчика входящих сообщений"""
-        try:
-            self.receive_handlers[message_type] = handler_function
-            self.logger.info(f"Registered receive handler for: {message_type}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to register receive handler for {message_type}: {e}")
-            return False
-    
-    def route_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Основной метод маршрутизации сообщения
-        Возвращает статус доставки
-        """
-        self.stats['messages_processed'] += 1
-        
-        # 1. Валидация сообщения
-        validation_result = self._validate_message(message)
-        if not validation_result['valid']:
-            self.stats['messages_invalid'] += 1
-            self.logger.warning(f"Invalid message: {validation_result['error']}")
-            return {
-                'status': DeliveryStatus.INVALID,
-                'error': validation_result['error'],
-                'message_id': message.get('id', 'unknown')
-            }
-        
-        # 2. Определение стратегии и роутеров
-        strategy = self._determine_routing_strategy(message)
-        target_routers = self._determine_routers(message)
-        
-        # 3. Проверка - обрабатываем ли мы это сообщение?
-        if not self._should_handle_message(target_routers):
-            self.logger.debug(f"Message not for this router: {message['id']}")
-            return {
-                'status': DeliveryStatus.PENDING,
-                'message': "Message routed to other routers",
-                'message_id': message['id']
-            }
-        
-        # 4. Обработка приоритета
-        prioritized_msg = self.priority_manager.process(message)
-        
-        # 5. Выполнение маршрутизации
-        delivery_result = self._execute_routing(strategy, prioritized_msg)
-        
-        # 6. Обновление статистики
-        if delivery_result['status'] == DeliveryStatus.DELIVERED:
-            self.stats['messages_delivered'] += 1
-        else:
-            self.stats['messages_failed'] += 1
-            
-        return delivery_result
-    
-    def _validate_message(self, message: Dict) -> Dict[str, Any]:
-        """Валидация структуры сообщения"""
-        for field in self.required_fields:
-            if field not in message:
-                return {
-                    'valid': False,
-                    'error': f"Missing required field: {field}",
-                    'missing_field': field
-                }
-        
-        # Проверка типа targets
-        targets = message.get('targets')
-        if targets is None:
-            return {
-                'valid': False,
-                'error': "Missing 'targets' field",
-                'missing_field': 'targets'
-            }
-        
-        # targets может быть: str, list[str], "all"
-        if not isinstance(targets, (str, list)):
-            return {
-                'valid': False,
-                'error': "Field 'targets' must be string or list",
-                'invalid_field': 'targets'
-            }
-        
-        return {'valid': True}
-    
-    def _determine_routing_strategy(self, message: Dict) -> RoutingStrategy:
-        """Определение стратегии маршрутизации на основе targets"""
-        targets = message.get('targets', [])
-        
-        if targets == "all":
-            return RoutingStrategy.BROADCAST
-        elif isinstance(targets, str):
-            return RoutingStrategy.GROUP
-        elif isinstance(targets, list) and len(targets) > 1:
-            return RoutingStrategy.MULTICAST
-        else:
-            return RoutingStrategy.UNICAST
-    
-    def _determine_routers(self, message: Dict) -> List[str]:
-        """Определение роутеров для обработки сообщения"""
-        routers = message.get('routers', [])
-        
-        if not routers:  # пустой список = внутренний
-            return ["internal"]
-        elif routers == "internal":
-            return ["internal"]
-        elif routers == "external":
-            return ["external"]
-        elif isinstance(routers, list):
-            return routers
-        else:
-            return ["internal"]  # fallback
-    
-    def _should_handle_message(self, routers: List[str]) -> bool:
-        """Должен ли этот роутер обрабатывать сообщение?"""
-        if "internal" in routers and not self.is_external:
-            return True
-        elif self.router_id in routers:
-            return True
-        elif "external" in routers and self.is_external:
-            return True
-        return False
-    
-    def _execute_routing(self, strategy: RoutingStrategy, message: Dict) -> Dict[str, Any]:
-        """Выполнение маршрутизации по стратегии"""
-        try:
-            targets = message.get('targets', [])
-            
-            if strategy == RoutingStrategy.BROADCAST:
-                return self._route_broadcast(message)
-            elif strategy == RoutingStrategy.GROUP:
-                return self._route_group(message, targets)
-            elif strategy == RoutingStrategy.MULTICAST:
-                return self._route_multicast(message, targets)
-            else:  # UNICAST
-                return self._route_unicast(message, targets)
-                
-        except Exception as e:
-            self.logger.error(f"Routing execution failed: {e}")
-            return {
-                'status': DeliveryStatus.FAILED,
-                'error': str(e),
-                'message_id': message.get('id', 'unknown')
-            }
-    
-    def _route_unicast(self, message: Dict, target: Union[str, List]) -> Dict[str, Any]:
-        """Маршрутизация одному получателю"""
-        if isinstance(target, list):
-            target = target[0]  # берем первого из списка
-            
-        return self._deliver_to_target(message, target)
-    
-    def _route_multicast(self, message: Dict, targets: List[str]) -> Dict[str, Any]:
-        """Маршрутизация нескольким получателям"""
-        results = []
-        for target in targets:
-            result = self._deliver_to_target(message, target)
-            results.append(result)
-        
-        # Определяем общий статус
-        if all(r['status'] == DeliveryStatus.DELIVERED for r in results):
-            overall_status = DeliveryStatus.DELIVERED
-        elif any(r['status'] == DeliveryStatus.DELIVERED for r in results):
-            overall_status = DeliveryStatus.PENDING  # частичная доставка
-        else:
-            overall_status = DeliveryStatus.FAILED
-            
-        return {
-            'status': overall_status,
-            'details': results,
-            'message_id': message.get('id', 'unknown')
-        }
-    
-    def _route_group(self, message: Dict, group_name: str) -> Dict[str, Any]:
-        """Маршрутизация группе получателей"""
-        # TODO: Реализовать когда будет менеджер групп процессов
-        self.logger.warning(f"Group routing not implemented yet for group: {group_name}")
-        return {
-            'status': DeliveryStatus.FAILED,
-            'error': f"Group routing not implemented: {group_name}",
-            'message_id': message.get('id', 'unknown')
-        }
-    
-    def _route_broadcast(self, message: Dict) -> Dict[str, Any]:
-        """Широковещательная маршрутизация"""
-        # TODO: Реализовать когда будет менеджер процессов
-        self.logger.warning("Broadcast routing not implemented yet")
-        return {
-            'status': DeliveryStatus.FAILED,
-            'error': "Broadcast routing not implemented",
-            'message_id': message.get('id', 'unknown')
-        }
-    
-    def _deliver_to_target(self, message: Dict, target: str) -> Dict[str, Any]:
-        """Доставка сообщения конкретной цели"""
-        try:
-            # Определяем метод доставки на основе типа цели
-            delivery_method = self._get_delivery_method(target)
-            if not delivery_method:
-                return {
-                    'status': DeliveryStatus.FAILED,
-                    'error': f"No delivery method for target: {target}",
-                    'target': target,
-                    'message_id': message.get('id', 'unknown')
-                }
-            
-            # Доставляем сообщение
-            result = delivery_method(target, message)
-            
-            return {
-                'status': DeliveryStatus.DELIVERED if result else DeliveryStatus.FAILED,
-                'target': target,
-                'message_id': message.get('id', 'unknown'),
-                'result': result
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Delivery failed to {target}: {e}")
-            return {
-                'status': DeliveryStatus.FAILED,
-                'error': str(e),
-                'target': target,
-                'message_id': message.get('id', 'unknown')
-            }
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Получение статистики роутера"""
-        return self.stats.copy()
-    
-    def process_incoming_messages(self, stop_event, pause_event):
-        """Обработка входящих сообщений (для использования в WorkerManager)"""
-        # TODO: Реализовать когда будет очередь входящих сообщений
-        while not stop_event.is_set():
-            if pause_event.is_set():
-                time.sleep(0.1)
-                continue
-            time.sleep(0.01)
-
-    def register_delivery_channel(self, channel_name: str, delivery_function: Callable):
-        """Регистрация канала доставки"""
-        self.send_methods[channel_name] = delivery_function
-        self.logger.info(f"Registered delivery channel: {channel_name}")
-
-    def _get_delivery_method(self, message: Dict) -> Callable:
-        """Получение метода доставки для сообщения"""
-        # Определяем канал доставки на основе типа сообщения и получателей
-        msg_type = message.get('type')
-        targets = message.get('targets', [])
-        
-        if msg_type == 'log' or 'logger' in targets:
-            return self.send_methods.get('log')
-        elif any(target in ['router', 'internal'] for target in targets):
-            return self.send_methods.get('internal')
-        else:
-            return self.send_methods.get('queue')  # По умолчанию - очереди
-
-
-
-from handler_dispatcher import HandlerDispatcher
-
-class UniversalRouterManager:
-    def __init__(self, router_id: str):
-        self.router_id = router_id
-        
-        # Два диспетчера: для стратегий маршрутизации и для каналов доставки
-        self.strategy_dispatcher = HandlerDispatcher(f"router_strategy_{router_id}")
-        self.channel_dispatcher = HandlerDispatcher(f"router_channel_{router_id}")
-        
-        # Инициализация стандартных обработчиков
-        self._setup_routing_strategies()
-        self._setup_delivery_channels()
-    
-    def _setup_routing_strategies(self):
-        """Регистрация стратегий маршрутизации"""
-        strategies = [
-            ("unicast", self._route_unicast, "Маршрутизация одному получателю", ["routing"]),
-            ("multicast", self._route_multicast, "Маршрутизация нескольким получателям", ["routing"]),
-            ("broadcast", self._route_broadcast, "Широковещательная рассылка", ["routing", "broadcast"]),
-            ("group", self._route_group, "Групповая маршрутизация", ["routing", "group"])
-        ]
-        
-        for key, handler, desc, tags in strategies:
-            self.strategy_dispatcher.register_handler(
-                key, handler, True, 
-                description=desc, tags=tags
-            )
-    
-    def _setup_delivery_channels(self):
-        """Регистрация каналов доставки"""
-        channels = [
-            ("internal", self._deliver_internal, "Внутренняя доставка (внутри процесса)", ["delivery", "internal"]),
-            ("queue", self._deliver_queue, "Доставка через очереди", ["delivery", "interprocess"]),
-            ("http", self._deliver_http, "HTTP доставка", ["delivery", "network"]),
-            ("websocket", self._deliver_websocket, "WebSocket доставка", ["delivery", "network", "realtime"]),
-            ("log", self._deliver_log, "Доставка в систему логирования", ["delivery", "log"])
-        ]
-        
-        for key, handler, desc, tags in channels:
-            self.channel_dispatcher.register_handler(
-                key, handler, True,
-                description=desc, tags=tags
-            )
-    
-    def get_available_strategies(self) -> List[Dict[str, Any]]:
-        """Получение доступных стратегий маршрутизации"""
-        return self.strategy_dispatcher.get_available_actions()
-    
-    def get_available_channels(self) -> List[Dict[str, Any]]:
-        """Получение доступных каналов доставки"""
-        return self.channel_dispatcher.get_available_actions()
-    
-    def register_custom_channel(self, 
-                              channel_name: str, 
-                              delivery_handler: Callable,
-                              description: str = "",
-                              tags: List[str] = None) -> bool:
-        """Регистрация кастомного канала доставки"""
-        return self.channel_dispatcher.register_handler(
-            channel_name, delivery_handler, True,
-            description=description, tags=tags or ["delivery", "custom"]
-        )
-    
-    def route_message(self, message: Dict) -> Dict:
-        """Умная маршрутизация с выбором стратегии и канала"""
-        # 1. Определяем стратегию маршрутизации
-        strategy = self._determine_routing_strategy(message)
-        strategy_result = self.strategy_dispatcher.dispatch(
-            message, key_field=strategy, data_field=""
-        )
-        
-        if strategy_result.get("status") != "success":
-            return strategy_result
-        
-        # 2. Определяем канал доставки
-        channel = self._determine_delivery_channel(message)
-        channel_result = self.channel_dispatcher.dispatch(
-            message, key_field=channel, data_field=""
-        )
-        
-        return {
-            "strategy": strategy,
-            "channel": channel,
-            "strategy_result": strategy_result,
-            "channel_result": channel_result,
-            "status": "routed" if channel_result.get("status") == "success" else "failed"
-        }
-    
-    def _determine_delivery_channel(self, message: Dict) -> str:
-        """Определение канала доставки на основе сообщения и конфигурации"""
-        # Можно определять на основе:
-        # - явного указания в сообщении
-        # - типа сообщения
-        # - получателей
-        # - приоритета
-        
-        explicit_channel = message.get('delivery_channel')
-        if explicit_channel and self.channel_dispatcher.has_handler(explicit_channel):
-            return explicit_channel
-        
-        # Эвристики выбора канала
-        msg_type = message.get('type')
-        if msg_type == 'log':
-            return 'log'
-        elif msg_type == 'command' and message.get('targets') == ['internal']:
-            return 'internal'
-        elif 'http' in message.get('targets', []):
-            return 'http'
-        else:
-            return 'queue'  # канал по умолчанию
-    
-    def get_routing_capabilities(self) -> Dict[str, Any]:
-        """Полная информация о возможностях роутера"""
-        return {
-            "router_id": self.router_id,
-            "strategies": self.get_available_strategies(),
-            "channels": self.get_available_channels(),
-            "statistics": {
-                "strategies": self.strategy_dispatcher.get_handler_statistics(),
-                "channels": self.channel_dispatcher.get_handler_statistics()
-            }
-        }
-
-# Пример тестирования роутера
-def test_router():
-    # Создаем роутер
-    router = UniversalRouterManager("test_router")
-    
-    # Регистрируем тестовый метод отправки
-    def test_send(target, message):
-        print(f"Delivered to {target}: {message.get('type')}")
-        return True
-    
-    router.register_send_method("test", test_send)
-    
-    # Тестовые сообщения
-    messages = [
-        {
-            "id": "msg1",
-            "type": "command",
-            "sender": "test_sender",
-            "targets": ["process_a"],
-            "routers": ["internal"],
-            "priority": "high",
-            "data": {"command": "start"}
-        },
-        {
-            "id": "msg2", 
-            "type": "log",
-            "sender": "test_sender",
-            "targets": "all",
-            "routers": ["internal", "external"],
-            "data": {"level": "INFO", "message": "Test log"}
-        }
-    ]
-    
-    # Отправляем сообщения
-    for msg in messages:
-        result = router.route_message(msg)
-        print(f"Message {msg['id']}: {result['status']}")
-    
-    # Получаем статистику
-    print("Router stats:", router.get_stats())
-
-if __name__ == "__main__":
-    test_router()
-
-
 # router_manager.py
+from typing import Dict, Any, Callable, Optional
 import time
-import logging
-from typing import Dict, List, Any, Optional, Callable, Union
-from enum import Enum
-from collections import defaultdict
+from dispatch_handler import Dispatcher
 
-from handler_dispatcher import HandlerDispatcher, DispatchStrategy
-
-class RoutingStrategy(Enum):
-    UNICAST = "unicast"
-    MULTICAST = "multicast" 
-    GROUP = "group"
-    BROADCAST = "broadcast"
-
-class DeliveryStatus(Enum):
-    PENDING = "pending"
-    DELIVERED = "delivered"
-    FAILED = "failed"
-    INVALID = "invalid"
-
-class UniversalRouterManager:
+class RouterManager:
     """
-    Универсальный менеджер маршрутизации сообщений
-    Объединяет все лучшие практики в одном лаконичном классе
+    Упрощенный менеджер маршрутизации - только базовые каналы
     """
     
-    def __init__(self, router_id: str, config: Dict[str, Any] = None):
+    def __init__(self, router_id: str, logger_manager=None):
         self.router_id = router_id
-        self.config = config or {}
+        self.logger = logger_manager
         
-        # Два основных диспетчера
-        self.strategy_dispatcher = HandlerDispatcher(f"router_strategy_{router_id}")
-        self.channel_dispatcher = HandlerDispatcher(f"router_channel_{router_id}")
+        # Диспетчер для каналов доставки
+        self.channel_dispatcher = Dispatcher(f"channels_{router_id}")
         
-        # Статистика
-        self.stats = {
-            'messages_processed': 0,
-            'messages_delivered': 0,
-            'messages_failed': 0,
-            'messages_invalid': 0
-        }
+        # Базовая статистика
+        self.stats = {'sent': 0, 'received': 0, 'errors': 0}
         
-        # Логирование
-        self.logger = logging.getLogger(f"Router_{router_id}")
-        self._setup_logging()
+        # Инициализация базовых каналов
+        self._init_basic_channels()
         
-        # Инициализация стандартных обработчиков
-        self._setup_default_handlers()
-    
-    def _setup_logging(self):
-        """Базовая настройка логирования"""
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                f'%(asctime)s - Router_{self.router_id} - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-            self.logger.setLevel(logging.INFO)
-    
-    def _setup_default_handlers(self):
-        """Настройка обработчиков по умолчанию"""
-        # Стратегии маршрутизации
-        self._register_strategies()
-        
-        # Каналы доставки
-        self._register_channels()
-    
-    def _register_strategies(self):
-        """Регистрация стратегий маршрутизации"""
-        strategies = [
-            ("unicast", self._route_unicast, "Маршрутизация одному получателю", ["routing"]),
-            ("multicast", self._route_multicast, "Маршрутизация нескольким получателям", ["routing"]),
-            ("broadcast", self._route_broadcast, "Широковещательная рассылка", ["routing", "broadcast"]),
-            ("group", self._route_group, "Групповая маршрутизация", ["routing", "group"])
-        ]
-        
-        for key, handler, desc, tags in strategies:
-            self.strategy_dispatcher.register_handler(
-                key, handler, True, description=desc, tags=tags
-            )
-    
-    def _register_channels(self):
-        """Регистрация каналов доставки по умолчанию"""
+        self._log("info", f"Router {router_id} ready")
+
+    def _log(self, level: str, message: str):
+        """Простое логирование"""
+        if self.logger:
+            getattr(self.logger, level)(f"[{self.router_id}] {message}")
+        else:
+            print(f"[{level.upper()}] {self.router_id}: {message}")
+
+    def _init_basic_channels(self):
+        """Только самые необходимые каналы"""
         channels = [
-            ("internal", self._deliver_internal, "Внутренняя доставка", ["delivery", "internal"]),
-            ("queue", self._deliver_queue, "Доставка через очереди", ["delivery", "interprocess"]),
-            ("log", self._deliver_log, "Доставка в логгер", ["delivery", "log"])
+            ("internal", self._deliver_internal),    # Внутри процесса
+            ("queue", self._deliver_queue),          # Межпроцессные очереди  
+            ("log", self._deliver_log),              # Логирование
         ]
         
-        for key, handler, desc, tags in channels:
-            self.channel_dispatcher.register_handler(
-                key, handler, True, description=desc, tags=tags
-            )
-    
-    def route_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        for name, handler in channels:
+            self.channel_dispatcher.register_handler(name, handler)
+
+    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Основной метод маршрутизации сообщения
-        Простой интерфейс - сложная логика внутри диспетчеров
+        Простая отправка сообщения
         """
-        self.stats['messages_processed'] += 1
+        self.stats['sent'] += 1
         
-        # 1. Валидация
-        validation_result = self._validate_message(message)
-        if not validation_result['valid']:
-            self.stats['messages_invalid'] += 1
-            return {
-                'status': DeliveryStatus.INVALID,
-                'error': validation_result['error'],
-                'message_id': message.get('id', 'unknown')
-            }
-        
-        try:
-            # 2. Определение стратегии маршрутизации
-            strategy = self._determine_routing_strategy(message)
-            
-            # 3. Выполнение маршрутизации через диспетчер стратегий
-            strategy_result = self.strategy_dispatcher.dispatch(
-                message, key_field=strategy, data_field=""
-            )
-            
-            # 4. Обновление статистики
-            if strategy_result.get('status') == DeliveryStatus.DELIVERED:
-                self.stats['messages_delivered'] += 1
-            else:
-                self.stats['messages_failed'] += 1
-            
-            return strategy_result
-            
-        except Exception as e:
-            self.logger.error(f"Routing failed: {e}")
-            self.stats['messages_failed'] += 1
-            return {
-                'status': DeliveryStatus.FAILED,
-                'error': str(e),
-                'message_id': message.get('id', 'unknown')
-            }
-    
-    def _validate_message(self, message: Dict) -> Dict[str, Any]:
-        """Простая валидация структуры сообщения"""
-        required_fields = ['id', 'type', 'sender', 'targets']
-        
-        for field in required_fields:
-            if field not in message:
-                return {
-                    'valid': False,
-                    'error': f"Missing required field: {field}"
-                }
-        
-        return {'valid': True}
-    
-    def _determine_routing_strategy(self, message: Dict) -> str:
-        """Определение стратегии на основе targets"""
-        targets = message.get('targets', [])
-        
-        if targets == "all":
-            return "broadcast"
-        elif isinstance(targets, str) and targets.startswith("group:"):
-            return "group"
-        elif isinstance(targets, list) and len(targets) > 1:
-            return "multicast"
-        else:
-            return "unicast"
-    
-    # === СТРАТЕГИИ МАРШРУТИЗАЦИИ ===
-    
-    def _route_unicast(self, message: Dict) -> Dict[str, Any]:
-        """Маршрутизация одному получателю"""
-        targets = message.get('targets', [])
-        target = targets[0] if isinstance(targets, list) else targets
-        
-        return self._deliver_to_target(message, target)
-    
-    def _route_multicast(self, message: Dict) -> Dict[str, Any]:
-        """Маршрутизация нескольким получателям"""
-        targets = message.get('targets', [])
-        if not isinstance(targets, list):
-            targets = [targets]
-        
-        results = []
-        for target in targets:
-            result = self._deliver_to_target(message, target)
-            results.append(result)
-        
-        # Определяем общий статус
-        successful = [r for r in results if r['status'] == DeliveryStatus.DELIVERED]
-        
-        if len(successful) == len(targets):
-            overall_status = DeliveryStatus.DELIVERED
-        elif successful:
-            overall_status = DeliveryStatus.PENDING
-        else:
-            overall_status = DeliveryStatus.FAILED
-            
-        return {
-            'status': overall_status,
-            'details': results,
-            'message_id': message.get('id', 'unknown')
-        }
-    
-    def _route_broadcast(self, message: Dict) -> Dict[str, Any]:
-        """Широковещательная маршрутизация"""
-        # Используем специальный канал broadcast
-        result = self.channel_dispatcher.dispatch(
-            message, key_field="broadcast", data_field=""
-        )
-        
-        return {
-            'status': DeliveryStatus.DELIVERED if result.get('status') == 'success' else DeliveryStatus.FAILED,
-            'message_id': message.get('id', 'unknown'),
-            'result': result
-        }
-    
-    def _route_group(self, message: Dict) -> Dict[str, Any]:
-        """Групповая маршрутизация"""
-        group_name = message.get('targets', '').replace('group:', '')
-        
-        # Получаем членов группы из конфигурации
-        group_members = self.config.get('groups', {}).get(group_name, [])
-        
-        if not group_members:
-            return {
-                'status': DeliveryStatus.FAILED,
-                'error': f"Group '{group_name}' not found or empty",
-                'message_id': message.get('id', 'unknown')
-            }
-        
-        # Маршрутизируем как multicast
-        message['targets'] = group_members
-        return self._route_multicast(message)
-    
-    def _deliver_to_target(self, message: Dict, target: str) -> Dict[str, Any]:
-        """Доставка сообщения конкретной цели"""
         try:
             # Определяем канал доставки
-            channel = self._determine_delivery_channel(target, message)
+            channel = message.get('channel', self._detect_channel(message))
             
-            # Добавляем target в сообщение для канала доставки
-            delivery_message = message.copy()
-            delivery_message['_current_target'] = target
+            # Отправляем через диспетчер
+            result = self.channel_dispatcher.dispatch(message, key_field=channel)
             
-            # Доставляем через диспетчер каналов
-            result = self.channel_dispatcher.dispatch(
-                delivery_message, key_field=channel, data_field=""
-            )
-            
-            return {
-                'status': DeliveryStatus.DELIVERED if result.get('status') == 'success' else DeliveryStatus.FAILED,
-                'target': target,
-                'channel': channel,
-                'message_id': message.get('id', 'unknown'),
-                'result': result
-            }
+            if result.get('status') == 'error':
+                self.stats['errors'] += 1
+                self._log("error", f"Send failed: {result.get('reason')}")
+            else:
+                self._log("debug", f"Message delivered via {channel}")
+                
+            return result
             
         except Exception as e:
-            self.logger.error(f"Delivery failed to {target}: {e}")
-            return {
-                'status': DeliveryStatus.FAILED,
-                'error': str(e),
-                'target': target,
-                'message_id': message.get('id', 'unknown')
-            }
-    
-    def _determine_delivery_channel(self, target: str, message: Dict) -> str:
-        """Определение канала доставки на основе цели и типа сообщения"""
-        # Эвристики выбора канала
-        msg_type = message.get('type')
+            self.stats['errors'] += 1
+            self._log("error", f"Send error: {e}")
+            return {'status': 'error', 'reason': str(e)}
+
+    def receive(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Простой прием сообщения  
+        """
+        self.stats['received'] += 1
+        self._log("debug", f"Message received: {message.get('type')}")
+        return self.send(message)  # Перенаправляем на отправку
+
+    def _detect_channel(self, message: Dict) -> str:
+        """Автоматическое определение канала"""
+        msg_type = message.get('type', '')
+        target = message.get('target', '')
         
         if msg_type == 'log' or target == 'logger':
             return 'log'
-        elif target in ['internal', 'router'] or msg_type == 'command':
-            return 'internal'
+        elif target in ['internal', 'router']:
+            return 'internal' 
         else:
-            return 'queue'  # канал по умолчанию
-    
-    # === КАНАЛЫ ДОСТАВКИ ===
+            return 'queue'  # По умолчанию - очередь
+
+    # === БАЗОВЫЕ КАНАЛЫ ДОСТАВКИ ===
     
     def _deliver_internal(self, message: Dict) -> Dict[str, Any]:
-        """Внутренняя доставка (в этом же процессе)"""
-        target = message.get('_current_target', 'unknown')
-        self.logger.info(f"Internal delivery to {target}: {message.get('type')}")
-        
-        # Здесь будет вызов соответствующего менеджера (command, log и т.д.)
-        # Пока просто возвращаем успех
-        return {'status': 'success', 'action': 'internal_delivery'}
-    
+        """Доставка внутри процесса"""
+        target = message.get('target')
+        self._log("debug", f"Internal delivery to {target}")
+        return {'status': 'success', 'channel': 'internal'}
+
     def _deliver_queue(self, message: Dict) -> Dict[str, Any]:
-        """Доставка через межпроцессные очереди"""
-        target = message.get('_current_target', 'unknown')
-        self.logger.info(f"Queue delivery to {target}: {message.get('type')}")
-        
-        # Здесь будет логика работы с очередями
-        return {'status': 'success', 'action': 'queue_delivery'}
-    
+        """Доставка через очередь"""
+        target = message.get('target') 
+        self._log("debug", f"Queue delivery to {target}")
+        return {'status': 'success', 'channel': 'queue'}
+
     def _deliver_log(self, message: Dict) -> Dict[str, Any]:
-        """Доставка в систему логирования"""
+        """Доставка в лог"""
         log_data = message.get('data', {})
-        level = log_data.get('level', 'INFO')
-        log_message = log_data.get('message', '')
+        level = log_data.get('level', 'INFO').lower()
+        text = log_data.get('message', '')
         
-        # Используем стандартный логгер
-        getattr(self.logger, level.lower())(f"{log_message}")
-        return {'status': 'success', 'action': 'log_delivery'}
+        self._log(level, text)
+        return {'status': 'success', 'channel': 'log'}
+
+    # === БАЗОВОЕ УПРАВЛЕНИЕ ===
     
-    # === УПРАВЛЕНИЕ И МОНИТОРИНГ ===
-    
-    def register_strategy(self, strategy_name: str, handler: Callable, 
-                         description: str = "", tags: List[str] = None) -> bool:
-        """Регистрация кастомной стратегии маршрутизации"""
-        return self.strategy_dispatcher.register_handler(
-            strategy_name, handler, True, 
-            description=description, tags=tags or ["routing", "custom"]
-        )
-    
-    def register_channel(self, channel_name: str, handler: Callable,
-                        description: str = "", tags: List[str] = None) -> bool:
-        """Регистрация кастомного канала доставки"""
-        return self.channel_dispatcher.register_handler(
-            channel_name, handler, True,
-            description=description, tags=tags or ["delivery", "custom"]
-        )
-    
-    def get_capabilities(self) -> Dict[str, Any]:
-        """Полная информация о возможностях роутера"""
-        return {
-            "router_id": self.router_id,
-            "strategies": self.strategy_dispatcher.get_available_actions(),
-            "channels": self.channel_dispatcher.get_available_actions(),
-            "statistics": self.get_stats()
-        }
-    
+    def register_channel(self, name: str, handler: Callable) -> bool:
+        """Регистрация кастомного канала"""
+        success = self.channel_dispatcher.register_handler(name, handler)
+        if success:
+            self._log("info", f"Channel registered: {name}")
+        return success
+
     def get_stats(self) -> Dict[str, Any]:
-        """Получение статистики"""
-        stats = self.stats.copy()
-        stats.update({
-            'strategy_handlers': len(self.strategy_dispatcher.get_all_handlers_info()),
-            'channel_handlers': len(self.channel_dispatcher.get_all_handlers_info())
-        })
-        return stats
-    
-    def get_available_actions(self) -> List[Dict[str, Any]]:
-        """Получение всех доступных действий для UI/API"""
-        actions = []
-        actions.extend(self.strategy_dispatcher.get_available_actions())
-        actions.extend(self.channel_dispatcher.get_available_actions())
-        return actions
-
-# === ПРИМЕР ИСПОЛЬЗОВАНИЯ ===
-
-def test_enhanced_router():
-    """Тестирование улучшенного роутера"""
-    
-    # Создаем роутер с конфигурацией групп
-    router = UniversalRouterManager("main_router", {
-        'groups': {
-            'chat_room': ['user1', 'user2', 'user3'],
-            'admins': ['admin1', 'admin2']
+        """Базовая статистика"""
+        return {
+            'router_id': self.router_id,
+            'sent': self.stats['sent'],
+            'received': self.stats['received'], 
+            'errors': self.stats['errors']
         }
-    })
+
+# === ИНТЕГРАЦИЯ С PROCESS_MODULE ===
+
+class ProcessRouterManager(RouterManager):
+    """
+    Роутер для ProcessModule с привязкой к менеджерам
+    """
     
-    # Регистрируем кастомный канал доставки
-    def custom_delivery(message: Dict) -> Dict:
-        print(f"Custom delivery: {message.get('type')} to {message.get('_current_target')}")
-        return {'status': 'success', 'action': 'custom_delivery'}
+    def __init__(self, process_module, logger_manager=None):
+        super().__init__(f"process_{process_module.name}", logger_manager)
+        self.process_module = process_module
+        
+        # Регистрируем процесс-специфичные каналы
+        self.register_channel("process_internal", self._deliver_to_manager)
+        self.register_channel("process_queue", self._deliver_to_queue)
+
+    def _deliver_to_manager(self, message: Dict) -> Dict[str, Any]:
+        """Доставка менеджеру внутри процесса"""
+        msg_type = message.get('type')
+        target = message.get('target')
+        
+        # Простая маршрутизация к менеджерам
+        manager_map = {
+            'command': 'commands',
+            'log': 'logger', 
+            'worker': 'workers'
+        }
+        
+        manager_name = manager_map.get(msg_type)
+        if manager_name:
+            manager = self.process_module.get_manager(manager_name)
+            if manager:
+                self._log("debug", f"Delivered to {manager_name}")
+                return {'status': 'success', 'manager': manager_name}
+        
+        return {'status': 'error', 'reason': f'No manager for {msg_type}'}
+
+    def _deliver_to_queue(self, message: Dict) -> Dict[str, Any]:
+        """Доставка в очередь процесса"""
+        queue_name = message.get('queue', 'system')
+        
+        if hasattr(self.process_module, 'queues'):
+            queue = self.process_module.queues.get(queue_name)
+            if queue:
+                queue.put(message)
+                self._log("debug", f"Queued to {queue_name}")
+                return {'status': 'success', 'queue': queue_name}
+        
+        return {'status': 'error', 'reason': f'Queue not found: {queue_name}'}
+
+# === ПРОСТОЕ ТЕСТИРОВАНИЕ ===
+
+def test_simple_router():
+    """Тестирование упрощенного роутера"""
     
-    router.register_channel(
-        "custom", custom_delivery,
-        description="Кастомная доставка для тестирования",
-        tags=["delivery", "test"]
-    )
+    # Создаем мок логгера
+    class TestLogger:
+        def info(self, msg): print(f"[INFO] {msg}")
+        def debug(self, msg): print(f"[DEBUG] {msg}") 
+        def error(self, msg): print(f"[ERROR] {msg}")
+    
+    router = RouterManager("test", TestLogger())
     
     # Тестовые сообщения
-    test_messages = [
-        {
-            "id": "msg1",
-            "type": "command",
-            "sender": "user1",
-            "targets": ["user2"],
-            "data": {"command": "ping", "args": {}}
-        },
-        {
-            "id": "msg2",
-            "type": "log", 
-            "sender": "system",
-            "targets": ["logger"],
-            "data": {"level": "INFO", "message": "System started"}
-        },
-        {
-            "id": "msg3",
-            "type": "chat",
-            "sender": "user1", 
-            "targets": "group:chat_room",
-            "data": {"text": "Hello everyone!"}
-        }
+    messages = [
+        {"id": "1", "type": "command", "target": "internal", "data": {"action": "test"}},
+        {"id": "2", "type": "log", "target": "logger", "data": {"level": "INFO", "message": "Hello"}},
     ]
     
-    print("🚀 Testing Enhanced Router...")
-    print("Available capabilities:", router.get_capabilities())
+    print("🚀 Testing simple router...")
     
-    # Отправляем сообщения
-    for msg in test_messages:
-        result = router.route_message(msg)
+    for msg in messages:
+        result = router.send(msg)
         print(f"Message {msg['id']}: {result['status']}")
     
-    # Показываем статистику
-    print("\n📊 Final statistics:", router.get_stats())
+    print("📊 Stats:", router.get_stats())
+    
+    return router
 
 if __name__ == "__main__":
-    test_enhanced_router()
+    test_simple_router()
