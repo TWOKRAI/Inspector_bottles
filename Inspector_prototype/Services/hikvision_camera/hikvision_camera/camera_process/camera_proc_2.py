@@ -424,8 +424,44 @@ class CameraProcess():
                         original_height = frame.shape[0]
                         original_width = frame.shape[1]
                     
+                    # Конвертируем в RGB если нужно
+                    if len(frame.shape) == 2:
+                        try:
+                            import cv2
+                            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                        except Exception as e:
+                            print(f"Error converting GRAY to RGB: {e}")
+                            continue
+                    elif len(frame.shape) == 3:
+                        if frame.shape[2] == 3:
+                            # Предполагаем что это BGR, конвертируем в RGB
+                            try:
+                                import cv2
+                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            except Exception as e:
+                                print(f"Error converting BGR to RGB: {e}")
+                                # Продолжаем без конвертации
+                                pass
+                        elif frame.shape[2] == 4:
+                            # Если RGBA, конвертируем в RGB
+                            try:
+                                import cv2
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+                            except Exception as e:
+                                print(f"Error converting RGBA to RGB: {e}")
+                                continue
+                    
+                    # Проверяем что изображение имеет правильный формат перед записью
+                    if len(frame.shape) != 3 or frame.shape[2] != 3:
+                        print(f"ERROR: Invalid frame format after conversion: shape={frame.shape}")
+                        continue
+                    
+                    # Получаем финальные размеры после всех конвертаций
+                    original_height = frame.shape[0]
+                    original_width = frame.shape[1]
+                    
                     # Сохраняем оригинальный размер при первом кадре
-                    if self.original_image_size is None and original_height and original_width:
+                    if self.original_image_size is None:
                         self.original_image_size = (original_height, original_width)
                         # Отправляем информацию о размере в App
                         try:
@@ -440,47 +476,6 @@ class CameraProcess():
                     
                     # НЕ изменяем размер кадра - используем оригинальный размер
                     # Это позволит работать с любым размером изображения
-                    
-                    # Конвертируем в RGB если нужно
-                    if len(frame.shape) == 2:
-                        try:
-                            import cv2
-                            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-                            original_height = frame.shape[0]
-                            original_width = frame.shape[1]
-                        except Exception as e:
-                            print(f"Error converting GRAY to RGB: {e}")
-                            continue
-                    elif len(frame.shape) == 3:
-                        if frame.shape[2] == 3:
-                            # Конвертируем BGR в RGB если нужно
-                            try:
-                                import cv2
-                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            except Exception as e:
-                                print(f"Error converting BGR to RGB: {e}")
-                                # Продолжаем без конвертации
-                                pass
-                        elif frame.shape[2] == 4:
-                            # Если RGBA, конвертируем в RGB
-                            try:
-                                import cv2
-                                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
-                                original_height = frame.shape[0]
-                                original_width = frame.shape[1]
-                            except Exception as e:
-                                print(f"Error converting RGBA to RGB: {e}")
-                                continue
-                    
-                    # Проверяем что изображение имеет правильный формат перед записью
-                    if len(frame.shape) != 3 or frame.shape[2] != 3:
-                        print(f"ERROR: Invalid frame format after conversion: shape={frame.shape}")
-                        continue
-                    
-                    # Обновляем размеры после всех конвертаций
-                    if original_height is None or original_width is None:
-                        original_height = frame.shape[0]
-                        original_width = frame.shape[1]
                     
                     # Записываем в разделяемую память
                     timestamp = time.time()
