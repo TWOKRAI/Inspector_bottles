@@ -49,6 +49,10 @@ class CameraUI(QMainWindow):
     """
     UI процесс, который общается с процессом камеры через queue_manager
     """
+    # Сигналы для безопасного вызова show/hide из другого потока
+    show_requested = pyqtSignal()
+    hide_requested = pyqtSignal()
+    toggle_requested = pyqtSignal()
     
     def __init__(self, queue_manager):
         super().__init__()
@@ -89,6 +93,11 @@ class CameraUI(QMainWindow):
         
         # Запускаем поток опроса сообщений
         self.message_thread.start()
+        
+        # Подключаем сигналы для безопасного вызова show/hide из другого потока
+        self.show_requested.connect(self._safe_show)
+        self.hide_requested.connect(self._safe_hide)
+        self.toggle_requested.connect(self._safe_toggle)
         
         # Запускаем поток для обработки команд управления видимостью
         self.control_ui_thread = threading.Thread(target=self._control_ui_loop)
@@ -482,37 +491,55 @@ class CameraUI(QMainWindow):
                 command = self.queue_manager.control_ui.get(timeout=0.1)
                 if command:
                     cmd_type = command.get('type')
+                    # Используем QMetaObject.invokeMethod для безопасного вызова из другого потока
                     if cmd_type == 'show':
-                        self.show()
+                        QMetaObject.invokeMethod(self, "_safe_show", Qt.QueuedConnection)
                     elif cmd_type == 'hide':
-                        self.hide()
+                        QMetaObject.invokeMethod(self, "_safe_hide", Qt.QueuedConnection)
                     elif cmd_type == 'toggle':
-                        if self.isVisible():
-                            self.hide()
-                        else:
-                            self.show()
+                        QMetaObject.invokeMethod(self, "_safe_toggle", Qt.QueuedConnection)
             except queue.Empty:
                 continue
             except Exception as e:
                 print(f"Error in control UI loop: {e}")
     
+    @staticmethod
+    def _safe_show(self):
+        """Безопасный вызов show() из главного потока Qt"""
+        if not self.isVisible():
+            QMainWindow.show(self)
+            # Если таймер был запущен до скрытия, возобновляем его
+            if self.frame_timer_was_running and self.is_grabbing:
+                self.frame_timer.start(16)
+                self.frame_timer_was_running = False
+                print("UI SDK: Frame timer resumed")
+    
+    @staticmethod
+    def _safe_hide(self):
+        """Безопасный вызов hide() из главного потока Qt"""
+        if self.isVisible():
+            # Сохраняем состояние таймера перед скрытием
+            if self.frame_timer.isActive():
+                self.frame_timer_was_running = True
+                self.frame_timer.stop()
+                print("UI SDK: Frame timer stopped (window hidden)")
+            QMainWindow.hide(self)
+    
+    @staticmethod
+    def _safe_toggle(self):
+        """Безопасный вызов toggle() из главного потока Qt"""
+        if self.isVisible():
+            CameraUI._safe_hide(self)
+        else:
+            CameraUI._safe_show(self)
+    
     def show(self):
         """Показать окно и возобновить обновление кадров если нужно"""
-        super().show()
-        # Если таймер был запущен до скрытия, возобновляем его
-        if self.frame_timer_was_running and self.is_grabbing:
-            self.frame_timer.start(16)
-            self.frame_timer_was_running = False
-            print("UI SDK: Frame timer resumed")
+        self._safe_show(self)
     
     def hide(self):
         """Скрыть окно и остановить обновление кадров для экономии ресурсов"""
-        # Сохраняем состояние таймера перед скрытием
-        if self.frame_timer.isActive():
-            self.frame_timer_was_running = True
-            self.frame_timer.stop()
-            print("UI SDK: Frame timer stopped (window hidden)")
-        super().hide()
+        self._safe_hide(self)
     
     def closeEvent(self, event):
         """Обработка закрытия окна"""
