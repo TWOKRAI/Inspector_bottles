@@ -143,7 +143,9 @@ def process_processing(queue_manager, control_processing):
             'processed': True,  # Флаг что это обработанное изображение
             'timestamps': data_frame['timestamps'],  # Все временные метки
             'processing_time': processing_time,  # Время обработки в секундах
-            'total_time_from_capture': total_time_from_capture  # Общее время от захвата до конца обработки
+            'total_time_from_capture': total_time_from_capture,  # Общее время от захвата до конца обработки
+            'image_height': image_height,  # Оригинальная высота изображения
+            'image_width': image_width    # Оригинальная ширина изображения
         }
         
         queue_manager.remove_old_frame_if_full(queue_manager.display_queue)
