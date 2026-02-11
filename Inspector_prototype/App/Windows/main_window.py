@@ -291,6 +291,10 @@ class MainWindow(QMainWindow):
         self.processing_time_ms = 0.0  # Время обработки в миллисекундах
         self.total_time_ms = 0.0  # Общее время от захвата до отображения в миллисекундах
         
+        # Размер изображения с камеры
+        self.image_height = 0  # Высота оригинального изображения
+        self.image_width = 0   # Ширина оригинального изображения
+        
         self.current_access_level = 0
         
         # Инициализируем UI перед запуском потока сообщений
@@ -365,6 +369,32 @@ class MainWindow(QMainWindow):
             self.fps_sdk = params.get('frame_rate', 0.0)
             self.update_controls_hikvision()
             self.update_fps_display()
+        
+        elif msg_type == 'image_size':
+            # Обновляем размер изображения
+            self.image_height = message.get('height', 0)
+            self.image_width = message.get('width', 0)
+            
+            # Обновляем максимальные значения слайдеров обрезки под реальный размер изображения
+            if hasattr(self, 'crop_top_slider') and self.image_height > 0:
+                self.crop_top_slider.slider.setMaximum(self.image_height)
+            if hasattr(self, 'crop_bottom_slider') and self.image_height > 0:
+                self.crop_bottom_slider.slider.setMaximum(self.image_height)
+                # Устанавливаем значение по умолчанию на полный размер
+                if self.controls_processing.get('crop_bottom', 0) == 0 or self.controls_processing.get('crop_bottom', 0) > self.image_height:
+                    self.controls_processing['crop_bottom'] = self.image_height
+                    self.crop_bottom_slider.slider.setValue(self.image_height)
+            if hasattr(self, 'crop_left_slider') and self.image_width > 0:
+                self.crop_left_slider.slider.setMaximum(self.image_width)
+            if hasattr(self, 'crop_right_slider') and self.image_width > 0:
+                self.crop_right_slider.slider.setMaximum(self.image_width)
+                # Устанавливаем значение по умолчанию на полный размер
+                if self.controls_processing.get('crop_right', 0) == 0 or self.controls_processing.get('crop_right', 0) > self.image_width:
+                    self.controls_processing['crop_right'] = self.image_width
+                    self.crop_right_slider.slider.setValue(self.image_width)
+            
+            self.update_fps_display()
+            print(f"App: Image size updated: {self.image_width}x{self.image_height}")
         
 
         self.update_controls()
@@ -1023,6 +1053,10 @@ class MainWindow(QMainWindow):
         self.fps_sdk_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
         fps_layout.addWidget(self.fps_sdk_label)
         
+        self.image_size_label = QLabel("Image Size: 0x0")
+        self.image_size_label.setStyleSheet("font-size: 12px; color: #9b59b6;")
+        fps_layout.addWidget(self.image_size_label)
+        
         self.fps_after_label = QLabel("Display FPS: 0.0")
         self.fps_after_label.setStyleSheet("font-size: 12px; color: #2ecc71;")
         fps_layout.addWidget(self.fps_after_label)
@@ -1063,6 +1097,11 @@ class MainWindow(QMainWindow):
         """Обновить отображение FPS и временных метрик во вкладке Hikvision"""
         if hasattr(self, 'fps_sdk_label'):
             self.fps_sdk_label.setText(f"SDK FPS: {self.fps_sdk:.1f}")
+        if hasattr(self, 'image_size_label'):
+            if self.image_width > 0 and self.image_height > 0:
+                self.image_size_label.setText(f"Image Size: {self.image_width}x{self.image_height}")
+            else:
+                self.image_size_label.setText("Image Size: Not detected")
         if hasattr(self, 'fps_after_label'):
             self.fps_after_label.setText(f"Display FPS: {self.fps_after_processing:.1f}")
         if hasattr(self, 'processing_time_label'):
@@ -1363,34 +1402,34 @@ class MainWindow(QMainWindow):
                                       parent=self)
         layout.addWidget(slider_control)
         
-        # Регуляторы обрезки изображения
-        slider_control = SliderControl("crop_top", 0, 720, 0,
+        # Регуляторы обрезки изображения (максимальные значения будут обновляться при получении размера)
+        self.crop_top_slider = SliderControl("crop_top", 0, 2160, 0,
                                       ui_elements=self.ui_elements,
                                       controls=self.controls_processing,
                                       callback=self.update_controls_processing,
                                       parent=self)
-        layout.addWidget(slider_control)
+        layout.addWidget(self.crop_top_slider)
         
-        slider_control = SliderControl("crop_bottom", 0, 720, 720,
+        self.crop_bottom_slider = SliderControl("crop_bottom", 0, 2160, 2160,
                                       ui_elements=self.ui_elements,
                                       controls=self.controls_processing,
                                       callback=self.update_controls_processing,
                                       parent=self)
-        layout.addWidget(slider_control)
+        layout.addWidget(self.crop_bottom_slider)
         
-        slider_control = SliderControl("crop_left", 0, 1280, 0,
+        self.crop_left_slider = SliderControl("crop_left", 0, 3840, 0,
                                       ui_elements=self.ui_elements,
                                       controls=self.controls_processing,
                                       callback=self.update_controls_processing,
                                       parent=self)
-        layout.addWidget(slider_control)
+        layout.addWidget(self.crop_left_slider)
         
-        slider_control = SliderControl("crop_right", 0, 1280, 1280,
+        self.crop_right_slider = SliderControl("crop_right", 0, 3840, 3840,
                                       ui_elements=self.ui_elements,
                                       controls=self.controls_processing,
                                       callback=self.update_controls_processing,
                                       parent=self)
-        layout.addWidget(slider_control)
+        layout.addWidget(self.crop_right_slider)
         
         # Регуляторы HSV нижней границы
         slider_control = SliderControl("hl", 0, 179, 0,

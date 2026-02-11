@@ -52,12 +52,16 @@ class QueueManager:
         self.memory_manager = ImageMemoryManager()
         
         # Конфигурация разделяемой памяти для прототипа
+        # Используем максимальный размер для поддержки разных размеров камер
+        # Память может хранить изображения любого размера до максимального
+        MAX_HEIGHT = 2160  # 4K высота
+        MAX_WIDTH = 3840   # 4K ширина
         memory_names = {
-            'camera_data': (1, (720, 1280, 3), np.uint8),  # Кадры с камеры
-            'camera_data_out': (1, (720, 1280, 3), np.uint8),  # Кадры с камеры (выходная, для App)
-            'process_data': (6, (720, 1280, 3), np.uint8),  # Обработанные кадры (6 изображений)
+            'camera_data': (1, (MAX_HEIGHT, MAX_WIDTH, 3), np.uint8),  # Кадры с камеры (до 4K)
+            'camera_data_out': (1, (MAX_HEIGHT, MAX_WIDTH, 3), np.uint8),  # Кадры с камеры (выходная, для App)
+            'process_data': (6, (MAX_HEIGHT, MAX_WIDTH, 3), np.uint8),  # Обработанные кадры (6 изображений)
             'neuroun_data': (21, (72, 72, 3), np.uint8),  # Данные для нейросети (21 изображение 72x72)
-            'display_data': (1, (720, 1280, 3), np.uint8),  # Кадры для отображения в App
+            'display_data': (1, (MAX_HEIGHT, MAX_WIDTH, 3), np.uint8),  # Кадры для отображения в App
         }
         
         coll = 12  # количество блоков памяти

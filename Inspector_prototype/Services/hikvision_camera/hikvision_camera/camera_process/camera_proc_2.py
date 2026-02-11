@@ -46,6 +46,9 @@ class CameraProcess():
         
         # FPS из SDK камеры
         self.sdk_fps = 0.0  # FPS из SDK камеры
+        
+        # Оригинальный размер изображения с камеры
+        self.original_image_size = None  # (height, width) - будет установлен при первом кадре
 
         
     def start(self):
@@ -399,12 +402,15 @@ class CameraProcess():
                     frame = np.array(self.buf_save_image)
                     
                     # Обрабатываем разные форматы
+                    original_height = None
+                    original_width = None
+                    
                     if len(frame.shape) == 1:
-                        height = self.st_frame_info.nHeight
-                        width = self.st_frame_info.nWidth
+                        original_height = self.st_frame_info.nHeight
+                        original_width = self.st_frame_info.nWidth
                         pixel_type = self.st_frame_info.enPixelType
                         
-                        frame = frame.reshape(height, width)
+                        frame = frame.reshape(original_height, original_width)
                         
                         # Демозаика для Bayer pattern
                         if pixel_type == 17301513:  # PixelType_Gvsp_BayerRG8
@@ -413,14 +419,27 @@ class CameraProcess():
                                 frame = cv2.cvtColor(frame, cv2.COLOR_BayerRG2RGB)
                             except:
                                 pass
+                    else:
+                        # Если уже массив, получаем размеры
+                        original_height = frame.shape[0]
+                        original_width = frame.shape[1]
                     
-                    # Изменяем размер кадра если нужно (для совместимости с памятью)
-                    if frame.shape[0] != 720 or frame.shape[1] != 1280:
+                    # Сохраняем оригинальный размер при первом кадре
+                    if self.original_image_size is None and original_height and original_width:
+                        self.original_image_size = (original_height, original_width)
+                        # Отправляем информацию о размере в App
                         try:
-                            import cv2
-                            frame = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_AREA)
-                        except:
+                            self.queue_manager.camera_to_app.put({
+                                'type': 'image_size',
+                                'height': original_height,
+                                'width': original_width
+                            }, block=False)
+                        except queue.Full:
                             pass
+                        print(f"Camera image size detected: {original_width}x{original_height}")
+                    
+                    # НЕ изменяем размер кадра - используем оригинальный размер
+                    # Это позволит работать с любым размером изображения
                     
                     # Конвертируем в RGB если нужно
                     if len(frame.shape) == 2:
@@ -468,6 +487,8 @@ class CameraProcess():
                             'capture_time': timestamp,  # Время захвата кадра
                             'frame_counter': self.frame_counter,
                             'frame_id': self.frame_id,
+                            'image_height': frame.shape[0],  # Оригинальная высота изображения
+                            'image_width': frame.shape[1],   # Оригинальная ширина изображения
                             'timestamps': {
                                 'capture': timestamp  # Начало цепочки обработки
                             }

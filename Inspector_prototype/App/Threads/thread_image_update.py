@@ -94,6 +94,17 @@ class UpdateImage(QThread):
                 timestamps = data_frame.get('timestamps', {})
                 processing_time = data_frame.get('processing_time', 0.0)
                 total_time_from_capture = data_frame.get('total_time_from_capture', 0.0)
+                image_height = data_frame.get('image_height', 0)
+                image_width = data_frame.get('image_width', 0)
+                
+                # Обновляем размер изображения в главном окне если он изменился
+                if hasattr(self.window_manager, 'main_window'):
+                    main_window = self.window_manager.main_window
+                    if image_height > 0 and image_width > 0:
+                        if main_window.image_height != image_height or main_window.image_width != image_width:
+                            main_window.image_height = image_height
+                            main_window.image_width = image_width
+                            main_window.update_fps_display()
                 
                 # Вычисляем FPS на основе времени между кадрами
                 if last_capture_time is not None:

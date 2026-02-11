@@ -66,6 +66,8 @@ def process_processing(queue_manager, control_processing):
         id_memory = data_frame['id_memory']
         capture_time = data_frame.get('capture_time', processing_start_time)
         frame_id = data_frame.get('frame_id', 0)
+        image_height = data_frame.get('image_height', 720)  # Оригинальная высота
+        image_width = data_frame.get('image_width', 1280)   # Оригинальная ширина
         
         # Инициализируем timestamps если их нет
         if 'timestamps' not in data_frame:
@@ -83,16 +85,21 @@ def process_processing(queue_manager, control_processing):
         original_frame = frames[0]
         
         # Применяем обрезку изображения
+        # Используем оригинальные размеры изображения для ограничения обрезки
+        orig_height = original_frame.shape[0]
+        orig_width = original_frame.shape[1]
+        
+        # Получаем значения обрезки из контролов (в пикселях от оригинального размера)
         crop_top = controls.get('crop_top', 0)
-        crop_bottom = controls.get('crop_bottom', original_frame.shape[0])
+        crop_bottom = controls.get('crop_bottom', orig_height)
         crop_left = controls.get('crop_left', 0)
-        crop_right = controls.get('crop_right', original_frame.shape[1])
+        crop_right = controls.get('crop_right', orig_width)
         
         # Ограничиваем значения размерами изображения
-        crop_top = max(0, min(crop_top, original_frame.shape[0]))
-        crop_bottom = max(crop_top, min(crop_bottom, original_frame.shape[0]))
-        crop_left = max(0, min(crop_left, original_frame.shape[1]))
-        crop_right = max(crop_left, min(crop_right, original_frame.shape[1]))
+        crop_top = max(0, min(crop_top, orig_height))
+        crop_bottom = max(crop_top, min(crop_bottom, orig_height))
+        crop_left = max(0, min(crop_left, orig_width))
+        crop_right = max(crop_left, min(crop_right, orig_width))
         
         cropped_frame = original_frame[crop_top:crop_bottom, crop_left:crop_right]
         
