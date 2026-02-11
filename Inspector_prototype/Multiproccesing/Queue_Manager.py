@@ -2,7 +2,7 @@ from multiprocessing import Queue, Event
 from queue import Empty
 import numpy as np
 
-from Multiproccesing.Memory_Manager import ImageMemoryManager
+from .Memory_Manager import ImageMemoryManager
 
 
 class QueueManager:
