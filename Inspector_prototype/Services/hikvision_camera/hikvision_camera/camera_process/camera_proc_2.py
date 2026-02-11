@@ -459,12 +459,9 @@ class CameraProcess():
                             'frame_id': self.frame_id,
                         }
                         
+                        # Отправляем метаданные в очередь для обработки
                         self.queue_manager.remove_old_frame_if_full(self.queue_manager.frame_processor_queue)
                         self.queue_manager.frame_processor_queue.put(data_frame)
-                        
-                        # Также отправляем в display_queue для App
-                        self.queue_manager.remove_old_frame_if_full(self.queue_manager.display_queue)
-                        self.queue_manager.display_queue.put(data_frame)
                         
                         self.frame_id += 1
                         if self.frame_id > 120:
