@@ -348,11 +348,16 @@ class CameraUI(QMainWindow):
                 self.enable_controls()
             elif status == 'Grabbing started':
                 self.is_grabbing = True
-                self.frame_timer.start(16)
+                # Запускаем таймер только если окно видимо
+                if self.isVisible():
+                    self.frame_timer.start(16)
+                else:
+                    self.frame_timer_was_running = True
                 self.enable_controls()
             elif status == 'Grabbing stopped':
                 self.is_grabbing = False
                 self.frame_timer.stop()
+                self.frame_timer_was_running = False
                 self.enable_controls()
                 
         elif msg_type == 'error':
