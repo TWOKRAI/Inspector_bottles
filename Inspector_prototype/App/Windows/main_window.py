@@ -323,10 +323,6 @@ class MainWindow(QMainWindow):
                 self.controls_hikvision['Gain'] = params.get('gain', 0)
             self.update_controls_hikvision()
 
-        self.init_ui()
-
-        if self.fullscreen: self.showFullScreen()
-
         self.update_controls()
         self.update_controls_camera()
         self.update_controls_neuroun()
