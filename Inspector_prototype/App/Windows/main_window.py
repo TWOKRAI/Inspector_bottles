@@ -318,7 +318,22 @@ class MainWindow(QMainWindow):
 
         main_layout.addStretch()
         self.create_tabs()
-        main_layout.addWidget(self.tab_widget)
+        
+        # Контейнер для вкладок с кнопкой скрытия
+        tabs_container = QWidget()
+        tabs_layout = QVBoxLayout()
+        tabs_container.setLayout(tabs_layout)
+        
+        # Кнопка скрытия/показа вкладок
+        self.btn_toggle_tabs = QPushButton("Скрыть вкладки")
+        self.btn_toggle_tabs.setMaximumHeight(30)
+        self.btn_toggle_tabs.clicked.connect(self.toggle_tabs_visibility)
+        tabs_layout.addWidget(self.btn_toggle_tabs)
+        
+        tabs_layout.addWidget(self.tab_widget)
+        self.tabs_visible = True
+        
+        main_layout.addWidget(tabs_container)
 
 
     def create_main_content_layout(self):
@@ -1104,6 +1119,16 @@ class MainWindow(QMainWindow):
         # Параметры уже отправляются через отдельные методы
         pass
     
+    def toggle_tabs_visibility(self):
+        """Скрыть/показать вкладки"""
+        self.tabs_visible = not self.tabs_visible
+        if self.tabs_visible:
+            self.tab_widget.show()
+            self.btn_toggle_tabs.setText("Скрыть вкладки")
+        else:
+            self.tab_widget.hide()
+            self.btn_toggle_tabs.setText("Показать вкладки")
+    
     def create_tab_processing(self):
         """Создать вкладку управления обработкой изображений"""
         tab = QWidget()
@@ -1133,6 +1158,50 @@ class MainWindow(QMainWindow):
                                          callback=self.update_controls_processing,
                                          parent=self)
         layout.addWidget(checkbox_control)
+        
+        # Регуляторы размера окна изображения
+        slider_control = SliderControl("image_width", 200, 2000, 1024,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("image_height", 200, 2000, 780,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        # Регуляторы обрезки изображения
+        slider_control = SliderControl("crop_top", 0, 720, 0,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("crop_bottom", 0, 720, 720,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("crop_left", 0, 1280, 0,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("crop_right", 0, 1280, 1280,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
         
         # Регуляторы HSV нижней границы
         slider_control = SliderControl("hl", 0, 179, 0,
@@ -1184,6 +1253,14 @@ class MainWindow(QMainWindow):
     
     def update_controls_processing(self):
         """Обновление управления процессом обработки"""
+        # Обновляем размер окна изображения если изменился
+        if 'image_width' in self.controls_processing or 'image_height' in self.controls_processing:
+            width = self.controls_processing.get('image_width', 1024)
+            height = self.controls_processing.get('image_height', 780)
+            if hasattr(self, 'image_label'):
+                # Можно изменить размер через изменение размера окна или самого label
+                pass
+        
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
         self.queue_manager.control_processing.put(self.controls_processing)
         self.queue_manager.control_processing_event.set()

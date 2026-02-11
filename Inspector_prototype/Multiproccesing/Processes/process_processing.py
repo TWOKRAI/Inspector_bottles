@@ -21,6 +21,10 @@ def process_processing(queue_manager, control_processing):
         'sm': 255,  # S upper
         'vm': 255,  # V upper
         'show_mask': False,  # Показывать маску или обработанное изображение
+        'crop_top': 0,
+        'crop_bottom': 720,
+        'crop_left': 0,
+        'crop_right': 1280,
     }
     
     initialization = False
@@ -55,10 +59,24 @@ def process_processing(queue_manager, control_processing):
         
         original_frame = frames[0]
         
+        # Применяем обрезку изображения
+        crop_top = controls.get('crop_top', 0)
+        crop_bottom = controls.get('crop_bottom', original_frame.shape[0])
+        crop_left = controls.get('crop_left', 0)
+        crop_right = controls.get('crop_right', original_frame.shape[1])
+        
+        # Ограничиваем значения размерами изображения
+        crop_top = max(0, min(crop_top, original_frame.shape[0]))
+        crop_bottom = max(crop_top, min(crop_bottom, original_frame.shape[0]))
+        crop_left = max(0, min(crop_left, original_frame.shape[1]))
+        crop_right = max(crop_left, min(crop_right, original_frame.shape[1]))
+        
+        cropped_frame = original_frame[crop_top:crop_bottom, crop_left:crop_right]
+        
         # Применяем обработку если включена
         if controls['enable_processing']:
             # Конвертируем в HSV
-            hsv_frame = cv2.cvtColor(original_frame, cv2.COLOR_RGB2HSV)
+            hsv_frame = cv2.cvtColor(cropped_frame, cv2.COLOR_RGB2HSV)
             
             # Создаем маску по цвету
             lower_bound = np.array([controls['hl'], controls['sl'], controls['vl']])
@@ -69,11 +87,11 @@ def process_processing(queue_manager, control_processing):
                 # Показываем маску (конвертируем в RGB для отображения)
                 processed_frame = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
             else:
-                # Применяем маску к оригинальному изображению
-                processed_frame = cv2.bitwise_and(original_frame, original_frame, mask=mask)
+                # Применяем маску к обрезанному изображению
+                processed_frame = cv2.bitwise_and(cropped_frame, cropped_frame, mask=mask)
         else:
-            # Если обработка выключена, просто копируем оригинал
-            processed_frame = original_frame.copy()
+            # Если обработка выключена, используем обрезанное изображение
+            processed_frame = cropped_frame.copy()
         
         # Записываем обработанный кадр в память
         processed_frames = [processed_frame]
