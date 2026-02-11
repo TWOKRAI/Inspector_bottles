@@ -322,19 +322,27 @@ class MainWindow(QMainWindow):
     def handle_camera_message(self, message):
         """Обработать сообщение от процесса камеры"""
         msg_type = message.get('type')
+        print(f"App received camera message: type={msg_type}, message={message}")
         
         if msg_type == 'enum_devices_response':
             devices = message.get('devices', [])
             self.hikvision_device_list = devices
+            print(f"App: Processing {len(devices)} devices")
             
             # Обновляем выпадающий список
             if hasattr(self, 'combo_cameras'):
+                print(f"App: combo_cameras exists, updating...")
                 self.combo_cameras.clear()
                 if len(devices) == 0:
                     self.combo_cameras.addItem("Устройства не найдены")
                 else:
                     for device in devices:
-                        self.combo_cameras.addItem(device.get('display_name', f"Camera {device.get('index', 0)}"))
+                        display_name = device.get('display_name', f"Camera {device.get('index', 0)}")
+                        print(f"App: Adding device to combo: {display_name}")
+                        self.combo_cameras.addItem(display_name)
+                print(f"App: combo_cameras now has {self.combo_cameras.count()} items")
+            else:
+                print(f"App: ERROR - combo_cameras does not exist!")
         
         elif msg_type == 'parameters_response':
             params = message.get('parameters', {})

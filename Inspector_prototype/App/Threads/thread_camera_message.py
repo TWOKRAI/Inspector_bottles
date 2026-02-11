@@ -20,12 +20,15 @@ class CameraMessageThread(QThread):
                 # Блокирующее ожидание сообщения с таймаутом
                 message = self.queue_manager.camera_to_ui.get(timeout=1)
                 if message:
+                    print(f"App CameraMessageThread: received message: {message.get('type')}")
                     self.message_received.emit(message)
             except Empty:
                 # Таймаут - продолжаем цикл
                 continue
             except Exception as e:
                 print(f"Error in camera message thread: {e}")
+                import traceback
+                traceback.print_exc()
                 break
     
     def stop(self):
