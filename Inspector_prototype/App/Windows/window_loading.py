@@ -33,13 +33,21 @@ class LoadingWindow(QWidget):
 
         # Создаем QProgressBar для отображения строки загрузки
         self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 8) 
+        self.progress_bar.setRange(0, 100) 
         self.progress_bar.setAlignment(Qt.AlignCenter)  # Центрируем строку загрузки
+        self.progress_bar.setFormat("%p%")  # Отображение процентов
+        
+        # Метка для отображения процентов
+        self.percent_label = QLabel("0%", self)
+        self.percent_label.setAlignment(Qt.AlignCenter)
+        self.percent_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
 
         # Добавляем виджеты в вертикальный layout
         vbox.addStretch()
         vbox.addWidget(self.image_label)
         vbox.addSpacing(35)
+        vbox.addWidget(self.percent_label)
+        vbox.addSpacing(10)
         vbox.addWidget(self.progress_bar)
         vbox.addStretch()
 
@@ -54,7 +62,8 @@ class LoadingWindow(QWidget):
 
         # Устанавливаем параметры окна
         self.setWindowTitle('Loading Window')
-        self.setGeometry(100, 100, 1000, 400)
+        # Размер будет установлен из main_app.py чтобы соответствовать главному окну
+        self.setMinimumSize(800, 500)
 
 
     def toggle_fullscreen(self):
@@ -64,6 +73,7 @@ class LoadingWindow(QWidget):
             self.showFullScreen()
 
 
-    def update_progress(self, value):
-        # Обновляем значение строки загрузки в зависимости от длины списка
-        self.progress_bar.setValue(value)
+    def update_progress(self, percent):
+        # Обновляем значение строки загрузки (percent от 0 до 100)
+        self.progress_bar.setValue(percent)
+        self.percent_label.setText(f"{percent}%")

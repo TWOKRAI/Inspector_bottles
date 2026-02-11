@@ -373,7 +373,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle("Image Processing App")
             self.setGeometry(100, 100, 1200, 800)
             # Убираем фиксированный размер чтобы окно могло изменяться
-            # self.setFixedSize(1024, 780)
+            self.setMinimumSize(800, 600)  # Минимальный размер вместо фиксированного
 
             main_layout = QVBoxLayout()
             central_widget = QWidget()

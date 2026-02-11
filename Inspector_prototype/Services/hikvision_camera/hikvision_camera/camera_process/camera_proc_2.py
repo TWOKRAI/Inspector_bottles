@@ -43,9 +43,6 @@ class CameraProcess():
         
         # Индексная система для памяти (как в backup_worker)
         self.index_memory = [0] * 12
-        
-        # Устанавливаем событие ready_app для начала передачи кадров
-        self.queue_manager.ready_app.set()
 
         
     def start(self):
@@ -68,6 +65,13 @@ class CameraProcess():
         self.memory_thread = threading.Thread(target=self._memory_release_loop)
         self.memory_thread.daemon = True
         self.memory_thread.start()
+        
+        # Отправляем сигнал готовности процесса
+        try:
+            self.queue_manager.process_ready_queue.put('proc_camera')
+            print("Camera process ready signal sent")
+        except Exception as e:
+            print(f"Error sending ready signal: {e}")
         
         print("Camera process ready, waiting for commands...")
     

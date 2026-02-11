@@ -95,6 +95,13 @@ class CameraUI(QMainWindow):
         self.control_ui_thread.daemon = True
         self.control_ui_thread.start()
         
+        # Отправляем сигнал готовности процесса
+        try:
+            self.queue_manager.process_ready_queue.put('proc_ui_sdk')
+            print("UI SDK process ready signal sent")
+        except Exception as e:
+            print(f"Error sending ready signal: {e}")
+        
     def init_ui(self):
         """Инициализация интерфейса"""
         self.setWindowTitle("Independent Camera Process - UI")

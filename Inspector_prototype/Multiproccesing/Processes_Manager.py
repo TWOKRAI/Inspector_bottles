@@ -23,6 +23,9 @@ class MultiProcessManager:
         self.camera_enable = True  # Процесс камеры (SDK)
         self.app_enable = True  # Процесс App для отображения
         self.processing_enable = True  # Процесс обработки изображений
+        
+        # Количество процессов для отслеживания загрузки
+        self.total_processes = 0
 
 
     def import_modules(self):
@@ -34,9 +37,8 @@ class MultiProcessManager:
             'proc_processing': 'Multiproccesing.Processes.process_processing',
         }
 
-        # Настройка счетчика модулей (количество процессов которые отправят ready сигнал)
-        # Пока устанавливаем 0 чтобы окно загрузки сразу закрывалось
-        self.queue_manager.total_modules = 0  # Можно установить нужное количество если процессы отправляют ready
+        # Подсчет количества процессов для отслеживания загрузки
+        # Будет установлено в initialize_processes после подсчета активных процессов
 
         # Динамический импорт
         imported_modules = {}
@@ -92,6 +94,18 @@ class MultiProcessManager:
     def initialize_processes(self):
         """Инициализирует процессы на основе конфигурации"""
         modules = self.import_modules()
+        
+        # Подсчитываем количество процессов перед их созданием
+        self.total_processes = sum([
+            self.camera_enable,
+            self.ui_sdk_enable,
+            self.processing_enable,
+            self.app_enable
+        ])
+        
+        # Устанавливаем количество процессов для окна загрузки
+        self.queue_manager.total_modules = self.total_processes
+        print(f"Total processes to initialize: {self.total_processes}")
 
         if self.camera_enable:
             # Процесс камеры (SDK)

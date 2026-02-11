@@ -37,6 +37,7 @@ class QueueManager:
         self.bot_message = Queue(maxsize=self.buffer_size)
         self.bot_message_send = Queue(maxsize=self.buffer_size)
         self.download = Queue()  # Очередь для загрузки/статусов
+        self.process_ready_queue = Queue()  # Очередь для сигналов готовности процессов
 
         # События
         self.control_camera_event = Event()

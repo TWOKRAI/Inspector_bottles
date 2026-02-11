@@ -11,6 +11,13 @@ def process_processing(queue_manager, control_processing):
     """
     print('Процесс обработки запущен')
     
+    # Отправляем сигнал готовности процесса
+    try:
+        queue_manager.process_ready_queue.put('proc_processing')
+        print("Processing process ready signal sent")
+    except Exception as e:
+        print(f"Error sending ready signal: {e}")
+    
     # Параметры обработки по умолчанию
     controls = {
         'enable_processing': False,

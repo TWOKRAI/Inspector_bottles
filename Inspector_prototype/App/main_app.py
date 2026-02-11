@@ -41,6 +41,13 @@ class WindowManager:
         self.set_fullscreen(self.fullscreen)
 
         self.admin_function(self.access_level)
+        
+        # Отправляем сигнал готовности процесса App
+        try:
+            self.queue_manager.process_ready_queue.put('proc_app')
+            print("App process ready signal sent")
+        except Exception as e:
+            print(f"Error sending ready signal: {e}")
 
 
     def create_all_windows(self):
@@ -48,12 +55,18 @@ class WindowManager:
         self.header.main_show.connect(self.show_main_winodw)
         self.header.neuroun_show.connect(self.show_neuroun_winodw)
 
-        self.loading_window = LoadingWindow(window_manager = self)
+        # Создаем главное окно сначала чтобы получить его размер
         self.main_window = MainWindow(window_manager = self)
         self.main_window.header.main_show.connect(self.show_main_winodw)
         self.main_window.header.neuroun_show.connect(self.show_neuroun_winodw)
-
         self.main_window.hide()
+        
+        # Создаем окно загрузки с таким же размером как главное окно
+        self.loading_window = LoadingWindow(window_manager = self)
+        # Устанавливаем размер окна загрузки равным размеру главного окна
+        main_window_size = self.main_window.size()
+        self.loading_window.resize(main_window_size)
+        self.loading_window.setGeometry(self.main_window.geometry())
 
 
     def create_thread(self):
