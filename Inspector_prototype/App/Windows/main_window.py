@@ -278,6 +278,7 @@ class MainWindow(QMainWindow):
         self.controls_robot = {}
         self.controls_conveyor = {}
         self.controls_hikvision = {}
+        self.controls_processing = {}
         
         self.current_access_level = 0
 
@@ -292,6 +293,7 @@ class MainWindow(QMainWindow):
         self.update_controls_robot()
         self.update_controls_conveyor()
         self.update_controls_hikvision()
+        self.update_controls_processing()
 
         self.update_access_level(self.current_access_level)
 
@@ -414,7 +416,8 @@ class MainWindow(QMainWindow):
         self.create_tab(self.tab_widget, "Параметры", self.create_tab_parameters()) 
         self.create_tab(self.tab_widget, "Нейрон", self.create_tab_neuroun())
         self.create_tab(self.tab_widget, "Робот", self.create_tab_robot())
-        self.create_tab(self.tab_widget, "Hikvision", self.create_tab_hikvision()) 
+        self.create_tab(self.tab_widget, "Hikvision", self.create_tab_hikvision())
+        self.create_tab(self.tab_widget, "Обработка", self.create_tab_processing()) 
 
 
     def create_tab(self, tabs: QTabWidget, name, content_widget, scrollable=True):
@@ -1100,6 +1103,90 @@ class MainWindow(QMainWindow):
         """Обновление управления Hikvision SDK"""
         # Параметры уже отправляются через отдельные методы
         pass
+    
+    def create_tab_processing(self):
+        """Создать вкладку управления обработкой изображений"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        tab.setLayout(layout)
+        
+        # Чекбокс включения обработки
+        checkbox_control = CheckboxControl("enable_processing", False, "left",
+                                         ui_elements=self.ui_elements, 
+                                         controls=self.controls_processing,
+                                         callback=self.update_controls_processing,
+                                         parent=self)
+        layout.addWidget(checkbox_control)
+        
+        # Чекбокс показа маски
+        checkbox_control = CheckboxControl("show_mask", False, "left",
+                                         ui_elements=self.ui_elements,
+                                         controls=self.controls_processing,
+                                         callback=self.update_controls_processing,
+                                         parent=self)
+        layout.addWidget(checkbox_control)
+        
+        # Чекбокс переключения между оригиналом и обработанным
+        checkbox_control = CheckboxControl("show_processed", False, "left",
+                                         ui_elements=self.ui_elements,
+                                         controls=self.controls_processing,
+                                         callback=self.update_controls_processing,
+                                         parent=self)
+        layout.addWidget(checkbox_control)
+        
+        # Регуляторы HSV нижней границы
+        slider_control = SliderControl("hl", 0, 179, 0,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("sl", 0, 255, 0,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("vl", 0, 255, 0,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        # Регуляторы HSV верхней границы
+        slider_control = SliderControl("hm", 0, 179, 179,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("sm", 0, 255, 255,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("vm", 0, 255, 255,
+                                      ui_elements=self.ui_elements,
+                                      controls=self.controls_processing,
+                                      callback=self.update_controls_processing,
+                                      parent=self)
+        layout.addWidget(slider_control)
+        
+        layout.addStretch()
+        
+        return tab
+    
+    def update_controls_processing(self):
+        """Обновление управления процессом обработки"""
+        self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
+        self.queue_manager.control_processing.put(self.controls_processing)
+        self.queue_manager.control_processing_event.set()
 
 
     def update_access_level(self, level: int):

@@ -22,6 +22,7 @@ class MultiProcessManager:
         self.ui_sdk_enable = True  # UI SDK процесс камеры
         self.camera_enable = True  # Процесс камеры (SDK)
         self.app_enable = True  # Процесс App для отображения
+        self.processing_enable = True  # Процесс обработки изображений
 
 
     def import_modules(self):
@@ -30,6 +31,7 @@ class MultiProcessManager:
             'proc_ui_sdk': 'Services.hikvision_camera.hikvision_camera.ui_camera_test_2',
             'proc_camera': 'Services.hikvision_camera.hikvision_camera.camera_process.camera_proc_2',
             'proc_app': 'Multiproccesing.Processes.process_app',
+            'proc_processing': 'Multiproccesing.Processes.process_processing',
         }
 
         # Настройка счетчика модулей
@@ -111,6 +113,17 @@ class MultiProcessManager:
             )
             self.processes.append(ui_sdk_process)
             print(f"Process 'proc_ui_sdk' initialized")
+
+        if self.processing_enable:
+            # Процесс обработки изображений
+            processing_process = self.create_process(
+                target_func=modules['proc_processing'],
+                args=(self.queue_manager, self.queue_manager.control_processing),
+                name='proc_processing',
+                priority='high'
+            )
+            self.processes.append(processing_process)
+            print(f"Process 'proc_processing' initialized")
 
         if self.app_enable:
             # Процесс App для отображения

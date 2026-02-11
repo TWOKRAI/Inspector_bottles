@@ -86,13 +86,16 @@ class UpdateImage(QThread):
             if data_frame is not None:
                 id_memory = data_frame.get('id_memory')
                 camera_robot = data_frame.get('camera_robot', False)
+                processed = data_frame.get('processed', False)
                 
                 frames = []
                 
-                if not camera_robot:
-                    # Читаем из camera_data (как записывает процесс камеры)
-                    frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
-                else:
+                # Проверяем настройку показа обработанного изображения
+                show_processed = False
+                if hasattr(self.window_manager, 'main_window'):
+                    show_processed = self.window_manager.main_window.controls_processing.get('show_processed', False)
+                
+                if camera_robot:
                     # Читаем из camera_data_out (для робота)
                     frames_out = self.queue_manager.memory_manager.read_images('camera_data_out', 0)
                     if len(frames_out) > 0:
@@ -104,6 +107,15 @@ class UpdateImage(QThread):
                         frame = frames_out_scaled[:, 40: width - 40]
                         frames.append(frame)
                         time.sleep(0.1)
+                elif show_processed or processed:
+                    # Читаем обработанное изображение из process_data
+                    frames = self.queue_manager.memory_manager.read_images('process_data', id_memory)
+                    if frames is None or len(frames) == 0:
+                        # Если обработанного нет, читаем оригинал
+                        frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                else:
+                    # Читаем оригинальное изображение из camera_data
+                    frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
 
                 if frames and len(frames) > 0:
                     self.update_frame.emit(frames)
