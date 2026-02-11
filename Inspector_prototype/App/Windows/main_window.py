@@ -396,6 +396,7 @@ class MainWindow(QMainWindow):
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setScaledContents(False)
         self.image_label.setStyleSheet("border: 2px solid white; border-radius: 10px;")
+        self.image_label.setMinimumSize(200, 200)  # Минимальный размер
         image_layout.addWidget(self.image_label)
 
         image_layout.addStretch()
@@ -1258,8 +1259,10 @@ class MainWindow(QMainWindow):
             width = self.controls_processing.get('image_width', 1024)
             height = self.controls_processing.get('image_height', 780)
             if hasattr(self, 'image_label'):
-                # Можно изменить размер через изменение размера окна или самого label
-                pass
+                # Изменяем максимальный размер label (реальный размер будет зависеть от layout)
+                self.image_label.setMaximumSize(width, height)
+                # Также можно изменить размер всего окна
+                # self.setFixedSize(width, height)
         
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
         self.queue_manager.control_processing.put(self.controls_processing)
