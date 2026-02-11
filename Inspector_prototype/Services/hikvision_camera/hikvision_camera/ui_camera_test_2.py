@@ -43,27 +43,6 @@ class CameraMessageThread(QThread):
         """Остановить поток"""
         self.running = False
         self.wait(2000)  # Ждем до 2 секунд для завершения
-    
-    def _control_ui_loop(self):
-        """Цикл обработки команд управления видимостью UI"""
-        while not self.queue_manager.stop_event.is_set():
-            try:
-                command = self.queue_manager.control_ui.get(timeout=0.1)
-                if command:
-                    cmd_type = command.get('type')
-                    if cmd_type == 'show':
-                        self.show()
-                    elif cmd_type == 'hide':
-                        self.hide()
-                    elif cmd_type == 'toggle':
-                        if self.isVisible():
-                            self.hide()
-                        else:
-                            self.show()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"Error in control UI loop: {e}")
 
 
 class CameraUI(QMainWindow):
@@ -481,6 +460,27 @@ class CameraUI(QMainWindow):
         self.btn_get_params.setEnabled(self.is_open)
         self.btn_set_params.setEnabled(self.is_open)
     
+    def _control_ui_loop(self):
+        """Цикл обработки команд управления видимостью UI"""
+        while not self.queue_manager.stop_event.is_set():
+            try:
+                command = self.queue_manager.control_ui.get(timeout=0.1)
+                if command:
+                    cmd_type = command.get('type')
+                    if cmd_type == 'show':
+                        self.show()
+                    elif cmd_type == 'hide':
+                        self.hide()
+                    elif cmd_type == 'toggle':
+                        if self.isVisible():
+                            self.hide()
+                        else:
+                            self.show()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Error in control UI loop: {e}")
+    
     def closeEvent(self, event):
         """Обработка закрытия окна"""
         print("Closing UI...")
@@ -494,6 +494,10 @@ class CameraUI(QMainWindow):
         
         # Останавливаем поток сообщений
         self.message_thread.stop()
+        
+        # Останавливаем поток управления UI
+        if hasattr(self, 'control_ui_thread'):
+            self.queue_manager.stop_event.set()
         
         # Отправляем команду завершения процесса камеры
         self.queue_manager.ui_to_camera.put({
