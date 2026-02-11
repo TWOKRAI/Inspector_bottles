@@ -20,7 +20,7 @@ class ImageMemoryManager:
             shm_list = self.create_memory(name, size, coll)
 
             if not shm_list:  # Если создание не удалось
-                print(f"⚠️ Failed to create memory for {name}")
+                print(f"WARNING: Failed to create memory for {name}")
                 continue  # Пропускаем эту память
             
             self.memories[name] = shm_list
@@ -50,11 +50,23 @@ class ImageMemoryManager:
         for i in range(coll):
             shm_name = f"{shm_name_orig}_{i}"
             try:
+                # Пытаемся создать новую память
                 shm = shared_memory.SharedMemory(name=shm_name, create=True, size=size)
                 shm_list.append(shm)
                 #print(f"Created memory '{shm_name}' ({size} bytes)")
+            except FileExistsError:
+                # Память уже существует - подключаемся к существующей
+                try:
+                    shm = shared_memory.SharedMemory(name=shm_name, create=False)
+                    shm_list.append(shm)
+                    print(f"Connected to existing memory '{shm_name}'")
+                except Exception as e:
+                    print(f"Error connecting to existing memory '{shm_name}': {e}")
+                    for shm in shm_list:
+                        shm.close()
+                    return None
             except Exception as e:
-                print(f"Error creating memory: {e}")
+                print(f"Error creating memory '{shm_name}': {e}")
                 for shm in shm_list:
                     shm.close()
                     shm.unlink()

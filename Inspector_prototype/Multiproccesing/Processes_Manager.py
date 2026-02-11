@@ -20,12 +20,14 @@ class MultiProcessManager:
         
         # Конфигурационные флаги
         self.ui_sdk_enable = True  # UI SDK процесс камеры
+        self.camera_enable = True  # Процесс камеры (SDK)
 
 
     def import_modules(self):
         """Динамически импортирует модули процессов"""
         modules = {
             'proc_ui_sdk': 'Services.hikvision_camera.hikvision_camera.ui_camera_test_2',
+            'proc_camera': 'Services.hikvision_camera.hikvision_camera.camera_process.camera_proc_2',
         }
 
         # Настройка счетчика модулей
@@ -85,6 +87,17 @@ class MultiProcessManager:
     def initialize_processes(self):
         """Инициализирует процессы на основе конфигурации"""
         modules = self.import_modules()
+
+        if self.camera_enable:
+            # Процесс камеры (SDK)
+            camera_process = self.create_process(
+                target_func=modules['proc_camera'],
+                args=(self.queue_manager,),
+                name='proc_camera',
+                priority='high'
+            )
+            self.processes.append(camera_process)
+            print(f"Process 'proc_camera' initialized")
 
         if self.ui_sdk_enable:
             # Процесс UI SDK камеры
