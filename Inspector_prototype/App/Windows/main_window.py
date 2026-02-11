@@ -1,6 +1,6 @@
 import cv2
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel,
-                             QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox)
+                             QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox, QComboBox)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtGui import QCursor
@@ -280,7 +280,48 @@ class MainWindow(QMainWindow):
         self.controls_hikvision = {}
         self.controls_processing = {}
         
+        # Список устройств камеры для Hikvision
+        self.hikvision_device_list = []
+        
         self.current_access_level = 0
+        
+        # Запускаем поток для получения сообщений от камеры
+        self.start_camera_message_thread()
+    
+    def start_camera_message_thread(self):
+        """Запустить поток для получения сообщений от камеры"""
+        from App.Threads.thread_camera_message import CameraMessageThread
+        self.camera_message_thread = CameraMessageThread(self.queue_manager, self.stop_event)
+        self.camera_message_thread.message_received.connect(self.handle_camera_message)
+        self.camera_message_thread.start()
+    
+    def handle_camera_message(self, message):
+        """Обработать сообщение от процесса камеры"""
+        msg_type = message.get('type')
+        
+        if msg_type == 'enum_devices_response':
+            devices = message.get('devices', [])
+            self.hikvision_device_list = devices
+            
+            # Обновляем выпадающий список
+            if hasattr(self, 'combo_cameras'):
+                self.combo_cameras.clear()
+                if len(devices) == 0:
+                    self.combo_cameras.addItem("Устройства не найдены")
+                else:
+                    for device in devices:
+                        self.combo_cameras.addItem(device.get('display_name', f"Camera {device.get('index', 0)}"))
+        
+        elif msg_type == 'parameters_response':
+            params = message.get('parameters', {})
+            # Обновляем значения в controls_hikvision
+            if 'Frame Rate' in self.ui_elements:
+                self.controls_hikvision['Frame Rate'] = params.get('frame_rate', 0)
+            if 'Exposure' in self.ui_elements:
+                self.controls_hikvision['Exposure'] = params.get('exposure_time', 0)
+            if 'Gain' in self.ui_elements:
+                self.controls_hikvision['Gain'] = params.get('gain', 0)
+            self.update_controls_hikvision()
 
         self.init_ui()
 
@@ -853,22 +894,22 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         tab.setLayout(layout)
         
-        # Кнопка показа/скрытия UI SDK окна
-        btn_show_ui = QPushButton("Показать UI SDK")
-        btn_show_ui.setMinimumHeight(50)
-        btn_show_ui.clicked.connect(lambda: self.toggle_sdk_ui(True))
-        layout.addWidget(btn_show_ui)
-        
-        btn_hide_ui = QPushButton("Скрыть UI SDK")
-        btn_hide_ui.setMinimumHeight(50)
-        btn_hide_ui.clicked.connect(lambda: self.toggle_sdk_ui(False))
-        layout.addWidget(btn_hide_ui)
-        
         # Кнопки управления камерой
         btn_enum = QPushButton("Enum Devices")
         btn_enum.setMinimumHeight(40)
         btn_enum.clicked.connect(self.sdk_enum_devices)
         layout.addWidget(btn_enum)
+        
+        # Выпадающий список камер
+        camera_layout = QHBoxLayout()
+        camera_label = QLabel("Камера:")
+        camera_label.setFixedWidth(80)
+        camera_layout.addWidget(camera_label)
+        
+        self.combo_cameras = QComboBox()
+        self.combo_cameras.setMinimumHeight(35)
+        camera_layout.addWidget(self.combo_cameras)
+        layout.addLayout(camera_layout)
         
         btn_open = QPushButton("Open Camera")
         btn_open.setMinimumHeight(40)
@@ -919,6 +960,17 @@ class MainWindow(QMainWindow):
         
         layout.addStretch()
         
+        # Кнопки показа/скрытия UI SDK окна (внизу)
+        btn_show_ui = QPushButton("Показать UI SDK")
+        btn_show_ui.setMinimumHeight(50)
+        btn_show_ui.clicked.connect(lambda: self.toggle_sdk_ui(True))
+        layout.addWidget(btn_show_ui)
+        
+        btn_hide_ui = QPushButton("Скрыть UI SDK")
+        btn_hide_ui.setMinimumHeight(50)
+        btn_hide_ui.clicked.connect(lambda: self.toggle_sdk_ui(False))
+        layout.addWidget(btn_hide_ui)
+        
         return tab
     
     def toggle_sdk_ui(self, show):
@@ -938,11 +990,19 @@ class MainWindow(QMainWindow):
     def sdk_open_camera(self):
         """Открыть камеру"""
         try:
-            # Получаем индекс из UI элементов если есть
-            camera_index = 0
-            if 'camera_index' in self.ui_elements:
-                camera_index = self.ui_elements['camera_index'].get('value', 0)
-            self.queue_manager.ui_to_camera.put({'type': 'open', 'camera_index': camera_index})
+            # Получаем индекс из выпадающего списка
+            camera_index = self.combo_cameras.currentIndex()
+            if camera_index < 0 or camera_index >= len(self.hikvision_device_list):
+                camera_index = 0
+            
+            # Получаем реальный индекс устройства
+            if len(self.hikvision_device_list) > 0:
+                selected_device = self.hikvision_device_list[camera_index]
+                real_camera_index = selected_device.get('index', camera_index)
+            else:
+                real_camera_index = camera_index
+                
+            self.queue_manager.ui_to_camera.put({'type': 'open', 'camera_index': real_camera_index})
         except Exception as e:
             print(f"Error opening camera: {e}")
     
@@ -1292,6 +1352,10 @@ class MainWindow(QMainWindow):
 
 
     def close_programm(self):
+        # Останавливаем поток сообщений камеры
+        if hasattr(self, 'camera_message_thread'):
+            self.camera_message_thread.stop()
+        
         self.stop_event.set()
         time.sleep(3)
         self.close()
