@@ -360,16 +360,22 @@ class MainWindow(QMainWindow):
 
 
     def init_ui(self):
-        # Создание главного окна
-        self.setWindowTitle("Image Processing App")
-        self.setGeometry(100, 100, 1200, 800)
-        # Убираем фиксированный размер чтобы окно могло изменяться
-        # self.setFixedSize(1024, 780) 
+        try:
+            # Создание главного окна
+            self.setWindowTitle("Image Processing App")
+            self.setGeometry(100, 100, 1200, 800)
+            # Убираем фиксированный размер чтобы окно могло изменяться
+            # self.setFixedSize(1024, 780)
 
-        main_layout = QVBoxLayout()
-        central_widget = QWidget()
-        central_widget.setLayout(main_layout)
-        self.setCentralWidget(central_widget)
+            main_layout = QVBoxLayout()
+            central_widget = QWidget()
+            central_widget.setLayout(main_layout)
+            self.setCentralWidget(central_widget)
+        except Exception as e:
+            print(f"Error in init_ui (start): {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
         main_layout.addWidget(self.header)
 
@@ -396,6 +402,14 @@ class MainWindow(QMainWindow):
         self.tabs_visible = True
         
         main_layout.addWidget(tabs_container)
+        
+        # Проверяем что все элементы созданы
+        if not hasattr(self, 'combo_cameras'):
+            print("WARNING: combo_cameras not created!")
+        if not hasattr(self, 'tab_widget'):
+            print("WARNING: tab_widget not created!")
+        if not hasattr(self, 'image_label'):
+            print("WARNING: image_label not created!")
 
 
     def create_main_content_layout(self):
@@ -1388,11 +1402,23 @@ class MainWindow(QMainWindow):
 
 
     def show(self):
-        super().show()
+        try:
+            super().show()
+            print("MainWindow.show() called")
+        except Exception as e:
+            print(f"Error in show(): {e}")
+            import traceback
+            traceback.print_exc()
 
     
     def close(self):
+        print("MainWindow.close() called")
         super().close()
+    
+    def closeEvent(self, event):
+        """Обработчик события закрытия окна"""
+        print("MainWindow.closeEvent() called")
+        event.accept()
 
 
     def close_programm(self):
