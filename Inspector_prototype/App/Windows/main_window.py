@@ -280,7 +280,19 @@ class MainWindow(QMainWindow):
         self.controls_robot = {}
         self.controls_conveyor = {}
         self.controls_hikvision = {}
-        self.controls_processing = {}
+        self.controls_processing = {
+            'crop_top': 0,
+            'crop_bottom': 2160,  # Максимальная высота по умолчанию
+            'crop_left': 0,
+            'crop_right': 3840,  # Максимальная ширина по умолчанию
+            'enable_processing': False,
+            'show_mask': False,
+            'show_processed': False,
+            'image_width': 1024,
+            'image_height': 780,
+            'hl': 0, 'sl': 0, 'vl': 0,
+            'hm': 179, 'sm': 255, 'vm': 255
+        }
         
         # Список устройств камеры для Hikvision
         self.hikvision_device_list = []
