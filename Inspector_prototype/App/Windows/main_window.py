@@ -1146,6 +1146,13 @@ class MainWindow(QMainWindow):
         """Начать захват кадров"""
         try:
             self.queue_manager.ui_to_camera.put({'type': 'start_grabbing'})
+            # Автоматически запрашиваем параметры после начала захвата для получения SDK FPS
+            import threading
+            def delayed_get_params():
+                import time
+                time.sleep(0.5)  # Небольшая задержка чтобы камера успела начать захват
+                self.sdk_get_parameters()
+            threading.Thread(target=delayed_get_params, daemon=True).start()
         except Exception as e:
             print(f"Error starting grabbing: {e}")
     

@@ -25,6 +25,7 @@ def process_processing(queue_manager, control_processing):
         print(f"Error sending ready signal: {e}")
     
     # Параметры обработки по умолчанию
+    # Используем большие значения по умолчанию для поддержки разных размеров
     controls = {
         'enable_processing': False,
         'hl': 0,  # H lower
@@ -35,23 +36,23 @@ def process_processing(queue_manager, control_processing):
         'vm': 255,  # V upper
         'show_mask': False,  # Показывать маску или обработанное изображение
         'crop_top': 0,
-        'crop_bottom': 720,
+        'crop_bottom': 2160,  # Максимальная высота
         'crop_left': 0,
-        'crop_right': 1280,
+        'crop_right': 3840,  # Максимальная ширина
     }
     
     initialization = False
     
     while not queue_manager.stop_event.is_set():
-        # Читаем управление из очереди
+        # Читаем управление из очереди (неблокирующе)
         try:
             new_controls = control_processing.get_nowait()
             controls.update(new_controls)
             initialization = True
         except Empty:
-            if not initialization:
-                time.sleep(0.01)
-                continue
+            # Если инициализация еще не произошла, используем значения по умолчанию
+            # но продолжаем обработку кадров
+            pass
         
         # Читаем метаданные кадра из очереди
         try:
@@ -96,10 +97,17 @@ def process_processing(queue_manager, control_processing):
         crop_right = controls.get('crop_right', orig_width)
         
         # Ограничиваем значения размерами изображения
+        # Если значения больше реального размера, используем полный размер
         crop_top = max(0, min(crop_top, orig_height))
         crop_bottom = max(crop_top, min(crop_bottom, orig_height))
         crop_left = max(0, min(crop_left, orig_width))
         crop_right = max(crop_left, min(crop_right, orig_width))
+        
+        # Если значения по умолчанию (максимальные), используем полный размер изображения
+        if crop_bottom >= orig_height:
+            crop_bottom = orig_height
+        if crop_right >= orig_width:
+            crop_right = orig_width
         
         cropped_frame = original_frame[crop_top:crop_bottom, crop_left:crop_right]
         
