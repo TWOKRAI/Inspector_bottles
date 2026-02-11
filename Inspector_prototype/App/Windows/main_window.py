@@ -285,8 +285,32 @@ class MainWindow(QMainWindow):
         
         self.current_access_level = 0
         
-        # Запускаем поток для получения сообщений от камеры
-        self.start_camera_message_thread()
+        # Инициализируем UI перед запуском потока сообщений
+        self.init_ui()
+
+        if self.fullscreen: 
+            self.showFullScreen()
+        else:
+            self.showNormal()
+
+        self.update_controls()
+        self.update_controls_camera()
+        self.update_controls_neuroun()
+        self.update_controls_draw()
+        self.update_controls_robot()
+        self.update_controls_conveyor()
+        self.update_controls_hikvision()
+        self.update_controls_processing()
+
+        self.update_access_level(self.current_access_level)
+        
+        # Запускаем поток для получения сообщений от камеры после инициализации UI
+        try:
+            self.start_camera_message_thread()
+        except Exception as e:
+            print(f"Error starting camera message thread: {e}")
+            import traceback
+            traceback.print_exc()
     
     def start_camera_message_thread(self):
         """Запустить поток для получения сообщений от камеры"""
