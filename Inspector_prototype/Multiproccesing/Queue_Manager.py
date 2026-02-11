@@ -16,6 +16,7 @@ class QueueManager:
         self.frame_processor_queue = Queue(maxsize=self.buffer_size)  # Кадры от камеры к обработке
         self.display_queue = Queue(maxsize=self.buffer_size)  # Обработанные кадры к UI
         self.memory_release_queue = Queue(maxsize=12)  # Освобождение памяти
+        self.frame_queue = Queue(maxsize=self.buffer_size)  # Кадры для UI SDK (временная очередь)
 
         # Очереди управления
         self.control_processing = Queue(maxsize=1)  # Управление процессом обработки (из App/UI)
@@ -75,6 +76,7 @@ class QueueManager:
         
         self.clear_queue(self.frame_processor_queue, 0)
         self.clear_queue(self.display_queue, 0)
+        self.clear_queue(self.frame_queue, 0)
         self.clear_queue(self.control_processing, 0)
         self.clear_queue(self.ui_to_camera, 0)
         self.clear_queue(self.camera_to_ui, 0)
