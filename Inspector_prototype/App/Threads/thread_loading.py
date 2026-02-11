@@ -19,6 +19,14 @@ class Loading(QThread):
     def run(self):
         time.sleep(1)
 
+        # Если total_modules = 0, сразу закрываем окно загрузки
+        if self.queue_manager.total_modules == 0:
+            self.queue_manager.ready_app.set()
+            self.window_close.emit()
+            self.quit()
+            print('Поток загрузки завершился (total_modules = 0)')
+            return
+
         while not self.stop_event.is_set():
             if self.len_data >= self.queue_manager.total_modules:
                 self.window_close.emit()

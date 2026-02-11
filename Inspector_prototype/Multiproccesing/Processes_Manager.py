@@ -34,8 +34,9 @@ class MultiProcessManager:
             'proc_processing': 'Multiproccesing.Processes.process_processing',
         }
 
-        # Настройка счетчика модулей
-        self.queue_manager.total_modules = len(modules)
+        # Настройка счетчика модулей (количество процессов которые отправят ready сигнал)
+        # Пока устанавливаем 0 чтобы окно загрузки сразу закрывалось
+        self.queue_manager.total_modules = 0  # Можно установить нужное количество если процессы отправляют ready
 
         # Динамический импорт
         imported_modules = {}
