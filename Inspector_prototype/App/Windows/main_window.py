@@ -277,6 +277,7 @@ class MainWindow(QMainWindow):
         self.controls_draw = {}
         self.controls_robot = {}
         self.controls_conveyor = {}
+        self.controls_hikvision = {}
         
         self.current_access_level = 0
 
@@ -290,6 +291,7 @@ class MainWindow(QMainWindow):
         self.update_controls_draw()
         self.update_controls_robot()
         self.update_controls_conveyor()
+        self.update_controls_hikvision()
 
         self.update_access_level(self.current_access_level)
 
@@ -411,7 +413,8 @@ class MainWindow(QMainWindow):
         self.create_tab(self.tab_widget, "Разное", self.create_tab_cropped_area()) 
         self.create_tab(self.tab_widget, "Параметры", self.create_tab_parameters()) 
         self.create_tab(self.tab_widget, "Нейрон", self.create_tab_neuroun())
-        self.create_tab(self.tab_widget, "Робот", self.create_tab_robot()) 
+        self.create_tab(self.tab_widget, "Робот", self.create_tab_robot())
+        self.create_tab(self.tab_widget, "Hikvision", self.create_tab_hikvision()) 
 
 
     def create_tab(self, tabs: QTabWidget, name, content_widget, scrollable=True):
@@ -825,6 +828,149 @@ class MainWindow(QMainWindow):
 
         return tab
     
+    def create_tab_hikvision(self):
+        """Создать вкладку управления Hikvision SDK"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        tab.setLayout(layout)
+        
+        # Кнопка показа/скрытия UI SDK окна
+        btn_show_ui = QPushButton("Показать UI SDK")
+        btn_show_ui.setMinimumHeight(50)
+        btn_show_ui.clicked.connect(lambda: self.toggle_sdk_ui(True))
+        layout.addWidget(btn_show_ui)
+        
+        btn_hide_ui = QPushButton("Скрыть UI SDK")
+        btn_hide_ui.setMinimumHeight(50)
+        btn_hide_ui.clicked.connect(lambda: self.toggle_sdk_ui(False))
+        layout.addWidget(btn_hide_ui)
+        
+        # Кнопки управления камерой
+        btn_enum = QPushButton("Enum Devices")
+        btn_enum.setMinimumHeight(40)
+        btn_enum.clicked.connect(self.sdk_enum_devices)
+        layout.addWidget(btn_enum)
+        
+        btn_open = QPushButton("Open Camera")
+        btn_open.setMinimumHeight(40)
+        btn_open.clicked.connect(self.sdk_open_camera)
+        layout.addWidget(btn_open)
+        
+        btn_close = QPushButton("Close Camera")
+        btn_close.setMinimumHeight(40)
+        btn_close.clicked.connect(self.sdk_close_camera)
+        layout.addWidget(btn_close)
+        
+        btn_start = QPushButton("Start Grabbing")
+        btn_start.setMinimumHeight(40)
+        btn_start.clicked.connect(self.sdk_start_grabbing)
+        layout.addWidget(btn_start)
+        
+        btn_stop = QPushButton("Stop Grabbing")
+        btn_stop.setMinimumHeight(40)
+        btn_stop.clicked.connect(self.sdk_stop_grabbing)
+        layout.addWidget(btn_stop)
+        
+        # Регуляторы параметров камеры
+        slider_control = SliderControl("Frame Rate", 0, 100, 0, transfer_k=0.1, round_k=1, 
+                                       ui_elements=self.ui_elements, controls=self.controls_hikvision, 
+                                       callback=self.update_controls_hikvision, parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("Exposure", 0, 100000, 0, transfer_k=1, round_k=0,
+                                       ui_elements=self.ui_elements, controls=self.controls_hikvision,
+                                       callback=self.update_controls_hikvision, parent=self)
+        layout.addWidget(slider_control)
+        
+        slider_control = SliderControl("Gain", 0, 100, 0, transfer_k=0.1, round_k=1,
+                                       ui_elements=self.ui_elements, controls=self.controls_hikvision,
+                                       callback=self.update_controls_hikvision, parent=self)
+        layout.addWidget(slider_control)
+        
+        # Кнопки получения/установки параметров
+        btn_get_params = QPushButton("Get Parameters")
+        btn_get_params.setMinimumHeight(40)
+        btn_get_params.clicked.connect(self.sdk_get_parameters)
+        layout.addWidget(btn_get_params)
+        
+        btn_set_params = QPushButton("Set Parameters")
+        btn_set_params.setMinimumHeight(40)
+        btn_set_params.clicked.connect(self.sdk_set_parameters)
+        layout.addWidget(btn_set_params)
+        
+        layout.addStretch()
+        
+        return tab
+    
+    def toggle_sdk_ui(self, show):
+        """Показать/скрыть UI SDK окно"""
+        try:
+            self.queue_manager.control_ui.put({'type': 'show' if show else 'hide'})
+        except Exception as e:
+            print(f"Error toggling SDK UI: {e}")
+    
+    def sdk_enum_devices(self):
+        """Перечислить устройства камеры"""
+        try:
+            self.queue_manager.ui_to_camera.put({'type': 'enum_devices'})
+        except Exception as e:
+            print(f"Error enumerating devices: {e}")
+    
+    def sdk_open_camera(self):
+        """Открыть камеру"""
+        try:
+            # Получаем индекс из UI элементов если есть
+            camera_index = 0
+            if 'camera_index' in self.ui_elements:
+                camera_index = self.ui_elements['camera_index'].get('value', 0)
+            self.queue_manager.ui_to_camera.put({'type': 'open', 'camera_index': camera_index})
+        except Exception as e:
+            print(f"Error opening camera: {e}")
+    
+    def sdk_close_camera(self):
+        """Закрыть камеру"""
+        try:
+            self.queue_manager.ui_to_camera.put({'type': 'close'})
+        except Exception as e:
+            print(f"Error closing camera: {e}")
+    
+    def sdk_start_grabbing(self):
+        """Начать захват кадров"""
+        try:
+            self.queue_manager.ui_to_camera.put({'type': 'start_grabbing'})
+        except Exception as e:
+            print(f"Error starting grabbing: {e}")
+    
+    def sdk_stop_grabbing(self):
+        """Остановить захват кадров"""
+        try:
+            self.queue_manager.ui_to_camera.put({'type': 'stop_grabbing'})
+        except Exception as e:
+            print(f"Error stopping grabbing: {e}")
+    
+    def sdk_get_parameters(self):
+        """Получить параметры камеры"""
+        try:
+            self.queue_manager.ui_to_camera.put({'type': 'get_parameters'})
+        except Exception as e:
+            print(f"Error getting parameters: {e}")
+    
+    def sdk_set_parameters(self):
+        """Установить параметры камеры"""
+        try:
+            # Получаем значения из controls_hikvision
+            frame_rate = self.controls_hikvision.get('Frame Rate', 0)
+            exposure = self.controls_hikvision.get('Exposure', 0)
+            gain = self.controls_hikvision.get('Gain', 0)
+            
+            self.queue_manager.ui_to_camera.put({
+                'type': 'set_parameters',
+                'frame_rate': frame_rate,
+                'exposure_time': exposure,
+                'gain': gain
+            })
+        except Exception as e:
+            print(f"Error setting parameters: {e}")
 
     def create_tab_neuroun(self):
         tab = QWidget()
@@ -949,6 +1095,11 @@ class MainWindow(QMainWindow):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_robot)
         self.queue_manager.control_robot.put(self.controls_robot)
         self.queue_manager.control_robot_event.set()
+    
+    def update_controls_hikvision(self):
+        """Обновление управления Hikvision SDK"""
+        # Параметры уже отправляются через отдельные методы
+        pass
 
 
     def update_access_level(self, level: int):
