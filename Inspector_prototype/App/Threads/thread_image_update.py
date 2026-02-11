@@ -70,6 +70,11 @@ class UpdateImage(QThread):
 
 
     def run(self):
+        # Счетчики для вычисления FPS на основе времени
+        last_capture_time = None
+        frame_count = 0
+        fps_start_time = time.time()
+        
         while not self.queue_manager.stop_event.is_set():
             try:
                 #data_frame = self.queue_manager.display_queue.get(timeout=0.05)
@@ -78,21 +83,52 @@ class UpdateImage(QThread):
                 time.sleep(0.01)
                 continue
             
-            # self.queue_manager.display_event.wait()
-            # data_frame = self.queue_manager.display_queue.get()
-            # self.queue_manager.display_event.clear()
-            
-
             if data_frame is not None:
+                # Время начала отображения
+                display_start_time = time.time()
+                
                 id_memory = data_frame.get('id_memory')
                 camera_robot = data_frame.get('camera_robot', False)
                 processed = data_frame.get('processed', False)
-                fps_after = data_frame.get('fps_after_processing', 0.0)
+                capture_time = data_frame.get('capture_time', display_start_time)
+                timestamps = data_frame.get('timestamps', {})
+                processing_time = data_frame.get('processing_time', 0.0)
+                total_time_from_capture = data_frame.get('total_time_from_capture', 0.0)
                 
-                # Обновляем FPS после обработки в главном окне
-                if hasattr(self.window_manager, 'main_window') and fps_after > 0:
-                    self.window_manager.main_window.fps_after_processing = fps_after
-                    self.window_manager.main_window.update_fps_display()
+                # Вычисляем FPS на основе времени между кадрами
+                if last_capture_time is not None:
+                    time_between_frames = capture_time - last_capture_time
+                    if time_between_frames > 0:
+                        current_fps = 1.0 / time_between_frames
+                    else:
+                        current_fps = 0.0
+                else:
+                    current_fps = 0.0
+                
+                last_capture_time = capture_time
+                frame_count += 1
+                
+                # Вычисляем средний FPS за последнюю секунду
+                elapsed_time = display_start_time - fps_start_time
+                if elapsed_time >= 1.0:
+                    avg_fps = frame_count / elapsed_time
+                    frame_count = 0
+                    fps_start_time = display_start_time
+                else:
+                    avg_fps = current_fps if current_fps > 0 else 0.0
+                
+                # Время окончания отображения
+                display_end_time = time.time()
+                display_time = display_end_time - display_start_time
+                total_time_to_display = display_end_time - capture_time
+                
+                # Обновляем FPS и временные метрики в главном окне
+                if hasattr(self.window_manager, 'main_window'):
+                    main_window = self.window_manager.main_window
+                    main_window.fps_after_processing = avg_fps
+                    main_window.processing_time_ms = processing_time * 1000  # В миллисекундах
+                    main_window.total_time_ms = total_time_to_display * 1000  # В миллисекундах
+                    main_window.update_fps_display()
                 
                 frames = []
                 

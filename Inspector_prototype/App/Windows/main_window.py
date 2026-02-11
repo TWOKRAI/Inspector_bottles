@@ -287,8 +287,9 @@ class MainWindow(QMainWindow):
         
         # FPS значения
         self.fps_sdk = 0.0  # FPS из SDK камеры
-        self.fps_before_processing = 0.0  # FPS до обработки
-        self.fps_after_processing = 0.0  # FPS после обработки
+        self.fps_after_processing = 0.0  # FPS после обработки (вычисляется на основе времени между кадрами)
+        self.processing_time_ms = 0.0  # Время обработки в миллисекундах
+        self.total_time_ms = 0.0  # Общее время от захвата до отображения в миллисекундах
         
         self.current_access_level = 0
         
@@ -365,11 +366,6 @@ class MainWindow(QMainWindow):
             self.update_controls_hikvision()
             self.update_fps_display()
         
-        elif msg_type == 'fps_update':
-            # Обновляем FPS значения
-            self.fps_before_processing = message.get('fps_before_processing', 0.0)
-            self.fps_sdk = message.get('fps_sdk', self.fps_sdk)
-            self.update_fps_display()
 
         self.update_controls()
         self.update_controls_camera()
@@ -1018,8 +1014,8 @@ class MainWindow(QMainWindow):
         btn_set_params.clicked.connect(self.sdk_set_parameters)
         layout.addWidget(btn_set_params)
         
-        # FPS информация
-        fps_group = QGroupBox("FPS Information")
+        # FPS и временная информация
+        fps_group = QGroupBox("FPS & Performance")
         fps_layout = QVBoxLayout()
         fps_group.setLayout(fps_layout)
         
@@ -1027,13 +1023,17 @@ class MainWindow(QMainWindow):
         self.fps_sdk_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
         fps_layout.addWidget(self.fps_sdk_label)
         
-        self.fps_before_label = QLabel("FPS до обработки: 0.0")
-        self.fps_before_label.setStyleSheet("font-size: 12px; color: #2ecc71;")
-        fps_layout.addWidget(self.fps_before_label)
-        
-        self.fps_after_label = QLabel("FPS после обработки: 0.0")
-        self.fps_after_label.setStyleSheet("font-size: 12px; color: #e74c3c;")
+        self.fps_after_label = QLabel("Display FPS: 0.0")
+        self.fps_after_label.setStyleSheet("font-size: 12px; color: #2ecc71;")
         fps_layout.addWidget(self.fps_after_label)
+        
+        self.processing_time_label = QLabel("Processing: 0.0 ms")
+        self.processing_time_label.setStyleSheet("font-size: 12px; color: #e67e22;")
+        fps_layout.addWidget(self.processing_time_label)
+        
+        self.total_time_label = QLabel("Total (capture→display): 0.0 ms")
+        self.total_time_label.setStyleSheet("font-size: 12px; color: #e74c3c;")
+        fps_layout.addWidget(self.total_time_label)
         
         layout.addWidget(fps_group)
         
@@ -1060,13 +1060,15 @@ class MainWindow(QMainWindow):
             print(f"Error toggling SDK UI: {e}")
     
     def update_fps_display(self):
-        """Обновить отображение FPS во вкладке Hikvision"""
+        """Обновить отображение FPS и временных метрик во вкладке Hikvision"""
         if hasattr(self, 'fps_sdk_label'):
             self.fps_sdk_label.setText(f"SDK FPS: {self.fps_sdk:.1f}")
-        if hasattr(self, 'fps_before_label'):
-            self.fps_before_label.setText(f"FPS до обработки: {self.fps_before_processing:.1f}")
         if hasattr(self, 'fps_after_label'):
-            self.fps_after_label.setText(f"FPS после обработки: {self.fps_after_processing:.1f}")
+            self.fps_after_label.setText(f"Display FPS: {self.fps_after_processing:.1f}")
+        if hasattr(self, 'processing_time_label'):
+            self.processing_time_label.setText(f"Processing: {self.processing_time_ms:.1f} ms")
+        if hasattr(self, 'total_time_label'):
+            self.total_time_label.setText(f"Total (capture→display): {self.total_time_ms:.1f} ms")
     
     def sdk_enum_devices(self):
         """Перечислить устройства камеры"""
@@ -1217,18 +1219,22 @@ class MainWindow(QMainWindow):
             # Создаем копию кадра для рисования FPS
             frame_with_fps = frame.copy()
             
-            # Рисуем FPS на изображении
+            # Рисуем FPS и временные метрики на изображении
             fps_text = f"FPS: {self.fps_after_processing:.1f}" if self.fps_after_processing > 0 else "FPS: 0.0"
+            time_text = f"Proc: {self.processing_time_ms:.1f}ms | Total: {self.total_time_ms:.1f}ms"
             
             # Настройки текста
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 1.0
-            color = (0, 255, 0)  # Зеленый цвет в RGB
+            font_scale = 0.7
+            color_fps = (0, 255, 0)  # Зеленый цвет для FPS
+            color_time = (255, 255, 0)  # Желтый цвет для времени
             thickness = 2
-            position = (10, 30)  # Верхний левый угол
             
-            # Рисуем текст на изображении
-            cv2.putText(frame_with_fps, fps_text, position, font, font_scale, color, thickness, cv2.LINE_AA)
+            # Рисуем FPS на изображении
+            cv2.putText(frame_with_fps, fps_text, (10, 30), font, font_scale, color_fps, thickness, cv2.LINE_AA)
+            
+            # Рисуем временные метрики на изображении
+            cv2.putText(frame_with_fps, time_text, (10, 55), font, font_scale, color_time, thickness, cv2.LINE_AA)
             
             height, width = frame_with_fps.shape[:2]
             channel = frame_with_fps.shape[2] if len(frame_with_fps.shape) == 3 else 1

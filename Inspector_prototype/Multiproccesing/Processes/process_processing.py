@@ -60,9 +60,19 @@ def process_processing(queue_manager, control_processing):
             time.sleep(0.01)
             continue
         
+        # Время начала обработки
+        processing_start_time = time.time()
+        
         id_memory = data_frame['id_memory']
-        timestamp = data_frame['current_time']
-        frame_id = data_frame['frame_id']
+        capture_time = data_frame.get('capture_time', processing_start_time)
+        frame_id = data_frame.get('frame_id', 0)
+        
+        # Инициализируем timestamps если их нет
+        if 'timestamps' not in data_frame:
+            data_frame['timestamps'] = {}
+        
+        # Сохраняем время начала обработки
+        data_frame['timestamps']['processing_start'] = processing_start_time
         
         # Читаем оригинальный кадр из памяти
         frames = queue_manager.memory_manager.read_images("camera_data", id_memory)
@@ -106,8 +116,13 @@ def process_processing(queue_manager, control_processing):
             # Если обработка выключена, используем обрезанное изображение
             processed_frame = cropped_frame.copy()
         
-        # Обновляем FPS счетчик (после обработки)
-        fps_after = fps_counter_after.update()
+        # Время окончания обработки
+        processing_end_time = time.time()
+        data_frame['timestamps']['processing_end'] = processing_end_time
+        
+        # Вычисляем время обработки
+        processing_time = processing_end_time - processing_start_time
+        total_time_from_capture = processing_end_time - capture_time
         
         # Записываем обработанный кадр в память
         processed_frames = [processed_frame]
@@ -116,10 +131,12 @@ def process_processing(queue_manager, control_processing):
         # Отправляем метаданные в display_queue для App
         display_data = {
             'id_memory': id_memory,
-            'current_time': timestamp,
+            'capture_time': capture_time,  # Время захвата кадра
             'frame_id': frame_id,
             'processed': True,  # Флаг что это обработанное изображение
-            'fps_after_processing': fps_after if fps_after > 0 else fps_counter_after.get_fps()
+            'timestamps': data_frame['timestamps'],  # Все временные метки
+            'processing_time': processing_time,  # Время обработки в секундах
+            'total_time_from_capture': total_time_from_capture  # Общее время от захвата до конца обработки
         }
         
         queue_manager.remove_old_frame_if_full(queue_manager.display_queue)

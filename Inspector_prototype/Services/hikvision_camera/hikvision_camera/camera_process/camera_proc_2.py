@@ -6,12 +6,6 @@ import queue
 import ctypes
 from ctypes import *
 import numpy as np
-import sys
-import os
-
-# Добавляем путь к Utils для импорта FrameFPS
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../'))
-from Utils.frame_fps import FrameFPS
 
 from .MvCameraControl_class import MvCamera, MV_CC_DEVICE_INFO_LIST, POINTER, MV_CC_DEVICE_INFO
 from .MvCameraControl_class import MV_FRAME_OUT, MV_DISPLAY_FRAME_INFO, MVCC_FLOATVALUE
@@ -50,8 +44,7 @@ class CameraProcess():
         # Индексная система для памяти (как в backup_worker)
         self.index_memory = [0] * 12
         
-        # FPS счетчики
-        self.fps_counter = FrameFPS(update_interval=1.0)  # FPS до обработки
+        # FPS из SDK камеры
         self.sdk_fps = 0.0  # FPS из SDK камеры
 
         
@@ -469,25 +462,16 @@ class CameraProcess():
                         self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
                         
                         # Отправляем метаданные в очередь для обработки
+                        # Сохраняем время захвата кадра для измерения производительности
                         data_frame = {
                             'id_memory': id_memory,
-                            'current_time': timestamp,
+                            'capture_time': timestamp,  # Время захвата кадра
                             'frame_counter': self.frame_counter,
                             'frame_id': self.frame_id,
+                            'timestamps': {
+                                'capture': timestamp  # Начало цепочки обработки
+                            }
                         }
-                        
-                        # Обновляем FPS счетчик (до обработки)
-                        fps_before = self.fps_counter.update()
-                        if fps_before > 0:
-                            # Отправляем FPS в App через очередь
-                            try:
-                                self.queue_manager.camera_to_app.put({
-                                    'type': 'fps_update',
-                                    'fps_before_processing': fps_before,
-                                    'fps_sdk': self.sdk_fps
-                                }, block=False)
-                            except queue.Full:
-                                pass
                         
                         # Отправляем метаданные в очередь для обработки
                         self.queue_manager.remove_old_frame_if_full(self.queue_manager.frame_processor_queue)
