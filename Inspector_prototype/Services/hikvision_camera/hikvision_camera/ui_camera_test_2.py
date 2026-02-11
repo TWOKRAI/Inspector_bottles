@@ -64,6 +64,9 @@ class CameraUI(QMainWindow):
         self.frame_timer = QTimer()
         self.frame_timer.timeout.connect(self.update_frame)
         
+        # Флаг для отслеживания, был ли запущен таймер до скрытия
+        self.frame_timer_was_running = False
+        
         # self.command_timer = QTimer()
         # self.command_timer.timeout.connect(self.check_camera_messages)
 
@@ -480,6 +483,24 @@ class CameraUI(QMainWindow):
                 continue
             except Exception as e:
                 print(f"Error in control UI loop: {e}")
+    
+    def show(self):
+        """Показать окно и возобновить обновление кадров если нужно"""
+        super().show()
+        # Если таймер был запущен до скрытия, возобновляем его
+        if self.frame_timer_was_running and self.is_grabbing:
+            self.frame_timer.start(16)
+            self.frame_timer_was_running = False
+            print("UI SDK: Frame timer resumed")
+    
+    def hide(self):
+        """Скрыть окно и остановить обновление кадров для экономии ресурсов"""
+        # Сохраняем состояние таймера перед скрытием
+        if self.frame_timer.isActive():
+            self.frame_timer_was_running = True
+            self.frame_timer.stop()
+            print("UI SDK: Frame timer stopped (window hidden)")
+        super().hide()
     
     def closeEvent(self, event):
         """Обработка закрытия окна"""
