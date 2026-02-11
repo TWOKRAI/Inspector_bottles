@@ -17,8 +17,8 @@ class CameraMessageThread(QThread):
         """Основной цикл потока"""
         while self.running and not self.stop_event.is_set():
             try:
-                # Блокирующее ожидание сообщения с таймаутом
-                message = self.queue_manager.camera_to_ui.get(timeout=1)
+                # Блокирующее ожидание сообщения с таймаутом (читаем из отдельной очереди для App)
+                message = self.queue_manager.camera_to_app.get(timeout=1)
                 if message:
                     print(f"App CameraMessageThread: received message: {message.get('type')}")
                     self.message_received.emit(message)

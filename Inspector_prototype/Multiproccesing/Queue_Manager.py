@@ -30,6 +30,7 @@ class QueueManager:
         # Очереди для UI SDK
         self.ui_to_camera = Queue(maxsize=10)  # Управление камерой (из UI SDK)
         self.camera_to_ui = Queue(maxsize=10)  # Ответы от камеры к UI SDK
+        self.camera_to_app = Queue(maxsize=10)  # Ответы от камеры к App (отдельная очередь)
         self.control_ui = Queue(maxsize=1)  # Управление видимостью UI SDK окна
 
         # Очереди для бота и других сервисов (заглушки для совместимости)

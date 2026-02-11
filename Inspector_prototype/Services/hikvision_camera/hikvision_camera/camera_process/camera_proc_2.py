@@ -228,11 +228,14 @@ class CameraProcess():
                 
                 devices.append(device_info)
             
-            self.queue_manager.camera_to_ui.put({
+            # Отправляем сообщение в обе очереди: для UI SDK и для App
+            response_msg = {
                 'type': 'enum_devices_response',
                 'devices': devices
-            })
-
+            }
+            self.queue_manager.camera_to_ui.put(response_msg)  # Для UI SDK
+            self.queue_manager.camera_to_app.put(response_msg)  # Для App
+            
             print(f'отправил enum_devices_response {devices}')
             
         except Exception as e:
@@ -522,10 +525,13 @@ class CameraProcess():
                 'gain': stFloatParam_gain.fCurValue
             }
             
-            self.queue_manager.camera_to_ui.put({
+            # Отправляем параметры в обе очереди: для UI SDK и для App
+            params_msg = {
                 'type': 'parameters_response',
                 'parameters': params
-            })
+            }
+            self.queue_manager.camera_to_ui.put(params_msg)  # Для UI SDK
+            self.queue_manager.camera_to_app.put(params_msg)  # Для App
             
         except Exception as e:
             self._send_error(f"Get parameters failed: {str(e)}")
