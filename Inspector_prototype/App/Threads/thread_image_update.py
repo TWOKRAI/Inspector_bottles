@@ -172,7 +172,8 @@ class UpdateImage(QThread):
 
                 if frames and len(frames) > 0:
                     self.update_frame.emit(frames)
-                #self.update_frame.emit(frames)
+                else:
+                    print(f"WARNING: No frames read from memory (id_memory={id_memory}, processed={processed}, show_processed={show_processed})")
                 
                 #print('time_all', time.time() - data_frame['current_time'])
                 

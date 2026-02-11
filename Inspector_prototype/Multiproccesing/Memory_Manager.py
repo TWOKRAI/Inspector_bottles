@@ -154,7 +154,9 @@ class ImageMemoryManager:
             return shm.name
 
         except Exception as e:
-            print(f"Write error: {e}")
+            print(f"Write error in {shm_name}[{index}]: {e}")
+            import traceback
+            traceback.print_exc()
             self._clear_memory(shm_name, index)
             return None
 
@@ -208,7 +210,9 @@ class ImageMemoryManager:
             return images
 
         except Exception as e:
-            print(f"Read error: {e}")
+            print(f"Read error in {shm_name}[{index}]: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def release_memory(self, shm_name: str, index: int) -> None:

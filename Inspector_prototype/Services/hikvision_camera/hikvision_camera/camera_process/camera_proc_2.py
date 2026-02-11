@@ -446,15 +446,41 @@ class CameraProcess():
                         try:
                             import cv2
                             frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-                        except:
-                            pass
-                    elif len(frame.shape) == 3 and frame.shape[2] == 3:
-                        # Конвертируем BGR в RGB если нужно
-                        try:
-                            import cv2
-                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        except:
-                            pass
+                            original_height = frame.shape[0]
+                            original_width = frame.shape[1]
+                        except Exception as e:
+                            print(f"Error converting GRAY to RGB: {e}")
+                            continue
+                    elif len(frame.shape) == 3:
+                        if frame.shape[2] == 3:
+                            # Конвертируем BGR в RGB если нужно
+                            try:
+                                import cv2
+                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            except Exception as e:
+                                print(f"Error converting BGR to RGB: {e}")
+                                # Продолжаем без конвертации
+                                pass
+                        elif frame.shape[2] == 4:
+                            # Если RGBA, конвертируем в RGB
+                            try:
+                                import cv2
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+                                original_height = frame.shape[0]
+                                original_width = frame.shape[1]
+                            except Exception as e:
+                                print(f"Error converting RGBA to RGB: {e}")
+                                continue
+                    
+                    # Проверяем что изображение имеет правильный формат перед записью
+                    if len(frame.shape) != 3 or frame.shape[2] != 3:
+                        print(f"ERROR: Invalid frame format after conversion: shape={frame.shape}")
+                        continue
+                    
+                    # Обновляем размеры после всех конвертаций
+                    if original_height is None or original_width is None:
+                        original_height = frame.shape[0]
+                        original_width = frame.shape[1]
                     
                     # Записываем в разделяемую память
                     timestamp = time.time()
@@ -478,7 +504,18 @@ class CameraProcess():
                         # Записываем кадр в память
                         frames = [frame]
                         self.index_memory[id_memory] = 1
-                        self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
+                        try:
+                            result = self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
+                            if result is None:
+                                print(f"ERROR: Failed to write frame to memory (id_memory={id_memory}, shape={frame.shape}, dtype={frame.dtype})")
+                                self.index_memory[id_memory] = 0
+                                continue
+                        except Exception as e:
+                            print(f"ERROR: Exception writing frame to memory: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            self.index_memory[id_memory] = 0
+                            continue
                         
                         # Отправляем метаданные в очередь для обработки
                         # Сохраняем время захвата кадра для измерения производительности
