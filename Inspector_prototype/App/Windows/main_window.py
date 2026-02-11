@@ -339,7 +339,8 @@ class MainWindow(QMainWindow):
         # Создание главного окна
         self.setWindowTitle("Image Processing App")
         self.setGeometry(100, 100, 1200, 800)
-        self.setFixedSize(1024, 780) 
+        # Убираем фиксированный размер чтобы окно могло изменяться
+        # self.setFixedSize(1024, 780) 
 
         main_layout = QVBoxLayout()
         central_widget = QWidget()
@@ -890,22 +891,23 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         tab.setLayout(layout)
         
-        # Кнопки управления камерой
+        # Кнопка Enum Devices и выпадающий список камер рядом
+        enum_layout = QHBoxLayout()
         btn_enum = QPushButton("Enum Devices")
         btn_enum.setMinimumHeight(40)
+        btn_enum.setMinimumWidth(150)
         btn_enum.clicked.connect(self.sdk_enum_devices)
-        layout.addWidget(btn_enum)
+        enum_layout.addWidget(btn_enum)
         
-        # Выпадающий список камер
-        camera_layout = QHBoxLayout()
+        # Выпадающий список камер рядом с кнопкой
         camera_label = QLabel("Камера:")
-        camera_label.setFixedWidth(80)
-        camera_layout.addWidget(camera_label)
+        camera_label.setFixedWidth(60)
+        enum_layout.addWidget(camera_label)
         
         self.combo_cameras = QComboBox()
         self.combo_cameras.setMinimumHeight(35)
-        camera_layout.addWidget(self.combo_cameras)
-        layout.addLayout(camera_layout)
+        enum_layout.addWidget(self.combo_cameras, stretch=1)
+        layout.addLayout(enum_layout)
         
         btn_open = QPushButton("Open Camera")
         btn_open.setMinimumHeight(40)
