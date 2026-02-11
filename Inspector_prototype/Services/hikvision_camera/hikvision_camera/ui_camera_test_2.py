@@ -523,6 +523,7 @@ def main(queue_manager=None):
                     queue_manager=queue_manager, 
                     )
     
-    window.show()
+    # По умолчанию окно скрыто
+    window.hide()
     
     sys.exit(app.exec_())
