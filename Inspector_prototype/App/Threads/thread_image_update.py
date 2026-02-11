@@ -84,37 +84,29 @@ class UpdateImage(QThread):
             
 
             if data_frame is not None:
-                id_memory = data_frame['id_memory']
-                camera_robot = data_frame['camera_robot']
+                id_memory = data_frame.get('id_memory')
+                camera_robot = data_frame.get('camera_robot', False)
+                
+                frames = []
                 
                 if not camera_robot:
-                    frames = self.queue_manager.memory_manager.read_images('display_data', id_memory)
-                    
+                    # Читаем из camera_data (как записывает процесс камеры)
+                    frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
                 else:
-                    frames = []
+                    # Читаем из camera_data_out (для робота)
                     frames_out = self.queue_manager.memory_manager.read_images('camera_data_out', 0)
-                    
-                    
                     if len(frames_out) > 0:
                         scale_factor = 0.7
-                            # Получаем размеры оригинального изображения
                         height, width = frames_out[0].shape[:2]
-                        
-                        
-                        # Вычисляем новые размеры на основе коэффициента
                         new_width = int(width * scale_factor)
                         new_height = int(height * scale_factor)
-                        
-                        # Масштабируем изображение
                         frames_out_scaled = cv2.resize(frames_out[0], (new_width, new_height))
-                                        
                         frame = frames_out_scaled[:, 40: width - 40]
-                        #frame = frames_out_2[100:700, 300:1000]
                         frames.append(frame)
-
                         time.sleep(0.1)
 
-                self.update_frame.emit(frames)
+                if frames and len(frames) > 0:
+                    self.update_frame.emit(frames)
                 #self.update_frame.emit(frames)
                 
                 #print('time_all', time.time() - data_frame['current_time'])

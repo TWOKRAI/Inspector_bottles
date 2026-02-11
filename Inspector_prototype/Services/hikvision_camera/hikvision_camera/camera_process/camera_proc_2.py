@@ -39,6 +39,13 @@ class CameraProcess():
         
         # Счетчики
         self.frame_counter = 0
+        self.frame_id = 0
+        
+        # Индексная система для памяти (как в backup_worker)
+        self.index_memory = [0] * 12
+        
+        # Устанавливаем событие ready_app для начала передачи кадров
+        self.queue_manager.ready_app.set()
 
         
     def start(self):
@@ -57,6 +64,11 @@ class CameraProcess():
         #     'camera_index': self.camera_index
         # })
         
+        # Запускаем поток для освобождения памяти
+        self.memory_thread = threading.Thread(target=self._memory_release_loop)
+        self.memory_thread.daemon = True
+        self.memory_thread.start()
+        
         print("Camera process ready, waiting for commands...")
     
     def _command_loop(self):
@@ -64,9 +76,7 @@ class CameraProcess():
         while not self.stop_event.is_set():
             try:
                 # Ждем команду от UI
-                print('Ждем команду от UI')
                 command = self.queue_manager.ui_to_camera.get(timeout=1)
-                print(f'UI получил message{command}')
 
                 if command:
                     self._handle_command(command)
@@ -79,6 +89,30 @@ class CameraProcess():
                 traceback.print_exc()
 
         print('exit')
+    
+    def _memory_release_loop(self):
+        """Цикл освобождения памяти"""
+        while not self.stop_event.is_set():
+            try:
+                id_memory_delete = self.queue_manager.memory_release_queue.get(timeout=0.05)
+                if id_memory_delete is not None and 0 <= id_memory_delete < len(self.index_memory):
+                    self.index_memory[id_memory_delete] = 0
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Error in memory release loop: {e}")
+    
+    def _memory_release_loop(self):
+        """Цикл освобождения памяти"""
+        while not self.stop_event.is_set():
+            try:
+                id_memory_delete = self.queue_manager.memory_release_queue.get(timeout=0.05)
+                if id_memory_delete is not None and 0 <= id_memory_delete < len(self.index_memory):
+                    self.index_memory[id_memory_delete] = 0
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Error in memory release loop: {e}")
     
     def _handle_command(self, command):
         """Обработать команду от UI"""
@@ -370,7 +404,73 @@ class CameraProcess():
                             except:
                                 pass
                     
-                    # Отправляем кадр в очередь
+                    # Изменяем размер кадра если нужно (для совместимости с памятью)
+                    if frame.shape[0] != 720 or frame.shape[1] != 1280:
+                        try:
+                            import cv2
+                            frame = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_AREA)
+                        except:
+                            pass
+                    
+                    # Конвертируем в RGB если нужно
+                    if len(frame.shape) == 2:
+                        try:
+                            import cv2
+                            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                        except:
+                            pass
+                    elif len(frame.shape) == 3 and frame.shape[2] == 3:
+                        # Конвертируем BGR в RGB если нужно
+                        try:
+                            import cv2
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        except:
+                            pass
+                    
+                    # Записываем в разделяемую память
+                    timestamp = time.time()
+                    
+                    # Находим свободный индекс
+                    id_memory = None
+                    for i in range(len(self.index_memory)):
+                        if self.index_memory[i] == 0:
+                            id_memory = i
+                            break
+                    
+                    if id_memory is not None:
+                        if id_memory > 7:
+                            # Очищаем очереди если память переполнена
+                            self.queue_manager.clear_all_queue()
+                            self.queue_manager.clear_all_event()
+                            for i in range(len(self.index_memory)):
+                                self.index_memory[i] = 0
+                            continue
+                        
+                        # Записываем кадр в память
+                        frames = [frame]
+                        self.index_memory[id_memory] = 1
+                        self.queue_manager.memory_manager.write_images(frames, "camera_data", id_memory)
+                        
+                        # Отправляем метаданные в очередь для обработки
+                        data_frame = {
+                            'id_memory': id_memory,
+                            'current_time': timestamp,
+                            'frame_counter': self.frame_counter,
+                            'frame_id': self.frame_id,
+                        }
+                        
+                        self.queue_manager.remove_old_frame_if_full(self.queue_manager.frame_processor_queue)
+                        self.queue_manager.frame_processor_queue.put(data_frame)
+                        
+                        # Также отправляем в display_queue для App
+                        self.queue_manager.remove_old_frame_if_full(self.queue_manager.display_queue)
+                        self.queue_manager.display_queue.put(data_frame)
+                        
+                        self.frame_id += 1
+                        if self.frame_id > 120:
+                            self.frame_id = 0
+                    
+                    # Также отправляем кадр в очередь для UI SDK (старый способ)
                     try:
                         self.queue_manager.frame_queue.put_nowait(frame)
                     except queue.Full:
@@ -379,6 +479,8 @@ class CameraProcess():
                     
                     # Освобождаем буфер
                     self.camera.MV_CC_FreeImageBuffer(stOutFrame)
+                    
+                    self.frame_counter += 1
                     
                 else:
                     time.sleep(0.001)
