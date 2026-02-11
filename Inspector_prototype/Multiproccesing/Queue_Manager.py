@@ -18,15 +18,33 @@ class QueueManager:
         self.memory_release_queue = Queue(maxsize=12)  # Освобождение памяти
         self.frame_queue = Queue(maxsize=self.buffer_size)  # Кадры для UI SDK (временная очередь)
 
-        # Очереди управления
+        # Очереди управления (для совместимости с App)
         self.control_processing = Queue(maxsize=1)  # Управление процессом обработки (из App/UI)
+        self.control_frame_process = Queue(maxsize=1)  # Управление процессом обработки кадров (для App)
+        self.control_camera = Queue(maxsize=1)  # Управление камерой (для App)
+        self.control_conveyor = Queue(maxsize=1)  # Управление конвейером (для App)
+        self.control_neuroun = Queue(maxsize=1)  # Управление нейросетью (для App)
+        self.control_draw = Queue(maxsize=1)  # Управление отрисовкой (для App)
+        self.control_robot = Queue(maxsize=1)  # Управление роботом (для App)
+        
+        # Очереди для UI SDK
         self.ui_to_camera = Queue(maxsize=10)  # Управление камерой (из UI SDK)
         self.camera_to_ui = Queue(maxsize=10)  # Ответы от камеры к UI SDK
         self.control_ui = Queue(maxsize=1)  # Управление видимостью UI SDK окна
 
+        # Очереди для бота и других сервисов (заглушки для совместимости)
+        self.bot_message = Queue(maxsize=self.buffer_size)
+        self.bot_message_send = Queue(maxsize=self.buffer_size)
+        self.download = Queue()  # Очередь для загрузки/статусов
+
         # События
         self.control_camera_event = Event()
         self.control_processing_event = Event()
+        self.control_conveyor_event = Event()
+        self.control_neuroun_event = Event()
+        self.control_draw_event = Event()
+        self.control_robot_event = Event()
+        self.control_frame_process_event = Event()
 
         # Менеджер памяти
         self.memory_manager = ImageMemoryManager()
@@ -77,13 +95,33 @@ class QueueManager:
         self.clear_queue(self.frame_processor_queue, 0)
         self.clear_queue(self.display_queue, 0)
         self.clear_queue(self.frame_queue, 0)
+        self.clear_queue(self.memory_release_queue, 0)
+        
+        # Очереди управления
         self.clear_queue(self.control_processing, 0)
+        self.clear_queue(self.control_frame_process, 0)
+        self.clear_queue(self.control_camera, 0)
+        self.clear_queue(self.control_conveyor, 0)
+        self.clear_queue(self.control_neuroun, 0)
+        self.clear_queue(self.control_draw, 0)
+        self.clear_queue(self.control_robot, 0)
+        
+        # UI SDK очереди
         self.clear_queue(self.ui_to_camera, 0)
         self.clear_queue(self.camera_to_ui, 0)
         self.clear_queue(self.control_ui, 0)
-        self.clear_queue(self.memory_release_queue, 0)
+        
+        # Другие очереди
+        self.clear_queue(self.bot_message, 0)
+        self.clear_queue(self.bot_message_send, 0)
+        self.clear_queue(self.download, 0)
 
     def clear_all_event(self):
         """Сбросить все события"""
         self.control_camera_event.clear()
         self.control_processing_event.clear()
+        self.control_conveyor_event.clear()
+        self.control_neuroun_event.clear()
+        self.control_draw_event.clear()
+        self.control_robot_event.clear()
+        self.control_frame_process_event.clear()
