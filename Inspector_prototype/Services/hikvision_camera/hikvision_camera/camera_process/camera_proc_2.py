@@ -6,6 +6,12 @@ import queue
 import ctypes
 from ctypes import *
 import numpy as np
+import sys
+import os
+
+# Добавляем путь к Utils для импорта FrameFPS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../'))
+from Utils.frame_fps import FrameFPS
 
 from .MvCameraControl_class import MvCamera, MV_CC_DEVICE_INFO_LIST, POINTER, MV_CC_DEVICE_INFO
 from .MvCameraControl_class import MV_FRAME_OUT, MV_DISPLAY_FRAME_INFO, MVCC_FLOATVALUE
@@ -43,6 +49,10 @@ class CameraProcess():
         
         # Индексная система для памяти (как в backup_worker)
         self.index_memory = [0] * 12
+        
+        # FPS счетчики
+        self.fps_counter = FrameFPS(update_interval=1.0)  # FPS до обработки
+        self.sdk_fps = 0.0  # FPS из SDK камеры
 
         
     def start(self):
@@ -466,6 +476,19 @@ class CameraProcess():
                             'frame_id': self.frame_id,
                         }
                         
+                        # Обновляем FPS счетчик (до обработки)
+                        fps_before = self.fps_counter.update()
+                        if fps_before > 0:
+                            # Отправляем FPS в App через очередь
+                            try:
+                                self.queue_manager.camera_to_app.put({
+                                    'type': 'fps_update',
+                                    'fps_before_processing': fps_before,
+                                    'fps_sdk': self.sdk_fps
+                                }, block=False)
+                            except queue.Full:
+                                pass
+                        
                         # Отправляем метаданные в очередь для обработки
                         self.queue_manager.remove_old_frame_if_full(self.queue_manager.frame_processor_queue)
                         self.queue_manager.frame_processor_queue.put(data_frame)
@@ -528,6 +551,9 @@ class CameraProcess():
                 'exposure_time': stFloatParam_exposureTime.fCurValue,
                 'gain': stFloatParam_gain.fCurValue
             }
+            
+            # Сохраняем FPS из SDK
+            self.sdk_fps = stFloatParam_FrameRate.fCurValue
             
             # Отправляем параметры в обе очереди: для UI SDK и для App
             params_msg = {

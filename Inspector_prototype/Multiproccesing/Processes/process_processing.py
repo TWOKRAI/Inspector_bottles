@@ -2,6 +2,12 @@ import cv2
 import time
 import numpy as np
 from queue import Empty
+import sys
+import os
+
+# Добавляем путь к Utils для импорта FrameFPS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+from Utils.frame_fps import FrameFPS
 
 
 def process_processing(queue_manager, control_processing):
@@ -100,6 +106,9 @@ def process_processing(queue_manager, control_processing):
             # Если обработка выключена, используем обрезанное изображение
             processed_frame = cropped_frame.copy()
         
+        # Обновляем FPS счетчик (после обработки)
+        fps_after = fps_counter_after.update()
+        
         # Записываем обработанный кадр в память
         processed_frames = [processed_frame]
         queue_manager.memory_manager.write_images(processed_frames, "process_data", id_memory)
@@ -110,6 +119,7 @@ def process_processing(queue_manager, control_processing):
             'current_time': timestamp,
             'frame_id': frame_id,
             'processed': True,  # Флаг что это обработанное изображение
+            'fps_after_processing': fps_after if fps_after > 0 else fps_counter_after.get_fps()
         }
         
         queue_manager.remove_old_frame_if_full(queue_manager.display_queue)

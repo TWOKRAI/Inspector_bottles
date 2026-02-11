@@ -87,6 +87,12 @@ class UpdateImage(QThread):
                 id_memory = data_frame.get('id_memory')
                 camera_robot = data_frame.get('camera_robot', False)
                 processed = data_frame.get('processed', False)
+                fps_after = data_frame.get('fps_after_processing', 0.0)
+                
+                # Обновляем FPS после обработки в главном окне
+                if hasattr(self.window_manager, 'main_window') and fps_after > 0:
+                    self.window_manager.main_window.fps_after_processing = fps_after
+                    self.window_manager.main_window.update_fps_display()
                 
                 frames = []
                 

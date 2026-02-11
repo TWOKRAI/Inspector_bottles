@@ -1,11 +1,13 @@
 import cv2
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel,
-                             QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox, QComboBox)
+                             QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox, QComboBox, QGroupBox)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtGui import QCursor
 from PyQt5.QtCore import QTimer
 import time
+import cv2
+import numpy as np
 
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QSlider, QWidget
 from PyQt5.QtCore import Qt
@@ -283,6 +285,11 @@ class MainWindow(QMainWindow):
         # Список устройств камеры для Hikvision
         self.hikvision_device_list = []
         
+        # FPS значения
+        self.fps_sdk = 0.0  # FPS из SDK камеры
+        self.fps_before_processing = 0.0  # FPS до обработки
+        self.fps_after_processing = 0.0  # FPS после обработки
+        
         self.current_access_level = 0
         
         # Инициализируем UI перед запуском потока сообщений
@@ -353,7 +360,16 @@ class MainWindow(QMainWindow):
                 self.controls_hikvision['Exposure'] = params.get('exposure_time', 0)
             if 'Gain' in self.ui_elements:
                 self.controls_hikvision['Gain'] = params.get('gain', 0)
+            # Сохраняем FPS из SDK
+            self.fps_sdk = params.get('frame_rate', 0.0)
             self.update_controls_hikvision()
+            self.update_fps_display()
+        
+        elif msg_type == 'fps_update':
+            # Обновляем FPS значения
+            self.fps_before_processing = message.get('fps_before_processing', 0.0)
+            self.fps_sdk = message.get('fps_sdk', self.fps_sdk)
+            self.update_fps_display()
 
         self.update_controls()
         self.update_controls_camera()
@@ -1002,6 +1018,25 @@ class MainWindow(QMainWindow):
         btn_set_params.clicked.connect(self.sdk_set_parameters)
         layout.addWidget(btn_set_params)
         
+        # FPS информация
+        fps_group = QGroupBox("FPS Information")
+        fps_layout = QVBoxLayout()
+        fps_group.setLayout(fps_layout)
+        
+        self.fps_sdk_label = QLabel("SDK FPS: 0.0")
+        self.fps_sdk_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        fps_layout.addWidget(self.fps_sdk_label)
+        
+        self.fps_before_label = QLabel("FPS до обработки: 0.0")
+        self.fps_before_label.setStyleSheet("font-size: 12px; color: #2ecc71;")
+        fps_layout.addWidget(self.fps_before_label)
+        
+        self.fps_after_label = QLabel("FPS после обработки: 0.0")
+        self.fps_after_label.setStyleSheet("font-size: 12px; color: #e74c3c;")
+        fps_layout.addWidget(self.fps_after_label)
+        
+        layout.addWidget(fps_group)
+        
         layout.addStretch()
         
         # Кнопки показа/скрытия UI SDK окна (внизу)
@@ -1023,6 +1058,15 @@ class MainWindow(QMainWindow):
             self.queue_manager.control_ui.put({'type': 'show' if show else 'hide'})
         except Exception as e:
             print(f"Error toggling SDK UI: {e}")
+    
+    def update_fps_display(self):
+        """Обновить отображение FPS во вкладке Hikvision"""
+        if hasattr(self, 'fps_sdk_label'):
+            self.fps_sdk_label.setText(f"SDK FPS: {self.fps_sdk:.1f}")
+        if hasattr(self, 'fps_before_label'):
+            self.fps_before_label.setText(f"FPS до обработки: {self.fps_before_processing:.1f}")
+        if hasattr(self, 'fps_after_label'):
+            self.fps_after_label.setText(f"FPS после обработки: {self.fps_after_processing:.1f}")
     
     def sdk_enum_devices(self):
         """Перечислить устройства камеры"""
@@ -1150,14 +1194,10 @@ class MainWindow(QMainWindow):
 
 
     def update_data(self, frames):
-        """Обновление данных изображения"""
+        """Обновить отображаемые данные (кадры) с наложением FPS"""
         if frames is None or len(frames) == 0:
             return
         
-        # frame = data['frame']
-        # timestrap = data['timestrap']
-
-        # if self.get_control_value("history") == 100:
         frame = frames[0]
         if frame is not None:
             self.update_image(frame)
@@ -1169,18 +1209,34 @@ class MainWindow(QMainWindow):
 
 
     def update_image(self, frame):
-        """Обновление изображения в label"""
+        """Обновление изображения в label с наложением FPS"""
         if frame is None:
             return
         
         try:
-            height, width = frame.shape[:2]
-            channel = frame.shape[2] if len(frame.shape) == 3 else 1
+            # Создаем копию кадра для рисования FPS
+            frame_with_fps = frame.copy()
+            
+            # Рисуем FPS на изображении
+            fps_text = f"FPS: {self.fps_after_processing:.1f}" if self.fps_after_processing > 0 else "FPS: 0.0"
+            
+            # Настройки текста
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 1.0
+            color = (0, 255, 0)  # Зеленый цвет в RGB
+            thickness = 2
+            position = (10, 30)  # Верхний левый угол
+            
+            # Рисуем текст на изображении
+            cv2.putText(frame_with_fps, fps_text, position, font, font_scale, color, thickness, cv2.LINE_AA)
+            
+            height, width = frame_with_fps.shape[:2]
+            channel = frame_with_fps.shape[2] if len(frame_with_fps.shape) == 3 else 1
             
             new_height = int(height * 0.69)
             new_width = int(width * 0.69)
 
-            frame_resized = cv2.resize(frame, (new_width, new_height))
+            frame_resized = cv2.resize(frame_with_fps, (new_width, new_height))
 
             bytes_per_line = 3 * new_width
             # Конвертируем RGB в BGR для QImage (так как OpenCV использует BGR)
