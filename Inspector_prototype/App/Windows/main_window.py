@@ -1106,14 +1106,17 @@ class MainWindow(QMainWindow):
 
 
     def update_data(self, frames):
-
-
+        """Обновление данных изображения"""
+        if frames is None or len(frames) == 0:
+            return
+        
         # frame = data['frame']
         # timestrap = data['timestrap']
 
         # if self.get_control_value("history") == 100:
         frame = frames[0]
-        self.update_image(frame)
+        if frame is not None:
+            self.update_image(frame)
         
         #total =  round((time.time() - timestrap) * 1000, 0)
         #total_all = data['total_all']
@@ -1122,16 +1125,35 @@ class MainWindow(QMainWindow):
 
 
     def update_image(self, frame):
-        height, width, channel = frame.shape
-        new_height = int(height * 0.69)
-        new_width = int(width * 0.69)
+        """Обновление изображения в label"""
+        if frame is None:
+            return
+        
+        try:
+            height, width = frame.shape[:2]
+            channel = frame.shape[2] if len(frame.shape) == 3 else 1
+            
+            new_height = int(height * 0.69)
+            new_width = int(width * 0.69)
 
-        frame_resized = cv2.resize(frame, (new_width, new_height))
+            frame_resized = cv2.resize(frame, (new_width, new_height))
 
-        bytes_per_line = 3 * new_width
-        q_img = QImage(frame_resized.data, new_width, new_height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-        pixmap = QPixmap.fromImage(q_img)
-        self.image_label.setPixmap(pixmap)
+            bytes_per_line = 3 * new_width
+            # Конвертируем RGB в BGR для QImage (так как OpenCV использует BGR)
+            if len(frame_resized.shape) == 3 and frame_resized.shape[2] == 3:
+                # Если изображение в RGB, конвертируем в BGR для QImage
+                frame_bgr = cv2.cvtColor(frame_resized, cv2.COLOR_RGB2BGR)
+                q_img = QImage(frame_bgr.data, new_width, new_height, bytes_per_line, QImage.Format_RGB888)
+            else:
+                q_img = QImage(frame_resized.data, new_width, new_height, bytes_per_line, QImage.Format_RGB888)
+            
+            pixmap = QPixmap.fromImage(q_img)
+            if hasattr(self, 'image_label'):
+                self.image_label.setPixmap(pixmap)
+        except Exception as e:
+            print(f"Error updating image: {e}")
+            import traceback
+            traceback.print_exc()
 
 
     def update_controls(self):
