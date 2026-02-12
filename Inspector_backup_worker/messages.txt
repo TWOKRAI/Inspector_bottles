@@ -1,0 +1,45 @@
+User ID: 1497700909
+Username: TWOKRAI
+Message: /start
+Date: 2025-02-15 20:34:08+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Привет
+Date: 2025-02-16 07:58:39+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Привет
+Date: 2025-02-16 10:04:00+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Здарова
+Date: 2025-02-16 10:04:10+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Трааааа
+Date: 2025-02-16 10:04:15+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Как сам?
+Date: 2025-02-16 10:45:08+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Че там
+Date: 2025-02-16 10:45:13+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Заебало хуйней си па дать
+Date: 2025-02-16 10:45:25+00:00
+
+User ID: 1497700909
+Username: TWOKRAI
+Message: Привет
+Date: 2025-02-16 10:55:30+00:00
+

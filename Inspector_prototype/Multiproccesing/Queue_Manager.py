@@ -14,12 +14,14 @@ class QueueManager:
 
         # Очереди для передачи данных между процессами
         self.frame_processor_queue = Queue(maxsize=self.buffer_size)  # Кадры от камеры к обработке
+        self.post_processor_queue = Queue(maxsize=self.buffer_size)  # Кадры от обработки к пост-обработке
         self.display_queue = Queue(maxsize=self.buffer_size)  # Обработанные кадры к UI
         self.memory_release_queue = Queue(maxsize=12)  # Освобождение памяти
         self.frame_queue = Queue(maxsize=self.buffer_size)  # Кадры для UI SDK (временная очередь)
 
         # Очереди управления (для совместимости с App)
         self.control_processing = Queue(maxsize=1)  # Управление процессом обработки (из App/UI)
+        self.control_post_processing = Queue(maxsize=1)  # Управление процессом пост-обработки (из App/UI)
         self.control_frame_process = Queue(maxsize=1)  # Управление процессом обработки кадров (для App)
         self.control_camera = Queue(maxsize=1)  # Управление камерой (для App)
         self.control_conveyor = Queue(maxsize=1)  # Управление конвейером (для App)
@@ -101,12 +103,14 @@ class QueueManager:
         print('Очистка всех очередей')
         
         self.clear_queue(self.frame_processor_queue, 0)
+        self.clear_queue(self.post_processor_queue, 0)
         self.clear_queue(self.display_queue, 0)
         self.clear_queue(self.frame_queue, 0)
         self.clear_queue(self.memory_release_queue, 0)
         
         # Очереди управления
         self.clear_queue(self.control_processing, 0)
+        self.clear_queue(self.control_post_processing, 0)
         self.clear_queue(self.control_frame_process, 0)
         self.clear_queue(self.control_camera, 0)
         self.clear_queue(self.control_conveyor, 0)

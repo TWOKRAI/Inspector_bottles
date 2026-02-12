@@ -23,6 +23,7 @@ class MultiProcessManager:
         self.camera_enable = True  # Процесс камеры (SDK)
         self.app_enable = True  # Процесс App для отображения
         self.processing_enable = True  # Процесс обработки изображений
+        self.post_processing_enable = True  # Процесс пост-обработки изображений
         
         # Количество процессов для отслеживания загрузки
         self.total_processes = 0
@@ -35,6 +36,7 @@ class MultiProcessManager:
             'proc_camera': 'Services.hikvision_camera.hikvision_camera.camera_process.camera_proc_2',
             'proc_app': 'Multiproccesing.Processes.process_app',
             'proc_processing': 'Multiproccesing.Processes.process_processing',
+            'proc_post_processing': 'Multiproccesing.Processes.process_post_processing',
         }
 
         # Подсчет количества процессов для отслеживания загрузки
@@ -100,6 +102,7 @@ class MultiProcessManager:
             self.camera_enable,
             self.ui_sdk_enable,
             self.processing_enable,
+            self.post_processing_enable,
             self.app_enable
         ])
         
@@ -139,6 +142,17 @@ class MultiProcessManager:
             )
             self.processes.append(processing_process)
             print(f"Process 'proc_processing' initialized")
+
+        if self.post_processing_enable:
+            # Процесс пост-обработки изображений
+            post_processing_process = self.create_process(
+                target_func=modules['proc_post_processing'],
+                args=(self.queue_manager, self.queue_manager.control_post_processing),
+                name='proc_post_processing',
+                priority='high'
+            )
+            self.processes.append(post_processing_process)
+            print(f"Process 'proc_post_processing' initialized")
 
         if self.app_enable:
             # Процесс App для отображения

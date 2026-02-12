@@ -143,8 +143,8 @@ def process_processing(queue_manager, control_processing):
         processed_frames = [processed_frame]
         queue_manager.memory_manager.write_images(processed_frames, "process_data", id_memory)
         
-        # Отправляем метаданные в display_queue для App
-        display_data = {
+        # Отправляем метаданные в post_processor_queue для пост-обработки
+        post_processing_data = {
             'id_memory': id_memory,
             'capture_time': capture_time,  # Время захвата кадра
             'frame_id': frame_id,
@@ -156,8 +156,8 @@ def process_processing(queue_manager, control_processing):
             'image_width': image_width    # Оригинальная ширина изображения
         }
         
-        queue_manager.remove_old_frame_if_full(queue_manager.display_queue)
-        queue_manager.display_queue.put(display_data)
+        queue_manager.remove_old_frame_if_full(queue_manager.post_processor_queue)
+        queue_manager.post_processor_queue.put(post_processing_data)
         
         # Освобождаем память камеры (опционально, можно делать позже)
         # queue_manager.memory_release_queue.put(id_memory)

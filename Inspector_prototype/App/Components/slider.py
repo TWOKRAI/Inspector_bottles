@@ -1,12 +1,12 @@
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QLabel, QSlider
 from PyQt5.QtGui import QFont, QIntValidator, QDoubleValidator
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, pyqtSignal, QTimer
 
-from App.Components.keyboard import VirtualKeyboard
+from App.Components.keyboard_mini import VirtualKeyboardMini
 
 
-class SliderControl2(QWidget):
-    def __init__(self, name, min_val, max_val, init_val, transfer_k=1, round_k=0, min_access=0, ui_elements=None, controls=[], callback=[], parent=None, label="slider_1"):
+class SliderControl(QWidget):
+    def __init__(self, name, min_val, max_val, init_val, transfer_k=1, round_k=0, min_access=0, ui_elements=None, controls=[], callback=[], parent=None, label=None):
         super().__init__(parent)
         self.name = name
         self.min_access = min_access
@@ -19,10 +19,37 @@ class SliderControl2(QWidget):
         # Инициализация компоновки
         self.hbox = QHBoxLayout(self)
 
-        # Создание виджетов
+        # Настройка шрифтов
+        font = QFont("Arial", 11)
+
         self.label = QLabel()
-        self.label.setText(label)  # Установка переданного или дефолтного label
+        # Используем name как label, если label не указан
+        display_label = label if label is not None else name
+        self.label.setText(display_label) 
+        self.label.setFont(font)
+        self.label.setWordWrap(True)
+        self.label.setFixedSize(145, 40)
+        self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self.value = self.transfer_value(init_val)
+
         self.value_input = QLineEdit()
+        font.setPointSize(12)
+        self.value_input.setFont(font)
+        self.value_input.setFixedSize(60, 30)
+        self.value_input.setAlignment(Qt.AlignCenter)
+
+        self.value_input.setText(str(self.value))
+
+        # Валидатор для поля ввода
+        if self.round_k == 0:
+            validator = QIntValidator()
+        else:
+            validator = QDoubleValidator()
+            validator.setNotation(QDoubleValidator.StandardNotation)
+
+        self.value_input.setValidator(validator)
+
         self.slider = QSlider(Qt.Horizontal)
 
         # Настройка слайдера
@@ -30,7 +57,7 @@ class SliderControl2(QWidget):
         self.slider.setMaximum(max_val)
         self.slider.setValue(init_val)
         self.slider.setMinimumHeight(45)
-        self.slider.setMinimumWidth(690)
+        self.slider.setMinimumWidth(630)
 
         self.slider.setStyleSheet("""
             QSlider::handle:horizontal {
@@ -43,25 +70,6 @@ class SliderControl2(QWidget):
             }
         """)
 
-        # Инициализация значения
-        self.value = self.transfer_value(init_val)
-        self.value_input.setText(str(self.value))
-
-        # Настройка шрифтов
-        font = QFont("Arial", 11)
-        self.label.setFont(font)
-        self.label.setWordWrap(True)
-        self.label.setFixedSize(100, 40)
-        self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-        # Валидатор для поля ввода
-        if self.round_k == 0:
-            validator = QIntValidator()
-        else:
-            validator = QDoubleValidator()
-            
-        self.value_input.setValidator(validator)
-
         # Подключение сигналов
         self.slider.valueChanged.connect(self.update_slider_value)
         self.value_input.editingFinished.connect(self.update_input_value)
@@ -71,17 +79,21 @@ class SliderControl2(QWidget):
         self.slider.wheelEvent = lambda event: None
 
         # Добавление виджетов в компоновку
-        self.hbox.addSpacing(25)
+        self.hbox.addSpacing(5)
         self.hbox.addWidget(self.label)
         self.hbox.addStretch()
         self.hbox.addWidget(self.value_input)
-        self.hbox.addSpacing(10)
+        self.hbox.addSpacing(20)
         self.hbox.addWidget(self.slider)
         self.hbox.addSpacing(25)
 
         # Обновление внешних элементов
         if self.ui_elements is not None:
-            self.ui_elements[name] = {'element': self.slider, 'value': self.value, 'min_access': self.min_access}
+            self.ui_elements[name] = {'element': self.slider, 
+                                        'value': self.value, 
+                                        'min_access': self.min_access,
+                                        'transfer_k': transfer_k,
+                                        'round_k': round_k}
 
         if self.controls is not None:
             if isinstance(self.controls, list):
@@ -90,26 +102,42 @@ class SliderControl2(QWidget):
             else:
                 self.controls[self.name] = self.value
 
+        self.block = False
+
+
     def update_slider_value(self, value):
         # Обновление значения из слайдера
         self.value = self.transfer_value(value)
         self.value_input.setText(str(self.value))
-        self.update_external()
+
+        if not self.block:
+            self.block = True
+            QTimer.singleShot(100, self.onTimeout)
+
 
     def update_input_value(self):
         # Обновление значения из поля ввода
         try:
-            input_value = float(self.value_input.text())
+            input_text = self.value_input.text()
+            # Заменяем запятую на точку, если нужно
+            input_text = input_text.replace(',', '.')
+            input_value = float(input_text)
             slider_value = int(round(input_value / self.transfer_k))
             slider_value = max(self.slider.minimum(), min(slider_value, self.slider.maximum()))
             self.slider.setValue(slider_value)
             self.value = self.transfer_value(slider_value)
+            
             self.update_external()
         except ValueError:
             self.value_input.setText(str(self.value))
+  
+  
+    def onTimeout(self):
+       self.update_external()
+       self.block = False
+    
 
     def update_external(self):
-        # Обновление внешних элементов управления
         if self.ui_elements is not None:
             self.ui_elements[self.name]['value'] = self.value
         if self.controls is not None:
@@ -125,14 +153,17 @@ class SliderControl2(QWidget):
             else:
                 self.func_update()
 
+
     def transfer_value(self, value):
         # Преобразование значения слайдера
         value_k = value * self.transfer_k
-        return round(value_k, self.round_k) if self.round_k != 0 else int(value_k)
+        rounded = round(value_k, self.round_k)
+        return int(rounded) if self.round_k == 0 else rounded
+
 
     def show_touch_keyboard(self, event):
         # Показ кастомной клавиатуры
-        self.keyboard = VirtualKeyboard()
+        self.keyboard = VirtualKeyboardMini()
         self.keyboard.input = self.value_input
         self.keyboard.enter = self.update_input_value
         self.keyboard.show()
@@ -140,5 +171,8 @@ class SliderControl2(QWidget):
         self.keyboard.activateWindow()
         super(QLineEdit, self.value_input).mousePressEvent(event)
 
+
     def slider_release(self):
+        self.update_external()
         print(f"Slider {self.name} value changed to {self.value}")
+

@@ -1,6 +1,7 @@
 import cv2
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel,
-                             QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox, QComboBox, QGroupBox)
+                             QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox, QComboBox, QGroupBox,
+                             QLineEdit, QSpinBox, QListWidget, QListWidgetItem, QFormLayout)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from PyQt5.QtGui import QCursor
@@ -13,250 +14,22 @@ from PyQt5.QtWidgets import QHBoxLayout, QLabel, QSlider, QWidget
 from PyQt5.QtCore import Qt
 
 from App.Components.header import HeaderWidget
-from  App.Components.slider import SliderControl2
+from App.Components.slider import SliderControl
+from App.Components.checkbox import CheckboxControl
+from App.Widget.Visual_settings_widjet.Visual_settings import VisualSettingsWidget
+from App.Widget.Circle_widjet.Circle import CircleWidget
+from App.Widget.Cropped_area_widjet.Cropped_area import CroppedAreaWidget
+from App.Widget.Parameters_widjet.Parameters import ParametersWidget
+from App.Widget.Neuroun_widjet.Neuroun import NeurounWidget
+from App.Widget.Robot_widjet.Robot import RobotWidget
+from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
+from App.Widget.Processing_widjet.Processing import ProcessingWidget
+from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
+from App.Components.params_manager import ParamsManager
+from App.Components.sort_widget import SpinWidget
 
 
-class SliderControl(QWidget):
-    def __init__(self, name, min_val, max_val, init_val, transfer_k=1, round_k=0, min_access = 0, ui_elements=None, controls=[], callback=[], parent=None):
-        super().__init__(parent)
-        self.name = name
-        self.min_access = min_access
-        self.ui_elements = ui_elements
-        self.controls = controls
-
-        # self.func_update = callbacks if callbacks else lambda: None
-
-        # Инициализация списка контролов
-        self.controls = controls
-
-        # Инициализация списка функций
-        self.func_update = callback
-
-        self.min_access = min_access 
-        
-        # Создание компоновки
-        self.hbox = QHBoxLayout(self)
-
-        # Создание виджетов
-        self.label = QLabel()
-        self.value_label = QLabel()
-        self.slider = QSlider(Qt.Horizontal)
-
-        # Настройка слайдера
-        self.slider.setMinimum(min_val)
-        self.slider.setMaximum(max_val)
-        self.slider.setValue(init_val)
-        self.slider.setMinimumHeight(45)
-        self.slider.setMinimumWidth(690)
-
-        self.slider.setStyleSheet("""
-            QSlider::handle:horizontal {
-                height: 50px;  /* Увеличение высоты в 2 раза */
-                width: 25px;   /* Увеличение ширины в 1.5 раза */
-                margin: -15px 0;  /* Корректировка отступов для центрирования */
-                border: 2px solid #4682B4;
-                border-radius: 7px;
-                background: gray;
-            }
-        """)
-
-        self.transfer_k = transfer_k
-        self.round_k = round_k
-
-        self.value = self.transfer_value(init_val)
-
-        self.value_label.setText(str(self.value))
-
-        font_family = "Arial"
-        font_size = 11
-        self.font = QFont(font_family, font_size)
-        self.label.setFont(self.font)
-        self.label.setWordWrap(True)
-        self.label.setFixedSize(100, 40)
-        self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.label.setText(name)
-
-        font_family = "Arial"
-        font_size = 12
-        self.font = QFont(font_family, font_size)
-        self.value_label.setFont(self.font)
-
-        # Подключение сигнала изменения значения
-        self.slider.valueChanged.connect(self.update_slider_value)
-        self.slider.sliderReleased.connect(self.slider_release)
-
-        # Отключение прокрутки колесом мыши
-        self.slider.wheelEvent = lambda event: None
-
-        # Добавление виджетов в компоновку
-        self.hbox.addSpacing(25)
-        self.hbox.addWidget(self.label)
-        self.hbox.addStretch()
-        self.hbox.addWidget(self.value_label)
-        self.hbox.addSpacing(10)
-        self.hbox.addWidget(self.slider)
-        self.hbox.addSpacing(25)
-
-        if self.ui_elements is not None:
-            self.ui_elements[name] = {'element': self.slider, 'value': init_val, 'min_access': self.min_access}
-
-        if self.controls is not None:
-            if isinstance(self.controls, list):
-                for control in self.controls:
-                    control[self.name] = self.value
-            else:
-                self.controls[self.name] = self.value
-
-
-    def update_slider_value(self, value):
-        self.value = value
-        self.value_transfer = self.transfer_value(self.value)
-
-        self.value_label.setText(str(self.value_transfer))
-
-        if self.ui_elements is not None:
-            self.ui_elements[self.name]['value'] = self.value_transfer
-        
-        if self.controls is not None:
-            if isinstance(self.controls, list):
-                for control in self.controls:
-                    control[self.name] = self.value_transfer
-            else:
-                self.controls[self.name] = self.value_transfer
-
-        if self.func_update is not None:
-            if isinstance(self.controls, list):
-                for func_update in self.func_update:
-                    func_update()
-            else:
-                self.func_update()
-
-        
-    def slider_release(self):
-        print(f"Slider {self.name} value changed to {self.value}")
-
-
-    def transfer_value(self, value):
-        value_k = value * self.visual_k
-
-        if self.round_k == 0:
-            print(int(round(value_k, self.round_k)))
-            return int(round(value_k, self.round_k)) 
-        else:
-            print(round(value_k, self.round_k))
-            return round(value_k, self.round_k)
-        
-
-    def transfer_value(self, value):
-        value_k = value * self.transfer_k
-        rounded = round(value_k, self.round_k)
-        return int(rounded) if self.round_k == 0 else rounded
-
-
-class CheckboxControl(QWidget):
-    def __init__(self, name, init_val, position="right", min_access = 0, ui_elements=None, controls=[], callback=[], parent=None):
-        super().__init__(parent)
-        self.name = name
-        self.ui_elements = ui_elements
-        # self.controls = controls
-
-        # if callback is not None:
-        #     self.func_update = callback
-        # else:
-        #     self.func_update = lambda: None
-
-        # Инициализация списка контролов
-        self.controls = controls
-
-        # Инициализация списка функций
-        self.func_update = callback
-
-        self.min_access = min_access 
-
-        # Создание компоновки
-        self.vbox = QVBoxLayout(self)
-        self.vbox.setAlignment(Qt.AlignCenter)
-
-        # Создание виджетов
-        self.checkbox = QCheckBox()
-        self.checkbox.setChecked(init_val)
-        self.checkbox.setStyleSheet("QCheckBox::indicator { width: 44px; height: 44px; }")
-        self.checkbox.stateChanged.connect(self.update_control)
-
-        self.label = QLabel(name)
-        self.label.setAlignment(Qt.AlignCenter)
-        font = QFont()
-        font.setPointSize(12)
-        self.label.setFont(font)
-
-        # Настройка расположения
-        self.setup_layout(position)
-
-        if self.ui_elements is not None:
-            self.ui_elements[name] = {'element': self.checkbox, 
-                                      'value': init_val, 
-                                      'min_access': self.min_access}
-
-        if self.controls is not None:
-            if isinstance(self.controls, list):
-                for control in self.controls:
-                    control[self.name] = init_val
-            else:
-                self.controls[self.name] = init_val
-
-
-    def setup_layout(self, position):
-        if position in ["top", "bottom"]:
-            hbox_0 = QHBoxLayout()
-            hbox_0.setAlignment(Qt.AlignCenter)
-            hbox_1 = QHBoxLayout()
-            hbox_1.setAlignment(Qt.AlignCenter)
-
-            if position == "top":
-                hbox_0.addStretch()
-                hbox_0.addWidget(self.label)
-                hbox_0.addStretch()
-
-                hbox_1.addStretch()
-                hbox_1.addWidget(self.checkbox)
-                hbox_1.addStretch()
-
-                self.vbox.addLayout(hbox_0)
-                self.vbox.addLayout(hbox_1)
-            else:
-                self.vbox.addWidget(self.checkbox)
-                self.vbox.addWidget(self.label)
-        else:
-            hbox = QHBoxLayout()
-            hbox.setAlignment(Qt.AlignCenter)
-            if position == "left":
-                hbox.addWidget(self.label)
-                hbox.addWidget(self.checkbox)
-            else:
-                hbox.addWidget(self.checkbox)
-                hbox.addWidget(self.label)
-            self.vbox.addLayout(hbox)
-
-    def update_control(self, state):
-        if self.ui_elements is not None:
-            self.ui_elements[self.name]['value'] = bool(state)
-            
-        if self.controls is not None:
-            if isinstance(self.controls, list):
-                for control in self.controls:
-                    control[self.name] = bool(state)
-            else:
-                self.controls[self.name] = bool(state)
-
-        if self.func_update is not None:
-            if isinstance(self.controls, list):
-                for func_update in self.func_update:
-                    func_update()
-            else:
-                self.func_update()
-
-
-        print(f"Checkbox {self.name} state changed to {bool(state)}")
+# SliderControl и CheckboxControl теперь импортируются из Components
 
 
 class MainWindow(QMainWindow):
@@ -294,6 +67,17 @@ class MainWindow(QMainWindow):
             'hm': 179, 'sm': 255, 'vm': 255
         }
         
+        # Operation Crop: области + цепочки обработки
+        self.controls_post_processing = {
+            'enable_post_processing': False,
+            'regions': [],  # [{name, x1, y1, x2, y2}, ...]
+            'region_chains': {},  # {name: [{processor_id, params}, ...]}
+            'view_mode': 'main',  # main | region | list
+            'selected_region': None,
+        }
+        # Визуальная настройка (масштаб изображения для экономии места)
+        self.controls_visual = {'image_scale': 0.5}
+        
         # Список устройств камеры для Hikvision
         self.hikvision_device_list = []
         
@@ -309,8 +93,17 @@ class MainWindow(QMainWindow):
         
         self.current_access_level = 0
         
-        # Инициализируем UI перед запуском потока сообщений
-        self.init_ui()
+        # Инициализируем базовый UI (без вкладок)
+        self.init_ui_base()
+        
+        # Создаем виджеты для вкладок
+        self.create_widgets()
+        
+        # Заполняем вкладки виджетами
+        self.update_tabs_with_widgets()
+        
+        # Завершаем инициализацию UI
+        self.init_ui_finish()
 
         if self.fullscreen: 
             self.showFullScreen()
@@ -325,23 +118,138 @@ class MainWindow(QMainWindow):
         self.update_controls_conveyor()
         self.update_controls_hikvision()
         self.update_controls_processing()
+        self.update_controls_post_processing()
 
         self.update_access_level(self.current_access_level)
         
-        # Запускаем поток для получения сообщений от камеры после инициализации UI
-        try:
-            self.start_camera_message_thread()
-        except Exception as e:
-            print(f"Error starting camera message thread: {e}")
-            import traceback
-            traceback.print_exc()
+        # Поток камеры запускается внутри HikvisionWidget
+        # Подключаем обработку сообщений для обновления ProcessingWidget и других компонентов
+        if hasattr(self, 'hikvision_widget') and self.hikvision_widget.camera_message_thread:
+            self.hikvision_widget.camera_message_thread.message_received.connect(self.handle_camera_message)
     
-    def start_camera_message_thread(self):
-        """Запустить поток для получения сообщений от камеры"""
-        from App.Threads.thread_camera_message import CameraMessageThread
-        self.camera_message_thread = CameraMessageThread(self.queue_manager, self.stop_event)
-        self.camera_message_thread.message_received.connect(self.handle_camera_message)
-        self.camera_message_thread.start()
+    def create_widgets(self):
+        """Создание всех виджетов для вкладок"""
+        # VisualSettingsWidget
+        self.visual_settings_widget = VisualSettingsWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls=self.controls_visual,
+            callback=self.update_controls_visual
+        )
+        
+        # CircleWidget
+        self.circle_widget = CircleWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls=self.controls,
+            callback=self.update_controls
+        )
+        
+        # CroppedAreaWidget
+        self.cropped_area_widget = CroppedAreaWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls=self.controls,
+            controls_draw=self.controls_draw,
+            controls_conveyor=self.controls_conveyor,
+            callback=self.update_controls,
+            callback_draw=self.update_controls_draw,
+            callback_conveyor=self.update_controls_conveyor
+        )
+        
+        # ParametersWidget
+        self.parameters_widget = ParametersWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls=self.controls,
+            controls_draw=self.controls_draw,
+            controls_robot=self.controls_robot,
+            controls_camera=self.controls_camera,
+            callback=self.update_controls,
+            callback_draw=self.update_controls_draw,
+            callback_robot=self.update_controls_robot,
+            callback_camera=self.update_controls_camera
+        )
+        
+        # NeurounWidget
+        self.neuroun_widget = NeurounWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls=self.controls,
+            controls_neuroun=self.controls_neuroun,
+            controls_draw=self.controls_draw,
+            callback=self.update_controls,
+            callback_neuroun=self.update_controls_neuroun,
+            callback_draw=self.update_controls_draw
+        )
+        
+        # RobotWidget
+        self.robot_widget = RobotWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls_robot=self.controls_robot,
+            callback=self.update_controls_robot
+        )
+        
+        # HikvisionWidget
+        self.hikvision_widget = HikvisionWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls_hikvision=self.controls_hikvision,
+            callback=self.update_controls_hikvision,
+            stop_event=self.stop_event if hasattr(self, 'stop_event') else None
+        )
+        
+        # ProcessingWidget
+        self.processing_widget = ProcessingWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls_processing=self.controls_processing,
+            callback=self.update_controls_processing
+        )
+        
+        # PostProcessingWidget
+        self.post_processing_widget = PostProcessingWidget(
+            window_manager=self.window_manager,
+            ui_elements=self.ui_elements,
+            controls_post_processing=self.controls_post_processing,
+            callback=self.update_controls_post_processing
+        )
+        
+        # Создаем менеджер параметров для системы рецептов
+        self.widgets_dict = {
+            'visual': self.visual_settings_widget,
+            'circle': self.circle_widget,
+            'cropped_area': self.cropped_area_widget,
+            'parameters': self.parameters_widget,
+            'neuroun': self.neuroun_widget,
+            'robot': self.robot_widget,
+            'hikvision': self.hikvision_widget,
+            'processing': self.processing_widget,
+            'post_processing': self.post_processing_widget,
+        }
+        self.params_manager = ParamsManager(self.widgets_dict)
+    
+    def update_tabs_with_widgets(self):
+        """Обновляет вкладки, добавляя виджеты"""
+        # Очищаем существующие вкладки если есть
+        while self.tab_widget.count() > 0:
+            self.tab_widget.removeTab(0)
+        
+        # Добавляем вкладки с виджетами
+        self.create_tab(self.tab_widget, "Сорта", self.create_tab_sort())
+        self.create_tab(self.tab_widget, "Визуальная настройка", self.visual_settings_widget)
+        self.create_tab(self.tab_widget, "Форма", self.circle_widget)
+        self.create_tab(self.tab_widget, "Разное", self.cropped_area_widget) 
+        self.create_tab(self.tab_widget, "Параметры", self.parameters_widget) 
+        self.create_tab(self.tab_widget, "Нейрон", self.neuroun_widget)
+        self.create_tab(self.tab_widget, "Робот", self.robot_widget)
+        self.create_tab(self.tab_widget, "Hikvision", self.hikvision_widget)
+        self.create_tab(self.tab_widget, "Обработка", self.processing_widget)
+        self.create_tab(self.tab_widget, "Operation Crop", self.post_processing_widget)
+        
+        # Устанавливаем кнопку переключения видимости вкладок
+        self.tab_widget.setCornerWidget(self.btn_toggle_tabs, Qt.TopRightCorner)
     
     def handle_camera_message(self, message):
         """Обработать сообщение от процесса камеры"""
@@ -349,63 +257,35 @@ class MainWindow(QMainWindow):
         print(f"App received camera message: type={msg_type}, message={message}")
         
         if msg_type == 'enum_devices_response':
+            # Обработка enum_devices_response теперь полностью происходит в HikvisionWidget
             devices = message.get('devices', [])
             self.hikvision_device_list = devices
-            print(f"App: Processing {len(devices)} devices")
-            
-            # Обновляем выпадающий список
-            if hasattr(self, 'combo_cameras'):
-                print(f"App: combo_cameras exists, updating...")
-                self.combo_cameras.clear()
-                if len(devices) == 0:
-                    self.combo_cameras.addItem("Устройства не найдены")
-                else:
-                    for device in devices:
-                        display_name = device.get('display_name', f"Camera {device.get('index', 0)}")
-                        print(f"App: Adding device to combo: {display_name}")
-                        self.combo_cameras.addItem(display_name)
-                print(f"App: combo_cameras now has {self.combo_cameras.count()} items")
-            else:
-                print(f"App: ERROR - combo_cameras does not exist!")
+            print(f"App: Processing {len(devices)} devices (handled by HikvisionWidget)")
         
         elif msg_type == 'parameters_response':
+            # Обработка происходит в HikvisionWidget, но обновляем метрики здесь
             params = message.get('parameters', {})
-            # Обновляем значения в controls_hikvision
-            if 'Frame Rate' in self.ui_elements:
-                self.controls_hikvision['Frame Rate'] = params.get('frame_rate', 0)
-            if 'Exposure' in self.ui_elements:
-                self.controls_hikvision['Exposure'] = params.get('exposure_time', 0)
-            if 'Gain' in self.ui_elements:
-                self.controls_hikvision['Gain'] = params.get('gain', 0)
-            # Сохраняем FPS из SDK
             self.fps_sdk = params.get('frame_rate', 0.0)
-            self.update_controls_hikvision()
-            self.update_fps_display()
+            # Обновляем FPS в HikvisionWidget
+            if hasattr(self, 'hikvision_widget'):
+                self.hikvision_widget.fps_sdk = self.fps_sdk
+                self.hikvision_widget.update_fps_display()
         
         elif msg_type == 'image_size':
             # Обновляем размер изображения
             self.image_height = message.get('height', 0)
             self.image_width = message.get('width', 0)
             
-            # Обновляем максимальные значения слайдеров обрезки под реальный размер изображения
-            if hasattr(self, 'crop_top_slider') and self.image_height > 0:
-                self.crop_top_slider.slider.setMaximum(self.image_height)
-            if hasattr(self, 'crop_bottom_slider') and self.image_height > 0:
-                self.crop_bottom_slider.slider.setMaximum(self.image_height)
-                # Устанавливаем значение по умолчанию на полный размер
-                if self.controls_processing.get('crop_bottom', 0) == 0 or self.controls_processing.get('crop_bottom', 0) > self.image_height:
-                    self.controls_processing['crop_bottom'] = self.image_height
-                    self.crop_bottom_slider.slider.setValue(self.image_height)
-            if hasattr(self, 'crop_left_slider') and self.image_width > 0:
-                self.crop_left_slider.slider.setMaximum(self.image_width)
-            if hasattr(self, 'crop_right_slider') and self.image_width > 0:
-                self.crop_right_slider.slider.setMaximum(self.image_width)
-                # Устанавливаем значение по умолчанию на полный размер
-                if self.controls_processing.get('crop_right', 0) == 0 or self.controls_processing.get('crop_right', 0) > self.image_width:
-                    self.controls_processing['crop_right'] = self.image_width
-                    self.crop_right_slider.slider.setValue(self.image_width)
+            # Обновляем максимальные значения слайдеров обрезки через ProcessingWidget
+            if hasattr(self, 'processing_widget'):
+                self.processing_widget.update_image_size(self.image_width, self.image_height)
             
-            self.update_fps_display()
+            # Обновляем FPS в HikvisionWidget
+            if hasattr(self, 'hikvision_widget'):
+                self.hikvision_widget.image_width = self.image_width
+                self.hikvision_widget.image_height = self.image_height
+                self.hikvision_widget.update_fps_display()
+            
             print(f"App: Image size updated: {self.image_width}x{self.image_height}")
         
 
@@ -417,11 +297,13 @@ class MainWindow(QMainWindow):
         self.update_controls_conveyor()
         self.update_controls_hikvision()
         self.update_controls_processing()
+        self.update_controls_post_processing()
 
         self.update_access_level(self.current_access_level)
 
 
-    def init_ui(self):
+    def init_ui_base(self):
+        """Базовая инициализация UI без вкладок"""
         try:
             # Создание главного окна
             self.setWindowTitle("Image Processing App")
@@ -434,44 +316,43 @@ class MainWindow(QMainWindow):
             central_widget.setLayout(main_layout)
             self.setCentralWidget(central_widget)
         except Exception as e:
-            print(f"Error in init_ui (start): {e}")
+            print(f"Error in init_ui_base: {e}")
             import traceback
             traceback.print_exc()
             raise
 
         main_layout.addWidget(self.header)
 
-        main_layout.addSpacing(3)
+        main_layout.addSpacing(2)
         main_content_layout = self.create_main_content_layout()
         main_layout.addLayout(main_content_layout)
-        main_layout.addSpacing(15)
-
-        main_layout.addStretch()
-        self.create_tabs()
+        main_layout.addSpacing(3)
         
-        # Контейнер для вкладок с кнопкой скрытия
-        tabs_container = QWidget()
-        tabs_layout = QVBoxLayout()
-        tabs_container.setLayout(tabs_layout)
+        # Создаем tab_widget, но пока без вкладок
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setMinimumHeight(220)
+        self.tab_widget.setStyleSheet("QTabBar::tab { height: 35px; width: 95px; }")
         
-        # Кнопка скрытия/показа вкладок
-        self.btn_toggle_tabs = QPushButton("Скрыть вкладки")
-        self.btn_toggle_tabs.setMaximumHeight(30)
+        # Кнопка «Скрыть»/«Показать» — в правом углу на одной линии с вкладками
+        self.btn_toggle_tabs = QPushButton("Скрыть")
+        self.btn_toggle_tabs.setFixedHeight(32)
+        self.btn_toggle_tabs.setMinimumWidth(70)
         self.btn_toggle_tabs.clicked.connect(self.toggle_tabs_visibility)
-        tabs_layout.addWidget(self.btn_toggle_tabs)
-        
-        tabs_layout.addWidget(self.tab_widget)
         self.tabs_visible = True
         
-        main_layout.addWidget(tabs_container)
-        
+        main_layout.addWidget(self.tab_widget, 1)
+    
+    def init_ui_finish(self):
+        """Завершение инициализации UI - проверки"""
         # Проверяем что все элементы созданы
-        if not hasattr(self, 'combo_cameras'):
-            print("WARNING: combo_cameras not created!")
         if not hasattr(self, 'tab_widget'):
             print("WARNING: tab_widget not created!")
         if not hasattr(self, 'image_label'):
             print("WARNING: image_label not created!")
+        if not hasattr(self, 'hikvision_widget'):
+            print("WARNING: hikvision_widget not created!")
+        elif not hasattr(self.hikvision_widget, 'combo_cameras'):
+            print("WARNING: hikvision_widget.combo_cameras not created!")
 
 
     def create_main_content_layout(self):
@@ -561,17 +442,40 @@ class MainWindow(QMainWindow):
 
 
     def create_tabs(self):
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setFixedHeight(270)
-        self.tab_widget.setStyleSheet("QTabBar::tab { height: 35px; width: 95px; }")  # Увеличение размера вкладок
-
-        self.create_tab(self.tab_widget, "Форма", self.create_tab_circle())
-        self.create_tab(self.tab_widget, "Разное", self.create_tab_cropped_area()) 
-        self.create_tab(self.tab_widget, "Параметры", self.create_tab_parameters()) 
-        self.create_tab(self.tab_widget, "Нейрон", self.create_tab_neuroun())
-        self.create_tab(self.tab_widget, "Робот", self.create_tab_robot())
-        self.create_tab(self.tab_widget, "Hikvision", self.create_tab_hikvision())
-        self.create_tab(self.tab_widget, "Обработка", self.create_tab_processing()) 
+        """Создание вкладок - теперь вызывается из update_tabs_with_widgets()"""
+        pass
+    
+    def create_tab_sort(self):
+        """Создать вкладку управления рецептами (сортами)"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        tab.setLayout(layout)
+        
+        label_tab = QLabel("Сортовые параметры")
+        label_tab.setAlignment(Qt.AlignCenter)
+        font = QFont()
+        font.setPointSize(14)
+        label_tab.setFont(font)
+        layout.addWidget(label_tab)
+        
+        self.sort_widget = SpinWidget(2)
+        layout.addWidget(self.sort_widget)
+        
+        self.sort_widget.applied.connect(self.apply_sort)
+        self.sort_widget.saved.connect(self.save_sort)
+        self.sort_widget.default.connect(self.default_sort)
+        
+        self.button_default = QPushButton('Сбросить значения')
+        self.button_default.setFixedSize(200, 50)
+        self.button_default.clicked.connect(self.reset_count)
+        layout.addWidget(self.button_default)
+        
+        return tab
+    
+    def reset_count(self):
+        """Сбросить счетчики"""
+        if hasattr(self, 'queue_manager') and hasattr(self.queue_manager, 'reset_count'):
+            self.queue_manager.reset_count.set() 
 
 
     def create_tab(self, tabs: QTabWidget, name, content_widget, scrollable=True):
@@ -684,7 +588,7 @@ class MainWindow(QMainWindow):
         slider_control = SliderControl("x_delta", 0, 100, 21, ui_elements=self.ui_elements, controls=self.controls, callback = self.update_controls, parent=self)
         layout.addWidget(slider_control)
 
-        slider_control = SliderControl2("x_min", 
+        slider_control = SliderControl("x_min", 
                                        0, 
                                        1280, 
                                        150, 
@@ -1083,8 +987,6 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(fps_group)
         
-        layout.addStretch()
-        
         # Кнопки показа/скрытия UI SDK окна (внизу)
         btn_show_ui = QPushButton("Показать UI SDK")
         btn_show_ui.setMinimumHeight(50)
@@ -1131,8 +1033,12 @@ class MainWindow(QMainWindow):
     def sdk_open_camera(self):
         """Открыть камеру"""
         try:
-            # Получаем индекс из выпадающего списка
-            camera_index = self.combo_cameras.currentIndex()
+            # Используем combo_cameras из HikvisionWidget
+            if hasattr(self, 'hikvision_widget') and hasattr(self.hikvision_widget, 'combo_cameras'):
+                camera_index = self.hikvision_widget.combo_cameras.currentIndex()
+            else:
+                camera_index = 0
+            
             if camera_index < 0 or camera_index >= len(self.hikvision_device_list):
                 camera_index = 0
             
@@ -1294,11 +1200,43 @@ class MainWindow(QMainWindow):
             # Рисуем временные метрики на изображении
             cv2.putText(frame_with_fps, time_text, (10, 55), font, font_scale, color_time, thickness, cv2.LINE_AA)
             
+            # Обновляем метрики в HikvisionWidget
+            if hasattr(self, 'hikvision_widget'):
+                self.hikvision_widget.update_fps_metrics(
+                    self.fps_after_processing,
+                    self.processing_time_ms,
+                    self.total_time_ms
+                )
+            
+            # Рисуем прямоугольники областей (Operation Crop) — координаты в пикселях кадра
+            height_img, width_img = frame_with_fps.shape[:2]
+            regions = self.controls_post_processing.get('regions', [])
+            selected_idx = getattr(self.post_processing_widget, '_selected_region_edit_idx', -1) if hasattr(self, 'post_processing_widget') else -1
+            for i, r in enumerate(regions):
+                x1, y1 = int(r.get('x1', 0)), int(r.get('y1', 0))
+                x2, y2 = int(r.get('x2', 0)), int(r.get('y2', 0))
+                x1, x2 = min(x1, x2), max(x1, x2)
+                y1, y2 = min(y1, y2), max(y1, y2)
+                # Ограничиваем в границах изображения
+                x1, x2 = max(0, x1), min(width_img, x2)
+                y1, y2 = max(0, y1), min(height_img, y2)
+                if x1 >= x2 or y1 >= y2:
+                    continue
+                is_selected = (i == selected_idx)
+                color = (0, 255, 0) if is_selected else (0, 165, 255)  # Зелёный выбран, оранжевый остальные
+                th = 3 if is_selected else 2
+                cv2.rectangle(frame_with_fps, (x1, y1), (x2, y2), color, th)
+                name = r.get('name', '')
+                cv2.putText(frame_with_fps, name, (x1, max(15, y1 - 5)), font, 0.5, color, 1, cv2.LINE_AA)
+            
             height, width = frame_with_fps.shape[:2]
             channel = frame_with_fps.shape[2] if len(frame_with_fps.shape) == 3 else 1
             
-            new_height = int(height * 0.69)
-            new_width = int(width * 0.69)
+            # Масштаб из вкладки «Визуальная настройка»
+            scale = self.controls_visual.get('image_scale', 0.5)
+            scale = max(0.2, min(1.0, float(scale)))
+            new_height = int(height * scale)
+            new_width = int(width * scale)
 
             frame_resized = cv2.resize(frame_with_fps, (new_width, new_height))
 
@@ -1326,10 +1264,18 @@ class MainWindow(QMainWindow):
         # self.controls['left'] = 225
         # self.controls['right'] = 1030
 
-        self.controls['neuroun'] = self.controls_neuroun['neuroun']
+        self.controls['neuroun'] = self.controls_neuroun.get('neuroun', False)
 
-        self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_frame_process)
-        self.queue_manager.control_frame_process.put(self.controls)
+        if hasattr(self, 'queue_manager') and self.queue_manager:
+            self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_frame_process)
+            self.queue_manager.control_frame_process.put(self.controls)
+        
+        # Автоматическое сохранение в текущий рецепт (real_value)
+        if hasattr(self, 'params_manager'):
+            try:
+                self.params_manager.save_to_excel('real_value')
+            except Exception as e:
+                print(f"Ошибка автосохранения параметров: {e}")
 
 
     def update_controls_camera(self):
@@ -1363,18 +1309,46 @@ class MainWindow(QMainWindow):
     
     def update_controls_hikvision(self):
         """Обновление управления Hikvision SDK"""
-        # Параметры уже отправляются через отдельные методы
+        # Параметры уже отправляются через отдельные методы в HikvisionWidget
         pass
     
+    def update_controls_visual(self):
+        """Обновление визуальных настроек"""
+        # Визуальные настройки не требуют отправки в очередь, только локальное использование
+        pass
+    
+    def get_all_params(self):
+        """Получить все параметры (для совместимости с системой рецептов)"""
+        if hasattr(self, 'params_manager'):
+            return self.params_manager.get_all_params()
+        return {}
+    
+    def apply_sort(self, number):
+        """Применить рецепт (сорт)"""
+        if hasattr(self, 'params_manager'):
+            self.params_manager.apply_recipe(number)
+    
+    def save_sort(self, number):
+        """Сохранить текущие значения в рецепт"""
+        if hasattr(self, 'params_manager'):
+            self.params_manager.save_recipe(number)
+    
+    def default_sort(self, number):
+        """Установить рецепт как дефолтный"""
+        if hasattr(self, 'params_manager'):
+            self.params_manager.set_default_recipe(number)
+    
     def toggle_tabs_visibility(self):
-        """Скрыть/показать вкладки"""
+        """Скрыть/показать контент вкладок (строка вкладок + кнопка остаются видимыми)."""
         self.tabs_visible = not self.tabs_visible
         if self.tabs_visible:
-            self.tab_widget.show()
-            self.btn_toggle_tabs.setText("Скрыть вкладки")
+            self.tab_widget.setMaximumHeight(16777215)  # Убираем ограничение
+            self.btn_toggle_tabs.setText("Скрыть")
         else:
-            self.tab_widget.hide()
-            self.btn_toggle_tabs.setText("Показать вкладки")
+            # Оставляем только строку вкладок с кнопкой
+            h = self.tab_widget.tabBar().sizeHint().height() + 4
+            self.tab_widget.setMaximumHeight(h)
+            self.btn_toggle_tabs.setText("Показать")
     
     def create_tab_processing(self):
         """Создать вкладку управления обработкой изображений"""
@@ -1494,8 +1468,6 @@ class MainWindow(QMainWindow):
                                       parent=self)
         layout.addWidget(slider_control)
         
-        layout.addStretch()
-        
         return tab
     
     def update_controls_processing(self):
@@ -1513,6 +1485,301 @@ class MainWindow(QMainWindow):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
         self.queue_manager.control_processing.put(self.controls_processing)
         self.queue_manager.control_processing_event.set()
+
+    def create_tab_visual_settings(self):
+        """Визуальная настройка: масштаб изображения для экономии места под регуляторы."""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        tab.setLayout(layout)
+        layout.addWidget(QLabel("Масштаб окна изображения (меньше = больше места для регуляторов):"))
+        scale_slider = SliderControl("image_scale", 20, 100, 50, transfer_k=0.01, round_k=2,
+                                    ui_elements=self.ui_elements, controls=self.controls_visual,
+                                    callback=self._on_visual_scale_changed, parent=self)
+        layout.addWidget(scale_slider)
+        self.visual_scale_label = QLabel("Масштаб: 0.50")
+        layout.addWidget(self.visual_scale_label)
+        return tab
+
+    def _on_visual_scale_changed(self):
+        scale = self.controls_visual.get('image_scale', 0.5)
+        if hasattr(self, 'visual_scale_label'):
+            self.visual_scale_label.setText(f"Масштаб: {scale:.2f}")
+
+    def create_tab_post_processing(self):
+        """Operation Crop: вкладки «Области» и «Цепочка». Каждая область — своя цепочка."""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        tab.setLayout(layout)
+
+        # Чекбокс включения + режим просмотра
+        checkbox_control = CheckboxControl("enable_post_processing", False, "left",
+                                         ui_elements=self.ui_elements,
+                                         controls=self.controls_post_processing,
+                                         callback=self.update_controls_post_processing,
+                                         parent=self)
+        layout.addWidget(checkbox_control)
+
+        view_group = QGroupBox("Режим просмотра")
+        view_layout = QVBoxLayout()
+        self.view_mode_combo = QComboBox()
+        self.view_mode_combo.addItems(["main", "region", "list"])
+        self.view_mode_combo.setCurrentText("main")
+        self.view_mode_combo.currentTextChanged.connect(self._on_view_mode_changed)
+        view_layout.addWidget(QLabel("Режим:"))
+        view_layout.addWidget(self.view_mode_combo)
+        self.region_combo = QComboBox()
+        self.region_combo.currentTextChanged.connect(self._on_selected_region_changed)
+        view_layout.addWidget(QLabel("Область (для region):"))
+        view_layout.addWidget(self.region_combo)
+        view_group.setLayout(view_layout)
+        layout.addWidget(view_group)
+
+        # Подвкладки: Области | Цепочка
+        self.op_crop_tabs = QTabWidget()
+        self.op_crop_tabs.addTab(self._create_tab_regions(), "1. Области")
+        self.op_crop_tabs.addTab(self._create_tab_chain(), "2. Цепочка")
+        layout.addWidget(self.op_crop_tabs)
+        self._refresh_regions_ui()
+        return tab
+
+    def _create_tab_regions(self):
+        """Вкладка 1: создание областей выреза (name, x1, y1, x2, y2)."""
+        w = QWidget()
+        l = QVBoxLayout()
+        w.setLayout(l)
+        form = QFormLayout()
+        self.region_name_edit = QLineEdit()
+        self.region_name_edit.setPlaceholderText("cap")
+        form.addRow("Имя:", self.region_name_edit)
+        self.region_x1 = QSpinBox()
+        self.region_x1.setRange(0, 10000)
+        self.region_x1.setValue(100)
+        self.region_x1.valueChanged.connect(self._update_region_coords_from_spinboxes)
+        form.addRow("x1:", self.region_x1)
+        self.region_y1 = QSpinBox()
+        self.region_y1.setRange(0, 10000)
+        self.region_y1.setValue(50)
+        self.region_y1.valueChanged.connect(self._update_region_coords_from_spinboxes)
+        form.addRow("y1:", self.region_y1)
+        self.region_x2 = QSpinBox()
+        self.region_x2.setRange(0, 10000)
+        self.region_x2.setValue(300)
+        self.region_x2.valueChanged.connect(self._update_region_coords_from_spinboxes)
+        form.addRow("x2:", self.region_x2)
+        self.region_y2 = QSpinBox()
+        self.region_y2.setRange(0, 10000)
+        self.region_y2.setValue(200)
+        self.region_y2.valueChanged.connect(self._update_region_coords_from_spinboxes)
+        form.addRow("y2:", self.region_y2)
+        l.addLayout(form)
+        btn_add = QPushButton("Добавить область")
+        btn_add.clicked.connect(self._add_region)
+        l.addWidget(btn_add)
+        self.regions_list = QListWidget()
+        self.regions_list.itemSelectionChanged.connect(self._on_region_selected)
+        l.addWidget(QLabel("Список областей:"))
+        l.addWidget(self.regions_list)
+        btn_remove = QPushButton("Удалить выбранную")
+        btn_remove.clicked.connect(self._remove_region)
+        l.addWidget(btn_remove)
+        btn_save = QPushButton("Сохранить координаты выбранной")
+        btn_save.clicked.connect(self._save_region_coords)
+        l.addWidget(btn_save)
+        return w
+
+    def _update_region_coords_from_spinboxes(self):
+        """Обновить выбранную область из полей ввода в реальном времени."""
+        row = self.regions_list.currentRow()
+        if row < 0:
+            return
+        regions = self.controls_post_processing.get("regions", [])
+        if 0 <= row < len(regions):
+            regions[row]["x1"] = self.region_x1.value()
+            regions[row]["y1"] = self.region_y1.value()
+            regions[row]["x2"] = self.region_x2.value()
+            regions[row]["y2"] = self.region_y2.value()
+            self.update_controls_post_processing()
+
+    def _save_region_coords(self):
+        """Сохранить текущие координаты в выбранную область."""
+        self._update_region_coords_from_spinboxes()
+        self._refresh_regions_ui()
+
+    def _create_tab_chain(self):
+        """Вкладка 2: цепочка для выбранной области. Добавить шаг, копировать цепочку."""
+        w = QWidget()
+        l = QVBoxLayout()
+        w.setLayout(l)
+        l.addWidget(QLabel("Область:"))
+        chain_region_row = QHBoxLayout()
+        self.chain_region_combo = QComboBox()
+        self.chain_region_combo.currentTextChanged.connect(self._refresh_chain_list)
+        chain_region_row.addWidget(self.chain_region_combo)
+        btn_show_crop = QPushButton("Показать вырез")
+        btn_show_crop.clicked.connect(self._show_chain_region_crop)
+        chain_region_row.addWidget(btn_show_crop)
+        l.addLayout(chain_region_row)
+        l.addWidget(QLabel("Шаги цепочки:"))
+        self.chain_steps_list = QListWidget()
+        l.addWidget(self.chain_steps_list)
+        add_layout = QHBoxLayout()
+        self.add_processor_combo = QComboBox()
+        from Services.Operation_crop.registry import REGISTRY
+        for pid, pcls in REGISTRY.items():
+            self.add_processor_combo.addItem(pcls().get_name(), pid)
+        add_layout.addWidget(self.add_processor_combo)
+        btn_add_step = QPushButton("Добавить шаг")
+        btn_add_step.clicked.connect(self._add_chain_step)
+        add_layout.addWidget(btn_add_step)
+        l.addLayout(add_layout)
+        btn_remove_step = QPushButton("Удалить шаг")
+        btn_remove_step.clicked.connect(self._remove_chain_step)
+        l.addWidget(btn_remove_step)
+        copy_layout = QHBoxLayout()
+        copy_layout.addWidget(QLabel("Копировать в:"))
+        self.copy_to_combo = QComboBox()
+        copy_layout.addWidget(self.copy_to_combo)
+        btn_copy = QPushButton("Копировать цепочку")
+        btn_copy.clicked.connect(self._copy_chain)
+        copy_layout.addWidget(btn_copy)
+        l.addLayout(copy_layout)
+        return w
+
+    def _on_view_mode_changed(self, text):
+        self.controls_post_processing["view_mode"] = text
+        self.update_controls_post_processing()
+
+    def _on_selected_region_changed(self, text):
+        self.controls_post_processing["selected_region"] = text if text else None
+        self.update_controls_post_processing()
+
+    def _show_chain_region_crop(self):
+        """Переключить отображение на вырезанную область (режим region)."""
+        name = self.chain_region_combo.currentText()
+        if name:
+            self.controls_post_processing["view_mode"] = "region"
+            self.controls_post_processing["selected_region"] = name
+            self.view_mode_combo.setCurrentText("region")
+            self.region_combo.setCurrentText(name)
+            self.update_controls_post_processing()
+
+    def _add_region(self):
+        name = self.region_name_edit.text().strip() or "region"
+        r = {
+            "name": name,
+            "x1": self.region_x1.value(),
+            "y1": self.region_y1.value(),
+            "x2": self.region_x2.value(),
+            "y2": self.region_y2.value(),
+        }
+        self.controls_post_processing.setdefault("regions", []).append(r)
+        self.controls_post_processing.setdefault("region_chains", {})[name] = []
+        self._refresh_regions_ui()
+        self.regions_list.setCurrentRow(len(self.controls_post_processing["regions"]) - 1)
+        self._selected_region_edit_idx = len(self.controls_post_processing["regions"]) - 1
+        self.update_controls_post_processing()
+
+    def _remove_region(self):
+        row = self.regions_list.currentRow()
+        if row < 0:
+            return
+        regions = self.controls_post_processing.get("regions", [])
+        if 0 <= row < len(regions):
+            name = regions[row]["name"]
+            regions.pop(row)
+            self.controls_post_processing.get("region_chains", {}).pop(name, None)
+        self._refresh_regions_ui()
+        self.update_controls_post_processing()
+
+    def _on_region_selected(self):
+        """При выборе области в списке — загрузить координаты в поля и запомнить индекс."""
+        row = self.regions_list.currentRow()
+        self._selected_region_edit_idx = row
+        regions = self.controls_post_processing.get("regions", [])
+        if 0 <= row < len(regions):
+            r = regions[row]
+            self.region_name_edit.blockSignals(True)
+            self.region_x1.blockSignals(True)
+            self.region_y1.blockSignals(True)
+            self.region_x2.blockSignals(True)
+            self.region_y2.blockSignals(True)
+            self.region_name_edit.setText(r.get("name", ""))
+            self.region_x1.setValue(r.get("x1", 0))
+            self.region_y1.setValue(r.get("y1", 0))
+            self.region_x2.setValue(r.get("x2", 0))
+            self.region_y2.setValue(r.get("y2", 0))
+            self.region_name_edit.blockSignals(False)
+            self.region_x1.blockSignals(False)
+            self.region_y1.blockSignals(False)
+            self.region_x2.blockSignals(False)
+            self.region_y2.blockSignals(False)
+
+    def _refresh_regions_ui(self):
+        self.regions_list.clear()
+        for r in self.controls_post_processing.get("regions", []):
+            self.regions_list.addItem(f"{r['name']} ({r['x1']},{r['y1']})-({r['x2']},{r['y2']})")
+        names = [r["name"] for r in self.controls_post_processing.get("regions", [])]
+        for cb in [self.region_combo, self.chain_region_combo, self.copy_to_combo]:
+            cb.blockSignals(True)
+            cb.clear()
+            cb.addItems(names)
+            cb.blockSignals(False)
+        self._refresh_chain_list()
+
+    def _refresh_chain_list(self):
+        name = self.chain_region_combo.currentText()
+        if not name:
+            return
+        chain = self.controls_post_processing.get("region_chains", {}).get(name, [])
+        self.chain_steps_list.clear()
+        from Services.Operation_crop.registry import REGISTRY
+        for step in chain:
+            pid = step.get("processor_id", "?")
+            pname = REGISTRY[pid]().get_name() if pid in REGISTRY else pid
+            self.chain_steps_list.addItem(pname)
+
+    def _add_chain_step(self):
+        name = self.chain_region_combo.currentText()
+        if not name:
+            return
+        pid = self.add_processor_combo.currentData()
+        if not pid:
+            return
+        step = {"processor_id": pid, "params": {}}
+        chains = self.controls_post_processing.setdefault("region_chains", {})
+        chains.setdefault(name, []).append(step)
+        self._refresh_chain_list()
+        self.update_controls_post_processing()
+
+    def _remove_chain_step(self):
+        name = self.chain_region_combo.currentText()
+        row = self.chain_steps_list.currentRow()
+        if not name or row < 0:
+            return
+        chain = self.controls_post_processing.get("region_chains", {}).get(name, [])
+        if 0 <= row < len(chain):
+            chain.pop(row)
+        self._refresh_chain_list()
+        self.update_controls_post_processing()
+
+    def _copy_chain(self):
+        src = self.chain_region_combo.currentText()
+        dst = self.copy_to_combo.currentText()
+        if not src or not dst or src == dst:
+            return
+        from Services.Operation_crop.chain import copy_chain
+        src_chain = self.controls_post_processing.get("region_chains", {}).get(src, [])
+        self.controls_post_processing.setdefault("region_chains", {})[dst] = copy_chain(src_chain)
+        self._refresh_chain_list()
+        self.update_controls_post_processing()
+
+    def update_controls_post_processing(self):
+        """Отправка controls в процесс пост-обработки."""
+        if not hasattr(self, 'queue_manager') or self.queue_manager is None:
+            return
+        ctrl = dict(self.controls_post_processing)
+        self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_post_processing)
+        self.queue_manager.control_post_processing.put(ctrl)
 
 
     def update_access_level(self, level: int):
@@ -1550,7 +1817,11 @@ class MainWindow(QMainWindow):
 
 
     def close_programm(self):
-        # Останавливаем поток сообщений камеры
+        # Останавливаем поток сообщений камеры в HikvisionWidget
+        if hasattr(self, 'hikvision_widget'):
+            self.hikvision_widget.stop_thread()
+        
+        # Также останавливаем старый поток если он еще существует
         if hasattr(self, 'camera_message_thread'):
             self.camera_message_thread.stop()
         
