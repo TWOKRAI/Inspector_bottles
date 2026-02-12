@@ -1,4 +1,0 @@
-# Минимальные зависимости для Clean Camera App
-PyQt5>=5.15.0
-numpy>=1.20.0
-opencv-python>=4.5.0

@@ -247,9 +247,6 @@ class MainWindow(QMainWindow):
         self.create_tab(self.tab_widget, "Hikvision", self.hikvision_widget)
         self.create_tab(self.tab_widget, "Обработка", self.processing_widget)
         self.create_tab(self.tab_widget, "Operation Crop", self.post_processing_widget)
-        
-        # Устанавливаем кнопку переключения видимости вкладок
-        self.tab_widget.setCornerWidget(self.btn_toggle_tabs, Qt.TopRightCorner)
     
     def handle_camera_message(self, message):
         """Обработать сообщение от процесса камеры"""
@@ -331,14 +328,52 @@ class MainWindow(QMainWindow):
         # Создаем tab_widget, но пока без вкладок
         self.tab_widget = QTabWidget()
         self.tab_widget.setMinimumHeight(220)
-        self.tab_widget.setStyleSheet("QTabBar::tab { height: 35px; width: 95px; }")
+        # Стиль для вкладок и corner widget
+        self.tab_widget.setStyleSheet("""
+            QTabBar::tab { 
+                height: 35px; 
+                width: 95px; 
+            }
+            QTabWidget::pane {
+                border: 1px solid #ccc;
+            }
+        """)
         
-        # Кнопка «Скрыть»/«Показать» — в правом углу на одной линии с вкладками
+        # Кнопка «Скрыть»/«Показать» — в правом углу строки вкладок
+        # Делаем её такой же как кнопки вкладок
         self.btn_toggle_tabs = QPushButton("Скрыть")
-        self.btn_toggle_tabs.setFixedHeight(32)
-        self.btn_toggle_tabs.setMinimumWidth(70)
+        self.btn_toggle_tabs.setFixedHeight(35)  # Такая же высота как у вкладок
+        self.btn_toggle_tabs.setFixedWidth(95)  # Такая же ширина как у вкладок
         self.btn_toggle_tabs.clicked.connect(self.toggle_tabs_visibility)
+        # Применяем стиль максимально похожий на вкладки
+        self.btn_toggle_tabs.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 0px;
+                font-size: 12px;
+                margin: 0px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+            QPushButton:pressed {
+                background-color: #d0d0d0;
+            }
+        """)
         self.tabs_visible = True
+        
+        # Создаем контейнер для правильного выравнивания кнопки
+        corner_container = QWidget()
+        corner_layout = QHBoxLayout(corner_container)
+        corner_layout.setContentsMargins(0, 0, 0, 0)
+        corner_layout.setSpacing(0)
+        corner_layout.addWidget(self.btn_toggle_tabs)
+        
+        # Устанавливаем контейнер в corner widget строки вкладок
+        self.tab_widget.setCornerWidget(corner_container, Qt.TopRightCorner)
         
         main_layout.addWidget(self.tab_widget, 1)
     
@@ -1339,15 +1374,39 @@ class MainWindow(QMainWindow):
             self.params_manager.set_default_recipe(number)
     
     def toggle_tabs_visibility(self):
-        """Скрыть/показать контент вкладок (строка вкладок + кнопка остаются видимыми)."""
+        """Скрыть/показать контент вкладок (строка вкладок остается видимой)."""
         self.tabs_visible = not self.tabs_visible
         if self.tabs_visible:
+            # Показываем содержимое вкладок
             self.tab_widget.setMaximumHeight(16777215)  # Убираем ограничение
+            self.tab_widget.setMinimumHeight(220)  # Восстанавливаем минимальную высоту
+            self.tab_widget.setFixedHeight(16777215)  # Убираем фиксированную высоту
+            
+            # Показываем все виджеты вкладок
+            for i in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(i)
+                if widget:
+                    widget.setVisible(True)
             self.btn_toggle_tabs.setText("Скрыть")
         else:
-            # Оставляем только строку вкладок с кнопкой
-            h = self.tab_widget.tabBar().sizeHint().height() + 4
-            self.tab_widget.setMaximumHeight(h)
+            # Скрываем содержимое вкладок полностью, оставляя только tab bar
+            # Получаем точную высоту tab bar
+            tab_bar = self.tab_widget.tabBar()
+            tab_bar_height = tab_bar.sizeHint().height()
+            # Добавляем небольшую поправку для corner widget (кнопка)
+            corner_widget_height = self.btn_toggle_tabs.sizeHint().height() if self.btn_toggle_tabs else 0
+            total_height = max(tab_bar_height, corner_widget_height) + 2  # +2 для небольших отступов
+            
+            # Устанавливаем фиксированную высоту равную высоте tab bar
+            self.tab_widget.setMaximumHeight(total_height)
+            self.tab_widget.setMinimumHeight(total_height)
+            self.tab_widget.setFixedHeight(total_height)
+            
+            # Скрываем содержимое всех вкладок
+            for i in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(i)
+                if widget:
+                    widget.setVisible(False)
             self.btn_toggle_tabs.setText("Показать")
     
     def create_tab_processing(self):
