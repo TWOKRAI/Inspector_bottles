@@ -83,7 +83,10 @@ def process_processing(queue_manager, control_processing):
         if frames is None or len(frames) == 0:
             continue
         
-        original_frame = frames[0]
+        original_frame = frames[0].copy()
+        # Единая конвертация в RGB в начале пайплайна — дальше везде (HSV, отображение в PyQt) ожидается RGB
+        if len(original_frame.shape) == 3 and original_frame.shape[2] == 3:
+            original_frame = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
         
         # Применяем обрезку изображения
         # Используем оригинальные размеры изображения для ограничения обрезки

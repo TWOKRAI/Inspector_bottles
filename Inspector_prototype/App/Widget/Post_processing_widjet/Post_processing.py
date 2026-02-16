@@ -104,10 +104,12 @@ class PostProcessingWidget(QWidget):
             return
         regions = self.controls_post_processing.get("regions", [])
         if 0 <= row < len(regions):
-            regions[row]["x1"] = self.region_x1.value()
-            regions[row]["y1"] = self.region_y1.value()
-            regions[row]["x2"] = self.region_x2.value()
-            regions[row]["y2"] = self.region_y2.value()
+            r = self._region_to_dict(regions[row])
+            r["x1"] = self.region_x1.value()
+            r["y1"] = self.region_y1.value()
+            r["x2"] = self.region_x2.value()
+            r["y2"] = self.region_y2.value()
+            regions[row] = r
             if self.callback:
                 self.callback()
 
@@ -206,12 +208,18 @@ class PostProcessingWidget(QWidget):
             return
         regions = self.controls_post_processing.get("regions", [])
         if 0 <= row < len(regions):
-            name = regions[row]["name"]
+            name = self._region_to_dict(regions[row])["name"]
             regions.pop(row)
             self.controls_post_processing.get("region_chains", {}).pop(name, None)
         self._refresh_regions_ui()
         if self.callback:
             self.callback()
+
+    def _region_to_dict(self, r):
+        """Привести элемент региона к виду {name, x1, y1, x2, y2} (элемент может быть dict или str)."""
+        if isinstance(r, dict):
+            return r
+        return {"name": str(r), "x1": 0, "y1": 0, "x2": 0, "y2": 0}
 
     def _on_region_selected(self):
         """При выборе области в списке — загрузить координаты в поля и запомнить индекс."""
@@ -221,7 +229,7 @@ class PostProcessingWidget(QWidget):
         self._selected_region_edit_idx = row
         regions = self.controls_post_processing.get("regions", [])
         if 0 <= row < len(regions):
-            r = regions[row]
+            r = self._region_to_dict(regions[row])
             self.region_name_edit.blockSignals(True)
             self.region_x1.blockSignals(True)
             self.region_y1.blockSignals(True)
@@ -243,8 +251,9 @@ class PostProcessingWidget(QWidget):
             return
         self.regions_list.clear()
         for r in self.controls_post_processing.get("regions", []):
-            self.regions_list.addItem(f"{r['name']} ({r['x1']},{r['y1']})-({r['x2']},{r['y2']})")
-        names = [r["name"] for r in self.controls_post_processing.get("regions", [])]
+            d = self._region_to_dict(r)
+            self.regions_list.addItem(f"{d['name']} ({d['x1']},{d['y1']})-({d['x2']},{d['y2']})")
+        names = [self._region_to_dict(r)["name"] for r in self.controls_post_processing.get("regions", [])]
         for cb in [self.region_combo, self.chain_region_combo, self.copy_to_combo]:
             cb.blockSignals(True)
             cb.clear()

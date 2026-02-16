@@ -412,11 +412,12 @@ class CameraProcess():
                         
                         frame = frame.reshape(original_height, original_width)
                         
-                        # Демозаика для Bayer pattern
+                        # Демозаика для Bayer pattern -> RGB, потом в BGR для единого формата в пайплайне
                         if pixel_type == 17301513:  # PixelType_Gvsp_BayerRG8
                             try:
                                 import cv2
                                 frame = cv2.cvtColor(frame, cv2.COLOR_BayerRG2RGB)
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                             except:
                                 pass
                     else:
@@ -424,32 +425,25 @@ class CameraProcess():
                         original_height = frame.shape[0]
                         original_width = frame.shape[1]
                     
-                    # Конвертируем в RGB если нужно
+                    # В память всегда пишем BGR; конвертация BGR->RGB — в process_processing.
                     if len(frame.shape) == 2:
                         try:
                             import cv2
                             frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                         except Exception as e:
                             print(f"Error converting GRAY to RGB: {e}")
                             continue
                     elif len(frame.shape) == 3:
-                        if frame.shape[2] == 3:
-                            # Предполагаем что это BGR, конвертируем в RGB
-                            try:
-                                import cv2
-                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            except Exception as e:
-                                print(f"Error converting BGR to RGB: {e}")
-                                # Продолжаем без конвертации
-                                pass
-                        elif frame.shape[2] == 4:
-                            # Если RGBA, конвертируем в RGB
+                        if frame.shape[2] == 4:
                             try:
                                 import cv2
                                 frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                             except Exception as e:
                                 print(f"Error converting RGBA to RGB: {e}")
                                 continue
+                        # 3 канала — считаем BGR от камеры, не трогаем
                     
                     # Проверяем что изображение имеет правильный формат перед записью
                     if len(frame.shape) != 3 or frame.shape[2] != 3:

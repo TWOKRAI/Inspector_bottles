@@ -1,3 +1,4 @@
+import os
 import cv2
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel,
                              QSlider, QCheckBox, QTabWidget, QScrollArea, QPushButton, QMessageBox, QComboBox, QGroupBox,
@@ -26,7 +27,7 @@ from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
 from App.Widget.Processing_widjet.Processing import ProcessingWidget
 from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
 from App.Components.params_manager import ParamsManager
-from App.Components.sort_widget import SpinWidget
+from App.Widget.Sort_widjet import SortWidget, SortData
 
 
 # SliderControl и CheckboxControl теперь импортируются из Components
@@ -228,7 +229,8 @@ class MainWindow(QMainWindow):
             'processing': self.processing_widget,
             'post_processing': self.post_processing_widget,
         }
-        self.params_manager = ParamsManager(self.widgets_dict)
+        self.sort_data = SortData()
+        self.params_manager = ParamsManager(self.widgets_dict, self.sort_data)
     
     def update_tabs_with_widgets(self):
         """Обновляет вкладки, добавляя виджеты"""
@@ -493,7 +495,7 @@ class MainWindow(QMainWindow):
         label_tab.setFont(font)
         layout.addWidget(label_tab)
         
-        self.sort_widget = SpinWidget(2)
+        self.sort_widget = SortWidget(self.sort_data, default_number=2, params_provider=self.get_all_params)
         layout.addWidget(self.sort_widget)
         
         self.sort_widget.applied.connect(self.apply_sort)
@@ -1208,7 +1210,6 @@ class MainWindow(QMainWindow):
         #self.total_label.setText(f'{total} ms\nall: {total_all}')
         #self.total_label.setText(f'all: {total_all}')
 
-
     def update_image(self, frame):
         """Обновление изображения в label с наложением FPS"""
         if frame is None:
@@ -1276,9 +1277,9 @@ class MainWindow(QMainWindow):
             frame_resized = cv2.resize(frame_with_fps, (new_width, new_height))
 
             bytes_per_line = 3 * new_width
-            # Конвертируем RGB в BGR для QImage (так как OpenCV использует BGR)
+            # Пайплайн отдаёт RGB (на сохранённом PNG цвета верные). В PyQt виджет на части систем
+            # трактует буфер как BGR — отдаём BGR в Format_RGB888, тогда отрисовка совпадает с PNG.
             if len(frame_resized.shape) == 3 and frame_resized.shape[2] == 3:
-                # Если изображение в RGB, конвертируем в BGR для QImage
                 frame_bgr = cv2.cvtColor(frame_resized, cv2.COLOR_RGB2BGR)
                 q_img = QImage(frame_bgr.data, new_width, new_height, bytes_per_line, QImage.Format_RGB888)
             else:
@@ -1311,12 +1312,16 @@ class MainWindow(QMainWindow):
                 self.params_manager.save_to_excel('real_value')
             except Exception as e:
                 print(f"Ошибка автосохранения параметров: {e}")
-
+        # Обновить таблицу сортов (с задержкой, чтобы не перерисовывать на каждый тик)
+        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+            self.sort_widget.schedule_refresh()
 
     def update_controls_camera(self):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_camera)
         self.queue_manager.control_camera.put(self.controls_camera)   
-        self.queue_manager.control_camera_event.set() 
+        self.queue_manager.control_camera_event.set()
+        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+            self.sort_widget.schedule_refresh() 
 
 
     def update_controls_conveyor(self):
@@ -1329,18 +1334,24 @@ class MainWindow(QMainWindow):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_neuroun)
         self.queue_manager.control_neuroun.put(self.controls_neuroun)
         self.queue_manager.control_neuroun_event.set()
+        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+            self.sort_widget.schedule_refresh()
 
     
     def update_controls_draw(self):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_draw)
         self.queue_manager.control_draw.put(self.controls_draw)
         self.queue_manager.control_draw_event.set()
+        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+            self.sort_widget.schedule_refresh()
 
 
     def update_controls_robot(self):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_robot)
         self.queue_manager.control_robot.put(self.controls_robot)
         self.queue_manager.control_robot_event.set()
+        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+            self.sort_widget.schedule_refresh()
     
     def update_controls_hikvision(self):
         """Обновление управления Hikvision SDK"""
@@ -1367,6 +1378,8 @@ class MainWindow(QMainWindow):
         """Сохранить текущие значения в рецепт"""
         if hasattr(self, 'params_manager'):
             self.params_manager.save_recipe(number)
+        if hasattr(self, 'sort_widget'):
+            self.sort_widget.refresh_table()
     
     def default_sort(self, number):
         """Установить рецепт как дефолтный"""
