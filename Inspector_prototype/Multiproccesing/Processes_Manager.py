@@ -24,6 +24,11 @@ class MultiProcessManager:
         self.app_enable = True  # Процесс App для отображения
         self.processing_enable = True  # Процесс обработки изображений
         self.post_processing_enable = True  # Процесс пост-обработки изображений
+        self.region_processor_1_enable = True  # Процесс обработки региона 1
+        self.region_processor_2_enable = True  # Процесс обработки региона 2
+        self.region_merger_enable = True  # Объединяющий процесс регионов
+        self.overlay_enable = True  # Процесс overlay (рисование текста и линий)
+        self.image_source_enable = True  # Процесс чтения изображения из файла (переключатель камера/файл)
         
         # Количество процессов для отслеживания загрузки
         self.total_processes = 0
@@ -37,6 +42,11 @@ class MultiProcessManager:
             'proc_app': 'Multiproccesing.Processes.process_app',
             'proc_processing': 'Multiproccesing.Processes.process_processing',
             'proc_post_processing': 'Multiproccesing.Processes.process_post_processing',
+            'proc_region_processor_1': 'Multiproccesing.Processes.process_region_processor_1',
+            'proc_region_processor_2': 'Multiproccesing.Processes.process_region_processor_2',
+            'proc_region_merger': 'Multiproccesing.Processes.process_region_merger',
+            'proc_overlay': 'Multiproccesing.Processes.process_overlay',
+            'proc_image_source': 'Multiproccesing.Processes.process_image_source',
         }
 
         # Подсчет количества процессов для отслеживания загрузки
@@ -103,7 +113,12 @@ class MultiProcessManager:
             self.ui_sdk_enable,
             self.processing_enable,
             self.post_processing_enable,
-            self.app_enable
+            self.app_enable,
+            self.region_processor_1_enable,
+            self.region_processor_2_enable,
+            self.region_merger_enable,
+            self.overlay_enable,
+            self.image_source_enable,
         ])
         
         # Устанавливаем количество процессов для окна загрузки
@@ -164,6 +179,61 @@ class MultiProcessManager:
             )
             self.processes.append(app_process)
             print(f"Process 'proc_app' initialized")
+
+        if self.region_processor_1_enable:
+            # Процесс обработки региона 1
+            region_processor_1 = self.create_process(
+                target_func=modules['proc_region_processor_1'],
+                args=(self.queue_manager, self.queue_manager.control_processing),
+                name='proc_region_processor_1',
+                priority='high'
+            )
+            self.processes.append(region_processor_1)
+            print(f"Process 'proc_region_processor_1' initialized")
+
+        if self.region_processor_2_enable:
+            # Процесс обработки региона 2
+            region_processor_2 = self.create_process(
+                target_func=modules['proc_region_processor_2'],
+                args=(self.queue_manager, self.queue_manager.control_processing),
+                name='proc_region_processor_2',
+                priority='high'
+            )
+            self.processes.append(region_processor_2)
+            print(f"Process 'proc_region_processor_2' initialized")
+
+        if self.region_merger_enable:
+            # Объединяющий процесс регионов
+            region_merger = self.create_process(
+                target_func=modules['proc_region_merger'],
+                args=(self.queue_manager, self.queue_manager.control_post_processing),
+                name='proc_region_merger',
+                priority='high'
+            )
+            self.processes.append(region_merger)
+            print(f"Process 'proc_region_merger' initialized")
+
+        if self.overlay_enable:
+            # Процесс overlay (рисование текста и линий)
+            overlay_process = self.create_process(
+                target_func=modules['proc_overlay'],
+                args=(self.queue_manager, self.queue_manager.control_overlay),
+                name='proc_overlay',
+                priority='normal'
+            )
+            self.processes.append(overlay_process)
+            print(f"Process 'proc_overlay' initialized")
+
+        if self.image_source_enable:
+            # Процесс чтения изображения из файла (переключатель камера/изображение)
+            image_source_process = self.create_process(
+                target_func=modules['proc_image_source'],
+                args=(self.queue_manager, self.queue_manager.control_source_image),
+                name='proc_image_source',
+                priority='normal'
+            )
+            self.processes.append(image_source_process)
+            print(f"Process 'proc_image_source' initialized")
 
 
     def start_processes(self):

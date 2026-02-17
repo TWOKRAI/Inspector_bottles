@@ -39,6 +39,8 @@ def process_processing(queue_manager, control_processing):
         'crop_bottom': 2160,  # Максимальная высота
         'crop_left': 0,
         'crop_right': 3840,  # Максимальная ширина
+        'enable_region_mode': False,  # Режим обработки регионов
+        'region_config': {},  # Конфигурация регионов: {region_id: {processor_id, x1, y1, x2, y2}}
     }
     
     initialization = False
@@ -113,6 +115,69 @@ def process_processing(queue_manager, control_processing):
             crop_right = orig_width
         
         cropped_frame = original_frame[crop_top:crop_bottom, crop_left:crop_right]
+        
+        # Проверяем режим обработки регионов
+        if controls.get('enable_region_mode', False):
+            # Режим регионов: разделяем на регионы и отправляем в процессоры
+            region_config = controls.get('region_config', {})
+            
+            if region_config:
+                # Отправляем каждый регион в соответствующий процессор
+                for region_id, region_info in region_config.items():
+                    processor_id = region_info.get('processor_id', 1)
+                    region_coords = {
+                        'x1': region_info.get('x1', 0),
+                        'y1': region_info.get('y1', 0),
+                        'x2': region_info.get('x2', orig_width),
+                        'y2': region_info.get('y2', orig_height),
+                    }
+                    
+                    # Выбираем очередь в зависимости от процессора
+                    if processor_id == 1:
+                        target_queue = queue_manager.region_processor_queue_1
+                    elif processor_id == 2:
+                        target_queue = queue_manager.region_processor_queue_2
+                    else:
+                        print(f"Unknown processor_id {processor_id} for region {region_id}")
+                        continue
+                    
+                    # Создаем данные региона
+                    region_data = {
+                        'id_memory': id_memory,
+                        'region_id': region_id,
+                        'frame_id': frame_id,
+                        'capture_time': capture_time,
+                        'region_coords': region_coords,
+                        'timestamps': data_frame.get('timestamps', {}).copy(),
+                        'image_height': image_height,
+                        'image_width': image_width,
+                    }
+                    
+                    # Отправляем в очередь процессора
+                    queue_manager.remove_old_frame_if_full(target_queue)
+                    target_queue.put(region_data)
+                    print(f"Sent region {region_id} to processor {processor_id} for frame {frame_id}")
+                
+                # В режиме регионов не обрабатываем изображение здесь, только отправляем регионы
+                # Объединяющий процесс соберет результаты
+                # Но все равно нужно отправить кадр в post_processor_queue для дальнейшей обработки
+                # Отправляем оригинальный кадр (регионы обработаются отдельно и объединятся)
+                post_processing_data = {
+                    'id_memory': id_memory,
+                    'capture_time': capture_time,
+                    'frame_id': frame_id,
+                    'processed': False,  # Регионы обрабатываются отдельно
+                    'timestamps': data_frame.get('timestamps', {}),
+                    'processing_time': 0.0,
+                    'total_time_from_capture': time.time() - capture_time,
+                    'image_height': image_height,
+                    'image_width': image_width
+                }
+                queue_manager.remove_old_frame_if_full(queue_manager.post_processor_queue)
+                queue_manager.post_processor_queue.put(post_processing_data)
+                continue
+            else:
+                print("Region mode enabled but no region_config provided, falling back to normal mode")
         
         # Применяем обработку если включена
         if controls['enable_processing']:

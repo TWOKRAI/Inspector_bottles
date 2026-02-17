@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QComboBox
 from App.Components.slider import SliderControl
 from App.Components.checkbox import CheckboxControl
 
@@ -51,6 +51,23 @@ class ProcessingWidget(QWidget):
             parent=self
         )
         layout.addWidget(checkbox_control)
+        
+        # Выбор типа процессора региона
+        layout.addWidget(QLabel("Тип обработки региона:"))
+        self.region_processor_combo = QComboBox()
+        self.region_processor_combo.addItems(["HSV (маска)", "RGB", "BGR", "Grayscale"])
+        # Устанавливаем значение на основе текущих настроек
+        region_processor_type = self.controls_processing.get('region_processor_type')
+        if region_processor_type == 'rgb':
+            self.region_processor_combo.setCurrentText("RGB")
+        elif region_processor_type == 'bgr':
+            self.region_processor_combo.setCurrentText("BGR")
+        elif region_processor_type == 'grayscale':
+            self.region_processor_combo.setCurrentText("Grayscale")
+        else:
+            self.region_processor_combo.setCurrentText("HSV (маска)")
+        self.region_processor_combo.currentTextChanged.connect(self._on_region_processor_changed)
+        layout.addWidget(self.region_processor_combo)
         
         # Регуляторы размера окна изображения
         slider_control = SliderControl(
@@ -199,6 +216,20 @@ class ProcessingWidget(QWidget):
             parent=self
         )
         layout.addWidget(slider_control)
+    
+    def _on_region_processor_changed(self, text):
+        """Обработчик изменения типа процессора региона"""
+        if text == "HSV (маска)":
+            self.controls_processing['region_processor_type'] = None
+        elif text == "RGB":
+            self.controls_processing['region_processor_type'] = 'rgb'
+        elif text == "BGR":
+            self.controls_processing['region_processor_type'] = 'bgr'
+        elif text == "Grayscale":
+            self.controls_processing['region_processor_type'] = 'grayscale'
+        
+        if self.callback:
+            self.callback()
     
     def update_image_size(self, width, height):
         """Обновляет максимальные значения слайдеров обрезки при получении размера изображения"""

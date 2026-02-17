@@ -115,6 +115,7 @@ recipes:
     hl: 0
     hm: 179
     image_height: 780
+    image_path: Data/last_frame.png
     image_scale: 0.5
     image_width: 1024
     k_size: 1.15
@@ -137,12 +138,16 @@ recipes:
     processing: true
     record_video: false
     rectangles: true
-    region_chains: '{}'
-    regions: '[]'
+    region_chains: '{"region1": [{"processor_id": "grayscale", "params": {}, "enabled":
+      true}]}'
+    region_processor_type: null
+    regions: '[{"name": "region1", "x1": 1246, "y1": 43, "x2": 343, "y2": 244}, {"name":
+      "region2", "x1": 138, "y1": 48, "x2": 350, "y2": 246}]'
     resize_delta: 0
     right: 1054
     robot_on: false
     save_image_brak: true
+    selected_image: original
     selected_region: null
     server: true
     servo_on: false
@@ -151,12 +156,14 @@ recipes:
     shift_y: 120
     show_mask: false
     show_processed: false
+    show_region_processed: false
     sl: 0
     sm: 255
     snap_y: 200
+    source: camera
     top: 145
     tracking: 50
-    view_mode: main
+    view_mode: original
     vl: 0
     vm: 255
     x_delta: 21
@@ -381,13 +388,16 @@ recipes:
     processing: true
     record_video: false
     rectangles: true
-    region_chains: '{}'
-    regions: '[{"name": "region", "x1": 125, "y1": 48, "x2": 343, "y2": 246}, {"name":
-      "region", "x1": 138, "y1": 48, "x2": 350, "y2": 246}]'
+    region_chains: '{"region1": [{"processor_id": "grayscale", "params": {}, "enabled":
+      true}]}'
+    region_processor_type: null
+    regions: '[{"name": "region1", "x1": 1246, "y1": 43, "x2": 343, "y2": 244}, {"name":
+      "region2", "x1": 138, "y1": 48, "x2": 350, "y2": 246}]'
     resize_delta: 0
     right: 1054
     robot_on: false
     save_image_brak: true
+    selected_image: original
     selected_region: null
     server: true
     servo_on: false
@@ -396,12 +406,13 @@ recipes:
     shift_y: 120
     show_mask: false
     show_processed: false
+    show_region_processed: false
     sl: 0
     sm: 255
     snap_y: 200
     top: 145
     tracking: 50
-    view_mode: main
+    view_mode: original
     vl: 0
     vm: 255
     x_delta: 21

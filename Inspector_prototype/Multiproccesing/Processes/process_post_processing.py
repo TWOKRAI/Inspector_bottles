@@ -116,8 +116,14 @@ def process_post_processing(queue_manager, control_post_processing):
         data_frame["total_time_from_capture"] = post_end - capture_time
 
         queue_manager.memory_manager.write_images([display_frame], "process_data", id_memory)
-        queue_manager.remove_old_frame_if_full(queue_manager.display_queue)
-        queue_manager.display_queue.put(data_frame)
+        
+        # Добавляем информацию о регионах в data_frame для overlay процесса
+        data_frame['regions'] = regions
+        data_frame['selected_region_idx'] = -1  # Можно передавать выбранный индекс
+        
+        # Отправляем в overlay очередь для наложения overlay
+        queue_manager.remove_old_frame_if_full(queue_manager.overlay_queue)
+        queue_manager.overlay_queue.put(data_frame)
 
 
 def main(queue_manager, control_post_processing):

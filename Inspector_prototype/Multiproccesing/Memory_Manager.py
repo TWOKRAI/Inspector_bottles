@@ -75,6 +75,22 @@ class ImageMemoryManager:
         return shm_list
 
     def _calculate_memory_size(self, num_images: int, image_shape: tuple, dtype: type) -> int:
+        """
+        Вычисляет размер памяти для хранения изображений.
+        
+        Память выделяется с запасом для максимального размера (MAX_HEIGHT x MAX_WIDTH),
+        но может хранить изображения любого размера до этого максимума.
+        При изменении размера регионов или изображений память автоматически подстраивается,
+        так как реальные размеры сохраняются в заголовке каждого изображения.
+        
+        Args:
+            num_images: Количество изображений
+            image_shape: Максимальный размер (height, width, channels)
+            dtype: Тип данных
+        
+        Returns:
+            Размер памяти в байтах
+        """
         h, w, c = image_shape
         itemsize = np.dtype(dtype).itemsize
         return 4 + num_images * (12 + 1 + h * w * c * itemsize)

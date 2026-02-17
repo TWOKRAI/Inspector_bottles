@@ -48,7 +48,10 @@ class MainWindow(QMainWindow):
 
         self.ui_elements = {}
         self.controls = {}
-        self.controls_camera = {}
+        self.controls_camera = {
+            'source': 'camera',  # 'camera' или 'image' — переключатель источника кадров
+            'image_path': 'Data/last_frame.png',  # путь к PNG при source='image'
+        }
         self.controls_neuroun = {}
         self.controls_draw = {}
         self.controls_robot = {}
@@ -65,19 +68,24 @@ class MainWindow(QMainWindow):
             'image_width': 1024,
             'image_height': 780,
             'hl': 0, 'sl': 0, 'vl': 0,
-            'hm': 179, 'sm': 255, 'vm': 255
+            'hm': 179, 'sm': 255, 'vm': 255,
+            'region_processor_type': None,  # None для HSV, или 'rgb', 'bgr', 'grayscale'
         }
         
         # Operation Crop: области + цепочки обработки
         self.controls_post_processing = {
             'enable_post_processing': False,
-            'regions': [],  # [{name, x1, y1, x2, y2}, ...]
+            'regions': [],  # [{name, x1, y1, x2, y2, processor_id}, ...]
             'region_chains': {},  # {name: [{processor_id, params}, ...]}
             'view_mode': 'main',  # main | region | list
             'selected_region': None,
+            'show_region_processed': False,  # Показывать обработанный регион или оригинал
         }
         # Визуальная настройка (масштаб изображения для экономии места)
-        self.controls_visual = {'image_scale': 0.5}
+        # Рисунки (FPS, регионы) управляются чекбоксом Draw в controls_draw
+        self.controls_visual = {
+            'image_scale': 0.5,
+        }
         
         # Список устройств камеры для Hikvision
         self.hikvision_device_list = []
@@ -127,6 +135,23 @@ class MainWindow(QMainWindow):
         # Подключаем обработку сообщений для обновления ProcessingWidget и других компонентов
         if hasattr(self, 'hikvision_widget') and self.hikvision_widget.camera_message_thread:
             self.hikvision_widget.camera_message_thread.message_received.connect(self.handle_camera_message)
+    
+    def _load_current_recipe_on_startup(self):
+        """Загрузить текущий рецепт при старте приложения"""
+        try:
+            current_recipe_number = self.sort_data.get_current_recipe_number()
+            if current_recipe_number is not None:
+                print(f"Автозагрузка текущего рецепта: {current_recipe_number}")
+                self.params_manager.apply_recipe(current_recipe_number)
+                print(f"Рецепт {current_recipe_number} успешно загружен")
+            else:
+                # Если текущий рецепт не установлен, загружаем default_value
+                print("Текущий рецепт не установлен, загрузка default_value")
+                self.params_manager.apply_recipe("default_value")
+        except Exception as e:
+            print(f"Ошибка при автозагрузке рецепта: {e}")
+            import traceback
+            traceback.print_exc()
     
     def create_widgets(self):
         """Создание всех виджетов для вкладок"""
@@ -231,6 +256,9 @@ class MainWindow(QMainWindow):
         }
         self.sort_data = SortData()
         self.params_manager = ParamsManager(self.widgets_dict, self.sort_data)
+        
+        # Автозагрузка текущего рецепта при старте приложения
+        self._load_current_recipe_on_startup()
     
     def update_tabs_with_widgets(self):
         """Обновляет вкладки, добавляя виджеты"""
@@ -464,6 +492,18 @@ class MainWindow(QMainWindow):
         checkbox_control = CheckboxControl("servo_on", False, "top", ui_elements=self.ui_elements, controls=self.controls_robot, callback = self.update_controls_robot, parent=self)
         checkbox_layout_right.addWidget(checkbox_control)
 
+        # Переключатель источника: камера или изображение из файла
+        source_group = QGroupBox("Источник кадров")
+        source_layout = QVBoxLayout()
+        self.source_combo = QComboBox()
+        self.source_combo.addItem("Камера", "camera")
+        self.source_combo.addItem("Изображение", "image")
+        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
+        source_layout.addWidget(QLabel("Источник:"))
+        source_layout.addWidget(self.source_combo)
+        source_group.setLayout(source_layout)
+        checkbox_layout_right.addWidget(source_group)
+        
         checkbox_control = CheckboxControl("enable_camera", True, "top", ui_elements=self.ui_elements, controls=self.controls_camera, callback = self.update_controls_camera, parent=self)
         checkbox_layout_right.addWidget(checkbox_control)
 
@@ -1059,6 +1099,12 @@ class MainWindow(QMainWindow):
             self.processing_time_label.setText(f"Processing: {self.processing_time_ms:.1f} ms")
         if hasattr(self, 'total_time_label'):
             self.total_time_label.setText(f"Total (capture→display): {self.total_time_ms:.1f} ms")
+        
+        # Обновляем отображение времени обработки во вкладке Processing
+        if hasattr(self, 'processing_time_display_label'):
+            self.processing_time_display_label.setText(f"Время обработки: {self.processing_time_ms:.1f} ms")
+        if hasattr(self, 'total_time_display_label'):
+            self.total_time_display_label.setText(f"Общее время (захват→отображение): {self.total_time_ms:.1f} ms")
     
     def sdk_enum_devices(self):
         """Перечислить устройства камеры"""
@@ -1216,25 +1262,15 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # Создаем копию кадра для рисования FPS
-            frame_with_fps = frame.copy()
+            # Убеждаемся что исходный кадр является непрерывным numpy массивом
+            if not isinstance(frame, np.ndarray):
+                return
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame, dtype=np.uint8)
             
-            # Рисуем FPS и временные метрики на изображении
-            fps_text = f"FPS: {self.fps_after_processing:.1f}" if self.fps_after_processing > 0 else "FPS: 0.0"
-            time_text = f"Proc: {self.processing_time_ms:.1f}ms | Total: {self.total_time_ms:.1f}ms"
-            
-            # Настройки текста
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.7
-            color_fps = (0, 255, 0)  # Зеленый цвет для FPS
-            color_time = (255, 255, 0)  # Желтый цвет для времени
-            thickness = 2
-            
-            # Рисуем FPS на изображении
-            cv2.putText(frame_with_fps, fps_text, (10, 30), font, font_scale, color_fps, thickness, cv2.LINE_AA)
-            
-            # Рисуем временные метрики на изображении
-            cv2.putText(frame_with_fps, time_text, (10, 55), font, font_scale, color_time, thickness, cv2.LINE_AA)
+            # Убеждаемся что копия непрерывная
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame, dtype=np.uint8)
             
             # Обновляем метрики в HikvisionWidget
             if hasattr(self, 'hikvision_widget'):
@@ -1244,35 +1280,20 @@ class MainWindow(QMainWindow):
                     self.total_time_ms
                 )
             
-            # Рисуем прямоугольники областей (Operation Crop) — координаты в пикселях кадра
-            height_img, width_img = frame_with_fps.shape[:2]
-            regions = self.controls_post_processing.get('regions', [])
-            selected_idx = getattr(self.post_processing_widget, '_selected_region_edit_idx', -1) if hasattr(self, 'post_processing_widget') else -1
-            for i, r in enumerate(regions):
-                x1, y1 = int(r.get('x1', 0)), int(r.get('y1', 0))
-                x2, y2 = int(r.get('x2', 0)), int(r.get('y2', 0))
-                x1, x2 = min(x1, x2), max(x1, x2)
-                y1, y2 = min(y1, y2), max(y1, y2)
-                # Ограничиваем в границах изображения
-                x1, x2 = max(0, x1), min(width_img, x2)
-                y1, y2 = max(0, y1), min(height_img, y2)
-                if x1 >= x2 or y1 >= y2:
-                    continue
-                is_selected = (i == selected_idx)
-                color = (0, 255, 0) if is_selected else (0, 165, 255)  # Зелёный выбран, оранжевый остальные
-                th = 3 if is_selected else 2
-                cv2.rectangle(frame_with_fps, (x1, y1), (x2, y2), color, th)
-                name = r.get('name', '')
-                cv2.putText(frame_with_fps, name, (x1, max(15, y1 - 5)), font, 0.5, color, 1, cv2.LINE_AA)
+            # Просто используем оригинальное изображение - overlay применяется в отдельном процессе
+            frame_with_fps = frame.copy()
             
             height, width = frame_with_fps.shape[:2]
+            if height <= 0 or width <= 0:
+                return  # пустой кадр — пропускаем обновление
+            
             channel = frame_with_fps.shape[2] if len(frame_with_fps.shape) == 3 else 1
             
             # Масштаб из вкладки «Визуальная настройка»
             scale = self.controls_visual.get('image_scale', 0.5)
             scale = max(0.2, min(1.0, float(scale)))
-            new_height = int(height * scale)
-            new_width = int(width * scale)
+            new_height = max(1, int(height * scale))
+            new_width = max(1, int(width * scale))
 
             frame_resized = cv2.resize(frame_with_fps, (new_width, new_height))
 
@@ -1316,10 +1337,36 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
             self.sort_widget.schedule_refresh()
 
+    def _on_source_changed(self, index):
+        """Переключение источника: камера / изображение"""
+        source = self.source_combo.currentData()
+        self.controls_camera['source'] = source
+        if source == 'image':
+            # При переключении на изображение останавливаем камеру
+            if hasattr(self.queue_manager, 'ui_to_camera'):
+                try:
+                    self.queue_manager.ui_to_camera.put_nowait({'type': 'stop_grabbing'})
+                except Exception:
+                    pass
+        self.update_controls_camera()
+    
     def update_controls_camera(self):
+        self.controls_camera['source'] = self.controls_camera.get('source', 'camera')
+        self.controls_camera['image_path'] = self.controls_camera.get('image_path', 'Data/last_frame.png')
+        if hasattr(self, 'source_combo') and self.source_combo:
+            idx = self.source_combo.findData(self.controls_camera['source'])
+            if idx >= 0 and idx != self.source_combo.currentIndex():
+                self.source_combo.blockSignals(True)
+                self.source_combo.setCurrentIndex(idx)
+                self.source_combo.blockSignals(False)
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_camera)
-        self.queue_manager.control_camera.put(self.controls_camera)   
+        self.queue_manager.control_camera.put(dict(self.controls_camera))
         self.queue_manager.control_camera_event.set()
+        # Отправляем источник кадров (camera/image) — в две очереди, т.к. camera и image_source оба читают
+        source_ctrl = {'source': self.controls_camera['source'], 'image_path': self.controls_camera['image_path']}
+        for q in (self.queue_manager.control_source, self.queue_manager.control_source_image):
+            self.queue_manager.remove_old_frame_if_full(q)
+            q.put(source_ctrl)
         if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
             self.sort_widget.schedule_refresh() 
 
@@ -1342,6 +1389,19 @@ class MainWindow(QMainWindow):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_draw)
         self.queue_manager.control_draw.put(self.controls_draw)
         self.queue_manager.control_draw_event.set()
+        # Отправляем в overlay: Draw чекбокс управляет включением/выключением рисунков (FPS, регионы)
+        if hasattr(self.queue_manager, 'control_overlay'):
+            overlay_controls = {
+                'draw': self.controls_draw.get('draw', True),
+                'enable_overlay': self.controls_draw.get('draw', True),
+                'show_fps': True,
+                'show_regions': True,
+                'show_region_names': True,
+            }
+            try:
+                self.queue_manager.control_overlay.put_nowait(overlay_controls)
+            except Exception:
+                pass
         if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
             self.sort_widget.schedule_refresh()
 
@@ -1359,8 +1419,7 @@ class MainWindow(QMainWindow):
         pass
     
     def update_controls_visual(self):
-        """Обновление визуальных настроек"""
-        # Визуальные настройки не требуют отправки в очередь, только локальное использование
+        """Обновление визуальных настроек (масштаб и т.д.). Рисунки управляются чекбоксом Draw."""
         pass
     
     def get_all_params(self):
@@ -1451,6 +1510,18 @@ class MainWindow(QMainWindow):
                                          callback=self.update_controls_processing,
                                          parent=self)
         layout.addWidget(checkbox_control)
+        
+        # Отображение времени обработки
+        processing_time_group = QGroupBox("Время обработки")
+        processing_time_layout = QVBoxLayout()
+        self.processing_time_display_label = QLabel("Время обработки: 0.0 ms")
+        self.processing_time_display_label.setStyleSheet("font-size: 12px; color: #e67e22; font-weight: bold;")
+        processing_time_layout.addWidget(self.processing_time_display_label)
+        self.total_time_display_label = QLabel("Общее время (захват→отображение): 0.0 ms")
+        self.total_time_display_label.setStyleSheet("font-size: 12px; color: #9b59b6; font-weight: bold;")
+        processing_time_layout.addWidget(self.total_time_display_label)
+        processing_time_group.setLayout(processing_time_layout)
+        layout.addWidget(processing_time_group)
         
         # Регуляторы размера окна изображения
         slider_control = SliderControl("image_width", 200, 2000, 1024,
@@ -1554,9 +1625,43 @@ class MainWindow(QMainWindow):
                 # Также можно изменить размер всего окна
                 # self.setFixedSize(width, height)
         
+        # Если включена обработка регионов, формируем region_config из controls_post_processing
+        if self.controls_processing.get('enable_processing', False):
+            # Проверяем есть ли регионы для обработки
+            regions = self.controls_post_processing.get('regions', [])
+            if regions:
+                # Формируем region_config для отправки регионов в процессоры
+                region_config = {}
+                for i, r in enumerate(regions):
+                    if isinstance(r, dict):
+                        region_name = r.get('name', f'region_{i+1}')
+                        processor_id = r.get('processor_id', (i % 2) + 1)  # По умолчанию распределяем между процессорами
+                        enabled = r.get('enabled', True)
+                        
+                        if enabled:  # Отправляем только включенные регионы
+                            region_config[region_name] = {
+                                'processor_id': processor_id,
+                                'x1': r.get('x1', 0),
+                                'y1': r.get('y1', 0),
+                                'x2': r.get('x2', 0),
+                                'y2': r.get('y2', 0),
+                            }
+                
+                if region_config:
+                    self.controls_processing['enable_region_mode'] = True
+                    self.controls_processing['region_config'] = region_config
+                else:
+                    self.controls_processing['enable_region_mode'] = False
+            else:
+                self.controls_processing['enable_region_mode'] = False
+        else:
+            self.controls_processing['enable_region_mode'] = False
+        
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
         self.queue_manager.control_processing.put(self.controls_processing)
         self.queue_manager.control_processing_event.set()
+        
+        # Overlay управляется через update_controls_draw (Draw чекбокс)
 
     def create_tab_visual_settings(self):
         """Визуальная настройка: масштаб изображения для экономии места под регуляторы."""
@@ -1597,6 +1702,14 @@ class MainWindow(QMainWindow):
         self.view_mode_combo.addItems(["main", "region", "list"])
         self.view_mode_combo.setCurrentText("main")
         self.view_mode_combo.currentTextChanged.connect(self._on_view_mode_changed)
+        
+        # Чекбокс переключения до/после обработки для регионов
+        checkbox_region_processed = CheckboxControl("show_region_processed", False, "left",
+                                                   ui_elements=self.ui_elements,
+                                                   controls=self.controls_post_processing,
+                                                   callback=self.update_controls_post_processing,
+                                                   parent=self)
+        view_layout.addWidget(checkbox_region_processed)
         view_layout.addWidget(QLabel("Режим:"))
         view_layout.addWidget(self.view_mode_combo)
         self.region_combo = QComboBox()
@@ -1849,9 +1962,40 @@ class MainWindow(QMainWindow):
         """Отправка controls в процесс пост-обработки."""
         if not hasattr(self, 'queue_manager') or self.queue_manager is None:
             return
+        
+        # Обновляем также обработку регионов в controls_processing
+        # чтобы регионы отправлялись в процессоры
+        if self.controls_post_processing.get('enable_post_processing', False):
+            regions = self.controls_post_processing.get('regions', [])
+            if regions:
+                region_config = {}
+                for i, r in enumerate(regions):
+                    if isinstance(r, dict):
+                        region_name = r.get('name', f'region_{i+1}')
+                        processor_id = r.get('processor_id', (i % 2) + 1)
+                        enabled = r.get('enabled', True)
+                        
+                        if enabled:
+                            region_config[region_name] = {
+                                'processor_id': processor_id,
+                                'x1': r.get('x1', 0),
+                                'y1': r.get('y1', 0),
+                                'x2': r.get('x2', 0),
+                                'y2': r.get('y2', 0),
+                            }
+                
+                if region_config:
+                    self.controls_processing['enable_region_mode'] = True
+                    self.controls_processing['region_config'] = region_config
+                    # Обновляем также control_processing
+                    self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
+                    self.queue_manager.control_processing.put(self.controls_processing)
+        
         ctrl = dict(self.controls_post_processing)
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_post_processing)
         self.queue_manager.control_post_processing.put(ctrl)
+        
+        # Overlay управляется через update_controls_draw (Draw чекбокс)
 
 
     def update_access_level(self, level: int):

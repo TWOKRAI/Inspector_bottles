@@ -4,6 +4,7 @@ import time
 import threading
 import queue
 import ctypes
+import os
 from ctypes import *
 import numpy as np
 
@@ -49,6 +50,13 @@ class CameraProcess():
         
         # Оригинальный размер изображения с камеры
         self.original_image_size = None  # (height, width) - будет установлен при первом кадре
+        
+        # Сохранение кадра раз в секунду (для переключения на режим «Изображение»)
+        self.last_save_time = 0.0
+        self.save_interval = 1.0  # секунд
+        
+        # Режим источника: 'camera' — камера, 'image' — чтение из файла
+        self.source_mode = 'camera'
 
         
     def start(self):
@@ -471,8 +479,34 @@ class CameraProcess():
                     # НЕ изменяем размер кадра - используем оригинальный размер
                     # Это позволит работать с любым размером изображения
                     
-                    # Записываем в разделяемую память
+                    # Проверяем режим источника (камера или изображение из файла)
+                    try:
+                        ctrl = self.queue_manager.control_source.get_nowait()
+                        self.source_mode = ctrl.get('source', 'camera')
+                    except (queue.Empty, AttributeError):
+                        pass
+                    
+                    if self.source_mode == 'image':
+                        # Режим «Изображение» — камера не пишет в пайплайн
+                        self.camera.MV_CC_FreeImageBuffer(stOutFrame)
+                        self.frame_counter += 1
+                        continue
+                    
+                    # Сохраняем кадр раз в секунду (для переключения на режим «Изображение»)
                     timestamp = time.time()
+                    if timestamp - self.last_save_time >= self.save_interval:
+                        try:
+                            import cv2
+                            # Data/ — относительно Inspector_prototype (4 уровня вверх от camera_process)
+                            save_dir = os.path.join(os.path.dirname(__file__), '../../../../Data')
+                            os.makedirs(save_dir, exist_ok=True)
+                            save_path = os.path.join(save_dir, 'last_frame.png')
+                            cv2.imwrite(save_path, frame)
+                            self.last_save_time = timestamp
+                        except Exception as e:
+                            pass
+                    
+                    # Записываем в разделяемую память
                     
                     # Находим свободный индекс
                     id_memory = None

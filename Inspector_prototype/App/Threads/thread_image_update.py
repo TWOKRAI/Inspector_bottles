@@ -143,10 +143,31 @@ class UpdateImage(QThread):
                 
                 frames = []
                 
-                # Проверяем настройку показа обработанного изображения
+                # Проверяем настройки отображения
                 show_processed = False
+                show_region_processed = False
+                view_mode = 'main'
+                selected_region = None
+                selected_image = None
+                region_processor_id = None
+                
                 if hasattr(self.window_manager, 'main_window'):
-                    show_processed = self.window_manager.main_window.controls_processing.get('show_processed', False)
+                    main_window = self.window_manager.main_window
+                    show_processed = main_window.controls_processing.get('show_processed', False)
+                    show_region_processed = main_window.controls_post_processing.get('show_region_processed', False)
+                    view_mode = main_window.controls_post_processing.get('view_mode', 'main')
+                    selected_region = main_window.controls_post_processing.get('selected_region')
+                    selected_image = main_window.controls_post_processing.get('selected_image', 'original')
+                    
+                    # Определяем processor_id для выбранного региона
+                    if selected_region:
+                        # Ищем регион в конфигурации
+                        regions = main_window.controls_post_processing.get('regions', [])
+                        for r in regions:
+                            if isinstance(r, dict) and r.get('name') == selected_region:
+                                # По умолчанию используем processor_id = 1, можно расширить логику
+                                region_processor_id = r.get('processor_id', 1)
+                                break
                 
                 if camera_robot:
                     # Читаем из camera_data_out (для робота)
@@ -160,15 +181,120 @@ class UpdateImage(QThread):
                         frame = frames_out_scaled[:, 40: width - 40]
                         frames.append(frame)
                         time.sleep(0.1)
-                elif show_processed or processed:
-                    # Читаем обработанное изображение из process_data
-                    frames = self.queue_manager.memory_manager.read_images('process_data', id_memory)
-                    if frames is None or len(frames) == 0:
-                        # Если обработанного нет, читаем оригинал
-                        frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
-                else:
-                    # Читаем оригинальное изображение из camera_data
-                    frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                elif (view_mode == 'region' or selected_image and selected_image.startswith('region_')) and selected_region:
+                    # Режим отображения региона
+                    # Вычисляем индекс памяти для региона используя гибкую схему
+                    MAX_REGIONS = 10  # Должно совпадать с Queue_Manager
+                    region_hash = hash(selected_region) % MAX_REGIONS
+                    region_memory_index = id_memory * MAX_REGIONS + region_hash
+                    
+                    # Определяем показывать ли обработанный регион
+                    # Если selected_image содержит "обработанный" или show_region_processed включен
+                    show_processed_region = show_region_processed or (selected_image and 'обработанный' in selected_image.lower())
+                    
+                    if show_processed_region:
+                        # Показываем обработанный регион
+                        frames = self.queue_manager.memory_manager.read_images('region_data', region_memory_index)
+                        if frames is None or len(frames) == 0:
+                            # Если обработанного нет, показываем оригинальный регион
+                            # Читаем оригинальное изображение и вырезаем регион
+                            original_frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                            if original_frames and len(original_frames) > 0:
+                                original_frame = original_frames[0].copy()
+                                if len(original_frame.shape) == 3 and original_frame.shape[2] == 3:
+                                    original_frame = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
+                                
+                                # Находим координаты региона
+                                regions = self.window_manager.main_window.controls_post_processing.get('regions', [])
+                                for r in regions:
+                                    if isinstance(r, dict) and r.get('name') == selected_region:
+                                        x1 = r.get('x1', 0)
+                                        y1 = r.get('y1', 0)
+                                        x2 = r.get('x2', original_frame.shape[1])
+                                        y2 = r.get('y2', original_frame.shape[0])
+                                        
+                                        # Ограничиваем координаты
+                                        orig_height = original_frame.shape[0]
+                                        orig_width = original_frame.shape[1]
+                                        x1 = max(0, min(x1, orig_width))
+                                        x2 = max(x1, min(x2, orig_width))
+                                        y1 = max(0, min(y1, orig_height))
+                                        y2 = max(y1, min(y2, orig_height))
+                                        
+                                        region_frame = original_frame[y1:y2, x1:x2]
+                                        frames = [region_frame]
+                                        break
+                    else:
+                        # Показываем оригинальный регион (вырезаем из оригинального изображения)
+                        original_frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                        if original_frames and len(original_frames) > 0:
+                            original_frame = original_frames[0].copy()
+                            if len(original_frame.shape) == 3 and original_frame.shape[2] == 3:
+                                original_frame = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
+                            
+                            # Находим координаты региона
+                            if hasattr(self.window_manager, 'main_window'):
+                                regions = self.window_manager.main_window.controls_post_processing.get('regions', [])
+                                for r in regions:
+                                    if isinstance(r, dict) and r.get('name') == selected_region:
+                                        x1 = r.get('x1', 0)
+                                        y1 = r.get('y1', 0)
+                                        x2 = r.get('x2', original_frame.shape[1])
+                                        y2 = r.get('y2', original_frame.shape[0])
+                                        
+                                        # Ограничиваем координаты
+                                        orig_height = original_frame.shape[0]
+                                        orig_width = original_frame.shape[1]
+                                        x1 = max(0, min(x1, orig_width))
+                                        x2 = max(x1, min(x2, orig_width))
+                                        y1 = max(0, min(y1, orig_height))
+                                        y2 = max(y1, min(y2, orig_height))
+                                        
+                                        region_frame = original_frame[y1:y2, x1:x2]
+                                        frames = [region_frame]
+                                        break
+                # Overlay (FPS, прямоугольники регионов) ТОЛЬКО на главном большом изображении
+                # На регионах и вырезанных изображениях overlay не показываем (там свои рисунки — позже из Redis)
+                region_view = ((view_mode == 'region' or (selected_image and selected_image.startswith('region_'))) 
+                              and selected_region)
+                
+                if not camera_robot and not region_view:
+                    # Главное изображение — показываем overlay если включён Draw
+                    show_overlay = False
+                    if hasattr(self.window_manager, 'main_window'):
+                        show_overlay = self.window_manager.main_window.controls_draw.get('draw', True)
+                    
+                    if show_overlay:
+                        overlay_frames = self.queue_manager.memory_manager.read_images('overlay_data', id_memory)
+                        if overlay_frames and len(overlay_frames) > 0:
+                            frames = overlay_frames
+                        else:
+                            # Если overlay нет, читаем обычное изображение
+                            if view_mode == 'merged' or selected_image == 'merged':
+                                # Показываем итоговое изображение с объединенными регионами
+                                frames = self.queue_manager.memory_manager.read_images('process_data', id_memory)
+                                if frames is None or len(frames) == 0:
+                                    frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                            elif show_processed or processed:
+                                # Читаем обработанное изображение из process_data
+                                frames = self.queue_manager.memory_manager.read_images('process_data', id_memory)
+                                if frames is None or len(frames) == 0:
+                                    frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                            else:
+                                # Читаем оригинальное изображение из camera_data
+                                frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                    else:
+                        # Draw выключен, читаем обычное изображение без overlay
+                        if view_mode == 'merged' or selected_image == 'merged':
+                            frames = self.queue_manager.memory_manager.read_images('process_data', id_memory)
+                            if frames is None or len(frames) == 0:
+                                frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                        elif show_processed or processed:
+                            frames = self.queue_manager.memory_manager.read_images('process_data', id_memory)
+                            if frames is None or len(frames) == 0:
+                                frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
+                        else:
+                            frames = self.queue_manager.memory_manager.read_images('camera_data', id_memory)
 
                 if frames and len(frames) > 0:
                     self.update_frame.emit(frames)
