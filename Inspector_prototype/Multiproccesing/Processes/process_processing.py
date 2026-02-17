@@ -8,6 +8,7 @@ import os
 # Добавляем путь к Utils для импорта FrameFPS
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 from Utils.frame_fps import FrameFPS
+from Utils.debug_log_helper import send_debug_log, send_debug_end
 
 
 def process_processing(queue_manager, control_processing):
@@ -63,6 +64,19 @@ def process_processing(queue_manager, control_processing):
             time.sleep(0.01)
             continue
         
+        # Проверяем маркер логирования ПОСЛЕ получения кадра
+        should_log = False
+        if hasattr(queue_manager, 'debug_log_process_processing'):
+            try:
+                marker = queue_manager.debug_log_process_processing
+                if marker.is_set():
+                    should_log = True
+                    marker.clear()  # Сбрасываем маркер после получения кадра
+                    frame_id = data_frame.get('frame_id', 'unknown')
+                    print(f"  [process_processing] ✓ Marker detected, will log frame_id={frame_id}")
+            except Exception as e:
+                print(f"  [process_processing] Error checking marker: {e}")
+        
         # Время начала обработки
         processing_start_time = time.time()
         
@@ -90,6 +104,23 @@ def process_processing(queue_manager, control_processing):
         if len(original_frame.shape) == 3 and original_frame.shape[2] == 3:
             original_frame = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
         
+        # Логирование оригинального кадра (только если маркер был установлен)
+        if should_log:
+            # Используем реальный frame_id из кадра, но сохраняем в папку current_frame
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_processing',
+                image=original_frame,
+                step_name='original',
+                description='Оригинальный кадр из камеры',
+                metadata={
+                    'id_memory': id_memory,
+                    'frame_id': frame_id,
+                    'image_height': image_height,
+                    'image_width': image_width,
+                    'capture_time': capture_time,
+                }
+            )
+        
         # Применяем обрезку изображения
         # Используем оригинальные размеры изображения для ограничения обрезки
         orig_height = original_frame.shape[0]
@@ -115,6 +146,23 @@ def process_processing(queue_manager, control_processing):
             crop_right = orig_width
         
         cropped_frame = original_frame[crop_top:crop_bottom, crop_left:crop_right]
+        
+        # Логирование обрезанного кадра (только если маркер был установлен)
+        if should_log:
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_processing',
+                image=cropped_frame,
+                step_name='cropped',
+                description='Обрезанный кадр',
+                metadata={
+                    'crop_top': crop_top,
+                    'crop_bottom': crop_bottom,
+                    'crop_left': crop_left,
+                    'crop_right': crop_right,
+                    'cropped_size': f"{cropped_frame.shape[0]}x{cropped_frame.shape[1]}",
+                    'enable_processing': controls.get('enable_processing', False),
+                }
+            )
         
         # Проверяем режим обработки регионов
         if controls.get('enable_region_mode', False):
@@ -184,10 +232,33 @@ def process_processing(queue_manager, control_processing):
             # Конвертируем в HSV
             hsv_frame = cv2.cvtColor(cropped_frame, cv2.COLOR_RGB2HSV)
             
+            # Логирование HSV кадра (без изображения, только метаданные)
+            if should_log:
+                send_debug_log(
+                    queue_manager, 'current_frame', 'process_processing',
+                    step_name='hsv',
+                    description='Конвертация в HSV',
+                    metadata={}
+                )
+            
             # Создаем маску по цвету
             lower_bound = np.array([controls['hl'], controls['sl'], controls['vl']])
             upper_bound = np.array([controls['hm'], controls['sm'], controls['vm']])
             mask = cv2.inRange(hsv_frame, lower_bound, upper_bound)
+            
+            # Логирование маски
+            if should_log:
+                mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+                send_debug_log(
+                    queue_manager, 'current_frame', 'process_processing',
+                    image=mask_rgb,
+                    step_name='mask',
+                    description='Маска по цвету',
+                    metadata={
+                        'lower_bound': [controls['hl'], controls['sl'], controls['vl']],
+                        'upper_bound': [controls['hm'], controls['sm'], controls['vm']],
+                    }
+                )
             
             if controls['show_mask']:
                 # Показываем маску (конвертируем в RGB для отображения)
@@ -210,6 +281,21 @@ def process_processing(queue_manager, control_processing):
         # Записываем обработанный кадр в память
         processed_frames = [processed_frame]
         queue_manager.memory_manager.write_images(processed_frames, "process_data", id_memory)
+        
+        # Логирование обработанного кадра (только если маркер был установлен)
+        if should_log:
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_processing',
+                image=processed_frame,
+                step_name='processed',
+                description='Обработанный кадр',
+                metadata={
+                    'enable_processing': controls['enable_processing'],
+                    'show_mask': controls.get('show_mask', False),
+                    'processing_time': processing_time,
+                    'total_time_from_capture': total_time_from_capture,
+                }
+            )
         
         # Отправляем метаданные в post_processor_queue для пост-обработки
         post_processing_data = {

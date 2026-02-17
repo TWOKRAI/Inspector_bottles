@@ -11,6 +11,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+from Utils.debug_log_helper import send_debug_log
 
 
 def process_region_merger(queue_manager, control_post_processing):
@@ -69,8 +70,16 @@ def process_region_merger(queue_manager, control_post_processing):
                     if elapsed > REGION_TIMEOUT:
                         print(f"Timeout for frame {frame_id}, sending incomplete result")
                         frames_to_remove.append(frame_id)
+                        
+                        # Проверяем маркер логирования для таймаута
+                        should_log_timeout = False
+                        if hasattr(queue_manager, 'debug_log_process_region_merger'):
+                            if queue_manager.debug_log_process_region_merger.is_set():
+                                should_log_timeout = True
+                                queue_manager.debug_log_process_region_merger.clear()
+                        
                         # Отправляем неполный результат
-                        _send_merged_result(queue_manager, frame_id, frame_data)
+                        _send_merged_result(queue_manager, frame_id, frame_data, should_log=should_log_timeout)
             
             for frame_id in frames_to_remove:
                 del pending_frames[frame_id]
@@ -119,7 +128,16 @@ def process_region_merger(queue_manager, control_post_processing):
         if received_regions == expected_regions:
             # Все регионы получены, объединяем и отправляем
             print(f"All regions received for frame {frame_id}, merging...")
-            _send_merged_result(queue_manager, frame_id, pending_frames[frame_id])
+            
+            # Проверяем маркер логирования ПОСЛЕ получения всех регионов
+            should_log_merger = False
+            if hasattr(queue_manager, 'debug_log_process_region_merger'):
+                if queue_manager.debug_log_process_region_merger.is_set():
+                    should_log_merger = True
+                    queue_manager.debug_log_process_region_merger.clear()  # Сбрасываем маркер
+                    print(f"  [process_region_merger] Marker detected and cleared, will log frame_id={frame_id}")
+            
+            _send_merged_result(queue_manager, frame_id, pending_frames[frame_id], should_log=should_log_merger)
             del pending_frames[frame_id]
         else:
             print(f"Frame {frame_id}: Received {len(received_regions)}/{len(expected_regions)} regions")
@@ -127,7 +145,7 @@ def process_region_merger(queue_manager, control_post_processing):
             print(f"  Expected: {expected_regions}")
 
 
-def _send_merged_result(queue_manager, frame_id, frame_data):
+def _send_merged_result(queue_manager, frame_id, frame_data, should_log=False):
     """
     Объединяет регионы в одно изображение и отправляет результат дальше
     """
@@ -145,6 +163,19 @@ def _send_merged_result(queue_manager, frame_id, frame_data):
         original_frame = frames[0].copy()
         if len(original_frame.shape) == 3 and original_frame.shape[2] == 3:
             original_frame = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
+        
+        # Логирование начала объединения (только если маркер был установлен)
+        if should_log:
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_region_merger',
+                step_name='merge_start',
+                description=f'Начало объединения {len(regions)} регионов',
+                metadata={
+                    'regions_count': len(regions),
+                    'regions_info': [{'region_id': r['region_id'], 'processor_id': r.get('processor_id')} 
+                                    for r in regions]
+                }
+            )
         
         # Создаем результирующее изображение (пока просто копируем оригинал)
         # В будущем можно накладывать обработанные регионы обратно
@@ -189,11 +220,43 @@ def _send_merged_result(queue_manager, frame_id, frame_data):
                 region_height = y2 - y1
                 region_width = x2 - x1
                 
-                if processed_region.shape[0] != region_height or processed_region.shape[1] != region_width:
-                    processed_region = cv2.resize(processed_region, (region_width, region_height))
+                # Проверяем валидность размеров перед ресайзом
+                if region_height > 0 and region_width > 0:
+                    if processed_region.shape[0] != region_height or processed_region.shape[1] != region_width:
+                        # Проверяем, что обработанный регион не пустой
+                        if processed_region.size > 0 and processed_region.shape[0] > 0 and processed_region.shape[1] > 0:
+                            try:
+                                processed_region = cv2.resize(processed_region, (region_width, region_height))
+                            except Exception as e:
+                                print(f"Error resizing region {region_id}: {e}")
+                                print(f"  processed_region shape: {processed_region.shape}")
+                                print(f"  target size: ({region_width}, {region_height})")
+                                continue  # Пропускаем этот регион
+                        else:
+                            print(f"Warning: processed_region {region_id} is empty, skipping")
+                            continue
+                    
+                    # Вставляем регион обратно
+                    if region_height <= merged_frame.shape[0] and region_width <= merged_frame.shape[1]:
+                        merged_frame[y1:y2, x1:x2] = processed_region
+                    else:
+                        print(f"Warning: Region {region_id} coordinates out of bounds, skipping")
+                else:
+                    print(f"Warning: Invalid region size for {region_id}: {region_width}x{region_height}, skipping")
                 
-                # Вставляем регион обратно
-                merged_frame[y1:y2, x1:x2] = processed_region
+                # Логирование вставки региона (только если маркер был установлен)
+                if should_log:
+                    send_debug_log(
+                        queue_manager, 'current_frame', 'process_region_merger',
+                        step_name=f'region_inserted_{region_id}',
+                        description=f'Вставлен регион {region_id}',
+                        metadata={
+                            'region_id': region_id,
+                            'processor_id': processor_id,
+                            'region_coords': region_coords,
+                            'region_size': f"{processed_region.shape[0]}x{processed_region.shape[1]}",
+                        }
+                    )
         
         # Вычисляем общее время обработки
         total_processing_time = sum(r.get('processing_time', 0) for r in regions)
@@ -209,6 +272,21 @@ def _send_merged_result(queue_manager, frame_id, frame_data):
         
         # Записываем объединенный кадр в память
         queue_manager.memory_manager.write_images([merged_frame], "process_data", id_memory)
+        
+        # Логирование объединенного кадра (только если маркер был установлен)
+        if should_log:
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_region_merger',
+                image=merged_frame,
+                step_name='merged',
+                description='Объединенный кадр со всеми регионами',
+                metadata={
+                    'regions_count': len(regions),
+                    'total_processing_time': total_processing_time,
+                    'merge_time': merge_time,
+                    'total_time_from_capture': merge_time - capture_time,
+                }
+            )
         
         # Отправляем результат дальше (в post_processor_queue)
         merged_result = {

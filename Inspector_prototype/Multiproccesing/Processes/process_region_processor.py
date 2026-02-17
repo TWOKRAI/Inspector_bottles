@@ -13,6 +13,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 from Utils.frame_fps import FrameFPS
 from Services.Region_processors import REGION_PROCESSORS, get_processor
+from Utils.debug_log_helper import send_debug_log
 
 
 def process_region_processor(queue_manager, control_processing, processor_id, input_queue):
@@ -65,6 +66,17 @@ def process_region_processor(queue_manager, control_processing, processor_id, in
             time.sleep(0.01)
             continue
         
+        # Проверяем маркер логирования ПОСЛЕ получения данных региона
+        should_log = False
+        event_name = f'debug_log_process_region_processor_{processor_id}'
+        if hasattr(queue_manager, event_name):
+            event = getattr(queue_manager, event_name)
+            if event.is_set():
+                should_log = True
+                event.clear()  # Сбрасываем маркер после получения данных
+                region_id = region_data.get('region_id', 'unknown')
+                print(f"  [process_region_processor_{processor_id}] ✓ Marker detected, will log region {region_id}")
+        
         # Время начала обработки
         processing_start_time = time.time()
         
@@ -100,15 +112,62 @@ def process_region_processor(queue_manager, control_processing, processor_id, in
         x2 = region_coords.get('x2', original_frame.shape[1])
         y2 = region_coords.get('y2', original_frame.shape[0])
         
-        # Ограничиваем координаты размерами изображения
+        # Ограничиваем координаты размерами изображения и исправляем неправильный порядок
         orig_height = original_frame.shape[0]
         orig_width = original_frame.shape[1]
+        
+        # Исправляем порядок координат если они перепутаны
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
+        
         x1 = max(0, min(x1, orig_width))
         x2 = max(x1, min(x2, orig_width))
         y1 = max(0, min(y1, orig_height))
         y2 = max(y1, min(y2, orig_height))
         
+        # Проверяем, что регион не пустой
+        if x2 <= x1 or y2 <= y1:
+            print(f"  [process_region_processor_{processor_id}] Warning: Invalid region coordinates for {region_id}: x1={x1}, x2={x2}, y1={y1}, y2={y2}")
+            continue  # Пропускаем пустой регион
+        
         region_frame = original_frame[y1:y2, x1:x2]
+        
+        # Логирование вырезанного региона (только если маркер был установлен)
+        if should_log:
+            # Проверяем, что регион не пустой
+            if region_frame.size > 0 and region_frame.shape[0] > 0 and region_frame.shape[1] > 0:
+                print(f"  [process_region_processor_{processor_id}] Logging extracted region {region_id}, size={region_frame.shape}")
+                send_debug_log(
+                    queue_manager, 'current_frame', f'process_region_processor_{processor_id}',
+                    image=region_frame,
+                    step_name='region_extracted',
+                    description=f'Вырезанный регион {region_id}',
+                    metadata={
+                        'region_id': region_id,
+                        'processor_id': processor_id,
+                        'region_coords': region_coords,
+                        'region_size': f"{region_frame.shape[0]}x{region_frame.shape[1]}",
+                        'enable_processing': controls.get('enable_processing', False),
+                    }
+                )
+            else:
+                print(f"  [process_region_processor_{processor_id}] Warning: Empty region {region_id}, skipping image log")
+                # Логируем без изображения
+                send_debug_log(
+                    queue_manager, 'current_frame', f'process_region_processor_{processor_id}',
+                    step_name='region_extracted',
+                    description=f'Вырезанный регион {region_id} (пустой)',
+                    metadata={
+                        'region_id': region_id,
+                        'processor_id': processor_id,
+                        'region_coords': region_coords,
+                        'region_size': '0x0',
+                        'enable_processing': controls.get('enable_processing', False),
+                        'warning': 'Region is empty'
+                    }
+                )
         
         # Проверяем тип процессора региона
         region_processor_type = controls.get('region_processor_type')
@@ -164,6 +223,45 @@ def process_region_processor(queue_manager, control_processing, processor_id, in
         region_memory_index = id_memory * MAX_REGIONS + region_hash
         processed_regions = [processed_region]
         queue_manager.memory_manager.write_images(processed_regions, "region_data", region_memory_index)
+        
+        # Логирование обработанного региона (только если маркер был установлен)
+        if should_log:
+            # Проверяем, что обработанный регион не пустой
+            if processed_region.size > 0 and processed_region.shape[0] > 0 and processed_region.shape[1] > 0:
+                print(f"  [process_region_processor_{processor_id}] Logging processed region {region_id}, size={processed_region.shape}")
+                send_debug_log(
+                    queue_manager, 'current_frame', f'process_region_processor_{processor_id}',
+                    image=processed_region,
+                    step_name='region_processed',
+                    description=f'Обработанный регион {region_id}',
+                    metadata={
+                        'region_id': region_id,
+                        'processor_id': processor_id,
+                        'region_processor_type': region_processor_type,
+                        'enable_processing': controls.get('enable_processing', False),
+                        'show_mask': controls.get('show_mask', False),
+                        'processing_time': processing_time,
+                        'region_memory_index': region_memory_index,
+                    }
+                )
+            else:
+                print(f"  [process_region_processor_{processor_id}] Warning: Empty processed region {region_id}, skipping image log")
+                # Логируем без изображения
+                send_debug_log(
+                    queue_manager, 'current_frame', f'process_region_processor_{processor_id}',
+                    step_name='region_processed',
+                    description=f'Обработанный регион {region_id} (пустой)',
+                    metadata={
+                        'region_id': region_id,
+                        'processor_id': processor_id,
+                        'region_processor_type': region_processor_type,
+                        'enable_processing': controls.get('enable_processing', False),
+                        'show_mask': controls.get('show_mask', False),
+                        'processing_time': processing_time,
+                        'region_memory_index': region_memory_index,
+                        'warning': 'Processed region is empty'
+                    }
+                )
         
         # Отправляем результат в объединяющий процесс
         region_result = {

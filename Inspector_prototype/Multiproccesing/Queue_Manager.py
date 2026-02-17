@@ -49,6 +49,10 @@ class QueueManager:
         self.bot_message_send = Queue(maxsize=self.buffer_size)
         self.download = Queue()  # Очередь для загрузки/статусов
         self.process_ready_queue = Queue()  # Очередь для сигналов готовности процессов
+        
+        # Очереди для отладочного логирования
+        self.debug_log_queue = Queue(maxsize=100)  # Очередь для логов от процессов
+        self.control_debug_logger = Queue(maxsize=1)  # Управление логгером (enable/disable, start_frame, generate_report)
 
         # События
         self.control_camera_event = Event()
@@ -58,6 +62,13 @@ class QueueManager:
         self.control_draw_event = Event()
         self.control_robot_event = Event()
         self.control_frame_process_event = Event()
+        
+        # Events для отладочного логирования - маркеры для каждого процесса
+        self.debug_log_process_processing = Event()  # Маркер для process_processing
+        self.debug_log_process_region_processor_1 = Event()  # Маркер для process_region_processor_1
+        self.debug_log_process_region_processor_2 = Event()  # Маркер для process_region_processor_2
+        self.debug_log_process_region_merger = Event()  # Маркер для process_region_merger
+        self.debug_log_process_overlay = Event()  # Маркер для process_overlay (последний)
 
         # Менеджер памяти
         self.memory_manager = ImageMemoryManager()
@@ -153,6 +164,10 @@ class QueueManager:
         self.clear_queue(self.bot_message, 0)
         self.clear_queue(self.bot_message_send, 0)
         self.clear_queue(self.download, 0)
+        
+        # Очереди отладочного логирования
+        self.clear_queue(self.debug_log_queue, 0)
+        self.clear_queue(self.control_debug_logger, 0)
 
     def clear_all_event(self):
         """Сбросить все события"""

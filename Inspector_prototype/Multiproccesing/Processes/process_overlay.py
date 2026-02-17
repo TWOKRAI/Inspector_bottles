@@ -10,6 +10,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+from Utils.debug_log_helper import send_debug_log, send_debug_end
 
 
 def process_overlay(queue_manager, control_overlay):
@@ -49,6 +50,15 @@ def process_overlay(queue_manager, control_overlay):
         except Empty:
             time.sleep(0.01)
             continue
+        
+        # Проверяем маркер логирования ПОСЛЕ получения кадра
+        should_log = False
+        if hasattr(queue_manager, 'debug_log_process_overlay'):
+            if queue_manager.debug_log_process_overlay.is_set():
+                should_log = True
+                queue_manager.debug_log_process_overlay.clear()  # Сбрасываем маркер после получения кадра
+                frame_id = data_frame.get('frame_id', 'unknown')
+                print(f"  [process_overlay] ✓ Marker detected, will log frame_id={frame_id}")
         
         # Draw управляет отображением overlay (рисунки)
         draw_enabled = controls.get('draw', controls.get('enable_overlay', True))
@@ -92,6 +102,23 @@ def process_overlay(queue_manager, control_overlay):
         frame = frames[0]
         # C-contiguous обязателен для cv2.putText/rectangle (shared memory даёт несовместимый layout)
         overlay_frame = np.ascontiguousarray(np.array(frame, dtype=np.uint8, copy=True))
+        
+        frame_id = data_frame.get('frame_id', 0)
+        
+        # Логирование кадра до overlay (только если маркер был установлен)
+        if should_log:
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_overlay',
+                image=overlay_frame.copy() if overlay_frame is not None else None,
+                step_name='before_overlay',
+                description='Кадр до наложения overlay',
+                metadata={
+                    'fps': fps,
+                    'processing_time_ms': processing_time_ms,
+                    'total_time_ms': total_time_ms,
+                    'regions_count': len(regions) if regions else 0,
+                }
+            )
         
         # Рисуем FPS и временные метрики (только на главном изображении)
         if draw_enabled and controls.get('show_fps', True):
@@ -153,6 +180,27 @@ def process_overlay(queue_manager, control_overlay):
         
         # Записываем изображение с overlay в отдельную память
         queue_manager.memory_manager.write_images([overlay_frame], "overlay_data", id_memory)
+        
+        # Логирование кадра после overlay (только если маркер был установлен)
+        if should_log:
+            send_debug_log(
+                queue_manager, 'current_frame', 'process_overlay',
+                image=overlay_frame,
+                step_name='after_overlay',
+                description='Кадр после наложения overlay',
+                metadata={
+                    'enable_overlay': controls.get('enable_overlay', True),
+                    'draw': draw_enabled,
+                    'show_fps': controls.get('show_fps', True),
+                    'show_regions': controls.get('show_regions', True),
+                    'show_region_names': controls.get('show_region_names', True),
+                    'fps': fps,
+                    'processing_time_ms': processing_time_ms,
+                    'total_time_ms': total_time_ms,
+                    'regions_count': len(regions) if regions else 0,
+                    'selected_region_idx': selected_region_idx,
+                }
+            )
         
         # Обновляем данные кадра
         data_frame['overlay_applied'] = True

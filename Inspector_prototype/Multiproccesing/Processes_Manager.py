@@ -29,6 +29,7 @@ class MultiProcessManager:
         self.region_merger_enable = True  # Объединяющий процесс регионов
         self.overlay_enable = True  # Процесс overlay (рисование текста и линий)
         self.image_source_enable = True  # Процесс чтения изображения из файла (переключатель камера/файл)
+        self.debug_logger_enable = True  # Процесс отладочного логирования
         
         # Количество процессов для отслеживания загрузки
         self.total_processes = 0
@@ -47,6 +48,7 @@ class MultiProcessManager:
             'proc_region_merger': 'Multiproccesing.Processes.process_region_merger',
             'proc_overlay': 'Multiproccesing.Processes.process_overlay',
             'proc_image_source': 'Multiproccesing.Processes.process_image_source',
+            'proc_debug_logger': 'Multiproccesing.Processes.process_debug_logger',
         }
 
         # Подсчет количества процессов для отслеживания загрузки
@@ -119,6 +121,7 @@ class MultiProcessManager:
             self.region_merger_enable,
             self.overlay_enable,
             self.image_source_enable,
+            self.debug_logger_enable,
         ])
         
         # Устанавливаем количество процессов для окна загрузки
@@ -234,6 +237,17 @@ class MultiProcessManager:
             )
             self.processes.append(image_source_process)
             print(f"Process 'proc_image_source' initialized")
+
+        if self.debug_logger_enable:
+            # Процесс отладочного логирования
+            debug_logger_process = self.create_process(
+                target_func=modules['proc_debug_logger'],
+                args=(self.queue_manager, self.queue_manager.control_debug_logger),
+                name='proc_debug_logger',
+                priority='low'
+            )
+            self.processes.append(debug_logger_process)
+            print(f"Process 'proc_debug_logger' initialized")
 
 
     def start_processes(self):
