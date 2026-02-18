@@ -28,7 +28,7 @@ class SliderControl(QWidget):
         self.label.setText(display_label) 
         self.label.setFont(font)
         self.label.setWordWrap(True)
-        self.label.setFixedSize(145, 40)
+        # Имя занимает 30% ширины, поэтому не фиксируем размер, а используем stretch factor
         self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.value = self.transfer_value(init_val)
@@ -57,7 +57,7 @@ class SliderControl(QWidget):
         self.slider.setMaximum(max_val)
         self.slider.setValue(init_val)
         self.slider.setMinimumHeight(45)
-        self.slider.setMinimumWidth(630)
+        # Убрана фиксированная ширина, чтобы слайдер мог растягиваться согласно пропорциям
 
         self.slider.setStyleSheet("""
             QSlider::handle:horizontal {
@@ -79,12 +79,12 @@ class SliderControl(QWidget):
         self.slider.wheelEvent = lambda event: None
 
         # Добавление виджетов в компоновку
+        # Имя занимает 15% ширины, регуляторы - 85%
         self.hbox.addSpacing(5)
-        self.hbox.addWidget(self.label)
-        self.hbox.addStretch()
+        self.hbox.addWidget(self.label, 3)  # 15% ширины (stretch factor 3 из 20)
         self.hbox.addWidget(self.value_input)
         self.hbox.addSpacing(20)
-        self.hbox.addWidget(self.slider)
+        self.hbox.addWidget(self.slider, 17)  # 85% ширины (stretch factor 17 из 20)
         self.hbox.addSpacing(25)
 
         # Обновление внешних элементов

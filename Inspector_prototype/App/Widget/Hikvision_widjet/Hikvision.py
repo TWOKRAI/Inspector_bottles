@@ -1,19 +1,23 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QComboBox, QGroupBox)
 from App.Components.slider import SliderControl
+from App.Components.structured_table import StructuredTableWidget
 from App.Widget.Hikvision_widjet.Threads.thread_camera_message import CameraMessageThread
 
 
 class HikvisionWidget(QWidget):
-    def __init__(self, window_manager=None, ui_elements=None, controls_hikvision=None, callback=None, stop_event=None):
+    def __init__(self, window_manager=None, ui_elements=None, controls_hikvision=None, callback=None,
+                 controls_camera=None, callback_camera=None, stop_event=None, data_manager=None):
         super().__init__()
         self.window_manager = window_manager
         self.ui_elements = ui_elements
         self.controls_hikvision = controls_hikvision
         self.callback = callback
+        self.controls_camera = controls_camera or {}
+        self.callback_camera = callback_camera
         self.stop_event = stop_event
+        self.data_manager = data_manager  # DataManager для автоматического создания камер
         
-        # Данные для FPS и метрик
         self.fps_sdk = 0.0
         self.fps_after_processing = 0.0
         self.processing_time_ms = 0.0
@@ -21,53 +25,87 @@ class HikvisionWidget(QWidget):
         self.image_height = 0
         self.image_width = 0
         self.hikvision_device_list = []
-        
+        self._current_device_index = -1
+        self._current_source = "image"
         self.camera_message_thread = None
-        
+
         self.init_ui()
         self.start_camera_message_thread()
+        
+        # Подключаем сигналы DataManager для синхронизации списка камер
+        if self.data_manager:
+            self.data_manager.camera_changed.connect(self._on_data_camera_changed)
     
     def init_ui(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        # Кнопка Enum Devices и выпадающий список камер рядом
-        enum_layout = QHBoxLayout()
+        # Источник кадров: таблица (камеры + изображение)
+        source_group = QGroupBox("Источник кадров")
+        source_layout = QVBoxLayout()
+        enum_row = QHBoxLayout()
         btn_enum = QPushButton("Enum Devices")
-        btn_enum.setMinimumHeight(40)
-        btn_enum.setMinimumWidth(150)
+        btn_enum.setMinimumHeight(36)
+        btn_enum.setMinimumWidth(140)
         btn_enum.clicked.connect(self.sdk_enum_devices)
-        enum_layout.addWidget(btn_enum)
+        enum_row.addWidget(btn_enum)
+        enum_row.addStretch()
+        source_layout.addLayout(enum_row)
         
-        # Выпадающий список камер рядом с кнопкой
-        camera_label = QLabel("Камера:")
-        camera_label.setFixedWidth(60)
-        enum_layout.addWidget(camera_label)
+        # Выпадающий список для выбора активной камеры (синхронизируется с DataManager)
+        if self.data_manager:
+            camera_select_row = QHBoxLayout()
+            camera_select_row.addWidget(QLabel("Активная камера:"))
+            self.camera_combo = QComboBox()
+            self.camera_combo.currentIndexChanged.connect(self._on_camera_combo_changed)
+            camera_select_row.addWidget(self.camera_combo, 1)
+            source_layout.addLayout(camera_select_row)
+            self._refresh_camera_combo()
         
-        self.combo_cameras = QComboBox()
-        self.combo_cameras.setMinimumHeight(35)
-        enum_layout.addWidget(self.combo_cameras, stretch=1)
-        layout.addLayout(enum_layout)
-        
+        self.sources_table = StructuredTableWidget(
+            columns=[
+                {"key": "name", "label": "Название", "type": "text"},
+                {"key": "enabled", "label": "Вкл.", "type": "checkbox"},
+                {"key": "process", "label": "Процесс", "type": "text"},
+                {"key": "state", "label": "Состояние", "type": "text"},
+                {"key": "ip", "label": "IP", "type": "text"},
+            ],
+            parent=self
+        )
+        self.sources_table.row_selected.connect(self._on_source_row_selected)
+        self.sources_table.cell_changed.connect(self._on_source_cell_changed)
+        source_layout.addWidget(self.sources_table)
+        source_group.setLayout(source_layout)
+        layout.addWidget(source_group)
+        self._refresh_sources_table()
+        self.sources_table.setCurrentCell(0, 0)
+        self._on_source_row_selected(0)
+
+        # Кнопки Open и Close на одном уровне
+        camera_buttons_layout = QHBoxLayout()
         btn_open = QPushButton("Open Camera")
         btn_open.setMinimumHeight(40)
         btn_open.clicked.connect(self.sdk_open_camera)
-        layout.addWidget(btn_open)
+        camera_buttons_layout.addWidget(btn_open)
         
         btn_close = QPushButton("Close Camera")
         btn_close.setMinimumHeight(40)
         btn_close.clicked.connect(self.sdk_close_camera)
-        layout.addWidget(btn_close)
+        camera_buttons_layout.addWidget(btn_close)
+        layout.addLayout(camera_buttons_layout)
         
+        # Кнопки Start и Stop Grabbing ниже
+        grabbing_buttons_layout = QHBoxLayout()
         btn_start = QPushButton("Start Grabbing")
         btn_start.setMinimumHeight(40)
         btn_start.clicked.connect(self.sdk_start_grabbing)
-        layout.addWidget(btn_start)
+        grabbing_buttons_layout.addWidget(btn_start)
         
         btn_stop = QPushButton("Stop Grabbing")
         btn_stop.setMinimumHeight(40)
         btn_stop.clicked.connect(self.sdk_stop_grabbing)
-        layout.addWidget(btn_stop)
+        grabbing_buttons_layout.addWidget(btn_stop)
+        layout.addLayout(grabbing_buttons_layout)
         
         # Регуляторы параметров камеры
         slider_control = SliderControl(
@@ -113,15 +151,17 @@ class HikvisionWidget(QWidget):
         layout.addWidget(slider_control)
         
         # Кнопки получения/установки параметров
-        btn_get_params = QPushButton("Get Parameters")
+        params_buttons_layout = QHBoxLayout()
+        btn_get_params = QPushButton("Обновить")  # Переименовано из Get Parameters
         btn_get_params.setMinimumHeight(40)
         btn_get_params.clicked.connect(self.sdk_get_parameters)
-        layout.addWidget(btn_get_params)
+        params_buttons_layout.addWidget(btn_get_params)
         
         btn_set_params = QPushButton("Set Parameters")
         btn_set_params.setMinimumHeight(40)
         btn_set_params.clicked.connect(self.sdk_set_parameters)
-        layout.addWidget(btn_set_params)
+        params_buttons_layout.addWidget(btn_set_params)
+        layout.addLayout(params_buttons_layout)
         
         # FPS и временная информация
         fps_group = QGroupBox("FPS & Performance")
@@ -150,16 +190,18 @@ class HikvisionWidget(QWidget):
         
         layout.addWidget(fps_group)
         
-        # Кнопки показа/скрытия UI SDK окна (внизу)
+        # Кнопки показа/скрытия UI SDK окна (внизу на одном уровне)
+        sdk_buttons_layout = QHBoxLayout()
         btn_show_ui = QPushButton("Показать UI SDK")
         btn_show_ui.setMinimumHeight(50)
         btn_show_ui.clicked.connect(lambda: self.toggle_sdk_ui(True))
-        layout.addWidget(btn_show_ui)
+        sdk_buttons_layout.addWidget(btn_show_ui)
         
         btn_hide_ui = QPushButton("Скрыть UI SDK")
         btn_hide_ui.setMinimumHeight(50)
         btn_hide_ui.clicked.connect(lambda: self.toggle_sdk_ui(False))
-        layout.addWidget(btn_hide_ui)
+        sdk_buttons_layout.addWidget(btn_hide_ui)
+        layout.addLayout(sdk_buttons_layout)
     
     def start_camera_message_thread(self):
         """Запустить поток для получения сообщений от камеры"""
@@ -179,18 +221,10 @@ class HikvisionWidget(QWidget):
         if msg_type == 'enum_devices_response':
             devices = message.get('devices', [])
             self.hikvision_device_list = devices
-            print(f"HikvisionWidget: Processing {len(devices)} devices")
-            
-            # Обновляем выпадающий список
-            self.combo_cameras.clear()
-            if len(devices) == 0:
-                self.combo_cameras.addItem("Устройства не найдены")
-            else:
-                for device in devices:
-                    display_name = device.get('display_name', f"Camera {device.get('index', 0)}")
-                    print(f"HikvisionWidget: Adding device to combo: {display_name}")
-                    self.combo_cameras.addItem(display_name)
-            print(f"HikvisionWidget: combo_cameras now has {self.combo_cameras.count()} items")
+            self._refresh_sources_table()
+            # Автоматически создаем камеры в DataManager при обнаружении
+            if self.data_manager:
+                self._create_cameras_in_datamanager(devices)
         
         elif msg_type == 'parameters_response':
             params = message.get('parameters', {})
@@ -252,19 +286,14 @@ class HikvisionWidget(QWidget):
                 print(f"Error enumerating devices: {e}")
     
     def sdk_open_camera(self):
-        """Открыть камеру"""
+        """Открыть камеру (используется выбранная строка в таблице источников)."""
+        if self._current_source == "image":
+            return
         if self.window_manager and hasattr(self.window_manager, 'queue_manager'):
             try:
-                camera_index = self.combo_cameras.currentIndex()
-                if camera_index < 0 or camera_index >= len(self.hikvision_device_list):
-                    camera_index = 0
-                
-                if len(self.hikvision_device_list) > 0:
-                    selected_device = self.hikvision_device_list[camera_index]
-                    real_camera_index = selected_device.get('index', camera_index)
-                else:
-                    real_camera_index = camera_index
-                    
+                real_camera_index = self._current_device_index
+                if len(self.hikvision_device_list) > 0 and real_camera_index < 0:
+                    real_camera_index = self.hikvision_device_list[0].get('index', 0)
                 self.window_manager.queue_manager.ui_to_camera.put({'type': 'open', 'camera_index': real_camera_index})
             except Exception as e:
                 print(f"Error opening camera: {e}")
@@ -349,7 +378,130 @@ class HikvisionWidget(QWidget):
                 except Exception as e:
                     print(f"Ошибка установки значения для {param_name}: {e}")
     
+    def _refresh_sources_table(self):
+        """Обновить таблицу источников: Изображение + список камер."""
+        rows = [
+            {"name": "Изображение", "enabled": True, "process": "Процесс 1", "state": "-", "ip": "-",
+             "_source": "image", "_device_index": -1}
+        ]
+        for i, dev in enumerate(self.hikvision_device_list):
+            idx = dev.get("index", i)
+            name = dev.get("display_name", f"Camera {idx}")
+            ip = dev.get("ip", dev.get("serial", "-"))
+            rows.append({
+                "name": name, "enabled": True, "process": "Процесс 1",
+                "state": "—", "ip": str(ip),
+                "_source": "camera", "_device_index": idx
+            })
+        self.sources_table.set_data(rows)
+
+    def _on_source_row_selected(self, row_index):
+        """Выбор строки источника: установить source и обновить панель ниже."""
+        row = self.sources_table.get_row_data(row_index) if row_index >= 0 else None
+        if not row:
+            return
+        self._current_source = row.get("_source", "camera")
+        self._current_device_index = row.get("_device_index", 0)
+        self.controls_camera["source"] = self._current_source
+        if self.callback_camera:
+            self.callback_camera()
+        if self._current_source == "camera" and self._current_device_index >= 0:
+            import threading
+            def delayed():
+                import time
+                time.sleep(0.3)
+                self.sdk_get_parameters()
+            threading.Thread(target=delayed, daemon=True).start()
+
+    def _on_source_cell_changed(self, row_index, column_key, value):
+        """Изменение ячейки (например Вкл.) — можно синхронизировать с процессами."""
+        pass
+
+    def showEvent(self, event):
+        """При показе виджета (переходе во вкладку) автоматически получаем параметры"""
+        super().showEvent(event)
+        if getattr(self, '_current_source', None) == 'camera' and getattr(self, '_current_device_index', -1) >= 0:
+            import threading
+            def delayed_get_params():
+                import time
+                time.sleep(0.2)
+                self.sdk_get_parameters()
+            threading.Thread(target=delayed_get_params, daemon=True).start()
+    
     def stop_thread(self):
         """Остановить поток сообщений камеры"""
         if self.camera_message_thread:
             self.camera_message_thread.stop()
+    
+    def _create_cameras_in_datamanager(self, devices):
+        """Автоматически создавать камеры в DataManager при обнаружении через Enum Devices"""
+        if not self.data_manager:
+            return
+        
+        for dev in devices:
+            device_index = dev.get("index", -1)
+            if device_index < 0:
+                continue
+            
+            # Генерируем ID камеры на основе индекса устройства
+            camera_id = f"camera_{device_index}"
+            
+            # Проверяем, существует ли уже камера с таким ID
+            if camera_id not in self.data_manager.get_cameras():
+                # Получаем имя камеры из устройства
+                camera_name = dev.get("display_name", f"Camera {device_index}")
+                ip = dev.get("ip", dev.get("serial", ""))
+                
+                # Создаем камеру в DataManager
+                created_id = self.data_manager.add_camera(camera_id=camera_id, name=camera_name)
+                if created_id:
+                    print(f"HikvisionWidget: Автоматически создана камера '{camera_name}' (ID: {created_id}) в DataManager")
+                    # Сохраняем параметры Hikvision если есть
+                    hikvision_params = {
+                        "Frame Rate": 0.0,
+                        "Exposure": 0,
+                        "Gain": 0.0
+                    }
+                    self.data_manager.set_camera_hikvision_params(created_id, hikvision_params)
+        
+        # Обновляем выпадающий список камер
+        self._refresh_camera_combo()
+    
+    def _refresh_camera_combo(self):
+        """Обновить выпадающий список камер из DataManager"""
+        if not self.data_manager or not hasattr(self, 'camera_combo'):
+            return
+        
+        current_camera_id = self.data_manager.get_current_camera_id()
+        
+        self.camera_combo.blockSignals(True)
+        self.camera_combo.clear()
+        
+        cameras = self.data_manager.get_cameras()
+        for camera_id in cameras:
+            camera = self.data_manager.get_camera(camera_id)
+            camera_name = camera.get("name", camera_id)
+            self.camera_combo.addItem(camera_name, camera_id)
+        
+        # Устанавливаем текущую камеру
+        if current_camera_id:
+            cameras = self.data_manager.get_cameras()
+            if current_camera_id in cameras:
+                index = cameras.index(current_camera_id)
+                self.camera_combo.setCurrentIndex(index)
+        
+        self.camera_combo.blockSignals(False)
+    
+    def _on_camera_combo_changed(self, index):
+        """Обработчик изменения выбранной камеры в выпадающем списке"""
+        if not self.data_manager or not hasattr(self, 'camera_combo'):
+            return
+        
+        camera_id = self.camera_combo.itemData(index)
+        if camera_id:
+            self.data_manager.set_current_camera(camera_id)
+            print(f"HikvisionWidget: Выбрана камера '{self.camera_combo.itemText(index)}' (ID: {camera_id})")
+    
+    def _on_data_camera_changed(self, camera_id):
+        """Обработчик изменения камеры в DataManager"""
+        self._refresh_camera_combo()

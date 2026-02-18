@@ -27,6 +27,7 @@ from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
 from App.Widget.Processing_widjet.Processing import ProcessingWidget
 from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
 from App.Components.params_manager import ParamsManager
+from App.Components.data_manager import DataManager
 from App.Widget.Sort_widjet import SortWidget, SortData
 
 
@@ -114,8 +115,26 @@ class MainWindow(QMainWindow):
         # Завершаем инициализацию UI
         self.init_ui_finish()
 
-        if self.fullscreen: 
-            self.showFullScreen()
+        # Применяем fullscreen с учетом ограничения из конфигурации приложения
+        if self.fullscreen:
+            app_config = self.window_manager.app_config if self.window_manager and hasattr(self.window_manager, 'app_config') else None
+            if app_config:
+                limit_fullhd = app_config.get_limit_fullhd()
+                if limit_fullhd:
+                    # Ограничиваем размер до заданного разрешения вместо fullscreen
+                    limit_width = app_config.get_fullscreen_limit_width()
+                    limit_height = app_config.get_fullscreen_limit_height()
+                    self.showNormal()
+                    self.setFixedSize(limit_width, limit_height)
+                    # Центрируем окно на экране
+                    screen = self.screen().availableGeometry()
+                    x = (screen.width() - limit_width) // 2
+                    y = (screen.height() - limit_height) // 2
+                    self.move(x, y)
+                else:
+                    self.showFullScreen()
+            else:
+                self.showFullScreen()
         else:
             self.showNormal()
 
@@ -153,14 +172,32 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
     
+    def _auto_save_backup(self):
+        """Автоматическое сохранение в backup рецепт"""
+        try:
+            if hasattr(self, 'data_manager'):
+                self.data_manager.save_to_recipe("backup")
+                # Также сохраняем параметры других виджетов
+                if hasattr(self, 'params_manager'):
+                    self.params_manager.save_to_excel("backup")
+        except Exception as e:
+            print(f"Ошибка автосохранения в backup: {e}")
+    
+    def _on_data_changed(self):
+        """Обработчик изменения данных в DataManager"""
+        # Можно добавить дополнительную логику при изменении данных
+        pass
+    
     def create_widgets(self):
         """Создание всех виджетов для вкладок"""
         # VisualSettingsWidget
+        app_config = self.window_manager.app_config if self.window_manager and hasattr(self.window_manager, 'app_config') else None
         self.visual_settings_widget = VisualSettingsWidget(
             window_manager=self.window_manager,
             ui_elements=self.ui_elements,
             controls=self.controls_visual,
-            callback=self.update_controls_visual
+            callback=self.update_controls_visual,
+            app_config=app_config
         )
         
         # CircleWidget
@@ -217,32 +254,42 @@ class MainWindow(QMainWindow):
             callback=self.update_controls_robot
         )
         
+        # Создаем DataManager перед HikvisionWidget, чтобы передать его в конструктор
+        self.sort_data = SortData()
+        self.data_manager = DataManager(self.sort_data)
+        self.data_manager.data_changed.connect(self._on_data_changed)
+        
         # HikvisionWidget
         self.hikvision_widget = HikvisionWidget(
             window_manager=self.window_manager,
             ui_elements=self.ui_elements,
             controls_hikvision=self.controls_hikvision,
+            controls_camera=self.controls_camera,
             callback=self.update_controls_hikvision,
-            stop_event=self.stop_event if hasattr(self, 'stop_event') else None
+            callback_camera=self.update_controls_camera,
+            stop_event=self.stop_event if hasattr(self, 'stop_event') else None,
+            data_manager=self.data_manager
         )
         
-        # ProcessingWidget
+        # ProcessingWidget и PostProcessingWidget создаём с data_manager
         self.processing_widget = ProcessingWidget(
             window_manager=self.window_manager,
             ui_elements=self.ui_elements,
             controls_processing=self.controls_processing,
-            callback=self.update_controls_processing
+            callback=self.update_controls_processing,
+            data_manager=self.data_manager,
+            controls_post_processing=self.controls_post_processing,
+            callback_post_processing=self.update_controls_post_processing,
         )
         
-        # PostProcessingWidget
         self.post_processing_widget = PostProcessingWidget(
             window_manager=self.window_manager,
             ui_elements=self.ui_elements,
             controls_post_processing=self.controls_post_processing,
-            callback=self.update_controls_post_processing
+            callback=self.update_controls_post_processing,
+            data_manager=self.data_manager
         )
         
-        # Создаем менеджер параметров для системы рецептов
         self.widgets_dict = {
             'visual': self.visual_settings_widget,
             'circle': self.circle_widget,
@@ -254,11 +301,15 @@ class MainWindow(QMainWindow):
             'processing': self.processing_widget,
             'post_processing': self.post_processing_widget,
         }
-        self.sort_data = SortData()
         self.params_manager = ParamsManager(self.widgets_dict, self.sort_data)
         
         # Автозагрузка текущего рецепта при старте приложения
         self._load_current_recipe_on_startup()
+        
+        # Настраиваем автосохранение в backup рецепт каждые 5 секунд
+        self.backup_timer = QTimer()
+        self.backup_timer.timeout.connect(self._auto_save_backup)
+        self.backup_timer.start(5000)  # 5000 мс = 5 секунд
     
     def update_tabs_with_widgets(self):
         """Обновляет вкладки, добавляя виджеты"""
@@ -269,14 +320,15 @@ class MainWindow(QMainWindow):
         # Добавляем вкладки с виджетами
         self.create_tab(self.tab_widget, "Сорта", self.create_tab_sort())
         self.create_tab(self.tab_widget, "Визуальная настройка", self.visual_settings_widget)
-        self.create_tab(self.tab_widget, "Форма", self.circle_widget)
-        self.create_tab(self.tab_widget, "Разное", self.cropped_area_widget) 
-        self.create_tab(self.tab_widget, "Параметры", self.parameters_widget) 
-        self.create_tab(self.tab_widget, "Нейрон", self.neuroun_widget)
-        self.create_tab(self.tab_widget, "Робот", self.robot_widget)
+        # Закомментированные вкладки: Форма, Разное, Параметры, Нейрон, Робот
+        # self.create_tab(self.tab_widget, "Форма", self.circle_widget)
+        # self.create_tab(self.tab_widget, "Разное", self.cropped_area_widget) 
+        # self.create_tab(self.tab_widget, "Параметры", self.parameters_widget) 
+        # self.create_tab(self.tab_widget, "Нейрон", self.neuroun_widget)
+        # self.create_tab(self.tab_widget, "Робот", self.robot_widget)
         self.create_tab(self.tab_widget, "Hikvision", self.hikvision_widget)
+        self.create_tab(self.tab_widget, "Регионы", self.post_processing_widget)  # Переименовано из Operation Crop и перемещено перед Обработкой
         self.create_tab(self.tab_widget, "Обработка", self.processing_widget)
-        self.create_tab(self.tab_widget, "Operation Crop", self.post_processing_widget)
     
     def handle_camera_message(self, message):
         """Обработать сообщение от процесса камеры"""
@@ -492,17 +544,7 @@ class MainWindow(QMainWindow):
         checkbox_control = CheckboxControl("servo_on", False, "top", ui_elements=self.ui_elements, controls=self.controls_robot, callback = self.update_controls_robot, parent=self)
         checkbox_layout_right.addWidget(checkbox_control)
 
-        # Переключатель источника: камера или изображение из файла
-        source_group = QGroupBox("Источник кадров")
-        source_layout = QVBoxLayout()
-        self.source_combo = QComboBox()
-        self.source_combo.addItem("Камера", "camera")
-        self.source_combo.addItem("Изображение", "image")
-        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
-        source_layout.addWidget(QLabel("Источник:"))
-        source_layout.addWidget(self.source_combo)
-        source_group.setLayout(source_layout)
-        checkbox_layout_right.addWidget(source_group)
+        # Источник кадров перенесён во вкладку Hikvision (таблица «Источник кадров»)
         
         checkbox_control = CheckboxControl("enable_camera", True, "top", ui_elements=self.ui_elements, controls=self.controls_camera, callback = self.update_controls_camera, parent=self)
         checkbox_layout_right.addWidget(checkbox_control)
@@ -1337,28 +1379,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
             self.sort_widget.schedule_refresh()
 
-    def _on_source_changed(self, index):
-        """Переключение источника: камера / изображение"""
-        source = self.source_combo.currentData()
-        self.controls_camera['source'] = source
-        if source == 'image':
-            # При переключении на изображение останавливаем камеру
-            if hasattr(self.queue_manager, 'ui_to_camera'):
-                try:
-                    self.queue_manager.ui_to_camera.put_nowait({'type': 'stop_grabbing'})
-                except Exception:
-                    pass
-        self.update_controls_camera()
-    
     def update_controls_camera(self):
         self.controls_camera['source'] = self.controls_camera.get('source', 'camera')
         self.controls_camera['image_path'] = self.controls_camera.get('image_path', 'Data/last_frame.png')
-        if hasattr(self, 'source_combo') and self.source_combo:
-            idx = self.source_combo.findData(self.controls_camera['source'])
-            if idx >= 0 and idx != self.source_combo.currentIndex():
-                self.source_combo.blockSignals(True)
-                self.source_combo.setCurrentIndex(idx)
-                self.source_combo.blockSignals(False)
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_camera)
         self.queue_manager.control_camera.put(dict(self.controls_camera))
         self.queue_manager.control_camera_event.set()
@@ -1959,12 +1982,32 @@ class MainWindow(QMainWindow):
         self.update_controls_post_processing()
 
     def update_controls_post_processing(self):
-        """Отправка controls в процесс пост-обработки."""
+        """Отправка controls в процесс пост-обработки. Данные берутся из DataManager при наличии."""
         if not hasattr(self, 'queue_manager') or self.queue_manager is None:
             return
         
-        # Обновляем также обработку регионов в controls_processing
-        # чтобы регионы отправлялись в процессоры
+        # Синхронизация из DataManager: собираем regions и region_chains для текущей камеры
+        if hasattr(self, 'data_manager') and self.data_manager:
+            camera_id = self.data_manager.get_current_camera_id()
+            if camera_id:
+                regions_list = []
+                region_chains_dict = {}
+                for region_name in self.data_manager.get_regions(camera_id):
+                    r = self.data_manager.get_region(camera_id, region_name)
+                    if not r.get('enabled', True):
+                        continue
+                    regions_list.append({
+                        'name': region_name,
+                        'x1': r.get('x1', 0), 'y1': r.get('y1', 0),
+                        'x2': r.get('x2', 0), 'y2': r.get('y2', 0),
+                        'enabled': True,
+                        'processor_id': 1,
+                    })
+                    region_chains_dict[region_name] = r.get('chains', [])
+                self.controls_post_processing['regions'] = regions_list
+                self.controls_post_processing['region_chains'] = region_chains_dict
+        
+        # Обновляем также обработку регионов в controls_processing для процессоров
         if self.controls_post_processing.get('enable_post_processing', False):
             regions = self.controls_post_processing.get('regions', [])
             if regions:
@@ -1987,7 +2030,6 @@ class MainWindow(QMainWindow):
                 if region_config:
                     self.controls_processing['enable_region_mode'] = True
                     self.controls_processing['region_config'] = region_config
-                    # Обновляем также control_processing
                     self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
                     self.queue_manager.control_processing.put(self.controls_processing)
         

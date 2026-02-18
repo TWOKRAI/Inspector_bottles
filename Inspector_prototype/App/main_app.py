@@ -12,6 +12,7 @@ from App.Windows.message_window import MessageWindow
 
 
 from App.Components.header import HeaderWidget
+from App.Components.app_config import AppConfigManager
 from App.Threads.thread_loading import Loading
 from App.Threads.thread_image_update import UpdateImage
 from App.Threads.thread_bot_message import BotThread
@@ -34,6 +35,9 @@ class WindowManager:
         self.fullscreen = False
 
         self.access_level = 2
+        
+        # Создаем менеджер конфигурации приложения
+        self.app_config = AppConfigManager()
 
         self.create_all_windows()
         self.create_thread()
@@ -89,24 +93,66 @@ class WindowManager:
 
     def set_fullscreen(self, fullscreen):
         self.fullscreen = fullscreen
-
+        
+        # Получаем настройки ограничения из конфигурации приложения
+        limit_fullhd = self.app_config.get_limit_fullhd() if self.app_config else False
+        limit_width = self.app_config.get_fullscreen_limit_width() if self.app_config else 1920
+        limit_height = self.app_config.get_fullscreen_limit_height() if self.app_config else 1080
+        
         if self.main_window:
             if fullscreen:
-                self.main_window.showFullScreen()
+                if limit_fullhd:
+                    # Ограничиваем размер до заданного разрешения вместо fullscreen
+                    self.main_window.showNormal()
+                    self.main_window.setFixedSize(limit_width, limit_height)
+                    # Центрируем окно на экране
+                    screen = self.main_window.screen().availableGeometry()
+                    x = (screen.width() - limit_width) // 2
+                    y = (screen.height() - limit_height) // 2
+                    self.main_window.move(x, y)
+                else:
+                    self.main_window.showFullScreen()
             else:
+                # Снимаем ограничение размера при выключении fullscreen
+                self.main_window.setFixedSize(16777215, 16777215)  # Убираем фиксированный размер (16777215 = QWIDGETSIZE_MAX)
+                self.main_window.setMaximumSize(16777215, 16777215)  # Убираем максимальный размер
+                self.main_window.setMinimumSize(800, 600)  # Восстанавливаем минимальный размер
                 self.main_window.showNormal()
 
         if self.loading_window:
             if fullscreen:
-                self.loading_window.showFullScreen()
+                if limit_fullhd:
+                    self.loading_window.showNormal()
+                    self.loading_window.setFixedSize(limit_width, limit_height)
+                    screen = self.loading_window.screen().availableGeometry()
+                    x = (screen.width() - limit_width) // 2
+                    y = (screen.height() - limit_height) // 2
+                    self.loading_window.move(x, y)
+                else:
+                    self.loading_window.showFullScreen()
             else:
+                self.loading_window.setFixedSize(16777215, 16777215)
+                self.loading_window.setMaximumSize(16777215, 16777215)
+                self.loading_window.setMinimumSize(800, 600)
                 self.loading_window.showNormal()
 
         if self.neuroun_window:
             if fullscreen:
-                self.neuroun_window.showFullScreen()
+                if limit_fullhd:
+                    self.neuroun_window.showNormal()
+                    self.neuroun_window.setFixedSize(limit_width, limit_height)
+                    screen = self.neuroun_window.screen().availableGeometry()
+                    x = (screen.width() - limit_width) // 2
+                    y = (screen.height() - limit_height) // 2
+                    self.neuroun_window.move(x, y)
+                else:
+                    self.neuroun_window.showFullScreen()
             else:
+                self.neuroun_window.setFixedSize(16777215, 16777215)
+                self.neuroun_window.setMaximumSize(16777215, 16777215)
+                self.neuroun_window.setMinimumSize(800, 600)
                 self.neuroun_window.showNormal()
+    
 
 
     def toggle_cursor_visibility(self, visible):
