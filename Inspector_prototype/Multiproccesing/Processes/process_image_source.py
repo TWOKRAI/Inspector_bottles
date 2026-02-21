@@ -27,6 +27,7 @@ def process_image_source(queue_manager, control_source):
     controls = {
         'source': 'camera',
         'image_path': 'Data/last_frame.png',
+        'enable_main_processing': True,  # Главный выключатель обработки
     }
     
     frame_counter = 0
@@ -95,9 +96,31 @@ def process_image_source(queue_manager, control_source):
         
         frame_counter += 1
         
+        # Проверяем главный выключатель обработки
+        enable_main_processing = controls.get('enable_main_processing', True)
+        
         try:
-            queue_manager.remove_old_frame_if_full(queue_manager.frame_processor_queue)
-            queue_manager.frame_processor_queue.put(data_frame)
+            if enable_main_processing:
+                # Обработка включена - отправляем в очередь обработки
+                queue_manager.remove_old_frame_if_full(queue_manager.frame_processor_queue)
+                queue_manager.frame_processor_queue.put(data_frame)
+            else:
+                # Обработка выключена - отправляем напрямую в очередь отображения
+                display_data_frame = {
+                    'id_memory': id_memory,
+                    'capture_time': timestamp,
+                    'frame_counter': frame_counter - 1,
+                    'frame_id': (frame_counter - 1) % 121,
+                    'image_height': frame.shape[0],
+                    'image_width': frame.shape[1],
+                    'timestamps': {'capture': timestamp},
+                    'from_file': True,
+                    'processed': False,  # Кадр не обработан
+                    'processing_time': 0.0,  # Время обработки = 0
+                    'total_time_from_capture': 0.0,  # Пока 0, будет обновлено при отображении
+                }
+                queue_manager.remove_old_frame_if_full(queue_manager.display_queue)
+                queue_manager.display_queue.put(display_data_frame)
         except Exception:
             pass
         

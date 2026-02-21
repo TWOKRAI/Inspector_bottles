@@ -140,14 +140,12 @@ recipes:
     processing: true
     record_video: false
     rectangles: true
-    region_chains: '{"main_image": [], "region1": [{"processor_id": "grayscale", "params":
-      {}, "enabled": true}], "region2": []}'
+    region_chains: '{"region1": [{"processor_id": "grayscale", "params": {}, "enabled":
+      true}]}'
     region_config: null
     region_processor_type: null
-    regions: '[{"name": "main_image", "x1": 0, "y1": 0, "x2": 3840, "y2": 2160, "enabled":
-      true, "processor_id": 1}, {"name": "region1", "x1": 1246, "y1": 43, "x2": 343,
-      "y2": 244, "enabled": true, "processor_id": 1}, {"name": "region2", "x1": 138,
-      "y1": 48, "x2": 350, "y2": 246, "enabled": true, "processor_id": 1}]'
+    regions: '[{"name": "region1", "x1": 1246, "y1": 0, "x2": 0, "y2": 0, "enabled":
+      true}, {"name": "region2", "x1": 138, "y1": 48, "x2": 350, "y2": 246}]'
     resize_delta: 0
     right: 1054
     robot_on: false
@@ -882,14 +880,12 @@ recipes:
     processing: true
     record_video: false
     rectangles: true
-    region_chains: '{"main_image": [], "region1": [{"processor_id": "grayscale", "params":
-      {}, "enabled": true}], "region2": []}'
+    region_chains: '{"region1": [{"processor_id": "grayscale", "params": {}, "enabled":
+      true}]}'
     region_config: null
     region_processor_type: null
-    regions: '[{"name": "main_image", "x1": 0, "y1": 0, "x2": 3840, "y2": 2160, "enabled":
-      true, "processor_id": 1}, {"name": "region1", "x1": 1246, "y1": 43, "x2": 343,
-      "y2": 244, "enabled": true, "processor_id": 1}, {"name": "region2", "x1": 138,
-      "y1": 48, "x2": 350, "y2": 246, "enabled": true, "processor_id": 1}]'
+    regions: '[{"name": "region1", "x1": 1246, "y1": 0, "x2": 0, "y2": 0, "enabled":
+      true}, {"name": "region2", "x1": 138, "y1": 48, "x2": 350, "y2": 246}]'
     resize_delta: 0
     right: 1054
     robot_on: false

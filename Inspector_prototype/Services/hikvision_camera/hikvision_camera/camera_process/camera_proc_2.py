@@ -57,6 +57,9 @@ class CameraProcess():
         
         # Режим источника: 'camera' — камера, 'image' — чтение из файла
         self.source_mode = 'camera'
+        
+        # Главный выключатель обработки
+        self.enable_main_processing = True
 
         
     def start(self):
@@ -479,10 +482,11 @@ class CameraProcess():
                     # НЕ изменяем размер кадра - используем оригинальный размер
                     # Это позволит работать с любым размером изображения
                     
-                    # Проверяем режим источника (камера или изображение из файла)
+                    # Проверяем режим источника (камера или изображение из файла) и главный выключатель обработки
                     try:
                         ctrl = self.queue_manager.control_source.get_nowait()
                         self.source_mode = ctrl.get('source', 'camera')
+                        self.enable_main_processing = ctrl.get('enable_main_processing', True)
                     except (queue.Empty, AttributeError):
                         pass
                     
@@ -554,9 +558,29 @@ class CameraProcess():
                             }
                         }
                         
-                        # Отправляем метаданные в очередь для обработки
-                        self.queue_manager.remove_old_frame_if_full(self.queue_manager.frame_processor_queue)
-                        self.queue_manager.frame_processor_queue.put(data_frame)
+                        # Проверяем главный выключатель обработки
+                        if self.enable_main_processing:
+                            # Обработка включена - отправляем в очередь обработки
+                            self.queue_manager.remove_old_frame_if_full(self.queue_manager.frame_processor_queue)
+                            self.queue_manager.frame_processor_queue.put(data_frame)
+                        else:
+                            # Обработка выключена - отправляем напрямую в очередь отображения
+                            display_data_frame = {
+                                'id_memory': id_memory,
+                                'capture_time': timestamp,
+                                'frame_counter': self.frame_counter,
+                                'frame_id': self.frame_id,
+                                'image_height': frame.shape[0],
+                                'image_width': frame.shape[1],
+                                'timestamps': {
+                                    'capture': timestamp
+                                },
+                                'processed': False,  # Кадр не обработан
+                                'processing_time': 0.0,  # Время обработки = 0
+                                'total_time_from_capture': 0.0,  # Пока 0, будет обновлено при отображении
+                            }
+                            self.queue_manager.remove_old_frame_if_full(self.queue_manager.display_queue)
+                            self.queue_manager.display_queue.put(display_data_frame)
                         
                         self.frame_id += 1
                         if self.frame_id > 120:

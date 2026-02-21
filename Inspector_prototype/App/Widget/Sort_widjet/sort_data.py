@@ -20,15 +20,21 @@ class SortData:
         ...
     """
 
-    def __init__(self, yaml_path=None):
+    def __init__(self, yaml_path=None, recipe_manager=None):
+        """
+        Args:
+            yaml_path: Путь к YAML файлу рецептов
+            recipe_manager: Опциональный RecipeManager для получения описаний из моделей (единый источник истины)
+        """
         if yaml_path is None:
-            # Путь: Inspector_prototype/Data/Recipes/value_settings.yaml
+            # Путь: App/Data/Recipes/value_settings.yaml
             base = os.path.dirname(__file__)
-            base = os.path.normpath(os.path.join(base, "..", "..", ".."))
+            base = os.path.normpath(os.path.join(base, "..", ".."))
             data_dir = os.path.join(base, "Data", "Recipes")
             os.makedirs(data_dir, exist_ok=True)
             yaml_path = os.path.join(data_dir, "value_settings.yaml")
         self.yaml_path = os.path.abspath(yaml_path)
+        self.recipe_manager = recipe_manager  # Единый источник истины для описаний
         self._data = {"current_recipe": 0, "parameter_info": {}, "recipes": {}}
         self.load()
 
@@ -94,7 +100,17 @@ class SortData:
         return []
 
     def get_parameter_info(self, param_name):
-        """Описание параметра (для столбца «Информация»)."""
+        """
+        Описание параметра (для столбца «Информация»).
+        Приоритет: RecipeManager (единый источник истины) > сохранённое в YAML
+        """
+        # Если есть RecipeManager, используем его для получения описания из моделей
+        if self.recipe_manager:
+            info = self.recipe_manager.get_parameter_info(param_name)
+            if info:
+                return info
+        
+        # Fallback: используем сохранённое описание из YAML (может быть переопределено пользователем)
         return self._data.get("parameter_info", {}).get(param_name, "")
 
     def set_parameter_info(self, param_name, info_text):

@@ -16,8 +16,11 @@ from PyQt5.QtCore import Qt
 
 from App.Components.header import HeaderWidget
 from App.Components.slider import SliderControl
+from App.Components.slider_enhanced import SliderControlEnhanced
 from App.Components.checkbox import CheckboxControl
-from App.Widget.Visual_settings_widjet.Visual_settings import VisualSettingsWidget
+from App.Widget.Visual_config_widget import VisualConfigWidget
+from App.Widget.Logging_widget import LoggingWidget
+from App.Managers import LoggingManager
 from App.Widget.Circle_widjet.Circle import CircleWidget
 from App.Widget.Cropped_area_widjet.Cropped_area import CroppedAreaWidget
 from App.Widget.Parameters_widjet.Parameters import ParametersWidget
@@ -27,8 +30,9 @@ from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
 from App.Widget.Processing_widjet.Processing import ProcessingWidget
 from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
 from App.Components.params_manager import ParamsManager
-from App.Components.data_manager import DataManager
+from App.Managers import DataManager, RecipeManager, ConverterManager
 from App.Widget.Sort_widjet import SortWidget, SortData
+from App.Registers import ProcessingRegisters, RegistersManager
 
 
 # SliderControl и CheckboxControl теперь импортируются из Components
@@ -52,26 +56,19 @@ class MainWindow(QMainWindow):
         self.controls_camera = {
             'source': 'camera',  # 'camera' или 'image' — переключатель источника кадров
             'image_path': 'Data/last_frame.png',  # путь к PNG при source='image'
+            'enable_main_processing': True,  # Главный выключатель обработки - если False, кадры идут напрямую в display_queue
         }
         self.controls_neuroun = {}
         self.controls_draw = {}
         self.controls_robot = {}
         self.controls_conveyor = {}
         self.controls_hikvision = {}
-        self.controls_processing = {
-            'crop_top': 0,
-            'crop_bottom': 2160,  # Максимальная высота по умолчанию
-            'crop_left': 0,
-            'crop_right': 3840,  # Максимальная ширина по умолчанию
-            'enable_processing': False,
-            'show_mask': False,
-            'show_processed': False,
-            'image_width': 1024,
-            'image_height': 780,
-            'hl': 0, 'sl': 0, 'vl': 0,
-            'hm': 179, 'sm': 255, 'vm': 255,
-            'region_processor_type': None,  # None для HSV, или 'rgb', 'bgr', 'grayscale'
-        }
+        # Используем Pydantic модель вместо словаря
+        self.registers_processing = ProcessingRegisters()
+        # Создаём словарь для обратной совместимости с компонентами
+        # Компоненты (SliderControl, CheckboxControl) работают напрямую со словарём
+        # Модель синхронизируется в update_controls_processing
+        self.controls_processing = self.registers_processing.model_dump()
         
         # Operation Crop: области + цепочки обработки
         self.controls_post_processing = {
@@ -190,14 +187,23 @@ class MainWindow(QMainWindow):
     
     def create_widgets(self):
         """Создание всех виджетов для вкладок"""
-        # VisualSettingsWidget
+        # LoggingManager - создаём перед виджетами
+        self.logging_manager = LoggingManager(queue_manager=self.queue_manager if hasattr(self, 'queue_manager') else None)
+        
+        # VisualConfigWidget - только конфигурация
         app_config = self.window_manager.app_config if self.window_manager and hasattr(self.window_manager, 'app_config') else None
-        self.visual_settings_widget = VisualSettingsWidget(
+        self.visual_config_widget = VisualConfigWidget(
             window_manager=self.window_manager,
             ui_elements=self.ui_elements,
             controls=self.controls_visual,
             callback=self.update_controls_visual,
             app_config=app_config
+        )
+        
+        # LoggingWidget - только логирование
+        self.logging_widget = LoggingWidget(
+            window_manager=self.window_manager,
+            logging_manager=self.logging_manager
         )
         
         # CircleWidget
@@ -254,10 +260,17 @@ class MainWindow(QMainWindow):
             callback=self.update_controls_robot
         )
         
-        # Создаем DataManager перед HikvisionWidget, чтобы передать его в конструктор
-        self.sort_data = SortData()
-        self.data_manager = DataManager(self.sort_data)
+        # Создаем менеджеры данных перед виджетами
+        # ConverterManager создаётся автоматически в DataManager
+        self.converter = ConverterManager()
+        self.registers_manager = RegistersManager()  # Единый источник истины для регистров и описаний
+        self.recipe_manager = RecipeManager(converter=self.converter, registers_manager=self.registers_manager)
+        self.data_manager = DataManager(recipe_manager=self.recipe_manager, converter=self.converter)
         self.data_manager.data_changed.connect(self._on_data_changed)
+        
+        # Для обратной совместимости создаём SortData (используется в ParamsManager)
+        # Передаём RecipeManager для получения описаний из моделей (единый источник истины)
+        self.sort_data = SortData(recipe_manager=self.recipe_manager)
         
         # HikvisionWidget
         self.hikvision_widget = HikvisionWidget(
@@ -272,10 +285,11 @@ class MainWindow(QMainWindow):
         )
         
         # ProcessingWidget и PostProcessingWidget создаём с data_manager
+        # Передаём свойство controls_processing (оно вернёт словарь для совместимости)
         self.processing_widget = ProcessingWidget(
             window_manager=self.window_manager,
             ui_elements=self.ui_elements,
-            controls_processing=self.controls_processing,
+            controls_processing=self.controls_processing,  # Свойство вернёт словарь
             callback=self.update_controls_processing,
             data_manager=self.data_manager,
             controls_post_processing=self.controls_post_processing,
@@ -291,7 +305,8 @@ class MainWindow(QMainWindow):
         )
         
         self.widgets_dict = {
-            'visual': self.visual_settings_widget,
+            'visual': self.visual_config_widget,
+            'logging': self.logging_widget,
             'circle': self.circle_widget,
             'cropped_area': self.cropped_area_widget,
             'parameters': self.parameters_widget,
@@ -319,7 +334,8 @@ class MainWindow(QMainWindow):
         
         # Добавляем вкладки с виджетами
         self.create_tab(self.tab_widget, "Сорта", self.create_tab_sort())
-        self.create_tab(self.tab_widget, "Визуальная настройка", self.visual_settings_widget)
+        self.create_tab(self.tab_widget, "Визуальная настройка", self.visual_config_widget)
+        self.create_tab(self.tab_widget, "Логирование", self.logging_widget)
         # Закомментированные вкладки: Форма, Разное, Параметры, Нейрон, Робот
         # self.create_tab(self.tab_widget, "Форма", self.circle_widget)
         # self.create_tab(self.tab_widget, "Разное", self.cropped_area_widget) 
@@ -549,6 +565,9 @@ class MainWindow(QMainWindow):
         checkbox_control = CheckboxControl("enable_camera", True, "top", ui_elements=self.ui_elements, controls=self.controls_camera, callback = self.update_controls_camera, parent=self)
         checkbox_layout_right.addWidget(checkbox_control)
 
+        checkbox_control = CheckboxControl("enable_main_processing", True, "top", ui_elements=self.ui_elements, controls=self.controls_camera, callback = self.update_controls_camera, parent=self)
+        checkbox_layout_right.addWidget(checkbox_control)
+
         checkbox_control = CheckboxControl("processing", True, "top", ui_elements=self.ui_elements, controls=self.controls, callback = self.update_controls, parent=self)
         checkbox_layout_right.addWidget(checkbox_control)
 
@@ -640,7 +659,29 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         tab.setLayout(layout)
 
-        slider_control = SliderControl("dp", 0, 20, 14,  transfer_k= 0.1, round_k=1, min_access=1, ui_elements=self.ui_elements, controls=self.controls, callback = self.update_controls, parent=self)
+        # Используем новый SliderControlEnhanced для поля "dp" из регистра "draw"
+        slider_control = SliderControlEnhanced(
+            register_name='draw',
+            field_name='dp',
+            registers_manager=self.registers_manager,
+            access_level=1,  # min_access=1 соответствует access_level=1
+            ui_elements=self.ui_elements,
+            controls=self.controls,
+            callback=self.update_controls,
+            transfer_k=0.1,
+            round_k=1,
+            parent=self
+        )
+
+        # Используем новый SliderControlEnhanced - максимально упрощённый вариант
+        # Все параметры автоматически определяются из parent (MainWindow) и метаданных
+        from App.Registers.models.draw import DrawRegisters
+        
+        slider_control = SliderControlEnhanced(
+            field=DrawRegisters.dp,  # Передаём поле модели напрямую - автоматически определяет всё!
+            parent=self  # Автоматически определяет ui_elements, controls, callback, registers_manager, access_level
+        )
+        
         layout.addWidget(slider_control)
 
         slider_control = SliderControl("minDist", 0, 100, 51, min_access=1, ui_elements=self.ui_elements, controls=self.controls, callback = self.update_controls, parent=self)
@@ -1382,11 +1423,16 @@ class MainWindow(QMainWindow):
     def update_controls_camera(self):
         self.controls_camera['source'] = self.controls_camera.get('source', 'camera')
         self.controls_camera['image_path'] = self.controls_camera.get('image_path', 'Data/last_frame.png')
+        self.controls_camera['enable_main_processing'] = self.controls_camera.get('enable_main_processing', True)
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_camera)
         self.queue_manager.control_camera.put(dict(self.controls_camera))
         self.queue_manager.control_camera_event.set()
-        # Отправляем источник кадров (camera/image) — в две очереди, т.к. camera и image_source оба читают
-        source_ctrl = {'source': self.controls_camera['source'], 'image_path': self.controls_camera['image_path']}
+        # Отправляем источник кадров (camera/image) и главный выключатель обработки — в две очереди, т.к. camera и image_source оба читают
+        source_ctrl = {
+            'source': self.controls_camera['source'], 
+            'image_path': self.controls_camera['image_path'],
+            'enable_main_processing': self.controls_camera['enable_main_processing']
+        }
         for q in (self.queue_manager.control_source, self.queue_manager.control_source_image):
             self.queue_manager.remove_old_frame_if_full(q)
             q.put(source_ctrl)
@@ -1638,10 +1684,21 @@ class MainWindow(QMainWindow):
     
     def update_controls_processing(self):
         """Обновление управления процессом обработки"""
-        # Обновляем размер окна изображения если изменился
-        if 'image_width' in self.controls_processing or 'image_height' in self.controls_processing:
-            width = self.controls_processing.get('image_width', 1024)
-            height = self.controls_processing.get('image_height', 780)
+        # Синхронизируем модель из словаря (компоненты могли изменить словарь напрямую)
+        # Обновляем модель из текущего состояния словаря
+        try:
+            self.registers_processing = ProcessingRegisters.model_validate(self.controls_processing, strict=False)
+        except Exception as e:
+            print(f"Ошибка валидации ProcessingRegisters: {e}")
+            # Если валидация не прошла, пытаемся обновить только существующие поля
+            for key, value in self.controls_processing.items():
+                if hasattr(self.registers_processing, key):
+                    setattr(self.registers_processing, key, value)
+        
+        # Обновляем размер изображения если изменились параметры
+        if hasattr(self.registers_processing, 'image_width') and hasattr(self.registers_processing, 'image_height'):
+            width = self.registers_processing.image_width
+            height = self.registers_processing.image_height
             if hasattr(self, 'image_label'):
                 # Изменяем максимальный размер label (реальный размер будет зависеть от layout)
                 self.image_label.setMaximumSize(width, height)
@@ -1649,7 +1706,7 @@ class MainWindow(QMainWindow):
                 # self.setFixedSize(width, height)
         
         # Если включена обработка регионов, формируем region_config из controls_post_processing
-        if self.controls_processing.get('enable_processing', False):
+        if self.registers_processing.enable_processing:
             # Проверяем есть ли регионы для обработки
             regions = self.controls_post_processing.get('regions', [])
             if regions:
@@ -1671,17 +1728,25 @@ class MainWindow(QMainWindow):
                             }
                 
                 if region_config:
-                    self.controls_processing['enable_region_mode'] = True
-                    self.controls_processing['region_config'] = region_config
+                    self.registers_processing.enable_region_mode = True
+                    self.registers_processing.region_config = region_config
                 else:
-                    self.controls_processing['enable_region_mode'] = False
+                    self.registers_processing.enable_region_mode = False
             else:
-                self.controls_processing['enable_region_mode'] = False
+                self.registers_processing.enable_region_mode = False
         else:
-            self.controls_processing['enable_region_mode'] = False
+            self.registers_processing.enable_region_mode = False
         
+        # Обновляем словарь из модели (на случай если модель изменилась)
+        # Но только для полей которые есть в модели, чтобы не потерять изменения компонентов
+        model_dict = self.registers_processing.model_dump()
+        for key in model_dict:
+            if key in self.controls_processing:
+                self.controls_processing[key] = model_dict[key]
+        
+        # Отправляем модель в очередь (преобразуем в dict для совместимости с процессами)
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
-        self.queue_manager.control_processing.put(self.controls_processing)
+        self.queue_manager.control_processing.put(self.registers_processing.model_dump(mode='json'))
         self.queue_manager.control_processing_event.set()
         
         # Overlay управляется через update_controls_draw (Draw чекбокс)
@@ -2028,10 +2093,13 @@ class MainWindow(QMainWindow):
                             }
                 
                 if region_config:
+                    self.registers_processing.enable_region_mode = True
+                    self.registers_processing.region_config = region_config
+                    # Обновляем словарь из модели
                     self.controls_processing['enable_region_mode'] = True
                     self.controls_processing['region_config'] = region_config
                     self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_processing)
-                    self.queue_manager.control_processing.put(self.controls_processing)
+                    self.queue_manager.control_processing.put(self.registers_processing.model_dump(mode='json'))
         
         ctrl = dict(self.controls_post_processing)
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_post_processing)
