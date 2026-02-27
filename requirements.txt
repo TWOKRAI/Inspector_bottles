@@ -1,0 +1,17 @@
+# Основные зависимости для Inspector_prototype (venv)
+#
+# Установка:
+#   python -m venv .venv
+#   .venv\Scripts\activate  (Windows)
+#   pip install -r requirements.txt
+#
+# Если нужны дополнительные инструменты для разработки (pytest и т.п.),
+# их можно вынести в отдельный requirements-dev.txt.
+
+PyQt5>=5.15.0
+numpy>=1.20.0
+opencv-python>=4.5.0
+pydantic>=2.0.0
+PyYAML>=6.0
+requests>=2.28.0
+
