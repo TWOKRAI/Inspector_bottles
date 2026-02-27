@@ -9,19 +9,24 @@ App Inspector - это PyQt5 приложение для инспекции бу
 ```
 Inspector_prototype/
 ├── App/                          # Основное приложение
+│   ├── Core/                     # Ядро: базовые виджеты, конфиг, менеджеры, потоки
+│   │   ├── base_configurable_widget.py  # Базовый класс конфигурируемых виджетов
+│   │   ├── app_config.py         # Менеджер конфигурации приложения
+│   │   ├── Managers/             # Менеджеры (данные, логирование, ошибки, окна)
+│   │   │   ├── data_manager.py   # Координатор данных
+│   │   │   ├── logging_manager.py
+│   │   │   ├── error_manager.py
+│   │   │   └── window_manager.py
+│   │   └── Threads/              # Рабочие потоки
 │   ├── Components/              # Переиспользуемые компоненты UI
-│   ├── Managers/                # Менеджеры (данные, логирование, ошибки, окна)
-│   │   ├── data_manager.py      # Координатор данных
-│   │   ├── logging_manager.py   # Логирование
-│   │   ├── error_manager.py     # Обработка ошибок
-│   │   └── window_manager.py    # Управление окнами
 │   ├── Registers/               # Регистры управления (Pydantic модели)
 │   ├── Widget/                  # Виджеты для различных функций
-│   │   ├── Visual_config_widget/ # Конфигурация визуальных настроек
-│   │   └── Logging_widget/       # Управление логированием
+│   │   ├── Visual_config_widget/
+│   │   └── Logging_widget/
 │   ├── Windows/                 # Окна приложения
-│   ├── Threads/                 # Рабочие потоки
 │   ├── Data/                    # Данные приложения (рецепты, конфиги, логи)
+│   ├── Resources/               # Ресурсы UI: изображения, иконки (вместо Image)
+│   ├── resource_paths.py       # get_resource_path() — пути к Resources
 │   └── docs/                    # Документация
 ├── Multiproccesing/             # Мультипроцессная обработка
 └── Services/                    # Сервисы (камеры Hikvision)
@@ -174,7 +179,7 @@ sequenceDiagram
 
 ---
 
-#### 2.2 WindowManager (`App/Managers/window_manager.py`)
+#### 2.2 WindowManager (`App/Core/Managers/window_manager.py`)
 
 **Ответственность**: Управление всеми окнами приложения.
 
@@ -193,7 +198,7 @@ sequenceDiagram
 
 ---
 
-### 3. Managers Layer (`App/Managers/`)
+### 3. Managers Layer (`App/Core/Managers/`)
 
 #### 3.1 DataManager (`data_manager.py`)
 
@@ -649,10 +654,10 @@ recipes:
 4. Использовать в виджетах
 
 **Добавление нового менеджера**:
-1. Создать класс в `App/Managers/new_manager.py`
+1. Создать класс в `App/Core/Managers/new_manager.py`
 2. Использовать `ConverterManager` для конвертации
 3. Интегрировать в `DataManager` если нужно
-4. Экспортировать в `App/Managers/__init__.py`
+4. Экспортировать в `App/Core/Managers/__init__.py`
 
 ---
 

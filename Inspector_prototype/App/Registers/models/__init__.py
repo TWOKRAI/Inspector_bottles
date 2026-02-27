@@ -1,20 +1,30 @@
 # -*- coding: utf-8 -*-
 """
 Модели регистров для App Inspector.
-Каждая модель находится в отдельном файле для лучшей организации кода.
+
+Все модели *Registers и инфраструктура схем находятся в подпакете field_registers.
+Здесь — реэкспорт для обратной совместимости и для discovery по пакету App.Registers.models.
 """
-from .camera import CameraRegisters
-from .processing import ProcessingRegisters
-from .post_processing import PostProcessingRegisters
-from .visual import VisualRegisters
-from .draw import DrawRegisters
-from .robot import RobotRegisters
-from .conveyor import ConveyorRegisters
-from .neuroun import NeurounRegisters
-from .hikvision import HikvisionRegisters
-from .frame_process import FrameProcessRegisters
+from App.Registers.models.field_registers import (
+    FieldSchema,
+    DEFAULT_FIELD_SCHEMA,
+    RegisterMetadataHelper,
+    DrawRegisters,
+    CameraRegisters,
+    ProcessingRegisters,
+    PostProcessingRegisters,
+    VisualRegisters,
+    RobotRegisters,
+    ConveyorRegisters,
+    NeurounRegisters,
+    HikvisionRegisters,
+    FrameProcessRegisters,
+)
 
 __all__ = [
+    'FieldSchema',
+    'DEFAULT_FIELD_SCHEMA',
+    'RegisterMetadataHelper',
     'CameraRegisters',
     'ProcessingRegisters',
     'PostProcessingRegisters',

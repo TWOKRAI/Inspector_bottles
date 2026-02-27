@@ -20,7 +20,7 @@ from App.Components.slider_enhanced import SliderControlEnhanced
 from App.Components.checkbox import CheckboxControl
 from App.Widget.Visual_config_widget import VisualConfigWidget
 from App.Widget.Logging_widget import LoggingWidget
-from App.Managers import LoggingManager
+from App.Core.Managers import LoggingManager
 from App.Widget.Circle_widjet.Circle import CircleWidget
 from App.Widget.Cropped_area_widjet.Cropped_area import CroppedAreaWidget
 from App.Widget.Parameters_widjet.Parameters import ParametersWidget
@@ -30,9 +30,25 @@ from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
 from App.Widget.Processing_widjet.Processing import ProcessingWidget
 from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
 from App.Components.params_manager import ParamsManager
-from App.Managers import DataManager, RecipeManager, ConverterManager
+from App.Core.Managers import DataManager, RecipeManager, ConverterManager
 from App.Widget.Sort_widjet import SortWidget, SortData
 from App.Registers import ProcessingRegisters, RegistersManager
+
+# Фреймворк: роутер и маршрутизация регистров (ядро в multiprocess_framework)
+try:
+    from multiprocess_framework.modules.Router_module import RouterManager
+    from multiprocess_framework.modules.Router_module.channels import QueueChannel
+    from multiprocess_framework.modules.Router_module.extensions import (
+        register_register_routing,
+        create_register_update_message,
+    )
+    _ROUTER_AVAILABLE = True
+except ImportError:
+    RouterManager = None
+    QueueChannel = None
+    register_register_routing = None
+    create_register_update_message = None
+    _ROUTER_AVAILABLE = False
 
 
 # SliderControl и CheckboxControl теперь импортируются из Components
@@ -325,6 +341,82 @@ class MainWindow(QMainWindow):
         self.backup_timer = QTimer()
         self.backup_timer.timeout.connect(self._auto_save_backup)
         self.backup_timer.start(5000)  # 5000 мс = 5 секунд
+
+        # Роутер для маршрутизации обновлений регистров (фреймворк multiprocess_framework)
+        self.router_manager = None
+        if _ROUTER_AVAILABLE and hasattr(self, 'queue_manager') and self.queue_manager:
+            self._setup_router_manager()
+    
+    def _setup_router_manager(self):
+        """Инициализация RouterManager и каналов для отправки обновлений регистров в процессы."""
+        if not _ROUTER_AVAILABLE or RouterManager is None or QueueChannel is None:
+            return
+        self.router_manager = RouterManager(router_id='app_router')
+        qm = self.queue_manager
+        # Регистрируем каналы управления (очередь + событие для пробуждения процесса)
+        channels_with_events = [
+            ('control_draw', qm.control_draw, getattr(qm, 'control_draw_event', None)),
+            ('control_camera', qm.control_camera, getattr(qm, 'control_camera_event', None)),
+            ('control_conveyor', qm.control_conveyor, getattr(qm, 'control_conveyor_event', None)),
+            ('control_neuroun', qm.control_neuroun, getattr(qm, 'control_neuroun_event', None)),
+            ('control_robot', qm.control_robot, getattr(qm, 'control_robot_event', None)),
+            ('control_processing', qm.control_processing, getattr(qm, 'control_processing_event', None)),
+            ('control_post_processing', qm.control_post_processing, None),
+            ('control_frame_process', qm.control_frame_process, getattr(qm, 'control_frame_process_event', None)),
+        ]
+        for ch_name, queue, ev in channels_with_events:
+            self.router_manager.register_channel(QueueChannel(ch_name, queue, ev))
+        if hasattr(qm, 'control_overlay'):
+            self.router_manager.register_channel(QueueChannel('control_overlay', qm.control_overlay, None))
+        if register_register_routing and self.registers_manager:
+            register_register_routing(self.router_manager, self.registers_manager)
+
+    def send_register_update(self, register_name: str, field_name: str, value):
+        """
+        Единая точка отправки обновления регистра в бэкенд через RouterManager.
+        Обновляет локальный словарь управления и отправляет snapshot в нужную очередь.
+        """
+        if not _ROUTER_AVAILABLE or not create_register_update_message or not self.router_manager:
+            return
+        # Соответствие имя_регистра -> (словарь controls, опционально доп. действия)
+        snapshots = {
+            'draw': (self.controls_draw, 'control_draw'),
+            'camera': (self.controls_camera, 'control_camera'),
+            'conveyor': (self.controls_conveyor, 'control_conveyor'),
+            'neuroun': (self.controls_neuroun, 'control_neuroun'),
+            'robot': (self.controls_robot, 'control_robot'),
+        }
+        if register_name not in snapshots:
+            return
+        controls, _ = snapshots[register_name]
+        controls[field_name] = value
+        msg = create_register_update_message(register_name, field_name, value, sender='app')
+        msg['snapshot'] = dict(controls)
+        self.router_manager.send(msg)
+        # Специальные случаи: camera и draw дублируют в другие очереди
+        if register_name == 'camera' and hasattr(self, 'queue_manager') and self.queue_manager:
+            src = {
+                'source': self.controls_camera.get('source', 'camera'),
+                'image_path': self.controls_camera.get('image_path', 'Data/last_frame.png'),
+                'enable_main_processing': self.controls_camera.get('enable_main_processing', True),
+            }
+            for q in (self.queue_manager.control_source, self.queue_manager.control_source_image):
+                self.queue_manager.remove_old_frame_if_full(q)
+                q.put(src)
+        if register_name == 'draw' and hasattr(self, 'queue_manager') and self.queue_manager and hasattr(self.queue_manager, 'control_overlay'):
+            overlay_controls = {
+                'draw': self.controls_draw.get('draw', True),
+                'enable_overlay': self.controls_draw.get('draw', True),
+                'show_fps': True,
+                'show_regions': True,
+                'show_region_names': True,
+            }
+            try:
+                self.queue_manager.control_overlay.put_nowait(overlay_controls)
+            except Exception:
+                pass
+        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+            self.sort_widget.schedule_refresh()
     
     def update_tabs_with_widgets(self):
         """Обновляет вкладки, добавляя виджеты"""
@@ -675,7 +767,7 @@ class MainWindow(QMainWindow):
 
         # Используем новый SliderControlEnhanced - максимально упрощённый вариант
         # Все параметры автоматически определяются из parent (MainWindow) и метаданных
-        from App.Registers.models.draw import DrawRegisters
+        from App.Registers.models import DrawRegisters
         
         slider_control = SliderControlEnhanced(
             field=DrawRegisters.dp,  # Передаём поле модели напрямую - автоматически определяет всё!

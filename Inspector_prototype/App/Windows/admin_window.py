@@ -33,7 +33,7 @@
 
 #         layout_v = QVBoxLayout()
 #         self.image_label = QLabel(self)
-#         pixmap = QPixmap("App\Image\icons8-lock-100.png")
+#         pixmap = QPixmap(get_resource_path("icons8-lock-100.png"))
 #         pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 #         self.image_label.setPixmap(pixmap)
 #         self.image_label.setAlignment(Qt.AlignCenter)
@@ -304,7 +304,7 @@
 #         """Интерфейс для ввода пароля"""
 #         # Иконка замка
 #         self.lock_icon = QLabel()
-#         pixmap = QPixmap("App\Image\icons8-lock-100.png")
+#         pixmap = QPixmap(get_resource_path("icons8-lock-100.png"))
 #         pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 #         self.lock_icon.setPixmap(pixmap)
 #         self.lock_icon.setAlignment(Qt.AlignCenter)
@@ -531,7 +531,7 @@
 
 #         # Общие элементы
 #         self.image_label = QLabel()
-#         pixmap = QPixmap("App\Image\icons8-lock-100.png")
+#         pixmap = QPixmap(get_resource_path("icons8-lock-100.png"))
 #         pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 #         self.image_label.setPixmap(pixmap)
 #         self.image_label.setAlignment(Qt.AlignCenter)
@@ -772,6 +772,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
 from App.Components.keyboard import VirtualKeyboard
+from App.resource_paths import get_resource_path
+
 
 class PasswordDialog(QWidget):
     def __init__(self, window_manager=None, parent=None):
@@ -795,7 +797,7 @@ class PasswordDialog(QWidget):
 
         # Общие элементы
         self.image_label = QLabel()
-        pixmap = QPixmap("App\Image\icons8-lock-100.png")
+        pixmap = QPixmap(get_resource_path("icons8-lock-100.png"))
         pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(pixmap)
         self.image_label.setAlignment(Qt.AlignCenter)
@@ -847,7 +849,7 @@ class PasswordDialog(QWidget):
         image_text_layout.addStretch()
 
         self.image_label2 = QLabel()
-        pixmap = QPixmap("App\Image\icons8-lock-100.png")
+        pixmap = QPixmap(get_resource_path("icons8-lock-100.png"))
         pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label2.setPixmap(pixmap)
         self.image_label2.setAlignment(Qt.AlignCenter)

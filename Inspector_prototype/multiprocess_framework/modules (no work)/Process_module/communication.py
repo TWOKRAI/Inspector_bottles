@@ -1,0 +1,251 @@
+"""
+Коммуникация процесса - работа с очередями и роутером.
+
+Отвечает за:
+- Регистрацию очередей в queue_registry
+- Регистрацию каналов в роутере
+- Отправку и получение сообщений
+- Broadcast сообщений
+"""
+
+from typing import Dict, Any, List
+from multiprocessing import Queue
+from ..Router_module.channel import QueueChannel
+
+
+class ProcessCommunication:
+    """
+    Коммуникация процесса.
+    
+    Инкапсулирует всю логику работы с очередями и роутером.
+    """
+    
+    def __init__(
+        self,
+        process_name: str,
+        queues: Dict[str, Queue],
+        router_manager,
+        shared_resources=None,
+        logger_callback=None
+    ):
+        """
+        Инициализация коммуникации процесса.
+        
+        Args:
+            process_name: Имя процесса
+            queues: Словарь очередей процесса
+            router_manager: RouterManager процесса
+            shared_resources: SharedResourcesManager (содержит queue_registry)
+            logger_callback: Функция для логирования
+        """
+        self.process_name = process_name
+        self.queues = queues
+        self.router_manager = router_manager
+        self.shared_resources = shared_resources
+        self.logger_callback = logger_callback or (lambda level, msg, ctx: print(f"[{level}] {ctx}: {msg}"))
+    
+    def register_process_queues(self):
+        """Регистрация очередей процесса в queue_registry"""
+        try:
+            # Используем queue_registry из router_manager если доступен
+            queue_registry = None
+            if self.router_manager and self.router_manager.queue_registry:
+                queue_registry = self.router_manager.queue_registry
+            
+            if queue_registry:
+                success = queue_registry.register_process_queues(
+                    self.process_name, 
+                    self.queues
+                )
+                if success:
+                    self.logger_callback("INFO", "Process queues registered in queue_registry", "communication")
+                else:
+                    self.logger_callback("WARNING", "Failed to register process queues", "communication")
+            else:
+                self.logger_callback("WARNING", "QueueRegistry not available for registration", "communication")
+        except Exception as e:
+            self.logger_callback("ERROR", f"Error registering process queues: {e}", "communication")
+    
+    def register_router_channels(self):
+        """Регистрация очередей в роутере через каналы"""
+        try:
+            for queue_name, queue in self.queues.items():
+                # Создаем QueueChannel для каждой очереди
+                channel = QueueChannel(f"{self.process_name}_{queue_name}", queue)
+                # Регистрируем канал в роутере
+                self.router_manager.register_channel(channel)
+                self.logger_callback("DEBUG", f"Registered queue channel '{queue_name}' in router", "communication")
+            
+            # Регистрируем канал system_events для событий (если есть очередь events)
+            if 'events' in self.queues or self.shared_resources:
+                # Создаем или получаем очередь для событий
+                events_queue = self.queues.get('events')
+                if not events_queue and self.shared_resources:
+                    # Пытаемся получить очередь событий из EventManager
+                    event_manager = self.shared_resources.event_manager
+                    if event_manager:
+                        events_queue = event_manager.get_event_queue()
+                
+                if events_queue:
+                    # Регистрируем канал system_events
+                    events_channel = QueueChannel("system_events", events_queue)
+                    self.router_manager.register_channel(events_channel)
+                    self.logger_callback("DEBUG", "Registered system_events channel in router", "communication")
+                    
+                    # Регистрируем обработчик для событий в диспетчере роутера
+                    self.router_manager.register_channel_handler(
+                        key="system_event",
+                        handler=lambda msg: {'channel': 'system_events', 'status': 'success'},
+                        expects_full_message=True,
+                        efficiency=10,
+                        tags=["event", "system"]
+                    )
+        
+        except Exception as e:
+            self.logger_callback("ERROR", f"Failed to register queues in router: {e}", "communication")
+    
+    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Отправить сообщение через роутер.
+        
+        Args:
+            message: Сообщение для отправки
+            
+        Returns:
+            Dict: Результат отправки
+        """
+        try:
+            # Если это объект с методом to_dict (наш BaseMessage)
+            if hasattr(message, 'to_dict'):
+                message_dict = message.to_dict()
+            elif isinstance(message, dict):
+                message_dict = message
+            else:
+                raise TypeError(f"Message must be BaseMessage or dict, got {type(message)}")
+            
+            return self.router_manager.send(message_dict)
+        except Exception as e:
+            self.logger_callback("ERROR", f"Failed to send message: {e}", "communication")
+            return {"status": "error", "reason": str(e)}
+    
+    def receive(self, timeout: float = 0.01) -> List[Dict[str, Any]]:
+        """
+        Получить входящие сообщения из всех каналов.
+        
+        Args:
+            timeout: Таймаут опроса
+            
+        Returns:
+            List[Dict]: Список полученных сообщений
+        """
+        try:
+            return self.router_manager.receive(timeout)
+        except Exception as e:
+            self.logger_callback("ERROR", f"Failed to receive messages: {e}", "communication")
+            return []
+    
+    def send_to_process(self, target: str, message: Dict[str, Any]) -> bool:
+        """
+        Отправить сообщение конкретному процессу.
+        
+        Args:
+            target: Имя целевого процесса
+            message: Сообщение
+            
+        Returns:
+            bool: True если отправка успешна
+        """
+        try:
+            if not self.router_manager:
+                return False
+            
+            # Используем queue_registry если доступен
+            if self.router_manager.queue_registry:
+                queue_type = message.get('queue_type', 'system')
+                result = self.router_manager.queue_registry.send_to_queue(
+                    target, 
+                    queue_type, 
+                    message
+                )
+                return result
+            
+            # Fallback: отправка через роутер
+            message['targets'] = [target]
+            message['sender'] = self.process_name
+            result = self.router_manager.send(message)
+            return result.get('status') == 'success'
+            
+        except Exception as e:
+            self.logger_callback("ERROR", f"Failed to send to process '{target}': {e}", "communication")
+            return False
+    
+    def broadcast(self, message: Dict[str, Any], exclude_self: bool = True) -> int:
+        """
+        Рассылка сообщения всем процессам.
+        
+        Args:
+            message: Сообщение
+            exclude_self: Исключить себя из рассылки
+            
+        Returns:
+            int: Количество успешных доставок
+        """
+        try:
+            if not self.router_manager:
+                return 0
+            
+            # Используем queue_registry если доступен
+            if self.router_manager.queue_registry:
+                exclude_process = self.process_name if exclude_self else None
+                queue_type = message.get('queue_type', 'system')
+                return self.router_manager.queue_registry.broadcast_message(
+                    message, 
+                    queue_type, 
+                    exclude_process
+                )
+            
+            # Fallback: отправка через роутер с broadcast флагом
+            message['targets'] = ['all']
+            result = self.router_manager.send(message)
+            return 1 if result.get('status') == 'success' else 0
+            
+        except Exception as e:
+            self.logger_callback("ERROR", f"Failed to broadcast message: {e}", "communication")
+            return 0
+    
+    def unregister_process(self):
+        """Отменить регистрацию процесса из queue_registry"""
+        try:
+            # Получаем queue_registry из router_manager если доступен
+            if self.router_manager and self.router_manager.queue_registry:
+                self.router_manager.queue_registry.unregister_process(self.process_name)
+        except Exception as e:
+            self.logger_callback("WARNING", f"Error unregistering process: {e}", "communication")
+    
+    def get_queue_stats(self) -> Dict[str, Any]:
+        """Получение статистики очередей"""
+        stats = {}
+        for name, queue in self.queues.items():
+            try:
+                # multiprocessing.Queue может не поддерживать qsize() на macOS
+                # или в некоторых случаях может вызывать ошибки
+                try:
+                    size = queue.qsize()
+                except (NotImplementedError, OSError, AttributeError):
+                    # Если qsize() не поддерживается, используем приблизительное значение
+                    size = 0
+                
+                maxsize = None
+                if hasattr(queue, 'maxsize'):
+                    maxsize = queue.maxsize
+                
+                stats[name] = {
+                    "size": size,
+                    "maxsize": maxsize
+                }
+            except Exception as e:
+                # Логируем ошибку, но не прерываем выполнение
+                error_msg = str(e) if str(e) else "Unknown error"
+                stats[name] = {"error": error_msg}
+        return stats
+

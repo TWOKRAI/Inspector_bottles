@@ -1,7 +1,9 @@
 import time
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import  Qt
+from PyQt5.QtCore import Qt
+
+from App.resource_paths import get_resource_path
 
 
 class LoadingWindow(QWidget):
@@ -27,7 +29,7 @@ class LoadingWindow(QWidget):
 
         # Создаем QLabel для отображения изображения
         self.image_label = QLabel(self)
-        pixmap = QPixmap('App/Image/innotech.png')  # Замените на путь к вашему изображению
+        pixmap = QPixmap(get_resource_path('innotech.png'))
         self.image_label.setPixmap(pixmap)
         self.image_label.setAlignment(Qt.AlignCenter)  # Центрируем изображение
 

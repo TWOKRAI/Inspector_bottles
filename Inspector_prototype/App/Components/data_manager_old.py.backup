@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """
 СТАРЫЙ DataManager - DEPRECATED.
-Используйте App.Managers.DataManager вместо этого.
+Используйте App.Core.Managers.DataManager вместо этого.
 
 Этот файл оставлен для обратной совместимости.
-Все новые разработки должны использовать App.Managers.DataManager.
+Все новые разработки должны использовать App.Core.Managers.DataManager.
 """
 import warnings
 
 # Импортируем новый DataManager
-from App.Managers import DataManager as NewDataManager
+from App.Core.Managers import DataManager as NewDataManager
 
 # Предупреждение при использовании старого импорта
 warnings.warn(
     "App.Components.data_manager.DataManager устарел. "
-    "Используйте App.Managers.DataManager вместо этого.",
+    "Используйте App.Core.Managers.DataManager вместо этого.",
     DeprecationWarning,
     stacklevel=2
 )

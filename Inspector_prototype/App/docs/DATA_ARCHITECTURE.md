@@ -50,8 +50,7 @@ App/Registers/
 │   ├── processing.py      # ProcessingRegisters
 │   ├── visual.py         # VisualRegisters
 │   └── ...
-├── manager.py             # RegistersManager
-└── converters.py          # RegistersConverter
+└── manager.py             # RegistersManager (конвертация через data_schema_module.registers_io)
 ```
 
 ### Пример модели регистра

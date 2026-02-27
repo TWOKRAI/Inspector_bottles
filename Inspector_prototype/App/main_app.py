@@ -4,7 +4,7 @@
 Создаёт и запускает приложение через WindowManager.
 """
 import sys
-from App.Managers.window_manager import WindowManager
+from App.Core.Managers.window_manager import WindowManager
 
 
 def create_app(queue_manager, stop_event):

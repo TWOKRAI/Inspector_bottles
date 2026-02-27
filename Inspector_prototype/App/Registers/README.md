@@ -1,86 +1,65 @@
 # Модуль регистров App Inspector
 
-Модуль для управления регистрами приложения с использованием Pydantic 2.
+**Использование библиотеки фреймворка** `data_schema_module`: конфигурация пакетов и тонкий фасад. Вся логика discovery и регистрации схем, тесты, документация и примеры — в **multiprocess_framework/refactored/modules/data_schema_module**.
 
 ## Структура
 
 ```
 Registers/
-├── __init__.py          # Экспорт всех компонентов
-├── manager.py           # RegistersManager - менеджер всех регистров
-├── converters.py        # RegistersConverter - конвертация в форматы
-└── models/              # Модели регистров
-    ├── __init__.py
-    ├── camera.py
-    ├── processing.py
-    ├── post_processing.py
-    ├── visual.py
-    ├── draw.py
-    ├── robot.py
-    ├── conveyor.py
-    ├── neuroun.py
-    ├── hikvision.py
-    └── frame_process.py
+├── __init__.py              # Экспорт моделей, схем, RegistersManager
+├── manager.py                # Тонкий фасад: пути к пакетам + вызовы фреймворка
+├── README.md
+├── tests/
+│   └── test_registers.py     # Один smoke-тест: RegistersManager как использование фреймворка
+└── models/
+    ├── __init__.py           # Реэкспорт из field_registers
+    ├── field_registers/      # Регистры *Registers и схема полей
+    │   ├── data_schema/
+    │   ├── draw.py, camera.py, processing.py, ...
+    │   └── __init__.py
+    └── field_data/           # Дата-модели *Data и единая схема полей
+        ├── data_schema/
+        ├── camera.py, region.py, chain.py
+        └── __init__.py
 ```
 
 ## Использование
 
-### Базовое использование
+### RegistersManager (пакеты по умолчанию для этого приложения)
 
 ```python
-from App.Registers import ProcessingRegisters, RegistersManager
+from App.Registers import RegistersManager
 
-# Использование отдельной модели
-registers = ProcessingRegisters()
-registers.crop_top = 100
-
-# Использование менеджера (все регистры в одном месте)
 manager = RegistersManager()
 manager.processing.crop_top = 100
-manager.camera.source = 'image'
+manager.camera.source = "image"
+meta = manager.get_field_metadata("draw", "dp")
+desc = manager.get_field_description("draw", "dp")
 ```
 
-### Конвертация
+### Другой процесс: свои пакеты
 
 ```python
-from App.Registers import RegistersManager, RegistersConverter
+from App.Registers.manager import RegistersManager
 
-manager = RegistersManager()
-
-# Экспорт в JSON
-json_str = RegistersConverter.to_json(manager)
-
-# Экспорт в YAML
-yaml_str = RegistersConverter.to_yaml(manager)
-
-# Экспорт в словарь
-data_dict = RegistersConverter.to_dict(manager)
-
-# Импорт из JSON
-manager_loaded = RegistersConverter.from_json(json_str)
-
-# Плоский словарь для рецептов
-flat_dict = RegistersConverter.to_flat_dict(manager)
+manager = RegistersManager(
+    registers_package="OtherProcess.Registers.models.registers",
+    data_package="OtherProcess.Registers.models.data",
+    translation_manager=my_translation_manager,
+)
 ```
 
-### Валидация
+### Конвертация и дата-модели
 
-```python
-# Валидация всех регистров
-is_valid = RegistersConverter.validate_contracts(manager)
+См. основной README фреймворка и примеры:
 
-# Или через менеджер
-is_valid = manager.validate_all()
-```
+- **Фреймворк:** `multiprocess_framework/refactored/modules/data_schema_module/README.md`
+- **Discovery и пакеты:** `data_schema_module/docs/DISCOVERY_AND_PACKAGES.md`
+- **Пример discovery по суффиксу:** `data_schema_module/docs/examples/03_registers_and_data_packages.py`
+- **Оценка в баллах (фреймворк + Registers):** `data_schema_module/docs/EVALUATION_FRAMEWORK_AND_REGISTERS.md`
 
-## Обратная совместимость
+## Тесты
 
-Все модели экспортируются из `App.Registers` для обратной совместимости:
-
-```python
-# Старый способ (всё ещё работает)
-from App.Registers import ProcessingRegisters
-
-# Новый способ
-from App.Registers import RegistersManager
-```
+- **Здесь:** один smoke-тест — что `RegistersManager()` создаётся и отдаёт метаданные (проверка использования фреймворка).  
+  Запуск: `pytest App/Registers/tests/ -v` (из корня `Inspector_prototype`).
+- **В фреймворке:** полные тесты discovery, `register_package_schemas`, преобразования имён — в `data_schema_module/tests/test_register_discovery.py`. Запуск из каталога `refactored/modules`: `pytest data_schema_module/tests/ -v`.

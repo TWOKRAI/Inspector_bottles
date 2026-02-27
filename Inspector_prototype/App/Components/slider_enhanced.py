@@ -10,7 +10,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from typing import Optional, Any
 
 from App.Components.keyboard_mini import VirtualKeyboardMini
-from App.Components.base_configurable_widget import ConfigurableWidget
+from App.Core.base_configurable_widget import ConfigurableWidget
 
 
 class SliderControlEnhanced(ConfigurableWidget):
@@ -300,14 +300,11 @@ class SliderControlEnhanced(ConfigurableWidget):
         self.block = False
     
     def update_external(self):
-        """Обновление внешних элементов и регистра"""
-        # Значение уже обновлено через set_field_value в update_input_value
-        # Но обновляем для совместимости
-        
+        """Обновление внешних элементов и отправка в бэкенд (через роутер или callback)."""
         if self.ui_elements is not None and self._field_name:
             if self._field_name in self.ui_elements:
                 self.ui_elements[self._field_name]['value'] = self.value
-        
+
         if self.controls is not None:
             if isinstance(self.controls, list):
                 for control in self.controls:
@@ -316,7 +313,18 @@ class SliderControlEnhanced(ConfigurableWidget):
             else:
                 if self._field_name:
                     self.controls[self._field_name] = self.value
-        
+
+        # Единый путь через RouterManager, если доступен send_register_update (фреймворк)
+        parent = self.parent()
+        if (
+            parent is not None
+            and getattr(parent, 'send_register_update', None) is not None
+            and self._register_name
+            and self._field_name
+        ):
+            parent.send_register_update(self._register_name, self._field_name, self.value)
+            return
+
         if self.func_update is not None:
             if isinstance(self.func_update, list):
                 for func in self.func_update:

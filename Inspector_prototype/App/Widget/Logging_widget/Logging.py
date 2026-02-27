@@ -6,7 +6,7 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QGroupBox, QMessageBox
 from PyQt5.QtCore import QTimer
 from queue import Empty
-from App.Managers import LoggingManager
+from App.Core.Managers import LoggingManager
 
 
 class LoggingWidget(QWidget):

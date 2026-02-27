@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
 """
 Модуль регистров для App Inspector.
-Используется Pydantic 2 для типизации и валидации данных.
 
-Структура:
-- models/ - отдельные файлы с моделями регистров
-- manager.py - RegistersManager для управления всеми регистрами
-- converters.py - RegistersConverter для конвертации в различные форматы
+Новая архитектура:
+- все, что связано с полями регистров и их метаданными — под `models.field_registers`
+  (data_schema: DEFAULT_FIELD_SCHEMA; RegisterMetadataHelper — миксин на классах *Registers);
+- все, что связано с дата-моделями (CameraData, RegionData, ChainStepData) и их
+  упрощёнными схемами — под `models.field_data` (также с подпапкой `data_schema`);
+- discovery/регистрация схем и работа с данными — через data_schema_module
+  (SchemaManager, register_package_registers, registers_io).
+
+Специальный толстый фасад RegistersManager больше не нужен: логика разнесена
+по слоям (SchemaManager, FieldSchema, helper-ы), а регистры можно регистрировать
+напрямую через data_schema_module.
 """
-# Экспорт всех моделей для обратной совместимости
+
 from .models import (
     CameraRegisters,
     ProcessingRegisters,
@@ -21,13 +27,19 @@ from .models import (
     HikvisionRegisters,
     FrameProcessRegisters,
 )
-
-# Экспорт моделей данных
-from .models.data import CameraData, RegionData, ChainStepData
-
-# Экспорт менеджера и конвертера
+from .models.field_data import (
+    CameraData,
+    RegionData,
+    ChainStepData,
+    DEFAULT_DATA_FIELD_SCHEMA,
+    field_from_schema as data_field_from_schema,
+)
+from .models.field_registers import (
+    FieldSchema,
+    DEFAULT_FIELD_SCHEMA as DEFAULT_REGISTER_FIELD_SCHEMA,
+    RegisterMetadataHelper,
+)
 from .manager import RegistersManager
-from .converters import RegistersConverter
 
 __all__ = [
     # Модели регистров управления
@@ -45,7 +57,12 @@ __all__ = [
     'CameraData',
     'RegionData',
     'ChainStepData',
-    # Менеджер и конвертер
+    # Общая инфраструктура полей регистров
+    'FieldSchema',
+    'DEFAULT_REGISTER_FIELD_SCHEMA',
+    'RegisterMetadataHelper',
+    # Схема полей дата-моделей (единая, как в field_registers)
+    'DEFAULT_DATA_FIELD_SCHEMA',
+    'data_field_from_schema',
     'RegistersManager',
-    'RegistersConverter',
 ]

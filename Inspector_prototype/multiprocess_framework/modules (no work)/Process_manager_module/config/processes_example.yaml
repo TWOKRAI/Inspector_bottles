@@ -1,0 +1,67 @@
+# config/processes.yaml
+# для примера
+_meta:
+  class_config_validation: src.Modules.Process_module.process_config.ProcessConfig
+  version: 1.0.0
+
+# Конфигурация процессов
+processes:
+  VisionProcess:
+    name: vision_processor
+    class: src.Modules.Vision_module.VisionProcess
+    class_config_validation: src.Modules.Process_module.process_config.ProcessConfig
+    priority: high
+    enabled: true
+    console:
+      enabled: true  # Включаем родную консоль процесса
+
+      title: "vision_processor" 
+    config: (может и путь быть на другой конфиг)
+      camera_id: 0
+      fps: 30
+      resolution: "1920x1080"
+    queues:
+      system:
+        maxsize: 100
+      data:
+        maxsize: 50
+      image:
+        maxsize: 10
+  
+  DataProcessor:
+    name: data_processor
+    class: src.Modules.Data_module.DataProcessor
+    class_config_validation: src.Modules.Data_module.DataConfig
+    priority: normal
+    enabled: true
+    config: (может и путь быть на другой конфиг)
+      buffer_size: 1000
+      batch_size: 64
+    queues:
+      system:
+        maxsize: 100
+      data:
+        maxsize: 200
+      results:
+        maxsize: 50
+  
+  ControlProcess:
+    name: controller
+    class: src.Modules.Control_module.ControlProcess
+    class_config_validation: src.Modules.Control_module.ControlConfig
+    priority: normal
+    enabled: true
+    config: (может и путь быть на другой конфиг)
+      update_interval: 0.1
+      timeout: 5.0
+    console:
+      enabled: true  # Включаем родную консоль процесса
+
+      title: "vision_processor" 
+    queues:
+      system:
+        maxsize: 100
+      commands:
+        maxsize: 20
+      feedback:
+        maxsize: 20

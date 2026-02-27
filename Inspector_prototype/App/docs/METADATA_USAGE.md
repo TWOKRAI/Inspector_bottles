@@ -390,7 +390,7 @@ info = recipe_manager.get_parameter_info('processing.crop_top')
 Все компоненты могут наследоваться от `ConfigurableWidget` для поддержки настройки через свойства:
 
 ```python
-from App.Components.base_configurable_widget import ConfigurableWidget
+from App.Core.base_configurable_widget import ConfigurableWidget
 
 class MyWidget(ConfigurableWidget):
     def _load_metadata(self):
@@ -465,7 +465,7 @@ json_schema_extra={
 ### TranslationManager
 
 ```python
-from App.Managers.translation_manager import TranslationManager
+from App.Core.Managers.translation_manager import TranslationManager
 
 # Создание менеджера переводов
 translation_manager = TranslationManager(

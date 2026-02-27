@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt, QSize, pyqtSignal
 
 
 from App.Windows.admin_window import PasswordDialog
+from App.resource_paths import get_resource_path
 
 
 class ButtonHeader:
@@ -172,7 +173,7 @@ class HeaderWidget(QWidget):
         layout_buttons.addSpacing(50)
 
         self.admin_button = ButtonHeader()
-        self.admin_button.image = 'Inspector_prototype\App\Image\icons8-test-account-96.png'
+        self.admin_button.image = get_resource_path('icons8-test-account-96.png')
         self.admin_button.func = self.admin
         layout_buttons.addWidget(self.admin_button.update())
         layout_buttons.addSpacing(30)
@@ -209,7 +210,7 @@ class HeaderWidget(QWidget):
 
         top_image_label = QLabel()
 
-        image = QImage('Inspector_prototype/App/Image/innotech.png')
+        image = QImage(get_resource_path('innotech.png'))
         if not image.isNull():
             scaled_image = image.scaled(image.width() // 2, image.height() // 2, Qt.KeepAspectRatio)
             top_pixmap = QPixmap.fromImage(scaled_image)
