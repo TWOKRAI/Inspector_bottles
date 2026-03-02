@@ -1,19 +1,9 @@
-"""
-Схема полей для дата-моделей (как в field_registers/draw.py).
+# Схема полей дата-моделей — из BaseFieldMeta (один источник истины).
+from multiprocess_framework.refactored.modules.data_schema_module import FieldSchema
 
-Использование в моделях (camera.py, region.py, chain.py):
-  from App.Registers.models.field_data.data_schema import (
-      DEFAULT_DATA_FIELD_SCHEMA,
-      field_from_schema,
-  )
-  name: str = field_from_schema('', description='Имя камеры', info='Отображаемое имя камеры')
-"""
-from App.Registers.models.field_data.data_schema.field_schema import (
-    DEFAULT_DATA_FIELD_SCHEMA,
-    field_from_schema,
-)
+from App.Registers.models.field_core import BaseFieldMeta
 
-__all__ = [
-    'DEFAULT_DATA_FIELD_SCHEMA',
-    'field_from_schema',
-]
+DEFAULT_DATA_FIELD_SCHEMA = BaseFieldMeta.schema_defaults()
+field_from_schema = FieldSchema(DEFAULT_DATA_FIELD_SCHEMA)
+
+__all__ = ["DEFAULT_DATA_FIELD_SCHEMA", "field_from_schema"]

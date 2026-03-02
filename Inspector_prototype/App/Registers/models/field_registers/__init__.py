@@ -10,8 +10,7 @@
 """
 from multiprocess_framework.refactored.modules.data_schema_module import FieldSchema
 
-from App.Registers.models.field_registers.data_schema.field_schema import DEFAULT_FIELD_SCHEMA
-from App.Registers.models.field_registers.data_schema.metadata_helper import RegisterMetadataHelper
+from App.Registers.models.field_registers.data_schema import DEFAULT_FIELD_SCHEMA, RegisterMetadataHelper
 
 from App.Registers.models.field_registers.draw import DrawRegisters
 from App.Registers.models.field_registers.camera import CameraRegisters

@@ -15,7 +15,7 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
     discover_registers_from_package,
     register_package_schemas,
 )
-from App.Registers.models.field_registers.data_schema.metadata_helper import RegistersContainerMetadataMixin
+from App.Registers.models.field_registers.data_schema import RegistersContainerMetadataMixin
 
 
 # Пакеты по умолчанию для этого приложения; в другом процессе можно передать свои

@@ -6,13 +6,14 @@
 from pydantic import BaseModel
 
 from multiprocess_framework.refactored.modules.data_schema_module import FieldSchema
-from App.Registers.models.field_registers.data_schema.field_schema import DEFAULT_FIELD_SCHEMA
-from App.Registers.models.field_registers.data_schema.metadata_helper import RegisterMetadataHelper
+from App.Registers.models.field_registers.data_schema import DEFAULT_FIELD_SCHEMA, RegisterMetadataHelper
 
 field_from_schema = FieldSchema(DEFAULT_FIELD_SCHEMA)
 
+from App.Registers.models.field_core import BaseFieldMeta, NumericFieldMeta
 
-class DrawRegisters(RegisterMetadataHelper, BaseModel):
+
+class DrawRegisters(BaseFieldMeta, NumericFieldMeta):
     """Регистры отрисовки"""
 
     dp: float = field_from_schema(
