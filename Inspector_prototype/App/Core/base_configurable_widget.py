@@ -422,9 +422,12 @@ class ConfigurableWidget(QWidget):
             return None
         
         register = self._registers_manager.get_register(self._register_name)
-        if register:
-            return getattr(register, self._field_name, None)
-        return None
+        if not register:
+            return None
+        field_obj = getattr(register, self._field_name, None)
+        if field_obj is not None and hasattr(field_obj, "value"):
+            return field_obj.value
+        return field_obj
     
     def set_field_value(self, value: Any) -> tuple[bool, Optional[str]]:
         """
@@ -453,10 +456,13 @@ class ConfigurableWidget(QWidget):
         ):
             return False, "Недостаточно прав доступа"
         
-        # Установка значения
+        # Установка значения (поддержка полей-объектов с .value и примитивов)
         register = self._registers_manager.get_register(self._register_name)
-        if register:
+        if not register:
+            return False, "Регистр не найден"
+        field_obj = getattr(register, self._field_name, None)
+        if field_obj is not None and hasattr(field_obj, "value"):
+            field_obj.value = value
+        else:
             setattr(register, self._field_name, value)
-            return True, None
-        
-        return False, "Регистр не найден"
+        return True, None

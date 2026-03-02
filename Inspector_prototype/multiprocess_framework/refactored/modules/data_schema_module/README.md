@@ -1,224 +1,240 @@
-# Data Schema Module
+# data_schema_module
 
 Универсальная система работы с данными на основе Pydantic v2.
 
-Этот модуль инкапсулирует всю логику для работы с дата-классами и схемами данных.
-Использует гибридный подход: dict в ProcessData, Pydantic модели в коде.
+---
 
-## 🚀 Быстрый старт
-
-**Минимальный путь** (схемы + создание экземпляров, без ProcessData):
-
-```python
-from multiprocess_framework.refactored.modules.data_schema_module import (
-    SchemaManager, register_schema, ModelFactory
-)
-
-@register_schema("MyConfig")
-class MyConfig(BaseModel):
-    host: str = "localhost"
-    port: int = 8080
-
-obj = ModelFactory.create("MyConfig", {"host": "0.0.0.0"})
-```
-
-**С хранением в ProcessData:** добавьте `StorageManager(shared_resources)` и `storage.register_manager(...)` / `get_manager_model(...)`. Остальное (VersionManager, Tools, registers_io) — по необходимости.
-
-## 📦 Основные возможности
-
-- ✅ Создание схем из Pydantic моделей
-- ✅ **FieldSchema** — создание полей по схеме-словарю (схему передаёт приложение, фреймворк только мержит и возвращает `Field`)
-- ✅ **Автообнаружение по суффиксу** — `discover_registers_from_package(package, suffix)` и `register_package_schemas(package, suffix)` — универсально для *Registers и *Data (пакет → SchemaManager). См. [docs/DISCOVERY_AND_PACKAGES.md](docs/DISCOVERY_AND_PACKAGES.md) и [docs/examples/03_registers_and_data_packages.py](docs/examples/03_registers_and_data_packages.py).
-- ✅ **registers_io** — универсальный ввод/вывод объектов с `model_dump_all`/`model_validate_all` (dict, JSON, YAML, flat_dict)
-- ✅ Валидация данных через Pydantic v2
-- ✅ Конвертация между форматами (JSON, YAML, dict, Pydantic model)
-- ✅ Работа с дефолтными значениями
-- ✅ Автоматическая синхронизация с ProcessData
-- ✅ Версионирование схем
-- ✅ ДНК компонентов (опционально)
-
-## 📚 Структура модуля
+## Архитектура
 
 ```
 data_schema_module/
-├── __init__.py              # Экспорт основных классов
-├── README.md                # Документация
-├── core/                    # Ядро модуля
-│   ├── interfaces.py        # Интерфейсы
-│   ├── exceptions.py        # Исключения
-│   └── metrics.py           # Метрики
-├── models/                  # Модели данных
-│   ├── base.py             # Базовые модели
-│   ├── dna.py              # ДНК компонентов
-│   └── types.py            # Типы
-├── storage/                 # Хранилище
-│   ├── storage_manager.py   # Менеджер хранения
-│   └── process_data_container.py
-├── registry/                # Реестр схем и автообнаружение
-│   ├── schema_registry.py   # Реестр Pydantic схем
-│   └── register_discovery.py  # discover_registers_from_package, register_package_registers
-├── factory/                 # Фабрики
-│   ├── model_factory.py
-│   └── dna_factory.py
-├── utils/                   # Утилиты
-│   ├── converters.py        # Конвертеры (DataConverter)
-│   ├── validators.py        # Валидаторы
-│   ├── helpers.py           # Вспомогательные функции
-│   ├── reference.py         # Ссылки
-│   ├── migration.py         # Миграция
-│   ├── field_schema.py      # FieldSchema — поля по схеме-словарю (схему передаёт приложение)
-│   └── registers_io.py      # Универсальный ввод/вывод регистров (dict, json, yaml, flat_dict)
-├── versioning/              # Версионирование
-│   └── version_manager.py
-├── api/                     # API
-│   ├── manager_adapter.py
-│   └── simple_api.py
-├── tools/                   # Инструменты
-│   ├── formatters.py
-│   ├── schema_visualizer.py
-│   └── schema_documentation_generator.py
-├── tests/                   # Тесты
-└── docs/                    # Документация
+├── fields/                  # Ядро: FieldMeta + FieldRouting + RegisterBase
+│   ├── field_meta.py        # FieldMeta — Annotated-дескриптор метаданных поля
+│   ├── field_routing.py     # FieldRouting — типизированная маршрутизация
+│   ├── field_types.py       # Готовые type aliases (Percent, HsvHue, Pixels, ...)
+│   ├── register_mixin.py    # RegisterMixin — 5 секций методов (с кэшированием)
+│   └── register_base.py     # RegisterBase = RegisterMixin + BaseModel
+│
+├── utils/
+│   └── registers_container.py  # RegistersContainer — контейнер + IO + diff
+│
+├── registry/                # Реестр схем и авто-дискавери
+│   ├── schema_registry.py   # SchemaManager Singleton + @register_schema
+│   └── register_discovery.py  # discover_registers_from_package
+│
+├── storage/
+│   ├── storage_manager.py   # StorageManager — хранение в ProcessData
+│   └── file_storage.py      # FileStorage — JSON (реализует IRegisterStorage)
+│
+├── versioning/
+│   └── version_manager.py   # VersionManager — история + откат конфигов
+│
+├── models/                  # Базовые модели компонентов
+│   ├── base.py              # BaseComponentModel, BaseManagerModel
+│   └── dna.py               # ComponentDNA — полное описание компонента
+│
+├── core/
+│   ├── interfaces.py        # ABC + IRegisterStorage + IAsyncRegisterStorage (TODO)
+│   └── exceptions.py        # Иерархия исключений
+│
+└── docs/examples/
+    ├── 00_quickstart.py     # ← Начни здесь: весь стек за 5 минут
+    ├── 01_basic_usage.py    # SchemaManager + ModelFactory
+    ├── 04_field_meta_registers.py  # FieldMeta, RegisterBase, FileStorage
 ```
 
-## 💡 Использование
+---
 
-### FieldSchema — поля по схеме-словарю
+## Три типа моделей
 
-Схему (словарь метаданных) передаёт приложение; фреймворк только мержит её с переопределениями и возвращает `Field(...)`.
+| Тип | Базовый класс | Назначение |
+|-----|--------------|------------|
+| Регистры / конфиги | `RegisterBase` | Параметры с метаданными: UI, валидация, маршрутизация |
+| Контейнеры данных | `BaseModel` | Вложенные структуры без UI-метаданных |
+| Компоненты / ДНК | `BaseComponentModel` | Живые компоненты системы (для воссоздания) |
 
-```python
-from multiprocess_framework.refactored.modules.data_schema_module import FieldSchema
+---
 
-# В приложении задаёте словарь (например DEFAULT_FIELD_SCHEMA)
-# Экземпляр вызываем как поле: field_from_schema(default_value, description='', **overrides)
-field_from_schema = FieldSchema(DEFAULT_FIELD_SCHEMA)
-dp: float = field_from_schema(1.4, description='Разрешение', min=0.1, max=20.0)
-```
-
-### Регистрация регистров пакета в SchemaManager
+## Быстрый старт
 
 ```python
-from multiprocess_framework.refactored.modules.data_schema_module import register_package_registers
-
-# Discovery классов *Registers в пакете + регистрация в SchemaManager
-register_package_registers("App.Registers.models")
-```
-
-### Универсальный ввод/вывод регистров (registers_io)
-
-```python
+from typing import Annotated
 from multiprocess_framework.refactored.modules.data_schema_module import (
-    registers_to_json, registers_from_json,
-    registers_to_dict, registers_from_dict,
+    FieldMeta, FieldRouting, RegisterBase, RegistersContainer, FileStorage,
+    # Готовые type aliases:
+    Percent, HsvHue, HsvChannel, Pixels, Seconds, NormalizedFloat,
 )
 
-# Объект должен иметь model_dump_all() и model_validate_all(data); фабрика — callable без аргументов
-json_str = registers_to_json(registers)
-registers = registers_from_json(json_str, factory=RegistersManager)
+# FieldRouting: один объект — без повтора routing={"channel": "..."} в каждом поле
+DRAW = FieldRouting(channel="control_draw")
+
+class DrawRegisters(RegisterBase):
+    dp: Annotated[float, FieldMeta(
+        "Разрешение", min=0.1, max=20.0, routing=DRAW,
+    )] = 1.4
+
+class ProcessingRegisters(RegisterBase):
+    hl: HsvHue = 0          # Annotated[int, FieldMeta("Hue", min=0, max=179)]
+    hm: HsvHue = 179
+    crop_top: Pixels = 0    # Annotated[int, FieldMeta("Пиксели", min=0, max=10000)]
+    threshold: NormalizedFloat = 0.5
+
+# Работа с полями
+r = DrawRegisters()
+r.dp                              # → 1.4  (plain float)
+r.model_dump()                    # → {"dp": 1.4, "enabled": True}
+r.update_field("dp", 2.0)        # → (True, None)
+r.update_field("dp", 999.0)      # → (False, "Значение 999.0 больше максимального 20.0")
+
+# Метаданные
+DrawRegisters.get_field_meta("dp").max   # → 20.0
+r.get_routing_channels()                  # → {"control_draw"}
+r.get_fields_for_channel("control_draw") # → ["dp"]
 ```
 
-### Создание схемы
+---
+
+## FieldMeta: все параметры
 
 ```python
-from pydantic import BaseModel
-from multiprocess_framework.refactored.modules.data_schema_module import (
-    SchemaManager,
-    register_schema
+FieldMeta(
+    description="Краткое описание (UI-лейбл)",
+    info="Подробное описание (UI-подсказка)",
+    unit="px",                               # единица измерения
+    min=0.0, max=100.0,                      # диапазон для числовых полей
+    transfer_k=1.0,                          # шаг слайдера = 1/transfer_k
+    round_k=2,                               # знаков после запятой
+    routing=FieldRouting(channel="ctrl"),    # типизированная маршрутизация
+    # routing={"channel": "ctrl"},           # или plain dict (обратная совместимость)
+    access_level=0,
+    readonly=False,
+    hidden=False,
+    description_i18n={"ru": "...", "en": "...", "de": "..."},
+    info_i18n={"ru": "...", "en": "..."},
+    examples=[1.0, 2.0, 5.0],
 )
-
-class MyComponentConfig(BaseModel):
-    name: str
-    enabled: bool = True
-
-# Регистрация схемы
-@register_schema("MyComponent")
-class MyComponentSchema(MyComponentConfig):
-    pass
 ```
 
-### Работа с данными
+---
+
+## FieldRouting: DRY маршрутизация
 
 ```python
-from multiprocess_framework.refactored.modules.data_schema_module import StorageManager
+# Без FieldRouting — повтор routing=dict в каждом поле:
+dp: Annotated[float, FieldMeta("...", routing={"channel": "control_draw"})] = 1.4
+minDist: Annotated[float, FieldMeta("...", routing={"channel": "control_draw"})] = 50.0
 
-storage = StorageManager(shared_resources=shared_resources)
+# С FieldRouting — один объект для всего регистра:
+DRAW = FieldRouting(channel="control_draw", priority=1)
 
-# Сохранение данных компонента
-storage.save_manager_data(
-    process_name="MyProcess",
-    manager_type="MyComponent",
-    manager_name="instance1",
-    data={"name": "test", "enabled": True}
-)
-
-# Получение данных
-data = storage.get_manager_data(
-    process_name="MyProcess",
-    manager_type="MyComponent",
-    manager_name="instance1"
-)
+dp: Annotated[float, FieldMeta("...", routing=DRAW)] = 1.4
+minDist: Annotated[float, FieldMeta("...", routing=DRAW)] = 50.0
 ```
 
-## 🔗 Интеграция
+---
 
-Модуль интегрируется с:
-- `shared_resources_module` - через SharedResourcesManager
-- `process_module` - через ProcessData
-- Другими модулями системы через StorageManager
+## Готовые type aliases
 
-## 📖 Документация
+```python
+# Вместо повторного Annotated[int, FieldMeta("Hue", min=0, max=179)] — просто:
+hl: HsvHue = 0
 
-Подробная документация находится в папке `docs/`:
-- [docs/README.md](docs/README.md) — обзор документации
-- [docs/STRUCTURE.md](docs/STRUCTURE.md) — структура модуля
-- [docs/DIAGRAMS.md](docs/DIAGRAMS.md) — **диаграммы классов и связей** (что с чем связано, для чего)
-- [docs/EVALUATION.md](docs/EVALUATION.md) — оценка модуля (баллы, сильные стороны, рекомендации)
-- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — руководство пользователя
-- [docs/TOOLS_GUIDE.md](docs/TOOLS_GUIDE.md) — визуализация и генерация документации схем
-- [docs/EXTENDING_GUIDE.md](docs/EXTENDING_GUIDE.md) — расширение модуля
-- [docs/DNA_USAGE_EXAMPLES.md](docs/DNA_USAGE_EXAMPLES.md) — примеры ДНК компонентов
+# Полный список:
+Percent          # float, unit="%", min=0..100
+NormalizedFloat  # float, min=0..1
+Scale            # float, min=0.01..100
+Milliseconds     # float, unit="мс"
+Seconds          # float, unit="с"
+Pixels           # int, unit="px", min=0..10000
+ImageScale       # float, min=0.1..4.0 (для UI)
+HsvHue           # int, min=0..179
+HsvChannel       # int, min=0..255
+NetworkPort      # int, min=1..65535
+FpsLimit         # int, unit="кадр/с", min=0..480
+```
 
-## 🧪 Тестирование
+---
 
-В папке `tests/` — unit-тесты модуля, в том числе для **FieldSchema**, **registers_io**, **register_discovery**.
+## RegisterMixin: 5 секций методов (с кэшированием O(1))
 
-**Запуск** (из каталога `refactored/modules`):
+```
+1. Метаданные  — get_field_meta*, get_all_fields_meta*, get_field_metadata,
+                 get_all_metadata, get_field_description, get_field_descriptions
+2. Валидация   — validate_field, get_safe_value
+3. Доступ      — can_modify_field, get_visible_fields, get_editable_fields,
+                 get_fields_for_access_level
+4. Маршрутизация — get_routing_channels, get_fields_for_channel
+5. Значения    — update_field, values_dict
+
+* — результат кэшируется per class / per (class, field) — O(1) после первого вызова
+```
+
+---
+
+## RegistersContainer: единое состояние + дандеры + diff
+
+```python
+container = RegistersContainer({"draw": DrawRegisters, "processing": ProcessingRegisters})
+
+# Атрибутный и индексный доступ (единый источник правды — _registers)
+container.draw          # DrawRegisters instance
+container["draw"]       # то же самое
+
+# Коллекционные операции
+"draw" in container     # True
+len(container)          # 2
+for name, reg in container: ...
+
+# diff: узнать что изменилось (для эффективной синхронизации с Router)
+snap = container.snapshot()
+container.draw.update_field("dp", 5.0)
+container.diff(snap)    # → {"draw": {"dp": 5.0}}
+
+# IO
+container.to_json()     # → JSON
+container.from_json(s)  # загрузить in-place
+container.to_yaml()     # → YAML (требует pyyaml)
+```
+
+---
+
+## Персистентность через IRegisterStorage
+
+```python
+# Готово: FileStorage (JSON)
+storage = FileStorage("data/registers")
+container.save(storage, "main_process")
+container.load(storage, "main_process")
+
+# Будущие реализации (TODO: async_save/async_load для Redis, PostgreSQL):
+class SQLiteStorage:
+    def load(self, name: str) -> dict: ...
+    def save(self, name: str, data: dict) -> None: ...
+    def exists(self, name: str) -> bool: ...
+    def delete(self, name: str) -> bool: ...
+```
+
+---
+
+## Тестирование
 
 ```bash
+# Тесты App/Registers (29 тестов)
+cd Inspector_prototype
+pytest App/Registers/tests/ -v
+
+# Тесты фреймворка
 cd multiprocess_framework/refactored/modules
 pytest data_schema_module/tests/ -v
+
+# Только новые тесты FieldMeta/RegisterMixin
+pytest data_schema_module/tests/test_field_meta.py -v
 ```
 
-Подробнее: [tests/README.md](tests/README.md).
+---
 
-## 📝 Примечания
+## Примеры
 
-- Модуль вынесен из `Shared_resources_module` как отдельный модуль для переиспользования
-- Поддерживается обратная совместимость со старым расположением
-- Все зависимости опциональны и импортируются динамически
-
-## 💬 Сложность модуля — советы
-
-Модуль **не перегружен**: слои разделены (core → registry/storage → factory/api → utils/tools), циклов нет. Ощущение сложности чаще из-за **многообразия входов**, а не из-за запутанной архитектуры.
-
-**Что иметь в голове:**
-- **Ядро для большинства сценариев:** `SchemaManager` + `register_schema` (или `register_package_registers`) + `ModelFactory`. Остальное подключается по мере надобности.
-- **Одна модель** (dict/json/yaml) → `DataConverter`. **Набор регистров** (model_dump_all/model_validate_all) → `registers_io`.
-- **VersionManager, SchemaVisualizer, ДНК** — опционально; без них модуль остаётся полноценным.
-- Везде один термин — **SchemaManager** (менеджер схем).
-
-Если хочется упростить жизнь новым разработчикам: в README/доках явно выделить блок «минимальный путь» (как выше) и раздел «Когда что использовать» (см. [docs/DIAGRAMS.md](docs/DIAGRAMS.md), шпаргалка в конце).
-
-## 🤖 Для AI и новых разработчиков
-
-**Быстрая справка:** [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) — принципы работы, взаимосвязи компонентов, типичный workflow. Позволяет понять модуль без изучения всех файлов.
-
-**Визуализация:** [docs/DIAGRAMS.md](docs/DIAGRAMS.md) — диаграммы классов и потоков данных.
-
-**Детальная структура:** [docs/STRUCTURE.md](docs/STRUCTURE.md) — описание всех пакетов и файлов.
-
-## 📄 Лицензия
-
-См. основной файл лицензии проекта.
-
+- `docs/examples/00_quickstart.py` — **начни здесь**: весь стек за 5 минут
+- `docs/examples/04_field_meta_registers.py` — детальный walkthrough FieldMeta
+- `docs/examples/01_basic_usage.py` — SchemaManager, ModelFactory

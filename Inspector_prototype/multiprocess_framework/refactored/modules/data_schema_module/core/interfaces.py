@@ -1,12 +1,28 @@
+# -*- coding: utf-8 -*-
 """
-Упрощенные интерфейсы для модуля data_schema.
+Интерфейсы (ABCs и Protocol) для модуля data_schema.
 
-Убраны дублирующиеся методы, оставлены только основные.
+Ключевые интерфейсы:
+    ISchemaManager       — реестр Pydantic-схем
+    IStorageManager      — хранение компонентов в ProcessData
+    IVersionManager      — версионирование конфигов
+    IDataConverter       — конвертация одной модели
+    IDataValidator       — валидация данных по модели
+    IRegisterStorage     — протокол хранилища для RegistersContainer
+                           (реализации: FileStorage, SQLiteStorage, RedisStorage ...)
+    IVisualizationFormatter / IDocumentationFormatter — стратегии вывода схем
 """
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Type, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type, runtime_checkable
+
 from pydantic import BaseModel
+
+try:
+    from typing import Protocol
+except ImportError:
+    from typing_extensions import Protocol  # type: ignore[assignment]
 
 from ..models.base import BaseManagerModel
 
@@ -374,7 +390,7 @@ class ISchemaVisualizer(ABC):
 
 class ISchemaDocumentationGenerator(ABC):
     """Интерфейс для генератора документации."""
-    
+
     @abstractmethod
     def generate_documentation(
         self,
@@ -385,15 +401,101 @@ class ISchemaDocumentationGenerator(ABC):
     ) -> str:
         """Сгенерировать документацию для схемы или всех схем."""
         pass
-    
+
     @abstractmethod
     def register_formatter(self, formatter: IDocumentationFormatter):
         """Зарегистрировать новый форматер документации."""
         pass
-    
+
     @abstractmethod
     def list_formats(self) -> List[str]:
         """Получить список доступных форматов."""
         pass
 
 
+# =============================================================================
+# Протокол хранилища регистров (для подключения баз данных)
+# =============================================================================
+
+@runtime_checkable
+class IRegisterStorage(Protocol):
+    """
+    Протокол хранилища для RegistersContainer.
+
+    Позволяет менять бэкенд хранения без изменения бизнес-логики.
+
+    Готовые реализации:
+        FileStorage       — JSON-файлы (storage/file_storage.py)
+
+    Будущие реализации (реализуйте этот же протокол):
+        SQLiteStorage     — локальная БД (offline-first)
+        PostgreSQLStorage — серверная СУБД
+        RedisStorage      — in-memory с персистентностью
+        S3Storage         — облачное хранилище
+
+    Пример реализации:
+
+        class SQLiteStorage:
+            def load(self, container_name: str) -> dict: ...
+            def save(self, container_name: str, data: dict) -> None: ...
+            def exists(self, container_name: str) -> bool: ...
+            def delete(self, container_name: str) -> bool: ...
+
+        container.save(SQLiteStorage("app.db"), "main_process")
+        container.load(SQLiteStorage("app.db"), "main_process")
+    """
+
+    def load(self, container_name: str) -> Dict[str, Any]:
+        """Загрузить данные регистров по имени контейнера."""
+        ...
+
+    def save(self, container_name: str, data: Dict[str, Any]) -> None:
+        """Сохранить данные регистров."""
+        ...
+
+    def exists(self, container_name: str) -> bool:
+        """Проверить наличие сохранённых данных."""
+        ...
+
+    def delete(self, container_name: str) -> bool:
+        """Удалить данные контейнера. Возвращает True если данные существовали."""
+        ...
+
+
+# TODO: RegistersContainer.async_save / async_load — реализовать когда
+#       потребуется интеграция с Redis/PostgreSQL.
+#       Пример реализации хранилища:
+#
+#       class RedisStorage:
+#           async def load(self, name: str) -> dict: ...
+#           async def save(self, name: str, data: dict) -> None: ...
+#           async def exists(self, name: str) -> bool: ...
+#           async def delete(self, name: str) -> bool: ...
+
+@runtime_checkable
+class IAsyncRegisterStorage(Protocol):
+    """
+    Async-версия IRegisterStorage для неблокирующих бэкендов.
+
+    Для использования с Redis, PostgreSQL, S3 и другими async-хранилищами.
+
+    TODO: Интегрировать в RegistersContainer через async_save / async_load:
+        await container.async_save(storage, "main_process")
+        await container.async_load(storage, "main_process")
+    """
+
+    async def load(self, container_name: str) -> Dict[str, Any]:
+        """Асинхронно загрузить данные регистров."""
+        ...
+
+    async def save(self, container_name: str, data: Dict[str, Any]) -> None:
+        """Асинхронно сохранить данные регистров."""
+        ...
+
+    async def exists(self, container_name: str) -> bool:
+        """Асинхронно проверить наличие данных."""
+        ...
+
+    async def delete(self, container_name: str) -> bool:
+        """Асинхронно удалить данные. Возвращает True если данные существовали."""
+        ...

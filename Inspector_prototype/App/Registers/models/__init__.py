@@ -1,38 +1,39 @@
 # -*- coding: utf-8 -*-
 """
-Модели регистров для App Inspector.
+Модели регистров и данных для App Inspector.
 
-Все модели *Registers и инфраструктура схем находятся в подпакете field_registers.
-Здесь — реэкспорт для обратной совместимости и для discovery по пакету App.Registers.models.
+Два типа моделей:
+    registers/ — RegisterBase-классы с FieldMeta (регистры + метаданные)
+    data/      — BaseModel-классы (контейнеры структурированных данных)
 """
-from App.Registers.models.field_registers import (
-    FieldSchema,
-    DEFAULT_FIELD_SCHEMA,
-    RegisterMetadataHelper,
+from .registers import (
     DrawRegisters,
     CameraRegisters,
     ProcessingRegisters,
     PostProcessingRegisters,
     VisualRegisters,
-    RobotRegisters,
     ConveyorRegisters,
-    NeurounRegisters,
-    HikvisionRegisters,
     FrameProcessRegisters,
+    HikvisionRegisters,
+    NeurounRegisters,
+    RobotRegisters,
 )
+from .data import CameraData, RegionData, ChainStepData
 
 __all__ = [
-    'FieldSchema',
-    'DEFAULT_FIELD_SCHEMA',
-    'RegisterMetadataHelper',
-    'CameraRegisters',
-    'ProcessingRegisters',
-    'PostProcessingRegisters',
-    'VisualRegisters',
-    'DrawRegisters',
-    'RobotRegisters',
-    'ConveyorRegisters',
-    'NeurounRegisters',
-    'HikvisionRegisters',
-    'FrameProcessRegisters',
+    # Регистры
+    "DrawRegisters",
+    "CameraRegisters",
+    "ProcessingRegisters",
+    "PostProcessingRegisters",
+    "VisualRegisters",
+    "ConveyorRegisters",
+    "FrameProcessRegisters",
+    "HikvisionRegisters",
+    "NeurounRegisters",
+    "RobotRegisters",
+    # Данные
+    "CameraData",
+    "RegionData",
+    "ChainStepData",
 ]

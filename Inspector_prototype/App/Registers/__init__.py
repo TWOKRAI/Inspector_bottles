@@ -2,67 +2,61 @@
 """
 Модуль регистров для App Inspector.
 
-Новая архитектура:
-- все, что связано с полями регистров и их метаданными — под `models.field_registers`
-  (data_schema: DEFAULT_FIELD_SCHEMA; RegisterMetadataHelper — миксин на классах *Registers);
-- все, что связано с дата-моделями (CameraData, RegionData, ChainStepData) и их
-  упрощёнными схемами — под `models.field_data` (также с подпапкой `data_schema`);
-- discovery/регистрация схем и работа с данными — через data_schema_module
-  (SchemaManager, register_package_registers, registers_io).
+Архитектура:
+    models/registers/ — RegisterBase-классы с FieldMeta (параметры с метаданными)
+    models/data/      — BaseModel-классы (структурированные данные без UI-метаданных)
+    manager.py        — RegistersManager (фасад над RegistersContainer)
 
-Специальный толстый фасад RegistersManager больше не нужен: логика разнесена
-по слоям (SchemaManager, FieldSchema, helper-ы), а регистры можно регистрировать
-напрямую через data_schema_module.
+Быстрый старт:
+
+    from App.Registers import RegistersManager
+
+    rm = RegistersManager()
+    rm.draw.dp                              # → 1.4
+    rm.get_field_metadata("draw", "dp")     # → {"description": ..., "min": 0.1, ...}
+    rm.draw.update_field("dp", 2.0)         # → (True, None)
+    rm.to_json()                            # → JSON со всеми регистрами
+
+Работа с дата-моделями:
+
+    from App.Registers import CameraData, RegionData
+    cam = CameraData(name="cam_01")
 """
-
 from .models import (
+    DrawRegisters,
     CameraRegisters,
     ProcessingRegisters,
     PostProcessingRegisters,
     VisualRegisters,
-    DrawRegisters,
-    RobotRegisters,
     ConveyorRegisters,
-    NeurounRegisters,
-    HikvisionRegisters,
     FrameProcessRegisters,
-)
-from .models.field_data import (
+    HikvisionRegisters,
+    NeurounRegisters,
+    RobotRegisters,
     CameraData,
     RegionData,
     ChainStepData,
-    DEFAULT_DATA_FIELD_SCHEMA,
-    field_from_schema as data_field_from_schema,
 )
-from .models.field_registers import (
-    FieldSchema,
-    DEFAULT_FIELD_SCHEMA as DEFAULT_REGISTER_FIELD_SCHEMA,
-    RegisterMetadataHelper,
-)
-from .manager import RegistersManager
+from .manager import RegistersManager, DEFAULT_REGISTERS_PACKAGE, DEFAULT_DATA_PACKAGE
 
 __all__ = [
-    # Модели регистров управления
-    'CameraRegisters',
-    'ProcessingRegisters',
-    'PostProcessingRegisters',
-    'VisualRegisters',
-    'DrawRegisters',
-    'RobotRegisters',
-    'ConveyorRegisters',
-    'NeurounRegisters',
-    'HikvisionRegisters',
-    'FrameProcessRegisters',
-    # Модели данных
-    'CameraData',
-    'RegionData',
-    'ChainStepData',
-    # Общая инфраструктура полей регистров
-    'FieldSchema',
-    'DEFAULT_REGISTER_FIELD_SCHEMA',
-    'RegisterMetadataHelper',
-    # Схема полей дата-моделей (единая, как в field_registers)
-    'DEFAULT_DATA_FIELD_SCHEMA',
-    'data_field_from_schema',
-    'RegistersManager',
+    # Регистры
+    "DrawRegisters",
+    "CameraRegisters",
+    "ProcessingRegisters",
+    "PostProcessingRegisters",
+    "VisualRegisters",
+    "ConveyorRegisters",
+    "FrameProcessRegisters",
+    "HikvisionRegisters",
+    "NeurounRegisters",
+    "RobotRegisters",
+    # Данные
+    "CameraData",
+    "RegionData",
+    "ChainStepData",
+    # Менеджер
+    "RegistersManager",
+    "DEFAULT_REGISTERS_PACKAGE",
+    "DEFAULT_DATA_PACKAGE",
 ]

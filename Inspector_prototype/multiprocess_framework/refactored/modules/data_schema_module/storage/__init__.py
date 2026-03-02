@@ -1,10 +1,15 @@
 """
-Менеджер хранения данных компонентов.
+Хранение данных: StorageManager (ProcessData), FileStorage (файловая система).
 
-Объединяет функциональность DataManager и ProcessDataContainer.
+StorageManager — хранение данных менеджеров/компонентов в ProcessData
+                 (для многопроцессорного взаимодействия).
+
+FileStorage    — персистентное хранение RegistersContainer в JSON-файлах.
+                 Реализует IRegisterStorage. Для других бэкендов (SQLite, Redis)
+                 реализуйте тот же интерфейс: load / save / exists / delete.
 """
-
 from .storage_manager import StorageManager
+from .file_storage import FileStorage
 
 # Опциональный импорт ProcessDataContainer
 try:
@@ -15,6 +20,7 @@ except ImportError:
 
 __all__ = [
     'StorageManager',
+    'FileStorage',
 ]
 
 if _has_container:

@@ -280,6 +280,9 @@ class MainWindow(QMainWindow):
         # ConverterManager создаётся автоматически в DataManager
         self.converter = ConverterManager()
         self.registers_manager = RegistersManager()  # Единый источник истины для регистров и описаний
+        draw_reg = self.registers_manager.get_register("draw")
+        if draw_reg and hasattr(draw_reg, "values_dict"):
+            self.controls_draw = draw_reg.values_dict()
         self.recipe_manager = RecipeManager(converter=self.converter, registers_manager=self.registers_manager)
         self.data_manager = DataManager(recipe_manager=self.recipe_manager, converter=self.converter)
         self.data_manager.data_changed.connect(self._on_data_changed)
@@ -765,17 +768,51 @@ class MainWindow(QMainWindow):
             parent=self
         )
 
-        # Используем новый SliderControlEnhanced - максимально упрощённый вариант
-        # Все параметры автоматически определяются из parent (MainWindow) и метаданных
+
         from App.Registers.models import DrawRegisters
         
         slider_control = SliderControlEnhanced(
-            field=DrawRegisters.dp,  # Передаём поле модели напрямую - автоматически определяет всё!
-            parent=self  # Автоматически определяет ui_elements, controls, callback, registers_manager, access_level
+            field=DrawRegisters.dp,  
+            parent=self 
         )
         
         layout.addWidget(slider_control)
 
+        slider_control = SliderControlEnhanced(
+            field=DrawRegisters.minDist,  
+            parent=self 
+        )
+
+        layout.addWidget(slider_control)
+
+        slider_control = SliderControlEnhanced(
+            field=DrawRegisters.param1,  
+            parent=self 
+        )
+
+        layout.addWidget(slider_control)
+
+        slider_control = SliderControlEnhanced(
+            field=DrawRegisters.param2,  
+            parent=self 
+        )
+
+        layout.addWidget(slider_control)
+
+        slider_control = SliderControlEnhanced(
+            field=DrawRegisters.minRadius,  
+            parent=self 
+        )
+
+        layout.addWidget(slider_control)
+
+        slider_control = SliderControlEnhanced(
+            field=DrawRegisters.maxRadius,  
+            parent=self 
+        )
+        
+        layout.addWidget(slider_control)
+        
         slider_control = SliderControl("minDist", 0, 100, 51, min_access=1, ui_elements=self.ui_elements, controls=self.controls, callback = self.update_controls, parent=self)
         layout.addWidget(slider_control)
 
@@ -1548,22 +1585,31 @@ class MainWindow(QMainWindow):
     
     def update_controls_draw(self):
         self.queue_manager.remove_old_frame_if_full(self.queue_manager.control_draw)
-        self.queue_manager.control_draw.put(self.controls_draw)
+        draw_reg = self.registers_manager.get_register("draw") if self.registers_manager else None
+        if draw_reg and hasattr(draw_reg, "values_dict"):
+            # Синхронизация чекбокса и прочих ключей из controls_draw в регистр
+            if "draw" in self.controls_draw:
+                draw_reg.draw = self.controls_draw["draw"]
+            data = draw_reg.values_dict()
+            self.controls_draw = data
+        else:
+            data = self.controls_draw
+        self.queue_manager.control_draw.put(data)
         self.queue_manager.control_draw_event.set()
         # Отправляем в overlay: Draw чекбокс управляет включением/выключением рисунков (FPS, регионы)
-        if hasattr(self.queue_manager, 'control_overlay'):
+        if hasattr(self.queue_manager, "control_overlay"):
             overlay_controls = {
-                'draw': self.controls_draw.get('draw', True),
-                'enable_overlay': self.controls_draw.get('draw', True),
-                'show_fps': True,
-                'show_regions': True,
-                'show_region_names': True,
+                "draw": data.get("draw", True),
+                "enable_overlay": data.get("draw", True),
+                "show_fps": True,
+                "show_regions": True,
+                "show_region_names": True,
             }
             try:
                 self.queue_manager.control_overlay.put_nowait(overlay_controls)
             except Exception:
                 pass
-        if hasattr(self, 'sort_widget') and self.sort_widget and hasattr(self.sort_widget, 'schedule_refresh'):
+        if hasattr(self, "sort_widget") and self.sort_widget and hasattr(self.sort_widget, "schedule_refresh"):
             self.sort_widget.schedule_refresh()
 
 

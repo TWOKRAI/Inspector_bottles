@@ -19,8 +19,6 @@ from .reference import (
     convert_reference_to_data,
     convert_all_references,
 )
-from .migration import from_dataclass, from_dict, from_json, from_yaml
-from .field_schema import FieldSchema
 from .registers_io import (
     registers_to_dict,
     registers_from_dict,
@@ -53,13 +51,6 @@ __all__ = [
     'convert_reference_to_data',
     'convert_all_references',
     
-    # Миграция
-    'from_dataclass',
-    'from_dict',
-    'from_json',
-    'from_yaml',
-    # Схема полей регистров
-    'FieldSchema',
     # Ввод/вывод регистров (универсальный)
     'registers_to_dict',
     'registers_from_dict',
