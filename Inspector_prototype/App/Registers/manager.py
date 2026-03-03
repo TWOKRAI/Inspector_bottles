@@ -16,11 +16,32 @@ RegistersManager — тонкий фасад регистров для App Inspe
 
     При использовании scan_path регистры также автоматически регистрируются
     в ProcessRegistersRegistry под именем auto_register_as (по умолчанию "app_process").
+
+Observer API (реактивность без Qt-зависимости):
+    Позволяет нескольким виджетам или другим потребителям подписаться на изменение
+    конкретного поля регистра.  Framework-слой остаётся свободен от Qt.
+
+    # Подписка на конкретное поле (UI-компонент):
+        rm.subscribe("draw", "dp", my_widget._update_value_silent)
+
+    # Подписка на все поля сразу (например, router-хук в main_window):
+        rm.subscribe_all(self._on_any_register_changed)
+
+    # Отмена подписки:
+        rm.unsubscribe("draw", "dp", my_widget._update_value_silent)
+        rm.unsubscribe_all(self._on_any_register_changed)
+
+    # Установить значение + уведомить всех подписчиков:
+        rm.set_field_value("draw", "dp", 1.8)
+
+    # Только уведомить (значение уже обновлено снаружи):
+        rm.notify_field_changed("draw", "dp", 1.8)
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
     RegistersContainer,
@@ -48,6 +69,7 @@ class RegistersManager(RegistersContainer):
         - поддерживает режим scan_path (без ручного __init__.py)
         - хранит translation_manager для локализации метаданных
         - при scan_path регистрирует себя в ProcessRegistersRegistry
+        - реактивный observer-паттерн без Qt-зависимостей
 
     Параметры:
         registers_package:  Пакет с *Registers-классами (режим пакета).
@@ -100,6 +122,12 @@ class RegistersManager(RegistersContainer):
 
         self._translation_manager = translation_manager
 
+        # Observer storage — нет Qt-зависимости, любой callable подходит.
+        # Поле-специфичные: (register_name, field_name) -> [callback(value)]
+        self._field_observers: dict[Tuple[str, str], List[Callable[[Any], None]]] = defaultdict(list)
+        # Глобальные: [callback(register_name, field_name, value)]
+        self._global_observers: List[Callable[[str, str, Any], None]] = []
+
         # Регистрируем контейнер в глобальном реестре процессов
         if scan_path is not None and auto_register_as:
             meta = process_meta or RegistersMeta(
@@ -112,6 +140,149 @@ class RegistersManager(RegistersContainer):
                 registry.update_process(auto_register_as, container=self, meta=meta)
             else:
                 registry.register_process(auto_register_as, self, meta=meta)
+
+    # =========================================================================
+    # Observer API — подписка / отмена / уведомление
+    # =========================================================================
+
+    def subscribe(
+        self,
+        register_name: str,
+        field_name: str,
+        callback: Callable[[Any], None],
+    ) -> None:
+        """Подписать callback(value) на изменение конкретного поля.
+
+        Можно подписать несколько callbacks на одно поле — все получат уведомление.
+        Повторная подписка одного и того же объекта игнорируется.
+        """
+        key = (register_name, field_name)
+        if callback not in self._field_observers[key]:
+            self._field_observers[key].append(callback)
+
+    def unsubscribe(
+        self,
+        register_name: str,
+        field_name: str,
+        callback: Callable[[Any], None],
+    ) -> None:
+        """Отписать callback от изменений конкретного поля."""
+        key = (register_name, field_name)
+        try:
+            self._field_observers[key].remove(callback)
+        except ValueError:
+            pass
+
+    def subscribe_all(
+        self,
+        callback: Callable[[str, str, Any], None],
+    ) -> None:
+        """Подписать callback(register_name, field_name, value) на любое изменение.
+
+        Используется, например, router-хуком в main_window для отправки
+        любого изменения регистра в бэкенд через RouterManager.
+        """
+        if callback not in self._global_observers:
+            self._global_observers.append(callback)
+
+    def unsubscribe_all(
+        self,
+        callback: Callable[[str, str, Any], None],
+    ) -> None:
+        """Отписать глобальный observer."""
+        try:
+            self._global_observers.remove(callback)
+        except ValueError:
+            pass
+
+    def set_field_value(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        """Установить значение поля в регистре и уведомить всех подписчиков.
+
+        Единственная точка записи значений в регистры.
+        Pydantic validate_assignment=True автоматически проверит ограничения.
+
+        Returns:
+            (True, None) при успехе, (False, error_message) при ошибке.
+        """
+        register = self.get_register(register_name)
+        if register is None:
+            return False, f"Регистр '{register_name}' не найден"
+        if not hasattr(register, field_name):
+            return False, f"Поле '{field_name}' не найдено в регистре '{register_name}'"
+        try:
+            setattr(register, field_name, value)
+        except Exception as exc:
+            return False, str(exc)
+        self._notify_observers(register_name, field_name, value)
+        return True, None
+
+    def notify_field_changed(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> None:
+        """Уведомить ТОЛЬКО field-специфичных подписчиков об изменении.
+
+        Используется слайдером когда:
+          - значение уже установлено в модели через setattr (или будет
+            отправлено на бэкенд напрямую через send_register_update),
+          - нужно лишь синхронизировать другие UI-компоненты на том же поле.
+
+        НЕ вызывает глобальные observers (subscribe_all) — чтобы не дублировать
+        отправку в роутер, если слайдер уже делает это самостоятельно.
+
+        Для полного fan-out (model + UI + backend + DB) используй set_field_value().
+        """
+        self._notify_field_observers(register_name, field_name, value)
+
+    def validate_field_value(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+        access_level: int = 0,
+    ) -> Tuple[bool, Optional[str]]:
+        """Алиас для validate_field — обратная совместимость с ConfigurableWidget."""
+        return self.validate_field(register_name, field_name, value, access_level)
+
+    def _notify_field_observers(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> None:
+        """Уведомить только field-специфичных подписчиков (без глобальных)."""
+        for cb in list(self._field_observers.get((register_name, field_name), [])):
+            try:
+                cb(value)
+            except Exception:
+                pass
+
+    def _notify_observers(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> None:
+        """Уведомить все подписанные callbacks: field-специфичные + глобальные.
+
+        Итерируемся по копии списка — безопасно если callback отпишется в процессе.
+        Исключения в callbacks подавляются, чтобы один сломанный подписчик
+        не прерывал уведомление остальных.
+        """
+        self._notify_field_observers(register_name, field_name, value)
+
+        for cb in list(self._global_observers):
+            try:
+                cb(register_name, field_name, value)
+            except Exception:
+                pass
 
     # =========================================================================
     # Переопределяем get_field_metadata / get_field_description

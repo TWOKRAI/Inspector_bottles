@@ -1,9 +1,24 @@
 # -*- coding: utf-8 -*-
 """
 Менеджер окон приложения App Inspector.
-Управляет всеми окнами приложения и их жизненным циклом.
+
+Ответственность:
+  - Жизненный цикл всех окон (создание, показ, скрытие, закрытие)
+  - Владение RouterManager и QueueChannel — единственное место где живут IPC-каналы
+  - Предоставление общего API send_register_update() для всех окон и виджетов
+  - Управление уровнем доступа и полноэкранным режимом
+
+Иерархия:
+  WindowManager
+    ├── RouterManager (router_module) — IPC с бэкендом
+    │     └── QueueChannel × N       — обёртки над multiprocessing.Queue
+    ├── MainWindow   ─┐
+    ├── LoadingWindow  ├── окна-контейнеры (только UI)
+    └── NeurounWindow ─┘
 """
 import sys
+from typing import Any, Optional
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QCursor
@@ -20,10 +35,47 @@ from App.Core.Threads.thread_loading import Loading
 from App.Core.Threads.thread_image_update import UpdateImage
 from App.Core.Threads.thread_bot_message import BotThread
 
+# Фреймворк: роутер + сообщения (мягкий fallback если модули не установлены)
+try:
+    from multiprocess_framework.refactored.modules.router_module import (
+        RouterManager,
+        QueueChannel,
+    )
+    from multiprocess_framework.refactored.modules.message_module import (
+        Message,
+        MessageType,
+    )
+    _ROUTER_AVAILABLE = True
+except ImportError:
+    RouterManager = None        # type: ignore[assignment,misc]
+    QueueChannel = None         # type: ignore[assignment,misc]
+    Message = None              # type: ignore[assignment,misc]
+    MessageType = None          # type: ignore[assignment,misc]
+    _ROUTER_AVAILABLE = False
+
 
 class WindowManager:
-    """Менеджер окон приложения"""
-    
+    """
+    Менеджер окон приложения.
+
+    Единственный владелец RouterManager — все окна и виджеты
+    вызывают self._wm.send_register_update(...) вместо прямой
+    работы с очередями.
+    """
+
+    # IPC-каналы: атрибут queue_manager → имя канала в роутере
+    _QUEUE_CHANNEL_MAP = [
+        "control_draw",
+        "control_camera",
+        "control_conveyor",
+        "control_neuroun",
+        "control_robot",
+        "control_processing",
+        "control_post_processing",
+        "control_frame_process",
+        "control_overlay",
+    ]
+
     def __init__(self, queue_manager, stop_event):
         self.queue_manager = queue_manager
         self.stop_event = stop_event
@@ -38,11 +90,13 @@ class WindowManager:
         self.header = None
 
         self.fullscreen = False
-
         self.access_level = 2
-        
-        # Создаем менеджер конфигурации приложения
+
         self.app_config = AppConfigManager()
+
+        # Инициализируем роутер до создания окон: окна могут запросить send_register_update
+        self._router_manager: Optional[Any] = None
+        self._setup_router()
 
         self.create_all_windows()
         self.create_thread()
@@ -50,13 +104,104 @@ class WindowManager:
         self.set_fullscreen(self.fullscreen)
 
         self.admin_function(self.access_level)
-        
-        # Отправляем сигнал готовности процесса App
+
+        # Сигнал готовности процесса App
         try:
             self.queue_manager.process_ready_queue.put('proc_app')
             print("App process ready signal sent")
         except Exception as e:
             print(f"Error sending ready signal: {e}")
+
+    # ------------------------------------------------------------------
+    # Роутер и IPC
+    # ------------------------------------------------------------------
+
+    def _setup_router(self) -> None:
+        """Создать RouterManager и зарегистрировать все IPC-каналы.
+
+        Вызывается один раз в __init__ до создания окон.
+        Все окна и виджеты используют send_register_update() —
+        никто не обращается к queue_manager напрямую для регистров.
+        """
+        if not _ROUTER_AVAILABLE:
+            print("[WindowManager] router_module недоступен — IPC отключён")
+            return
+        if self.queue_manager is None:
+            return
+
+        self._router_manager = RouterManager("app_ui_router")
+        self._router_manager.initialize()
+
+        registered = []
+        for attr in self._QUEUE_CHANNEL_MAP:
+            queue = getattr(self.queue_manager, attr, None)
+            if queue is not None:
+                self._router_manager.register_channel(QueueChannel(attr, queue))
+                registered.append(attr)
+
+        print(f"[WindowManager] Роутер инициализирован, каналы: {registered}")
+
+    def setup_register_observer(self, registers_manager) -> None:
+        """Подписать глобальный observer: любое программное изменение регистра
+        (загрузка рецепта, сброс) автоматически уходит в бэкенд через роутер.
+
+        Вызывается из MainWindow после создания RegistersManager.
+        """
+        if not hasattr(registers_manager, "subscribe_all"):
+            return
+
+        def _on_register_changed(register_name: str, field_name: str, value: Any) -> None:
+            self.send_register_update(register_name, field_name, value, registers_manager)
+
+        registers_manager.subscribe_all(_on_register_changed)
+
+    def send_register_update(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+        registers_manager=None,
+    ) -> None:
+        """Единая точка отправки изменения регистра в бэкенд через RouterManager.
+
+        Вызывается:
+          - SliderControlEnhanced / CheckboxControlEnhanced при изменении значения
+          - SortController после применения рецепта (через observer RegistersManager)
+          - Любым виджетом через self._wm.send_register_update(...)
+
+        Читает полный snapshot регистра чтобы бэкенд получил актуальное состояние.
+        """
+        if not self._router_manager:
+            return
+        if not _ROUTER_AVAILABLE:
+            return
+
+        snapshot: dict = {}
+        if registers_manager is not None:
+            reg_obj = registers_manager.get_register(register_name)
+            snapshot = reg_obj.model_dump() if reg_obj else {field_name: value}
+        else:
+            snapshot = {field_name: value}
+
+        channel = f"control_{register_name}"
+        msg = (
+            Message.create(MessageType.COMMAND, sender="app_ui")
+            .set_channel(channel)
+            .set_command(
+                "set_register",
+                args={
+                    "register": register_name,
+                    "field": field_name,
+                    "value": value,
+                    "snapshot": snapshot,
+                },
+            )
+        )
+        self._router_manager.send(msg)
+
+    # ------------------------------------------------------------------
+    # Создание окон и потоков
+    # ------------------------------------------------------------------
 
     def create_all_windows(self):
         """Создание всех окон приложения"""

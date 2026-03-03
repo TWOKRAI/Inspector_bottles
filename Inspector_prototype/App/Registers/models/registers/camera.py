@@ -31,6 +31,15 @@ class CameraRegisters(RegisterBase):
         ),
     ] = "Data/last_frame.png"
 
+    enabled: Annotated[
+        bool,
+        FieldMeta(
+            "Камера включена",
+            info="Включить захват кадров с камеры.",
+            routing={"channel": "control_camera"},
+        ),
+    ] = True
+
     enable_main_processing: Annotated[
         bool,
         FieldMeta(
@@ -39,3 +48,12 @@ class CameraRegisters(RegisterBase):
             routing={"channel": "control_camera"},
         ),
     ] = True
+
+    record_video: Annotated[
+        bool,
+        FieldMeta(
+            "Запись видео",
+            info="Включить запись видеопотока на диск.",
+            routing={"channel": "control_camera"},
+        ),
+    ] = False

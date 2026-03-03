@@ -5,7 +5,7 @@
 """
 from typing import Optional, List, Dict
 from PyQt5.QtCore import QObject, pyqtSignal
-from App.Registers.models.field_data import RegionData, ChainStepData
+from App.Registers import RegionData, ChainStepData
 from .camera_manager import CameraManager
 from .converter_manager import ConverterManager
 

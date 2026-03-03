@@ -20,8 +20,32 @@ DRAW_ROUTING = FieldRouting(channel="control_draw")
 class DrawRegisters(RegisterBase):
     """Регистры параметров алгоритма детектора кругов (HoughCircles)."""
 
-    # Флаг включения рисования кругов на изображении
-    draw: bool = True
+    draw: Annotated[
+        bool,
+        FieldMeta(
+            "Отображение оверлея",
+            info="Включить отображение графических оверлеев на изображении (круги, регионы, FPS).",
+            routing=DRAW_ROUTING,
+        ),
+    ] = True
+
+    circles: Annotated[
+        bool,
+        FieldMeta(
+            "Показывать круги",
+            info="Отображать детектированные круги на изображении.",
+            routing=DRAW_ROUTING,
+        ),
+    ] = True
+
+    rectangles: Annotated[
+        bool,
+        FieldMeta(
+            "Показывать прямоугольники",
+            info="Отображать детектированные прямоугольные области на изображении.",
+            routing=DRAW_ROUTING,
+        ),
+    ] = True
 
     dp: Annotated[
         float,
@@ -38,7 +62,7 @@ class DrawRegisters(RegisterBase):
             min=0.1,
             transfer_k=0.1,
             round_k=1,
-            min_access=1,
+            access_level=1,
             routing=DRAW_ROUTING,
         ),
     ] = 1.4
@@ -51,9 +75,10 @@ class DrawRegisters(RegisterBase):
             unit="px",
             min=0.0,
             max=1000.0,
+            access_level=1,
             routing=DRAW_ROUTING,
         ),
-    ] = 50.0
+    ] = 51.0
 
     param1: Annotated[
         float,
@@ -62,9 +87,10 @@ class DrawRegisters(RegisterBase):
             info="Верхний порог детектора Canny для обнаружения краёв.",
             min=0.0,
             max=200.0,
+            access_level=1,
             routing=DRAW_ROUTING,
         ),
-    ] = 100.0
+    ] = 47.0
 
     param2: Annotated[
         float,
@@ -74,9 +100,10 @@ class DrawRegisters(RegisterBase):
                  "Меньшее значение — больше ложных срабатываний.",
             min=0.0,
             max=200.0,
+            access_level=1,
             routing=DRAW_ROUTING,
         ),
-    ] = 30.0
+    ] = 31.0
 
     minRadius: Annotated[
         float,
@@ -86,9 +113,10 @@ class DrawRegisters(RegisterBase):
             unit="px",
             min=0.0,
             max=1000.0,
+            access_level=1,
             routing=DRAW_ROUTING,
         ),
-    ] = 0.0
+    ] = 22.0
 
     maxRadius: Annotated[
         float,
@@ -98,6 +126,7 @@ class DrawRegisters(RegisterBase):
             unit="px",
             min=0.0,
             max=1000.0,
+            access_level=1,
             routing=DRAW_ROUTING,
         ),
-    ] = 0.0
+    ] = 41.0

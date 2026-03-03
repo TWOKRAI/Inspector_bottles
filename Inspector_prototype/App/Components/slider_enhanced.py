@@ -76,7 +76,21 @@ class SliderControlEnhanced(ConfigurableWidget):
                 controls = parent.controls
             if callback is None and hasattr(parent, 'update_controls'):
                 callback = parent.update_controls
-        
+
+        # Инициализируем атрибуты ДО super().__init__() — базовый класс может
+        # вызвать _load_metadata() через setter field_name → _apply_configuration()
+        self.ui_elements = ui_elements
+        self.controls = controls
+        self.func_update = callback
+        self.custom_label = label
+        self.transfer_k = transfer_k
+        self.round_k = round_k
+        self.label = None
+        self.value_input = None
+        self.slider = None
+        self.hbox = None
+        self.block = False
+
         # Вызываем конструктор базового класса
         super().__init__(
             register_name=register_name,
@@ -86,22 +100,7 @@ class SliderControlEnhanced(ConfigurableWidget):
             access_level=access_level,
             parent=parent
         )
-        
-        # Дополнительные параметры
-        self.ui_elements = ui_elements
-        self.controls = controls
-        self.func_update = callback
-        self.custom_label = label
-        self.transfer_k = transfer_k
-        self.round_k = round_k
-        
-        # UI элементы (будут созданы в _load_metadata)
-        self.label = None
-        self.value_input = None
-        self.slider = None
-        self.hbox = None
-        self.block = False
-        
+
         # Если конфигурация уже задана, загружаем метаданные
         if self._register_name and self._field_name and self._registers_manager:
             self._load_metadata()
@@ -117,7 +116,7 @@ class SliderControlEnhanced(ConfigurableWidget):
         """Обновление значения из слайдера"""
         self.value = self.transfer_value(value)
         self.value_input.setText(str(self.value))
-        
+
         if not self.block:
             self.block = True
             QTimer.singleShot(100, self.onTimeout)
@@ -299,8 +298,57 @@ class SliderControlEnhanced(ConfigurableWidget):
         self.update_external()
         self.block = False
     
+    def _update_value_silent(self, value: Any) -> None:
+        """Обновить слайдер и поле ввода без эмитирования сигналов изменения.
+
+        Вызывается RegistersManager когда другой компонент изменил то же поле.
+        blockSignals предотвращает рекурсивный вызов update_external.
+        """
+        if self.slider is None or self.value_input is None or self.transfer_k is None:
+            return
+
+        # Конвертируем реальное значение из модели в позицию слайдера
+        slider_pos = (
+            int(round(value / self.transfer_k))
+            if self.transfer_k and self.transfer_k != 1.0
+            else int(round(value))
+        )
+        slider_pos = max(self.slider.minimum(), min(slider_pos, self.slider.maximum()))
+
+        self.slider.blockSignals(True)
+        self.value_input.blockSignals(True)
+        try:
+            self.slider.setValue(slider_pos)
+            self.value = self.transfer_value(slider_pos)
+            self.value_input.setText(str(self.value))
+        finally:
+            self.slider.blockSignals(False)
+            self.value_input.blockSignals(False)
+
     def update_external(self):
-        """Обновление внешних элементов и отправка в бэкенд (через роутер или callback)."""
+        """Синхронизировать модель, уведомить observers и отправить в бэкенд."""
+        # 1. Синхронизируем значение в Pydantic-модели (единственный источник правды).
+        if self._registers_manager and self._register_name and self._field_name:
+            register = self._registers_manager.get_register(self._register_name)
+            if register is not None and hasattr(register, self._field_name):
+                try:
+                    setattr(register, self._field_name, self.value)
+                except Exception:
+                    pass
+
+        # 2. Уведомляем другие UI-компоненты привязанные к тому же полю
+        #    (только field-специфичные observers, без глобальных — бэкенд
+        #    вызывается ниже напрямую через send_register_update).
+        if (
+            self._registers_manager
+            and self._register_name
+            and self._field_name
+            and hasattr(self._registers_manager, "notify_field_changed")
+        ):
+            self._registers_manager.notify_field_changed(
+                self._register_name, self._field_name, self.value
+            )
+
         if self.ui_elements is not None and self._field_name:
             if self._field_name in self.ui_elements:
                 self.ui_elements[self._field_name]['value'] = self.value

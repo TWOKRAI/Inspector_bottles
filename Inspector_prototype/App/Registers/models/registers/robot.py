@@ -44,3 +44,21 @@ class RobotRegisters(RegisterBase):
             routing={"channel": "control_robot"},
         ),
     ] = True
+
+    servo_on: Annotated[
+        bool,
+        FieldMeta(
+            "Серво включено",
+            info="Включить серводвигатели манипулятора.",
+            routing={"channel": "control_robot"},
+        ),
+    ] = False
+
+    server: Annotated[
+        bool,
+        FieldMeta(
+            "Сервер включен",
+            info="Включить сервер для внешних подключений.",
+            routing={"channel": "control_robot"},
+        ),
+    ] = True

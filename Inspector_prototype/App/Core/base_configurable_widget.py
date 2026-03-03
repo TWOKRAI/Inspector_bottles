@@ -316,6 +316,7 @@ class ConfigurableWidget(QWidget):
     def registers_manager(self, value: Any):
         """Установить RegistersManager и применить конфигурацию"""
         if value != self._registers_manager:
+            self._unbind_from_manager()
             self._registers_manager = value
             self._apply_configuration()
     
@@ -375,8 +376,11 @@ class ConfigurableWidget(QWidget):
         if not self._is_initialized:
             self._load_metadata()
             self._is_initialized = True
+            self._bind_to_manager()
         else:
+            self._unbind_from_manager()
             self._reload_metadata()
+            self._bind_to_manager()
     
     def _load_metadata(self):
         """
@@ -398,6 +402,54 @@ class ConfigurableWidget(QWidget):
         Должен быть переопределён в дочерних классах.
         """
         pass
+
+    # =========================================================================
+    # Observer binding — синхронизация между несколькими компонентами
+    # =========================================================================
+
+    def _bind_to_manager(self) -> None:
+        """Подписать виджет на изменения своего поля в RegistersManager.
+
+        Вызывается автоматически после _load_metadata.
+        Безопасно вызывать повторно — subscribe игнорирует дубликаты.
+        """
+        if (
+            self._registers_manager
+            and self._register_name
+            and self._field_name
+            and hasattr(self._registers_manager, "subscribe")
+        ):
+            self._registers_manager.subscribe(
+                self._register_name, self._field_name, self._update_value_silent
+            )
+
+    def _unbind_from_manager(self) -> None:
+        """Отписать виджет от RegistersManager.
+
+        Вызывается автоматически при смене manager/register/field или закрытии виджета.
+        """
+        if (
+            self._registers_manager
+            and self._register_name
+            and self._field_name
+            and hasattr(self._registers_manager, "unsubscribe")
+        ):
+            self._registers_manager.unsubscribe(
+                self._register_name, self._field_name, self._update_value_silent
+            )
+
+    def _update_value_silent(self, value: Any) -> None:
+        """Обновить отображение виджета без эмитирования сигналов изменения.
+
+        Вызывается RegistersManager при изменении поля другим компонентом.
+        Должен быть переопределён в дочерних классах.
+        """
+        pass
+
+    def closeEvent(self, event) -> None:
+        """Отписаться от RegistersManager при закрытии виджета."""
+        self._unbind_from_manager()
+        super().closeEvent(event)
     
     def get_metadata(self) -> dict:
         """
@@ -431,32 +483,39 @@ class ConfigurableWidget(QWidget):
     
     def set_field_value(self, value: Any) -> tuple[bool, Optional[str]]:
         """
-        Установить значение поля в регистре с валидацией.
-        
-        Args:
-            value: Значение для установки
-            
+        Установить значение поля в регистре с валидацией и уведомлением observers.
+
+        Делегирует в registers_manager.set_field_value(), который:
+          1. Устанавливает значение в Pydantic-модели.
+          2. Уведомляет все подписанные компоненты (другие слайдеры, чекбоксы и пр.).
+          3. Уведомляет глобальные observers (например, router-хук для бэкенда).
+
         Returns:
             tuple: (success: bool, error_message: Optional[str])
         """
         if not self._registers_manager or not self._register_name or not self._field_name:
             return False, "Конфигурация не завершена"
-        
-        # Валидация
-        is_valid, error = self._registers_manager.validate_field_value(
-            self._register_name, self._field_name, value, self._access_level
-        )
-        
-        if not is_valid:
-            return False, error
-        
-        # Проверка прав
+
+        # Проверка прав доступа
         if not self._registers_manager.can_modify_field(
             self._register_name, self._field_name, self._access_level
         ):
             return False, "Недостаточно прав доступа"
-        
-        # Установка значения (поддержка полей-объектов с .value и примитивов)
+
+        # Валидация значения
+        is_valid, error = self._registers_manager.validate_field_value(
+            self._register_name, self._field_name, value, self._access_level
+        )
+        if not is_valid:
+            return False, error
+
+        # Установка через менеджер — он обновит модель и уведомит всех подписчиков
+        if hasattr(self._registers_manager, "set_field_value"):
+            return self._registers_manager.set_field_value(
+                self._register_name, self._field_name, value
+            )
+
+        # Fallback для менеджеров без observer-API (обратная совместимость)
         register = self._registers_manager.get_register(self._register_name)
         if not register:
             return False, "Регистр не найден"

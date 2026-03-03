@@ -2,9 +2,30 @@
 """
 Пакет регистров приложения Inspector.
 
-RegistersScanner автоматически обнаруживает все *Registers-классы
-из .py файлов в этой директории — __init__.py вручную обновлять не нужно.
-
-Если нужен режим пакета (discover_registers_from_package):
-    добавь классы в __all__ ниже и соответствующие импорты.
+Каждый модуль содержит один RegisterBase-класс.
+Явный экспорт нужен чтобы App.Registers.models.__init__ мог делать
+`from .registers import DrawRegisters, ...`
 """
+from .camera import CameraRegisters
+from .conveyor import ConveyorRegisters
+from .draw import DrawRegisters
+from .frame_process import FrameProcessRegisters
+from .hikvision import HikvisionRegisters
+from .neuroun import NeurounRegisters
+from .post_processing import PostProcessingRegisters
+from .processing import ProcessingRegisters
+from .robot import RobotRegisters
+from .visual import VisualRegisters
+
+__all__ = [
+    "CameraRegisters",
+    "ConveyorRegisters",
+    "DrawRegisters",
+    "FrameProcessRegisters",
+    "HikvisionRegisters",
+    "NeurounRegisters",
+    "PostProcessingRegisters",
+    "ProcessingRegisters",
+    "RobotRegisters",
+    "VisualRegisters",
+]
