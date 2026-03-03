@@ -39,10 +39,19 @@ class QueueChannel(MessageChannel):
     def channel_type(self) -> str:
         return "queue"
     
-    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Отправить сообщение в очередь."""
+    def send(self, message: Dict[str, Any], timeout: float = 1.0) -> Dict[str, Any]:
+        """Отправить сообщение в очередь.
+
+        Args:
+            message: Сообщение для отправки.
+            timeout: Максимальное время ожидания (сек) если очередь полная.
+                     По умолчанию 1 сек — не блокирует навсегда при выключенном бэкенде.
+
+        Returns:
+            {"status": "success"} или {"status": "error", "reason": ...}
+        """
         try:
-            self._queue.put(message)
+            self._queue.put(message, block=True, timeout=timeout)
             return {"status": "success", "channel": self.name}
         except Exception as e:
             return {"status": "error", "reason": str(e)}

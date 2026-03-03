@@ -16,7 +16,9 @@
     ├── LoadingWindow  ├── окна-контейнеры (только UI)
     └── NeurounWindow ─┘
 """
+import queue
 import sys
+import threading
 from typing import Any, Optional
 
 from PyQt5.QtCore import Qt
@@ -98,6 +100,17 @@ class WindowManager:
         self._router_manager: Optional[Any] = None
         self._setup_router()
 
+        # Фоновый поток-отправщик: UI кладёт сообщения сюда без блокировки,
+        # поток сам отправляет в IPC (там блокировка безопасна).
+        self._send_queue: queue.Queue = queue.Queue(maxsize=256)
+        self._sender_stop = threading.Event()
+        self._sender_thread = threading.Thread(
+            target=self._sender_worker,
+            name="ipc-sender",
+            daemon=True,
+        )
+        self._sender_thread.start()
+
         self.create_all_windows()
         self.create_thread()
         self.toggle_cursor_visibility(True)
@@ -111,6 +124,44 @@ class WindowManager:
             print("App process ready signal sent")
         except Exception as e:
             print(f"Error sending ready signal: {e}")
+
+    # ------------------------------------------------------------------
+    # Фоновый поток-отправщик IPC
+    # ------------------------------------------------------------------
+
+    def _sender_worker(self) -> None:
+        """Фоновый поток-отправщик IPC-сообщений.
+
+        Архитектура (UI никогда не блокируется):
+          UI-поток  →  _send_queue.put_nowait()  (мгновенно)
+          этот поток →  _send_queue.get()  →  router_manager.send()
+                          ↑ здесь допустима блокировка — не UI-поток
+
+        Когда бэкенд выключен:
+          queue_channel.send() вернёт {"status": "error"} через 1 сек таймаут.
+          Поток продолжает работу, дроппает недоставленное сообщение и берёт следующее.
+          UI при этом отзывчив полностью.
+        """
+        while not self._sender_stop.is_set():
+            try:
+                msg = self._send_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[WindowManager] sender_worker get error: {e}")
+                continue
+
+            if self._router_manager is None:
+                continue
+
+            try:
+                result = self._router_manager.send(msg)
+                if isinstance(result, dict) and result.get("status") == "error":
+                    reason = result.get("reason", "unknown")
+                    if "Full" not in reason and "timeout" not in reason.lower():
+                        print(f"[WindowManager] IPC send error: {reason}")
+            except Exception as e:
+                print(f"[WindowManager] IPC send exception: {e}")
 
     # ------------------------------------------------------------------
     # Роутер и IPC
@@ -134,9 +185,9 @@ class WindowManager:
 
         registered = []
         for attr in self._QUEUE_CHANNEL_MAP:
-            queue = getattr(self.queue_manager, attr, None)
-            if queue is not None:
-                self._router_manager.register_channel(QueueChannel(attr, queue))
+            ipc_queue = getattr(self.queue_manager, attr, None)
+            if ipc_queue is not None:
+                self._router_manager.register_channel(QueueChannel(attr, ipc_queue))
                 registered.append(attr)
 
         print(f"[WindowManager] Роутер инициализирован, каналы: {registered}")
@@ -164,12 +215,12 @@ class WindowManager:
     ) -> None:
         """Единая точка отправки изменения регистра в бэкенд через RouterManager.
 
-        Вызывается:
-          - SliderControlEnhanced / CheckboxControlEnhanced при изменении значения
-          - SortController после применения рецепта (через observer RegistersManager)
-          - Любым виджетом через self._wm.send_register_update(...)
+        Вызывается из UI-потока (чекбокс, слайдер, рецепт).
+        Метод **не блокирует UI**: кладёт сообщение в локальную очередь,
+        фоновый поток _sender_worker отправляет в IPC.
 
-        Читает полный snapshot регистра чтобы бэкенд получил актуальное состояние.
+        Если локальная очередь переполнена (очень быстрые клики) — сообщение
+        отбрасывается с предупреждением, UI при этом не зависает.
         """
         if not self._router_manager:
             return
@@ -197,7 +248,13 @@ class WindowManager:
                 },
             )
         )
-        self._router_manager.send(msg)
+        try:
+            self._send_queue.put_nowait(msg)
+        except queue.Full:
+            print(
+                f"[WindowManager] send queue full, dropping update: "
+                f"{register_name}.{field_name}={value}"
+            )
 
     # ------------------------------------------------------------------
     # Создание окон и потоков
@@ -324,6 +381,8 @@ class WindowManager:
 
     def close_program(self):
         """Закрытие программы и всех окон"""
+        self._sender_stop.set()
+
         if self.main_window:
             self.main_window.close()
            

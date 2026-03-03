@@ -6,11 +6,16 @@
 
 ```
 Managers/
-├── converter_manager.py   # ConverterManager - универсальная конвертация
-├── recipe_manager.py      # RecipeManager - работа с рецептами
-├── camera_manager.py      # CameraManager - управление камерами
-├── region_manager.py      # RegionManager - управление регионами
-└── data_manager.py        # DataManager - координатор всех менеджеров
+├── converter_manager.py    # ConverterManager - универсальная конвертация
+├── recipe_manager.py       # RecipeManager - работа с рецептами
+├── camera_manager.py       # CameraManager - управление камерами
+├── region_manager.py       # RegionManager - управление регионами
+├── data_manager.py         # DataManager - координатор CameraManager/RegionManager/RecipeManager
+├── params_manager.py       # ParamsManager - сбор параметров из виджетов, применение рецептов
+├── logging_manager.py      # LoggingManager - централизованное логирование
+├── error_manager.py        # ErrorManager - обработка и статистика ошибок
+├── translation_manager.py  # TranslationManager - i18n через metadata Pydantic-полей
+└── window_manager.py       # WindowManager - жизненный цикл окон, IPC, доступ
 ```
 
 ## Цепочка данных
@@ -79,6 +84,32 @@ camera = converter.from_yaml(yaml_str, CameraData)
 flat = converter.to_flat_dict(registers_manager)
 structured = converter.from_flat_dict(flat, RegistersManager)
 ```
+
+## ParamsManager
+
+Управляет параметрами виджетов и применением рецептов. Переехал из `App/Components/` в `App/Core/Managers/` — это менеджер, а не UI-компонент.
+
+```python
+from App.Core.Managers import ParamsManager
+from App.Widget.Sort_widjet.sort_data import SortData
+
+sort_data = SortData()
+manager = ParamsManager(
+    widgets_dict={"processing": processing_widget, "robot": robot_widget},
+    sort_data=sort_data,
+)
+
+# Применить рецепт №3 ко всем виджетам
+manager.apply_recipe(3)
+
+# Сохранить текущее состояние как рецепт №3
+manager.save_recipe(3)
+
+# Получить все параметры
+params = manager.get_all_params()
+```
+
+Виджет должен реализовывать `get_params() -> dict` и `apply_params(params: dict)`.
 
 ## Обратная совместимость
 

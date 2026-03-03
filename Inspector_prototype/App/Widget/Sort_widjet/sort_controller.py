@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 from PyQt5.QtCore import QObject, QTimer
 
-from App.Components.params_manager import ParamsManager
+from App.Core.Managers.params_manager import ParamsManager
 from App.Widget.Sort_widjet.sort_data import SortData
 
 

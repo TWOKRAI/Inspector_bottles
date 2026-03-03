@@ -11,6 +11,7 @@ from .logging_manager import LoggingManager
 from .error_manager import ErrorManager
 from .window_manager import WindowManager
 from .translation_manager import TranslationManager
+from .params_manager import ParamsManager
 
 __all__ = [
     'ConverterManager',
@@ -22,4 +23,5 @@ __all__ = [
     'ErrorManager',
     'WindowManager',
     'TranslationManager',
+    'ParamsManager',
 ]

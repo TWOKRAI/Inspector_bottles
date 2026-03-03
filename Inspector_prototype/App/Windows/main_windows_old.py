@@ -29,7 +29,7 @@ from App.Widget.Robot_widjet.Robot import RobotWidget
 from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
 from App.Widget.Processing_widjet.Processing import ProcessingWidget
 from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
-from App.Components.params_manager import ParamsManager
+from App.Core.Managers.params_manager import ParamsManager
 from App.Core.Managers import DataManager, RecipeManager, ConverterManager
 from App.Widget.Sort_widjet import SortWidget, SortData
 from App.Registers import ProcessingRegisters, RegistersManager
