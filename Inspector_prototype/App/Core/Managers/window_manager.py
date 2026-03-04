@@ -4,21 +4,19 @@
 
 Ответственность:
   - Жизненный цикл всех окон (создание, показ, скрытие, закрытие)
-  - Владение RouterManager и QueueChannel — единственное место где живут IPC-каналы
-  - Предоставление общего API send_register_update() для всех окон и виджетов
+  - Владение RouterManager — единственная точка IPC с бэкендом
+  - send_register_update() — единый API для всех окон и виджетов
   - Управление уровнем доступа и полноэкранным режимом
 
 Иерархия:
   WindowManager
-    ├── RouterManager (router_module) — IPC с бэкендом
-    │     └── QueueChannel × N       — обёртки над multiprocessing.Queue
+    ├── RouterManager          — IPC с бэкендом (async send, routing)
+    │     └── QueueChannel × N — обёртки над multiprocessing.Queue
     ├── MainWindow   ─┐
     ├── LoadingWindow  ├── окна-контейнеры (только UI)
     └── NeurounWindow ─┘
 """
-import queue
 import sys
-import threading
 from typing import Any, Optional
 
 from PyQt5.QtCore import Qt
@@ -63,9 +61,16 @@ class WindowManager:
     Единственный владелец RouterManager — все окна и виджеты
     вызывают self._wm.send_register_update(...) вместо прямой
     работы с очередями.
+
+    Async send полностью инкапсулирован в RouterManager:
+      UI → send_register_update() → router.send_async()  [non-blocking]
+                                        ↓
+                               router._sender_worker     [background thread]
+                                        ↓
+                               QueueChannel.send()       [blocking OK here]
     """
 
-    # IPC-каналы: атрибут queue_manager → имя канала в роутере
+    # IPC-каналы: имя атрибута queue_manager → имя канала в роутере
     _QUEUE_CHANNEL_MAP = [
         "control_draw",
         "control_camera",
@@ -96,20 +101,9 @@ class WindowManager:
 
         self.app_config = AppConfigManager()
 
-        # Инициализируем роутер до создания окон: окна могут запросить send_register_update
+        # Инициализируем роутер до создания окон
         self._router_manager: Optional[Any] = None
         self._setup_router()
-
-        # Фоновый поток-отправщик: UI кладёт сообщения сюда без блокировки,
-        # поток сам отправляет в IPC (там блокировка безопасна).
-        self._send_queue: queue.Queue = queue.Queue(maxsize=256)
-        self._sender_stop = threading.Event()
-        self._sender_thread = threading.Thread(
-            target=self._sender_worker,
-            name="ipc-sender",
-            daemon=True,
-        )
-        self._sender_thread.start()
 
         self.create_all_windows()
         self.create_thread()
@@ -126,53 +120,14 @@ class WindowManager:
             print(f"Error sending ready signal: {e}")
 
     # ------------------------------------------------------------------
-    # Фоновый поток-отправщик IPC
-    # ------------------------------------------------------------------
-
-    def _sender_worker(self) -> None:
-        """Фоновый поток-отправщик IPC-сообщений.
-
-        Архитектура (UI никогда не блокируется):
-          UI-поток  →  _send_queue.put_nowait()  (мгновенно)
-          этот поток →  _send_queue.get()  →  router_manager.send()
-                          ↑ здесь допустима блокировка — не UI-поток
-
-        Когда бэкенд выключен:
-          queue_channel.send() вернёт {"status": "error"} через 1 сек таймаут.
-          Поток продолжает работу, дроппает недоставленное сообщение и берёт следующее.
-          UI при этом отзывчив полностью.
-        """
-        while not self._sender_stop.is_set():
-            try:
-                msg = self._send_queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"[WindowManager] sender_worker get error: {e}")
-                continue
-
-            if self._router_manager is None:
-                continue
-
-            try:
-                result = self._router_manager.send(msg)
-                if isinstance(result, dict) and result.get("status") == "error":
-                    reason = result.get("reason", "unknown")
-                    if "Full" not in reason and "timeout" not in reason.lower():
-                        print(f"[WindowManager] IPC send error: {reason}")
-            except Exception as e:
-                print(f"[WindowManager] IPC send exception: {e}")
-
-    # ------------------------------------------------------------------
     # Роутер и IPC
     # ------------------------------------------------------------------
 
     def _setup_router(self) -> None:
-        """Создать RouterManager и зарегистрировать все IPC-каналы.
+        """Создать RouterManager, зарегистрировать все IPC-каналы и запустить.
 
         Вызывается один раз в __init__ до создания окон.
-        Все окна и виджеты используют send_register_update() —
-        никто не обращается к queue_manager напрямую для регистров.
+        После этого вся отправка идёт через send_register_update() → send_async().
         """
         if not _ROUTER_AVAILABLE:
             print("[WindowManager] router_module недоступен — IPC отключён")
@@ -181,7 +136,6 @@ class WindowManager:
             return
 
         self._router_manager = RouterManager("app_ui_router")
-        self._router_manager.initialize()
 
         registered = []
         for attr in self._QUEUE_CHANNEL_MAP:
@@ -190,11 +144,12 @@ class WindowManager:
                 self._router_manager.register_channel(QueueChannel(attr, ipc_queue))
                 registered.append(attr)
 
+        # initialize() запускает фоновый поток-отправщик
+        self._router_manager.initialize()
         print(f"[WindowManager] Роутер инициализирован, каналы: {registered}")
 
     def setup_register_observer(self, registers_manager) -> None:
-        """Подписать глобальный observer: любое программное изменение регистра
-        (загрузка рецепта, сброс) автоматически уходит в бэкенд через роутер.
+        """Подписать глобальный observer: любое изменение регистра → IPC.
 
         Вызывается из MainWindow после создания RegistersManager.
         """
@@ -213,14 +168,13 @@ class WindowManager:
         value: Any,
         registers_manager=None,
     ) -> None:
-        """Единая точка отправки изменения регистра в бэкенд через RouterManager.
+        """Единая точка отправки изменения регистра в бэкенд.
 
-        Вызывается из UI-потока (чекбокс, слайдер, рецепт).
-        Метод **не блокирует UI**: кладёт сообщение в локальную очередь,
-        фоновый поток _sender_worker отправляет в IPC.
+        Метод non-blocking: делегирует в RouterManager.send_async().
+        Async send реализован внутри RouterManager — никакого кода потоков здесь нет.
 
-        Если локальная очередь переполнена (очень быстрые клики) — сообщение
-        отбрасывается с предупреждением, UI при этом не зависает.
+        Если бэкенд выключен — сообщение отбрасывается через таймаут в QueueChannel,
+        UI при этом не зависает.
         """
         if not self._router_manager:
             return
@@ -241,20 +195,14 @@ class WindowManager:
             .set_command(
                 "set_register",
                 args={
-                    "register": register_name,
-                    "field": field_name,
-                    "value": value,
-                    "snapshot": snapshot,
+                    "register":  register_name,
+                    "field":     field_name,
+                    "value":     value,
+                    "snapshot":  snapshot,
                 },
             )
         )
-        try:
-            self._send_queue.put_nowait(msg)
-        except queue.Full:
-            print(
-                f"[WindowManager] send queue full, dropping update: "
-                f"{register_name}.{field_name}={value}"
-            )
+        self._router_manager.send_async(msg)
 
     # ------------------------------------------------------------------
     # Создание окон и потоков
@@ -266,15 +214,12 @@ class WindowManager:
         self.header.main_show.connect(self.show_main_winodw)
         self.header.neuroun_show.connect(self.show_neuroun_winodw)
 
-        # Создаем главное окно сначала чтобы получить его размер
         self.main_window = MainWindow(window_manager=self)
         self.main_window.header.main_show.connect(self.show_main_winodw)
         self.main_window.header.neuroun_show.connect(self.show_neuroun_winodw)
         self.main_window.hide()
-        
-        # Создаем окно загрузки с таким же размером как главное окно
+
         self.loading_window = LoadingWindow(window_manager=self)
-        # Устанавливаем размер окна загрузки равным размеру главного окна
         main_window_size = self.main_window.size()
         self.loading_window.resize(main_window_size)
         self.loading_window.setGeometry(self.main_window.geometry())
@@ -300,19 +245,16 @@ class WindowManager:
     def set_fullscreen(self, fullscreen):
         """Установка режима fullscreen для всех окон"""
         self.fullscreen = fullscreen
-        
-        # Получаем настройки ограничения из конфигурации приложения
+
         limit_fullhd = self.app_config.get_limit_fullhd() if self.app_config else False
         limit_width = self.app_config.get_fullscreen_limit_width() if self.app_config else 1920
         limit_height = self.app_config.get_fullscreen_limit_height() if self.app_config else 1080
-        
+
         if self.main_window:
             if fullscreen:
                 if limit_fullhd:
-                    # Ограничиваем размер до заданного разрешения вместо fullscreen
                     self.main_window.showNormal()
                     self.main_window.setFixedSize(limit_width, limit_height)
-                    # Центрируем окно на экране
                     screen = self.main_window.screen().availableGeometry()
                     x = (screen.width() - limit_width) // 2
                     y = (screen.height() - limit_height) // 2
@@ -320,10 +262,9 @@ class WindowManager:
                 else:
                     self.main_window.showFullScreen()
             else:
-                # Снимаем ограничение размера при выключении fullscreen
-                self.main_window.setFixedSize(16777215, 16777215)  # Убираем фиксированный размер (16777215 = QWIDGETSIZE_MAX)
-                self.main_window.setMaximumSize(16777215, 16777215)  # Убираем максимальный размер
-                self.main_window.setMinimumSize(800, 600)  # Восстанавливаем минимальный размер
+                self.main_window.setFixedSize(16777215, 16777215)
+                self.main_window.setMaximumSize(16777215, 16777215)
+                self.main_window.setMinimumSize(800, 600)
                 self.main_window.showNormal()
 
         if self.loading_window:
@@ -363,7 +304,6 @@ class WindowManager:
     def toggle_cursor_visibility(self, visible):
         """Переключает видимость курсора для всех окон"""
         cursor = QCursor(Qt.ArrowCursor) if visible else QCursor(Qt.BlankCursor)
-
         if self.main_window:
             self.main_window.setCursor(cursor)
         if self.loading_window:
@@ -381,11 +321,12 @@ class WindowManager:
 
     def close_program(self):
         """Закрытие программы и всех окон"""
-        self._sender_stop.set()
+        if self._router_manager:
+            self._router_manager.shutdown()
 
         if self.main_window:
             self.main_window.close()
-           
+
         if self.loading_window:
             self.loading_window.close()
 
@@ -426,16 +367,14 @@ class WindowManager:
             self.main_window.show()
         else:
             self.main_window.show()
-        
         self.close_neuroun_winodw()
-
         print('ПОказал окно майн')
 
     def close_main_winodw(self):
         """Закрыть главное окно"""
         if self.main_window:
-            self.main_window.hide()    
-    
+            self.main_window.hide()
+
     def show_neuroun_winodw(self):
         """Показать окно нейросети"""
         if not self.neuroun_window:
@@ -445,9 +384,7 @@ class WindowManager:
             self.neuroun_window.show()
         else:
             self.neuroun_window.show()
-        
         self.close_main_winodw()
-
         print('ПОказал окно нейрон')
 
     def close_neuroun_winodw(self):

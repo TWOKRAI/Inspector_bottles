@@ -1,251 +1,172 @@
+# -*- coding: utf-8 -*-
 """
-Интерфейсы для RouterModule.
+Интерфейсы router_module.
 
-Определяет контракты для компонентов модуля маршрутизации сообщений.
+IRouterManager — контракт для любой реализации роутера.
+IMessageChannel — контракт для любого типа канала (Queue, Socket, HTTP, ...).
 """
-
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Callable, Union
-
-# Импорт для типизации
+from typing import Any, Callable, Dict, List, Optional, Union
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from ...message_module import Message
 
 
 class IRouterManager(ABC):
-    """
-    Интерфейс для менеджера маршрутизации сообщений.
-    
-    Определяет контракт для всех реализаций роутера.
-    """
-    
+    """Контракт для менеджера маршрутизации."""
+
     @property
     @abstractmethod
     def manager_name(self) -> str:
         """Имя роутера."""
-        pass
-    
+
     @abstractmethod
     def initialize(self) -> bool:
-        """
-        Инициализация роутера.
-        
-        Returns:
-            bool: True если инициализация успешна
-        """
-        pass
-    
+        """Инициализация (запуск фоновых потоков, регистрация каналов)."""
+
     @abstractmethod
     def shutdown(self) -> bool:
-        """
-        Завершение работы роутера.
-        
-        Returns:
-            bool: True если завершение успешно
-        """
-        pass
-    
+        """Корректная остановка всех потоков и очистка ресурсов."""
+
+    # --- Отправка ---
+
     @abstractmethod
-    def send(self, message: Union['Message', Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Отправить сообщение с интеллектуальным выбором канала.
-        
-        Args:
-            message: Сообщение для отправки (Message объект или словарь)
-            
-        Returns:
-            Результат отправки
-        """
-        pass
-    
+    def send(self, message: Union["Message", Dict[str, Any]]) -> Dict[str, Any]:
+        """Синхронная отправка. Может блокироваться."""
+
     @abstractmethod
-    def receive(self, timeout: float = 0.0, return_messages: bool = True) -> List[Union['Message', Dict[str, Any]]]:
-        """
-        Получить сообщения со всех каналов.
-        
-        Args:
-            timeout: Таймаут опроса
-            return_messages: Если True, возвращает Message объекты, иначе словари
-            
-        Returns:
-            Список сообщений
-        """
-        pass
-    
+    def send_async(
+        self,
+        message: Union["Message", Dict[str, Any]],
+        priority: str = "normal",
+    ) -> None:
+        """Non-blocking отправка. Безопасна для UI-потока."""
+
+    # --- Получение ---
+
     @abstractmethod
-    def register_channel(self, channel: 'IMessageChannel') -> bool:
-        """
-        Зарегистрировать канал в роутере.
-        
-        Args:
-            channel: Канал, реализующий интерфейс IMessageChannel
-            
-        Returns:
-            True если канал успешно зарегистрирован
-        """
-        pass
-    
+    def receive(
+        self,
+        timeout: float = 0.0,
+        return_messages: bool = True,
+    ) -> List[Union["Message", Dict[str, Any]]]:
+        """Синхронный опрос всех каналов."""
+
+    @abstractmethod
+    def start_listening(self, poll_interval: float = 0.01) -> bool:
+        """Запустить фоновый поток приёма сообщений."""
+
+    @abstractmethod
+    def stop_listening(self, timeout: float = 5.0) -> bool:
+        """Остановить фоновый поток приёма."""
+
+    @abstractmethod
+    def add_message_callback(self, callback: Callable) -> None:
+        """Зарегистрировать callback для входящих сообщений."""
+
+    # --- Каналы ---
+
+    @abstractmethod
+    def register_channel(self, channel: "IMessageChannel") -> bool:
+        """Зарегистрировать канал."""
+
     @abstractmethod
     def unregister_channel(self, channel_name: str) -> bool:
-        """
-        Удалить канал из роутера.
-        
-        Args:
-            channel_name: Имя канала для удаления
-            
-        Returns:
-            True если канал успешно удален
-        """
-        pass
-    
+        """Удалить канал."""
+
     @abstractmethod
-    def get_channel(self, channel_name: str) -> Optional['IMessageChannel']:
-        """
-        Получить канал по имени.
-        
-        Args:
-            channel_name: Имя канала
-            
-        Returns:
-            Канал или None если не найден
-        """
-        pass
-    
+    def get_channel(self, channel_name: str) -> Optional["IMessageChannel"]:
+        """Получить канал по имени."""
+
+    # --- Маршрутизация (channel_dispatcher) ---
+
     @abstractmethod
-    def register_channel_handler(
+    def register_route(
         self,
         key: str,
-        handler: Callable,
-        expects_full_message: bool = True,
-        metadata: Dict[str, Any] = None,
+        channel_name: Optional[str],
+        strategy: Any = None,
         efficiency: int = 0,
-        tags: List[str] = None
+        tags: Optional[List[str]] = None,
     ) -> bool:
+        """Привязать routing-ключ к каналу через channel_dispatcher.
+        strategy=None → EXACT_MATCH.
+        channel_name=None → брать из msg['channel'] (dynamic).
         """
-        Зарегистрировать кастомный обработчик для выбора каналов.
-        
-        Args:
-            key: Ключ для диспетчеризации
-            handler: Функция-обработчик, возвращающая channel_name
-            expects_full_message: Использовать полное сообщение
-            metadata: Метаданные обработчика
-            efficiency: Уровень эффективности обработчика
-            tags: Теги для группировки
-            
-        Returns:
-            True если регистрация успешна
-        """
-        pass
-    
+
+    @abstractmethod
+    def register_broadcast_route(
+        self,
+        key: str,
+        channel_names: List[str],
+        tags: Optional[List[str]] = None,
+    ) -> bool:
+        """Привязать ключ к группе каналов (fan-out)."""
+
+    # --- Обработчики входящих ---
+
     @abstractmethod
     def register_message_handler(
         self,
         key: str,
         handler: Callable,
         expects_full_message: bool = True,
-        metadata: Dict[str, Any] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         efficiency: int = 0,
-        tags: List[str] = None
+        tags: Optional[List[str]] = None,
     ) -> bool:
-        """
-        Зарегистрировать обработчик для входящих сообщений.
-        
-        Args:
-            key: Ключ для диспетчеризации входящих сообщений
-            handler: Функция-обработчик входящих сообщений
-            expects_full_message: Использовать полное сообщение
-            metadata: Метаданные обработчика
-            efficiency: Уровень эффективности обработчика
-            tags: Теги для группировки
-            
-        Returns:
-            True если регистрация успешна
-        """
-        pass
-    
+        """Зарегистрировать обработчик входящих сообщений."""
+
+    # --- Middleware ---
+
+    @abstractmethod
+    def add_send_middleware(self, fn: Callable) -> None:
+        """Добавить middleware для исходящих сообщений."""
+
+    @abstractmethod
+    def add_receive_middleware(self, fn: Callable) -> None:
+        """Добавить middleware для входящих сообщений."""
+
+    # --- Статистика ---
+
     @abstractmethod
     def get_stats(self) -> Dict[str, Any]:
-        """
-        Получить статистику работы роутера.
-        
-        Returns:
-            Словарь со статистикой
-        """
-        pass
+        """Полная статистика роутера."""
 
 
 class IMessageChannel(ABC):
+    """Контракт для любого типа канала сообщений.
+
+    Реализуется для Queue (mp/thread), Socket, HTTP, Database, Log и т.д.
     """
-    Интерфейс для каналов сообщений.
-    
-    Определяет контракт для всех типов каналов (Queue, Logger, HTTP, etc.).
-    """
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Уникальное имя канала."""
-        pass
-    
+
     @property
     @abstractmethod
     def channel_type(self) -> str:
-        """Тип канала (queue, log, telegram, http, etc)."""
-        pass
-    
+        """Тип канала: 'queue', 'socket', 'http', 'log', ...)."""
+
     @abstractmethod
     def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Отправить сообщение через канал.
-        
-        Args:
-            message: Сообщение для отправки
-            
-        Returns:
-            Результат отправки
-        """
-        pass
-    
+        """Отправить сообщение. Возвращает {"status": "success"|"error", ...}."""
+
     @abstractmethod
     def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
-        """
-        Опрос канала для получения сообщений.
-        
-        Args:
-            timeout: Таймаут опроса (0 = non-blocking)
-            
-        Returns:
-            Список полученных сообщений
-        """
-        pass
-    
-    def start_listening(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
-        """
-        Запуск асинхронного прослушивания канала.
-        
-        Args:
-            callback: Функция обратного вызова для полученных сообщений
-            
-        Returns:
-            True если запущено успешно
-        """
-        return False
-    
-    def stop_listening(self) -> bool:
-        """Остановить прослушивание канала."""
-        return True
-    
-    def get_info(self) -> Dict[str, Any]:
-        """
-        Получить информацию о канале.
-        
-        Returns:
-            Словарь с информацией о канале
-        """
-        return {
-            "name": self.name,
-            "type": self.channel_type,
-            "active": True
-        }
+        """Опросить канал. timeout=0 → non-blocking."""
 
+    def start_listening(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
+        """Запустить асинхронное прослушивание (опционально)."""
+        return False
+
+    def stop_listening(self) -> bool:
+        """Остановить прослушивание."""
+        return True
+
+    def get_info(self) -> Dict[str, Any]:
+        """Информация о состоянии канала."""
+        return {"name": self.name, "type": self.channel_type, "active": True}
