@@ -7,11 +7,38 @@
 
 from typing import Dict, Any, Optional
 
-# Импорт из старого модуля (временно, пока ConfigModule не рефакторен)
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "modules"))
-from Config_module import Config
+# Импорт из refactored config_module
+from ...config_module import Config
+
+
+class _CustomProcessConfig:
+    """Обёртка над custom dict для совместимости с ProcessConfiguration."""
+
+    def __init__(self, custom: dict):
+        self._custom = custom or {}
+        self._process = self._custom.get('process_config', {})
+        self.managers = self._custom.get('component_managers_config', self._process.get('managers', {}))
+
+    def get_manager_config(self, manager_name: str) -> Optional[Dict[str, Any]]:
+        cfg = self.managers.get(manager_name) if isinstance(self.managers, dict) else None
+        return cfg if cfg else None
+
+    def get_module_config(self, module_name: str) -> Dict[str, Any]:
+        mods = self._custom.get('module_configs', {})
+        return mods.get(module_name, {}) if isinstance(mods, dict) else {}
+
+    def get_process_config(self, key: str, default: Any = None) -> Any:
+        parts = key.split('.')
+        v = self._process
+        for p in parts:
+            if isinstance(v, dict) and p in v:
+                v = v[p]
+            else:
+                return default
+        return v
+
+    def update_process_config(self, **kwargs) -> None:
+        self._process.update(kwargs)
 
 
 class ProcessConfigHandler(Config):
@@ -36,16 +63,27 @@ class ProcessConfigHandler(Config):
             shared_resources: SharedResourcesManager (легковесный контейнер с ProcessStateRegistry)
             config: Локальная конфигурация (опционально, берется из process_data если не указана)
         """
-        # Получаем конфигурацию из ProcessData
+        # Получаем конфигурацию из ProcessData (config или custom)
         if shared_resources:
             process_data = shared_resources.get_process_data(process_name)
-            if process_data and process_data.config:
-                # Используем конфигурацию из ProcessData
-                process_config = process_data.config.process.copy()
-                if config:
-                    process_config.update(config)
-                super().__init__(process_config)
-                self.process_config = process_data.config
+            if process_data:
+                # ProcessData.config (ProcessConfiguration) или custom dict
+                if hasattr(process_data, 'config') and process_data.config:
+                    process_config = process_data.config.process.copy()
+                    if config:
+                        process_config.update(config)
+                    super().__init__(process_config)
+                    self.process_config = process_data.config
+                elif process_data.custom:
+                    # Конфиг из custom: process_config, component_managers_config, etc.
+                    process_config = process_data.custom.get('process_config', {}).copy()
+                    if config:
+                        process_config.update(config)
+                    super().__init__(process_config)
+                    self.process_config = _CustomProcessConfig(process_data.custom)
+                else:
+                    super().__init__(config or {})
+                    self.process_config = None
             else:
                 super().__init__(config or {})
                 self.process_config = None
@@ -71,9 +109,8 @@ class ProcessConfigHandler(Config):
             if managers_config:
                 return managers_config
         
-        # Проверяем ConfigManager
-        if self.config_manager:
-            # Используем get_process_config для получения конфигурации процесса
+        # Проверяем ConfigManager (refactored ConfigManager использует get_config(name))
+        if self.config_manager and hasattr(self.config_manager, 'get_process_config'):
             process_config = self.config_manager.get_process_config()
             if process_config and self.process_name in process_config:
                 managers_config = process_config[self.process_name].get('managers', {})
@@ -139,9 +176,8 @@ class ProcessConfigHandler(Config):
             if value != default:
                 return value
         
-        # Проверяем ConfigManager
-        if self.config_manager:
-            # Используем get_process_config для получения конфигурации процесса
+        # Проверяем ConfigManager (refactored может не иметь get_process_config)
+        if self.config_manager and hasattr(self.config_manager, 'get_process_config'):
             process_config = self.config_manager.get_process_config()
             if process_config and self.process_name in process_config:
                 # Используем точечную нотацию для получения значения
@@ -179,17 +215,15 @@ class ProcessConfigHandler(Config):
             if self.process_config:
                 self.process_config.update_process_config(**new_config)
             
-            # Обновляем ConfigManager
-            if self.config_manager:
-                # Получаем текущую конфигурацию процесса
+            # Обновляем ConfigManager (если поддерживает API)
+            if (self.config_manager and hasattr(self.config_manager, 'get_process_config')
+                    and hasattr(self.config_manager, 'update_process_config')):
                 process_config = self.config_manager.get_process_config()
                 if process_config and self.process_name in process_config:
-                    # Обновляем конфигурацию процесса
                     updated_config = process_config[self.process_name].copy()
                     updated_config.update(new_config)
                     self.config_manager.update_process_config({self.process_name: updated_config})
                 else:
-                    # Создаем новую конфигурацию процесса
                     self.config_manager.update_process_config({self.process_name: new_config})
             
             return True

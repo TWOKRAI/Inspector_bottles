@@ -65,6 +65,7 @@ class ProcessLifecycle:
             error_trace = traceback.format_exc()
             self.process._log_error(f"Failed to initialize process '{self.process.name}': {e}")
             self.process._log_error(f"Traceback: {error_trace}")
+            print(f"[ProcessLifecycle] Init failed: {e}\n{error_trace}")  # Fallback для отладки
             return False
     
     def shutdown(self) -> bool:

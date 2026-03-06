@@ -9,15 +9,11 @@ from typing import Optional, Union, Dict, Any
 from pathlib import Path
 
 from ..runner.process_runner import run_process_function
+from ..platforms import get_platform_adapter
 
-# Импорт из старого модуля (временно, пока не рефакторены)
-import sys
-from pathlib import Path as PathLib
-sys.path.insert(0, str(PathLib(__file__).parent.parent.parent.parent.parent / "modules"))
-from Shared_resources_module.SharedResourcesManager import SharedResourcesManager
-from Config_module.config_manager import ConfigManager
-from Logger_module import LoggerManager
-from Process_manager_module.platforms import get_platform_adapter
+from ...shared_resources_module import SharedResourcesManager
+from ...config_module import ConfigManager
+from ...logger_module import LoggerManager
 
 
 class ProcessManagerBootstrap:
@@ -42,15 +38,18 @@ class ProcessManagerBootstrap:
         """
         self.platform = platform_adapter or get_platform_adapter()
         self.platform.setup_multiprocessing()
-        
+
         self.stop_event = Event()
-        self.shared_resources = SharedResourcesManager()
-        
-        # ConfigManager для загрузки конфигурации
-        self.config_manager = ConfigManager()
-        
-        # Logger для bootstrap
-        self.logger = LoggerManager(config_manager=self.config_manager)
+        self.shared_resources = SharedResourcesManager(manager_name="shared_resources")
+        self.shared_resources.initialize()
+
+        self.config_manager = ConfigManager(manager_name="config_manager", process=None)
+        self.config_manager.initialize()
+
+        self.logger = LoggerManager(
+            manager_name="bootstrap_logger",
+            config_manager=self.config_manager,
+        )
         self.logger.initialize()
         
         # Конфигурация процессов
@@ -69,31 +68,21 @@ class ProcessManagerBootstrap:
         try:
             self.logger.info("🚀 Starting ProcessManagerProcess...", module="bootstrap")
             
-            # Регистрируем ProcessManagerProcess в shared_resources с конфигурацией
-            # Используем новый путь к рефакторенному модулю
-            process_config = {
-                'process': {
-                    'processes_config': self.processes_config
-                },
-                'managers': {},
-                'modules': {}
+            # Connection bundle (только picklable) — избегаем pickle SharedResourcesManager/RLock
+            process_config = {'processes_config': self.processes_config}
+            bundle = {
+                "queues": {},
+                "config": process_config,
+                "custom": {"process_config": process_config}
             }
             
-            self.shared_resources.register_process_with_config(
-                process_name='ProcessManager',
-                config=process_config,
-                initial_state={'status': 'initializing'}
-            )
-            
-            # Создаем ProcessManagerProcess как процесс ОС
-            # Используем новый путь к рефакторенному модулю
             self.process_manager_process = Process(
                 target=run_process_function,
                 args=(
                     'multiprocess_framework.refactored.modules.process_manager_module.process.process_manager_process.ProcessManagerProcess',
                     'ProcessManager',
                     self.stop_event,
-                    self.shared_resources
+                    bundle
                 ),
                 name='ProcessManager'
             )
@@ -115,17 +104,17 @@ class ProcessManagerBootstrap:
             return False
     
     def stop(self):
-        """Останавливает ProcessManagerProcess."""
+        """Останавливает ProcessManagerProcess и освобождает shared_resources."""
         if self.process_manager_process and self.process_manager_process.is_alive():
             self.logger.info("🛑 Stopping ProcessManagerProcess...", module="bootstrap")
             self.stop_event.set()
             self.process_manager_process.terminate()
             self.process_manager_process.join(timeout=3.0)
-            
             if self.process_manager_process.is_alive():
                 self.process_manager_process.kill()
-            
             self.logger.info("✅ ProcessManagerProcess stopped", module="bootstrap")
+        if self.shared_resources:
+            self.shared_resources.shutdown()
     
     def wait(self):
         """Ожидает завершения ProcessManagerProcess."""

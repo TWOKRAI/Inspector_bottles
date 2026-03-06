@@ -24,12 +24,12 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QCursor
 import qdarkstyle
 
-from App.Windows.main_window import MainWindow
-from App.Windows.window_loading import LoadingWindow
-from App.Windows.neuroun_window import NeurounWindow
-from App.Windows.message_window import MessageWindow
+from App.UI.Windows.main_window import MainWindow
+from App.UI.Windows.window_loading import LoadingWindow
+from App.UI.Windows.neuroun_window import NeurounWindow
+from App.UI.Windows.message_window import MessageWindow
 
-from App.Components.header import HeaderWidget
+from App.UI.Components.header import HeaderWidget
 from App.Core.app_config import AppConfigManager
 from App.Core.Threads.thread_loading import Loading
 from App.Core.Threads.thread_image_update import UpdateImage

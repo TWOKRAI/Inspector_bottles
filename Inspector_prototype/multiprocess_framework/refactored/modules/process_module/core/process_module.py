@@ -147,19 +147,14 @@ class ProcessModule(BaseManager, ObservableMixin):
         from ...config_module import ConfigManager
         self.config_manager = ConfigManager()
         
-        # Загружаем конфигурацию из ProcessData если доступна
-        if self.shared_resources:
-            process_data = self.shared_resources.get_process_data(self.name)
-            if process_data and process_data.config:
-                config_dict = process_data.config.to_dict()
-                if config_dict.get('process'):
-                    self.config_manager.update_process_config({self.name: config_dict['process']})
+        # Загружаем конфигурацию из ProcessData если доступна (для ConfigManager)
+        # ConfigManager refactored не имеет update_process_config — конфиг берётся из config_handler
         
         # Устанавливаем config_manager в config_handler
         self.config_handler.config_manager = self.config_manager
         
-        # Обновляем self.config из config_handler
-        self.config = dict(self.config_handler)
+        # Обновляем self.config из config_handler (Config.data — плоский dict)
+        self.config = self.config_handler.data if self.config_handler else {}
     
     def _init_queues(self):
         """Инициализация очередей процесса (функциональность ProcessCore)."""
@@ -266,8 +261,31 @@ class ProcessModule(BaseManager, ObservableMixin):
     
     def _init_application_threads(self):
         """Опциональная инициализация потоков приложения."""
-        # Переопределяется в дочерних классах
+        # Создание воркеров из config["workers"] (конфиг-драйвен)
+        workers_config = self.config.get("workers") if self.config else {}
+        if workers_config and self.worker_manager:
+            self._create_workers_from_config(workers_config)
+        # Дочерние классы могут переопределить для дополнительной логики
         pass
+
+    def _create_workers_from_config(self, workers_config: Dict[str, Any]) -> None:
+        """Создать воркеры из config. worker_dict: {class: path, config: {...}}."""
+        from ...worker_module import ThreadConfig, ThreadPriority
+        for name, wc in workers_config.items():
+            if not isinstance(wc, dict) or "class" not in wc:
+                continue
+            try:
+                module_path, class_name = wc["class"].rsplit(".", 1)
+                module = __import__(module_path, fromlist=[class_name])
+                cls = getattr(module, class_name)
+                instance = cls(process=self, config=wc.get("config", {}))
+                target = getattr(instance, "run", instance)
+                if not callable(target):
+                    raise TypeError(f"Worker '{name}' must have run(stop_event, pause_event) or be callable")
+                thread_config = ThreadConfig(priority=ThreadPriority.NORMAL)
+                self.worker_manager.create_worker(name, target, thread_config)
+            except Exception as e:
+                self._log_error(f"Failed to create worker '{name}': {e}")
     
     # ========================================================================
     # ОСНОВНОЙ ЦИКЛ ПРОЦЕССА

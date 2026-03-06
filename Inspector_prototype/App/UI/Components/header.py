@@ -3,7 +3,7 @@ from PyQt5.QtGui import QImage, QPixmap, QIcon
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 
 
-from App.Windows.admin_window import PasswordDialog
+from App.UI.Windows.admin_window import PasswordDialog
 from App.resource_paths import get_resource_path
 
 

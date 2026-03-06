@@ -11,6 +11,11 @@ import re
 from ..utils.name_utils import get_adapter_name_from_class
 
 
+def _noop(*a, **kw):
+    """Заглушка для proxy-методов после unpickle. Pickle-совместима (модульная функция)."""
+    return None
+
+
 class BaseManager(ABC):
     """
     Базовый абстрактный класс для всех менеджеров системы.
@@ -262,21 +267,28 @@ class BaseManager(ABC):
             >>> # Явный доступ (РЕКОМЕНДУЕТСЯ)
             >>> adapter = manager.get_adapter("command")
         """
-        # Пробуем найти адаптер по имени
-        if name in self._adapters:
-            adapter = self._adapters[name]
+        # Пробуем найти адаптер по имени (через __dict__ чтобы избежать рекурсии в __getattr__)
+        _adapters = self.__dict__.get('_adapters', {})
+        if name in _adapters:
+            adapter = _adapters[name]
             if adapter is None:
                 raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}' (adapter is None)")
             return adapter
         
         # Пробуем найти по snake_case версии имени класса
-        for adapter_name, adapter in self._adapters.items():
+        for adapter_name, adapter in _adapters.items():
             if adapter is None:
                 continue
             expected_name = get_adapter_name_from_class(adapter.__class__.__name__)
             if name == expected_name:
                 return adapter
-        
+
+        # Fallback для proxy-методов после unpickle (исключены при pickle для multiprocessing)
+        # Модульная функция вместо lambda — pickle-совместимо на Windows (spawn)
+        if name in ('_log_method', '_log_method_internal', '_log', '_record_metric_method',
+                    '_track_error_method', '_call_manager') or name.startswith(('_log_', '_record_', '_track_')):
+            return _noop
+
         # Если не нашли, вызываем стандартное поведение
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
     

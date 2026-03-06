@@ -15,8 +15,8 @@ from PyQt5.QtWidgets import (
     QAbstractItemView,
 )
 
-from App.Widget.Sort_widjet.sort_data import SortData
-from App.Widget.Sort_widjet.sort_excel_export import SortExcelExporter
+from App.UI.Widgets.Sort_widget.sort_data import SortData
+from App.UI.Widgets.Sort_widget.sort_excel_export import SortExcelExporter
 
 
 def _normalize_value(v):
@@ -61,6 +61,7 @@ class SortWidget(QtWidgets.QWidget):
     applied = pyqtSignal(int)
     saved = pyqtSignal(int)
     default = pyqtSignal(int)
+    export_excel_requested = pyqtSignal(str) 
 
     def __init__(self, sort_data, default_number=2, params_provider=None):
         super().__init__()
@@ -196,10 +197,8 @@ class SortWidget(QtWidgets.QWidget):
             "Excel (*.xlsx)",
         )
         if path:
-            if SortExcelExporter.export_to_excel(self.sort_data, path):
-                QMessageBox.information(self, "Экспорт", f"Данные сохранены в:\n{path}")
-            else:
-                QMessageBox.warning(self, "Экспорт", "Нет данных для экспорта.")
+            self.export_excel_requested.emit(path)
+
 
     def validate_input(self):
         try:

@@ -747,3 +747,356 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         event.accept()
+
+
+
+
+
+
+
+
+
+
+
+# -*- coding: utf-8 -*-
+"""
+MainWindow — чистый компоновщик виджетов.
+
+Ответственность:
+  - Инжекция зависимостей (managers, services)
+  - Сборка UI из автономных виджетов
+  - Маршрутизация сигналов между виджетами
+  - Проксирование команд к WindowManager (IPC)
+
+Все виджеты самодостаточны:
+  - ImagePanelWidget — отображение кадров + метрики производительности
+  - SortContainer — рецепты, автосохранение, работа с регистрами
+  - HikvisionWidget — камера, потоки, параметры SDK
+  - Остальные вкладки — аналогично
+
+Сигнальная шина:
+  Widget A --сигнал--> MainWindow --сигнал--> Widget B
+  или напрямую через RegistersManager (pub/sub)
+"""
+
+from typing import Any, Optional, List, Dict
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (
+    QMainWindow,
+    QVBoxLayout,
+    QWidget,
+)
+
+# Компоненты
+from App.Components.header import HeaderWidget
+from App.Components.tab_widget import TabWidget
+
+# Виджеты — все автономные
+from App.Widget.ImagePanel.image_panel import ImagePanelWidget
+from App.Widget.Sort_widjet.sort_container import SortContainer
+from App.Widget.Hikvision_widjet.Hikvision import HikvisionWidget
+from App.Widget.Logging_widget import LoggingWidget
+from App.Widget.Post_processing_widjet.Post_processing import PostProcessingWidget
+from App.Widget.Processing_widjet.Processing import ProcessingWidget
+from App.Widget.Circle_widjet.Circle import CircleWidget
+from App.Widget.Visual_config_widget import VisualConfigWidget
+
+
+class MainWindow(QMainWindow):
+    """
+    Главное окно — чистый контейнер-compositor.
+    
+    Публичный API (вызывается WindowManager):
+        update_frame(frame, metrics)  — новый кадр от UpdateImage thread
+        update_access_level(level)    — смена уровня доступа
+        close_programm()              — корректное завершение
+    """
+    
+    # Сигналы для WindowManager (если нужна обратная связь)
+    reset_count_requested = pyqtSignal()           # Кнопка "Сбросить значения"
+    recipe_applied = pyqtSignal(str)               # Применён рецепт (для логирования)
+    camera_command = pyqtSignal(dict)              # Команда камере (enum, open, etc)
+    
+    def __init__(
+        self,
+        window_manager: Optional[Any] = None,
+        registers_manager: Optional[Any] = None,
+        data_manager: Optional[Any] = None,
+        logging_manager: Optional[Any] = None,
+        camera_service: Optional[Any] = None,
+        performance_monitor: Optional[Any] = None,
+        app_config: Optional[Any] = None,
+    ) -> None:
+        super().__init__()
+        
+        # Инжектированные зависимости — только храним ссылки
+        self._wm = window_manager
+        self._rm = registers_manager
+        self._dm = data_manager
+        self._lm = logging_manager
+        self._camera_service = camera_service
+        self._perf_monitor = performance_monitor
+        self._app_config = app_config
+        
+        # Состояние
+        self._current_access_level: int = 0
+        
+        # Виджеты (создаются в _init_ui)
+        self._header: Optional[HeaderWidget] = None
+        self._image_panel: Optional[ImagePanelWidget] = None
+        self._tab_widget: Optional[TabWidget] = None
+        
+        # Подвиджеты вкладок (для доступа к cleanup)
+        self._sort_container: Optional[SortContainer] = None
+        self._hikvision_widget: Optional[HikvisionWidget] = None
+        
+        self._init_ui()
+        self._connect_inter_widget_signals()
+        self._apply_window_settings()
+        
+    # ------------------------------------------------------------------
+    # UI Construction — только создание и компоновка
+    # ------------------------------------------------------------------
+    
+    def _init_ui(self) -> None:
+        """Создать все виджеты и разместить в layout."""
+        self.setWindowTitle("Inspector")
+        self.setMinimumSize(800, 600)
+        
+        # Центральный виджет
+        central = QWidget()
+        self.setCentralWidget(central)
+        
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        # 1. Шапка
+        self._header = HeaderWidget(window_manager=self._wm)
+        layout.addWidget(self._header)
+        
+        # 2. Панель изображений (с метриками производительности)
+        self._image_panel = ImagePanelWidget(
+            registers_manager=self._rm,
+            performance_monitor=self._perf_monitor,
+            parent=self
+        )
+        layout.addWidget(self._image_panel, stretch=1)
+        
+        layout.addSpacing(3)
+        
+        # 3. Вкладки
+        self._tab_widget = self._build_tabs()
+        layout.addWidget(self._tab_widget)
+        
+    def _build_tabs(self) -> TabWidget:
+        """Создать TabWidget со всеми вкладками."""
+        tabs = TabWidget()
+        
+        # ── Сорта (рецепты) ──────────────────────────────────────────
+        # Полностью автономный контейнер со своим контроллером
+        self._sort_container = SortContainer(
+            registers_manager=self._rm,
+            data_manager=self._dm,
+            parent=self
+        )
+        tabs.add_tab(self._sort_container, "Сорта", wrap_scroll=False)
+        
+        # ── Визуальная настройка ─────────────────────────────────────
+        tabs.add_tab(
+            VisualConfigWidget(
+                window_manager=self._wm,
+                app_config=self._app_config
+            ),
+            "Визуальная настройка"
+        )
+        
+        # ── Логирование ──────────────────────────────────────────────
+        tabs.add_tab(
+            LoggingWidget(
+                window_manager=self._wm,
+                logging_manager=self._lm,
+            ),
+            "Логирование"
+        )
+        
+        # ── Hikvision (камера) ───────────────────────────────────────
+        # Полностью автономный — свой поток, своя логика
+        self._hikvision_widget = HikvisionWidget(
+            camera_service=self._camera_service,
+            registers_manager=self._rm,
+            data_manager=self._dm,
+            window_manager=self._wm,  # только для queue_manager, если нужно
+        )
+        tabs.add_tab(self._hikvision_widget, "Hikvision")
+        
+        # ── Регионы (пост-обработка) ─────────────────────────────────
+        tabs.add_tab(
+            PostProcessingWidget(
+                registers_manager=self._rm,
+                data_manager=self._dm,
+            ),
+            "Регионы"
+        )
+        
+        # ── Обработка ────────────────────────────────────────────────
+        tabs.add_tab(
+            ProcessingWidget(
+                registers_manager=self._rm,
+                data_manager=self._dm,
+            ),
+            "Обработка"
+        )
+        
+        # ── Форма (Circle) ───────────────────────────────────────────
+        tabs.add_tab(
+            CircleWidget(window_manager=self._wm),
+            "Форма"
+        )
+        
+        return tabs
+        
+    # ------------------------------------------------------------------
+    # Signal Routing — соединяем виджеты друг с другом
+    # ------------------------------------------------------------------
+    
+    def _connect_inter_widget_signals(self) -> None:
+        """
+        Маршрутизация сигналов между виджетами.
+        MainWindow выступает как "шина" — знает топологию, но не логику.
+        """
+        # Hikvision → ImagePanel: размер изображения для метрик
+        self._hikvision_widget.image_size_detected.connect(
+            self._image_panel.set_image_size
+        )
+        
+        # Hikvision → ImagePanel: FPS от SDK (для отображения)
+        self._hikvision_widget.fps_updated.connect(
+            self._image_panel.update_fps_metrics
+        )
+        
+        # SortContainer → MainWindow → WindowManager (reset_count)
+        self._sort_container.reset_requested.connect(
+            self._on_reset_count_requested
+        )
+        
+        # SortContainer → логирование
+        self._sort_container.recipe_applied.connect(
+            self.recipe_applied.emit  # прокси наружу
+        )
+        
+        # Hikvision → логирование/обработка
+        self._hikvision_widget.camera_error.connect(
+            self._on_camera_error
+        )
+        
+        # ImagePanel → наружу (если нужно)
+        self._image_panel.frame_clicked.connect(
+            self._on_frame_clicked
+        )
+        
+    # ------------------------------------------------------------------
+    # Window Settings
+    # ------------------------------------------------------------------
+    
+    def _apply_window_settings(self) -> None:
+        """Применить настройки окна (fullscreen, размер, позиция)."""
+        if not getattr(self._wm, 'fullscreen', False):
+            self.showNormal()
+            self.setGeometry(100, 100, 1200, 800)
+            return
+            
+        # Fullscreen mode
+        if self._app_config and self._app_config.get_limit_fullhd():
+            w = self._app_config.get_fullscreen_limit_width()
+            h = self._app_config.get_fullscreen_limit_height()
+            self.setFixedSize(w, h)
+            screen = self.screen().availableGeometry()
+            self.move((screen.width() - w) // 2, (screen.height() - h) // 2)
+        else:
+            self.showFullScreen()
+            
+    # ------------------------------------------------------------------
+    # Public API — вызывается WindowManager / потоками
+    # ------------------------------------------------------------------
+    
+    def update_frame(
+        self, 
+        frame: Any,  # np.ndarray
+        metrics: Optional[Dict[str, float]] = None
+    ) -> None:
+        """
+        Slot для UpdateImage thread.
+        
+        Args:
+            frame: Кадр от камеры (numpy array)
+            metrics: Опциональные метрики {'fps': 30.0, 'proc_time': 5.2, 'total_time': 10.5}
+        """
+        self._image_panel.display_frame(frame, metrics)
+        
+    def update_access_level(self, level: int) -> None:
+        """
+        Распространить уровень доступа на все виджеты.
+        Вызывается WindowManager после входа администратора.
+        """
+        self._current_access_level = level
+        
+        # Рекурсивно находим все ConfigurableWidget
+        from App.Core.base_configurable_widget import ConfigurableWidget
+        for child in self.findChildren(ConfigurableWidget):
+            child.access_level = level
+            
+    def close_programm(self) -> None:
+        """Корректное завершение: cleanup всех виджетов."""
+        # Останавливаем потоки и сохраняем состояние
+        if self._hikvision_widget:
+            self._hikvision_widget.cleanup()
+            
+        if self._sort_container:
+            self._sort_container.cleanup()
+            
+        # Сигнал наружу
+        if self._wm and hasattr(self._wm, 'stop_event'):
+            self._wm.stop_event.set()
+            
+        self.close()
+        
+    # ------------------------------------------------------------------
+    # Private Slots — обработчики сигналов виджетов
+    # ------------------------------------------------------------------
+    
+    def _on_reset_count_requested(self) -> None:
+        """Кнопка 'Сбросить значения' в SortContainer."""
+        # Прокси в WindowManager для IPC
+        if self._wm and hasattr(self._wm, 'send_reset_count'):
+            self._wm.send_reset_count()
+        self.reset_count_requested.emit()
+        
+    def _on_camera_error(self, error_msg: str) -> None:
+        """Ошибка от HikvisionWidget — можно показать в статус-баре или логе."""
+        if self._lm:
+            self._lm.log_error(f"Camera: {error_msg}")
+            
+    def _on_frame_clicked(self, pos: tuple) -> None:
+        """Клик по изображению — например, выбор точки для калибровки."""
+        # Прокси наружу или обработка здесь
+        pass
+        
+    # ------------------------------------------------------------------
+    # Properties для обратной совместимости (убрать позже)
+    # ------------------------------------------------------------------
+    
+    @property
+    def header(self):
+        """Доступ к HeaderWidget (используется WindowManager)."""
+        return self._header
+        
+    # ------------------------------------------------------------------
+    # Qt Overrides
+    # ------------------------------------------------------------------
+    
+    def closeEvent(self, event) -> None:
+        """Пользователь закрыл окно — корректный shutdown."""
+        self.close_programm()
+        event.accept()

@@ -31,16 +31,10 @@ class ProcessManagers:
         # Импорт нового рефакторенного RouterManager
         from ...router_module import RouterManager, RouterAdapter
         
-        # Импорт других менеджеров (временно из старого модуля, потом будут рефакторены)
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "modules"))
-        
-        from Command_module.command_manager import CommandManager
-        from Logger_module.manager import LoggerManager, LogConfig
-        
-        from Command_module.command_adapter import CommandAdapter
-        from Logger_module.logger_adapter import LoggerAdapter
+        # Импорт из refactored модулей (ТОЛЬКО refactored, не трогаем modules "no work")
+        from ...command_module import CommandManager, CommandAdapter
+        from ...logger_module import LoggerManager, LogConfig
+        from ...logger_module.adapters.logger_adapter import LoggerAdapter
         
         managers_config = self.process.config_handler.get_managers_config()
         
@@ -61,10 +55,11 @@ class ProcessManagers:
                     setattr(log_config, key, value)
         
         self.process.logger_manager = LoggerManager(
+            manager_name=f"logger_{self.process.name}",
             config=log_config,
-            process=self.process,  # Ссылка на процесс
+            process=self.process,
             config_manager=self.process.config_manager,
-            enable_message_routing=True
+            enable_router_routing=True
         )
         self.process.logger_manager.initialize()
         

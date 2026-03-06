@@ -204,23 +204,23 @@ class ProcessManagerCore(BaseManager, ObservableMixin):
                     # Если не удалось сохранить, продолжаем без сохранения
                     pass
             
-            # Создаем очереди для процесса
-            if self.queue_registry:
+            # Создаем очереди (пропуск если уже созданы в двухфазном режиме)
+            if self.queue_registry and not self.queue_registry.get_process_queues(name):
                 queue_config = process_config.get('queues', {})
                 self.queue_registry.create_and_register_queues(name, queue_config)
             
-            # Импортируем функцию запуска процесса
-            from ..runner import run_process_function
+            # Connection bundle: queues + routing_map (телефонная книга — все процессы видят друг друга)
+            queues = self.queue_registry.get_process_queues(name) if self.queue_registry else {}
+            routing_map = dict(self.queue_registry.registered_queues) if self.queue_registry else {}
+            process_data = self.shared_resources.get_process_data(name) if self.shared_resources else None
+            custom = dict(process_data.custom) if process_data and process_data.custom else {}
+            custom.setdefault('process_config', process_config)
+            bundle = {"queues": queues, "config": process_config, "custom": custom, "routing_map": routing_map}
             
-            # Создаем процесс ОС
+            from ..runner import run_process_function
             process = Process(
                 target=run_process_function,
-                args=(
-                    class_path,
-                    name,
-                    self.stop_event,
-                    self.shared_resources
-                ),
+                args=(class_path, name, self.stop_event, bundle),
                 name=name
             )
             

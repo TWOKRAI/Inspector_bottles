@@ -2,7 +2,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from queue import Empty
 import time
 
-from App.Windows.message_window import MessageWindow
+from App.UI.Windows.message_window import MessageWindow
 
 
 class BotThread(QThread):

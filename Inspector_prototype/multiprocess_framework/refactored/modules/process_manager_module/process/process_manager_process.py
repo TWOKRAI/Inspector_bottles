@@ -46,22 +46,23 @@ class ProcessManagerProcess(ProcessModule):
         super().__init__(name, shared_resources, config)
         
         # Создаем ProcessManagerCore (Сверхэго)
-        # Импортируем зависимости (временно из старого модуля)
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "modules"))
-        
-        from Config_module.config_manager import ConfigManager
-        from Shared_resources_module.queue_registry import QueueRegistry
-        from Console_module import ConsoleManager
-        from Process_manager_module.platforms import get_platform_adapter
-        
-        # Создаем локальные менеджеры
-        config_manager = ConfigManager()
+        from ...config_module import ConfigManager
+        from ...shared_resources_module import QueueRegistry
+        from ...console_module import ConsoleManager
+        from ..platforms import get_platform_adapter
+
+        config_manager = ConfigManager(manager_name="config_manager", process=None)
+        config_manager.initialize()
         queue_registry = QueueRegistry(
-            process_state_registry=self.shared_resources.process_state_registry if self.shared_resources else None
+            manager_name="queue_registry",
+            process_state_registry=self.shared_resources.process_state_registry if self.shared_resources else None,
         )
-        console_manager = ConsoleManager(logger=self.logger_manager if hasattr(self, 'logger_manager') else None)
+        queue_registry.initialize()
+        logger = self.logger_manager if hasattr(self, "logger_manager") else None
+        console_manager = ConsoleManager(
+            manager_name="console_manager",
+            managers={"logger": logger} if logger else {},
+        )
         platform_adapter = get_platform_adapter()
         
         # Создаем ProcessManagerCore
@@ -93,15 +94,41 @@ class ProcessManagerProcess(ProcessModule):
         # Инициализация ProcessModule (Эго)
         if not super().initialize():
             return False
-        
+
         # Инициализация ProcessManagerCore (Сверхэго)
         if not self.core.initialize():
             return False
-        
+
+        # Создание и запуск процессов из processes_config
+        processes_config = self.get_config("processes_config") or {}
+        if isinstance(processes_config, dict) and processes_config:
+            self._create_processes_from_config(processes_config)
+
         # Запускаем мониторинг состояний процессов
         self.process_monitor.start()
-        
+
         return True
+
+    def _create_processes_from_config(self, processes_config: Dict[str, Dict[str, Any]]) -> None:
+        """Создать и запустить процессы из processes_config.
+        Двухфазный подход: сначала все очереди (телефонная книга), затем запуск процессов.
+        """
+        valid = [(n, c) for n, c in processes_config.items()
+                 if isinstance(c, dict) and c.get("class")]
+        if not valid:
+            return
+        # Фаза 1: создать очереди для всех процессов
+        for name, proc_config in valid:
+            if self.shared_resources:
+                self.shared_resources.register_process_state(name, config={"process": proc_config})
+            if self.core.queue_registry:
+                self.core.queue_registry.create_and_register_queues(
+                    name, proc_config.get("queues", {}))
+        # Фаза 2: создать и запустить процессы (bundle с полной routing_map)
+        for name, proc_config in valid:
+            priority = proc_config.get("priority", "normal")
+            if self.core.create_process(name, proc_config["class"], proc_config, priority):
+                self.core.start_process(name)
     
     def shutdown(self) -> bool:
         """

@@ -136,7 +136,25 @@ class ProcessStateRegistry:
         except Exception as e:
             print(f"ProcessStateRegistry: Failed to register process '{process_name}': {e}")
             return False
-    
+
+    def register_process_with_config(
+        self,
+        process_name: str,
+        config: Any,
+        initial_state: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Регистрация процесса с конфигурацией (ProcessConfiguration или dict).
+        """
+        if hasattr(config, "process") and hasattr(config, "to_dict"):
+            config = config.to_dict()
+        elif not isinstance(config, dict):
+            config = {}
+        state = initial_state or {}
+        return self.register_process(
+            process_name, initial_state=state, queue_names=None, config=config
+        )
+
     def update_state(
         self, 
         process_name: str, 

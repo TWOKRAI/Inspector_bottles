@@ -3,7 +3,7 @@
 Централизованный менеджер параметров виджетов.
 Хранилище рецептов — SortData (YAML). Excel только через виджет (экспорт отдельным классом).
 """
-from App.Widget.Sort_widjet.sort_data import SortData
+from App.UI.Widgets.Sort_widget.sort_data import SortData
 
 
 class ParamsManager:

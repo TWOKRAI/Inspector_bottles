@@ -15,7 +15,7 @@ ConfigManager, QueueRegistry, MemoryManager создаются локально 
 from multiprocessing import Queue, Event
 from typing import Dict, Any, Optional
 
-from ...base_manager import BaseManager, ObservableMixin
+from ...base_manager import BaseManager, ObservableMixin, _noop
 # Импорт из refactored модуля process_module
 from ...process_module.state.process_state_registry import ProcessStateRegistry
 from ...process_module.state.process_data import ProcessData
@@ -241,7 +241,8 @@ class SharedResourcesManager(BaseManager, ObservableMixin):
         self,
         process_name: str,
         initial_state: Optional[Dict[str, Any]] = None,
-        queue_names: Optional[Dict[str, str]] = None
+        queue_names: Optional[Dict[str, str]] = None,
+        config: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Регистрация состояния процесса.
@@ -252,12 +253,13 @@ class SharedResourcesManager(BaseManager, ObservableMixin):
             process_name: Имя процесса
             initial_state: Начальное состояние процесса
             queue_names: Словарь имен очередей
+            config: Конфигурация процесса {process: {...}, managers: {...}}
         
         Returns:
             bool: True если регистрация успешна
         """
         return self.process_state_registry.register_process(
-            process_name, initial_state, queue_names
+            process_name, initial_state, queue_names, config
         )
     
     def register_process_with_config(
@@ -375,6 +377,14 @@ class SharedResourcesManager(BaseManager, ObservableMixin):
         Raises:
             AttributeError: Если процесс не найден и имя не является специальным атрибутом
         """
+        # Fallback для proxy-методов после unpickle (исключены при pickle для multiprocessing)
+        # Модульная функция вместо lambda — pickle-совместимо на Windows (spawn)
+        _PICKLE_SKIP_ATTRS = (
+            '_log_method', '_log_method_internal', '_log', '_record_metric_method',
+            '_track_error_method', '_call_manager'
+        )
+        if name in _PICKLE_SKIP_ATTRS or name.startswith(('_log_', '_record_', '_track_')):
+            return _noop
         # Проверяем, не является ли это специальным атрибутом
         if name.startswith('_') or name in ['process_state_registry', 'shared_resources', 'event_manager', 'get_stats', '__dict__']:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
@@ -434,5 +444,25 @@ class SharedResourcesManager(BaseManager, ObservableMixin):
             f"shared_resources={stats.get('shared_resources', {}).get('shared_resources', {}).get('count', 0)}"
             f")"
         )
+
+    def __getstate__(self):
+        """Pickle: исключаем proxy-методы и _registry (closures не pickle-able на Windows)."""
+        state = self.__dict__.copy()
+        _PICKLE_EXCLUDE = (
+            'log_debug', 'log_info', 'log_warning', 'log_error', 'log_critical',
+            'record_metric', 'increment', 'record_timing', 'gauge',
+            'track_error', 'record_error',
+            '_call_manager', '_registry', '_plugin_registry', '_proxy_created',
+        )
+        for key in _PICKLE_EXCLUDE:
+            state.pop(key, None)
+        # Обеспечиваем _adapters для BaseManager после unpickle
+        if '_adapters' not in state:
+            state['_adapters'] = {}
+        return state
+
+    def __setstate__(self, state):
+        """Unpickle: восстанавливаем объект. Proxy-методы будут созданы при необходимости."""
+        self.__dict__.update(state)
 
 

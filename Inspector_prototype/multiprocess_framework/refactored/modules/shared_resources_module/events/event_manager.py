@@ -364,6 +364,32 @@ class EventManager(BaseManager, ObservableMixin):
         
         return stats
 
+    def __getstate__(self):
+        """Pickle: исключаем proxy-методы, Queue, callbacks для multiprocessing на Windows."""
+        state = self.__dict__.copy()
+        _PICKLE_EXCLUDE = (
+            'log_debug', 'log_info', 'log_warning', 'log_error', 'log_critical',
+            'record_metric', 'increment', 'record_timing', 'gauge',
+            'track_error', 'record_error',
+            '_call_manager', '_registry', '_plugin_registry', '_proxy_created',
+            '_event_queue', '_subscribers', '_new_event_event',  # Queue, Event, callbacks
+        )
+        for key in _PICKLE_EXCLUDE:
+            state.pop(key, None)
+        if '_adapters' not in state:
+            state['_adapters'] = {}
+        return state
+
+    def __setstate__(self, state):
+        """Unpickle: восстанавливаем объект. Исключённые Queue/Event — None."""
+        self.__dict__.update(state)
+        if '_event_queue' not in self.__dict__:
+            self._event_queue = None
+        if '_subscribers' not in self.__dict__:
+            self._subscribers = {}
+        if '_new_event_event' not in self.__dict__:
+            self._new_event_event = None
+
 
 
 

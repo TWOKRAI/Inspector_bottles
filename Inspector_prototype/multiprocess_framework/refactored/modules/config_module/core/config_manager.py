@@ -35,7 +35,11 @@ from ..interfaces import IConfigManager, IConfig
 from .base_config import Config  # Импорт из того же пакета core/
 from ...data_schema_module.storage.storage_manager import StorageManager
 from ...shared_resources_module.events.event_manager import EventManager, EventType
-from ...shared_resources_module.core.shared_resources_manager import SharedResourcesManager
+
+# Ленивый импорт SharedResourcesManager — избегаем циклической зависимости
+# (shared_resources -> process_module -> config -> config_manager -> shared_resources)
+if TYPE_CHECKING:
+    from ...shared_resources_module.core.shared_resources_manager import SharedResourcesManager
 
 
 class ConfigManager(BaseManager, ObservableMixin, IConfigManager):
@@ -67,7 +71,7 @@ class ConfigManager(BaseManager, ObservableMixin, IConfigManager):
         self,
         manager_name: str = "ConfigManager",
         process: Optional["Process"] = None,
-        shared_resources: Optional[SharedResourcesManager] = None,
+        shared_resources: Optional["SharedResourcesManager"] = None,
         event_manager: Optional[EventManager] = None,
         storage_manager: Optional[StorageManager] = None,
         auto_sync: bool = True,

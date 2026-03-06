@@ -462,3 +462,20 @@ class ObservableMixin:
         print("=" * 60)
         print(json.dumps(methods, indent=2, ensure_ascii=False))
         print("=" * 60)
+
+    def __getstate__(self):
+        """Pickle: исключаем proxy-методы (closures не pickle-able на Windows)."""
+        state = self.__dict__.copy()
+        _PICKLE_EXCLUDE = (
+            'log_debug', 'log_info', 'log_warning', 'log_error', 'log_critical',
+            'record_metric', 'increment', 'record_timing', 'gauge',
+            'track_error', 'record_error',
+            '_call_manager', '_registry', '_plugin_registry', '_proxy_created',
+        )
+        for key in _PICKLE_EXCLUDE:
+            state.pop(key, None)
+        return state
+
+    def __setstate__(self, state):
+        """Unpickle: восстанавливаем объект."""
+        self.__dict__.update(state)
