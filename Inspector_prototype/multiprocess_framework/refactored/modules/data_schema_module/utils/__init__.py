@@ -29,6 +29,12 @@ from .registers_io import (
     registers_to_flat_dict,
     registers_from_flat_dict,
 )
+from .config_converters import (
+    config_to_dict,
+    configs_to_dicts,
+    build_process_with_workers,
+    process,
+)
 
 __all__ = [
     # Конвертеры
@@ -60,5 +66,10 @@ __all__ = [
     'registers_from_yaml',
     'registers_to_flat_dict',
     'registers_from_flat_dict',
+    # Dict at Boundary
+    'config_to_dict',
+    'configs_to_dicts',
+    'build_process_with_workers',
+    'process',
 ]
 

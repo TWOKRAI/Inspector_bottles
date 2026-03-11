@@ -29,6 +29,7 @@ class Process1Config(RegisterBase):
             "queues": {
                 "system": {"maxsize": self.queue_maxsize},
                 "data": {"maxsize": self.queue_maxsize},
+                "worker_in": {"maxsize": 50},
             },
             "priority": self.priority,
         })

@@ -70,6 +70,30 @@ def setup_signal_handlers(coordinator):
         signal.signal(signal.SIGBREAK, signal_handler)
 
 
+def create_app(queue_manager, stop_event):
+    """
+    Создание и запуск приложения (для process_app).
+    Вызывается из Multiproccesing.Processes.process_app.
+    """
+    from App.Core.Application.coordinator import ApplicationCoordinator
+    from pathlib import Path
+
+    coordinator = ApplicationCoordinator(
+        queue_manager=queue_manager,
+        stop_event=stop_event,
+        config_path=Path("App/Data/config.yaml"),
+    )
+    if not coordinator.initialize():
+        print("[create_app] Failed to initialize")
+        return 1
+    try:
+        return coordinator.run()
+    except Exception as e:
+        print(f"[create_app] Error: {e}")
+        coordinator.shutdown()
+        return 1
+
+
 def main():
     """
     Главная функция приложения.

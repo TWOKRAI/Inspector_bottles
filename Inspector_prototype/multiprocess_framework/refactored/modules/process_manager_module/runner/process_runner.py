@@ -14,10 +14,6 @@ import importlib
 from multiprocessing import Event
 from typing import Optional, Union, Dict, Any
 
-# Временно используем старый путь, потом будет рефакторен
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "modules"))
 from multiprocess_framework.refactored.modules.shared_resources_module import SharedResourcesManager
 
 

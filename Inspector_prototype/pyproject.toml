@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inspector-prototype"
+version = "0.1.0"
+description = "Multiprocess Framework — распределённое приложение на одной машине"
+requires-python = ">=3.9"
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["multiprocess_framework*", "multiprocess_prototype*"]
+
+[tool.pytest.ini_options]
+testpaths = ["multiprocess_framework/refactored"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

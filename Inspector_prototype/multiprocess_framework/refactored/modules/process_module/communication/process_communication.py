@@ -79,12 +79,29 @@ class ProcessCommunication:
                 self.logger_callback("WARNING", "RouterManager not available", "communication")
                 return
             
+            WORKER_ONLY_QUEUES = ("worker_in",)
             for queue_name, queue in self.queues.items():
-                # Создаем QueueChannel для каждой очереди
+                if queue_name in WORKER_ONLY_QUEUES:
+                    continue
                 channel = QueueChannel(f"{self.process_name}_{queue_name}", queue)
-                # Регистрируем канал в роутере
                 self.router_manager.register_channel(channel)
                 self.logger_callback("DEBUG", f"Registered queue channel '{queue_name}' in router", "communication")
+            
+            # Регистрация каналов для других процессов (из shared_resources) — межпроцессная связь
+            if self.shared_resources and self.shared_resources.process_state_registry:
+                for target_name in self.shared_resources.process_state_registry.get_process_names():
+                    if target_name == self.process_name:
+                        continue
+                    process_data = self.shared_resources.get_process_data(target_name)
+                    if process_data and process_data.queues:
+                        for qtype in process_data.queues:
+                            queue = process_data.get_queue(qtype)
+                            if queue:
+                                ch_name = f"{target_name}_{qtype}"
+                                if not self.router_manager.get_channel(ch_name):
+                                    channel = QueueChannel(ch_name, queue)
+                                    self.router_manager.register_channel(channel)
+                                    self.logger_callback("DEBUG", f"Registered cross-process channel '{ch_name}'", "communication")
             
             # Регистрируем канал system_events для событий (если есть очередь events)
             if 'events' in self.queues or self.shared_resources:

@@ -112,6 +112,7 @@ from .core.interfaces import (
     IDataValidator,
     IRegisterStorage,
     IAsyncRegisterStorage,
+    HasBuild,
 )
 
 # --- Модели компонентов ---
@@ -128,6 +129,12 @@ from .utils.helpers import (
     merge_with_defaults,
     extract_fields,
     get_model_schema,
+)
+from .utils.config_converters import (
+    config_to_dict,
+    configs_to_dicts,
+    build_process_with_workers,
+    process,
 )
 from .utils.registers_io import (
     registers_to_dict,
@@ -243,6 +250,7 @@ __all__ = [
     "IDataValidator",
     "IRegisterStorage",
     "IAsyncRegisterStorage",
+    "HasBuild",
     # Модели компонентов
     "BaseComponentModel",
     "BaseManagerModel",
@@ -265,6 +273,11 @@ __all__ = [
     "registers_from_yaml",
     "registers_to_flat_dict",
     "registers_from_flat_dict",
+    # Dict at Boundary
+    "config_to_dict",
+    "configs_to_dicts",
+    "build_process_with_workers",
+    "process",
     # Версионирование
     "VersionManager",
     "VersionInfo",

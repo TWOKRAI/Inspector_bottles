@@ -2,9 +2,13 @@
 Core компоненты Process Manager Module.
 """
 
-from .process_manager_core import ProcessManagerCore
+from .process_registry import ProcessRegistry
+from .process_priority import ProcessPriority
+from .process_status import ProcessStatus
 
 __all__ = [
-    'ProcessManagerCore',
+    'ProcessRegistry',
+    'ProcessPriority',
+    'ProcessStatus',
 ]
 

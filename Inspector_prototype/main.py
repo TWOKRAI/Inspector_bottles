@@ -1,6 +1,14 @@
 """
 Главный файл запуска прототипа инспектора
 """
+import sys
+from pathlib import Path
+
+# Добавляем корень прототипа в путь (для multiprocess_framework, App и т.д.)
+_proto = Path(__file__).resolve().parent
+if str(_proto) not in sys.path:
+    sys.path.insert(0, str(_proto))
+
 from Multiproccesing.Processes_Manager import MultiProcessManager
 
 

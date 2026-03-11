@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: inspector-prototype
+Version: 0.1.0
+Summary: Multiprocess Framework — распределённое приложение на одной машине
+Requires-Python: >=3.9
+Requires-Dist: pydantic>=2.0

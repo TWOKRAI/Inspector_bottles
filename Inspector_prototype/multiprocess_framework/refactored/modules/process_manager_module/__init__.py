@@ -1,14 +1,15 @@
 """
-Process Manager Module (Refactored) - Модуль управления процессами на основе BaseManager.
+Process Manager Module (Refactored) - Модуль управления процессами.
 
-ProcessManager является Сверхэго в архитектуре "Тройцы создания циклов".
+ProcessManagerProcess — оркестратор с композицией ProcessRegistry + ProcessPriority + ProcessStatus.
 """
 
-from .core.process_manager_core import ProcessManagerCore
 from .process.process_manager_process import ProcessManagerProcess
+from .launcher import SystemLauncher, ProcessSpawner
 
 __all__ = [
-    'ProcessManagerCore',
     'ProcessManagerProcess',
+    'SystemLauncher',
+    'ProcessSpawner',
 ]
 

@@ -67,7 +67,6 @@ class SystemThreads:
                 # Получаем сообщения из очередей через роутер
                 if self.process.router_manager:
                     messages = self.process.router_manager.receive(timeout=0.0)
-                    
                     for message in messages:
                         self._handle_message(message)
                 

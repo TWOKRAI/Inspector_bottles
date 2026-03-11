@@ -1,85 +1,38 @@
-# Статус ProcessManagerModule (Refactored)
+# process_manager_module — Статус рефакторинга
 
-## ✅ Завершено
+## Текущий этап: 0 / 8
 
-### Основные компоненты
-- ✅ `core/process_manager_core.py` - ProcessManagerCore (BaseManager + ObservableMixin)
-- ✅ `core/process_lifecycle.py` - ProcessLifecycle (управление жизненным циклом процессов)
-- ✅ `core/process_priority.py` - ProcessPriority (управление приоритетами процессов)
-- ✅ `core/process_status.py` - ProcessStatus (мониторинг статуса процессов)
-- ✅ `process/process_manager_process.py` - ProcessManagerProcess (ProcessModule + ProcessManagerCore)
-- ✅ `runner/process_runner.py` - run_process_function (запуск процессов)
+## Оценки (0-10)
 
-### Новые компоненты
-- ✅ `monitor/process_monitor.py` - ProcessMonitor (мониторинг состояний процессов)
-- ✅ `bootstrap/process_manager_bootstrap.py` - ProcessManagerBootstrap (загрузка системы)
-- ✅ `launcher/system_launcher.py` - SystemLauncher (запуск системы)
+| Критерий | Оценка | Комментарий |
+|----------|--------|-------------|
+| Код (читаемость, стандарты) | 6 | Хорошая структура, но сложный spawner |
+| Тесты (покрытие) | 5 | Есть тесты для launcher, registry, spawner |
+| Документация (README, interfaces) | 5 | README есть, нет interfaces.py |
+| Связанность (меньше = лучше) | 3 | Оркестратор — ожидаемо высокая связанность |
+| Дублирование | 6 | Незначительные повторения в process_runner |
+| Работоспособность | 4 | sys.path убран, нужна проверка на этапе 1 |
 
-### Интеграция
-- ✅ ProcessMonitor интегрирован в ProcessManagerProcess
-- ✅ ProcessManagerBootstrap использует новый ProcessManagerProcess
-- ✅ SystemLauncher использует ProcessManagerBootstrap
+## Чеклист рефакторинга
 
-## Архитектура
+- [x] Этап 0: Критические баги исправлены (убран sys.path.insert из process_runner.py)
+- [ ] Этап 1: Модуль запускается в составе оркестратора
+- [ ] Этап 2: Работает с дочерними процессами
+- [ ] Этап 3: Коммуникация через Router проверена
+- [ ] Этап 4: Живое ДНК интегрировано
+- [ ] Этап 5: CommandManager подключён
+- [ ] Этап 6: Graceful shutdown работает
+- [ ] Этап 7: Unit-тесты написаны и проходят
+- [ ] Этап 8: README и interfaces.py готовы
 
-### Тройца создания циклов
-- **ProcessManagerCore (Сверхэго)** - управляет всеми процессами системы
-- **ProcessManagerProcess (Эго)** - базовый процесс, выполняет работу
-- **WorkerManager (Ид)** - управляет потоками внутри процесса
+## Известные проблемы
 
-### Компоненты
-```
-ProcessManagerProcess (ProcessModule)
-├── ProcessManagerCore (BaseManager + ObservableMixin)
-│   ├── ProcessLifecycle
-│   ├── ProcessPriority
-│   └── ProcessStatus
-├── ProcessMonitor
-│   └── state_monitor (Worker через WorkerManager)
-└── WorkerManager (Id)
-```
+- process_runner.py использовал `from Console_module.redirector` — обёрнуто в try/except
+- Нет interfaces.py
+- Главная цель Этапа 1 — добиться работы SystemLauncher → ProcessManagerProcess
 
-## Использование
+## История изменений
 
-### Через SystemLauncher (рекомендуется)
-```python
-from multiprocess_framework.refactored.modules.process_manager_module import SystemLauncher
-
-launcher = SystemLauncher(config="config/processes.yaml")
-launcher.start()
-launcher.wait()
-```
-
-### Через ProcessManagerBootstrap
-```python
-from multiprocess_framework.refactored.modules.process_manager_module import ProcessManagerBootstrap
-
-bootstrap = ProcessManagerBootstrap(config="config/processes.yaml")
-bootstrap.start()
-bootstrap.wait()
-```
-
-## Преимущества новой архитектуры
-
-- ✅ Единообразие со всеми менеджерами системы (BaseManager + ObservableMixin)
-- ✅ Автоматическое логирование через ObservableMixin
-- ✅ Стандартный жизненный цикл (initialize/shutdown)
-- ✅ Модульная структура (core/, process/, monitor/, bootstrap/, launcher/)
-- ✅ Интеграция с ProcessModule и WorkerManager
-- ✅ ProcessMonitor как компонент, а не отдельный ProcessModule
-
-## ⚠️ Требует проверки
-
-1. Тестирование нового ProcessManagerModule
-2. Проверка интеграции с ProcessModule и WorkerManager
-3. Проверка работы ProcessMonitor
-4. Проверка работы ProcessManagerBootstrap и SystemLauncher
-
-## 📋 Следующие шаги
-
-1. Написать юнит-тесты для ProcessManagerCore
-2. Написать тесты для ProcessMonitor
-3. Интеграционные тесты для ProcessManagerProcess
-4. Тесты для ProcessManagerBootstrap и SystemLauncher
-5. Проверить работу с реальными процессами
-
+| Дата | Что сделано | Этап |
+|------|-------------|------|
+| 2026-03-11 | Убран sys.path.insert из process_runner.py, STATUS.md создан | 0 |

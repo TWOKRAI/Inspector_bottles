@@ -29,10 +29,6 @@ from .core.interfaces import (
     ISharedResourcesManager,
 )
 
-# ProcessStateRegistry импортируется из refactored модуля process_module
-from ..process_module.state.process_state_registry import ProcessStateRegistry
-from ..process_module.state.process_data import ProcessData
-
 __all__ = [
     # Основные классы
     'SharedResourcesManager',
@@ -49,8 +45,7 @@ __all__ = [
     'IProcessStateRegistry',
     'ISharedResourcesManager',
     
-    # Из Process_module
-    'ProcessStateRegistry',
-    'ProcessData',
+    # ProcessStateRegistry и ProcessData — импортируй напрямую:
+    # from multiprocess_framework.refactored.modules.process_module.state import ...
 ]
 

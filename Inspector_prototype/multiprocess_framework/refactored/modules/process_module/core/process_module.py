@@ -288,23 +288,9 @@ class ProcessModule(BaseManager, ObservableMixin):
                 self._log_error(f"Failed to create worker '{name}': {e}")
     
     # ========================================================================
-    # ОСНОВНОЙ ЦИКЛ ПРОЦЕССА
+    # ФЛАГ ОСТАНОВКИ
     # ========================================================================
-    
-    def run(self):
-        """
-        Основной цикл процесса.
-        
-        Должен быть переопределен в дочерних классах.
-        """
-        self.stop_process = False
-        while not self.should_stop():
-            time.sleep(0.1)
-    
-    def stop(self):
-        """Остановка процесса."""
-        self.stop_process = True
-    
+
     def should_stop(self) -> bool:
         """Проверка флага остановки."""
         return self.stop_process

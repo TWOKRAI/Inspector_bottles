@@ -46,12 +46,13 @@ class ProcessLifecycle:
             # 5. Регистрация состояния процесса
             self.process._register_process_state()
             
-            # 6. Инициализация системных потоков
-            self.process._init_system_threads()
-            
-            # 7. Опциональная инициализация для дочерних классов
+            # 6. Воркеры и кастомные менеджеры — до message_processor,
+            #    чтобы register_message_handler успел зарегистрироваться
             self.process._init_custom_managers()
             self.process._init_application_threads()
+            
+            # 7. Системные потоки (message_processor) — после воркеров
+            self.process._init_system_threads()
             
             # 8. Обновляем статус на "ready"
             self.process.update_process_state(status="ready")

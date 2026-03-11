@@ -1,34 +1,33 @@
 """
 Точка входа для многопроцессного приложения.
 
-SystemLauncher — фасад: создание процессов и воркеров через конфиги.
+SystemLauncher — фасад: add_process(name, proc_dict).
+Конвертация config → dict через build_process_with_workers (Dict at Boundary).
 """
 
 import sys
-from pathlib import Path
-
-_prototype_root = Path(__file__).resolve().parent.parent
-if str(_prototype_root) not in sys.path:
-    sys.path.insert(0, str(_prototype_root))
 
 
-def main():
-    from multiprocess_framework.refactored.modules.process_manager_module.launcher import SystemLauncher
+def main() -> int:
+    from multiprocess_framework.refactored.modules.process_manager_module import (
+        SystemLauncher,
+    )
+    from multiprocess_framework.refactored.modules.data_schema_module import process
     from multiprocess_prototype.processes.process_1 import Process1Config
     from multiprocess_prototype.processes.process_1.worker_1 import Worker1Config
     from multiprocess_prototype.processes.process_2 import Process2Config
-    from multiprocess_prototype.processes.process_2.worker_2 import Worker2_1Config, Worker2_2Config
+    from multiprocess_prototype.processes.process_2.worker_2 import (
+        Worker2_1Config,
+        Worker2_2Config,
+    )
 
     launcher = SystemLauncher()
 
-    process_1 = launcher.create_process(Process1Config())
-    process_1.add_worker(Worker1Config())
-    launcher.add_process(process_1)
+    launcher.add_process(*process(Process1Config(), Worker1Config()))
 
-    process_2 = launcher.create_process(Process2Config())
-    process_2.add_worker(Worker2_1Config())
-    process_2.add_worker(Worker2_2Config())
-    launcher.add_process(process_2)
+    launcher.add_process(
+        *process(Process2Config(), Worker2_1Config(), Worker2_2Config())
+    )
 
     launcher.run()
     launcher.shutdown()
