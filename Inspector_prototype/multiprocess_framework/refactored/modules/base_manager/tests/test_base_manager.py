@@ -1,148 +1,216 @@
 """
-Тесты для BaseManager.
+Тесты BaseManager.
+
+Покрывает: жизненный цикл, адаптеры, события, статистику, диагностику,
+           isinstance по IBaseManager, pickle-совместимость.
 """
 
+import pickle
 import pytest
+
 from ..core.base_manager import BaseManager
+from ..interfaces import IBaseManager
 
 
-class MockManager(BaseManager):
-    """Тестовый менеджер для проверки BaseManager."""
-    
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+class ConcreteManager(BaseManager):
+    """Минимальная конкретная реализация BaseManager для тестов."""
+
     def initialize(self) -> bool:
         self.is_initialized = True
         return True
-    
+
     def shutdown(self) -> bool:
         self.is_initialized = False
         return True
 
 
 class MockAdapter:
-    """Тестовый адаптер."""
-    
-    def __init__(self, manager, process=None):
-        self.manager = manager
-        self.process = process
-        self.adapter_name = "test_adapter"
+    """Минимальный адаптер для тестов."""
+
+    def __init__(self):
+        self.manager = None
         self._initialized = False
-    
+
     def setup(self) -> bool:
         self._initialized = True
         return True
-    
+
     def is_initialized(self) -> bool:
         return self._initialized
 
+    def get_stats(self) -> dict:
+        return {"type": "MockAdapter"}
+
+
+# ---------------------------------------------------------------------------
+# TestBaseManager
+# ---------------------------------------------------------------------------
 
 class TestBaseManager:
-    """Тесты для BaseManager."""
-    
-    def test_create_manager(self):
-        """Тест создания менеджера."""
-        manager = MockManager("test_manager")
-        
-        assert manager.manager_name == "test_manager"
-        assert manager.is_initialized is False
-        assert manager.process is None
-    
+
+    def test_creation_defaults(self):
+        m = ConcreteManager("test_manager")
+        assert m.manager_name == "test_manager"
+        assert m.is_initialized is False
+        assert m.process is None
+        assert m.list_adapters() == []
+
+    def test_creation_with_process(self):
+        process = object()
+        m = ConcreteManager("test_manager", process=process)
+        assert m.process is process
+
     def test_initialize(self):
-        """Тест инициализации менеджера."""
-        manager = MockManager("test_manager")
-        
-        result = manager.initialize()
-        
-        assert result is True
-        assert manager.is_initialized is True
-    
+        m = ConcreteManager("test_manager")
+        assert m.initialize() is True
+        assert m.is_initialized is True
+
     def test_shutdown(self):
-        """Тест завершения менеджера."""
-        manager = MockManager("test_manager")
-        manager.initialize()
-        
-        result = manager.shutdown()
-        
-        assert result is True
-        assert manager.is_initialized is False
-    
-    def test_attach_adapter(self):
-        """Тест подключения адаптера."""
-        manager = MockManager("test_manager")
-        adapter = MockAdapter(manager)
-        
-        result = manager.attach_adapter(adapter, name="test")
-        
-        assert result is True
-        assert manager.has_adapter("test")
-        assert manager.get_adapter("test") == adapter
-    
-    def test_get_adapter_by_name(self):
-        """Тест получения адаптера по имени."""
-        manager = MockManager("test_manager")
-        adapter = MockAdapter(manager)
-        
-        manager.attach_adapter(adapter, name="test")
-        
-        assert manager.get_adapter("test") == adapter
-    
+        m = ConcreteManager("test_manager")
+        m.initialize()
+        assert m.shutdown() is True
+        assert m.is_initialized is False
+
+    # ---- Адаптеры ----
+
+    def test_attach_adapter_with_explicit_name(self):
+        m = ConcreteManager("test_manager")
+        adapter = MockAdapter()
+        assert m.attach_adapter(adapter, name="mock") is True
+        assert m.has_adapter("mock")
+        assert m.get_adapter("mock") is adapter
+
+    def test_attach_adapter_none_returns_false(self):
+        m = ConcreteManager("test_manager")
+        assert m.attach_adapter(None) is False
+
+    def test_attach_adapter_sets_back_reference(self):
+        m = ConcreteManager("test_manager")
+        adapter = MockAdapter()
+        m.attach_adapter(adapter, name="mock")
+        assert adapter.manager is m
+
+    def test_get_adapter_first_when_no_name(self):
+        m = ConcreteManager("test_manager")
+        adapter = MockAdapter()
+        m.attach_adapter(adapter, name="first")
+        assert m.get_adapter() is adapter
+
+    def test_get_adapter_nonexistent_returns_none(self):
+        m = ConcreteManager("test_manager")
+        assert m.get_adapter("nonexistent") is None
+
     def test_list_adapters(self):
-        """Тест получения списка адаптеров."""
-        manager = MockManager("test_manager")
-        adapter1 = MockAdapter(manager)
-        adapter2 = MockAdapter(manager)
-        
-        manager.attach_adapter(adapter1, name="adapter1")
-        manager.attach_adapter(adapter2, name="adapter2")
-        
-        adapters = manager.list_adapters()
-        
-        assert "adapter1" in adapters
-        assert "adapter2" in adapters
-    
+        m = ConcreteManager("test_manager")
+        m.attach_adapter(MockAdapter(), name="a1")
+        m.attach_adapter(MockAdapter(), name="a2")
+        adapters = m.list_adapters()
+        assert "a1" in adapters
+        assert "a2" in adapters
+        assert len(adapters) == 2
+
     def test_detach_adapter(self):
-        """Тест отключения адаптера."""
-        manager = MockManager("test_manager")
-        adapter = MockAdapter(manager)
-        
-        manager.attach_adapter(adapter, name="test")
-        result = manager.detach_adapter("test")
-        
-        assert result is True
-        assert not manager.has_adapter("test")
-    
-    def test_get_stats(self):
-        """Тест получения статистики."""
-        manager = MockManager("test_manager")
-        adapter = MockAdapter(manager)
-        
-        manager.attach_adapter(adapter, name="test")
-        stats = manager.get_stats()
-        
+        m = ConcreteManager("test_manager")
+        m.attach_adapter(MockAdapter(), name="mock")
+        assert m.detach_adapter("mock") is True
+        assert not m.has_adapter("mock")
+
+    def test_detach_nonexistent_returns_false(self):
+        m = ConcreteManager("test_manager")
+        assert m.detach_adapter("nonexistent") is False
+
+    def test_magic_access_to_adapter(self):
+        m = ConcreteManager("test_manager")
+        adapter = MockAdapter()
+        m.attach_adapter(adapter, name="mock")
+        assert m.mock is adapter
+
+    def test_magic_access_raises_attribute_error(self):
+        m = ConcreteManager("test_manager")
+        with pytest.raises(AttributeError):
+            _ = m.nonexistent_adapter
+
+    # ---- События ----
+
+    def test_on_event_and_emit(self):
+        m = ConcreteManager("test_manager")
+        received = []
+
+        m.on_event("test_event", lambda data: received.append(data))
+        m.emit_event("test_event", {"key": "value"})
+
+        assert len(received) == 1
+        assert received[0] == {"key": "value"}
+
+    def test_emit_event_with_multiple_handlers(self):
+        m = ConcreteManager("test_manager")
+        calls = []
+        m.on_event("ev", lambda d: calls.append(1))
+        m.on_event("ev", lambda d: calls.append(2))
+        m.emit_event("ev", {})
+        assert calls == [1, 2]
+
+    def test_emit_event_handler_exception_does_not_propagate(self):
+        m = ConcreteManager("test_manager")
+        m.on_event("ev", lambda d: (_ for _ in ()).throw(RuntimeError("boom")))
+        m.emit_event("ev", {})  # должен не падать
+
+    def test_emit_unknown_event_is_noop(self):
+        m = ConcreteManager("test_manager")
+        m.emit_event("unknown", {})  # не должен падать
+
+    # ---- Статистика ----
+
+    def test_get_stats_keys(self):
+        m = ConcreteManager("test_manager")
+        m.attach_adapter(MockAdapter(), name="mock")
+        stats = m.get_stats()
+
         assert stats["manager_name"] == "test_manager"
         assert stats["is_initialized"] is False
-        assert "test" in stats["adapters"]
-    
-    def test_events(self):
-        """Тест событий."""
-        manager = MockManager("test_manager")
-        event_called = []
-        
-        def handler(data):
-            event_called.append(data)
-        
-        manager.on_event("test_event", handler)
-        manager.emit_event("test_event", {"data": "test"})
-        
-        assert len(event_called) == 1
-        assert event_called[0]["data"] == "test"
-    
-    def test_magic_access_adapter(self):
-        """Тест magic-доступа к адаптеру."""
-        manager = MockManager("test_manager")
-        adapter = MockAdapter(manager)
-        
-        manager.attach_adapter(adapter, name="test")
-        
-        # Доступ через magic-атрибут
-        assert manager.test == adapter
+        assert "mock" in stats["adapters"]
+        assert "adapters_info" in stats
+        assert "type" in stats["adapters_info"]["mock"]
 
+    def test_get_stats_no_process(self):
+        m = ConcreteManager("test_manager")
+        assert m.get_stats()["process_name"] == "standalone"
+
+    # ---- Диагностика ----
+
+    def test_get_debug_info_keys(self):
+        m = ConcreteManager("test_manager")
+        info = m.get_debug_info()
+        assert "manager_name" in info
+        assert "is_initialized" in info
+        assert "adapters" in info
+        assert "available_methods" in info
+
+    def test_str_repr(self):
+        m = ConcreteManager("test_manager")
+        s = str(m)
+        assert "test_manager" in s
+        assert "False" in s
+
+    # ---- Контракт IBaseManager ----
+
+    def test_isinstance_ibasemanager(self):
+        m = ConcreteManager("test_manager")
+        assert isinstance(m, IBaseManager)
+
+    # ---- Pickle ----
+
+    def test_pickle_roundtrip(self):
+        m = ConcreteManager("test_manager")
+        m.initialize()
+        m.attach_adapter(MockAdapter(), name="mock")
+
+        data = pickle.dumps(m)
+        m2 = pickle.loads(data)
+
+        assert m2.manager_name == "test_manager"
+        assert m2.is_initialized is True

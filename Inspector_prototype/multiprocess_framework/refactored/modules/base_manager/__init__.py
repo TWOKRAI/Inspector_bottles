@@ -1,21 +1,19 @@
 """
-Base Manager Module - Основа для всех менеджеров системы.
+base_manager — основа для всех менеджеров системы.
 
-Публичный API модуля. Импортируйте отсюда все необходимое.
+Публичный API модуля. Импортируйте только отсюда.
+
+Примеры:
+    from base_manager import BaseManager, ObservableMixin, BaseAdapter
+    from base_manager.interfaces import IBaseManager, IBaseAdapter, IObservableMixin
 """
 
-from .core.base_manager import BaseManager, _noop
+from .core.base_manager import BaseManager
 from .adapters.base_adapter import BaseAdapter
 from .mixins.observable_mixin import ObservableMixin
 
-# ManagerExtensionMixin объединен с ObservableMixin
-# Используйте ObservableMixin с auto_proxy=True для автоматических прокси-методов
-
 __all__ = [
-    # Основные классы
     'BaseManager',
     'BaseAdapter',
-    # Миксин (объединяет ObservableMixin и ManagerExtensionMixin)
     'ObservableMixin',
 ]
-

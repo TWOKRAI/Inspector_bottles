@@ -1,162 +1,256 @@
 """
-Интерфейсы для Base Manager Module.
+Публичные контракты (интерфейсы) модуля base_manager.
 
-Интерфейсы определяют контракты для классов модуля и используются для:
+Используются для:
+- Аннотаций типов и статической проверки (mypy, pyright)
+- Создания моков в тестах
 - Документации ожидаемого поведения
-- Проверки соответствия в тестах
-- Type hints для статической проверки типов
-- Создания моков для тестирования
 
-Для использования в type hints используйте TYPE_CHECKING:
+Пример использования в type hints:
     from typing import TYPE_CHECKING
     if TYPE_CHECKING:
-        from .interfaces import IBaseManager
+        from base_manager.interfaces import IBaseManager
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Dict, Set
+from typing import Any, Optional, Dict, Set, List
 from contextlib import contextmanager
 
-# Импорт для ObservableMixin интерфейса (избегаем циклических импортов)
 try:
     from .mixins.plugins.plugin_base import ObservablePlugin
 except ImportError:
-    ObservablePlugin = Any  # Fallback для случаев когда плагины не доступны
+    ObservablePlugin = Any  # type: ignore[misc,assignment]
 
+
+# =============================================================================
+# IBaseManager
+# =============================================================================
 
 class IBaseManager(ABC):
     """
-    Интерфейс базового менеджера.
-    
-    Все менеджеры системы должны реализовывать этот интерфейс.
-    Используется для проверки соответствия контракту в тестах и type hints.
+    Контракт базового менеджера.
+
+    Все менеджеры системы наследуют BaseManager, который реализует
+    этот интерфейс. Используйте IBaseManager для type hints и проверки
+    isinstance() там, где важна принадлежность к иерархии менеджеров.
     """
-    
+
+    # ---- Жизненный цикл ----
+
     @abstractmethod
     def initialize(self) -> bool:
-        """
-        Инициализация менеджера.
-        
-        Returns:
-            bool: True если инициализация успешна
-        """
-        pass
-    
+        """Инициализировать менеджер. True — успех."""
+
     @abstractmethod
     def shutdown(self) -> bool:
-        """
-        Корректное завершение работы менеджера.
-        
-        Returns:
-            bool: True если завершение успешно
-        """
-        pass
-    
+        """Корректно завершить работу. True — успех."""
+
+    # ---- Адаптеры ----
+
     @abstractmethod
     def attach_adapter(self, adapter: Any, name: Optional[str] = None) -> bool:
         """
-        Подключить адаптер к менеджеру.
-        
+        Подключить адаптер.
+
         Args:
             adapter: Экземпляр адаптера
-            name: Имя адаптера (опционально)
-            
+            name:    Имя адаптера (рекомендуется указывать явно)
+
         Returns:
-            bool: True если адаптер успешно подключен
+            True если подключён успешно
         """
-        pass
-    
+
     @abstractmethod
     def get_adapter(self, name: Optional[str] = None) -> Optional[Any]:
         """
         Получить адаптер по имени.
-        
-        Args:
-            name: Имя адаптера
-            
-        Returns:
-            Адаптер или None если не найден
-        """
-        pass
 
+        Returns:
+            Адаптер или None
+        """
+
+    @abstractmethod
+    def has_adapter(self, name: str) -> bool:
+        """True если адаптер с таким именем подключён."""
+
+    @abstractmethod
+    def list_adapters(self) -> List[str]:
+        """Список имён подключённых адаптеров."""
+
+    @abstractmethod
+    def detach_adapter(self, name: str) -> bool:
+        """Отключить адаптер. True если он был подключён."""
+
+    # ---- События ----
+
+    @abstractmethod
+    def on_event(self, event_type: str, callback: Any) -> None:
+        """Зарегистрировать обработчик события."""
+
+    @abstractmethod
+    def emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Генерировать событие."""
+
+    # ---- Статистика / диагностика ----
+
+    @abstractmethod
+    def get_stats(self) -> Dict[str, Any]:
+        """Статистика менеджера."""
+
+    @abstractmethod
+    def get_debug_info(self) -> Dict[str, Any]:
+        """Подробная диагностическая информация."""
+
+
+# =============================================================================
+# IBaseAdapter
+# =============================================================================
 
 class IBaseAdapter(ABC):
     """
-    Интерфейс базового адаптера.
-    
-    Все адаптеры менеджеров должны реализовывать этот интерфейс.
-    Используется для проверки соответствия контракту в тестах и type hints.
+    Контракт базового адаптера.
+
+    Адаптер инкапсулирует логику взаимодействия менеджера с процессом
+    или внешним ресурсом.
     """
-    
+
     @abstractmethod
     def setup(self) -> bool:
-        """
-        Настройка адаптера и интеграция с менеджером.
-        
-        Returns:
-            bool: True если настройка успешна
-        """
-        pass
-    
+        """Настроить адаптер. True — успех."""
+
     @abstractmethod
     def is_initialized(self) -> bool:
-        """
-        Проверка инициализации адаптера.
-        
-        Returns:
-            bool: True если адаптер инициализирован
-        """
-        pass
+        """True если адаптер готов к работе."""
 
+
+# =============================================================================
+# IObservableMixin
+# =============================================================================
 
 class IObservableMixin(ABC):
     """
-    Интерфейс для ObservableMixin.
-    
-    Определяет контракт для ObservableMixin - универсального миксина
-    для добавления наблюдаемости и расширений к менеджерам.
-    
-    Примечание: Полный интерфейс находится в mixins/interfaces.py
-    для избежания циклических импортов. Этот интерфейс - базовая версия.
+    Контракт ObservableMixin.
+
+    Определяет полный публичный API для наблюдаемости менеджеров:
+    регистрация внешних сервисов (logger, stats, error …), управление
+    их состоянием и получение диагностики.
     """
-    
+
+    # ---- Управление менеджерами ----
+
     @abstractmethod
-    def register_manager(self, name: str, manager: Any, enabled: bool = True):
-        """Регистрация нового менеджера."""
-        pass
-    
+    def register_manager(self, name: str, manager: Any, enabled: bool = True) -> None:
+        """Зарегистрировать менеджер под именем name."""
+
+    @abstractmethod
+    def unregister_manager(self, name: str) -> None:
+        """Удалить менеджер из реестра."""
+
     @abstractmethod
     def get_manager(self, name: str) -> Optional[Any]:
         """Получить менеджер по имени."""
-        pass
-    
+
     @abstractmethod
     def has_manager(self, name: str) -> bool:
-        """Проверить наличие менеджера."""
-        pass
-    
+        """True если менеджер зарегистрирован."""
+
+    # ---- Состояние ----
+
     @abstractmethod
-    def enable(self, manager_name: str, enabled: bool = True):
-        """Включить/выключить функцию менеджера."""
-        pass
-    
+    def enable(self, manager_name: str, enabled: bool = True) -> None:
+        """Включить или выключить менеджер."""
+
+    @abstractmethod
+    def disable(self, manager_name: str) -> None:
+        """Выключить менеджер."""
+
     @abstractmethod
     def is_enabled(self, manager_name: str) -> bool:
-        """Проверить включена ли функция менеджера."""
-        pass
-    
+        """True если менеджер включён."""
+
     @abstractmethod
     def get_enabled_managers(self) -> Set[str]:
-        """Получить список включенных менеджеров."""
-        pass
-    
+        """Множество имён включённых менеджеров."""
+
+    @abstractmethod
+    def context(self, manager_name: str, enabled: bool = True):
+        """Контекстный менеджер для временного изменения состояния."""
+
+    # ---- Конфигурация ----
+
+    @abstractmethod
+    def update_config(self, config: Dict[str, Any]) -> None:
+        """Обновить конфигурацию."""
+
     @abstractmethod
     def get_config(self) -> Dict[str, Any]:
-        """Получить текущую конфигурацию."""
-        pass
-    
+        """Текущая конфигурация."""
+
     @abstractmethod
     def get_state(self) -> Dict[str, Any]:
-        """Получить текущее состояние."""
-        pass
+        """Полный снимок состояния."""
 
+    # ---- Плагины ----
+
+    @abstractmethod
+    def register_plugin(self, plugin: Any, name: Optional[str] = None) -> None:
+        """Зарегистрировать плагин."""
+
+    @abstractmethod
+    def unregister_plugin(self, name: str) -> None:
+        """Удалить плагин."""
+
+    @abstractmethod
+    def has_plugin(self, name: str) -> bool:
+        """True если плагин зарегистрирован."""
+
+    @abstractmethod
+    def get_plugin(self, name: str) -> Optional[Any]:
+        """Получить плагин по имени."""
+
+    # ---- Встроенные методы наблюдаемости ----
+
+    @abstractmethod
+    def _log(self, level: str, message: str, **kwargs) -> None:
+        """Логирование через logger manager."""
+
+    @abstractmethod
+    def _log_debug(self, message: str, **kwargs) -> None:
+        """Логирование уровня DEBUG."""
+
+    @abstractmethod
+    def _log_info(self, message: str, **kwargs) -> None:
+        """Логирование уровня INFO."""
+
+    @abstractmethod
+    def _log_warning(self, message: str, **kwargs) -> None:
+        """Логирование уровня WARNING."""
+
+    @abstractmethod
+    def _log_error(self, message: str, **kwargs) -> None:
+        """Логирование уровня ERROR."""
+
+    @abstractmethod
+    def _log_critical(self, message: str, **kwargs) -> None:
+        """Логирование уровня CRITICAL."""
+
+    @abstractmethod
+    def _record_metric(
+        self, metric_name: str, value: Any = 1,
+        tags: Optional[Dict[str, str]] = None
+    ) -> None:
+        """Запись метрики."""
+
+    @abstractmethod
+    def _record_timing(
+        self, metric_name: str, duration: float,
+        tags: Optional[Dict[str, str]] = None
+    ) -> None:
+        """Запись времени выполнения."""
+
+    @abstractmethod
+    def _track_error(
+        self, error: Exception,
+        context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Отслеживание ошибки."""
