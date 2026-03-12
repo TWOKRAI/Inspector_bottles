@@ -1,34 +1,29 @@
 # logger_module — Статус рефакторинга
 
-## Текущий этап: 3 / 8
+## Текущий этап: 4 / 8
 
-## Оценки (0-10)
+## Оценки (0–10)
 
 | Критерий | Оценка | Комментарий |
 |---|---|---|
-| Код | 9 | Все 3 критических бага устранены, level-based routing добавлен |
-| Тесты | 4 | 10/10 проходят; нужно: тест BatchManager под нагрузкой, тест route_by_level |
-| Документация | 8 | README в стиле router_module |
-| Связанность | 8 | LogDispatcher аналогичен channel_dispatcher из RouterManager |
-| Дублирование | 9 | _convert_level упрощён до `LogLevel[level.upper()]` |
-| Работоспособность | 8 | thread-safe BatchManager, handler вызывается напрямую |
+| Код | 9 | Мигрирован на CRM; BatchBuffer из CRM; ILogChannel(IChannel); thread-safe registry |
+| Тесты | 7 | ~30 тестов; все проходят; нужны: стресс-тест BatchBuffer, тест scope routing |
+| Документация | 8 | README в стиле router_module; обновить примеры под CRM |
+| Связанность | 9 | Наследует ChannelRoutingManager; зависит от channel_routing_module |
+| Дублирование | 10 | Нет: _channel_registry из CRM, BatchBuffer из CRM, Dispatcher из CRM |
+| Работоспособность | 8 | BatchBuffer + scope routing работают; channel_routing вместо channels: Dict |
 
-## Что сделано в этапе 3
+## Что сделано в CRM-миграции (Фаза 2)
 
-- [x] **Bug fix**: `LogDispatcher.route_log()` вызывал `dispatcher.dispatch(channel_name, record_dict)` —
-      первый аргумент трактовался как `message` (str), второй как `key_field` (dict) → TypeError
-      поглощался молча → **логи физически не записывались**. Исправлено:
-      `handler(record_dict)` вызывается напрямую.
-- [x] **Bug fix**: `BatchManager.flush_all()` не был thread-safe при конкурентном доступе.
-      Добавлен `threading.Lock`; атомарное извлечение пачки под локом,
-      вызов flush_callback вне лока (I/O не блокирует других писателей).
-- [x] **Bug fix**: `LoggerAdapter._convert_level()` имел мёртвый код с ручным маппингом.
-      Упрощено до `LogLevel[level.upper()]` + except KeyError → None.
-- [x] **Архитектурное улучшение**: `LogDispatcher.register_level_route()` + `route_by_level()` —
-      level-based routing через Dispatcher (аналог `channel_dispatcher` в RouterManager):
-      `dispatch(record_dict, key_field='level')` — теперь dispatch_module используется корректно.
-      Позволяет: `ERROR → errors.log`, `WARNING → system.log`, `r".*" → console`.
-- [x] `LogDispatcher.get_level_routes()` / `get_channel_names()` — интроспекция маршрутов.
+- [x] `ILogChannel(IChannel)` — унифицированная иерархия каналов
+- [x] `LogChannel(ILogChannel)` — `name`, `channel_type` как `@property`; `FileChannel`, `ConsoleChannel`, `HttpChannel` наследуют
+- [x] `LoggerManager(ChannelRoutingManager, ILoggerManager)` — убраны дублирующие реализации registry/buffer
+- [x] `self._channel_registry` из CRM вместо `channels: Dict` (был без lock)
+- [x] `BatchBuffer` из CRM вместо `BatchManager` (старый `BatchManager.py` оставлен для backward compatibility)
+- [x] `_resolve_log_config()` — принимает None | dict | LogConfig | RegisterBase → LogConfig
+- [x] Свойство `channels` сохранено для backward compatibility (возвращает dict из registry)
+- [x] Свойство `batcher` — alias для `self._buffer`
+- [x] `initialize()` / `shutdown()` обновлены — управляют CRM-компонентами
 
 ## Чеклист рефакторинга
 
@@ -36,17 +31,19 @@
 - [x] Этап 1: Модуль запускается — LoggerManager.initialize() работает
 - [x] Этап 2: interfaces.py, README, encoding headers, интеграция с message_module
 - [x] Этап 3: BatchManager thread-safe, LogDispatcher исправлен, level-based routing
-- [ ] Этап 4: LoggerManager.log() использует route_by_level (заменить scope-based на level-based)
+- [x] Этап 4: LoggerManager наследует ChannelRoutingManager; ILogChannel(IChannel)
 - [ ] Этап 5: Интеграционный тест — приём LOG-сообщений через RouterManager
 - [ ] Этап 6: Graceful shutdown — flush() перед остановкой + router unsubscribe
-- [ ] Этап 7: Unit-тесты — покрытие > 85%, стресс-тест батчинга
+- [ ] Этап 7: Unit-тесты — покрытие > 85%, стресс-тест BatchBuffer под нагрузкой
 - [ ] Этап 8: Полная интеграция с process_manager_module
 
 ## Известные проблемы
 
-- `LoggerManager.log()` всё ещё использует scope-based канальный список из ScopeConfig,
-  а не новый `route_by_level()`. Этап 4 исправит это.
-- Стресс-тест BatchManager под многопоточной нагрузкой не написан.
+- `LoggerManager.log()` использует scope-based routing (список каналов из ScopeConfig).
+  `route_by_level()` из LogDispatcher доступен, но не задействован как основной путь.
+- `LogDispatcher` сохранён для backward compatibility и для ErrorManager.
+- Стресс-тест BatchBuffer под многопоточной нагрузкой не написан.
+- README не обновлён под CRM-архитектуру (показывает старую ChannelRegistry).
 
 ## История изменений
 
@@ -54,4 +51,6 @@
 |---|---|---|
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |
 | 2026-03-12 | interfaces.py, bugs fixed, README, encoding headers | 2 |
-| 2026-03-12 | BatchManager thread-safe, LogDispatcher fix, level-based routing, _convert_level | 3 |
+| 2026-03-12 | BatchManager thread-safe, LogDispatcher fix, level-based routing | 3 |
+| 2026-03-12 | CRM Фаза 2: LoggerManager(ChannelRoutingManager), ILogChannel(IChannel), BatchBuffer | 4 |
+| 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |

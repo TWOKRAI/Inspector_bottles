@@ -2,46 +2,57 @@
 """
 ErrorManagerConfig — RegisterBase-конфиг для ErrorManager.
 
-По образцу process_1_config: data_schema_module как точка истины.
-build() возвращает (manager_name, config_dict) — dict совместим с LogConfig.from_dict().
+Наследует ChannelRoutingConfig — участвует в едином конфиг-дереве фреймворка.
 
-Три severity-канала (по умолчанию):
-  critical_file_path → logs/critical.log  (CRITICAL)
-  error_file_path    → logs/errors.log    (ERROR)
-  warnings_file_path → logs/warnings.log  (WARNING, None = не создавать)
+Три severity-канала строятся из file_path атрибутов в build().
+Унаследованное поле `channels: Dict[str, dict]` служит точкой расширения:
+любые дополнительные каналы (например, Telegram, Slack) добавляются туда
+и автоматически включаются в итоговый config_dict.
+
+Пример:
+    # Минимальный конфиг:
+    config = ErrorManagerConfig()
+    em = ErrorManager(config=config)
+
+    # С кастомным файлом и severity-overrides:
+    config = ErrorManagerConfig(
+        error_file_path="var/log/errors.log",
+        critical_file_path="var/log/critical.log",
+        include_stacktrace=True,
+    )
+
+    # Добавить Telegram-канал через наследованное поле:
+    config = ErrorManagerConfig(
+        channels={"telegram": {"type": "http", "url": "https://..."}}
+    )
 """
 
-from typing import Annotated, Optional
+from typing import Annotated, Dict, Optional
 
-from ...data_schema_module import (
-    RegisterBase,
-    FieldMeta,
-    register_schema,
-)
+from ...data_schema_module import FieldMeta, register_schema
+from ...channel_routing_module import ChannelRoutingConfig
 
 
 @register_schema("ErrorManagerConfig")
-class ErrorManagerConfig(RegisterBase):
+class ErrorManagerConfig(ChannelRoutingConfig):
     """Конфигурация ErrorManager с severity-based channel routing.
 
-    Пример:
-        config = ErrorManagerConfig(
-            error_file_path="var/log/errors.log",
-            critical_file_path="var/log/critical.log",
-            include_stacktrace=True,
-        )
-        em = ErrorManager(config=config)
+    Наследует ChannelRoutingConfig:
+      manager_name: str = "ErrorManager"
+      channels: Dict[str, dict] = {}   ← дополнительные каналы (расширение)
+
+    Severity-каналы строятся автоматически из file_path полей в build().
     """
 
     manager_name: str = "ErrorManager"
     app_name: str = "errors"
 
-    # Severity channels
     critical_file_path: Annotated[str, FieldMeta("Путь к файлу критических ошибок")] = "logs/critical.log"
     error_file_path: Annotated[str, FieldMeta("Путь к файлу ошибок")] = "logs/errors.log"
-    warnings_file_path: Annotated[Optional[str], FieldMeta("Путь к файлу предупреждений (None — не создавать)")] = "logs/warnings.log"
+    warnings_file_path: Annotated[
+        Optional[str], FieldMeta("Путь к файлу предупреждений (None — не создавать)")
+    ] = "logs/warnings.log"
 
-    # Уровень и батчинг
     default_level: Annotated[str, FieldMeta("Минимальный уровень логирования")] = "WARNING"
     include_stacktrace: bool = True
     enable_batching: Annotated[bool, FieldMeta("Батчинг")] = True
@@ -51,31 +62,30 @@ class ErrorManagerConfig(RegisterBase):
     def build(self) -> tuple[str, dict]:
         """Вернуть (manager_name, config_dict) для ErrorManager.
 
-        config_dict совместим с LogConfig.from_dict() + include_stacktrace.
-        Каналы строятся по severity: critical_file, errors_file, warnings_file.
+        Строит severity-каналы из file_path атрибутов, затем мержит с
+        дополнительными каналами из унаследованного ChannelRoutingConfig.channels.
         """
-        channels: dict = {}
-
-        channels["critical_file"] = {
-            "type": "file",
-            "enabled": True,
-            "file_path": self.critical_file_path,
-            "format": "%(asctime)s [CRITICAL] %(name)s: %(message)s",
-            "max_size": 10 * 1024 * 1024,
-            "backup_count": 10,
-        }
-
-        channels["errors_file"] = {
-            "type": "file",
-            "enabled": True,
-            "file_path": self.error_file_path,
-            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            "max_size": 10 * 1024 * 1024,
-            "backup_count": 5,
+        severity_channels: Dict[str, dict] = {
+            "critical_file": {
+                "type": "file",
+                "enabled": True,
+                "file_path": self.critical_file_path,
+                "format": "%(asctime)s [CRITICAL] %(name)s: %(message)s",
+                "max_size": 10 * 1024 * 1024,
+                "backup_count": 10,
+            },
+            "errors_file": {
+                "type": "file",
+                "enabled": True,
+                "file_path": self.error_file_path,
+                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                "max_size": 10 * 1024 * 1024,
+                "backup_count": 5,
+            },
         }
 
         if self.warnings_file_path:
-            channels["warnings_file"] = {
+            severity_channels["warnings_file"] = {
                 "type": "file",
                 "enabled": True,
                 "file_path": self.warnings_file_path,
@@ -84,6 +94,8 @@ class ErrorManagerConfig(RegisterBase):
                 "backup_count": 3,
             }
 
+        all_channels = {**severity_channels, **self.channels}
+
         return (self.manager_name, {
             "app_name": self.app_name,
             "default_level": self.default_level,
@@ -91,5 +103,5 @@ class ErrorManagerConfig(RegisterBase):
             "enable_batching": self.enable_batching,
             "batch_size": self.batch_size,
             "batch_interval": self.batch_interval,
-            "channels": channels,
+            "channels": all_channels,
         })

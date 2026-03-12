@@ -19,46 +19,32 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from ..base_manager.interfaces import IBaseManager
+from ..channel_routing_module.interfaces import IChannel
 from .core.log_config import LogLevel, LogScope
 
 
-class ILogChannel(ABC):
-    """Контракт канала записи логов.
+class ILogChannel(IChannel):
+    """Контракт канала записи логов (наследует IChannel).
+
+    Наследует IChannel — все лог-каналы автоматически являются IChannel
+    и могут использоваться в ChannelRegistry и ChannelRoutingManager.
+
+    IChannel уже определяет: name (property), write(), close(), get_info(),
+    channel_type (property, default="generic").
+
+    ILogChannel добавляет close() как обязательный метод.
 
     Реализуется для: файла (FileChannel), консоли (ConsoleChannel),
     HTTP (HttpChannel), и любых кастомных каналов.
     Каналы stateless относительно фильтрации — этим занимается LoggerManager.
     """
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Уникальное имя канала (ключ в реестре каналов LoggerManager)."""
-
-    @abstractmethod
-    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Записать одну запись лога.
-
-        Args:
-            record: Словарь записи лога с полями:
-                    timestamp (float), level (str), scope (str),
-                    message (str), module (str), extra (dict).
-
-        Returns:
-            {'status': 'success', 'channel': name}
-            {'status': 'error', 'error': str, 'channel': name}
-        """
-
     @abstractmethod
     def close(self) -> None:
         """Закрыть канал, освободить ресурсы (файловые дескрипторы, соединения)."""
 
     def get_info(self) -> Dict[str, Any]:
-        """Информация о состоянии канала для мониторинга.
-
-        Возвращает как минимум {'name': self.name, 'active': True}.
-        Переопределяется в конкретных каналах для дополнительной диагностики.
-        """
+        """Информация о состоянии канала для мониторинга."""
         return {"name": self.name, "active": True}
 
 

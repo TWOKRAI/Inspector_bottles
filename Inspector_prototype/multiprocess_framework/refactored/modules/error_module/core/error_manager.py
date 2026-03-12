@@ -1,36 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-ErrorManager — специализированный менеджер ошибок (наследник LoggerManager).
+ErrorManager — специализированный наследник LoggerManager с severity-based routing.
 
-Добавляет поверх LoggerManager:
-  - Severity-based channel routing:
-      CRITICAL → critical.log
-      ERROR    → errors.log
-      WARNING  → warnings.log (если настроен)
-  - log_exception() с форматированием traceback
-  - Дефолтный конфиг ERROR-уровня
+Ключевые улучшения (Фаза 3 — CRM унификация):
+  - _setup_level_routes() строит _level_to_channel: {level_str → channel_name}
+    и регистрирует маршруты в self._dispatcher (из CRM) напрямую.
+  - log() перегружает LoggerManager.log() для WARNING/ERROR/CRITICAL:
+    → ищет channel_name через _level_to_channel (O(1))
+    → пишет через buffer (если есть) или напрямую в channel
+  - DEBUG/INFO → fallback на LoggerManager.log() (scope-based)
+  - Результат: level routing теперь РЕАЛЬНО используется, не просто регистрируется.
 
-Dict at boundary: принимает dict, LogConfig, или объект с build() -> (name, dict).
-Без зависимости от data_schema_module в core — только logger_module.
-
-Архитектурная аналогия с RouterManager:
+Архитектурная аналогия:
   RouterManager:   message → channel_dispatcher(key=type) → IMessageChannel
-  ErrorManager:    error   → level_dispatcher(key=level)  → ILogChannel
+  ErrorManager:    error   → _level_to_channel(key=level) → ILogChannel
 """
-
+import time
 import traceback
 from typing import Optional, Any, Union, Dict
 
 from ...logger_module import LoggerManager
-from ...logger_module.core.log_config import LogConfig
-from ...logger_module.core.log_dispatcher import LogDispatcher
+from ...logger_module.core.log_config import LogConfig, LogLevel, LogScope
+from ...logger_module.core.log_dispatcher import LogRecord
 
 
-# Дефолтный конфиг (dict) — без зависимости от ErrorManagerConfig.
-# Три канала по уровням серьёзности — ERROR-менеджер отделяет warning от fatal.
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "errors",
-    "default_level": "WARNING",   # Ловим WARNING, ERROR, CRITICAL
+    "default_level": "WARNING",
     "enable_batching": True,
     "batch_size": 50,
     "batch_interval": 0.5,
@@ -63,16 +59,13 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
-def _normalize_config(
+def _normalize_error_config(
     config: Optional[Union[Dict[str, Any], LogConfig, Any]],
 ) -> tuple[str, LogConfig, bool]:
-    """
-    Преобразовать config в (manager_name, LogConfig, include_stacktrace).
+    """Преобразовать config → (manager_name, LogConfig, include_stacktrace).
 
-    - dict -> LogConfig.from_dict(config)
-    - LogConfig -> как есть
-    - объект с build() -> build() возвращает (name, dict)
-    - None -> дефолтный dict
+    Поддерживает: None | dict | LogConfig | объект с build() → (name, dict).
+    Вызывает TypeError для неизвестных типов.
     """
     manager_name = "ErrorManager"
     include_stacktrace = True
@@ -101,30 +94,25 @@ def _normalize_config(
 
 
 class ErrorManager(LoggerManager):
-    """Менеджер ошибок — специализированный наследник LoggerManager.
+    """Менеджер ошибок с severity-based channel routing.
 
     Добавляет поверх LoggerManager:
-      1. Severity-based channel routing через LogDispatcher.register_level_route():
-           CRITICAL → critical.log
-           ERROR    → errors.log
-           WARNING  → warnings.log
-         Аналог channel_dispatcher в RouterManager — маршрутизация по ключу level.
+      1. _level_to_channel: Dict[str, str] — прямой маппинг уровня → канал.
+         WARNING → warnings_file, ERROR → errors_file, CRITICAL → critical_file.
 
-      2. log_exception() — логирование исключения с traceback.
+      2. log() override — для WARNING/ERROR/CRITICAL использует _level_to_channel
+         вместо scope-based routing. DEBUG/INFO идут через LoggerManager.log().
+         Buffer-aware: если _buffer задан → enqueue, иначе прямой write().
 
-      3. Дефолтный конфиг с тремя severity-каналами.
+      3. log_exception() — traceback + self.error().
 
     Жизненный цикл:
-        em = ErrorManager()                     # дефолтный конфиг
-        em = ErrorManager(config=my_dict)       # dict at boundary
-        em = ErrorManager(config=ErrorManagerConfig(...))  # RegisterBase
+        em = ErrorManager()
+        em = ErrorManager(config={"app_name": "my_app"})
+        em = ErrorManager(config=ErrorManagerConfig(...))
         em.initialize()
         em.log_exception(exc, "context", module="my_module")
         em.shutdown()
-
-    Интеграция через ObservableMixin:
-        ObservableMixin.__init__(self, managers={'errors': error_manager})
-        self._track_error(exc, context={"method": "process"})
     """
 
     def __init__(
@@ -138,17 +126,7 @@ class ErrorManager(LoggerManager):
         enable_router_routing: bool = False,
         **kwargs,
     ) -> None:
-        """
-        Args:
-            manager_name:          Имя менеджера.
-            process:               Родительский процесс (опционально).
-            config:                dict, LogConfig, объект с build(), или None (дефолт).
-            config_manager:        ConfigManager (опционально).
-            router_manager:        RouterManager для межпроцессных логов (опционально).
-            managers:              Словарь дополнительных менеджеров для ObservableMixin.
-            enable_router_routing: False по умолчанию — ошибки пишутся локально.
-        """
-        resolved_name, log_config, include_stacktrace = _normalize_config(config)
+        resolved_name, log_config, include_stacktrace = _normalize_error_config(config)
         manager_name = resolved_name
 
         super().__init__(
@@ -163,52 +141,91 @@ class ErrorManager(LoggerManager):
         )
 
         self._include_stacktrace = include_stacktrace
+        self._level_to_channel: Dict[str, str] = {}
 
     def initialize(self) -> bool:
-        """Инициализация ErrorManager.
-
-        Вызывает LoggerManager.initialize(), затем настраивает level-based routing.
-
-        Returns:
-            True при успехе.
-        """
         result = super().initialize()
         if result:
             self._setup_level_routes()
         return result
 
     def _setup_level_routes(self) -> None:
-        """Настроить level-based routing через LogDispatcher.
+        """Построить _level_to_channel и зарегистрировать маршруты в self._dispatcher.
 
-        Регистрирует каналы в LogDispatcher.register_level_route() по уровню серьёзности.
-        После этого можно использовать dispatcher.route_by_level(record) вместо route_log().
-
-        Маппинг (если канал существует в конфиге):
-          CRITICAL → critical_file
-          ERROR    → errors_file  (также CRITICAL, если нет critical_file)
-          WARNING  → warnings_file (также WARNING идёт в errors_file если нет warnings_file)
+        После этого:
+          - self._level_to_channel["ERROR"] == "errors_file" (O(1) lookup в log())
+          - self._dispatcher знает маршрут "ERROR" → write() на errors_file
+          - self.dispatcher (LogDispatcher) тоже регистрирует для backward compat get_stats()
         """
-        d: LogDispatcher = self.dispatcher
+        self._level_to_channel = {}
 
         has_critical = "critical_file" in self.channels
-        has_errors = "errors_file" in self.channels
+        has_errors   = "errors_file" in self.channels
         has_warnings = "warnings_file" in self.channels
 
-        # CRITICAL
         if has_critical:
-            d.register_level_route("CRITICAL", "critical_file", self.channels["critical_file"].write)
+            self._level_to_channel["CRITICAL"] = "critical_file"
         elif has_errors:
-            d.register_level_route("CRITICAL", "errors_file", self.channels["errors_file"].write)
+            self._level_to_channel["CRITICAL"] = "errors_file"
 
-        # ERROR
         if has_errors:
-            d.register_level_route("ERROR", "errors_file", self.channels["errors_file"].write)
+            self._level_to_channel["ERROR"] = "errors_file"
 
-        # WARNING
         if has_warnings:
-            d.register_level_route("WARNING", "warnings_file", self.channels["warnings_file"].write)
+            self._level_to_channel["WARNING"] = "warnings_file"
         elif has_errors:
-            d.register_level_route("WARNING", "errors_file", self.channels["errors_file"].write)
+            self._level_to_channel["WARNING"] = "errors_file"
+
+        # Register in LogDispatcher for backward compat (get_stats → get_level_routes)
+        d = self.dispatcher
+        for level_str, ch_name in self._level_to_channel.items():
+            ch = self._channel_registry.get(ch_name)
+            if ch is not None:
+                d.register_level_route(level_str, ch_name, ch.write)
+
+    def log(
+        self,
+        scope: LogScope,
+        level: LogLevel,
+        message: str,
+        module: str = "main",
+        **extra,
+    ) -> None:
+        """Override: WARNING/ERROR/CRITICAL → level-based routing.
+
+        DEBUG/INFO → fallback to LoggerManager.log() (scope-based).
+
+        Теперь level routing РЕАЛЬНО используется (в старом коде маршруты
+        были зарегистрированы но route_by_level() никогда не вызывался).
+        """
+        self.stats['messages_processed'] += 1
+
+        channel_name = self._level_to_channel.get(level.value)
+        if channel_name is None:
+            # DEBUG / INFO / unknown level → parent scope-based routing
+            # Don't double-count messages_processed
+            self.stats['messages_processed'] -= 1
+            return LoggerManager.log(self, scope, level, message, module, **extra)
+
+        record_dict = LogRecord(
+            timestamp=time.time(),
+            level=level,
+            scope=scope,
+            message=message,
+            module=module,
+            extra={**self._get_thread_context(), **extra},
+        ).to_dict()
+
+        if self._buffer is not None:
+            self._buffer.enqueue(channel_name, record_dict)
+            self.stats['messages_batched'] += 1
+        else:
+            ch = self._channel_registry.get(channel_name)
+            if ch is not None:
+                try:
+                    ch.write(record_dict)
+                except Exception as e:
+                    self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
 
     def log_exception(
         self,
@@ -217,22 +234,13 @@ class ErrorManager(LoggerManager):
         module: str = "errors",
         include_stacktrace: Optional[bool] = None,
     ) -> None:
-        """Логировать исключение с опциональным traceback.
+        """Логировать исключение с traceback.
 
         Args:
             exc:               Объект исключения.
-            message:           Дополнительное контекстное сообщение.
-            module:            Модуль-источник исключения.
-            include_stacktrace: True/False переопределяет глобальный флаг.
-                               None → использует значение из конфига.
-
-        Example:
-            try:
-                risky_operation()
-            except ValueError as e:
-                error_manager.log_exception(
-                    e, "invalid input data", module="validator"
-                )
+            message:           Дополнительный контекст.
+            module:            Модуль-источник.
+            include_stacktrace: Переопределить глобальный флаг (None → из конфига).
         """
         full_message = f"{message}: {exc}" if message else str(exc)
         use_trace = include_stacktrace if include_stacktrace is not None else self._include_stacktrace
@@ -247,5 +255,5 @@ class ErrorManager(LoggerManager):
         """Статистика ErrorManager — расширяет LoggerManager.get_stats()."""
         stats = super().get_stats()
         stats["include_stacktrace"] = self._include_stacktrace
-        stats["level_routes"] = self.dispatcher.get_level_routes()
+        stats["level_routes"] = dict(self._level_to_channel)
         return stats

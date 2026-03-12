@@ -136,3 +136,71 @@
 - Контекст: Какой уровень тестирования нужен.
 - Решение: Unit-тесты для каждого модуля. Integration тесты — на этапе 7 при необходимости.
 - Причина: multiprocess_prototype сам является интеграционным тестом.
+
+---
+
+## ADR-013: channel_routing_module — базовый класс для всех менеджеров с каналами
+- Дата: 2026-03-12
+- Статус: принято
+- Контекст: RouterManager, LoggerManager, ErrorManager независимо реализовывали один паттерн
+  (реестр каналов, диспетчер, буфер, lifecycle). Три раза один код = три источника ошибок.
+- Решение: Создать `ChannelRoutingManager(BaseManager, ObservableMixin)` в новом `channel_routing_module`.
+  В него переносится: `ChannelRegistry` (thread-safe), `Dispatcher` (key→handler), `IBufferStrategy`
+  (pluggable), `normalize_config()` (Dict at Boundary), `ChannelRoutingConfig(RegisterBase)`.
+- Причина: DRY. Исправление ошибки в registry / buffer теперь применяется ко всем менеджерам сразу.
+  Новый менеджер = наследование CRM, а не копирование кода.
+- Отклонённые альтернативы:
+  - Миксин-классы (ChannelRegistryMixin, BufferMixin) — отклонено как источник MRO-конфликтов.
+  - Вынести логику в отдельный helper-класс без наследования — отклонено: manager.registry.register()
+    читается хуже, чем manager.register_channel().
+
+---
+
+## ADR-014: IChannel — единый базовый интерфейс каналов
+- Дата: 2026-03-12
+- Статус: принято
+- Контекст: `IMessageChannel` и `ILogChannel` — несовместимые иерархии. `ChannelRegistry` в CRM
+  требует единый тип.
+- Решение: `IChannel` определён в `channel_routing_module.interfaces`. `ILogChannel(IChannel)` —
+  добавлены `name`, `channel_type` как properties. `IMessageChannel(IChannel)` — добавлен `write()`
+  как alias для `send()`.
+- Причина: Единый `ChannelRegistry[IChannel]` хранит каналы всех типов. `isinstance(ch, IChannel)`
+  как гарантия совместимости. Нет дублирования контракта `close()` / `get_info()`.
+- Отклонённые альтернативы:
+  - Три независимых реестра под каждый тип — отклонено как усиление фрагментации.
+  - Protocol (structural typing) вместо ABC — отклонено: теряется явная ошибка при неполной реализации.
+
+---
+
+## ADR-015: AsyncSender остаётся в RouterManager (не заменяется AsyncSenderBuffer)
+- Дата: 2026-03-12
+- Статус: принято
+- Контекст: CRM предоставляет `AsyncSenderBuffer(send_fn)` как pluggable буфер. Казалось логичным
+  заменить `AsyncSender` в RouterManager на него.
+- Решение: `AsyncSender` остаётся внутри `RouterManager` как специализированный компонент.
+  `RouterManager(ChannelRoutingManager)` передаёт `buffer_strategy=None`.
+- Причина: `AsyncSenderBuffer.enqueue(channel_name, data)` работает с уже resolved каналом.
+  `AsyncSender` буферизует ВЕСЬ pipeline: `enqueue(msg) → apply_middleware(msg) → resolve_channels(msg)
+  → write_to_channel`. Middleware-трансформации должны происходить ДО резолюции канала.
+  Заменить AsyncSender на AsyncSenderBuffer = потеря middleware pipeline.
+- Отклонённые альтернативы:
+  - Обогатить `IBufferStrategy` поддержкой middleware — отклонено как нарушение SRP буфера.
+  - Переместить middleware в channel.write() — отклонено: middleware в RouterManager привязано
+    к маршруту, а не к каналу.
+
+---
+
+## ADR-016: ChannelRoutingConfig(RegisterBase) — базовый конфиг через наследование
+- Дата: 2026-03-12
+- Статус: принято
+- Контекст: Конфиги менеджеров существовали в трёх форматах: dataclass (LogConfig), RegisterBase
+  (ErrorManagerConfig), отсутствует (RouterManager). Нужна унификация без потери гибкости.
+- Решение: `ChannelRoutingConfig(RegisterBase)` содержит общие поля `manager_name`, `channels`.
+  `build()` → `(name, dict)`. `ErrorManagerConfig(ChannelRoutingConfig)` наследует и расширяет.
+  `normalize_config()` принимает `None | dict | RegisterBase` и всегда возвращает `dict`.
+- Причина: RegisterBase — уже принятый стандарт в framework (ADR-003). `build()` совместим с
+  `normalize_config()`. Наследование позволяет добавлять специфичные поля (severity paths, batch_size)
+  без потери общего API. Все конфиги попадают в `data_schema_module` через `@register_schema`.
+- Отклонённые альтернативы:
+  - Pydantic BaseModel напрямую (без RegisterBase) — отклонено: теряется интеграция с registers_module.
+  - Единый монолитный конфиг со всеми полями всех менеджеров — отклонено как нарушение OCP.

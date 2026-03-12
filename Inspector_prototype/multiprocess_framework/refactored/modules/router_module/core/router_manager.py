@@ -1,40 +1,51 @@
 # -*- coding: utf-8 -*-
 """
-RouterManager — фасад маршрутизации сообщений.
+RouterManager (Refactored) — наследник ChannelRoutingManager.
 
-Координирует: AsyncSender, AsyncReceiver, ChannelRegistry, MiddlewarePipeline,
-channel_dispatcher (исходящие), message_dispatcher (входящие).
+Фаза 4 — CRM унификация:
+  - Наследует ChannelRoutingManager: получает _channel_registry, _dispatcher, _buffer
+  - self._channel_registry (из CRM) заменяет self._channels (router's ChannelRegistry)
+  - self.channel_dispatcher = self._dispatcher (alias для backward compat)
+  - self.message_dispatcher остаётся (router-специфичный dispatcher для входящих)
+  - self._sender (AsyncSender) остаётся — его pipeline отличается от CRM buffer:
+      send_async → AsyncSender → _do_send() → middleware + resolve + channel.send()
+      (CRM buffer: enqueue(channel, data) → channel.write())
 
-Полная документация: router_module/README.md
+  - IMessageChannel теперь наследует IChannel → QueueChannel совместим с CRM registry
+  - register_channel() override: inject logger, НЕ auto-register в dispatcher
+  - register_route() override: name-returning handler (RouterManager routing pattern)
+  - _resolve_channels() использует self._channel_registry
+
+Публичный API не изменён: send, send_async, receive, register_channel,
+register_route, register_message_handler, get_stats, etc.
 """
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from ...base_manager import BaseManager, ObservableMixin
+from ...channel_routing_module import ChannelRoutingManager
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ..interfaces import IMessageChannel
 
-from ._sender           import AsyncSender
-from ._receiver         import AsyncReceiver
-from ._channel_registry import ChannelRegistry
-from ._middleware        import MiddlewarePipeline
+from ._sender   import AsyncSender
+from ._receiver import AsyncReceiver
+from ._middleware import MiddlewarePipeline
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...message_module import Message
 
 
-class RouterManager(BaseManager, ObservableMixin):
+class RouterManager(ChannelRoutingManager):
     """
     Масштабируемый менеджер маршрутизации сообщений.
 
-    Координирует работу AsyncSender, AsyncReceiver, ChannelRegistry
-    и двух Dispatcher'ов. Сам не содержит потоков и мьютексов — вся
-    сложность делегирована в специализированные компоненты.
+    Координирует AsyncSender, AsyncReceiver, ChannelRegistry (из CRM),
+    channel_dispatcher (= self._dispatcher из CRM) и message_dispatcher.
 
     Attrs:
         router_id:          Синоним manager_name (backward compat)
         channel_dispatcher: Dispatcher для маршрутизации ИСХОДЯЩИХ → каналы
+                            (= self._dispatcher из CRM)
         message_dispatcher: Dispatcher для обработки ВХОДЯЩИХ сообщений
     """
 
@@ -48,28 +59,28 @@ class RouterManager(BaseManager, ObservableMixin):
         logger: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
-        # --- BaseManager + ObservableMixin ---
-        BaseManager.__init__(self, manager_name=manager_name, process=process)
-        managers = kwargs.get("managers", {})
+        managers = kwargs.pop("managers", {})
         if logger and "logger" not in managers:
             managers["logger"] = logger
-        ObservableMixin.__init__(
+
+        ChannelRoutingManager.__init__(
             self,
+            manager_name=manager_name,
+            process=process,
+            config=None,
+            buffer_strategy=None,          # AsyncSender handles buffering (not CRM buffer)
+            dispatcher_key_field="command",
+            dispatcher_strategy=dispatch_strategy,
             managers=managers,
-            config=kwargs.get("config", {}),
-            auto_proxy=kwargs.get("auto_proxy", True),
+            observable_config=kwargs.pop("observable_config", None),
+            auto_proxy=kwargs.pop("auto_proxy", True),
+            **kwargs,
         )
 
-        self.router_id = manager_name       # backward compat
+        self.router_id = manager_name
         self.queue_registry = queue_registry
 
-        # --- Компоненты ---
-        self._channels = ChannelRegistry(
-            log_warning=self._log_warning,
-            log_error=self._log_error,
-            log_debug=self._log_debug,
-        )
-
+        # --- AsyncSender: buffers FULL send pipeline (middleware + resolve + send)
         self._sender = AsyncSender(
             name=manager_name,
             send_fn=self._do_send,
@@ -88,17 +99,16 @@ class RouterManager(BaseManager, ObservableMixin):
         self._send_mw = MiddlewarePipeline("send", log_warning=self._log_warning)
         self._recv_mw = MiddlewarePipeline("receive", log_warning=self._log_warning)
 
-        # --- Dispatcher'ы ---
-        self.channel_dispatcher = Dispatcher(
-            f"{manager_name}_channel_dispatcher",
-            default_strategy=dispatch_strategy,
-        )
+        # channel_dispatcher = CRM's _dispatcher (backward compat alias)
+        self.channel_dispatcher = self._dispatcher
+
+        # message_dispatcher: router-specific, handles INCOMING messages
         self.message_dispatcher = Dispatcher(
             f"{manager_name}_message_dispatcher",
+            process=process,
             default_strategy=dispatch_strategy,
         )
 
-        # --- Локальная статистика (операции самого роутера) ---
         self._stats: Dict[str, int] = {
             "sent_attempted":     0,
             "sent_ok":            0,
@@ -112,16 +122,14 @@ class RouterManager(BaseManager, ObservableMixin):
     # ================================================================
 
     def initialize(self) -> bool:
-        """Запустить фоновый поток-отправщик.
-
-        Поток-приёмник запускается отдельно через start_listening().
-        """
         try:
+            self._dispatcher.initialize()
+            self.message_dispatcher.initialize()
             self._sender.start()
             self.is_initialized = True
             self._log_info(
                 f"RouterManager '{self.manager_name}' initialized "
-                f"(channels: {self._channels.names()})"
+                f"(channels: {self._channel_registry.names()})"
             )
             return True
         except Exception as e:
@@ -129,18 +137,17 @@ class RouterManager(BaseManager, ObservableMixin):
             return False
 
     def shutdown(self) -> bool:
-        """Корректная остановка всех компонентов."""
         try:
             self._sender.stop()
             self._receiver.stop()
 
-            for ch in self._channels.clear():
+            for ch in self._channel_registry.clear():
                 try:
                     ch.stop_listening()
                 except Exception:
                     pass
 
-            self.channel_dispatcher.shutdown()
+            self._dispatcher.shutdown()
             self.message_dispatcher.shutdown()
             self.is_initialized = False
             self._log_info("RouterManager shutdown completed")
@@ -158,27 +165,20 @@ class RouterManager(BaseManager, ObservableMixin):
         message: Union["Message", Dict[str, Any]],
         priority: str = "normal",
     ) -> None:
-        """Non-blocking отправка — безопасна для UI-потока.
+        """Non-blocking: помещает всё сообщение в AsyncSender → обработка в фоне.
 
-        Помещает сообщение в PriorityQueue AsyncSender'а.
-        При переполнении буфера — предупреждение, не зависание.
-
-        Args:
-            message:  Message-объект или словарь.
-            priority: 'urgent' | 'high' | 'normal' | 'low'
+        AsyncSender вызывает _do_send() который применяет middleware,
+        резолвит каналы и вызывает channel.send(). Это отличие от CRM buffer:
+        весь pipeline (включая middleware) выполняется в фоновом потоке.
         """
         self._sender.enqueue(self._to_dict(message), priority)
 
     def send(self, message: Union["Message", Dict[str, Any]]) -> Dict[str, Any]:
-        """Синхронная отправка. Блокирует вызывающий поток.
-
-        Для фоновых потоков и тестов.
-        НЕ вызывать из UI-потока — используй send_async().
-        """
+        """Синхронная отправка. Блокирует вызывающий поток."""
         return self._do_send(self._to_dict(message))
 
     def _do_send(self, msg_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Внутренняя отправка: send middleware → resolve channels → channel.send()."""
+        """Применить middleware → резолвить каналы → channel.send()."""
         self._stats["sent_attempted"] += 1
         try:
             processed = self._send_mw.apply(msg_dict)
@@ -203,12 +203,13 @@ class RouterManager(BaseManager, ObservableMixin):
                 result = channels[0].send(processed)
                 if isinstance(result, dict) and result.get("status") == "error":
                     self._stats["errors"] += 1
-                    self._log_debug(f"channel '{channels[0].name}' error: {result.get('reason')}")
+                    self._log_debug(
+                        f"channel '{channels[0].name}' error: {result.get('reason')}"
+                    )
                 else:
                     self._stats["sent_ok"] += 1
                 return result
 
-            # Broadcast
             results = []
             all_ok = True
             for ch in channels:
@@ -235,15 +236,10 @@ class RouterManager(BaseManager, ObservableMixin):
         timeout: float = 0.0,
         return_messages: bool = True,
     ) -> List[Union["Message", Dict[str, Any]]]:
-        """Sync опрос всех каналов + receive middleware + message_dispatcher.
+        """Sync опрос всех каналов + receive middleware + message_dispatcher."""
+        from ...message_module import Message
 
-        Args:
-            timeout:         Таймаут на один канал (0 = non-blocking).
-            return_messages: True → Message-объекты, False → словари.
-        """
-        from ...message_module import Message  # avoid circular import
-
-        raw = self._channels.poll_all(timeout)
+        raw = self._poll_all_channels(timeout)
         result = []
 
         for msg_dict in raw:
@@ -258,7 +254,6 @@ class RouterManager(BaseManager, ObservableMixin):
                     "receive_time": time.time(),
                 })
 
-                # fire-and-forget dispatch входящего
                 dispatch_key = processed.get("command") or processed.get("type", "")
                 if dispatch_key:
                     try:
@@ -269,7 +264,9 @@ class RouterManager(BaseManager, ObservableMixin):
                     except Exception:
                         pass
 
-                result.append(Message.from_dict(processed) if return_messages else processed)
+                result.append(
+                    Message.from_dict(processed) if return_messages else processed
+                )
                 self._stats["received"] += 1
 
             except Exception as e:
@@ -278,25 +275,60 @@ class RouterManager(BaseManager, ObservableMixin):
 
         return result
 
+    def _poll_all_channels(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
+        """Опросить все каналы в registry. Добавляет _source_channel к каждому msg."""
+        snapshot = self._channel_registry.snapshot()
+        messages: List[Dict[str, Any]] = []
+        for ch_name, ch in snapshot.items():
+            if not hasattr(ch, "poll"):
+                continue
+            try:
+                for msg in ch.poll(timeout):
+                    if isinstance(msg, dict):
+                        msg["_source_channel"] = ch_name
+                    messages.append(msg)
+            except Exception as e:
+                self._log_error(f"poll error on '{ch_name}': {e}")
+        return messages
+
     # ================================================================
     # ASYNC RECEIVE
     # ================================================================
 
     def start_listening(self, poll_interval: float = 0.01) -> bool:
-        """Запустить фоновый listener-поток."""
         return self._receiver.start(self.receive, poll_interval)
 
     def stop_listening(self, timeout: float = 5.0) -> bool:
-        """Остановить listener-поток."""
         return self._receiver.stop(timeout)
 
     def add_message_callback(self, callback: Callable) -> None:
-        """Зарегистрировать колбэк для входящих сообщений."""
         self._receiver.add_callback(callback)
 
     def remove_message_callback(self, callback: Callable) -> None:
-        """Удалить колбэк."""
         self._receiver.remove_callback(callback)
+
+    # ================================================================
+    # CHANNEL REGISTRATION (override CRM — no auto-dispatcher registration)
+    # ================================================================
+
+    def register_channel(self, channel: IMessageChannel) -> bool:
+        """Зарегистрировать IMessageChannel.
+
+        Override CRM's register_channel() чтобы:
+          1. Проверить тип (IMessageChannel, не просто IChannel)
+          2. Inject log-callbacks (_attach_logger)
+          3. НЕ auto-регистрировать в channel_dispatcher — RouterManager
+             управляет routing через register_route() явно.
+        """
+        if not isinstance(channel, IMessageChannel):
+            self._log_warning(
+                f"[RouterManager] register_channel: expected IMessageChannel, "
+                f"got {type(channel).__name__}"
+            )
+            return False
+        if hasattr(channel, "_attach_logger"):
+            channel._attach_logger(self._log_warning, self._log_error)
+        return self._channel_registry.register(channel)
 
     # ================================================================
     # CHANNEL ROUTING (channel_dispatcher API)
@@ -312,12 +344,10 @@ class RouterManager(BaseManager, ObservableMixin):
     ) -> bool:
         """Привязать routing-ключ к каналу через channel_dispatcher.
 
-        Args:
-            key:          Ключ диспетчеризации. Для PATTERN_MATCH — regex.
-            channel_name: Имя канала. None → брать из msg["channel"] (dynamic).
-            strategy:     EXACT / PATTERN / FALLBACK.
-            efficiency:   Приоритет при FALLBACK_MATCH.
-            tags:         Теги для группировки маршрутов.
+        Использует name-returning handler pattern: dispatcher возвращает имя канала,
+        RouterManager затем резолвит канал по имени в _resolve_channels().
+
+        Это отличается от CRM's register_route() где handler пишет напрямую.
         """
         return self.channel_dispatcher.register_handler(
             key=key,
@@ -349,7 +379,6 @@ class RouterManager(BaseManager, ObservableMixin):
         channel_names: List[str],
         description: str = "",
     ) -> bool:
-        """Зарегистрировать chain-broadcast сценарий через channel_dispatcher."""
         self.channel_dispatcher.create_scenario(scenario_name, description)
         for i, ch_name in enumerate(channel_names):
             _ch = ch_name
@@ -375,7 +404,6 @@ class RouterManager(BaseManager, ObservableMixin):
         tags: Optional[List[str]] = None,
         strategy: DispatchStrategy = DispatchStrategy.EXACT_MATCH,
     ) -> bool:
-        """Зарегистрировать обработчик входящих сообщений."""
         return self.message_dispatcher.register_handler(
             key=key,
             handler=handler,
@@ -387,7 +415,6 @@ class RouterManager(BaseManager, ObservableMixin):
         )
 
     def register_message_scenario(self, scenario_name: str, description: str = "") -> bool:
-        """Создать chain-сценарий обработки входящих."""
         return self.message_dispatcher.create_scenario(scenario_name, description)
 
     def add_handler_to_message_scenario(
@@ -397,7 +424,6 @@ class RouterManager(BaseManager, ObservableMixin):
         handler: Callable,
         stage: int = 0,
     ) -> bool:
-        """Добавить шаг в сценарий обработки входящих."""
         return self.message_dispatcher.add_handler_to_scenario(
             scenario_name=scenario_name,
             handler_key=handler_key,
@@ -410,47 +436,14 @@ class RouterManager(BaseManager, ObservableMixin):
     # ================================================================
 
     def add_send_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
-        """Добавить middleware для исходящих сообщений.
-
-        fn(msg) → dict | None.  None → сообщение отбрасывается.
-        """
         self._send_mw.add(fn)
 
     def add_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
-        """Добавить middleware для входящих сообщений."""
         self._recv_mw.add(fn)
 
     def clear_middleware(self) -> None:
-        """Сбросить все middleware (send + receive)."""
         self._send_mw.clear()
         self._recv_mw.clear()
-
-    # ================================================================
-    # CHANNELS (делегирует в ChannelRegistry)
-    # ================================================================
-
-    def register_channel(self, channel: IMessageChannel) -> bool:
-        """Зарегистрировать канал. Thread-safe.
-
-        Если канал поддерживает _attach_logger() (наследует MessageChannel),
-        автоматически инжектит log-колбэки роутера — errors из канала попадут
-        в LoggerManager через ObservableMixin.
-        """
-        if hasattr(channel, "_attach_logger"):
-            channel._attach_logger(self._log_warning, self._log_error)
-        return self._channels.register(channel)
-
-    def unregister_channel(self, channel_name: str) -> bool:
-        """Удалить канал. Thread-safe."""
-        return self._channels.unregister(channel_name)
-
-    def get_channel(self, channel_name: str) -> Optional[IMessageChannel]:
-        """Получить канал по имени или None. Thread-safe."""
-        return self._channels.get(channel_name)
-
-    def get_all_channels(self) -> List[IMessageChannel]:
-        """Список всех зарегистрированных каналов. Thread-safe."""
-        return self._channels.all()
 
     # ================================================================
     # STATISTICS & MONITORING
@@ -469,24 +462,20 @@ class RouterManager(BaseManager, ObservableMixin):
             "sender_alive":          self._sender.is_alive,
             "listener_alive":        self._receiver.is_alive,
             "send_queue_size":       self._sender.qsize,
-            "channels_count":        len(self._channels),
+            "channels_count":        len(self._channel_registry),
             "callbacks_count":       self._receiver.callback_count,
             "send_middleware_count": len(self._send_mw),
             "recv_middleware_count": len(self._recv_mw),
-            # integer aliases — backward compat
             "channel_handlers":      len(_ch_handlers),
             "message_handlers":      len(_msg_handlers),
-            # полные списки для инспекции
             "channel_routes":        _ch_handlers,
             "message_handler_list":  _msg_handlers,
-            # агрегированные счётчики
             "queued_async":          self._sender.queued,
             "dropped":               self._sender.dropped,
             "processed":             self._receiver.processed,
             **self._stats,
-            # errors — суммируем с ошибками receiver'а
             "errors":  self._stats["errors"] + self._receiver.errors,
-            "channels": self._channels.get_info(),
+            "channels": self._channel_registry.get_info(),
         }
 
         if isinstance(base, dict):
@@ -531,35 +520,35 @@ class RouterManager(BaseManager, ObservableMixin):
 
         Приоритет:
           1. msg["channel"] задан явно → прямой O(1) lookup
-          2. channel_dispatcher.dispatch() → str | List[str]
-          3. [] → ошибка (нет тихого fallback)
+          2. channel_dispatcher.dispatch() → str | List[str] (имена каналов)
+          3. [] → ошибка
         """
-        # 1. Explicit channel — fast path
         ch_name = msg_dict.get("channel")
         if ch_name:
-            ch = self._channels.get(ch_name)
+            ch = self._channel_registry.get(ch_name)
             if ch:
                 return [ch]
             self._log_warning(f"channel '{ch_name}' not registered")
             return []
 
-        # 2. Dispatcher
         key_field = "command" if msg_dict.get("command") else "type"
         if not msg_dict.get(key_field):
-            self._log_warning("_resolve_channels: no 'channel', 'command' or 'type' in message")
+            self._log_warning(
+                "_resolve_channels: no 'channel', 'command' or 'type' in message"
+            )
             return []
 
         dispatch_result = self.channel_dispatcher.dispatch(msg_dict, key_field=key_field)
 
         if isinstance(dispatch_result, str):
-            ch = self._channels.get(dispatch_result)
+            ch = self._channel_registry.get(dispatch_result)
             if ch:
                 return [ch]
             self._log_warning(f"channel '{dispatch_result}' from dispatcher not registered")
             return []
 
         if isinstance(dispatch_result, list):
-            snapshot = self._channels.snapshot()
+            snapshot = self._channel_registry.snapshot()
             resolved = [snapshot[n] for n in dispatch_result if n in snapshot]
             missing  = [n for n in dispatch_result if n not in snapshot]
             if missing:
@@ -574,10 +563,10 @@ class RouterManager(BaseManager, ObservableMixin):
 
     @staticmethod
     def _make_channel_handler(channel_name: Optional[str]) -> Callable:
-        """Создать routing-handler для channel_dispatcher.
+        """Создать name-returning handler для channel_dispatcher.
 
-        channel_name=str  → возвращает имя канала (static)
-        channel_name=None → берёт из msg["channel"] (dynamic)
+        RouterManager routing pattern: handler returns channel NAME (str),
+        not the written result. _resolve_channels() resolves name → channel.
         """
         if channel_name is not None:
             _name = channel_name
@@ -589,11 +578,7 @@ class RouterManager(BaseManager, ObservableMixin):
     # ================================================================
 
     def register_channel_handler(self, key: str, handler: Callable, **kwargs) -> bool:
-        """Backward-compat: регистрирует routing-handler в channel_dispatcher.
-
-        handler(msg) → str (channel_name) | List[str] (broadcast).
-        Новый API: register_route() или register_message_handler().
-        """
+        """Backward-compat: регистрирует routing-handler в channel_dispatcher."""
         return self.channel_dispatcher.register_handler(
             key=key,
             handler=handler,
@@ -603,5 +588,5 @@ class RouterManager(BaseManager, ObservableMixin):
         )
 
     def cleanup(self) -> None:
-        """Alias for shutdown() — backward compatibility."""
+        """Alias for shutdown()."""
         self.shutdown()

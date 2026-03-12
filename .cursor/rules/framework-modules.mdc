@@ -6,9 +6,26 @@ alwaysApply: false
 
 # Правила работы с модулями фреймворка
 
+## Иерархия менеджеров
+
+```
+BaseManager + ObservableMixin
+        │
+        ▼
+ChannelRoutingManager  ← БАЗОВЫЙ КЛАСС для менеджеров с каналами
+        │
+        ├── LoggerManager       (BatchBuffer, scope/level routing)
+        │       └── ErrorManager  (_level_to_channel, severity routing)
+        └── RouterManager       (AsyncSender + channel/msg dispatchers)
+```
+
+**Новый менеджер с каналами** — наследуй `ChannelRoutingManager`, не копируй код!
+Подробнее: `modules/channel_routing_module/README.md`
+
 ## Золотой образец
 
-`Inspector_prototype\multiprocess_framework\refactored\modules\router_module` — эталонная структура. При работе с другими модулями смотри на неё.
+`Inspector_prototype\multiprocess_framework\refactored\modules\channel_routing_module` — эталон для базового класса менеджера.
+`Inspector_prototype\multiprocess_framework\refactored\modules\router_module` — эталон для специализированного менеджера.
 
 ## Запрещено
 
@@ -16,6 +33,8 @@ alwaysApply: false
 - Добавлять `sys.path.insert` в production-код
 - Создавать дублирующиеся методы (проверяй на наличие перед добавлением)
 - Добавлять новые внешние зависимости без крайней необходимости
+- Создавать собственный ChannelRegistry / registry-dict в менеджере — используй `self._channel_registry` из CRM
+- Создавать новый менеджер без `ChannelRoutingConfig(RegisterBase)` как основы конфига
 
 ## Шаблон STATUS.md
 
@@ -43,3 +62,7 @@ alwaysApply: false
 - registers_module отдельно от data_schema_module (ADR-002)
 - Dict at Boundary (ADR-008)
 - correlation_id для request-response (ADR-005)
+- ChannelRoutingManager — единый базовый класс для менеджеров с каналами (ADR-013)
+- IChannel — единый базовый интерфейс каналов; ILogChannel(IChannel), IMessageChannel(IChannel) (ADR-014)
+- AsyncSender остаётся в RouterManager, не заменяется AsyncSenderBuffer из CRM (ADR-015)
+- ChannelRoutingConfig(RegisterBase) — базовый конфиг; наследовать, а не дублировать (ADR-016)

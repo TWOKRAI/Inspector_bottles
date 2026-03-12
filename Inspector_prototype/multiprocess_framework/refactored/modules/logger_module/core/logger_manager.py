@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Основной менеджер логирования (Refactored).
-Объединяет все компоненты в единую систему с поддержкой:
-- Наследование от BaseManager
-- Интеграция с ObservableMixin
-- Динамическая конфигурация через ConfigManager
-- Поддержка файлов по модулям
-- Интеграция с RouterManager для межпроцессного логирования
+LoggerManager (Refactored) — наследник ChannelRoutingManager.
+
+Миграция Фаза 2:
+  - Наследует ChannelRoutingManager вместо BaseManager + ObservableMixin
+  - Каналы хранятся в self._channel_registry (thread-safe, из CRM)
+  - Батчинг через self._buffer (BatchBuffer из CRM)
+  - LogDispatcher сохранён для backward compat (ErrorManager, Фаза 3)
+  - Публичный API не изменён (info, error, log, flush, get_stats и т.д.)
 """
 import time
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
@@ -16,342 +17,322 @@ from pathlib import Path
 if TYPE_CHECKING:
     from multiprocessing import Process
 
-from ...base_manager import BaseManager, ObservableMixin
-from ...base_manager.interfaces import IBaseManager
+from ...channel_routing_module import ChannelRoutingManager
+from ...channel_routing_module.buffers.batch_buffer import BatchBuffer, BatchConfig as CRMBatchConfig
 from ..interfaces import ILoggerManager
 from .log_config import LogConfig, LogLevel, LogScope, ScopeConfig, ChannelConfig
 from .log_dispatcher import LogDispatcher, LogRecord
-from ..batcher.batch_manager import BatchManager, BatchConfig
 from ..channels.log_channel import create_channel, LogChannel
 
-# Глобальная переменная для контекста (поддерживает асинхронность)
 log_context: ContextVar[Dict[str, Any]] = ContextVar('log_context', default={})
 
 
-class LoggerManager(BaseManager, ObservableMixin, ILoggerManager):
+class LoggerManager(ChannelRoutingManager, ILoggerManager):
     """
-    Главный менеджер системы логирования (Refactored).
-    
-    Features:
-    - Гибкая конфигурация через YAML и ConfigManager
-    - Множественные каналы записи
-    - Батчинг для производительности
-    - Контекстное логирование
-    - Фильтрация по областям и модулям
-    - Поддержка отдельных файлов для каждого модуля
-    - Динамическое изменение конфигурации в реальном времени
-    - Интеграция с RouterManager для межпроцессного логирования
+    Менеджер системы логирования (наследует ChannelRoutingManager).
+
+    Использует от ChannelRoutingManager:
+      - self._channel_registry  — thread-safe хранилище каналов (IChannel)
+      - self._buffer            — BatchBuffer для пакетной записи
+      - self._dispatcher        — Dispatcher (базовый, для level-based routing в ErrorManager)
+
+    Сохраняет свою специфику:
+      - LogConfig              — конфигурация областей/уровней/каналов
+      - LogDispatcher          — channel-based routing (backward compat для ErrorManager)
+      - Scope-based routing    — log() определяет каналы по ScopeConfig
+      - Module channels        — отдельный файл для каждого модуля
+      - Context stack          — push_context / pop_context
     """
-    
+
     _instance = None
-    
+
     def __init__(
         self,
         manager_name: str = "LoggerManager",
         process: Optional["Process"] = None,
-        config: Optional[LogConfig] = None,
+        config: Optional[Any] = None,
         config_manager: Optional[Any] = None,
         router_manager: Optional[Any] = None,
         managers: Optional[Dict[str, Any]] = None,
         enable_router_routing: bool = True,
-        **kwargs
+        **kwargs,
     ):
-        """
-        Инициализация менеджера логирования.
-        
-        Args:
-            manager_name: Имя менеджера
-            process: Ссылка на родительский процесс
-            config: Конфигурация логирования (если None, создается дефолтная)
-            config_manager: Менеджер конфигурации для динамического управления
-            router_manager: RouterManager для межпроцессного логирования
-            managers: Словарь других менеджеров для интеграции
-            enable_router_routing: Включить маршрутизацию логов через RouterManager
-            **kwargs: Дополнительные параметры для ObservableMixin
-        """
-        # Инициализация BaseManager
-        BaseManager.__init__(self, manager_name=manager_name, process=process)
-        
-        # Подготовка менеджеров для ObservableMixin
         if managers is None:
             managers = {}
-
         if router_manager:
             managers['router'] = router_manager
 
-        # Флаг router_routing передаётся как feature-флаг в config ObservableMixin,
-        # чтобы его можно было включать/выключать через self.enable('router_routing').
         observable_config = {'router_routing': enable_router_routing}
 
-        # Инициализация ObservableMixin
-        ObservableMixin.__init__(
+        # --- Normalize config ---
+        log_config = self._resolve_log_config(config)
+
+        # --- Init ChannelRoutingManager (without buffer — set up later) ---
+        ChannelRoutingManager.__init__(
             self,
+            manager_name=manager_name,
+            process=process,
+            config=None,
+            buffer_strategy=None,
+            dispatcher_key_field="level",
             managers=managers,
-            config=observable_config,
+            observable_config=observable_config,
             auto_proxy=kwargs.get('auto_proxy', True),
         )
-        
-        # Сохраняем зависимости
+
         self._config_manager = config_manager
         self._router_manager = router_manager
-        
-        # Инициализация конфигурации
-        self.config = config or LogConfig()
-        self.app_name = self.config.app_name
-        
-        # Инициализация компонентов
+
+        self.config = log_config
+        self.app_name = log_config.app_name
+
+        # LogDispatcher — backward compat for ErrorManager (Phase 3 will remove)
         self.dispatcher = LogDispatcher(app_name=self.config.app_name, process=process)
-        self.batcher = None
-        self.channels: Dict[str, LogChannel] = {}
-        self._module_channels: Dict[str, LogChannel] = {}  # Каналы для отдельных модулей
-        
-        # Контекст логирования (используем contextvars вместо блокировок)
+
+        # Module-specific channels (separate from main registry)
+        self._module_channels: Dict[str, LogChannel] = {}
+
         self._context_stack: List[Dict[str, Any]] = []
-        
-        # Кэш для быстрых проверок (сбрасывается при изменении конфига)
+
         self._decision_cache: Dict[str, bool] = {}
         self._cache_enabled = True
-        
-        # Статистика
+
         self.stats = {
             'messages_processed': 0,
             'messages_skipped': 0,
             'messages_batched': 0,
             'messages_routed': 0,
-            'module_files_created': 0
+            'module_files_created': 0,
         }
-        
-        # Настройка системы
+
         self._setup_channels()
         self._setup_batcher()
-        
-        # Сохраняем инстанс для глобального доступа
+
         LoggerManager._instance = self
-    
+
+    # =========================================================================
+    # ЖИЗНЕННЫЙ ЦИКЛ
+    # =========================================================================
+
     def initialize(self) -> bool:
-        """
-        Инициализация менеджера логирования.
-        
-        Returns:
-            bool: True если инициализация успешна
-        """
         try:
-            # Инициализация диспетчера
             self.dispatcher.initialize()
-            
+            self._dispatcher.initialize()
+            if self._buffer:
+                self._buffer.start()
             self.is_initialized = True
             self.info("LoggerManager initialized", module="logger_manager")
             return True
         except Exception as e:
             self._fallback_log("ERROR", f"LoggerManager initialization failed: {e}")
             return False
-    
+
     def shutdown(self) -> bool:
-        """
-        Корректное завершение работы менеджера.
-        
-        Returns:
-            bool: True если завершение успешно
-        """
         try:
             self.info("LoggerManager shutting down", module="logger_manager")
             self.flush()
-            
-            # Закрываем диспетчер
+            if self._buffer:
+                self._buffer.stop()
             self.dispatcher.shutdown()
-            
-            # Закрываем все каналы
-            for channel in list(self.channels.values()) + list(self._module_channels.values()):
-                if hasattr(channel, 'close'):
-                    try:
-                        channel.close()
-                    except Exception:
-                        pass
-            
+            self._dispatcher.shutdown()
+
+            for channel in self._channel_registry.clear():
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+            for channel in list(self._module_channels.values()):
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+
             self.is_initialized = False
             return True
         except Exception as e:
             self._fallback_log("ERROR", f"LoggerManager shutdown failed: {e}")
             return False
-    
+
+    # =========================================================================
+    # SETUP
+    # =========================================================================
+
+    @staticmethod
+    def _resolve_log_config(config: Any) -> LogConfig:
+        """Convert config (None | dict | LogConfig | RegisterBase) to LogConfig."""
+        if config is None:
+            return LogConfig()
+        if isinstance(config, LogConfig):
+            return config
+        if isinstance(config, dict):
+            return LogConfig.from_dict(config)
+        if hasattr(config, 'build') and callable(config.build):
+            result = config.build()
+            if isinstance(result, tuple) and len(result) == 2:
+                _, cfg_dict = result
+                return LogConfig.from_dict(cfg_dict) if isinstance(cfg_dict, dict) else LogConfig()
+            if isinstance(result, dict):
+                return LogConfig.from_dict(result)
+        return LogConfig()
+
     def _setup_channels(self):
-        """Настраивает каналы записи"""
+        """Создать каналы из конфига и зарегистрировать в CRM registry."""
         for channel_name, channel_config in self.config.channels.items():
             if channel_config.enabled:
                 self._setup_channel(channel_name, channel_config)
-    
+
     def _setup_channel(self, channel_name: str, channel_config: ChannelConfig):
-        """Настраивает один канал."""
         try:
             channel = create_channel(channel_config)
-            self.channels[channel_name] = channel
-            
-            # Регистрируем обработчик в диспетчере
-            self.dispatcher.register_channel_handler(
-                channel_name,
-                channel.write
-            )
+            self._channel_registry.register(channel)
+            self.dispatcher.register_channel_handler(channel_name, channel.write)
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
-    
+
     def _setup_module_channel(self, module_name: str, file_path: Optional[str] = None):
-        """
-        Настраивает отдельный канал для модуля.
-        
-        Args:
-            module_name: Имя модуля
-            file_path: Путь к файлу (если None, используется logs/{module_name}.log)
-        """
         if not file_path:
             file_path = f"logs/{module_name}.log"
-        
         try:
-            # Создаем конфигурацию канала для модуля
             channel_config = ChannelConfig(
                 name=f"module_{module_name}",
                 type="file",
                 enabled=True,
                 file_path=file_path,
                 format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                max_size=10 * 1024 * 1024,  # 10MB
-                backup_count=5
+                max_size=10 * 1024 * 1024,
+                backup_count=5,
             )
-            
             channel = create_channel(channel_config)
             self._module_channels[module_name] = channel
-            
-            # Регистрируем обработчик
+            self._channel_registry.register(channel)
             self.dispatcher.register_channel_handler(
-                f"module_{module_name}",
-                channel.write
+                f"module_{module_name}", channel.write
             )
-            
             self.stats['module_files_created'] += 1
-            self.debug(f"Module channel created: {module_name} -> {file_path}", module="logger_manager")
+            self.debug(
+                f"Module channel created: {module_name} -> {file_path}",
+                module="logger_manager",
+            )
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup module channel {module_name}: {e}")
-    
+
     def _setup_batcher(self):
-        """Настраивает батчинг если включен"""
+        """Настроить BatchBuffer из CRM если батчинг включён."""
         if self.config.enable_batching:
-            batch_config = BatchConfig(
-                max_size=self.config.batch_size,
-                flush_interval=self.config.batch_interval
+            self._buffer = BatchBuffer(
+                flush_fn=self._flush_batch,
+                config=CRMBatchConfig(
+                    max_size=self.config.batch_size,
+                    flush_interval=self.config.batch_interval,
+                ),
             )
-            self.batcher = BatchManager(self._flush_batch, batch_config)
         else:
-            self.batcher = None
-    
+            self._buffer = None
+
     def _flush_batch(self, channel: str, batch: List[Dict]):
-        """Обрабатывает пачку логов"""
-        for record_dict in batch:
-            # Восстанавливаем LogRecord из словаря
-            record = LogRecord(
-                timestamp=record_dict['timestamp'],
-                level=LogLevel[record_dict['level']],
-                scope=LogScope[record_dict['scope']],
-                message=record_dict['message'],
-                module=record_dict['module'],
-                extra=record_dict.get('extra', {})
-            )
-            self.dispatcher.route_log(record, [channel])
-    
+        """Callback для BatchBuffer — записать пачку в канал."""
+        ch = self._channel_registry.get(channel)
+        if ch is not None:
+            for record_dict in batch:
+                try:
+                    ch.write(record_dict)
+                except Exception:
+                    pass
+            return
+
+        ch = self._module_channels.get(channel.replace("module_", "", 1))
+        if ch is not None:
+            for record_dict in batch:
+                try:
+                    ch.write(record_dict)
+                except Exception:
+                    pass
+
+    # =========================================================================
+    # ОСНОВНОЙ API ЛОГИРОВАНИЯ
+    # =========================================================================
+
     def should_log(self, scope: LogScope, level: LogLevel, module: str) -> bool:
-        """
-        Определяет, нужно ли логировать сообщение.
-        Использует кэш для производительности.
-        """
         if not self._cache_enabled:
             return self._should_log_direct(scope, level, module)
-        
         cache_key = f"{scope.value}:{level.value}:{module}"
-        
         if cache_key in self._decision_cache:
             return self._decision_cache[cache_key]
-        
-        should_log = self._should_log_direct(scope, level, module)
-        self._decision_cache[cache_key] = should_log
-        return should_log
-    
+        result = self._should_log_direct(scope, level, module)
+        self._decision_cache[cache_key] = result
+        return result
+
     def _should_log_direct(self, scope: LogScope, level: LogLevel, module: str) -> bool:
-        """Прямая проверка без кэша."""
         scope_config = self.config.get_scope_config(scope)
         return scope_config.should_log(level, module)
-    
+
     def log(
         self,
         scope: LogScope,
         level: LogLevel,
         message: str,
         module: str = "main",
-        **extra
+        **extra,
     ):
-        """
-        Основной метод логирования.
-        
-        Args:
-            scope: Область логирования (система, бизнес и т.д.)
-            level: Уровень важности
-            message: Текст сообщения
-            module: Модуль/компонент источника
-            **extra: Дополнительные данные для контекста
-        """
         self.stats['messages_processed'] += 1
-        
-        # Быстрая проверка - нужно ли логировать?
+
         if not self.should_log(scope, level, module):
             self.stats['messages_skipped'] += 1
             return
-        
-        # Получаем конфигурацию области
+
         scope_config = self.config.get_scope_config(scope)
-        channels = scope_config.channels or list(self.channels.keys())
-        
-        # Проверяем наличие отдельного канала для модуля
+        channels = scope_config.channels or self._channel_registry.names()
+
         if module in self._module_channels:
+            channels = list(channels)
             channels.append(f"module_{module}")
-        
-        # Собираем контекст
+
         context = {
             **log_context.get(),
             **self._get_thread_context(),
-            **extra
+            **extra,
         }
-        
-        # Создаем запись
+
         record = LogRecord(
             timestamp=time.time(),
             level=level,
             scope=scope,
             message=message,
             module=module,
-            extra=context
+            extra=context,
         )
-        
-        # Маршрутизация через RouterManager (если включена)
+
         if self.is_enabled('router_routing') and self._router_manager:
             self._route_via_router(record)
-        
-        # Отправляем на запись
-        if self.batcher:
-            # Через батчер
-            for channel in channels:
-                self.batcher.add_message(channel, record.to_dict())
+
+        if self._buffer:
+            for ch_name in channels:
+                self._buffer.enqueue(ch_name, record.to_dict())
             self.stats['messages_batched'] += 1
         else:
-            # Напрямую в диспетчер
-            self.dispatcher.route_log(record, channels)
-    
+            self._write_record_to_channels(record, channels)
+
+    def _write_record_to_channels(self, record: LogRecord, channel_names: List[str]) -> None:
+        """Write log record directly to named channels (no buffer)."""
+        record_dict = record.to_dict()
+        for ch_name in channel_names:
+            ch = self._channel_registry.get(ch_name)
+            if ch is None:
+                ch = self._module_channels.get(ch_name.replace("module_", "", 1))
+            if ch is not None:
+                try:
+                    ch.write(record_dict)
+                except Exception:
+                    pass
+            else:
+                handler = self.dispatcher.channel_handlers.get(ch_name)
+                if handler:
+                    try:
+                        handler(record_dict)
+                    except Exception:
+                        pass
+
     def _route_via_router(self, record: LogRecord) -> None:
-        """Маршрутизировать LOG-запись через RouterManager.
-
-        Использует Message(type='log') — единый язык системы.
-        Избегаем рекурсии: если логирование снова вызовет этот метод,
-        исключение тихо глотается.
-
-        Args:
-            record: Запись лога для отправки.
-        """
         if not self._router_manager:
             return
         try:
@@ -372,135 +353,152 @@ class LoggerManager(BaseManager, ObservableMixin, ILoggerManager):
             self._router_manager.send(msg)
             self.stats['messages_routed'] += 1
         except Exception:
-            # Тихое подавление — нельзя логировать ошибку через себя (рекурсия)
             pass
-    
+
+    # =========================================================================
+    # КОНТЕКСТ
+    # =========================================================================
+
     def push_context(self, **context_vars):
-        """Добавляет контекст для текущего потока"""
         current_context = self._get_thread_context()
         new_context = {**current_context, **context_vars}
         self._context_stack.append(new_context)
-    
+
     def pop_context(self):
-        """Убирает последний добавленный контекст"""
         if self._context_stack:
             self._context_stack.pop()
-    
+
     def _get_thread_context(self) -> Dict[str, Any]:
-        """Получает контекст для текущего потока"""
         return self._context_stack[-1] if self._context_stack else {}
-    
-    # Удобные методы для разных областей
+
+    # =========================================================================
+    # УДОБНЫЕ МЕТОДЫ ПО ОБЛАСТИ
+    # =========================================================================
+
     def system(self, level: LogLevel, message: str, module: str = "main", **extra):
-        """Логирование системных событий"""
         self.log(LogScope.SYSTEM, level, message, module, **extra)
-    
+
     def business(self, level: LogLevel, message: str, module: str = "main", **extra):
-        """Логирование бизнес-логики"""
         self.log(LogScope.BUSINESS, level, message, module, **extra)
-    
+
     def performance(self, level: LogLevel, message: str, module: str = "main", **extra):
-        """Логирование производительности"""
         self.log(LogScope.PERFORMANCE, level, message, module, **extra)
-    
+
     def audit(self, level: LogLevel, message: str, module: str = "main", **extra):
-        """Логирование аудита"""
         self.log(LogScope.AUDIT, level, message, module, **extra)
-    
+
     def security(self, level: LogLevel, message: str, module: str = "main", **extra):
-        """Логирование безопасности"""
         self.log(LogScope.SECURITY, level, message, module, **extra)
-    
+
+    # =========================================================================
+    # УДОБНЫЕ МЕТОДЫ ПО УРОВНЮ
+    # =========================================================================
+
     def debug(self, message: str, module: str = "main", **extra):
-        """Отладочное логирование"""
         self.log(LogScope.DEBUG, LogLevel.DEBUG, message, module, **extra)
-    
+
     def info(self, message: str, module: str = "main", **extra):
-        """Информационное сообщение"""
         self.log(LogScope.BUSINESS, LogLevel.INFO, message, module, **extra)
-    
+
     def warning(self, message: str, module: str = "main", **extra):
-        """Предупреждение"""
         self.log(LogScope.SYSTEM, LogLevel.WARNING, message, module, **extra)
-    
+
     def error(self, message: str, module: str = "main", **extra):
-        """Ошибка"""
         self.log(LogScope.SYSTEM, LogLevel.ERROR, message, module, **extra)
-    
+
     def critical(self, message: str, module: str = "main", **extra):
-        """Критическая ошибка"""
         self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, **extra)
-    
-    # Методы для управления модулями
+
+    # =========================================================================
+    # УПРАВЛЕНИЕ МОДУЛЯМИ
+    # =========================================================================
+
     def enable_module_logging(self, module_name: str, file_path: Optional[str] = None):
-        """
-        Включает отдельное логирование для модуля.
-        
-        Args:
-            module_name: Имя модуля
-            file_path: Путь к файлу (опционально)
-        """
         self._setup_module_channel(module_name, file_path)
-    
+
     def disable_module_logging(self, module_name: str):
-        """
-        Выключает логирование для модуля.
-        
-        Args:
-            module_name: Имя модуля
-        """
         if module_name in self._module_channels:
             channel = self._module_channels[module_name]
-            if hasattr(channel, 'close'):
+            try:
                 channel.close()
+            except Exception:
+                pass
+            self._channel_registry.unregister(f"module_{module_name}")
             del self._module_channels[module_name]
-    
+
+    # =========================================================================
+    # BACKWARD COMPAT: self.channels (property)
+    # =========================================================================
+
+    @property
+    def channels(self) -> Dict[str, Any]:
+        """Backward compat: {channel_name: channel_object}.
+
+        Used by ErrorManager._setup_level_routes() to access channels by name.
+        """
+        return {ch.name: ch for ch in self._channel_registry.all()}
+
+    @property
+    def batcher(self):
+        """Backward compat: alias for self._buffer."""
+        return self._buffer
+
+    # =========================================================================
+    # СТАТИСТИКА
+    # =========================================================================
+
     def get_stats(self) -> Dict[str, Any]:
-        """Возвращает статистику использования"""
         base_stats = {
             'app_name': self.app_name,
             'messages_processed': self.stats['messages_processed'],
             'messages_skipped': self.stats['messages_skipped'],
             'messages_routed': self.stats['messages_routed'],
-            'channels_count': len(self.channels),
+            'channels_count': len(self._channel_registry),
             'module_channels_count': len(self._module_channels),
             'module_files_created': self.stats['module_files_created'],
-            'batching_enabled': self.config.enable_batching
+            'batching_enabled': self.config.enable_batching,
         }
-        
-        if self.batcher:
+
+        if self._buffer:
             base_stats.update({
                 'messages_batched': self.stats['messages_batched'],
-                'batch_stats': self.batcher.stats
+                'batch_stats': self._buffer.stats,
             })
-        
+
         return base_stats
-    
+
+    # =========================================================================
+    # БУФЕР
+    # =========================================================================
+
     def flush(self):
-        """Принудительно сбрасывает все буферизованные логи"""
-        if self.batcher:
-            self.batcher.flush_all()
-    
+        if self._buffer:
+            self._buffer.flush()
+
+    # =========================================================================
+    # ВСПОМОГАТЕЛЬНЫЕ
+    # =========================================================================
+
     def _fallback_log(self, level: str, message: str, module: str = "system"):
-        """Аварийное логирование при недоступности основных методов."""
         try:
             print(f"[{level}] [{module}] {message}")
         except Exception:
             pass
 
 
-# Глобальные функции для удобства
+# =========================================================================
+# Глобальные функции
+# =========================================================================
+
 def get_logger() -> Optional[LoggerManager]:
-    """Возвращает глобальный экземпляр логгера"""
     return LoggerManager._instance
 
+
 def init_logging(config: LogConfig, **kwargs) -> LoggerManager:
-    """Инициализирует глобальную систему логирования"""
     return LoggerManager(config=config, **kwargs)
 
+
 def shutdown_logging():
-    """Останавливает систему логирования"""
     logger = get_logger()
     if logger:
         logger.shutdown()
-

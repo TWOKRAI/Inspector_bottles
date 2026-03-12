@@ -1,8 +1,38 @@
 # logger_module
 
-Центральный менеджер логирования системы. Собирает логи от всех менеджеров
-через `ObservableMixin`, принимает `LOG`-сообщения от дочерних процессов
-через `RouterManager` и записывает в множество каналов.
+Менеджер логирования, интегрированный в единую иерархию через `ChannelRoutingManager`.
+Собирает логи от всех менеджеров через `ObservableMixin`, принимает `LOG`-сообщения от дочерних
+процессов через `RouterManager` и записывает в множество каналов используя батчинг.
+
+---
+
+## Архитектура и наследование
+
+```
+BaseManager + ObservableMixin
+        │
+        ▼
+ChannelRoutingManager  ← базовый класс для менеджеров с каналами
+        │
+        ▼
+LoggerManager (BatchBuffer, scope-based routing, ILogChannel)
+        │
+        ▼
+ErrorManager  (override log() для level-based routing)
+```
+
+**Что дал LoggerManager от ChannelRoutingManager:**
+- `_channel_registry` (thread-safe RLock вместо `channels: Dict`)
+- `_dispatcher` для маршрутизации по ключу (scope, level)
+- `BatchBuffer` — настраиваемая стратегия буферизации
+- `_normalize_config()` — обработка Dict | RegisterBase | None
+- Единая иерархия `ILogChannel(IChannel)`
+
+**Что осталось специфичным LoggerManager:**
+- Scope-based routing (SYSTEM, BUSINESS, PERFORMANCE, AUDIT, SECURITY, DEBUG)
+- Логирование с контекстом (`push_context` / `pop_context`)
+- Module-specific логирование (`enable_module_logging`)
+- Priority flush для ERROR/CRITICAL
 
 ---
 
@@ -10,41 +40,37 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Любой менеджер (ObservableMixin)                                     │
+│  Любой менеджер (BaseManager + ObservableMixin)                      │
 │                                                                        │
-│  ObservableMixin.__init__(managers={'logger': logger_manager})         │
-│  self._log_info("message")   ──→  LoggerManager.info(msg)             │
-│  self._log_error("error")    ──→  LoggerManager.error(msg)            │
+│  ObservableMixin.__init__(managers={'logger': logger_manager})        │
+│  self._log_info("message")   ──→  LoggerManager.info(msg)            │
+│  self._log_error("error")    ──→  LoggerManager.error(msg)           │
 └──────────────────────────────────────────────────────────────────────┘
                     │
-          ┌─────────▼────────────────────────────────────┐
-          │              LoggerManager                    │
-          │                                               │
-          │  ┌────────────┐  ┌──────────┐  ┌──────────┐  │
-          │  │ ScopeFilter│  │  Batcher │  │ Router   │  │
-          │  │ (кэш)      │  │  (batch) │  │ routing  │  │
-          │  └─────┬──────┘  └────┬─────┘  └────┬─────┘  │
-          └────────┼──────────────┼──────────────┼────────┘
-                   │              │              │
-          ┌────────▼──────────────▼──────────────▼────────┐
-          │         LogDispatcher → каналы                 │
-          │  FileChannel  ConsoleChannel  HttpChannel  ... │
-          └─────────────────────────────────────────────────┘
-```
-
-```
-Дочерний процесс
-      │
-      │  Message(type='log', level='error', message='...')
-      │
-      ▼
-RouterManager (channel='log')
-      │
-      ▼
-LoggerManager.receive() / handler
-      │
-      ▼
-Каналы записи
+        ┌───────────▼──────────────────────────────────┐
+        │         LoggerManager                         │
+        │    (наследует ChannelRoutingManager)          │
+        │                                               │
+        │  ┌────────────┐  ┌──────────────┐  ┌──────┐  │
+        │  │ ScopeFilter│  │BatchBuffer   │  │Router│  │
+        │  │ (кэш scope)│  │(config batch)│  │route │  │
+        │  └─────┬──────┘  └───┬──────────┘  └───┬──┘  │
+        └────────┼──────────────┼─────────────────┼────┘
+                 │              │                 │
+        ┌────────▼──────────────▼─────────────────▼────┐
+        │  ChannelRoutingManager._dispatcher           │
+        │         (scope/level routing)                │
+        │  ┌─────────────────────────────────────────┐ │
+        │  │  scope dispatcher (from CRM)            │ │
+        │  │  data → scope filter → channel list     │ │
+        │  └─────────────────────────────────────────┘ │
+        └─────────────────────────────────────────────┘
+                 │
+        ┌────────▼──────────────────────────────────┐
+        │     ILogChannel (от CRM через наследование)│
+        │  FileChannel  ConsoleChannel  HttpChannel  │
+        │  + кастомные каналы (DatabaseChannel...) │
+        └───────────────────────────────────────────┘
 ```
 
 **Интеграция через ObservableMixin:**
@@ -67,15 +93,15 @@ logger_module/
 ├── __init__.py               ← Публичный API
 │
 ├── core/
-│   ├── logger_manager.py     ← LoggerManager (основной класс)
-│   ├── log_dispatcher.py     ← LogDispatcher + LogRecord
+│   ├── logger_manager.py     ← LoggerManager(ChannelRoutingManager, ILoggerManager)
+│   ├── log_dispatcher.py     ← LogDispatcher + LogRecord (backward compatibility)
 │   └── log_config.py         ← LogConfig, LogLevel, LogScope, ChannelConfig, ...
 │
 ├── channels/
-│   └── log_channel.py        ← LogChannel, FileChannel, ConsoleChannel, HttpChannel
+│   └── log_channel.py        ← LogChannel(ILogChannel), FileChannel, ConsoleChannel, HttpChannel
 │
 ├── batcher/
-│   └── batch_manager.py      ← BatchManager, BatchConfig
+│   └── batch_manager.py      ← BatchManager (сохранён для backward compatibility)
 │
 ├── adapters/
 │   └── logger_adapter.py     ← LoggerAdapter (для интеграции с процессами)
@@ -86,58 +112,51 @@ logger_module/
 
 ---
 
-## Области логирования (LogScope)
+## Быстрый старт
 
-| Scope | Константа | Назначение |
-|---|---|---|
-| `"system"` | `LogScope.SYSTEM` | Запуск, остановка, конфигурация системы |
-| `"business"` | `LogScope.BUSINESS` | Бизнес-логика, обработка данных |
-| `"perf"` | `LogScope.PERFORMANCE` | Время выполнения, throughput |
-| `"audit"` | `LogScope.AUDIT` | Действия пользователей, изменения |
-| `"security"` | `LogScope.SECURITY` | Аутентификация, авторизация |
-| `"debug"` | `LogScope.DEBUG` | Отладочная информация |
+```python
+from logger_module import LoggerManager, LogConfig, LogLevel, LogScope
 
-## Уровни логирования (LogLevel)
+# Вариант 1: минимальная конфигурация
+logger = LoggerManager(manager_name="app_logger")
+logger.initialize()
 
-```
-CRITICAL > ERROR > WARNING > INFO > DEBUG
+# Вариант 2: через dict (Dict at Boundary)
+logger = LoggerManager(
+    manager_name="app_logger",
+    config={
+        "app_name": "inspector",
+        "default_level": "INFO",
+        "channels": {
+            "console": {"type": "console", "enabled": True},
+            "file":    {"type": "file", "enabled": True, "file_path": "logs/app.log"},
+        },
+    }
+)
+logger.initialize()
+
+# Вариант 3: через LogConfig (Pydantic)
+config = LogConfig.from_dict({
+    "app_name": "inspector",
+    "default_level": "INFO",
+    "enable_batching": True,
+    "batch_size": 100,
+    "channels": {...},
+})
+logger = LoggerManager(manager_name="app_logger", config=config)
+logger.initialize()
 ```
 
 ---
 
 ## API: LoggerManager
 
-### Создание
+### Жизненный цикл
 
-```python
-from logger_module import LoggerManager, LogConfig, LogLevel, LogScope
-
-# Минимальная конфигурация
-logger = LoggerManager(manager_name="app_logger")
-logger.initialize()
-
-# С конфигурацией через dict (Dict at Boundary)
-config = LogConfig.from_dict({
-    "app_name": "inspector",
-    "default_level": "INFO",
-    "enable_batching": True,
-    "batch_size": 100,
-    "channels": {
-        "console": {"type": "console", "enabled": True},
-        "file":    {"type": "file", "enabled": True, "file_path": "logs/app.log"},
-    },
-})
-logger = LoggerManager(manager_name="app_logger", config=config)
-logger.initialize()
-
-# С RouterManager (для межпроцессного логирования)
-logger = LoggerManager(
-    manager_name="app_logger",
-    config=config,
-    router_manager=router,
-    enable_router_routing=True,
-)
-```
+| Метод | Описание |
+|---|---|
+| `initialize()` | Инициализировать каналы, dispatcher, buffer из CRM. Запустить батчер. |
+| `shutdown()` | `flush()` → закрыть каналы → остановить buffer → остановить dispatcher. |
 
 ### Быстрые методы по уровню
 
@@ -178,7 +197,7 @@ logger.log(
 # Все последующие вызовы автоматически получат эти поля
 logger.push_context(request_id="req-42", user="admin")
 logger.info("processing request")   # → extra = {request_id: req-42, user: admin}
-logger.warning("slow query")        # → extra = {request_id: req-42, user: admin}
+logger.warning("slow query")
 logger.pop_context()
 
 # Контекст как контекстный менеджер (через contextvars)
@@ -201,77 +220,74 @@ logger.disable_module_logging("router_module")
 
 ---
 
-## API: LoggerAdapter (для интеграции с процессами)
+## Батчинг (BatchBuffer из CRM)
+
+По умолчанию включен. Логи группируются в пачки и записываются пакетами.
+`ERROR` и `CRITICAL` всегда записываются немедленно (priority flush).
 
 ```python
-from logger_module import LoggerAdapter
-
-# Создание в ProcessModule:
-adapter = LoggerAdapter(logger_manager=logger, process=self)
-adapter.setup()
-
-# Логирование с автоматическим scope:
-adapter.log_with_auto_scope("info", "starting", context="my_process")
-adapter.log_with_auto_scope(LogLevel.ERROR, "failed", context="my_process")
-
-# Переключение роутера:
-adapter.set_router_routing(True)   # логи пойдут через RouterManager
-
-# Статистика:
-stats = adapter.get_stats()
+# Принудительный сброс (например, при shutdown)
+logger.flush()
 ```
+
+| Параметр | По умолчанию | Описание |
+|---|---|---|
+| `enable_batching` | `True` | Включить батчинг |
+| `batch_size` | `100` | Максимальный размер пачки |
+| `batch_interval` | `1.0 сек` | Интервал принудительного сброса |
+| `priority_flush` | `True` | ERROR/CRITICAL записываются немедленно |
+
+**Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
+могут одновременно вызывать `logger.info()` без гонок данных.
 
 ---
 
-## Интеграция через ObservableMixin
+## Каналы (ILogChannel)
 
-Любой менеджер, использующий `ObservableMixin`, автоматически получает
-доступ к логированию через LoggerManager:
+Все каналы наследуют `ILogChannel(IChannel)` из `channel_routing_module`:
 
 ```python
-from base_manager import BaseManager, ObservableMixin
-
-class RouterManager(BaseManager, ObservableMixin):
-    def __init__(self, name, logger=None, **kwargs):
-        BaseManager.__init__(self, name)
-        managers = {}
-        if logger:
-            managers['logger'] = logger
-
-        ObservableMixin.__init__(
-            self,
-            managers=managers,
-            config={'logger': True},
-            auto_proxy=True,
-        )
-
-    def send(self, msg):
-        self._log_debug(f"sending {msg.get('type')}")  # → LoggerManager.debug()
-        # ...
-        self._log_info("sent successfully")             # → LoggerManager.info()
+class ILogChannel(IChannel):
+    @property
+    def name(self) -> str: ...
+    @property
+    def channel_type(self) -> str: return "log"
+    def write(self, data: Dict[str, Any]) -> Dict[str, Any]: ...
+    def close(self) -> None: ...
+    def get_info(self) -> Dict[str, Any]: ...
 ```
 
-**Pickle-совместимость:** после unpickle (Windows spawn) нужно заново
-вызвать `manager.register_manager('logger', logger_manager)`.
+### Встроенные каналы
 
----
+- `FileChannel` — запись в файл
+- `ConsoleChannel` — вывод на консоль
+- `HttpChannel` — отправка в удалённый сервис логирования
 
-## Прием LOG-сообщений от процессов
-
-Логи от дочерних процессов приходят через RouterManager как `Message(type='log')`.
-Регистрация обработчика:
+### Кастомный канал
 
 ```python
-# При настройке оркестратора:
-router.register_message_handler(
-    key="log",
-    handler=lambda msg: logger.log(
-        scope=LogScope[msg.get("metadata", {}).get("scope", "BUSINESS").upper()],
-        level=LogLevel[msg.get("level", "INFO").upper()],
-        message=msg.get("message", ""),
-        module=msg.get("module", "unknown"),
-    ),
-)
+from logger_module.interfaces import ILogChannel
+
+class DatabaseChannel(ILogChannel):
+    @property
+    def name(self) -> str:
+        return "database"
+
+    def write(self, record: dict) -> dict:
+        try:
+            db.insert("logs", record)
+            return {"status": "success", "channel": self.name}
+        except Exception as e:
+            return {"status": "error", "error": str(e), "channel": self.name}
+
+    def close(self) -> None:
+        db.close()
+
+    def get_info(self) -> dict:
+        return {"name": self.name, "active": db.is_connected()}
+
+# Регистрация через register_channel()
+logger.register_channel(DatabaseChannel())
 ```
 
 ---
@@ -306,11 +322,6 @@ config = LogConfig.from_dict({
             "enabled": True,
             "file_path": "logs/errors.log",
         },
-        "remote": {
-            "type": "http",
-            "enabled": False,
-            "url": "https://logs.example.com/ingest",
-        },
     },
 
     "scopes": {
@@ -326,61 +337,77 @@ config = LogConfig.from_dict({
 })
 ```
 
-### Кастомный канал
+---
+
+## Прием LOG-сообщений от дочерних процессов
+
+Логи от дочерних процессов приходят через RouterManager как `Message(type='log')`.
 
 ```python
-from logger_module.interfaces import ILogChannel
-
-class DatabaseChannel(ILogChannel):
-    @property
-    def name(self) -> str:
-        return "database"
-
-    def write(self, record: dict) -> dict:
-        try:
-            db.insert("logs", record)
-            return {"status": "success", "channel": self.name}
-        except Exception as e:
-            return {"status": "error", "error": str(e), "channel": self.name}
-
-    def close(self) -> None:
-        db.close()
-
-    def get_info(self) -> dict:
-        return {"name": self.name, "active": db.is_connected()}
+# При настройке оркестратора:
+router.register_message_handler(
+    key="log",
+    handler=lambda msg: logger.log(
+        scope=LogScope[msg.get("metadata", {}).get("scope", "BUSINESS").upper()],
+        level=LogLevel[msg.get("level", "INFO").upper()],
+        message=msg.get("message", ""),
+        module=msg.get("module", "unknown"),
+    ),
+)
 ```
 
 ---
 
-## Батчинг
+## Интеграция через ObservableMixin
 
-По умолчанию включен. Логи группируются в пачки и записываются пакетами.
-`ERROR` и `CRITICAL` всегда записываются немедленно (priority flush).
+Любой менеджер, использующий `ObservableMixin`, автоматически получает доступ к логированию:
 
 ```python
-# Принудительный сброс (например, при shutdown)
-logger.flush()
-```
+from base_manager import BaseManager, ObservableMixin
 
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `enable_batching` | `True` | Включить батчинг |
-| `batch_size` | `100` | Максимальный размер пачки |
-| `batch_interval` | `1.0 сек` | Интервал принудительного сброса |
-| `priority_flush` | `True` | ERROR/CRITICAL записываются немедленно |
+class RouterManager(BaseManager, ObservableMixin):
+    def __init__(self, name, logger=None, **kwargs):
+        BaseManager.__init__(self, name)
+        managers = {'logger': logger} if logger else {}
+
+        ObservableMixin.__init__(
+            self,
+            managers=managers,
+            config={'logger': True},
+            auto_proxy=True,
+        )
+
+    def send(self, msg):
+        self._log_debug(f"sending {msg.get('type')}")  # → LoggerManager.debug()
+        # ...
+        self._log_info("sent successfully")             # → LoggerManager.info()
+```
 
 ---
 
-## Публичный контракт (interfaces.py)
+## Dict at Boundary
 
-```python
-from logger_module.interfaces import ILoggerManager, ILogChannel
+| Формат | Пример |
+|---|---|
+| `None` | `LoggerManager()` — дефолтный конфиг |
+| `dict` | `{"app_name": "app", "default_level": "INFO", "channels": {...}}` |
+| `LogConfig` | `LoggerManager(config=log_config)` |
+| Объект с `build()` | `build()` возвращает `(manager_name: str, config: dict)` |
 
-def configure_logging(manager: ILoggerManager) -> None:
-    manager.enable_module_logging("my_module")
-    manager.system(LogLevel.INFO, "configured", module="setup")
+---
 
-class MyLogChannel(ILogChannel):
-    # Реализация кастомного канала
-    ...
+## Тесты
+
+```bash
+cd Inspector_prototype/multiprocess_framework/refactored
+pytest modules/logger_module/tests/ -v
 ```
+
+Покрытие (~30 тестов):
+- Жизненный цикл: `initialize()` / `shutdown()`
+- Логирование по уровням: debug/info/warning/error/critical
+- Логирование по областям: system/business/performance/audit/security
+- Батчинг: size-based, time-based, priority flush
+- Контекст: push/pop, contextvars integration
+- Каналы: регистрация, удаление, кастомные каналы
+- Интеграция с RouterManager: приём LOG-сообщений

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Реализации каналов записи логов.
+
+Все каналы наследуют ILogChannel(IChannel) — совместимы с ChannelRoutingManager.
 """
 import logging
 import logging.handlers
@@ -12,22 +14,30 @@ try:
 except ImportError:
     requests = None
 
+from ..interfaces import ILogChannel
 from ..core.log_config import ChannelConfig
 
 
-class LogChannel:
-    """Базовый класс канала логирования"""
-    
+class LogChannel(ILogChannel):
+    """Базовый класс канала логирования (реализует ILogChannel → IChannel)."""
+
     def __init__(self, config: ChannelConfig):
         self.config = config
-        self.name = config.name
-    
+        self._name = config.name
+        self._type = config.type
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def channel_type(self) -> str:
+        return self._type
+
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Записывает запись лога"""
         raise NotImplementedError
-    
-    def close(self):
-        """Закрывает канал (опционально, переопределяется в дочерних классах)"""
+
+    def close(self) -> None:
         pass
 
 

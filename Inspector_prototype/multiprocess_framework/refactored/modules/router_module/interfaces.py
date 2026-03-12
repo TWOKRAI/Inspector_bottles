@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...message_module import Message
 
+from ..channel_routing_module.interfaces import IChannel
+
 
 class IRouterManager(ABC):
     """Контракт менеджера маршрутизации сообщений."""
@@ -167,18 +169,28 @@ class IRouterManager(ABC):
         """Агрегированная статистика роутера, каналов, dispatcher'ов и потоков."""
 
 
-class IMessageChannel(ABC):
+class IMessageChannel(IChannel):
     """Контракт для любого типа канала сообщений.
 
+    Наследует IChannel — все message-каналы являются IChannel и совместимы
+    с ChannelRegistry и ChannelRoutingManager.
+
+    IChannel определяет: name (property), channel_type (property),
+    write(data), close(), get_info().
+
+    IMessageChannel добавляет:
+      send(message)          — alias для write(), семантика «отправить»
+      poll(timeout)          — опрос (pull-модель)
+      start/stop_listening() — push-модель (опционально)
+
     Реализуется для Queue (mp/thread), Socket, HTTP, DB, Log и т.д.
-    Каналы должны быть stateless относительно маршрутизации —
-    они только отправляют и принимают, RouterManager решает куда.
+    Каналы stateless относительно маршрутизации — только отправляют/принимают.
     """
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Уникальное имя канала (используется как ключ в ChannelRegistry)."""
+        """Уникальное имя канала (ключ в ChannelRegistry)."""
 
     @property
     @abstractmethod
@@ -189,12 +201,20 @@ class IMessageChannel(ABC):
     def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Отправить сообщение. Вернуть {"status": "success"|"error", ...}."""
 
+    def write(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """IChannel.write() — alias для send(). Обеспечивает совместимость с CRM."""
+        return self.send(data)
+
     @abstractmethod
     def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
         """Опросить канал. timeout=0 → non-blocking. Вернуть список сообщений."""
 
+    def close(self) -> None:
+        """IChannel.close() — останавливает listening если запущен."""
+        self.stop_listening()
+
     def start_listening(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
-        """Запустить асинхронное прослушивание (опционально для каналов с push-моделью).
+        """Запустить асинхронное прослушивание (push-модель, опционально).
         По умолчанию не поддерживается — RouterManager использует polling.
         """
         return False
