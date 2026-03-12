@@ -526,7 +526,7 @@ class RouterManager(BaseManager, ObservableMixin):
             return message.to_dict()
         return dict(message)
 
-    def _resolve_channels(self, msg_dict: Dict[str, Any]) -> List[MessageChannel]:
+    def _resolve_channels(self, msg_dict: Dict[str, Any]) -> List[IMessageChannel]:
         """Найти каналы для исходящего сообщения.
 
         Приоритет:

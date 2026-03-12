@@ -13,10 +13,11 @@
 - Middleware pipeline (send / receive)
 - Инспекция (get_dispatcher_info, get_stats)
 """
+import threading
 import time
 import unittest
 from queue import Queue
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 from ..core.router_manager import RouterManager
 from ..channels.queue_channel import QueueChannel

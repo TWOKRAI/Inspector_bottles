@@ -322,11 +322,10 @@ class Dispatcher(BaseManager, ObservableMixin):
         """Поиск обработчика в конкретной стратегии."""
         strategy_impl = self._strategies[strategy]
         storage = self._handlers_storage[strategy]
-        
+
         if strategy == DispatchStrategy.CHAIN_MATCH:
-            # Для CHAIN_MATCH используем scenarios
-            storage = self._strategies[DispatchStrategy.CHAIN_MATCH]
-        
+            storage = self._scenarios
+
         return strategy_impl.find_handler(key, storage)
     
     def _find_handler(self, key: str) -> Optional[HandlerInfo]:
@@ -419,13 +418,25 @@ class Dispatcher(BaseManager, ObservableMixin):
             
             # 3. Определение стратегии из сообщения
             requested_strategy = self._get_strategy_from_message(message)
-            
+
             # 4. Поиск обработчика
-            if requested_strategy:
-                # Если стратегия указана явно - ищем только в ней
+            if requested_strategy == DispatchStrategy.CHAIN_MATCH:
+                # Явный запрос chain — ключ должен быть именем сценария
+                if key in self._scenarios:
+                    self._log_debug(f"Executing scenario '{key}' via chain strategy", module="dispatcher")
+                    result = self.dispatch_scenario(key, message, data_field)
+                    duration = time.time() - start_time
+                    self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": key})
+                    return result
+                error_msg = f"No scenario '{key}' found for chain strategy"
+                self._log_warning(error_msg, module="dispatcher", key=key)
+                self._record_metric("dispatcher.dispatch.errors", tags={"error": "scenario_not_found", "key": key})
+                return {"status": "error", "reason": error_msg}
+            elif requested_strategy:
+                # Другая явная стратегия — ищем только в ней
                 handler_info = self._find_handler_in_strategy(key, requested_strategy)
             else:
-                # Иначе ищем по всем стратегиям
+                # Авто-детект по всем стратегиям
                 handler_info = self._find_handler(key)
             
             if not handler_info:

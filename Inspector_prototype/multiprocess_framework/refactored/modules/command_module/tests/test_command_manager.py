@@ -212,17 +212,68 @@ class TestCommandManager(unittest.TestCase):
             return {}
         def handler2(data):
             return {}
-        
+
         self.manager.register_command("cmd1", handler1)
         self.manager.register_command("cmd2", handler2)
-        
+
         stats = self.manager.get_stats()
-        
+
         self.assertIsInstance(stats, dict)
         self.assertEqual(stats["total_commands"], 2)
         self.assertIn("cmd1", stats["commands"])
         self.assertIn("cmd2", stats["commands"])
         self.assertEqual(stats["process_name"], "test_process")
+
+    def test_handle_command_expects_full_message(self):
+        """handle_command с expects_full_message=True передаёт всё сообщение в handler."""
+        received = {}
+
+        def full_handler(message):
+            received["command"] = message.get("command")
+            received["extra"] = message.get("extra")
+            return {"ok": True}
+
+        self.manager.register_command("full", full_handler, expects_full_message=True)
+
+        message = {"command": "full", "data": {"v": 1}, "extra": "metadata"}
+        result = self.manager.handle_command(message)
+
+        self.assertEqual(result["ok"], True)
+        self.assertEqual(received["command"], "full")
+        self.assertEqual(received["extra"], "metadata")
+
+    def test_handle_command_handler_exception_returns_error(self):
+        """Исключение внутри обработчика перехватывается Dispatcher и возвращается как {"status": "error"}."""
+        def broken_handler(data):
+            raise ValueError("Something went wrong")
+
+        self.manager.register_command("broken", broken_handler)
+
+        result = self.manager.handle_command({"command": "broken", "data": {}})
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Something went wrong", result["reason"])
+
+    def test_register_duplicate_command_rejected(self):
+        """Повторная регистрация той же команды отклоняется."""
+        def h1(data): return {"v": 1}
+        def h2(data): return {"v": 2}
+
+        self.assertTrue(self.manager.register_command("dup", h1))
+        self.assertFalse(self.manager.register_command("dup", h2))
+
+        result = self.manager.handle_command({"command": "dup", "data": {}})
+        self.assertEqual(result["v"], 1)
+
+    def test_handle_command_with_fallback_strategy(self):
+        """register_command с FALLBACK_MATCH и явной стратегией в сообщении."""
+        def fast(data): return {"speed": "fast"}
+        def slow(data): return {"speed": "slow"}
+
+        self.manager.register_command("proc", slow, strategy=DispatchStrategy.FALLBACK_MATCH, efficiency=1)
+        self.manager.register_command("proc", fast, strategy=DispatchStrategy.FALLBACK_MATCH, efficiency=10)
+
+        result = self.manager.handle_command({"command": "proc", "strategy": "fallback", "data": {}})
+        self.assertEqual(result["speed"], "fast")
 
 
 if __name__ == '__main__':

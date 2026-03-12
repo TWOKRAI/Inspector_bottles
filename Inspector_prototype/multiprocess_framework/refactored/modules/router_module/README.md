@@ -267,7 +267,7 @@ router = RouterManager("my_router", managers={"logger": logger_manager})
 ## Тесты
 
 ```bash
-python -m pytest multiprocess_framework/refactored/modules/router_module/tests/ -v
+python -m pytest Inspector_prototype/multiprocess_framework/refactored/modules/router_module/tests/ -v
 ```
 
 Покрытие (~797 строк):

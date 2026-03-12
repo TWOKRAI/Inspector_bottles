@@ -18,8 +18,7 @@ __all__ = [
     "DispatchStrategy",
     "HandlerInfo",
     "Scenario",
-    # Классы диспетчеров
-    "BaseDispatcher",
+    # Основной диспетчер
     "Dispatcher",
     # Построитель сценариев
     "ScenarioBuilder",
@@ -27,5 +26,7 @@ __all__ = [
     "IDispatcher",
     # Обратная совместимость
     "AdvancedDispatcher",
+    # Лёгкий диспетчер (без ObservableMixin, EXACT_MATCH only)
+    "BaseDispatcher",
 ]
 

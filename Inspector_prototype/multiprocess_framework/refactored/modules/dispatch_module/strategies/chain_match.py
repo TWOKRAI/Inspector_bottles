@@ -39,19 +39,21 @@ class ChainMatchStrategy(BaseStrategy):
         return False
     
     def find_handler(self, key: str, handlers_storage: Any) -> Optional[HandlerInfo]:
-        """Поиск обработчика в сценариях."""
-        for scenario in self.scenarios.values():
+        """Поиск обработчика в сценариях по переданному хранилищу."""
+        scenarios = handlers_storage if isinstance(handlers_storage, dict) else self.scenarios
+        for scenario in scenarios.values():
             for handler in scenario.handlers:
                 if handler.key == key:
                     return handler
         return None
     
     def get_all_handlers(self, handlers_storage: Any) -> List[Dict]:
-        """Получить все обработчики из всех сценариев."""
+        """Получить все обработчики из всех сценариев по переданному хранилищу."""
+        scenarios = handlers_storage if isinstance(handlers_storage, dict) else self.scenarios
         all_handlers = []
-        for scenario in self.scenarios.values():
+        for scenario in scenarios.values():
             all_handlers.extend(scenario.handlers)
-        
+
         return [
             {
                 "key": h.key,
@@ -62,13 +64,14 @@ class ChainMatchStrategy(BaseStrategy):
             }
             for h in all_handlers
         ]
-    
+
     def get_handlers_by_tag(self, tag: str, handlers_storage: Any) -> List[Dict]:
-        """Получить обработчики по тегу из всех сценариев."""
+        """Получить обработчики по тегу из всех сценариев по переданному хранилищу."""
+        scenarios = handlers_storage if isinstance(handlers_storage, dict) else self.scenarios
         all_handlers = []
-        for scenario in self.scenarios.values():
+        for scenario in scenarios.values():
             all_handlers.extend(scenario.handlers)
-        
+
         return [
             {
                 "key": h.key,

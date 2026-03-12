@@ -25,6 +25,8 @@ class Process1Config(RegisterBase):
         class_path = f"{Process1Module.__module__}.{Process1Module.__name__}"
         return (self.process_name, {
             "class": class_path,
+            "channels": {"worker_in": {"maxsize": 50, "type": "queue"}},
+
             "queue_maxsize": self.queue_maxsize,
             "queues": {
                 "system": {"maxsize": self.queue_maxsize},

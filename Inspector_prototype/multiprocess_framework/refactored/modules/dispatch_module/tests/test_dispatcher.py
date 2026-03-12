@@ -5,6 +5,8 @@
 - Регистрация обработчиков
 - Диспетчеризация сообщений
 - Работа со сценариями
+- overwrite_handler
+- Явный запрос стратегии "chain" в сообщении
 - Интеграция с ObservableMixin
 """
 
@@ -253,39 +255,152 @@ class TestDispatcher(unittest.TestCase):
         self.assertEqual(scenario_info["name"], "test_scenario")
     
     def test_scenario_dispatch(self):
-        """Тест выполнения сценария."""
-        # Создаем сценарий
+        """Тест выполнения сценария по ключу (key == scenario name)."""
         self.dispatcher.create_scenario("image_processing", "Обработка изображений")
-        
-        # Добавляем обработчики
+
         def preprocess(data):
             return {"preprocessed": True, "data": data}
-        
+
         def process(data):
             return {"processed": True, "result": data}
-        
-        self.dispatcher.add_handler_to_scenario(
-            "image_processing",
-            "preprocess",
-            preprocess,
-            stage=1
-        )
-        
-        self.dispatcher.add_handler_to_scenario(
-            "image_processing",
-            "process",
-            process,
-            stage=2
-        )
-        
-        # Выполняем сценарий
+
+        self.dispatcher.add_handler_to_scenario("image_processing", "preprocess", preprocess, stage=1)
+        self.dispatcher.add_handler_to_scenario("image_processing", "process", process, stage=2)
+
         message = {"command": "image_processing", "data": {"image": "test.jpg"}}
         result = self.dispatcher.dispatch(message)
-        
+
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["scenario"], "image_processing")
         self.assertEqual(len(result["stages"]), 2)
         self.assertIsNotNone(result["final_result"])
+
+    # ------------------------------------------------------------------
+    # overwrite_handler
+    # ------------------------------------------------------------------
+
+    def test_overwrite_existing_handler(self):
+        """overwrite_handler заменяет обработчик — dispatch вызывает новый."""
+        def old_handler(data):
+            return {"version": "old"}
+
+        def new_handler(data):
+            return {"version": "new"}
+
+        self.dispatcher.register_handler("cmd", old_handler)
+        self.dispatcher.overwrite_handler("cmd", new_handler)
+
+        result = self.dispatcher.dispatch({"command": "cmd", "data": {}})
+        self.assertEqual(result["version"], "new")
+
+    def test_overwrite_nonexistent_handler(self):
+        """overwrite_handler создаёт обработчик, если ключ не существовал."""
+        def handler(data):
+            return {"created": True}
+
+        result_reg = self.dispatcher.overwrite_handler("new_cmd", handler)
+        self.assertTrue(result_reg)
+
+        result = self.dispatcher.dispatch({"command": "new_cmd", "data": {}})
+        self.assertEqual(result["created"], True)
+
+    def test_overwrite_replaces_across_all_storages(self):
+        """overwrite_handler удаляет ключ из всех стратегий перед повторной регистрацией."""
+        def v1(data):
+            return {"v": 1}
+
+        def v2(data):
+            return {"v": 2}
+
+        self.dispatcher.register_handler("multi", v1)
+        self.dispatcher.overwrite_handler("multi", v2)
+
+        result = self.dispatcher.dispatch({"command": "multi", "data": {}})
+        self.assertEqual(result["v"], 2)
+
+    # ------------------------------------------------------------------
+    # Явная стратегия "chain" в сообщении (регрессия исправленного бага)
+    # ------------------------------------------------------------------
+
+    def test_dispatch_explicit_chain_strategy_executes_scenario(self):
+        """strategy='chain' в сообщении корректно выполняет сценарий (bug regression)."""
+        self.dispatcher.create_scenario("pipeline", "Тест цепочки")
+
+        def step_a(data):
+            return {"step": "a", "data": data}
+
+        def step_b(data):
+            return {"step": "b", "input": data}
+
+        self.dispatcher.add_handler_to_scenario("pipeline", "step_a", step_a, stage=1)
+        self.dispatcher.add_handler_to_scenario("pipeline", "step_b", step_b, stage=2)
+
+        message = {"command": "pipeline", "strategy": "chain", "data": {"x": 1}}
+        result = self.dispatcher.dispatch(message)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["scenario"], "pipeline")
+        self.assertEqual(len(result["stages"]), 2)
+
+    def test_dispatch_explicit_chain_strategy_missing_scenario(self):
+        """strategy='chain' с несуществующим сценарием возвращает понятную ошибку."""
+        message = {"command": "nonexistent_pipeline", "strategy": "chain", "data": {}}
+        result = self.dispatcher.dispatch(message)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("nonexistent_pipeline", result["reason"])
+
+    # ------------------------------------------------------------------
+    # dispatch_scenario с stop_on_error=False
+    # ------------------------------------------------------------------
+
+    def test_scenario_stop_on_error_false_continues(self):
+        """stop_on_error=False продолжает выполнение цепочки после ошибочного этапа."""
+        self.dispatcher.create_scenario("partial", "Частичное выполнение")
+
+        def good_step(data):
+            return {"ok": True}
+
+        def bad_step(data):
+            raise ValueError("Intentional error")
+
+        def final_step(data):
+            return {"final": True}
+
+        self.dispatcher.add_handler_to_scenario("partial", "good",  good_step,  stage=1)
+        self.dispatcher.add_handler_to_scenario("partial", "bad",   bad_step,   stage=2)
+        self.dispatcher.add_handler_to_scenario("partial", "final", final_step, stage=3)
+
+        result = self.dispatcher.dispatch_scenario("partial", {"data": {}}, stop_on_error=False)
+
+        self.assertEqual(len(result["stages"]), 3)
+        self.assertEqual(result["stages"][0]["status"], "success")
+        self.assertEqual(result["stages"][1]["status"], "error")
+        self.assertEqual(result["stages"][2]["status"], "success")
+        self.assertEqual(result["final_result"], {"final": True})
+
+    def test_scenario_stop_on_error_true_stops(self):
+        """stop_on_error=True (по умолчанию) останавливает выполнение на ошибке."""
+        self.dispatcher.create_scenario("strict", "Строгое выполнение")
+
+        def good_step(data):
+            return {"ok": True}
+
+        def bad_step(data):
+            raise RuntimeError("Stop here")
+
+        def unreachable_step(data):
+            return {"should_not_run": True}
+
+        self.dispatcher.add_handler_to_scenario("strict", "good",        good_step,        stage=1)
+        self.dispatcher.add_handler_to_scenario("strict", "bad",         bad_step,         stage=2)
+        self.dispatcher.add_handler_to_scenario("strict", "unreachable", unreachable_step, stage=3)
+
+        result = self.dispatcher.dispatch_scenario("strict", {"data": {}}, stop_on_error=True)
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(len(result["stages"]), 2)
+        self.assertIn("final_error", result)
 
 
 if __name__ == '__main__':

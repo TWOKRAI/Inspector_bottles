@@ -10,16 +10,8 @@ import time
 if TYPE_CHECKING:
     from multiprocessing import Process
 
-from .base_command_manager import BaseCommandManager
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...base_manager import BaseManager, ObservableMixin
-
-# Импорт интерфейса отложен для избежания циклических зависимостей
-try:
-    from ..interfaces import ICommandManager
-except ImportError:
-    # Fallback если интерфейс не доступен
-    ICommandManager = None
 
 
 class CommandManager(BaseManager, ObservableMixin):
@@ -117,20 +109,12 @@ class CommandManager(BaseManager, ObservableMixin):
             config=config
         )
         
-        # Создаем диспетчер для команд
         self.dispatcher = Dispatcher(
             manager_name=f"{manager_name}_commands",
             process=process,
             default_strategy=default_strategy,
             managers=managers,
             config=config,
-            # Передаем параметры для обратной совместимости
-            logger_manager=logger_manager,
-            error_manager=error_manager,
-            statistics_manager=statistics_manager,
-            enable_logging=enable_logging,
-            enable_error_tracking=enable_error_tracking,
-            enable_statistics=enable_statistics
         )
         
         # НЕ вызываем initialize() здесь - это делается явно после создания

@@ -1,68 +1,55 @@
 """
-Базовый класс для командных менеджеров.
+Лёгкий командный менеджер без ObservableMixin.
 
-Предоставляет общий интерфейс для работы с командами.
+Используется когда нужен минимальный менеджер команд без зависимости от
+BaseManager/ObservableMixin. Для production-кода используйте CommandManager.
 """
 from typing import Dict, Any, Callable, Optional, List
-from abc import ABC, abstractmethod
 
 
-class BaseCommandManager(ABC):
+class BaseCommandManager:
     """
-    Базовый класс для командных менеджеров.
-    
-    Определяет общий интерфейс для регистрации и выполнения команд.
+    Лёгкий конкретный командный менеджер — EXACT_MATCH only, без ObservableMixin.
+
+    Предназначен для юнит-тестов и простых случаев, где зависимость от
+    BaseManager избыточна. Для полной функциональности (мульти-стратегии,
+    логирование, статистика) используйте CommandManager.
     """
-    
+
     def __init__(self, process_name: str):
-        """
-        Инициализация базового командного менеджера.
-        
-        Args:
-            process_name: Имя процесса для идентификации
-        """
         self.process_name = process_name
-    
-    @abstractmethod
+        self._commands: Dict[str, Callable] = {}
+
     def register_command(
         self,
         command_name: str,
         handler: Callable,
         **kwargs
     ) -> bool:
-        """
-        Регистрация новой команды.
-        
-        Args:
-            command_name: Название команды
-            handler: Функция-обработчик команды
-            **kwargs: Дополнительные аргументы
-            
-        Returns:
-            bool: Успешность регистрации
-        """
-        pass
-    
-    @abstractmethod
-    def handle_command(self, message: Dict) -> Any:
-        """
-        Обработка командного сообщения.
-        
-        Args:
-            message: Сообщение для обработки
-            
-        Returns:
-            Результат выполнения команды или сообщение об ошибке
-        """
-        pass
-    
-    @abstractmethod
-    def get_commands(self) -> List[Dict]:
-        """
-        Получение списка всех зарегистрированных команд.
-        
-        Returns:
-            Список словарей с информацией о командах
-        """
-        pass
+        if command_name in self._commands:
+            return False
+        self._commands[command_name] = handler
+        return True
 
+    def overwrite_command(self, command_name: str, handler: Callable, **kwargs) -> bool:
+        self._commands[command_name] = handler
+        return True
+
+    def handle_command(self, message: Dict) -> Any:
+        command_name = message.get("command")
+        if command_name not in self._commands:
+            return {"status": "error", "reason": f"Command '{command_name}' not found"}
+        try:
+            handler = self._commands[command_name]
+            data = message.get("data", {})
+            return handler(data)
+        except Exception as e:
+            return {"status": "error", "reason": f"Command failed: {str(e)}"}
+
+    def get_commands(self) -> List[Dict]:
+        return [{"key": name} for name in self._commands]
+
+    def get_command_info(self, command_name: str) -> Optional[Dict]:
+        if command_name not in self._commands:
+            return None
+        return {"key": command_name}
