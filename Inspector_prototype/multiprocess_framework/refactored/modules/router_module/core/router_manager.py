@@ -1,69 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-RouterManager — единая точка маршрутизации сообщений.
+RouterManager — фасад маршрутизации сообщений.
 
-Фасад, который координирует работу четырёх специализированных компонентов:
+Координирует: AsyncSender, AsyncReceiver, ChannelRegistry, MiddlewarePipeline,
+channel_dispatcher (исходящие), message_dispatcher (входящие).
 
-    ┌─────────────────────────────────────────────────────────────────┐
-    │  Исходящее сообщение                                            │
-    │                                                                 │
-    │  send_async(msg) ──► AsyncSender (PriorityQueue + thread)       │
-    │  send(msg)       ──► _do_send()                                 │
-    │                           │                                     │
-    │                    MiddlewarePipeline (send)                    │
-    │                           │                                     │
-    │                    channel_dispatcher                           │
-    │                      EXACT  "cmd"   → "control_queue"          │
-    │                      PATTERN r".*"  → из msg["channel"]        │
-    │                      BROADCAST      → [ch1, ch2, ch3]          │
-    │                           │                                     │
-    │                    ChannelRegistry.get(name).send(msg)          │
-    └─────────────────────────────────────────────────────────────────┘
-
-    ┌─────────────────────────────────────────────────────────────────┐
-    │  Входящее сообщение                                             │
-    │                                                                 │
-    │  AsyncReceiver (listener thread)                                │
-    │       │  receive()                                              │
-    │       │      │                                                  │
-    │       │  ChannelRegistry.poll_all()                             │
-    │       │      │                                                  │
-    │       │  MiddlewarePipeline (receive)                           │
-    │       │      │                                                  │
-    │       │  message_dispatcher (fire-and-forget)                   │
-    │       │      │                                                  │
-    │       └─► callbacks (зарегистрированные через add_message_callback)│
-    └─────────────────────────────────────────────────────────────────┘
-
-Использование:
-    router = RouterManager("ui_router")
-    router.register_channel(QueueChannel("ctrl", mp_queue))
-    router.register_route("set_register", "ctrl")
-    router.register_message_handler("ack", on_ack)
-    router.initialize()
-
-    router.send_async(msg, priority="high")   # non-blocking, UI-поток
-    router.send(msg)                          # sync, фоновый поток/тесты
-    router.start_listening()                  # запуск listener-потока
-
-    router.shutdown()
-
-Статистика счётчиков (get_stats):
-    queued_async      — помещено в буфер через send_async()
-    dropped           — отброшено из-за переполнения буфера
-    sent_attempted    — вызовов _do_send()
-    sent_ok           — успешно доставленных
-    received          — принятых входящих сообщений
-    processed         — обработанных listener-колбэками
-    errors            — всех ошибок (отправка + приём + колбэки)
-    middleware_dropped — отброшено middleware (fn → None)
+Полная документация: router_module/README.md
 """
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...dispatch_module import Dispatcher, DispatchStrategy
-from ..channels.base_channel import MessageChannel
 from ..interfaces import IMessageChannel
 
 from ._sender           import AsyncSender
@@ -482,19 +430,26 @@ class RouterManager(BaseManager, ObservableMixin):
     # ================================================================
 
     def register_channel(self, channel: IMessageChannel) -> bool:
-        """Зарегистрировать канал. Thread-safe."""
+        """Зарегистрировать канал. Thread-safe.
+
+        Если канал поддерживает _attach_logger() (наследует MessageChannel),
+        автоматически инжектит log-колбэки роутера — errors из канала попадут
+        в LoggerManager через ObservableMixin.
+        """
+        if hasattr(channel, "_attach_logger"):
+            channel._attach_logger(self._log_warning, self._log_error)
         return self._channels.register(channel)
 
     def unregister_channel(self, channel_name: str) -> bool:
         """Удалить канал. Thread-safe."""
         return self._channels.unregister(channel_name)
 
-    def get_channel(self, channel_name: str) -> Optional[MessageChannel]:
-        """Получить канал по имени. Thread-safe."""
+    def get_channel(self, channel_name: str) -> Optional[IMessageChannel]:
+        """Получить канал по имени или None. Thread-safe."""
         return self._channels.get(channel_name)
 
-    def get_all_channels(self) -> List[MessageChannel]:
-        """Список всех каналов. Thread-safe."""
+    def get_all_channels(self) -> List[IMessageChannel]:
+        """Список всех зарегистрированных каналов. Thread-safe."""
         return self._channels.all()
 
     # ================================================================

@@ -1,14 +1,10 @@
 """
-Worker 1 — воркер для process_1. Ping-pong: явное чтение из worker_in, отправка через роутер.
+Worker 1 — ping-pong воркер для process_1.
+Принимает сообщения через router_manager.receive(), отправляет через router_manager.send().
 """
 
 import time
 from typing import Any
-
-try:
-    from queue import Empty
-except ImportError:
-    from multiprocessing.queues import Empty
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
     RegisterBase,
@@ -26,7 +22,6 @@ class Worker1Config(RegisterBase):
     interval: Annotated[float, FieldMeta("Интервал опроса, сек", min=0.001, max=10.0)] = 1
 
     def build(self) -> tuple[str, dict]:
-        """Вернуть (имя_воркера, worker_dict) для build_process_with_workers."""
         class_path = f"{Worker1.__module__}.{Worker1.__name__}"
         return (self.name, {
             "class": class_path,
@@ -35,7 +30,12 @@ class Worker1Config(RegisterBase):
 
 
 class Worker1:
-    """Воркер 1. Явное чтение из worker_in, отправка в process_2_worker_in."""
+    """
+    Ping-pong воркер (сторона process_1).
+
+    Отправляет и принимает сообщения исключительно через router_manager —
+    прямого доступа к очередям нет.
+    """
 
     def __init__(self, process: Any, config: dict):
         self.process = process
@@ -47,37 +47,38 @@ class Worker1:
             if pause_event.is_set():
                 time.sleep(0.1)
                 continue
-            if not self.process.router_manager:
+
+            router = self.process.router_manager
+            if not router:
                 time.sleep(self.interval)
                 continue
 
-            # Явное чтение из worker_in
-            if self.process.queues and "worker_in" in self.process.queues:
-                try:
-                    msg = self.process.queues["worker_in"].get_nowait()
-                    if isinstance(msg, dict) and msg.get("command") == "pong":
-                        n = msg.get("data", {}).get("n", 0)
-                        new_n = n + 1
-                        print(f"[worker_1] ПРИНЯЛ {n}, +1={new_n}, отправляю")
-                        self.process.router_manager.send({
-                            "channel": "process_2_worker_in",
-                            "sender": "worker_1",
-                            "command": "ping",
-                            "data": {"n": new_n},
-                        })
-                except Empty:
-                    pass
-
-            # Первая отправка
+            # Первая отправка — запускаем пинг-понг
             if not self._initial_sent:
                 self._initial_sent = True
-                result = self.process.router_manager.send({
+                result = router.send({
                     "channel": "process_2_worker_in",
                     "sender": "worker_1",
                     "command": "ping",
                     "data": {"n": 0},
                 })
                 if result.get("status") == "success":
-                    print(f"[worker_1] ОТПРАВИЛ старт: n=0")
+                    print("[worker_1] ОТПРАВИЛ старт ping n=0", flush=True)
+                else:
+                    print(f"[worker_1] ОШИБКА отправки: {result}", flush=True)
+
+            # Читаем все входящие через роутер
+            for msg in router.receive():
+                msg_dict = msg.to_dict() if hasattr(msg, "to_dict") else msg
+                if msg_dict.get("command") == "pong":
+                    n = msg_dict.get("data", {}).get("n", 0)
+                    new_n = n + 1
+                    print(f"[worker_1] ПРИНЯЛ pong n={n}, отправляю ping n={new_n}", flush=True)
+                    router.send({
+                        "channel": "process_2_worker_in",
+                        "sender": "worker_1",
+                        "command": "ping",
+                        "data": {"n": new_n},
+                    })
 
             time.sleep(self.interval)

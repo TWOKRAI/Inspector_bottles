@@ -1,87 +1,71 @@
+# -*- coding: utf-8 -*-
 """
-Базовый интерфейс для каналов сообщений (Refactored).
+MessageChannel — абстрактный базовый класс для всех каналов сообщений.
 
-Универсальная система каналов для отправки и приема сообщений.
+Добавляет к IMessageChannel:
+  - Инъекцию log-колбэков (log_warning, log_error) через конструктор
+    или через _attach_logger() вызываемый RouterManager при регистрации.
+  - self._log_warning / self._log_error — всегда callable, не None.
 
-Философия:
-- Каждый канал может как отправлять, так и принимать сообщения
-- Единый интерфейс для всех типов каналов
-- Легко расширяемая архитектура
+Создание канала без логгера — корректно (молчаливый no-op):
+    ch = QueueChannel("ctrl", q)                   # без логгера
+
+Создание с явными колбэками:
+    ch = QueueChannel("ctrl", q, log_error=my_fn)
+
+RouterManager инжектит свои колбэки автоматически при register_channel():
+    router.register_channel(ch)   # → ch._attach_logger(router._log_warning, ...)
 """
-
-from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Callable
+from abc import abstractmethod
+from typing import Callable, Dict, Any, List, Optional
 
 from ..interfaces import IMessageChannel
 
 
 class MessageChannel(IMessageChannel):
+    """Абстрактный базовый класс канала с поддержкой инъекции логирования.
+
+    Все конкретные каналы (QueueChannel, SocketChannel, ...) наследуют этот класс
+    и получают готовые self._log_warning / self._log_error без дублирования кода.
     """
-    Базовый класс для всех каналов сообщений.
-    
-    Определяет единый интерфейс для всех типов каналов (Queue, Logger, HTTP, etc.).
-    """
-    
+
+    def __init__(
+        self,
+        log_warning: Optional[Callable[[str], None]] = None,
+        log_error:   Optional[Callable[[str], None]] = None,
+    ) -> None:
+        self._log_warning = log_warning or (lambda msg: None)
+        self._log_error   = log_error   or (lambda msg: None)
+
+    def _attach_logger(
+        self,
+        log_warning: Callable[[str], None],
+        log_error:   Callable[[str], None],
+    ) -> None:
+        """Подключить логирование от RouterManager после регистрации.
+
+        Вызывается автоматически RouterManager.register_channel().
+        Переопределять не нужно.
+        """
+        self._log_warning = log_warning
+        self._log_error   = log_error
+
+    # ---- Обязательные (реализуются в подклассах) ----
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Уникальное имя канала."""
-        pass
-    
+
     @property
     @abstractmethod
     def channel_type(self) -> str:
-        """Тип канала (queue, log, telegram, http, etc)."""
-        pass
-    
+        """Тип: 'queue', 'socket', 'http', 'db', 'log', ..."""
+
     @abstractmethod
     def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Отправить сообщение через канал.
-        
-        Args:
-            message: Сообщение для отправки
-            
-        Returns:
-            Результат отправки
-        """
-        pass
-    
+        """Отправить сообщение. Вернуть {"status": "success"|"error", ...}."""
+
     @abstractmethod
     def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
-        """
-        Опрос канала для получения сообщений.
-        
-        Args:
-            timeout: Таймаут опроса (0 = non-blocking)
-            
-        Returns:
-            Список полученных сообщений
-        """
-        pass
-    
-    def start_listening(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
-        """
-        Запуск асинхронного прослушивания канала.
-        
-        Args:
-            callback: Функция обратного вызова для полученных сообщений
-            
-        Returns:
-            True если запущено успешно
-        """
-        # По умолчанию не поддерживается
-        return False
-    
-    def stop_listening(self) -> bool:
-        """Остановить прослушивание канала."""
-        return True
-    
-    def get_info(self) -> Dict[str, Any]:
-        """Получить информацию о канале."""
-        return {
-            "name": self.name,
-            "type": self.channel_type,
-            "active": True
-        }
-
+        """Опросить канал. timeout=0 → non-blocking."""

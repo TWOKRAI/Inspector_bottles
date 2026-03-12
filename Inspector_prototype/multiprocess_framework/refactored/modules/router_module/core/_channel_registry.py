@@ -17,7 +17,6 @@ ChannelRegistry — потокобезопасный реестр каналов
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
-from ..channels.base_channel import MessageChannel
 from ..interfaces import IMessageChannel
 
 
@@ -37,7 +36,7 @@ class ChannelRegistry:
         log_error:   Optional[Callable] = None,
         log_debug:   Optional[Callable] = None,
     ) -> None:
-        self._channels: Dict[str, MessageChannel] = {}
+        self._channels: Dict[str, IMessageChannel] = {}
         self._lock = threading.RLock()
 
         self._log_warning = log_warning or (lambda msg: None)
@@ -51,13 +50,13 @@ class ChannelRegistry:
     def register(self, channel: IMessageChannel) -> bool:
         """Зарегистрировать канал.
 
-        Принимает любой объект, реализующий IMessageChannel.
+        Принимает любой объект, реализующий IMessageChannel (не обязательно MessageChannel).
         Если канал с таким именем уже есть — заменяет с предупреждением.
         """
-        if not isinstance(channel, MessageChannel):
+        if not isinstance(channel, IMessageChannel):
             self._log_error(
                 f"[ChannelRegistry] register: '{type(channel).__name__}' "
-                f"does not implement MessageChannel"
+                f"does not implement IMessageChannel"
             )
             return False
         with self._lock:
@@ -80,12 +79,12 @@ class ChannelRegistry:
     # Access
     # ------------------------------------------------------------------
 
-    def get(self, name: str) -> Optional[MessageChannel]:
+    def get(self, name: str) -> Optional[IMessageChannel]:
         """Получить канал по имени или None."""
         with self._lock:
             return self._channels.get(name)
 
-    def all(self) -> List[MessageChannel]:
+    def all(self) -> List[IMessageChannel]:
         """Список всех каналов."""
         with self._lock:
             return list(self._channels.values())
@@ -95,12 +94,12 @@ class ChannelRegistry:
         with self._lock:
             return list(self._channels.keys())
 
-    def snapshot(self) -> Dict[str, MessageChannel]:
+    def snapshot(self) -> Dict[str, IMessageChannel]:
         """Копия словаря channel_name → channel."""
         with self._lock:
             return dict(self._channels)
 
-    def clear(self) -> List[MessageChannel]:
+    def clear(self) -> List[IMessageChannel]:
         """Очистить реестр. Возвращает список удалённых каналов (для stop_listening)."""
         with self._lock:
             channels = list(self._channels.values())

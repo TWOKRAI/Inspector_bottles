@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Интерфейсы router_module.
+Публичные контракты router_module.
 
-IRouterManager — контракт для любой реализации роутера.
-IMessageChannel — контракт для любого типа канала (Queue, Socket, HTTP, ...).
+IRouterManager   — единственный интерфейс от которого зависит внешний код.
+IMessageChannel  — контракт любого типа канала (Queue, Socket, HTTP, DB, ...).
+
+Правило: внешние модули импортируют только из interfaces.py, не из core/.
 """
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -14,26 +16,31 @@ if TYPE_CHECKING:
 
 
 class IRouterManager(ABC):
-    """Контракт для менеджера маршрутизации."""
+    """Контракт менеджера маршрутизации сообщений."""
 
     @property
     @abstractmethod
     def manager_name(self) -> str:
-        """Имя роутера."""
+        """Имя экземпляра роутера."""
+
+    # ---- Жизненный цикл ----
 
     @abstractmethod
     def initialize(self) -> bool:
-        """Инициализация (запуск фоновых потоков, регистрация каналов)."""
+        """Запустить фоновые потоки (AsyncSender). Вернуть True при успехе."""
 
     @abstractmethod
     def shutdown(self) -> bool:
-        """Корректная остановка всех потоков и очистка ресурсов."""
+        """Корректно остановить все потоки, очистить каналы и dispatcher'ы."""
 
-    # --- Отправка ---
+    # ---- Отправка ----
 
     @abstractmethod
     def send(self, message: Union["Message", Dict[str, Any]]) -> Dict[str, Any]:
-        """Синхронная отправка. Может блокироваться."""
+        """Синхронная отправка. Блокирует вызывающий поток до завершения.
+        Для UI-потоков используй send_async().
+        Возвращает {"status": "success"|"error"|"dropped", ...}.
+        """
 
     @abstractmethod
     def send_async(
@@ -41,9 +48,12 @@ class IRouterManager(ABC):
         message: Union["Message", Dict[str, Any]],
         priority: str = "normal",
     ) -> None:
-        """Non-blocking отправка. Безопасна для UI-потока."""
+        """Non-blocking отправка. Помещает в PriorityQueue AsyncSender'а.
+        priority: "urgent" | "high" | "normal" | "low"
+        При переполнении буфера — дроп с предупреждением, не исключение.
+        """
 
-    # --- Получение ---
+    # ---- Получение ----
 
     @abstractmethod
     def receive(
@@ -51,35 +61,48 @@ class IRouterManager(ABC):
         timeout: float = 0.0,
         return_messages: bool = True,
     ) -> List[Union["Message", Dict[str, Any]]]:
-        """Синхронный опрос всех каналов."""
+        """Синхронный опрос всех зарегистрированных каналов.
+        timeout=0 → non-blocking.
+        return_messages=True → список Message, False → список dict.
+        """
 
     @abstractmethod
     def start_listening(self, poll_interval: float = 0.01) -> bool:
-        """Запустить фоновый поток приёма сообщений."""
+        """Запустить фоновый поток-приёмник.
+        Все входящие сообщения передаются зарегистрированным callbacks.
+        """
 
     @abstractmethod
     def stop_listening(self, timeout: float = 5.0) -> bool:
-        """Остановить фоновый поток приёма."""
+        """Остановить поток-приёмник."""
 
     @abstractmethod
     def add_message_callback(self, callback: Callable) -> None:
-        """Зарегистрировать callback для входящих сообщений."""
+        """Зарегистрировать callback(msg) для входящих сообщений (async receive)."""
 
-    # --- Каналы ---
+    @abstractmethod
+    def remove_message_callback(self, callback: Callable) -> None:
+        """Удалить callback из списка."""
+
+    # ---- Каналы ----
 
     @abstractmethod
     def register_channel(self, channel: "IMessageChannel") -> bool:
-        """Зарегистрировать канал."""
+        """Зарегистрировать канал. При повторной регистрации — замена с предупреждением."""
 
     @abstractmethod
     def unregister_channel(self, channel_name: str) -> bool:
-        """Удалить канал."""
+        """Удалить канал по имени. Вернуть False если не найден."""
 
     @abstractmethod
     def get_channel(self, channel_name: str) -> Optional["IMessageChannel"]:
-        """Получить канал по имени."""
+        """Получить канал по имени или None."""
 
-    # --- Маршрутизация (channel_dispatcher) ---
+    @abstractmethod
+    def get_all_channels(self) -> List["IMessageChannel"]:
+        """Список всех зарегистрированных каналов."""
+
+    # ---- Маршруты (channel_dispatcher) ----
 
     @abstractmethod
     def register_route(
@@ -91,8 +114,9 @@ class IRouterManager(ABC):
         tags: Optional[List[str]] = None,
     ) -> bool:
         """Привязать routing-ключ к каналу через channel_dispatcher.
+        key: команда/тип сообщения (exact или regex для PATTERN_MATCH).
+        channel_name=None → имя канала берётся из msg["channel"] (dynamic).
         strategy=None → EXACT_MATCH.
-        channel_name=None → брать из msg['channel'] (dynamic).
         """
 
     @abstractmethod
@@ -102,9 +126,9 @@ class IRouterManager(ABC):
         channel_names: List[str],
         tags: Optional[List[str]] = None,
     ) -> bool:
-        """Привязать ключ к группе каналов (fan-out)."""
+        """Привязать ключ к группе каналов (fan-out / broadcast)."""
 
-    # --- Обработчики входящих ---
+    # ---- Обработчики входящих (message_dispatcher) ----
 
     @abstractmethod
     def register_message_handler(
@@ -116,51 +140,63 @@ class IRouterManager(ABC):
         efficiency: int = 0,
         tags: Optional[List[str]] = None,
     ) -> bool:
-        """Зарегистрировать обработчик входящих сообщений."""
+        """Зарегистрировать обработчик входящих сообщений.
+        Вызывается автоматически во время receive() по ключу command/type.
+        """
 
-    # --- Middleware ---
-
-    @abstractmethod
-    def add_send_middleware(self, fn: Callable) -> None:
-        """Добавить middleware для исходящих сообщений."""
+    # ---- Middleware ----
 
     @abstractmethod
-    def add_receive_middleware(self, fn: Callable) -> None:
-        """Добавить middleware для входящих сообщений."""
+    def add_send_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
+        """Добавить fn(msg) -> dict|None в pipeline исходящих.
+        None → сообщение дропается.
+        """
 
-    # --- Статистика ---
+    @abstractmethod
+    def add_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
+        """Добавить fn(msg) -> dict|None в pipeline входящих."""
+
+    @abstractmethod
+    def clear_middleware(self) -> None:
+        """Сбросить все send и receive middleware."""
+
+    # ---- Статистика ----
 
     @abstractmethod
     def get_stats(self) -> Dict[str, Any]:
-        """Полная статистика роутера."""
+        """Агрегированная статистика роутера, каналов, dispatcher'ов и потоков."""
 
 
 class IMessageChannel(ABC):
     """Контракт для любого типа канала сообщений.
 
-    Реализуется для Queue (mp/thread), Socket, HTTP, Database, Log и т.д.
+    Реализуется для Queue (mp/thread), Socket, HTTP, DB, Log и т.д.
+    Каналы должны быть stateless относительно маршрутизации —
+    они только отправляют и принимают, RouterManager решает куда.
     """
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Уникальное имя канала."""
+        """Уникальное имя канала (используется как ключ в ChannelRegistry)."""
 
     @property
     @abstractmethod
     def channel_type(self) -> str:
-        """Тип канала: 'queue', 'socket', 'http', 'log', ...)."""
+        """Строковый тип: 'queue', 'socket', 'http', 'db', 'log', ..."""
 
     @abstractmethod
     def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Отправить сообщение. Возвращает {"status": "success"|"error", ...}."""
+        """Отправить сообщение. Вернуть {"status": "success"|"error", ...}."""
 
     @abstractmethod
     def poll(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
-        """Опросить канал. timeout=0 → non-blocking."""
+        """Опросить канал. timeout=0 → non-blocking. Вернуть список сообщений."""
 
     def start_listening(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
-        """Запустить асинхронное прослушивание (опционально)."""
+        """Запустить асинхронное прослушивание (опционально для каналов с push-моделью).
+        По умолчанию не поддерживается — RouterManager использует polling.
+        """
         return False
 
     def stop_listening(self) -> bool:
@@ -168,5 +204,5 @@ class IMessageChannel(ABC):
         return True
 
     def get_info(self) -> Dict[str, Any]:
-        """Информация о состоянии канала."""
+        """Информация о состоянии канала для мониторинга."""
         return {"name": self.name, "type": self.channel_type, "active": True}

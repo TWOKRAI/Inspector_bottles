@@ -36,7 +36,7 @@ def run_process_function(
     """
     redirector = None
     try:
-        print(f"[{process_name}] Process starting...")
+        print(f"[{process_name}] Process starting...", flush=True)
         
         try:
             module_path, class_name = class_path.rsplit('.', 1)
@@ -71,6 +71,12 @@ def run_process_function(
                 shared_resources.register_process_state(target_name)
                 for qtype, q in (target_queues or {}).items():
                     shared_resources.process_state_registry.add_queue(target_name, qtype, q)
+                    if qtype == "worker_in":
+                        print(f"[{process_name}] routing_map: {target_name}.{qtype} queue_id={id(q)} handle={getattr(q._reader, 'fileno', lambda: '?')()}", flush=True)
+            # Own queues diagnostic
+            for qtype, q in queues.items():
+                if qtype == "worker_in":
+                    print(f"[{process_name}] own queue: {qtype} queue_id={id(q)} handle={getattr(q._reader, 'fileno', lambda: '?')()}", flush=True)
             process_data = shared_resources.get_process_data(process_name)
         else:
             shared_resources = shared_resources_or_bundle or SharedResourcesManager()
@@ -121,10 +127,11 @@ def run_process_function(
         if hasattr(process_instance, 'initialize'):
             try:
                 if not process_instance.initialize():
-                    print(f"[{process_name}] Process initialization failed")
+                    print(f"[{process_name}] Process initialization failed", flush=True)
                     return
+                print(f"[{process_name}] Process initialized", flush=True)
             except Exception as init_err:
-                print(f"[{process_name}] Process initialization error: {init_err}")
+                print(f"[{process_name}] Process initialization error: {init_err}", flush=True)
                 import traceback
                 traceback.print_exc()
                 return
@@ -142,7 +149,7 @@ def run_process_function(
         # Ожидаем завершения (следим за stop_event если он есть)
         while True:
             if stop_event and stop_event.is_set():
-                print(f"[{process_name}] Stop signal received")
+                print(f"[{process_name}] Stop signal received", flush=True)
                 if hasattr(process_instance, 'stop'):
                     process_instance.stop()
                 break
@@ -150,12 +157,12 @@ def run_process_function(
                 break
             time.sleep(0.1)
         
-        print(f"[{process_name}] Process finished")
+        print(f"[{process_name}] Process finished", flush=True)
         
     except KeyboardInterrupt:
-        print(f"[{process_name}] Interrupted by user")
+        print(f"[{process_name}] Interrupted by user", flush=True)
     except Exception as e:
-        print(f"[{process_name}] Process failed: {e}")
+        print(f"[{process_name}] Process failed: {e}", flush=True)
         import traceback
         traceback.print_exc()
     finally:

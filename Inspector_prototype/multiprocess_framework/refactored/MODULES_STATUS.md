@@ -15,20 +15,18 @@
 | dispatch_module | 0/8 | 5 | 3 | 4 | 3 | ? |
 | router_module | 0/8 | 6 | 5 | 5 | 5 | да |
 | command_module | 0/8 | 5 | 3 | 5 | 4 | ? |
-| worker_module | - | - | - | - | - | - |
+| worker_module | 2/8 | 6 | 5 | 3 | 3 | да |
 | registers_module | 0/8 | 7 | 3 | 3 | 3 | да |
-| process_module | 0/8 | 5 | 3 | 4 | 2 | нет |
-| process_manager_module | 0/8 | 6 | 5 | 5 | 3 | нет |
-
-> `worker_module` — не найден в modules/, вероятно входит в состав `process_module`
+| process_module | 2/8 | 5 | 3 | 4 | 2 | да |
+| process_manager_module | 2/8 | 7 | 5 | 5 | 3 | да |
 
 ## Прогресс по этапам
 
 | Этап | Статус | Описание |
 |------|--------|----------|
 | 0 | ✅ Завершён | Инфраструктура, баги, validate.py, STATUS.md |
-| 1 | ⏳ Следующий | SystemLauncher → ProcessManagerProcess |
-| 2 | ⏳ | Дочерние процессы |
+| 1 | ✅ Завершён | SystemLauncher → ProcessManagerProcess запускается |
+| 2 | ✅ Завершён | ProcessManager создаёт Process1Module, Process2Module; воркеры работают |
 | 3 | ⏳ | Ping-pong коммуникация |
 | 4 | ⏳ | Живое ДНК |
 | 5 | ⏳ | CommandManager + correlation_id |

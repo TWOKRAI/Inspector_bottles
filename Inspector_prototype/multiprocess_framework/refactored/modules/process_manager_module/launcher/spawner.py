@@ -94,12 +94,15 @@ class ProcessSpawner:
         self.stop()
         sys.exit(0)
 
-    def stop(self, timeout: float = 3.0) -> None:
+    def stop(self, timeout: float = 5.0) -> None:
         """Остановить ProcessManagerProcess и освободить ресурсы."""
         if self._process and self._process.is_alive():
             self._stop_event.set()
-            self._process.terminate()
-            self._process.join(timeout=timeout)
+            # Даём процессу время завершиться gracefully перед terminate
+            self._process.join(timeout=2.0)
+            if self._process.is_alive():
+                self._process.terminate()
+                self._process.join(timeout=timeout)
             if self._process.is_alive():
                 self._process.kill()
         if self._shared_resources:

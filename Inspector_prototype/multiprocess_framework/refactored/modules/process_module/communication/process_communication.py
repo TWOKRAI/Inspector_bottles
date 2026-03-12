@@ -79,10 +79,7 @@ class ProcessCommunication:
                 self.logger_callback("WARNING", "RouterManager not available", "communication")
                 return
             
-            WORKER_ONLY_QUEUES = ("worker_in",)
             for queue_name, queue in self.queues.items():
-                if queue_name in WORKER_ONLY_QUEUES:
-                    continue
                 channel = QueueChannel(f"{self.process_name}_{queue_name}", queue)
                 self.router_manager.register_channel(channel)
                 self.logger_callback("DEBUG", f"Registered queue channel '{queue_name}' in router", "communication")
