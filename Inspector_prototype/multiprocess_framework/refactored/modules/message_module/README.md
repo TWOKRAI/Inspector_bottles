@@ -1,340 +1,432 @@
-# Message Module - Транспорт
+# message_module
 
-## Описание
+Универсальный транспортный протокол системы — единый **язык общения** между
+всеми менеджерами и процессами фреймворка.
 
-Message Module - это универсальный транспорт для всех сообщений в системе. Это основа коммуникации, которая используется Router Manager для маршрутизации сообщений между компонентами.
-
-## Структура модуля
-
-Модуль следует стандарту структуры (см. MODULE_STRUCTURE.md):
-
-```
-message/
-├── __init__.py              # Публичный API модуля
-├── interfaces.py            # Интерфейсы модуля (если нужны)
-├── core/                    # Основные классы
-│   ├── __init__.py
-│   └── message.py           # Класс Message (публичные и внутренние методы разделены)
-├── schemas/                 # Схемы валидации (Pydantic v2) ⭐ НОВОЕ
-│   ├── __init__.py
-│   ├── base.py              # BaseMessageSchema
-│   ├── command.py           # CommandMessageSchema
-│   └── log.py               # LogMessageSchema
-├── validators/              # Валидаторы (внутренние)
-│   ├── __init__.py
-│   └── message_validator.py # MessageValidator
-├── converters/             # Конвертеры (внутренние)
-│   ├── __init__.py
-│   └── message_converter.py # MessageConverter
-├── factories/               # Фабрики (публичные)
-│   ├── __init__.py
-│   └── message_factory.py  # MessageFactory, create_message, parse_message
-├── types/                   # Типы, константы, исключения
-│   ├── __init__.py
-│   ├── message_types.py    # MessageType, Priority, LogLevel, MessageSchema
-│   └── exceptions.py       # MessageValidationError
-├── utils.py                 # Утилиты (generate_message_id, apply_type_defaults)
-├── README.md
-└── tests/
-    ├── test_message.py
-    └── test_schemas.py      # Тесты схем ⭐ НОВОЕ
-```
+---
 
 ## Роль в архитектуре
 
-Message Module является **транспортом** (аналогия с кровью/сигналами в организме):
-- Все компоненты используют Message для коммуникации
-- Router Manager использует Message для маршрутизации
-- Поддерживает все типы сообщений через единый интерфейс
-- **Система схем (Pydantic v2)** для валидации и производительности ⭐
-
-## Система схем (Pydantic v2) ⭐
-
-### Что такое схемы?
-
-Схемы - это классы Pydantic v2 для валидации сообщений. Они позволяют:
-- ✅ Определять разные схемы для разных типов сообщений
-- ✅ Убирать ненужные поля из базовой схемы
-- ✅ Автоматическую валидацию через Pydantic
-- ✅ Высокую производительность (кеширование валидации)
-- ✅ Хранение информации о схеме в сообщении (путь, название, ссылка)
-
-### Использование схем
-
-#### Со схемой (рекомендуется для новых проектов)
-
-```python
-from multiprocess_framework.refactored.modules.message import (
-    Message, MessageType, CommandMessageSchema
-)
-
-# Создание с валидацией через схему
-msg = Message.create(
-    MessageType.COMMAND,
-    sender="ProcessA",
-    schema=CommandMessageSchema,  # ← Схема для валидации
-    targets=["ProcessB"],
-    command="process_data",
-    args={"param": "value"}
-)
-
-# Информация о схеме хранится в сообщении
-print(msg.get_schema_info())
-# {'schema_name': 'CommandMessageSchema', 'schema_module': '...', 'schema_path': '...'}
-
-print(msg.get_schema())
-# <class 'multiprocess_framework.refactored.modules.message.schemas.command.CommandMessageSchema'>
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Любой Process/Manager                        │
+│                                                                       │
+│   msg = MessageAdapter(sender="my_proc")                             │
+│   msg.command(targets=["other_proc"], command="start")               │
+│         │                                                             │
+│   router.send(msg)   ──→  msg.to_dict()  ──→  Queue / Channel        │
+│                                                                       │
+│   raw = queue.get()  ──→  Message.from_dict(raw)  ──→  msg объект    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Без схемы (обратная совместимость)
+**Правило Dict at Boundary (ADR-008):**
 
-```python
-# Старый код работает как раньше
-msg = Message.create(
-    MessageType.COMMAND,
-    sender="ProcessA",
-    targets=["ProcessB"],
-    command="process_data"
-)
+| Действие | Формат |
+|---|---|
+| Передача через границу процессов | `msg.to_dict()` → `dict` |
+| Восстановление после получения | `Message.from_dict(raw)` |
+| Внутри процесса | Объект `Message` |
+
+---
+
+## Структура модуля
+
+```
+message_module/
+├── interfaces.py          ← Публичный контракт (IMessage, IMessageFactory)
+├── __init__.py            ← Публичный API
+│
+├── core/
+│   └── message.py         ← Класс Message (основной объект сообщения)
+│
+├── types/
+│   ├── message_types.py   ← MessageType, Priority, LogLevel, MessageSchema
+│   └── exceptions.py      ← MessageValidationError
+│
+├── schemas/               ← Pydantic-схемы (опциональная строгая валидация)
+│   ├── base.py            ← BaseMessageSchema (extra='allow')
+│   ├── command.py         ← CommandMessageSchema (extra='forbid')
+│   └── log.py             ← LogMessageSchema    (extra='forbid')
+│
+├── adapters/
+│   └── message_adapter.py ← MessageAdapter (рекомендуемый способ создания)
+│
+├── factories/
+│   └── message_factory.py ← MessageFactory, create_message(), parse_message()
+│
+├── validators/
+│   └── message_validator.py ← MessageValidator (внутренний)
+│
+├── converters/
+│   └── message_converter.py ← MessageConverter (внутренний)
+│
+├── utils/
+│   └── utils.py           ← generate_message_id(), apply_type_defaults()
+│
+└── tests/
+    ├── test_message.py
+    ├── test_schemas.py
+    └── test_adapter.py
 ```
 
-### Доступные схемы
+---
 
-- `BaseMessageSchema` - базовая схема со всеми полями
-- `CommandMessageSchema` - схема для COMMAND сообщений
-- `LogMessageSchema` - схема для LOG сообщений
+## Типы сообщений
 
-### Создание кастомной схемы
+| Тип | Константа | Обязательные поля | Назначение |
+|---|---|---|---|
+| `general` | `MessageType.GENERAL` | `content` | Произвольное сообщение |
+| `command` | `MessageType.COMMAND` | `command` | Команда процессу/менеджеру |
+| `log` | `MessageType.LOG` | `level`, `message` | Запись в лог |
+| `system` | `MessageType.SYSTEM` | `action` | Управление жизненным циклом |
+| `broadcast` | `MessageType.BROADCAST` | `content` | Рассылка всем процессам |
+| `data` | `MessageType.DATA` | `data_type` | Передача больших данных |
+| `request` | `MessageType.REQUEST` | `request_type` | Запрос с ожиданием ответа |
+| `response` | `MessageType.RESPONSE` | `request_id` | Ответ на REQUEST |
+| `event` | `MessageType.EVENT` | `event_type` | Событие pub/sub |
+
+---
+
+## Поля сообщения
+
+### Базовые (у всех типов)
+
+| Поле | Тип | Описание | Авто |
+|---|---|---|---|
+| `id` | `str` | Уникальный идентификатор | ✓ |
+| `type` | `str` | Тип из MessageType | — |
+| `sender` | `str` | Имя отправителя | — |
+| `targets` | `List[str]` | Список получателей | — |
+| `timestamp` | `float` | Unix-timestamp создания | ✓ |
+| `priority` | `str` | `normal` | `low\|normal\|high\|urgent` |
+| `channel` | `str\|None` | Канал доставки | ✓ по типу |
+| `routers` | `List[str]` | Список роутеров | ✓ по типу |
+| `metadata` | `dict` | Произвольные метаданные | — |
+
+### Специфичные по типу
+
+| Поле | Тип | Для типа |
+|---|---|---|
+| `content` | `Any` | GENERAL |
+| `command` | `str` | COMMAND |
+| `args` | `dict` | COMMAND |
+| `need_ack` | `bool` | COMMAND |
+| `level` | `str` | LOG |
+| `message` | `str` | LOG |
+| `module` | `str` | LOG |
+| `action` | `str` | SYSTEM |
+| `data` | `Any` | SYSTEM, DATA |
+| `exclude` | `List[str]` | BROADCAST |
+| `data_type` | `str` | DATA |
+| `use_shared_memory` | `bool` | DATA |
+| `memory_key` | `str` | DATA |
+| `request_type` | `str` | REQUEST |
+| `query` | `Any` | REQUEST |
+| `timeout` | `float` | REQUEST |
+| `request_id` | `str` | RESPONSE |
+| `success` | `bool` | RESPONSE |
+| `result` | `Any` | RESPONSE |
+| `error` | `str` | RESPONSE |
+| `event_type` | `str` | EVENT |
+| `event_data` | `Any` | EVENT |
+
+---
+
+## API: MessageAdapter (рекомендуется)
+
+`MessageAdapter` — основной способ создания сообщений в процессах и менеджерах.
+Фиксирует `sender` один раз при создании.
 
 ```python
-from pydantic import BaseModel, Field
-from typing import List, Optional
-import time
+from message_module import MessageAdapter
 
-class VisionMessageSchema(BaseModel):
-    """Кастомная схема для VisionProcess."""
-    
-    # Обязательные поля
-    id: str
-    type: str = "data"
-    sender: str
-    targets: List[str]
-    timestamp: float = Field(default_factory=time.time)
-    
-    # Специфичные поля
-    image_data: bytes
-    bbox: List[float]
-    confidence: float
-    model_version: Optional[str] = None
-    
-    class Config:
-        extra = "forbid"  # Запрещаем дополнительные поля
+class MyProcess:
+    def __init__(self, name: str):
+        self.msg = MessageAdapter(sender=name)
 
-# Использование
-msg = Message.create(
-    MessageType.DATA,
-    sender="VisionProcess",
-    schema=VisionMessageSchema,
-    targets=["AIProcess"],
-    image_data=image_bytes,
-    bbox=[10, 20, 100, 200],
-    confidence=0.95
-)
+    def on_start(self):
+        # Команда
+        self.router.send(self.msg.command(
+            targets=["orchestrator"],
+            command="ready",
+            args={"pid": os.getpid()},
+        ))
+
+    def on_event(self, data):
+        # Событие
+        self.router.send(self.msg.event("frame_ready", event_data=data))
+
+    def on_error(self, err):
+        # Лог
+        self.router.send(self.msg.log("error", str(err)))
+
+    def ask_status(self, target):
+        # Запрос с correlation_id
+        req = self.msg.request(targets=[target], request_type="get_status")
+        self.router.send(req)
+        return req.id   # сохранить для сопоставления ответа
+
+    def reply(self, request_id, requester, result):
+        # Ответ
+        self.router.send(self.msg.response(
+            targets=[requester],
+            request_id=request_id,
+            result=result,
+        ))
 ```
 
-### Производительность
+### Методы MessageAdapter
 
-- ✅ Валидация кешируется при создании сообщения
-- ✅ Повторная валидация пропускается если уже валидировано через схему
-- ✅ Pydantic v2 обеспечивает высокую скорость валидации
+| Метод | Аргументы | Создаёт тип |
+|---|---|---|
+| `create(msg_type, targets, **kw)` | любой тип | любой |
+| `command(targets, command, args, need_ack, priority)` | — | COMMAND |
+| `log(level, message, module)` | — | LOG |
+| `system(targets, action, data, priority)` | — | SYSTEM |
+| `broadcast(content, exclude, priority)` | — | BROADCAST |
+| `data(targets, data_type, data, use_shared_memory, memory_key)` | — | DATA |
+| `request(targets, request_type, query, timeout)` | — | REQUEST |
+| `response(targets, request_id, result, success, error)` | — | RESPONSE |
+| `event(event_type, targets, event_data)` | — | EVENT |
 
-## Публичный API
+---
 
-### Импорт
+## API: Message (класс объекта)
 
-```python
-from multiprocess_framework.refactored.modules.message import (
-    Message,
-    MessageType,
-    Priority,
-    LogLevel,
-    create_message,
-    parse_message
-)
-```
-
-### Message
-
-Универсальный класс для всех типов сообщений:
+### Создание
 
 ```python
-# Создание сообщения
-msg = Message.create(
-    type=MessageType.COMMAND,
-    sender="ProcessA",
-    targets=["ProcessB"],
-    command="process_data",
-    args={"data_id": 123}
-)
+from message_module import Message, MessageType
 
-# Fluent API
-msg.set_priority(Priority.HIGH)
-msg.add_metadata("user_id", "12345")
+# Через фабричный метод (без адаптера)
+msg = Message.create(MessageType.COMMAND, sender="proc_1",
+                     targets=["proc_2"], command="start")
 
-# Конвертация
-data = msg.to_dict()
-json_str = msg.to_json()
-```
+# С Pydantic-валидацией
+from message_module import CommandMessageSchema
+msg = Message.create(MessageType.COMMAND, sender="proc_1",
+                     targets=["proc_2"], command="start",
+                     schema=CommandMessageSchema)
 
-### Фабрика сообщений
-
-```python
-from multiprocess_framework.refactored.modules.message import create_message, parse_message
-
-# Создание через функцию
-msg = create_message(MessageType.COMMAND, sender="ProcessA", ...)
-
-# Парсинг из различных форматов
-msg = parse_message(json_str)  # Автоматически определяет формат
-```
-
-### MessageType
-
-Типы сообщений:
-- `GENERAL` - обычное сообщение
-- `COMMAND` - команда для выполнения
-- `LOG` - лог-сообщение
-- `SYSTEM` - системное сообщение
-- `BROADCAST` - широковещательное сообщение
-- `DATA` - сообщение с данными
-- `REQUEST` - запрос
-- `RESPONSE` - ответ
-- `EVENT` - событие
-
-### Priority
-
-Приоритеты сообщений:
-- `LOW` - низкий
-- `NORMAL` - обычный
-- `HIGH` - высокий
-- `URGENT` - срочный
-
-## Использование
-
-### Создание сообщений
-
-```python
-# Через фабричный метод
-msg = Message.create(
-    type=MessageType.COMMAND,
-    sender="GUI",
-    targets=["Worker"],
-    command="process"
-)
-
-# Из словаря
-msg = Message.from_dict({
-    "type": "command",
-    "sender": "GUI",
-    "targets": ["Worker"],
-    "command": "process"
-})
-
-# Из JSON
+# Восстановление из dict (на принимающей стороне)
+msg = Message.from_dict(raw_dict)
 msg = Message.from_json(json_str)
 ```
 
 ### Fluent API
 
 ```python
-msg = Message.create(MessageType.LOG, sender="ProcessA")
-msg.set_log(LogLevel.INFO, "Message text", module="worker")
-msg.set_priority(Priority.HIGH)
-msg.add_metadata("key", "value")
+msg = (
+    Message.create(MessageType.GENERAL, sender="proc_1")
+    .set_targets(["proc_2", "proc_3"])
+    .set_priority("high")
+    .set_channel("custom_channel")
+    .set_content({"result": 42})
+    .add_metadata("trace_id", "abc123")
+)
+```
+
+### Сериализация (Dict at Boundary)
+
+```python
+# Перед отправкой через очередь между процессами
+raw = msg.to_dict()          # только непустые поля
+raw = msg.to_dict(exclude_none=False)  # все поля
+json_str = msg.to_json(indent=2)
+
+# После получения из очереди
+msg = Message.from_dict(raw)
+```
+
+### Словарный доступ
+
+```python
+msg.get("command")           # None если нет
+msg["command"]               # KeyError если нет
+"command" in msg             # проверка
+msg["priority"] = "high"     # установка (валидируется)
 ```
 
 ### Валидация
 
 ```python
-# Валидация с исключением
 try:
-    msg.validate()
+    msg.validate()   # raises MessageValidationError
 except MessageValidationError as e:
-    print(f"Invalid message: {e}")
+    ...
 
-# Проверка без исключения
-if msg.is_valid():
-    router.send(msg)
+if msg.is_valid():   # без исключения
+    ...
 ```
 
-## Интеграция с Router
+---
 
-Message используется Router Manager для маршрутизации:
+## API: MessageFactory (низкоуровневый)
 
 ```python
-# Router автоматически определяет канал по типу сообщения
-msg = Message.create(MessageType.LOG, sender="ProcessA", ...)
-router.send(msg)  # Автоматически выберет LoggerChannel
+from message_module import MessageFactory, create_message, parse_message
 
-# Явное указание канала
-msg.channel = "process_queue"
-router.send(msg)  # Отправит в QueueChannel
+factory = MessageFactory()
+msg = factory.create(MessageType.LOG, "proc_1", level="info", message="hello")
+
+# Функции-алиасы
+msg = create_message(MessageType.COMMAND, "proc_1", targets=["proc_2"], command="ping")
+msg = parse_message(raw_dict_or_json_string)
 ```
 
-## Публичный API
+---
 
-### Message.create()
+## Интеграция с router_module
 
-Фабричный метод для создания сообщений.
+```
+MessageAdapter.command(...)
+       │
+       ▼  msg.to_dict()
+  RouterManager.send(msg)
+       │
+       ├─→ _send_middleware → msg_dict
+       │
+       ├─→ channel_dispatcher → resolve channel
+       │
+       └─→ channel.send(msg_dict)   ← QueueChannel / SocketChannel / ...
+```
 
-### Message.to_dict()
+На принимающей стороне:
 
-Конвертация в словарь.
+```
+channel.poll()
+    │
+    ▼  raw_dict
+RouterManager.receive()
+    │
+    ├─→ _recv_middleware → msg_dict
+    │
+    ├─→ message_dispatcher.dispatch(msg_dict)   ← fire-and-forget handlers
+    │
+    └─→ Message.from_dict(msg_dict)   ← возвращается вызывающему
+```
 
-### Message.to_json()
+---
 
-Конвертация в JSON.
+## Pydantic-схемы (опциональная строгая валидация)
 
-### Message.from_dict()
+Схемы используются когда нужна строгая типизация и запрет лишних полей.
 
-Создание из словаря.
+```python
+from message_module import Message, CommandMessageSchema, LogMessageSchema
 
-### Message.from_json()
+# COMMAND — запрещает лишние поля (extra='forbid')
+msg = Message.create(
+    "command", sender="proc_1",
+    targets=["proc_2"], command="start",
+    schema=CommandMessageSchema,
+)
 
-Создание из JSON.
+# LOG — запрещает лишние поля, задаёт targets=['logger']
+msg = Message.create(
+    "log", sender="proc_1",
+    level="error", message="Something went wrong",
+    schema=LogMessageSchema,
+)
 
-### Message.validate()
+# BaseMessageSchema — разрешает доп. поля (extra='allow'), для общих случаев
+from message_module import BaseMessageSchema
+```
 
-Валидация сообщения.
+### Создание своей схемы
 
-## Структура компонентов
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Dict, Any, List
 
-### Публичные компоненты (экспортируются из __init__.py)
+class MySchema(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=False)
+    id: str
+    type: str = "custom"
+    sender: str
+    targets: List[str]
+    timestamp: float
+    my_field: str         # обязательное поле
 
-- **Message** (`core/message.py`) - основной класс сообщений
-  - Публичные методы: `create()`, `validate()`, `to_dict()`, `to_json()`, и т.д.
-  - Внутренние методы: `_sync_to_dict()` (с префиксом `_`)
-- **MessageFactory** (`factories/message_factory.py`) - фабрика для создания сообщений
-- **create_message()** - функция для создания сообщений
-- **parse_message()** - функция для парсинга сообщений
-- **MessageType, Priority, LogLevel** (`types/`) - типы и перечисления
-- **MessageValidationError** (`types/exceptions.py`) - исключения
+    def get_schema_info(self):
+        return {
+            'schema_name': self.__class__.__name__,
+            'schema_module': self.__class__.__module__,
+            'schema_path': f"{self.__class__.__module__}.{self.__class__.__name__}",
+        }
 
-### Внутренние компоненты (не экспортируются)
+msg = Message.create("custom", "proc_1", targets=["proc_2"],
+                      my_field="value", schema=MySchema)
+```
 
-- **MessageValidator** (`validators/message_validator.py`) - валидация сообщений
-- **MessageConverter** (`converters/message_converter.py`) - конвертация сообщений
-- **utils.py** - утилиты (generate_message_id, apply_type_defaults)
+---
 
-## Принципы использования
+## Приоритеты
 
-1. **Используйте только публичный API** - импортируйте из `__init__.py`
-2. **Не используйте внутренние классы напрямую** - они могут измениться
-3. **Используйте типы из types/** - они стабильны и документированы
-4. **Публичные методы** - без префикса `_`
-5. **Внутренние методы** - с префиксом `_` (не используйте извне)
+| Значение | Константа | Описание |
+|---|---|---|
+| `"urgent"` | `Priority.URGENT` | Максимальный (обработка немедленно) |
+| `"high"` | `Priority.HIGH` | Высокий |
+| `"normal"` | `Priority.NORMAL` | Обычный (по умолчанию) |
+| `"low"` | `Priority.LOW` | Низкий (фоновые задачи) |
 
-## Тесты
+Приоритет используется `AsyncSender` в `RouterManager`
+для сортировки в `PriorityQueue`.
 
-Тесты находятся в `tests/` директории модуля и тестируют только публичный API.
+---
 
+## Идентификаторы (correlation_id)
+
+Для паттерна REQUEST-RESPONSE используйте `msg.id` как `correlation_id`:
+
+```python
+# Отправитель
+req = adapter.request(targets=["service"], request_type="get_data")
+correlation_id = req.id
+router.send(req)
+
+# Получатель (handler)
+def handle_request(msg):
+    result = process(msg.get("query"))
+    router.send(adapter.response(
+        targets=[msg.sender],
+        request_id=msg.id,   # correlation_id
+        result=result,
+    ))
+
+# Отправитель (обработка ответа)
+def handle_response(msg):
+    if msg.get("request_id") == correlation_id:
+        process_result(msg.get("result"))
+```
+
+---
+
+## Публичный контракт (interfaces.py)
+
+Внешние модули, которые принимают сообщения, должны type-hint через `IMessage`:
+
+```python
+from message_module.interfaces import IMessage
+
+def process_incoming(msg: IMessage) -> None:
+    sender = msg.sender
+    data = msg.get("data")
+    reply = msg.clone()
+    ...
+```
+
+`IMessageFactory` — для dependency injection и тестирования:
+
+```python
+from message_module.interfaces import IMessageFactory
+
+class MyManager:
+    def __init__(self, factory: IMessageFactory):
+        self._factory = factory
+
+    def create_ping(self) -> IMessage:
+        return self._factory.create("command", self.name,
+                                    targets=["other"], command="ping")
+```
