@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Основной менеджер логирования (Refactored).
 Объединяет все компоненты в единую систему с поддержкой:
@@ -74,19 +75,20 @@ class LoggerManager(BaseManager, ObservableMixin, ILoggerManager):
         # Подготовка менеджеров для ObservableMixin
         if managers is None:
             managers = {}
-        
+
         if router_manager:
             managers['router'] = router_manager
-        
-        config_dict = kwargs.get('config', {})
-        config_dict['router_routing'] = enable_router_routing
-        
+
+        # Флаг router_routing передаётся как feature-флаг в config ObservableMixin,
+        # чтобы его можно было включать/выключать через self.enable('router_routing').
+        observable_config = {'router_routing': enable_router_routing}
+
         # Инициализация ObservableMixin
         ObservableMixin.__init__(
             self,
             managers=managers,
-            config=config_dict,
-            auto_proxy=True
+            config=observable_config,
+            auto_proxy=kwargs.get('auto_proxy', True),
         )
         
         # Сохраняем зависимости
@@ -340,35 +342,37 @@ class LoggerManager(BaseManager, ObservableMixin, ILoggerManager):
             # Напрямую в диспетчер
             self.dispatcher.route_log(record, channels)
     
-    def _route_via_router(self, record: LogRecord):
-        """
-        Маршрутизирует лог через RouterManager для межпроцессного логирования.
-        
+    def _route_via_router(self, record: LogRecord) -> None:
+        """Маршрутизировать LOG-запись через RouterManager.
+
+        Использует Message(type='log') — единый язык системы.
+        Избегаем рекурсии: если логирование снова вызовет этот метод,
+        исключение тихо глотается.
+
         Args:
-            record: Запись лога
+            record: Запись лога для отправки.
         """
+        if not self._router_manager:
+            return
         try:
-            if not self._router_manager:
-                return
-            
-            # Конвертируем LogLevel в строку
-            level_str = record.level.value.lower()
-            
-            # Отправляем через роутер
-            self._router_manager.send({
-                'channel': 'logger',
-                'text': record.message,
-                'level': level_str.upper(),
-                'timestamp': True,
-                'process': self.manager_name,
-                'module': record.module,
-                'scope': record.scope.value,
-                'extra': record.extra
-            })
-            
+            from ....message_module import Message, MessageType
+
+            msg = Message.create(
+                MessageType.LOG,
+                sender=self.manager_name,
+                targets=["logger"],
+                level=record.level.value.lower(),
+                message=record.message,
+                module=record.module,
+            )
+            if record.extra:
+                msg.add_metadata("scope", record.scope.value)
+                msg.add_metadata("extra", record.extra)
+
+            self._router_manager.send(msg)
             self.stats['messages_routed'] += 1
-        except Exception as e:
-            # Не логируем ошибку через себя, чтобы избежать рекурсии
+        except Exception:
+            # Тихое подавление — нельзя логировать ошибку через себя (рекурсия)
             pass
     
     def push_context(self, **context_vars):

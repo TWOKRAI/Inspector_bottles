@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Logger Module (Refactored) - Модуль системы логирования.
 

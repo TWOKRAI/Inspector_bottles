@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Error Module (Refactored) — специализированный менеджер ошибок.
 

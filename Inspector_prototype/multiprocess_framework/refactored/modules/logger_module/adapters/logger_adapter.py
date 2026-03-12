@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Адаптер для LoggerManager (Refactored).
 
@@ -108,54 +109,31 @@ class LoggerAdapter(BaseAdapter):
             return False
     
     def _convert_level(self, level: Union[str, LogLevel]) -> Optional[LogLevel]:
-        """
-        Конвертирует уровень логирования в LogLevel.
-        
-        Args:
-            level: Уровень (строка или LogLevel)
-            
+        """Конвертировать строку или LogLevel в LogLevel.
+
+        Использует встроенный enum-lookup `LogLevel[name.upper()]`.
+        Дополнительного маппинга не нужно — enum имена совпадают с верхним регистром.
+
         Returns:
-            LogLevel или None если не удалось конвертировать
+            LogLevel, или None если имя не распознано.
         """
         if isinstance(level, LogLevel):
             return level
-        
         if isinstance(level, str):
-            level_upper = level.upper()
             try:
-                return LogLevel[level_upper]
+                return LogLevel[level.upper()]
             except KeyError:
-                # Пробуем конвертировать из формата lowercase
-                level_mapping = {
-                    'debug': LogLevel.DEBUG,
-                    'info': LogLevel.INFO,
-                    'warning': LogLevel.WARNING,
-                    'error': LogLevel.ERROR,
-                    'critical': LogLevel.CRITICAL
-                }
-                return level_mapping.get(level.lower())
-        
+                return None
         return None
-    
+
     def _get_default_scope(self, level: LogLevel) -> LogScope:
+        """Определить LogScope по уровню.
+
+        WARNING, ERROR, CRITICAL → SYSTEM (влияют на стабильность системы).
+        INFO, DEBUG              → BUSINESS (бизнес-логика).
         """
-        Определяет область логирования по умолчанию на основе уровня.
-        
-        Args:
-            level: Уровень логирования
-            
-        Returns:
-            LogScope
-        """
-        # Для ошибок и критических - SYSTEM
-        if level in [LogLevel.ERROR, LogLevel.CRITICAL]:
+        if level in {LogLevel.WARNING, LogLevel.ERROR, LogLevel.CRITICAL}:
             return LogScope.SYSTEM
-        
-        # Для предупреждений - SYSTEM
-        if level == LogLevel.WARNING:
-            return LogScope.SYSTEM
-        
-        # Для остального - BUSINESS
         return LogScope.BUSINESS
     
     def _get_default_module(self) -> str:

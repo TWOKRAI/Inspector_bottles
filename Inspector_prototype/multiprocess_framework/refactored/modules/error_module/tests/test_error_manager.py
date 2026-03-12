@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Тесты ErrorManager."""
 
 import pytest
@@ -10,10 +11,13 @@ class TestErrorManager:
     """Тесты ErrorManager."""
 
     def test_init_with_none(self) -> None:
-        """Инициализация с config=None использует дефолты."""
+        """Инициализация с config=None использует дефолты.
+
+        default_level=WARNING: ErrorManager ловит WARNING, ERROR, CRITICAL.
+        """
         em = ErrorManager(config=None)
         assert em.app_name == "errors"
-        assert em.config.default_level.value == "ERROR"
+        assert em.config.default_level.value == "WARNING"
 
     def test_init_with_dict(self) -> None:
         """Инициализация с config=dict."""
