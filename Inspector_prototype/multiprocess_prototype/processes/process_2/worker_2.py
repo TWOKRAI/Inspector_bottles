@@ -19,12 +19,22 @@ class Worker2_1Config(SchemaBase):
 
     name: str = "worker_2_1"
     interval: Annotated[float, FieldMeta("Интервал опроса, сек", min=0.001, max=10.0)] = 1
+    priority: str = "NORMAL"
+    execution_mode: str = "loop"
+    restart_on_failure: bool = False
+    max_restarts: int = 3
 
     def build(self) -> tuple[str, dict]:
         class_path = f"{Worker2_1.__module__}.{Worker2_1.__name__}"
         return (self.name, {
             "class": class_path,
             "config": {"interval": self.interval},
+            "thread": {
+                "priority": self.priority,
+                "execution_mode": self.execution_mode,
+                "restart_on_failure": self.restart_on_failure,
+                "max_restarts": self.max_restarts,
+            },
         })
 
 
@@ -34,12 +44,22 @@ class Worker2_2Config(SchemaBase):
 
     name: str = "worker_2_2"
     interval: Annotated[float, FieldMeta("Интервал опроса, сек", min=0.001, max=10.0)] = 1
+    priority: str = "NORMAL"
+    execution_mode: str = "loop"
+    restart_on_failure: bool = False
+    max_restarts: int = 3
 
     def build(self) -> tuple[str, dict]:
         class_path = f"{Worker2_2.__module__}.{Worker2_2.__name__}"
         return (self.name, {
             "class": class_path,
             "config": {"interval": self.interval},
+            "thread": {
+                "priority": self.priority,
+                "execution_mode": self.execution_mode,
+                "restart_on_failure": self.restart_on_failure,
+                "max_restarts": self.max_restarts,
+            },
         })
 
 

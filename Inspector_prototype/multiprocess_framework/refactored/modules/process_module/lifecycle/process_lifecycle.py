@@ -4,7 +4,10 @@
 Отвечает за инициализацию и завершение работы процесса.
 """
 
+import traceback
 from typing import Dict, Any, Optional
+
+from ..types import ProcessStatus
 
 
 class ProcessLifecycle:
@@ -55,18 +58,17 @@ class ProcessLifecycle:
             self.process._init_system_threads()
             
             # 8. Обновляем статус на "ready"
-            self.process.update_process_state(status="ready")
-            
+            self.process.update_process_state(status=ProcessStatus.READY.value)
+
             self.process.is_initialized = True
             self.process._log_info(f"Process '{self.process.name}' initialized successfully")
             return True
-            
+
         except Exception as e:
-            import traceback
             error_trace = traceback.format_exc()
             self.process._log_error(f"Failed to initialize process '{self.process.name}': {e}")
             self.process._log_error(f"Traceback: {error_trace}")
-            print(f"[ProcessLifecycle] Init failed: {e}\n{error_trace}")  # Fallback для отладки
+            print(f"[ProcessLifecycle] Init failed: {e}\n{error_trace}")
             return False
     
     def shutdown(self) -> bool:
@@ -96,7 +98,7 @@ class ProcessLifecycle:
                 self.process.router_manager.shutdown()
             
             # 5. Обновляем статус процесса
-            self.process.update_process_state(status="stopped")
+            self.process.update_process_state(status=ProcessStatus.STOPPED.value)
             
             self.process.is_initialized = False
             self.process._log_info(f"Process '{self.process.name}' shut down successfully")

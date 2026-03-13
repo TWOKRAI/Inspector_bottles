@@ -5,12 +5,15 @@
 Все процессы теперь являются менеджерами с единым интерфейсом.
 """
 
-import time
 from typing import Dict, Any, Optional
 from multiprocessing import Queue
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...base_manager.interfaces import IBaseManager
+
+# Публичные контракты и типы
+from ..interfaces import IProcessModule, ISharedResources
+from ..types import ProcessStatus
 
 # Импорт компонентов из нового модуля
 from ..config import ProcessConfigHandler
@@ -23,79 +26,77 @@ from ..threads import SystemThreads
 from ..state import ProcessState
 
 
-class ProcessModule(BaseManager, ObservableMixin):
+class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     """
     Базовый класс для всех процессов системы (Refactored).
-    
+
     Наследуется от BaseManager и использует ObservableMixin для:
     - Единообразия со всеми менеджерами системы
     - Автоматического логирования через ObservableMixin
     - Стандартного жизненного цикла (initialize/shutdown)
-    
-    Функциональность ProcessCore интегрирована в initialize/shutdown.
-    
+
+    Реализует IProcessModule — публичный контракт для внешних модулей.
+    Принимает shared_resources через DI (ISharedResources protocol) —
+    нет прямого импорта из shared_resources_module.
+
     Attributes:
         name: Имя процесса (синоним manager_name)
-        shared_resources: SharedResourcesManager
+        shared_resources: ISharedResources (DI — получается снаружи)
         config: Конфигурация процесса
         queues: Словарь очередей для коммуникации
         config_handler: ProcessConfigHandler для работы с конфигурацией
         communication: ProcessCommunication для межпроцессной коммуникации
     """
-    
+
     def __init__(
         self,
         name: str,
-        shared_resources=None,
-        config: dict = None
+        shared_resources: Optional[ISharedResources] = None,
+        config: Optional[dict] = None,
     ):
         """
         Инициализация процесса.
-        
+
         Args:
             name: Имя процесса
-            shared_resources: SharedResourcesManager (легковесный контейнер с ProcessStateRegistry)
-            config: Локальная конфигурация процесса (опционально, берется из process_data если не указана)
+            shared_resources: ISharedResources (DI — передаётся снаружи, не импортируется)
+            config: Локальная конфигурация процесса (опционально)
         """
-        # Инициализация BaseManager
         BaseManager.__init__(self, manager_name=name, process=None)
-        
-        # Инициализация ObservableMixin (пока без менеджеров, они будут добавлены позже)
+
         ObservableMixin.__init__(
             self,
             managers={},
             config={},
-            auto_proxy=True  # Автоматические прокси-методы для логирования
+            auto_proxy=True,
         )
-        
-        # Сохраняем параметры
-        self.name = name  # Синоним для manager_name для совместимости
-        self.shared_resources = shared_resources
+
+        self.name = name
+        self.shared_resources: Optional[ISharedResources] = shared_resources
         self.config = config or {}
-        
-        # Инициализация компонентов (будут настроены в initialize())
+
+        # Компоненты (настраиваются в initialize())
         self.config_handler = None
         self.communication = None
         self.queues = None
         self.queue_registry = None
         self.memory_manager = None
-        
-        # Флаг остановки процесса
+
         self.stop_process = False
-        
-        # Менеджеры процесса (будут созданы в initialize())
+
+        # Менеджеры (создаются в initialize())
         self.worker_manager = None
         self.logger_manager = None
         self.command_manager = None
         self.router_manager = None
-        
-        # Компоненты процесса (используют композицию)
+
+        # Внутренние компоненты (композиция)
         self._lifecycle = ProcessLifecycle(self)
-        self._managers = ProcessManagers(self)
+        self._process_managers = ProcessManagers(self)
         self._threads = SystemThreads(self)
         self._state = ProcessState(self)
-        
-        # НЕ вызываем initialize() здесь - это делается явно после создания
+
+        # initialize() вызывается явно после создания
     
     # ========================================================================
     # РЕАЛИЗАЦИЯ BaseManager - ЖИЗНЕННЫЙ ЦИКЛ
@@ -183,24 +184,17 @@ class ProcessModule(BaseManager, ObservableMixin):
                 'custom': Queue(maxsize=20),
             }
         
-        # Создаем локальные менеджеры как вспомогательные утилиты
+        # Получаем queue_registry и memory_manager через shared_resources (DI)
         if self.shared_resources:
-            from ...shared_resources_module import QueueRegistry, MemoryManager
-            
-            # QueueRegistry создается локально с ссылкой на ProcessStateRegistry
-            self.queue_registry = QueueRegistry(
-                process_state_registry=self.shared_resources.process_state_registry
-            )
-            
-            # MemoryManager создается локально
-            self.memory_manager = MemoryManager()
+            self.queue_registry = getattr(self.shared_resources, "queue_registry", None)
+            self.memory_manager = getattr(self.shared_resources, "memory_manager", None)
         else:
             self.queue_registry = None
             self.memory_manager = None
     
     def _init_managers(self):
         """Инициализация менеджеров процесса через ObservableMixin."""
-        self._managers.initialize()
+        self._process_managers.initialize()
     
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
@@ -269,8 +263,8 @@ class ProcessModule(BaseManager, ObservableMixin):
         pass
 
     def _create_workers_from_config(self, workers_config: Dict[str, Any]) -> None:
-        """Создать воркеры из config. worker_dict: {class: path, config: {...}}."""
-        from ...worker_module import ThreadConfig, ThreadPriority
+        """Создать воркеры из config. worker_dict: {class: path, config: {...}, thread: {...}}."""
+        from ...worker_module import ThreadConfig
         for name, wc in workers_config.items():
             if not isinstance(wc, dict) or "class" not in wc:
                 continue
@@ -282,7 +276,8 @@ class ProcessModule(BaseManager, ObservableMixin):
                 target = getattr(instance, "run", instance)
                 if not callable(target):
                     raise TypeError(f"Worker '{name}' must have run(stop_event, pause_event) or be callable")
-                thread_config = ThreadConfig(priority=ThreadPriority.NORMAL)
+                thread_dict = wc.get("thread", {})
+                thread_config = ThreadConfig.from_dict(thread_dict)
                 self.worker_manager.create_worker(name, target, thread_config)
             except Exception as e:
                 self._log_error(f"Failed to create worker '{name}': {e}")
@@ -344,6 +339,11 @@ class ProcessModule(BaseManager, ObservableMixin):
     def router_adapter(self):
         """Доступ к router_adapter через менеджера."""
         return self.router_manager.get_adapter() if self.router_manager else None
+
+    @property
+    def worker_adapter(self):
+        """Доступ к worker_adapter через менеджера."""
+        return self.worker_manager.get_adapter() if self.worker_manager else None
     
     # ========================================================================
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
@@ -401,7 +401,7 @@ class ProcessModule(BaseManager, ObservableMixin):
     
     def reload_manager(self, manager_name: str) -> bool:
         """Пересоздать менеджер на основе текущей конфигурации."""
-        return self._managers.reload_manager(manager_name)
+        return self._process_managers.reload_manager(manager_name)
     
     # ========================================================================
     # КОММУНИКАЦИЯ (расширенные методы для совместимости)
@@ -491,36 +491,24 @@ class ProcessModule(BaseManager, ObservableMixin):
     # ========================================================================
     
     def run(self):
-        """
-        Запуск процесса.
-        
-        Обновляет статус на "running" и запускает воркеры.
-        """
-        # Обновляем статус на "running"
-        self.update_process_state(status="running")
-        
+        """Запуск процесса — статус RUNNING, старт воркеров."""
+        self.update_process_state(status=ProcessStatus.RUNNING.value)
+
         if self.worker_manager:
             self.worker_manager.start_all_workers()
-        
+
         self.log("INFO", f"Process '{self.name}' started", "lifecycle")
-    
+
     def stop(self):
-        """
-        Остановка процесса.
-        
-        Обновляет статус на "stopping" и останавливает все компоненты.
-        """
-        # Обновляем статус на "stopping"
-        self.update_process_state(status="stopping")
-        
+        """Остановка процесса — статус STOPPING, остановка воркеров и shutdown."""
+        self.update_process_state(status=ProcessStatus.STOPPING.value)
+
         self.log("INFO", f"Process '{self.name}' stopping", "lifecycle")
         self.stop_process = True
-        
-        # Останавливаем все воркеры
+
         if self.worker_manager:
             self.worker_manager.stop_all_workers()
-        
-        # Вызываем shutdown для корректного завершения
+
         self.shutdown()
     
     # ========================================================================

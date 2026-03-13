@@ -16,22 +16,11 @@ from __future__ import annotations
 from multiprocessing import Queue, Event
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from ...base_manager import BaseManager, ObservableMixin, _noop
+from ...base_manager import BaseManager, ObservableMixin
+from ...base_manager.core.base_manager import _noop
 from ..events.event_manager import EventManager
-
-if TYPE_CHECKING:
-    from ...process_module.state.process_state_registry import ProcessStateRegistry
-    from ...process_module.state.process_data import ProcessData
-
-
-def _get_process_state_registry():
-    from ...process_module.state.process_state_registry import ProcessStateRegistry
-    return ProcessStateRegistry
-
-
-def _get_process_data():
-    from ...process_module.state.process_data import ProcessData
-    return ProcessData
+from ..state.process_data import ProcessData
+from ..state.process_state_registry import ProcessStateRegistry
 
 
 class SharedResourcesManager(BaseManager, ObservableMixin):
@@ -111,7 +100,6 @@ class SharedResourcesManager(BaseManager, ObservableMixin):
         # Реестр состояний процессов (БЕЗ Manager и Lock)
         # Содержит все ProcessData всех процессов с их очередями, событиями и конфигурациями
         # Передаем event_manager для автоматической отправки событий при изменениях
-        ProcessStateRegistry = _get_process_state_registry()
         self.process_state_registry = ProcessStateRegistry(event_manager=self.event_manager)
     
     # ========================================================================

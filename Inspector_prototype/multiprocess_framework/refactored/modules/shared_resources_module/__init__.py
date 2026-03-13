@@ -6,7 +6,8 @@ SharedResources Module (Refactored) - Менеджер общих ресурсо
 
 Архитектура:
 - SharedResourcesManager (архив) - легковесный контейнер
-- ProcessStateRegistry - реестр состояний процессов (из Process_module)
+- ProcessStateRegistry - реестр состояний процессов (теперь локально в state/)
+- ProcessData - данные процесса (теперь локально в state/)
 - EventManager - менеджер событий (BaseManager + ObservableMixin)
 - QueueRegistry - реестр очередей (BaseManager + ObservableMixin)
 - MemoryManager - менеджер разделенной памяти (BaseManager + ObservableMixin)
@@ -19,6 +20,10 @@ from .events.event_manager import EventManager, EventType
 from .queues.queue_registry import QueueRegistry
 from .memory.memory_manager import MemoryManager
 from .registry.data_schema_adapter import DataSchemaAdapter
+
+# Данные процессов (перенесены из process_module для разрыва циклической зависимости)
+from .state.process_data import ProcessData, ProcessDataKeys, QueuesProxy, EventsProxy
+from .state.process_state_registry import ProcessStateRegistry
 
 # Интерфейсы
 from .core.interfaces import (
@@ -37,15 +42,19 @@ __all__ = [
     'QueueRegistry',
     'MemoryManager',
     'DataSchemaAdapter',
-    
+
+    # Данные процессов
+    'ProcessData',
+    'ProcessDataKeys',
+    'QueuesProxy',
+    'EventsProxy',
+    'ProcessStateRegistry',
+
     # Интерфейсы
     'IQueueRegistry',
     'IEventManager',
     'IMemoryManager',
     'IProcessStateRegistry',
     'ISharedResourcesManager',
-    
-    # ProcessStateRegistry и ProcessData — импортируй напрямую:
-    # from multiprocess_framework.refactored.modules.process_module.state import ...
 ]
 

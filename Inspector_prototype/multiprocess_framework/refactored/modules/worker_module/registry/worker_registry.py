@@ -1,139 +1,135 @@
+# -*- coding: utf-8 -*-
 """
-Реестр воркеров.
+Потокобезопасный реестр воркеров.
 
-Управление регистрацией и хранением информации о воркерах.
+Все операции защищены threading.Lock.
 """
 
 import threading
-from typing import Dict, Callable, Optional
-from datetime import datetime
+from typing import Callable, Dict, List, Optional
 
-from ..core.thread_config import ThreadConfig, WorkerStatus
+from ..interfaces import IWorkerRegistry
+from ..types import WorkerStatus, WorkerType, ExecutionMode
 
 
-class WorkerRegistry:
+class WorkerRegistry(IWorkerRegistry):
+    """Потокобезопасный реестр воркеров.
+
+    Хранит WorkerInfo-словари для каждого зарегистрированного воркера.
+    Все публичные методы защищены self._lock (threading.Lock).
+
+    Это центральное хранилище информации обо всех потоках, запущенных в ProcessModule.
+    Гарантирует целостность данных при одновременном доступе из разных потоков
+    и из основного потока WorkerManager.
+
+    Данные:
+        _workers: Dict[str, WorkerInfo]
+            Словарь имя-воркера → полная информация о воркере (WorkerInfo TypedDict).
+
+    Операции:
+        register() — добавить новый воркер (атомарно)
+        unregister() — удалить воркер (редко используется)
+        get() — получить информацию о воркере
+        get_all_names() — получить все имена воркеров
+        get_by_type() — фильтр по WorkerType (SYSTEM/APPLICATION)
+        update_status() — обновить статус
+        get_status() — получить статус
+
+    Thread-safety:
+        Все методы используют контекстный менеджер with self._lock:
+        для защиты доступа к _workers словарю.
     """
-    Реестр воркеров.
-    
-    Инкапсулирует логику регистрации и хранения информации о воркерах.
-    """
-    
+
     def __init__(self):
-        """Инициализация реестра."""
-        self.workers: Dict[str, Dict] = {}
-        self.thread_configs: Dict[str, ThreadConfig] = {}
-    
+        self._lock = threading.Lock()
+        self._workers: Dict[str, Dict] = {}
+
+    # ---- Регистрация ----
+
     def register(
         self,
         worker_name: str,
         target: Callable,
-        config: ThreadConfig,
+        config,
         thread: threading.Thread,
         stop_event: threading.Event,
-        pause_event: threading.Event
+        pause_event: threading.Event,
     ) -> bool:
-        """
-        Регистрация воркера в реестре.
-        
-        Args:
-            worker_name: Имя воркера
-            target: Целевая функция
-            config: Конфигурация потока
-            thread: Поток воркера
-            stop_event: Событие остановки
-            pause_event: Событие паузы
-            
-        Returns:
-            bool: True если регистрация успешна
-        """
-        if worker_name in self.workers:
-            return False
-        
-        self.workers[worker_name] = {
-            'thread': thread,
-            'stop_event': stop_event,
-            'pause_event': pause_event,
-            'target': target,
-            'config': config,
-            'status': WorkerStatus.STOPPED,
-            'restart_count': 0,
-            'last_error': None,
-            'start_time': None,
-            'total_runtime': 0.0,
-            'last_run_duration': 0.0,
-            'successful_runs': 0,
-            'failed_runs': 0,
-            'has_been_started': False
-        }
-        
-        self.thread_configs[worker_name] = config
-        return True
-    
-    def unregister(self, worker_name: str) -> bool:
-        """
-        Удаление воркера из реестра.
-        
-        Args:
-            worker_name: Имя воркера
-            
-        Returns:
-            bool: True если удаление успешно
-        """
-        if worker_name in self.workers:
-            del self.workers[worker_name]
-            self.thread_configs.pop(worker_name, None)
-            return True
-        return False
-    
-    def get(self, worker_name: str) -> Optional[Dict]:
-        """
-        Получение информации о воркере.
-        
-        Args:
-            worker_name: Имя воркера
-            
-        Returns:
-            Dict с информацией о воркере или None
-        """
-        return self.workers.get(worker_name)
-    
-    def has(self, worker_name: str) -> bool:
-        """
-        Проверка наличия воркера.
-        
-        Args:
-            worker_name: Имя воркера
-            
-        Returns:
-            bool: True если воркер зарегистрирован
-        """
-        return worker_name in self.workers
-    
-    def get_all_names(self) -> list:
-        """Получить список имен всех воркеров."""
-        return list(self.workers.keys())
-    
-    def update_status(self, worker_name: str, status: WorkerStatus):
-        """
-        Обновление статуса воркера.
-        
-        Args:
-            worker_name: Имя воркера
-            status: Новый статус
-        """
-        if worker_name in self.workers:
-            self.workers[worker_name]['status'] = status
-    
-    def get_status(self, worker_name: str) -> Optional[WorkerStatus]:
-        """
-        Получение статуса воркера.
-        
-        Args:
-            worker_name: Имя воркера
-            
-        Returns:
-            WorkerStatus или None
-        """
-        worker_info = self.workers.get(worker_name)
-        return worker_info['status'] if worker_info else None
+        """Зарегистрировать воркер. Возвращает False если имя уже занято."""
+        with self._lock:
+            if worker_name in self._workers:
+                return False
 
+            self._workers[worker_name] = {
+                "thread": thread,
+                "stop_event": stop_event,
+                "pause_event": pause_event,
+                "target": target,
+                "config": config,
+                "status": WorkerStatus.STOPPED,
+                "worker_type": getattr(config, "worker_type", WorkerType.APPLICATION),
+                "execution_mode": getattr(config, "execution_mode", ExecutionMode.LOOP),
+                "restart_count": 0,
+                "last_error": None,
+                "start_time": None,
+                "total_runtime": 0.0,
+                "last_run_duration": 0.0,
+                "successful_runs": 0,
+                "failed_runs": 0,
+                "has_been_started": False,
+            }
+            return True
+
+    def unregister(self, worker_name: str) -> bool:
+        """Удалить воркер из реестра."""
+        with self._lock:
+            if worker_name in self._workers:
+                del self._workers[worker_name]
+                return True
+            return False
+
+    # ---- Чтение ----
+
+    def get(self, worker_name: str) -> Optional[Dict]:
+        """Получить dict воркера (прямая ссылка — мутации допустимы под внешней блокировкой)."""
+        with self._lock:
+            return self._workers.get(worker_name)
+
+    def has(self, worker_name: str) -> bool:
+        with self._lock:
+            return worker_name in self._workers
+
+    def get_all_names(self) -> List[str]:
+        with self._lock:
+            return list(self._workers.keys())
+
+    def get_by_type(self, worker_type: WorkerType) -> List[str]:
+        """Получить имена воркеров определённого типа."""
+        with self._lock:
+            return [
+                name for name, info in self._workers.items()
+                if info.get("worker_type") == worker_type
+            ]
+
+    # ---- Обновление статуса ----
+
+    def update_status(self, worker_name: str, status: WorkerStatus) -> None:
+        with self._lock:
+            if worker_name in self._workers:
+                self._workers[worker_name]["status"] = status
+
+    def get_status(self, worker_name: str) -> Optional[WorkerStatus]:
+        with self._lock:
+            info = self._workers.get(worker_name)
+            return info["status"] if info else None
+
+    # ---- Статистика ----
+
+    def snapshot(self) -> Dict[str, Dict]:
+        """Снимок реестра (shallow copy каждого dict)."""
+        with self._lock:
+            return {name: dict(info) for name, info in self._workers.items()}
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._workers)

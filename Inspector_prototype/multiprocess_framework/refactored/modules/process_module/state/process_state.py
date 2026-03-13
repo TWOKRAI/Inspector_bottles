@@ -1,7 +1,8 @@
 """
 Управление состоянием процесса.
 
-Отвечает за регистрацию и обновление состояния процесса в ProcessStateRegistry.
+Тонкая обёртка — делегирует в shared_resources через ISharedResources protocol.
+Не хранит прямую ссылку на ProcessModule, работает через переданные зависимости.
 """
 
 from typing import Dict, Any, Optional
@@ -10,87 +11,80 @@ from typing import Dict, Any, Optional
 class ProcessState:
     """
     Управление состоянием процесса.
-    
-    Инкапсулирует логику регистрации и обновления состояния процесса.
+
+    Делегирует регистрацию и обновление состояния в shared_resources.
+    Работает через ISharedResources protocol — нет прямой зависимости от реализации.
     """
-    
+
     def __init__(self, process):
         """
-        Инициализация управления состоянием.
-        
         Args:
-            process: Ссылка на ProcessModule
+            process: Ссылка на ProcessModule (используется только для доступа к
+                     process.name, process.shared_resources, process.queues и логирования)
         """
         self.process = process
-    
+
     def register(self):
-        """Регистрация состояния процесса."""
+        """Регистрация состояния процесса в shared_resources."""
         if not self.process.shared_resources:
             return
-        
+
         try:
-            # Получаем имена очередей из локального queue_registry
             queue_names = {}
-            if self.process.queue_registry:
-                process_queues = self.process.queue_registry.get_process_queues(self.process.name)
-                if process_queues:
-                    queue_names = {
-                        queue_type: f"{self.process.name}_{queue_type}" 
-                        for queue_type in process_queues.keys()
-                    }
-            
-            # Регистрируем процесс со статусом "initializing"
-            if hasattr(self.process.shared_resources, 'register_process_state'):
-                self.process.shared_resources.register_process_state(
+            if self.process.queues:
+                queue_names = {
+                    queue_type: f"{self.process.name}_{queue_type}"
+                    for queue_type in self.process.queues.keys()
+                }
+
+            shared = self.process.shared_resources
+            if hasattr(shared, "register_process_state"):
+                shared.register_process_state(
                     process_name=self.process.name,
                     initial_state={
                         "status": "initializing",
                         "metadata": {
                             "config": self.process.config or {},
-                            "queues_count": len(self.process.queues) if self.process.queues else 0
-                        }
+                            "queues_count": len(self.process.queues) if self.process.queues else 0,
+                        },
                     },
-                    queue_names=queue_names
+                    queue_names=queue_names,
                 )
-            elif hasattr(self.process.shared_resources, 'update_process_state'):
-                # Альтернативный способ регистрации
-                self.process.shared_resources.update_process_state(
-                    self.process.name,
-                    status="initializing"
-                )
-            
+            elif hasattr(shared, "update_process_state"):
+                shared.update_process_state(self.process.name, status="initializing")
+
             self.process._log_info(f"Process state registered: {self.process.name}")
         except Exception as e:
             self.process._log_error(f"Failed to register process state: {e}")
-    
+
     def update(
         self,
         status: Optional[str] = None,
         events: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        custom: Optional[Dict[str, Any]] = None
+        custom: Optional[Dict[str, Any]] = None,
     ):
         """
         Обновление состояния процесса.
-        
+
         Args:
-            status: Новый статус процесса (ready, running, stopping, error)
+            status: Новый статус (ready, running, stopping, error)
             events: События для добавления
             metadata: Метаданные для обновления
             custom: Кастомные данные для обновления
         """
         if not self.process.shared_resources:
             return
-        
+
         try:
-            if hasattr(self.process.shared_resources, 'update_process_state'):
-                self.process.shared_resources.update_process_state(
+            shared = self.process.shared_resources
+            if hasattr(shared, "update_process_state"):
+                shared.update_process_state(
                     process_name=self.process.name,
                     status=status,
                     events=events,
                     metadata=metadata,
-                    custom=custom
+                    custom=custom,
                 )
         except Exception as e:
             self.process._log_error(f"Failed to update process state: {e}")
-

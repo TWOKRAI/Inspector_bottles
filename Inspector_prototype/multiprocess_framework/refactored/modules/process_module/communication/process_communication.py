@@ -1,29 +1,24 @@
 """
-Коммуникация процесса - работа с очередями и роутером (Refactored).
+Коммуникация процесса — работа с очередями и роутером.
 
-Интегрируется с RouterManager для межпроцессной коммуникации.
-RouterManager использует Dispatch модуль для интеллектуальной маршрутизации сообщений.
-
-Архитектура коммуникации:
-- ProcessCommunication → RouterManager → Dispatcher → MessageChannel
-- RouterManager использует Dispatch модуль для выбора канала отправки
-- Dispatcher анализирует сообщение и выбирает оптимальный канал
-- MessageChannel отправляет сообщение через свой протокол (Queue, Logger, etc.)
+Реализует IProcessCommunication.
+Архитектура: ProcessCommunication → RouterManager → Dispatcher → MessageChannel
 """
 
+from queue import Queue as ThreadQueue
 from typing import Dict, Any, List, Optional
 from multiprocessing import Queue
 
-# Импорт из нового рефакторенного RouterModule
 from ...router_module import QueueChannel
+from ..interfaces import IProcessCommunication
 
 
-class ProcessCommunication:
+class ProcessCommunication(IProcessCommunication):
     """
-    Коммуникация процесса (Refactored).
-    
+    Коммуникация процесса.
+
+    Реализует IProcessCommunication.
     Инкапсулирует всю логику работы с очередями и роутером.
-    Интегрируется с RouterManager для маршрутизации сообщений.
     """
     
     def __init__(
@@ -100,6 +95,14 @@ class ProcessCommunication:
                                     self.router_manager.register_channel(channel)
                                     self.logger_callback("DEBUG", f"Registered cross-process channel '{ch_name}'", "communication")
             
+            # Локальный канал для межпоточного общения внутри процесса (queue.Queue — быстрый)
+            local_channel_name = f"{self.process_name}_local"
+            if not self.router_manager.get_channel(local_channel_name):
+                local_queue = ThreadQueue(maxsize=256)
+                local_channel = QueueChannel(local_channel_name, local_queue)
+                self.router_manager.register_channel(local_channel)
+                self.logger_callback("DEBUG", f"Registered local intra-process channel '{local_channel_name}'", "communication")
+
             # Регистрируем канал system_events для событий (если есть очередь events)
             if 'events' in self.queues or self.shared_resources:
                 # Создаем или получаем очередь для событий
@@ -250,25 +253,29 @@ class ProcessCommunication:
         stats = {}
         for name, queue in self.queues.items():
             try:
-                # multiprocessing.Queue может не поддерживать qsize() на macOS
-                # или в некоторых случаях может вызывать ошибки
                 try:
                     size = queue.qsize()
                 except (NotImplementedError, OSError, AttributeError):
-                    # Если qsize() не поддерживается, используем приблизительное значение
                     size = 0
-                
-                maxsize = None
-                if hasattr(queue, 'maxsize'):
-                    maxsize = queue.maxsize
-                
-                stats[name] = {
-                    "size": size,
-                    "maxsize": maxsize
-                }
+
+                maxsize = getattr(queue, "maxsize", None)
+                stats[name] = {"size": size, "maxsize": maxsize}
             except Exception as e:
-                # Логируем ошибку, но не прерываем выполнение
-                error_msg = str(e) if str(e) else "Unknown error"
-                stats[name] = {"error": error_msg}
+                stats[name] = {"error": str(e) or "Unknown error"}
         return stats
+
+    # ---- Алиасы для IProcessCommunication ----
+
+    def send_message(self, target: str, message: Dict[str, Any]) -> bool:
+        """Отправить сообщение конкретному процессу (алиас send_to_process)."""
+        return self.send_to_process(target, message)
+
+    def broadcast_message(self, message: Dict[str, Any], exclude_self: bool = True) -> bool:
+        """Разослать сообщение всем процессам (алиас broadcast, возвращает bool)."""
+        return self.broadcast(message, exclude_self) > 0
+
+    def receive_message(self, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """Получить одно сообщение из очереди."""
+        messages = self.receive(timeout=timeout if timeout is not None else 0.01)
+        return messages[0] if messages else None
 
