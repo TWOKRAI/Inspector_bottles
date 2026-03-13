@@ -33,7 +33,7 @@ from ...base_manager import BaseManager, ObservableMixin
 from ...base_manager.interfaces import IBaseManager
 from ..interfaces import IConfigManager, IConfig
 from .base_config import Config  # Импорт из того же пакета core/
-from ...data_schema_module.storage.storage_manager import StorageManager
+from ...data_schema_module.extensions.storage_manager import StorageManager
 from ...shared_resources_module.events.event_manager import EventManager, EventType
 
 # Ленивый импорт SharedResourcesManager — избегаем циклической зависимости

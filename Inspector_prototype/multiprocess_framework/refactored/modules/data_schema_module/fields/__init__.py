@@ -1,32 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-Система полей регистров: FieldMeta + FieldRouting + type aliases + RegisterBase.
+Backward-compatible re-export.
 
-Использование:
+Компоненты перемещены в core/:
+    fields/field_meta.py      -> core/field_meta.py
+    fields/field_routing.py   -> core/field_routing.py
+    fields/field_types.py     -> core/field_types.py
+    fields/register_mixin.py  -> core/schema_mixin.py  (RegisterMixin = SchemaMixin)
+    fields/register_base.py   -> core/schema_base.py   (RegisterBase = SchemaBase)
 
-    from typing import Annotated
-    from multiprocess_framework.refactored.modules.data_schema_module import (
-        FieldMeta, FieldRouting, RegisterBase,
-        # Готовые type aliases:
-        Percent, Pixels, HsvHue, HsvChannel, Scale, Seconds,
-    )
-
-    DRAW = FieldRouting(channel="control_draw")
-
-    class DrawRegisters(RegisterBase):
-        dp: Annotated[float, FieldMeta("Разрешение", min=0.1, max=20.0, routing=DRAW)] = 1.4
-        minDist: Annotated[float, FieldMeta("Мин. расстояние", routing=DRAW)] = 50.0
-
-    class ProcessingRegisters(RegisterBase):
-        hl: HsvHue = 0          # Annotated[int, FieldMeta("Hue", min=0, max=179)]
-        hm: HsvHue = 179
-        crop_top: Pixels = 0    # Annotated[int, FieldMeta("Пиксели", min=0, max=10000)]
+Все старые импорты продолжают работать через этот файл.
+Используйте новые пути для нового кода:
+    from data_schema_module.core import FieldMeta, SchemaBase, ...
 """
-from .field_meta import FieldMeta
-from .field_routing import FieldRouting
-from .register_mixin import RegisterMixin
-from .register_base import RegisterBase
-from .field_types import (
+from ..core.field_meta import FieldMeta
+from ..core.field_routing import FieldRouting
+from ..core.schema_mixin import SchemaMixin, RegisterMixin
+from ..core.schema_base import SchemaBase, RegisterBase
+from ..core.field_types import (
     Percent,
     NormalizedFloat,
     Scale,
@@ -41,12 +32,12 @@ from .field_types import (
 )
 
 __all__ = [
-    # Ядро
     "FieldMeta",
     "FieldRouting",
+    "SchemaMixin",
     "RegisterMixin",
+    "SchemaBase",
     "RegisterBase",
-    # Переиспользуемые type aliases
     "Percent",
     "NormalizedFloat",
     "Scale",

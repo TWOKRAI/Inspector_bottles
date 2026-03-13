@@ -1,74 +1,50 @@
 # -*- coding: utf-8 -*-
 """
-data_schema_module — Универсальная система работы с данными на основе Pydantic v2.
+data_schema_module — Независимое ядро для описания структур данных.
 
 Архитектура:
-    ┌─────────────────────────────────────────────────────┐
-    │  Поля (fields/)                                      │
-    │  FieldMeta — метаданные поля (Annotated-дескриптор) │
-    │  RegisterMixin — 5 секций методов                    │
-    │  RegisterBase  — RegisterMixin + BaseModel           │
-    ├─────────────────────────────────────────────────────┤
-    │  Контейнер (utils/registers_container.py)            │
-    │  RegistersContainer — набор регистров + IO           │
-    ├─────────────────────────────────────────────────────┤
-    │  Реестр (registry/)                                  │
-    │  SchemaManager, discover_registers_from_package      │
-    ├─────────────────────────────────────────────────────┤
-    │  Хранение (storage/)                                 │
-    │  StorageManager (ProcessData) + FileStorage (JSON)   │
-    ├─────────────────────────────────────────────────────┤
-    │  Версионирование (versioning/)                       │
-    │  VersionManager — история + откат конфигов           │
-    ├─────────────────────────────────────────────────────┤
-    │  Компоненты и ДНК (models/)                         │
-    │  BaseComponentModel, BaseManagerModel, ComponentDNA  │
-    └─────────────────────────────────────────────────────┘
+    core/          Ядро: SchemaBase, FieldMeta, validators
+    registry/      Реестр схем (без Singleton)
+    serialization/ Сериализация: dict/JSON/YAML, FileStorage
+    container/     RegistersContainer, config_converters
+    interfaces.py  Публичный контракт (протоколы и ABC)
 
-Быстрый старт (регистры и конфиги):
-
-    from typing import Annotated
-    from multiprocess_framework.refactored.modules.data_schema_module import (
-        FieldMeta, RegisterBase, RegistersContainer,
-        discover_registers_from_package,
-    )
-
-    class DrawRegisters(RegisterBase):
-        dp: Annotated[float, FieldMeta("Разрешение", min=0.1, max=20.0)] = 1.4
-
-    r = DrawRegisters()
-    r.dp                             # → 1.4
-    r.get_field_meta("dp").max       # → 20.0
-    r.update_field("dp", 2.0)        # → (True, None)
-
-Быстрый старт (компоненты и хранение в ProcessData):
-
-    from multiprocess_framework.refactored.modules.data_schema_module import (
-        SchemaManager, ModelFactory, StorageManager, register_schema,
-    )
-
-    @register_schema("MyConfig")
-    class MyConfig(BaseModel):
-        host: str = "localhost"
-        port: int = 8080
-
-    obj = ModelFactory.create("MyConfig", {"host": "0.0.0.0"})
-
-Персистентность через FileStorage:
-
-    from multiprocess_framework.refactored.modules.data_schema_module import FileStorage
-    s = FileStorage("data/registers")
-    container.save(s, "main_process")
-    container.load(s, "main_process")
+Расширения (явный импорт):
+    from data_schema_module.extensions.storage_manager import StorageManager
+    from data_schema_module.extensions.versioning import VersionManager
+    from data_schema_module._compat import ...  # legacy re-exports при необходимости
 """
+# =============================================================================
+# Публичный контракт (интерфейсы)
+# =============================================================================
+from .interfaces import (
+    ISchema,
+    ISchemaRegistry,
+    ISchemaAdapter,
+    ISchemaStorage,
+    IAsyncSchemaStorage,
+    HasBuild,
+    IDataConverter,
+    IDataValidator,
+    IRegisterStorage,
+    IAsyncRegisterStorage,
+    ISchemaManager,
+    IVisualizationFormatter,
+    IDocumentationFormatter,
+    ISchemaVisualizer,
+    ISchemaDocumentationGenerator,
+    IStorageManager,
+    IVersionManager,
+)
 
-# --- Поля: ядро архитектуры ---
-from .fields import (
-    FieldMeta,
-    FieldRouting,
-    RegisterMixin,
-    RegisterBase,
-    # Переиспользуемые type aliases
+# =============================================================================
+# Ядро: схемы и поля
+# =============================================================================
+from .core.schema_base import SchemaBase, RegisterBase
+from .core.schema_mixin import SchemaMixin, RegisterMixin
+from .core.field_meta import FieldMeta
+from .core.field_routing import FieldRouting
+from .core.field_types import (
     Percent,
     NormalizedFloat,
     Scale,
@@ -80,77 +56,9 @@ from .fields import (
     HsvChannel,
     NetworkPort,
     FpsLimit,
+    register_field_type,
+    get_field_type,
 )
-
-# --- Реестр схем, авто-дискавери, сканер, межпроцессный реестр ---
-from .registry.schema_registry import SchemaManager, register_schema
-from .registry.register_discovery import (
-    discover_registers_from_package,
-    register_package_registers,
-    register_package_schemas,
-)
-from .registry.registers_scanner import RegistersScanner
-from .registry.process_registry import ProcessRegistersRegistry, RegistersMeta
-
-# --- Контейнер регистров ---
-from .utils.registers_container import RegistersContainer
-
-# --- Хранилище ---
-from .storage.storage_manager import StorageManager
-from .storage.file_storage import FileStorage
-
-# --- Адаптеры и фабрика ---
-from .api.manager_adapter import ManagerDataAdapter
-from .factory.model_factory import ModelFactory
-
-# --- Интерфейсы ---
-from .core.interfaces import (
-    ISchemaManager,
-    IStorageManager,
-    IVersionManager,
-    IDataConverter,
-    IDataValidator,
-    IRegisterStorage,
-    IAsyncRegisterStorage,
-    HasBuild,
-)
-
-# --- Модели компонентов ---
-from .models import BaseComponentModel, BaseManagerModel, ComponentType
-
-# --- Конвертеры и валидаторы ---
-from .utils.converters import DataConverter, FormatType
-from .utils.validators import DataValidator
-
-# --- Вспомогательные утилиты ---
-from .utils.helpers import (
-    get_nested_value,
-    set_nested_value,
-    merge_with_defaults,
-    extract_fields,
-    get_model_schema,
-)
-from .utils.config_converters import (
-    config_to_dict,
-    configs_to_dicts,
-    build_process_with_workers,
-    process,
-)
-from .utils.registers_io import (
-    registers_to_dict,
-    registers_from_dict,
-    registers_to_json,
-    registers_from_json,
-    registers_to_yaml,
-    registers_from_yaml,
-    registers_to_flat_dict,
-    registers_from_flat_dict,
-)
-
-# --- Версионирование ---
-from .versioning.version_manager import VersionManager, VersionInfo
-
-# --- Исключения ---
 from .core.exceptions import (
     DataSchemaError,
     SchemaNotFoundError,
@@ -160,60 +68,91 @@ from .core.exceptions import (
     DataManagerError,
     VersionManagerError,
 )
-
-# --- Метрики ---
-from .core.metrics import (
-    MetricsCollector,
-    get_metrics_collector,
-    record_metric,
-    increment_metric,
-    record_timing,
-    timed,
+from .core.validators import DataValidator
+from .core.helpers import (
+    get_nested_value,
+    set_nested_value,
+    merge_with_defaults,
+    extract_fields,
+    get_model_schema,
 )
-
-# --- Упрощённый API ---
-from .api.simple_api import (
-    create_config,
-    create_manager_config,
-    get_config,
-    config_from_dict,
-    auto_config,
-)
-
-# --- Ссылки ---
-from .utils.reference import (
+from .core.reference import (
     DataReference,
     is_reference,
     convert_reference_to_data,
     convert_all_references,
 )
 
-# --- Инструменты ---
-from .tools.schema_visualizer import SchemaVisualizer
-from .tools.schema_documentation_generator import SchemaDocumentationGenerator
+# =============================================================================
+# Реестр схем
+# =============================================================================
+from .registry.schema_registry import (
+    SchemaRegistry,
+    SchemaManager,
+    register_schema,
+    get_default_registry,
+)
+from .registry.discovery import (
+    RegistersScanner,
+    discover_registers_from_package,
+    register_package_schemas,
+    register_package_registers,
+)
 
-# --- ДНК компонентов (опционально) ---
-try:
-    from .factory.dna_factory import DNAFactory
-    from .storage.process_data_container import ProcessDataContainer
-    from .models.dna import (
-        ComponentDNA,
-        ComponentLocation,
-        ResourceReference,
-        ResourceType,
-        ComponentHierarchy,
-    )
-    _has_dna = True
-except ImportError:
-    _has_dna = False
+# =============================================================================
+# Сериализация
+# =============================================================================
+from .serialization.converter import DataConverter, FormatType
+from .serialization.io import (
+    registers_to_dict,
+    registers_from_dict,
+    registers_to_json,
+    registers_from_json,
+    registers_to_yaml,
+    registers_from_yaml,
+    registers_to_flat_dict,
+    registers_from_flat_dict,
+)
+from .serialization.file_storage import FileStorage
 
+# =============================================================================
+# Контейнеры
+# =============================================================================
+from .container.registers_container import RegistersContainer
+from .container.config_converters import (
+    config_to_dict,
+    configs_to_dicts,
+    build_process_with_workers,
+    process,
+)
+
+# =============================================================================
+# Публичный API (ядро)
+# =============================================================================
 __all__ = [
-    # Поля — основа архитектуры
+    "ISchema",
+    "ISchemaRegistry",
+    "ISchemaAdapter",
+    "ISchemaStorage",
+    "IAsyncSchemaStorage",
+    "HasBuild",
+    "IDataConverter",
+    "IDataValidator",
+    "IRegisterStorage",
+    "IAsyncRegisterStorage",
+    "ISchemaManager",
+    "IVisualizationFormatter",
+    "IDocumentationFormatter",
+    "ISchemaVisualizer",
+    "ISchemaDocumentationGenerator",
+    "IStorageManager",
+    "IVersionManager",
+    "SchemaBase",
+    "RegisterBase",
+    "SchemaMixin",
+    "RegisterMixin",
     "FieldMeta",
     "FieldRouting",
-    "RegisterMixin",
-    "RegisterBase",
-    # Переиспользуемые type aliases
     "Percent",
     "NormalizedFloat",
     "Scale",
@@ -225,46 +164,35 @@ __all__ = [
     "HsvChannel",
     "NetworkPort",
     "FpsLimit",
-    # Реестр
-    "SchemaManager",
-    "register_schema",
-    "discover_registers_from_package",
-    "register_package_registers",
-    "register_package_schemas",
-    "RegistersScanner",
-    "ProcessRegistersRegistry",
-    "RegistersMeta",
-    # Контейнер
-    "RegistersContainer",
-    # Хранилище
-    "StorageManager",
-    "FileStorage",
-    # Адаптеры и фабрика
-    "ManagerDataAdapter",
-    "ModelFactory",
-    # Интерфейсы
-    "ISchemaManager",
-    "IStorageManager",
-    "IVersionManager",
-    "IDataConverter",
-    "IDataValidator",
-    "IRegisterStorage",
-    "IAsyncRegisterStorage",
-    "HasBuild",
-    # Модели компонентов
-    "BaseComponentModel",
-    "BaseManagerModel",
-    "ComponentType",
-    # Конвертеры и валидаторы
-    "DataConverter",
+    "register_field_type",
+    "get_field_type",
+    "DataSchemaError",
+    "SchemaNotFoundError",
+    "SchemaValidationError",
+    "SchemaRegistrationError",
+    "InvalidParameterError",
+    "DataManagerError",
+    "VersionManagerError",
     "DataValidator",
-    "FormatType",
-    # Утилиты
     "get_nested_value",
     "set_nested_value",
     "merge_with_defaults",
     "extract_fields",
     "get_model_schema",
+    "DataReference",
+    "is_reference",
+    "convert_reference_to_data",
+    "convert_all_references",
+    "SchemaRegistry",
+    "SchemaManager",
+    "register_schema",
+    "get_default_registry",
+    "RegistersScanner",
+    "discover_registers_from_package",
+    "register_package_schemas",
+    "register_package_registers",
+    "DataConverter",
+    "FormatType",
     "registers_to_dict",
     "registers_from_dict",
     "registers_to_json",
@@ -273,52 +201,10 @@ __all__ = [
     "registers_from_yaml",
     "registers_to_flat_dict",
     "registers_from_flat_dict",
-    # Dict at Boundary
+    "FileStorage",
+    "RegistersContainer",
     "config_to_dict",
     "configs_to_dicts",
     "build_process_with_workers",
     "process",
-    # Версионирование
-    "VersionManager",
-    "VersionInfo",
-    # Ссылки
-    "DataReference",
-    "is_reference",
-    "convert_reference_to_data",
-    "convert_all_references",
-    # Исключения
-    "DataSchemaError",
-    "SchemaNotFoundError",
-    "SchemaValidationError",
-    "SchemaRegistrationError",
-    "InvalidParameterError",
-    "DataManagerError",
-    "VersionManagerError",
-    # Метрики
-    "MetricsCollector",
-    "get_metrics_collector",
-    "record_metric",
-    "increment_metric",
-    "record_timing",
-    "timed",
-    # Упрощённый API
-    "create_config",
-    "create_manager_config",
-    "get_config",
-    "config_from_dict",
-    "auto_config",
-    # Инструменты
-    "SchemaVisualizer",
-    "SchemaDocumentationGenerator",
 ]
-
-if _has_dna:
-    __all__ += [
-        "DNAFactory",
-        "ProcessDataContainer",
-        "ComponentDNA",
-        "ComponentLocation",
-        "ResourceReference",
-        "ResourceType",
-        "ComponentHierarchy",
-    ]

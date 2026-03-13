@@ -1,14 +1,16 @@
+# -*- coding: utf-8 -*-
 """
 Исключения модуля data_schema.
 
 Иерархия исключений для удобной обработки ошибок и интеграции с ExceptionManager.
 """
+from typing import Any, Optional
 
 
 class DataSchemaError(Exception):
     """Базовое исключение модуля data_schema."""
-    
-    def __init__(self, message: str, context: dict = None):
+
+    def __init__(self, message: str, context: Optional[dict] = None):
         """
         Инициализация исключения.
         
@@ -32,7 +34,7 @@ class DataSchemaError(Exception):
 class SchemaNotFoundError(DataSchemaError):
     """Схема не найдена в реестре."""
     
-    def __init__(self, schema_name: str, available_schemas: list = None):
+    def __init__(self, schema_name: str, available_schemas: Optional[list] = None):
         """
         Инициализация исключения.
         
@@ -54,7 +56,12 @@ class SchemaNotFoundError(DataSchemaError):
 class SchemaValidationError(DataSchemaError):
     """Ошибка валидации данных по схеме."""
     
-    def __init__(self, schema_name: str, validation_errors: list, data: dict = None):
+    def __init__(
+        self,
+        schema_name: str,
+        validation_errors: list,
+        data: Optional[dict] = None,
+    ):
         """
         Инициализация исключения.
         
@@ -81,7 +88,12 @@ class SchemaValidationError(DataSchemaError):
 class SchemaRegistrationError(DataSchemaError):
     """Ошибка регистрации схемы."""
     
-    def __init__(self, schema_name: str, reason: str, schema_class: type = None):
+    def __init__(
+        self,
+        schema_name: str,
+        reason: str,
+        schema_class: Optional[type] = None,
+    ):
         """
         Инициализация исключения.
         
@@ -104,7 +116,7 @@ class SchemaRegistrationError(DataSchemaError):
 class InvalidParameterError(DataSchemaError):
     """Ошибка валидации параметра."""
     
-    def __init__(self, parameter_name: str, value: any, reason: str):
+    def __init__(self, parameter_name: str, value: Any, reason: str):
         """
         Инициализация исключения.
         

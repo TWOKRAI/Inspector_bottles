@@ -81,6 +81,267 @@ data_schema_module/
 
 ---
 
+## Диаграмма связей и классов
+
+Ниже — схема того, как устроен модуль: основные классы, интерфейсы и потоки данных. Рендер: любой просмотрщик Markdown с поддержкой Mermaid (GitHub, VS Code, Cursor).
+
+### Слои и зависимости пакетов
+
+```mermaid
+flowchart TB
+    subgraph public ["Публичный API __init__.py"]
+        API["SchemaBase, FieldMeta, SchemaRegistry\nDataConverter, RegistersContainer\nprocess, register_schema"]
+    end
+
+    subgraph interfaces ["interfaces.py"]
+        ISchema["ISchema"]
+        ISchemaAdapter["ISchemaAdapter"]
+        ISchemaStorage["ISchemaStorage"]
+        HasBuild["HasBuild"]
+        IDataConverter["IDataConverter"]
+        IDataValidator["IDataValidator"]
+        ISchemaRegistry["ISchemaRegistry"]
+    end
+
+    subgraph core ["core/"]
+        SchemaBase["SchemaBase"]
+        SchemaMixin["SchemaMixin"]
+        FieldMeta["FieldMeta"]
+        FieldRouting["FieldRouting"]
+        FieldTypes["field_types\nPercent, Pixels, ..."]
+        DataValidator["DataValidator"]
+        Exceptions["exceptions"]
+        Helpers["helpers"]
+        Reference["reference"]
+    end
+
+    subgraph registry ["registry/"]
+        SchemaRegistry["SchemaRegistry"]
+        Discovery["discovery\nRegistersScanner"]
+    end
+
+    subgraph serialization ["serialization/"]
+        DataConverter["DataConverter"]
+        FileStorage["FileStorage"]
+        RegistersIO["io\nregisters_to_dict, ..."]
+    end
+
+    subgraph container ["container/"]
+        RegistersContainer["RegistersContainer"]
+        ConfigConverters["config_converters\nprocess, build_process_with_workers"]
+    end
+
+    subgraph extensions ["extensions/ опционально"]
+        StorageManager["StorageManager"]
+        VersionManager["VersionManager"]
+        Models["models\nBaseComponentModel, DNA"]
+    end
+
+    API --> ISchema
+    API --> core
+    API --> registry
+    API --> serialization
+    API --> container
+    SchemaBase --> SchemaMixin
+    SchemaBase --> BaseModel["Pydantic BaseModel"]
+    SchemaMixin --> FieldMeta
+    FieldMeta --> FieldRouting
+    RegistersContainer --> SchemaBase
+    RegistersContainer --> ISchemaStorage
+    FileStorage -.->|"implements"| ISchemaStorage
+    DataConverter -.->|"implements"| IDataConverter
+    DataValidator -.->|"implements"| IDataValidator
+    SchemaRegistry -.->|"implements"| ISchemaRegistry
+    ConfigConverters --> HasBuild
+```
+
+### Классы ядра и реализация интерфейсов
+
+```mermaid
+classDiagram
+    direction TB
+
+    class ISchema {
+        <<Protocol>>
+        +model_dump() Dict
+        +get_field_meta(field_name) Any
+        +get_all_fields_meta() Dict
+        +update_field(name, value, access_level) Tuple
+        +validate_field(name, value, access_level) Tuple
+    }
+
+    class ISchemaAdapter {
+        <<Protocol>>
+        +adapt(schema_class, **options) Dict
+        +adapt_instance(instance, **options) Dict
+    }
+
+    class ISchemaStorage {
+        <<Protocol>>
+        +load(container_name) Dict
+        +save(container_name, data) None
+        +exists(container_name) bool
+        +delete(container_name) bool
+    }
+
+    class HasBuild {
+        <<Protocol>>
+        +build()
+    }
+
+    class SchemaMixin {
+        +get_field_meta(field_name)
+        +get_all_fields_meta()
+        +get_routing_channels()
+        +get_fields_for_channel(channel)
+        +update_field(name, value, access_level)
+        +validate_field(name, value, access_level)
+    }
+
+    class SchemaBase {
+        +model_config
+        _check_field_constraints()
+    }
+
+    class FieldMeta {
+        +description, info, unit
+        +min, max, transfer_k, round_k
+        +routing, access_level, readonly
+        +validate_value(value, access_level)
+        +clamp(value), round_value(value)
+        +to_dict(lang)
+    }
+
+    class FieldRouting {
+        +channel, priority, transform
+        +to_dict()
+    }
+
+    class SchemaRegistry {
+        +register(name, schema_class)
+        +get_schema(name)
+        +has_schema(name)
+        +create_instance(name, data)
+        +get_defaults(name)
+        +validate(name, data)
+        +list_schemas(), unregister(), clear()
+    }
+
+    class RegistersContainer {
+        +_register_map, _registers
+        +__getattr__, __getitem__
+        +model_dump_all(), model_validate_all()
+        +diff(reference), snapshot()
+        +save(storage, name), load(storage, name)
+    }
+
+    class FileStorage {
+        +load(container_name)
+        +save(container_name, data)
+        +exists(container_name)
+        +delete(container_name)
+    }
+
+    class DataConverter {
+        <<static>>
+        +model_to_dict(model)
+        +dict_to_model(data, model_class)
+        +model_to_json(model)
+        +json_to_model(json_str, model_class)
+    }
+
+    BaseModel <|-- SchemaBase
+    SchemaMixin <|-- SchemaBase
+    SchemaBase ..|> ISchema
+    RegistersContainer --> SchemaBase
+    RegistersContainer ..> ISchemaStorage : uses
+    FileStorage ..|> ISchemaStorage
+    DataConverter ..|> IDataConverter
+    SchemaRegistry ..|> ISchemaRegistry
+    FieldMeta *-- FieldRouting : routing may contain
+```
+
+### Поток данных: от схемы до персистентности
+
+```mermaid
+sequenceDiagram
+    participant App as Приложение
+    participant Schema as Класс схемы (SchemaBase)
+    participant Registry as SchemaRegistry
+    participant Container as RegistersContainer
+    participant Storage as FileStorage / ISchemaStorage
+
+    App->>Registry: register_schema("draw", DrawRegisters)
+    App->>Container: RegistersContainer({"draw": DrawRegisters})
+    Container->>Schema: DrawRegisters()
+    Note over Container: хранит экземпляры в _registers
+
+    App->>Container: container.draw.update_field("dp", 2.0)
+    App->>Container: container.snapshot() / diff(snap)
+
+    App->>Storage: container.save(storage, "main_process")
+    Container->>Container: model_dump_all()
+    Container->>Storage: storage.save(name, data)
+
+    App->>Storage: container.load(storage, "main_process")
+    Storage->>Container: storage.load(name)
+    Container->>Container: model_validate_all(data)
+```
+
+### Внешние адаптеры (реализуют ISchemaAdapter)
+
+```mermaid
+flowchart LR
+    subgraph data_schema ["data_schema_module"]
+        ISchemaAdapter["ISchemaAdapter\n(Protocol)"]
+        SchemaBase["SchemaBase"]
+    end
+
+    subgraph router_mod ["router_module"]
+        RouterAdapter["RouterSchemaAdapter"]
+    end
+
+    subgraph config_mod ["config_module"]
+        ConfigAdapter["ConfigSchemaAdapter"]
+    end
+
+    subgraph process_mgr ["process_manager_module"]
+        ProcessAdapter["ProcessSchemaAdapter"]
+    end
+
+    RouterAdapter -.->|implements| ISchemaAdapter
+    ConfigAdapter -.->|implements| ISchemaAdapter
+    ProcessAdapter -.->|implements| ISchemaAdapter
+    RouterAdapter -->|uses| SchemaBase
+    ConfigAdapter -->|uses| SchemaBase
+    ProcessAdapter -->|uses| SchemaBase
+```
+
+---
+
+## Оценка модуля в баллах (честная)
+
+Оценка по критериям 0–10: что уже хорошо, где есть ограничения. Ориентир — готовность к продакшену и поддерживаемость.
+
+| Критерий | Балл | Комментарий |
+|----------|------|-------------|
+| **Архитектура и разделение слоёв** | 9/10 | Чёткое деление core / registry / serialization / container, extensions вынесены, зависимости ядра нулевые. Минус: часть кода ещё в старых путях (core/metrics, registry/process_registry). |
+| **Читаемость кода** | 8/10 | Понятные имена (SchemaBase, FieldMeta), docstrings есть. __init__.py после чистки — только ядро. Сложнее входить в schema_mixin и кэши. |
+| **Тестовое покрытие** | 8/10 | Много unit- и интеграционных тестов, extensions тоже покрыты. Нет явного замеренного % покрытия; часть edge cases (пустые контейнеры, конфликты имён) может быть не закрыта. |
+| **Модульность и независимость** | 9/10 | Ядро не тянет process_module/config_module. Реестр с опциональными метриками. Расширения — явный импорт. |
+| **Расширяемость** | 8/10 | ISchemaAdapter, ISchemaStorage, register_field_type(). Добавить свой тип поля или хранилище — без правки ядра. Нет плагинной системы и единого реестра «типов полей». |
+| **Производительность** | 8/10 | Кэши в SchemaMixin, model_dump_json вместо двойной сериализации. Модуль-уровневые кэши не очищаются при динамическом создании классов. |
+| **Документация** | 8/10 | README, STATUS, MIGRATION, диаграммы, примеры. Часть docs/ устарела (старая структура); нет единого «архитектурного» doc. |
+| **Типизация и практики Python** | 8/10 | Protocol, ABC, Optional в исключениях, TYPE_CHECKING. Не везде строгие аннотации (часть Any); Python 3.10+ union syntax можно шире использовать. |
+
+**Итоговая оценка: 8.3/10**
+
+**Сильные стороны:** независимое ядро, понятный контракт (interfaces), нормальная тестируемость реестра и контейнеров, Dict at Boundary и адаптеры в потребляющих модулях.
+
+**Слабые стороны и риски:** модульные кэши без сброса; IAsyncSchemaStorage не используется; обратная совместимость через _compat и старые импорты (StorageManager и т.д.) — при полном отказе от _compat часть кода сломается, пока потребители не перейдут на extensions.
+
+---
+
 ## 🚀 Быстрый старт (5 минут)
 
 ### 1. Базовая схема с полями

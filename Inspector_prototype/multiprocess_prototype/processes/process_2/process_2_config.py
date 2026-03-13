@@ -1,11 +1,11 @@
 """
-Конфиг process_2 — RegisterBase + FieldMeta, data_schema_module.
+Конфиг process_2 — SchemaBase + FieldMeta, data_schema_module.
 """
 
 from typing import Annotated
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
-    RegisterBase,
+    SchemaBase,
     FieldMeta,
     register_schema,
 )
@@ -13,7 +13,7 @@ from .process_2_module import Process2Module
 
 
 @register_schema("Process2Config")
-class Process2Config(RegisterBase):
+class Process2Config(SchemaBase):
     """Регистр конфигурации process_2."""
 
     process_name: str = "process_2"

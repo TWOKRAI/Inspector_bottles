@@ -1,6 +1,11 @@
 # Примеры адаптеров — Интеграция data_schema_module с другими модулями
 
-**Версия:** 2.0 | **Дата:** 2026-03-13 | **Статус:** Примеры для Шага 11
+**Версия:** 2.0 | **Дата:** 2026-03-13 | **Статус:** ✅ Реализовано (Шаг 11 завершён)
+
+> **Реальные файлы адаптеров:**
+> - `router_module/adapters/schema_adapter.py` — `RouterSchemaAdapter`
+> - `config_module/adapters/schema_adapter.py` — `ConfigSchemaAdapter`
+> - `process_manager_module/adapters/schema_adapter.py` — `ProcessSchemaAdapter`
 
 ---
 

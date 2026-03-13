@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
-    RegisterBase,
+    SchemaBase,
     FieldMeta,
     register_schema,
 )
@@ -15,7 +15,7 @@ from typing import Annotated
 
 
 @register_schema("Worker1Config")
-class Worker1Config(RegisterBase):
+class Worker1Config(SchemaBase):
     """Регистр конфигурации worker_1."""
 
     name: str = "worker_1"

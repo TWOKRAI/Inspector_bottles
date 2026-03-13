@@ -46,17 +46,10 @@ class DataSchemaAdapter:
         if self._data_manager is None:
             try:
                 # Импорт из нового отдельного модуля data_schema_module
-                from ...data_schema_module import StorageManager
-                # Создаем экземпляр StorageManager с ссылкой на shared_resources
+                from ...data_schema_module.extensions.storage_manager import StorageManager
                 self._data_manager = StorageManager(shared_resources=self.shared_resources)
             except ImportError:
-                # Fallback: пытаемся импортировать из старого места (для обратной совместимости)
-                try:
-                    from ....modules.Shared_resources_module.data_schema import StorageManager
-                    self._data_manager = StorageManager(shared_resources=self.shared_resources)
-                except ImportError:
-                    # Модуль не доступен
-                    return None
+                return None
         
         return self._data_manager
     

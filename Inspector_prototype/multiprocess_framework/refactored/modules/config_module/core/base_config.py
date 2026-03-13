@@ -18,8 +18,8 @@ from threading import RLock
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-from ...data_schema_module.utils.converters import DataConverter, FormatType
-from ...data_schema_module.utils.validators import DataValidator
+from ...data_schema_module.serialization.converter import DataConverter, FormatType
+from ...data_schema_module.core.validators import DataValidator
 
 
 class Config:

@@ -32,14 +32,14 @@ ChannelRoutingConfig — базовый RegisterBase-конфиг для мен�
 from typing import Annotated, Dict, Any
 
 from ...data_schema_module import (
-    RegisterBase,
+    SchemaBase,
     FieldMeta,
     register_schema,
 )
 
 
 @register_schema("ChannelRoutingConfig")
-class ChannelRoutingConfig(RegisterBase):
+class ChannelRoutingConfig(SchemaBase):
     """Базовый конфиг для ChannelRoutingManager и всех наследников.
 
     Общие поля:
