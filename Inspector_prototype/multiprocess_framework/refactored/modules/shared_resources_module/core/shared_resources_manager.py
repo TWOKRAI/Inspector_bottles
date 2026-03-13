@@ -1,469 +1,385 @@
 """
-Менеджер общих ресурсов для межпроцессного взаимодействия (Refactored).
+SharedResourcesManager — фасад-делегатор для всех общих ресурсов системы.
 
-Легковесный контейнер-библиотека (архив), который передается в каждый процесс.
-Наследуется от BaseManager и использует ObservableMixin для единообразия со всеми менеджерами системы.
+Pickle-safe «записная книжка»: создаётся в ProcessManager, заполняется через
+register_process(), передаётся напрямую в дочерние процессы через pickle.
 
-Содержит только ProcessStateRegistry со всеми ProcessData всех процессов и EventManager.
-БЕЗ Manager() и Lock() для кросс-платформенной совместимости.
-Queue и Event сериализуемы сами по себе.
+После unpickle дочерний процесс вызывает reinitialize_in_child() для
+восстановления non-pickle ресурсов (EventManager internal Queue, SharedMemory handles).
 
-ConfigManager, QueueRegistry, MemoryManager создаются локально в каждом процессе
-как вспомогательные утилиты и работают с данными из ProcessStateRegistry.
+ADR-018: register_process() — единая точка регистрации.
+ADR-021: прямой pickle SRM вместо ad-hoc bundle dict.
 """
 from __future__ import annotations
 
-from multiprocessing import Queue, Event
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from multiprocessing import Event, Queue
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...base_manager.core.base_manager import _noop
+
+from ..config.config_store import ConfigStore
 from ..events.event_manager import EventManager
+from ..queues.queue_registry import QueueRegistry
+from ..memory.memory_manager import MemoryManager
 from ..state.process_data import ProcessData
 from ..state.process_state_registry import ProcessStateRegistry
+from ..types import ProcessStatus
+from .interfaces import ISharedResourcesManager
 
 
-class SharedResourcesManager(BaseManager, ObservableMixin):
+# Атрибуты ObservableMixin, которые нельзя pickle (closures)
+_PICKLE_EXCLUDE = frozenset((
+    "log_debug", "log_info", "log_warning", "log_error", "log_critical",
+    "record_metric", "increment", "record_timing", "gauge",
+    "track_error", "record_error",
+    "_call_manager", "_registry", "_plugin_registry", "_proxy_created",
+))
+
+
+class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManager):
     """
-    Менеджер общих ресурсов для всех процессов (Refactored).
-    
-    Наследуется от BaseManager и использует ObservableMixin для:
-    - Единообразия со всеми менеджерами системы
-    - Автоматического логирования через ObservableMixin
-    - Стандартного жизненного цикла (initialize/shutdown)
-    
-    Легковесный контейнер-библиотека (архив), который передается в каждый процесс.
-    Содержит только ProcessStateRegistry со всеми ProcessData всех процессов и EventManager.
-    
-    БЕЗ Manager() и Lock() - использует простой словарь с ProcessData.
-    Queue и Event сериализуемы и могут передаваться между процессами.
-    
-    Attributes:
-        manager_name: Имя менеджера
-        process_state_registry: Реестр состояний процессов
-        event_manager: Менеджер событий
-        shared_resources: Словарь дополнительных общих ресурсов
+    Фасад-делегатор для всех общих ресурсов системы.
+
+    Содержит пять внутренних компонентов:
+      - ConfigStore         — конфиги всех процессов (статика)
+      - ProcessStateRegistry — runtime-состояния (Queue/Event ссылки)
+      - QueueRegistry       — создание и доступ к очередям
+      - EventManager        — системные события
+      - MemoryManager       — SharedMemory по именам
+
+    Pickle-safe: Queue/Event нативно pickle-able; EventManager._event_queue
+    и SharedMemory handles пересоздаются через reinitialize_in_child().
     """
-    
+
     def __init__(
         self,
         manager_name: str = "SharedResourcesManager",
         process: Optional[Any] = None,
-        router_manager=None,
-        logger=None,
-        **kwargs
-    ):
-        """
-        Инициализация менеджера общих ресурсов.
-        
-        БЕЗ Manager() - использует простой словарь с ProcessData.
-        Содержит только ProcessStateRegistry - легковесный контейнер с данными всех процессов.
-        
-        Args:
-            manager_name: Имя менеджера
-            process: Ссылка на родительский процесс (опционально)
-            router_manager: RouterManager для распространения событий (опционально)
-            logger: Логгер (опционально, используется через ObservableMixin)
-            **kwargs: Дополнительные параметры для ObservableMixin
-        """
-        # Инициализация BaseManager
+        router_manager: Optional[Any] = None,
+        logger: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> None:
         BaseManager.__init__(self, manager_name=manager_name, process=process)
-        
-        # Инициализация ObservableMixin
-        managers = kwargs.get('managers', {})
-        if logger and 'logger' not in managers:
-            managers['logger'] = logger
-        
-        config = kwargs.get('config', {})
-        auto_proxy = kwargs.get('auto_proxy', True)
-        
+
+        managers = kwargs.get("managers", {})
+        if logger and "logger" not in managers:
+            managers["logger"] = logger
         ObservableMixin.__init__(
             self,
             managers=managers,
-            config=config,
-            auto_proxy=auto_proxy
+            config=kwargs.get("config", {}),
+            auto_proxy=kwargs.get("auto_proxy", True),
         )
-        
-        # Словарь для хранения дополнительных общих ресурсов
-        self.shared_resources: Dict[str, Any] = {}
-        
-        # Менеджер событий для межпроцессного взаимодействия
-        # Передаем self после инициализации для избежания циклической зависимости
-        self.event_manager = EventManager(
+
+        # Внутренние компоненты (порядок важен: PSR нужен раньше QR/MM)
+        self._config_store = ConfigStore()
+        self._event_manager = EventManager(
             manager_name=f"{manager_name}_EventManager",
             process=process,
             router_manager=router_manager,
-            shared_resources=self,
-            logger=logger
+            logger=logger,
         )
-        
-        # Реестр состояний процессов (БЕЗ Manager и Lock)
-        # Содержит все ProcessData всех процессов с их очередями, событиями и конфигурациями
-        # Передаем event_manager для автоматической отправки событий при изменениях
-        self.process_state_registry = ProcessStateRegistry(event_manager=self.event_manager)
-    
-    # ========================================================================
-    # РЕАЛИЗАЦИЯ BaseManager - ЖИЗНЕННЫЙ ЦИКЛ
-    # ========================================================================
-    
+        self._process_state_registry = ProcessStateRegistry(
+            event_manager=self._event_manager,
+        )
+        self._queue_registry = QueueRegistry(
+            manager_name=f"{manager_name}_QueueRegistry",
+            process_state_registry=self._process_state_registry,
+            logger=logger,
+        )
+        self._memory_manager = MemoryManager(
+            manager_name=f"{manager_name}_MemoryManager",
+            process_state_registry=self._process_state_registry,
+            logger=logger,
+        )
+
+        # Обратная совместимость: старый код мог использовать shared_resources dict
+        self.shared_resources: Dict[str, Any] = {}
+
+    # =========================================================================
+    # ISharedResourcesManager — жизненный цикл
+    # =========================================================================
+
     def initialize(self) -> bool:
-        """
-        Инициализация менеджера общих ресурсов.
-        
-        Инициализирует EventManager и ProcessStateRegistry.
-        
-        Returns:
-            bool: True если инициализация успешна
-        """
         try:
-            # Инициализация EventManager
-            if not self.event_manager.initialize():
+            if not self._event_manager.initialize():
                 return False
-            
+            self._queue_registry.initialize()
+            self._memory_manager.initialize()
             self.is_initialized = True
             self._log_info(f"SharedResourcesManager '{self.manager_name}' initialized")
             return True
         except Exception as e:
-            self._log_error(f"Failed to initialize SharedResourcesManager: {e}")
+            self._log_error(f"SharedResourcesManager.initialize() failed: {e}")
             return False
-    
+
     def shutdown(self) -> bool:
-        """
-        Завершение работы менеджера общих ресурсов.
-        
-        Завершает EventManager и очищает ресурсы.
-        
-        Returns:
-            bool: True если завершение успешно
-        """
         try:
-            # Завершение EventManager
-            if self.event_manager:
-                self.event_manager.shutdown()
-            
-            # Очищаем общие ресурсы
+            self._event_manager.shutdown()
+            self._queue_registry.shutdown()
+            self._memory_manager.shutdown()
             self.shared_resources.clear()
-            
             self.is_initialized = False
             self._log_info("SharedResourcesManager shutdown completed")
             return True
         except Exception as e:
-            self._log_error(f"Error during SharedResourcesManager shutdown: {e}")
+            self._log_error(f"SharedResourcesManager.shutdown() failed: {e}")
             return False
-    
-    # ========================================================================
-    # УПРАВЛЕНИЕ ОБЩИМИ РЕСУРСАМИ
-    # ========================================================================
-    
-    def add_shared_resource(self, name: str, resource: Any):
+
+    # =========================================================================
+    # ISharedResourcesManager — register_process (ADR-018)
+    # =========================================================================
+
+    def register_process(self, name: str, config: dict) -> bool:
         """
-        Добавление общего ресурса.
-        
-        Args:
-            name: Имя ресурса
-            resource: Ресурс для добавления
+        Единая точка регистрации процесса.
+
+        1. Сохраняет конфиг в ConfigStore.
+        2. Создаёт ProcessData в PSR.
+        3. Создаёт очереди из config["queues"].
+        4. Создаёт стандартные события stop/pause.
+        5. Создаёт SharedMemory если config["memory"] задан.
         """
-        self.shared_resources[name] = resource
-    
-    def get_shared_resource(self, name: str) -> Optional[Any]:
+        try:
+            # 1. Конфиг
+            self._config_store.store(name, config)
+
+            # 2. ProcessData
+            self._process_state_registry.register_process(name)
+
+            # 3. Очереди
+            queues_config = config.get("queues", {})
+            if queues_config:
+                self._queue_registry.create_and_register_queues(name, queues_config)
+
+            # 4. Стандартные события
+            self._create_standard_events(name, config)
+
+            # 5. SharedMemory
+            memory_config = config.get("memory")
+            if memory_config and isinstance(memory_config, dict):
+                memory_names = memory_config.get("names", {})
+                coll = memory_config.get("coll", 1)
+                if memory_names:
+                    self._memory_manager.create_memory_dict(name, memory_names, coll)
+
+            self._log_info(f"Process '{name}' registered in SRM")
+            return True
+        except Exception as e:
+            self._log_error(f"register_process('{name}') failed: {e}")
+            return False
+
+    def _create_standard_events(self, name: str, config: dict) -> None:
+        """Создать стандартные события stop/pause для процесса."""
+        stop_event = Event()
+        pause_event = Event()
+        self._process_state_registry.add_event(name, "stop", stop_event)
+        self._process_state_registry.add_event(name, "pause", pause_event)
+
+        # Дополнительные события из конфига
+        for event_name in config.get("events", []):
+            self._process_state_registry.add_event(name, event_name, Event())
+
+    # =========================================================================
+    # ISharedResourcesManager — reinitialize_in_child (ADR-020)
+    # =========================================================================
+
+    def reinitialize_in_child(self) -> bool:
         """
-        Получение общего ресурса.
-        
-        Args:
-            name: Имя ресурса
-        
-        Returns:
-            Ресурс или None если не найден
+        Восстановить non-pickle ресурсы после unpickle в дочернем процессе.
+
+        Вызывается явно в ProcessModule.initialize() — не автоматически.
         """
-        return self.shared_resources.get(name)
-    
-    # ========================================================================
-    # ДОСТУП К ProcessData
-    # ========================================================================
-    
+        try:
+            # EventManager: пересоздать internal Queue/Event для локальных подписок
+            self._event_manager.reinitialize()
+
+            # MemoryManager: открыть SharedMemory по именам (create=False)
+            self._memory_manager.reinitialize_handles()
+
+            # QueueRegistry: убедиться что ссылка на PSR актуальна
+            self._queue_registry._process_state_registry = self._process_state_registry
+
+            self._log_info("SRM reinitialized in child process")
+            return True
+        except Exception as e:
+            self._log_error(f"reinitialize_in_child() failed: {e}")
+            return False
+
+    # =========================================================================
+    # Properties (ISharedResourcesManager)
+    # =========================================================================
+
+    @property
+    def config_store(self) -> ConfigStore:
+        return self._config_store
+
+    @property
+    def process_state_registry(self) -> ProcessStateRegistry:
+        return self._process_state_registry
+
+    @property
+    def queue_registry(self) -> QueueRegistry:
+        return self._queue_registry
+
+    @property
+    def event_manager(self) -> EventManager:
+        return self._event_manager
+
+    @property
+    def memory_manager(self) -> MemoryManager:
+        return self._memory_manager
+
+    # =========================================================================
+    # Доступ к данным процессов
+    # =========================================================================
+
     def get_process_data(self, process_name: str) -> Optional[ProcessData]:
-        """
-        Получает ProcessData объект процесса.
-        
-        Args:
-            process_name: Имя процесса
-        
-        Returns:
-            ProcessData или None если процесс не найден
-        """
-        return self.process_state_registry.get_process_data(process_name)
-    
+        return self._process_state_registry.get_process_data(process_name)
+
     def get_all_process_data(self) -> Dict[str, ProcessData]:
-        """
-        Получает все ProcessData объекты всех процессов.
-        
-        Returns:
-            Словарь {process_name: ProcessData}
-        """
-        return self.process_state_registry.get_all_process_data()
-    
+        return self._process_state_registry.get_all_process_data()
+
+    def get_process_config(self, name: str) -> Optional[dict]:
+        return self._config_store.get(name)
+
+    def get_process_names(self) -> List[str]:
+        return self._process_state_registry.get_process_names()
+
     def get_process_queue(self, process_name: str, queue_type: str) -> Optional[Queue]:
-        """
-        Получает очередь процесса напрямую из ProcessData.
-        
-        Args:
-            process_name: Имя процесса
-            queue_type: Тип очереди
-        
-        Returns:
-            Queue или None если не найдена
-        """
-        process_data = self.get_process_data(process_name)
-        if process_data:
-            return process_data.get_queue(queue_type)
-        return None
-    
+        pd = self.get_process_data(process_name)
+        return pd.get_queue(queue_type) if pd else None
+
     def get_process_event(self, process_name: str, event_name: str) -> Optional[Event]:
-        """
-        Получает событие процесса напрямую из ProcessData.
-        
-        Args:
-            process_name: Имя процесса
-            event_name: Имя события
-        
-        Returns:
-            Event или None если не найдено
-        """
-        process_data = self.get_process_data(process_name)
-        if process_data:
-            return process_data.get_event(event_name)
-        return None
-    
-    # ========================================================================
-    # ДЕЛЕГИРОВАНИЕ МЕТОДОВ К ProcessStateRegistry
-    # ========================================================================
-    
+        pd = self.get_process_data(process_name)
+        return pd.get_event(event_name) if pd else None
+
+    # =========================================================================
+    # Обратная совместимость (старый API)
+    # =========================================================================
+
     def register_process_state(
         self,
         process_name: str,
         initial_state: Optional[Dict[str, Any]] = None,
         queue_names: Optional[Dict[str, str]] = None,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """
-        Регистрация состояния процесса.
-        
-        Делегирует вызов в ProcessStateRegistry.
-        
-        Args:
-            process_name: Имя процесса
-            initial_state: Начальное состояние процесса
-            queue_names: Словарь имен очередей
-            config: Конфигурация процесса {process: {...}, managers: {...}}
-        
-        Returns:
-            bool: True если регистрация успешна
-        """
-        return self.process_state_registry.register_process(
-            process_name, initial_state, queue_names, config
+        """Устаревший метод. Используйте register_process()."""
+        return self._process_state_registry.register_process(
+            process_name, initial_state, config=config
         )
-    
+
     def register_process_with_config(
         self,
         process_name: str,
-        config,
-        initial_state: Optional[Dict[str, Any]] = None
+        config: Any,
+        initial_state: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """
-        Регистрация процесса с конфигурацией.
-        
-        Делегирует вызов в ProcessStateRegistry.
-        
-        Args:
-            process_name: Имя процесса
-            config: ProcessConfiguration для процесса
-            initial_state: Начальное состояние процесса
-        
-        Returns:
-            bool: True если регистрация успешна
-        """
-        return self.process_state_registry.register_process_with_config(
+        """Устаревший метод. Используйте register_process()."""
+        return self._process_state_registry.register_process_with_config(
             process_name, config, initial_state
         )
-    
+
     def update_process_state(
         self,
         process_name: str,
-        status: Optional[str] = None,
+        status: Optional[Any] = None,
         events: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         queues: Optional[Dict[str, str]] = None,
-        custom: Optional[Dict[str, Any]] = None
+        custom: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """
-        Обновление состояния процесса.
-        
-        Делегирует вызов в ProcessStateRegistry.
-        """
-        return self.process_state_registry.update_state(
+        return self._process_state_registry.update_state(
             process_name, status, events, metadata, queues, custom
         )
-    
+
     def get_process_state(self, process_name: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение состояния процесса.
-        
-        Делегирует вызов в ProcessStateRegistry.
-        """
-        return self.process_state_registry.get_state(process_name)
-    
+        return self._process_state_registry.get_state(process_name)
+
     def get_all_process_states(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Получение всех состояний процессов.
-        
-        Делегирует вызов в ProcessStateRegistry.
-        """
-        return self.process_state_registry.get_all_states()
-    
-    def get_process_names(self) -> list:
-        """
-        Получение списка всех зарегистрированных процессов.
-        
-        Делегирует вызов в ProcessStateRegistry.
-        """
-        return self.process_state_registry.get_process_names()
-    
-    # ========================================================================
-    # СТАТИСТИКА
-    # ========================================================================
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """
-        Получение статистики работы менеджера ресурсов.
-        
-        Интегрируется со статистикой BaseManager и ObservableMixin.
-        """
-        stats = super().get_stats() if hasattr(super(), 'get_stats') else {}
-        
-        shared_stats = {
-            'process_state_registry': self.process_state_registry.get_stats() if hasattr(self.process_state_registry, 'get_stats') else {},
-            'shared_resources': {
-                'count': len(self.shared_resources),
-                'names': list(self.shared_resources.keys())
-            },
-            'event_manager': self.event_manager.get_stats() if hasattr(self.event_manager, 'get_stats') else {}
-        }
-        
-        if isinstance(stats, dict):
-            stats['shared_resources'] = shared_stats
-        else:
-            stats = {'shared_resources': shared_stats}
-        
-        return stats
-    
-    # ========================================================================
-    # ДИНАМИЧЕСКИЙ ДОСТУП К ПРОЦЕССАМ
-    # ========================================================================
-    
-    def __getattr__(self, name: str):
-        """
-        Динамический доступ к данным процессов через атрибуты.
-        
-        Позволяет обращаться к данным процесса как к атрибуту:
-            shared_resources.process_1.queues.data.put(item)
-            shared_resources.process_1.config.get_process_config('key')
-            shared_resources.process_1.events.start.set()
-        
-        Args:
-            name: Имя процесса
-        
-        Returns:
-            ProcessData или None если процесс не найден
-        
-        Raises:
-            AttributeError: Если процесс не найден и имя не является специальным атрибутом
-        """
-        # Fallback для proxy-методов после unpickle (исключены при pickle для multiprocessing)
-        # Модульная функция вместо lambda — pickle-совместимо на Windows (spawn)
-        _PICKLE_SKIP_ATTRS = (
-            '_log_method', '_log_method_internal', '_log', '_record_metric_method',
-            '_track_error_method', '_call_manager'
-        )
-        if name in _PICKLE_SKIP_ATTRS or name.startswith(('_log_', '_record_', '_track_')):
-            return _noop
-        # Проверяем, не является ли это специальным атрибутом
-        if name.startswith('_') or name in ['process_state_registry', 'shared_resources', 'event_manager', 'get_stats', '__dict__']:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        
-        # Пытаемся получить ProcessData для процесса
-        process_data = self.get_process_data(name)
-        if process_data is not None:
-            return process_data
-        
-        # Если процесс не найден, вызываем стандартное исключение
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'. "
-            f"Available processes: {', '.join(self.get_process_names())}"
-        )
-    
-    # ========================================================================
-    # ИНТЕГРАЦИЯ С DataManager (из data_schema модуля)
-    # ========================================================================
-    
-    def get_data_manager(self):
-        """
-        Получить DataManager для работы с данными компонентов (из data_schema).
-        
-        Returns:
-            DataManager экземпляр или None если модуль не доступен
-        
-        Note:
-            data_schema вынесен как отдельный модуль для переиспользования.
-            Используется адаптер для удобного доступа.
-        """
-        from ..registry.data_schema_adapter import DataSchemaAdapter
-        
-        if not hasattr(self, '_data_schema_adapter'):
+        return self._process_state_registry.get_all_states()
+
+    def add_shared_resource(self, name: str, resource: Any) -> None:
+        self.shared_resources[name] = resource
+
+    def get_shared_resource(self, name: str) -> Optional[Any]:
+        return self.shared_resources.get(name)
+
+    def get_data_manager(self) -> Optional[Any]:
+        from ..adapters.data_schema_adapter import DataSchemaAdapter
+        if not hasattr(self, "_data_schema_adapter"):
             self._data_schema_adapter = DataSchemaAdapter(self)
-        
         return self._data_schema_adapter.get_data_manager()
-    
+
     @property
-    def data_manager(self):
-        """
-        Получить DataManager (из data_schema модуля).
-        
-        Returns:
-            DataManager или None если модуль не доступен
-        """
+    def data_manager(self) -> Optional[Any]:
         return self.get_data_manager()
-    
-    def __str__(self) -> str:
-        """
-        Строковое представление менеджера ресурсов.
-        """
-        stats = self.get_stats()
-        registry_stats = stats.get('shared_resources', {}).get('process_state_registry', {})
-        return (
-            f"SharedResourcesManager("
-            f"processes={registry_stats.get('total_processes', 0)}, "
-            f"shared_resources={stats.get('shared_resources', {}).get('shared_resources', {}).get('count', 0)}"
-            f")"
+
+    # =========================================================================
+    # Статистика
+    # =========================================================================
+
+    def get_stats(self) -> Dict[str, Any]:
+        base = super().get_stats() if hasattr(super(), "get_stats") else {}
+        srm_stats = {
+            "process_state_registry": self._process_state_registry.get_stats(),
+            "queue_registry": self._queue_registry.get_stats(),
+            "memory_manager": self._memory_manager.get_stats(),
+            "event_manager": self._event_manager.get_stats(),
+            "config_store": {"processes": list(self._config_store._configs.keys())},
+        }
+        if isinstance(base, dict):
+            base["shared_resources"] = srm_stats
+        else:
+            base = {"shared_resources": srm_stats}
+        return base
+
+    # =========================================================================
+    # Динамический доступ к процессам (shared_resources.process_name)
+    # =========================================================================
+
+    def __getattr__(self, name: str) -> Any:
+        _PICKLE_SKIP = (
+            "_log_method", "_log_method_internal", "_log",
+            "_record_metric_method", "_track_error_method", "_call_manager",
+        )
+        if name in _PICKLE_SKIP or name.startswith(("_log_", "_record_", "_track_")):
+            return _noop
+        if name.startswith("_") or name in (
+            "_process_state_registry", "shared_resources", "_event_manager",
+            "_queue_registry", "_memory_manager", "_config_store",
+            "get_stats", "__dict__",
+        ):
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+
+        pd = self._process_state_registry.get_process_data(name)
+        if pd is not None:
+            return pd
+        raise AttributeError(
+            f"'{type(self).__name__}' has no attribute '{name}'. "
+            f"Available processes: {self._process_state_registry.get_process_names()}"
         )
 
-    def __getstate__(self):
-        """Pickle: исключаем proxy-методы и _registry (closures не pickle-able на Windows)."""
+    # =========================================================================
+    # Pickle (ADR-021)
+    # =========================================================================
+
+    def __getstate__(self) -> dict:
         state = self.__dict__.copy()
-        _PICKLE_EXCLUDE = (
-            'log_debug', 'log_info', 'log_warning', 'log_error', 'log_critical',
-            'record_metric', 'increment', 'record_timing', 'gauge',
-            'track_error', 'record_error',
-            '_call_manager', '_registry', '_plugin_registry', '_proxy_created',
-        )
         for key in _PICKLE_EXCLUDE:
             state.pop(key, None)
-        # Обеспечиваем _adapters для BaseManager после unpickle
-        if '_adapters' not in state:
-            state['_adapters'] = {}
+        state.setdefault("_adapters", {})
         return state
 
-    def __setstate__(self, state):
-        """Unpickle: восстанавливаем объект. Proxy-методы будут созданы при необходимости."""
+    def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
 
-
+    def __str__(self) -> str:
+        psr_stats = self._process_state_registry.get_stats()
+        return (
+            f"SharedResourcesManager("
+            f"processes={psr_stats.get('total_processes', 0)}, "
+            f"configs={len(self._config_store)})"
+        )

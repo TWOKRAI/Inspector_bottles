@@ -1,140 +1,204 @@
 """
-Юнит-тесты для SharedResourcesManager.
+Тесты для core/shared_resources_manager.py.
+
+Ключевые сценарии:
+- register_process() — единая точка регистрации
+- Pickle/unpickle — Queue/Event сохраняются
+- reinitialize_in_child() — восстановление после unpickle
+- Properties — доступ к внутренним менеджерам
 """
 
+import pickle
 import pytest
 from multiprocessing import Queue, Event
 
 from ..core.shared_resources_manager import SharedResourcesManager
-from ...process_module.state.process_state_registry import ProcessStateRegistry
-from ...process_module.state.process_data import ProcessData
+from ..types import ProcessStatus
 
 
-class TestSharedResourcesManager:
-    """Тесты для SharedResourcesManager."""
-    
-    def test_initialization(self):
-        """Тест инициализации менеджера."""
-        manager = SharedResourcesManager()
-        assert manager is not None
-        assert manager.manager_name == "SharedResourcesManager"
-        assert manager.process_state_registry is not None
-        assert manager.event_manager is not None
-    
-    def test_initialize(self):
-        """Тест инициализации."""
-        manager = SharedResourcesManager()
-        assert manager.initialize() is True
-        assert manager.is_initialized is True
-    
-    def test_shutdown(self):
-        """Тест завершения работы."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        assert manager.shutdown() is True
-        assert manager.is_initialized is False
-    
-    def test_add_get_shared_resource(self):
-        """Тест добавления и получения общих ресурсов."""
-        manager = SharedResourcesManager()
-        manager.add_shared_resource("test_resource", "test_value")
-        assert manager.get_shared_resource("test_resource") == "test_value"
-        assert manager.get_shared_resource("nonexistent") is None
-    
-    def test_register_process_state(self):
-        """Тест регистрации состояния процесса."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        result = manager.register_process_state(
-            "test_process",
-            initial_state={"status": "ready"}
-        )
+@pytest.fixture
+def srm():
+    s = SharedResourcesManager()
+    s.initialize()
+    return s
+
+
+BASIC_CONFIG = {
+    "queues": {
+        "system": {"maxsize": 100},
+        "data": {"maxsize": 50},
+    },
+}
+
+
+def _srm_worker(shared_resources, result_q):
+    """Модульная функция для Process (local functions не pickle-able на Windows spawn)."""
+    shared_resources.reinitialize_in_child()
+    msg = shared_resources.get_process_data("p1").get_queue("system").get(timeout=2.0)
+    result_q.put(msg)
+
+
+class TestSRMInit:
+    def test_initialize_returns_true(self):
+        s = SharedResourcesManager()
+        assert s.initialize() is True
+
+    def test_properties_available(self, srm):
+        assert srm.config_store is not None
+        assert srm.process_state_registry is not None
+        assert srm.queue_registry is not None
+        assert srm.event_manager is not None
+        assert srm.memory_manager is not None
+
+
+class TestRegisterProcess:
+    def test_register_creates_process_data(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        pd = srm.get_process_data("p1")
+        assert pd is not None
+        assert pd.name == "p1"
+
+    def test_register_stores_config(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        cfg = srm.get_process_config("p1")
+        assert cfg is not None
+        assert "queues" in cfg
+
+    def test_register_creates_queues(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        pd = srm.get_process_data("p1")
+        assert pd.get_queue("system") is not None
+        assert pd.get_queue("data") is not None
+
+    def test_register_creates_stop_event(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        pd = srm.get_process_data("p1")
+        assert pd.get_event("stop") is not None
+        assert pd.get_event("pause") is not None
+
+    def test_register_multiple_processes(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        srm.register_process("p2", BASIC_CONFIG)
+        assert set(srm.get_process_names()) == {"p1", "p2"}
+
+    def test_get_process_config_returns_copy(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        cfg = srm.get_process_config("p1")
+        cfg["injected"] = True
+        assert "injected" not in srm.get_process_config("p1")
+
+
+def _srm_without_queues():
+    """SRM без Queue/Event — для тестирования pickle в unit-тестах.
+    Queue/Event pickle тестируется через реальный multiprocessing.Process (интеграционный тест).
+    """
+    s = SharedResourcesManager()
+    s.initialize()
+    # Регистрируем процесс без очередей и событий
+    s._config_store.store("p1", BASIC_CONFIG)
+    s._process_state_registry.register_process("p1")
+    return s
+
+
+class TestPickleRoundtrip:
+    def test_pickle_preserves_process_names(self):
+        """Pickle SRM без Queue/Event — проверяем структуру."""
+        srm = _srm_without_queues()
+        srm2 = pickle.loads(pickle.dumps(srm))
+        assert "p1" in srm2.get_process_names()
+
+    def test_pickle_preserves_config(self):
+        srm = _srm_without_queues()
+        srm2 = pickle.loads(pickle.dumps(srm))
+        cfg = srm2.get_process_config("p1")
+        assert cfg is not None
+        assert "queues" in cfg
+
+    def test_pickle_preserves_metadata(self):
+        """Метаданные ProcessData сохраняются через pickle."""
+        srm = _srm_without_queues()
+        srm._process_state_registry.update_state("p1", metadata={"pid": 42})
+        srm2 = pickle.loads(pickle.dumps(srm))
+        pd = srm2.get_process_data("p1")
+        assert pd.metadata["pid"] == 42
+
+    def test_pickle_event_manager_has_no_queue(self, srm):
+        """После pickle EventManager._event_queue должен быть None.
+        Используем srm без Queue (EventManager._event_queue исключается в __getstate__)."""
+        # Создаём SRM без register_process (нет Queue в PSR)
+        s = SharedResourcesManager()
+        s.initialize()
+        srm2 = pickle.loads(pickle.dumps(s))
+        assert srm2.event_manager._event_queue is None
+
+    def test_pickle_event_manager_has_no_subscribers(self, srm):
+        s = SharedResourcesManager()
+        s.initialize()
+        srm2 = pickle.loads(pickle.dumps(s))
+        assert srm2.event_manager._subscribers == {}
+
+    def test_queue_ipc_via_process(self, srm):
+        """Интеграционный тест: Queue работает между процессами через SRM."""
+        import multiprocessing as mp
+        srm.register_process("p1", BASIC_CONFIG)
+        q = srm.get_process_data("p1").get_queue("system")
+        q.put("hello_from_parent")
+
+        result_q = mp.Queue()
+        p = mp.Process(target=_srm_worker, args=(srm, result_q))
+        p.start()
+        p.join(timeout=5)
+        assert p.exitcode == 0
+        assert result_q.get(timeout=1.0) == "hello_from_parent"
+
+
+class TestReinitializeInChild:
+    def test_reinitialize_restores_event_manager(self):
+        """reinitialize_in_child() пересоздаёт EventManager ресурсы."""
+        s = SharedResourcesManager()
+        s.initialize()
+        srm2 = pickle.loads(pickle.dumps(s))
+        assert srm2.reinitialize_in_child() is True
+        assert srm2.event_manager._event_queue is not None
+        assert srm2.event_manager._new_event_event is not None
+
+    def test_reinitialize_allows_emit(self):
+        s = SharedResourcesManager()
+        s.initialize()
+        srm2 = pickle.loads(pickle.dumps(s))
+        srm2.reinitialize_in_child()
+        from ..types import EventType
+        result = srm2.event_manager.emit_event(EventType.CONFIG_UPDATED)
         assert result is True
-        
-        process_data = manager.get_process_data("test_process")
-        assert process_data is not None
-        assert process_data.name == "test_process"
-    
-    def test_get_process_data(self):
-        """Тест получения ProcessData."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        manager.register_process_state("test_process")
-        process_data = manager.get_process_data("test_process")
-        assert process_data is not None
-        assert process_data.name == "test_process"
-        
-        assert manager.get_process_data("nonexistent") is None
-    
-    def test_get_all_process_data(self):
-        """Тест получения всех ProcessData."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        manager.register_process_state("process1")
-        manager.register_process_state("process2")
-        
-        all_data = manager.get_all_process_data()
-        assert len(all_data) == 2
-        assert "process1" in all_data
-        assert "process2" in all_data
-    
-    def test_get_process_queue(self):
-        """Тест получения очереди процесса."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        manager.register_process_state("test_process")
-        process_data = manager.get_process_data("test_process")
-        
-        queue = Queue()
-        process_data.add_queue("test_queue", queue)
-        
-        retrieved_queue = manager.get_process_queue("test_process", "test_queue")
-        assert retrieved_queue is not None
-        assert retrieved_queue == queue
-    
-    def test_get_process_event(self):
-        """Тест получения события процесса."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        manager.register_process_state("test_process")
-        process_data = manager.get_process_data("test_process")
-        
-        event = Event()
-        process_data.add_event("test_event", event)
-        
-        retrieved_event = manager.get_process_event("test_process", "test_event")
-        assert retrieved_event is not None
-        assert retrieved_event == event
-    
-    def test_get_stats(self):
-        """Тест получения статистики."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        manager.register_process_state("test_process")
-        stats = manager.get_stats()
-        
-        assert isinstance(stats, dict)
-        assert 'shared_resources' in stats
-    
-    def test_dynamic_access(self):
-        """Тест динамического доступа к процессам."""
-        manager = SharedResourcesManager()
-        manager.initialize()
-        
-        manager.register_process_state("test_process")
-        
-        # Доступ через атрибут
-        process_data = manager.test_process
-        assert process_data is not None
-        assert process_data.name == "test_process"
-        
-        # Ошибка для несуществующего процесса
-        with pytest.raises(AttributeError):
-            _ = manager.nonexistent_process
 
+
+class TestDynamicAccess:
+    def test_attribute_access_returns_process_data(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        pd = srm.p1
+        assert pd.name == "p1"
+
+    def test_attribute_access_missing_raises(self, srm):
+        with pytest.raises(AttributeError):
+            _ = srm.nonexistent_process
+
+
+class TestBackwardCompatibility:
+    def test_register_process_state(self, srm):
+        result = srm.register_process_state("p1")
+        assert result is True
+        assert srm.has_process("p1") if hasattr(srm, "has_process") else srm.get_process_data("p1") is not None
+
+    def test_get_process_queue(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        q = srm.get_process_queue("p1", "system")
+        assert q is not None
+
+    def test_get_process_event(self, srm):
+        srm.register_process("p1", BASIC_CONFIG)
+        e = srm.get_process_event("p1", "stop")
+        assert e is not None
+
+    def test_add_shared_resource(self, srm):
+        srm.add_shared_resource("my_key", "my_value")
+        assert srm.get_shared_resource("my_key") == "my_value"

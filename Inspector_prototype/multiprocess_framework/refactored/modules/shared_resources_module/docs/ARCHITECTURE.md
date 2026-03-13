@@ -1,105 +1,120 @@
-# Архитектура SharedResourcesModule (Refactored)
+# shared_resources_module — Архитектура
 
-## Обзор
+## Компонентная диаграмма
 
-SharedResourcesModule - менеджер общих ресурсов для межпроцессного взаимодействия.
+```mermaid
+graph TD
+    subgraph SRM_facade ["SharedResourcesManager (фасад, pickle-safe)"]
+        CS["ConfigStore<br/>Dict[str, dict]<br/>конфиги всех процессов"]
+        PSR["ProcessStateRegistry<br/>Dict[str, ProcessData]<br/>runtime-состояние"]
+        QR["QueueRegistry<br/>создание + доступ к Queue<br/>через PSR"]
+        EM["EventManager<br/>системные события<br/>reinitialize()"]
+        MM["MemoryManager<br/>SharedMemory по именам<br/>owner vs consumer"]
+    end
 
-**Наследуется от:** BaseManager + ObservableMixin
+    subgraph PD ["ProcessData (в PSR)"]
+        PDQ["queues: QueuesProxy<br/>system, data, broadcast..."]
+        PDE["events: EventsProxy<br/>stop, pause..."]
+        PDS["status: ProcessStatus"]
+        PDM["metadata: dict"]
+        PDC["custom: dict (runtime only)"]
+    end
 
-## Архитектура
-
-```
-SharedResourcesManager (архив, BaseManager + ObservableMixin)
-├── ProcessStateRegistry (из Process_module)
-│   └── ProcessData (данные процессов через data_schema)
-├── EventManager (BaseManager + ObservableMixin)
-│   └── Интеграция с RouterManager
-├── QueueRegistry (BaseManager + ObservableMixin)
-│   └── Интеграция с ProcessStateRegistry
-└── MemoryManager (BaseManager + ObservableMixin)
-    └── Использует ProcessData.custom через data_schema
-```
-
-## Компоненты
-
-### SharedResourcesManager (Архив)
-
-Легковесный контейнер для межпроцессного взаимодействия:
-- Содержит ProcessStateRegistry и EventManager
-- БЕЗ Manager() и Lock() для кросс-платформенной совместимости
-- Передается в каждый процесс
-- Координирует работу всех компонентов
-
-### ProcessStateRegistry
-
-Реестр состояний процессов:
-- Хранит ProcessData всех процессов
-- Использует data_schema для работы с данными
-- БЕЗ Manager() и Lock()
-
-### EventManager
-
-Менеджер событий:
-- Интегрируется с RouterManager для распространения событий
-- Данные хранятся в data_schema через ProcessData
-- Поддержка подписок на события
-
-### QueueRegistry
-
-Реестр очередей:
-- Управляет очередями процессов
-- Интегрируется с ProcessStateRegistry
-- Данные хранятся в data_schema через ProcessData
-
-### MemoryManager
-
-Менеджер разделенной памяти:
-- Инкапсулирует логику работы с multiprocessing.shared_memory
-- Данные хранятся в ProcessData.custom через data_schema
-- Поддержка создания, записи и чтения блоков памяти
-
-## Принципы
-
-1. **БЕЗ Manager()**: БЕЗ multiprocessing.Manager() для кросс-платформенной совместимости
-2. **Легковесность**: SharedResourcesManager - легковесный контейнер
-3. **data_schema**: Единая точка работы с данными через data_schema
-4. **Модульность**: Каждый компонент - отдельный модуль с четкой ответственностью
-
-## Жизненный цикл
-
-```python
-# 1. Создание
-shared_resources = SharedResourcesManager(router_manager=router_manager)
-
-# 2. Инициализация
-shared_resources.initialize()  # Инициализирует EventManager и ProcessStateRegistry
-
-# 3. Использование
-shared_resources.register_process_state("MyProcess")
-process_data = shared_resources.get_process_data("MyProcess")
-
-# 4. Завершение
-shared_resources.shutdown()  # Завершает EventManager и очищает ресурсы
+    PSR --> PD
+    QR -->|"создает Queue,<br/>регистрирует в PSR"| PSR
+    MM -->|"хранит shm.name строки<br/>в ProcessData.custom"| PSR
+    EM -->|"emit через PSR<br/>при изменениях"| PSR
 ```
 
-## Интеграция с data_schema
+## Поток данных: регистрация процессов
 
-Все данные хранятся через data_schema:
-- ProcessData использует data_schema для работы с данными
-- ProcessConfiguration хранится в ProcessData через data_schema
-- Кастомные данные хранятся в ProcessData.custom через data_schema
+```mermaid
+sequenceDiagram
+    participant App as main.py
+    participant SL as SystemLauncher
+    participant PMM as ProcessManagerProcess
+    participant SRM as SharedResourcesManager
+    participant P1 as ChildProcess_1
 
-См. `DATA_SCHEMA.md` для деталей (после переноса data_schema).
+    App->>SL: add_process("camera", config_dict)
+    SL->>PMM: spawn ProcessManager
 
-## Преимущества новой архитектуры
+    PMM->>SRM: srm = SharedResourcesManager()
+    PMM->>SRM: srm.initialize()
+    PMM->>SRM: srm.register_process("camera", config_dict)
 
-- ✅ Единообразие со всеми менеджерами системы
-- ✅ Автоматическое логирование через ObservableMixin
-- ✅ Стандартный жизненный цикл (initialize/shutdown)
-- ✅ Модульная структура
-- ✅ Интеграция с ProcessStateRegistry и ProcessData
-- ✅ Использование data_schema для работы с данными
+    Note over SRM: 1. config_store.store("camera", config)<br/>2. PSR.register_process("camera")<br/>3. queue_registry.create_and_register_queues()<br/>4. Создать stop/pause Event<br/>5. memory_manager (если config["memory"])
 
+    PMM->>P1: Process(target=run_fn, args=(srm,))
 
+    Note over P1: pickle SRM → unpickle<br/>Queue/Event ссылки сохранены!
+    P1->>P1: srm.reinitialize_in_child()
+    P1->>P1: ProcessModule(shared_resources=srm)
+```
 
+## Pickle/Unpickle диаграмма
 
+```mermaid
+graph LR
+    subgraph main ["ProcessManager (главный процесс)"]
+        SRM1["SRM<br/>ConfigStore: dict ✅<br/>PSR: ProcessData + Queue/Event ✅<br/>EventManager: _event_queue ❌<br/>MemoryManager: shm names ✅"]
+    end
+
+    SRM1 -->|"pickle"| Wire["bytes через pipe"]
+    Wire -->|"unpickle"| SRM2
+
+    subgraph child ["Child Process"]
+        SRM2["SRM (unpickled)<br/>ConfigStore: ✅<br/>PSR + Queue/Event: ✅<br/>EventManager: _event_queue = None<br/>MemoryManager: handles = {}"]
+        SRM3["After reinitialize_in_child()<br/>EventManager: new local Queue ✅<br/>MemoryManager: opened shm handles ✅"]
+        SRM2 -->|"reinitialize_in_child()"| SRM3
+    end
+```
+
+## Разделение ответственностей
+
+| Компонент | Ответственность | Pickle-safe? | reinitialize? |
+|-----------|----------------|-------------|---------------|
+| **ConfigStore** | Конфиги всех процессов | ✅ (dict) | Нет |
+| **ProcessStateRegistry** | Runtime: статус, Queue/Event | ✅ (нативно) | Нет |
+| **QueueRegistry** | Создание Queue, доступ через PSR | ✅ | Нет |
+| **EventManager** | Системные события, подписки | ⚠️ | **Да** |
+| **MemoryManager** | SharedMemory: owner/consumer | ✅ (имена) | **Да** |
+
+## Многопроцессорная безопасность
+
+1. **Нет разделяемого мутабельного состояния** — каждый процесс имеет свою копию SRM
+2. **Queue** — единственный канал общения (OS pipes, thread/process safe)
+3. **Event** — синхронизация через shared semaphore (process safe)
+4. **SharedMemory** — каждый процесс открывает свой handle по имени
+5. **Нет Lock/Manager** — не нужны, нет shared mutable state
+
+## Файловая структура
+
+```
+shared_resources_module/
+├── __init__.py                      # Чистый экспорт
+├── interfaces.py                    # Реэкспорт из core/interfaces.py
+├── types/
+│   └── types.py                     # ProcessStatus, ResourceType, EventType, TypedDict
+├── core/
+│   ├── interfaces.py                # ISharedResourcesManager, IConfigStore, ...
+│   └── shared_resources_manager.py  # SRM (фасад)
+├── state/
+│   ├── process_data.py              # ProcessData (runtime: status + queues + events)
+│   └── process_state_registry.py    # PSR: Dict[str, ProcessData]
+├── config/
+│   └── config_store.py              # ConfigStore: Dict[str, dict]
+├── events/
+│   └── event_manager.py             # EventManager: emit, subscribe, reinitialize()
+├── queues/
+│   └── queue_registry.py            # QueueRegistry: create + access через PSR
+├── memory/
+│   └── memory_manager.py            # MemoryManager: shm.name, owner/consumer
+├── adapters/
+│   └── data_schema_adapter.py       # Адаптер для data_schema_module
+├── registry/
+│   └── data_schema_adapter.py       # Обратная совместимость → adapters/
+├── tests/                           # 50+ тестов
+└── docs/
+    └── ARCHITECTURE.md              # Этот файл
+```

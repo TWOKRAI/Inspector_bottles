@@ -1,775 +1,546 @@
 """
-Менеджер разделяемой памяти для изображений и данных (Refactored).
+MemoryManager — управление SharedMemory для изображений и данных.
 
-Наследуется от BaseManager и использует ObservableMixin для единообразия со всеми менеджерами системы.
-Инкапсулирует логику работы с multiprocessing.shared_memory.
-Ссылки на блоки памяти хранятся в ProcessData.custom через data_schema.
+Pickle-safe паттерн (ADR-019):
+  - В ProcessData.custom["memory_names"] хранятся только shm.name строки
+  - SharedMemory объекты хранятся в _local_handles (не pickle-able)
+  - reinitialize_handles() открывает shm по именам в дочернем процессе
+
+Owner process (ProcessManager): create=True, unlink() при shutdown.
+Consumer process (дочерние): create=False, close() при shutdown.
+
+Единый путь кода:
+  _local_handles: Dict[str, Dict[str, List[SharedMemory]]]
+      └── process_name
+              └── shm_base_name
+                      └── [shm_0, shm_1, ...]
+
+  Метаданные (params, index_usage, coll):
+    - С PSR: хранятся в ProcessData.custom (pickle-safe, видны всем процессам)
+    - Без PSR: хранятся в _local_meta (только для standalone/unit-test режима)
+
+  Нет _local_memories, нет дублирующих путей.
 """
 
-import numpy as np
 import struct
 from multiprocessing import shared_memory
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 
 from ...base_manager import BaseManager, ObservableMixin
+from ..core.interfaces import IMemoryManager
+
+# Синтетическое имя процесса для standalone-режима (без PSR)
+_STANDALONE_PROCESS = "_standalone"
 
 
-class MemoryManager(BaseManager, ObservableMixin):
+class _MemoryMeta:
+    """Метаданные одного shm-блока (params, index_usage, coll)."""
+
+    __slots__ = ("params", "index_usage", "coll")
+
+    def __init__(self, params: tuple, coll: int) -> None:
+        self.params = params          # (num_images, image_shape, dtype)
+        self.index_usage: List[int] = [0] * coll
+        self.coll: int = coll
+
+
+class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
     """
-    Менеджер разделяемой памяти для изображений и данных (Refactored).
-    
-    Наследуется от BaseManager и использует ObservableMixin для:
-    - Единообразия со всеми менеджерами системы
-    - Автоматического логирования через ObservableMixin
-    - Стандартного жизненного цикла (initialize/shutdown)
-    
-    Инкапсулирует логику работы с multiprocessing.shared_memory.
-    Ссылки на блоки памяти хранятся в ProcessData.custom через data_schema.
-    
-    Attributes:
-        manager_name: Имя менеджера
-        process_state_registry: ProcessStateRegistry для интеграции с ProcessData
-        _local_memories: Локальное хранилище (для обратной совместимости)
+    Менеджер разделяемой памяти для изображений и данных.
+
+    Единый путь кода через _local_handles независимо от наличия PSR.
+    Метаданные хранятся в ProcessData.custom (с PSR) или _local_meta (без PSR).
+
+    Pickle-safe: _local_handles и _local_meta НЕ сериализуются.
+    После unpickle вызов reinitialize_handles() восстанавливает handles по именам из PSR.
     """
-    
+
     def __init__(
         self,
         manager_name: str = "MemoryManager",
         process: Optional[Any] = None,
-        process_state_registry=None,
-        logger=None,
-        **kwargs
-    ):
-        """
-        Инициализация менеджера памяти.
-        
-        Args:
-            manager_name: Имя менеджера
-            process: Ссылка на родительский процесс (опционально)
-            process_state_registry: ProcessStateRegistry для интеграции с ProcessData
-            logger: Логгер (опционально, используется через ObservableMixin)
-            **kwargs: Дополнительные параметры для ObservableMixin
-        """
-        # Инициализация BaseManager
+        process_state_registry: Optional[Any] = None,
+        logger: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> None:
         BaseManager.__init__(self, manager_name=manager_name, process=process)
-        
-        # Инициализация ObservableMixin
-        managers = kwargs.get('managers', {})
-        if logger and 'logger' not in managers:
-            managers['logger'] = logger
-        
-        config = kwargs.get('config', {})
-        auto_proxy = kwargs.get('auto_proxy', True)
-        
+
+        managers = kwargs.get("managers", {})
+        if logger and "logger" not in managers:
+            managers["logger"] = logger
         ObservableMixin.__init__(
             self,
             managers=managers,
-            config=config,
-            auto_proxy=auto_proxy
+            config=kwargs.get("config", {}),
+            auto_proxy=kwargs.get("auto_proxy", True),
         )
-        
-        # ProcessStateRegistry для интеграции с ProcessData
-        self.process_state_registry = process_state_registry
-        
-        # Временное хранилище для локального использования (для обратной совместимости)
-        # В идеале все должно храниться в ProcessData.custom через data_schema
-        self._local_memories: Dict[str, List[shared_memory.SharedMemory]] = {}
-        self._local_memory_params: Dict[str, tuple] = {}
-        self._local_index_usage: Dict[str, List[int]] = {}
-        self._local_coll_memories: Dict[str, int] = {}
-        
-        # Статистика
-        self._stats = {
-            'created': 0,
-            'written': 0,
-            'read': 0,
-            'errors': 0
-        }
-    
-    # ========================================================================
-    # РЕАЛИЗАЦИЯ BaseManager - ЖИЗНЕННЫЙ ЦИКЛ
-    # ========================================================================
-    
+
+        self._process_state_registry = process_state_registry
+
+        # Единственное хранилище handles — НЕ pickle-safe
+        # {process_name: {shm_base_name: [SharedMemory, ...]}}
+        self._local_handles: Dict[str, Dict[str, List[shared_memory.SharedMemory]]] = {}
+
+        # Метаданные для standalone-режима (без PSR)
+        # {process_name: {shm_base_name: _MemoryMeta}}
+        self._local_meta: Dict[str, Dict[str, _MemoryMeta]] = {}
+
+        # Owner создаёт (create=True) и unlink при shutdown.
+        # Consumer только открывает (create=False) и close при shutdown.
+        self._is_owner: bool = True
+
+        self._stats = {"created": 0, "written": 0, "read": 0, "errors": 0}
+
+    # =========================================================================
+    # Жизненный цикл
+    # =========================================================================
+
     def initialize(self) -> bool:
-        """
-        Инициализация менеджера памяти.
-        
-        Returns:
-            bool: True если инициализация успешна
-        """
         try:
             self.is_initialized = True
             self._log_info(f"MemoryManager '{self.manager_name}' initialized")
             return True
         except Exception as e:
-            self._log_error(f"Failed to initialize MemoryManager: {e}")
+            self._log_error(f"MemoryManager.initialize() failed: {e}")
             return False
-    
+
     def shutdown(self) -> bool:
-        """
-        Завершение работы менеджера памяти.
-        
-        Закрывает все блоки разделенной памяти.
-        
-        Returns:
-            bool: True если завершение успешно
-        """
         try:
-            # Закрываем все блоки памяти
-            self._close_all_memories()
-            
-            # Очищаем локальное хранилище
-            self._local_memories.clear()
-            self._local_memory_params.clear()
-            self._local_index_usage.clear()
-            self._local_coll_memories.clear()
-            
+            self._close_all_handles()
+            self._local_meta.clear()
             self.is_initialized = False
             self._log_info("MemoryManager shutdown completed")
             return True
         except Exception as e:
-            self._log_error(f"Error during MemoryManager shutdown: {e}")
+            self._log_error(f"MemoryManager.shutdown() failed: {e}")
             return False
-    
-    def _close_all_memories(self):
-        """Закрыть все блоки разделенной памяти."""
-        # Закрываем локальные блоки
-        for memories in self._local_memories.values():
-            for shm in memories:
-                try:
-                    if shm:
-                        shm.close()
-                        if shm.name:
-                            try:
-                                shm.unlink()
-                            except FileNotFoundError:
-                                pass
-                except Exception as e:
-                    self._log_error(f"Error closing memory block: {e}")
-        
-        # Закрываем блоки из ProcessData (если есть)
-        if self.process_state_registry:
-            for process_name in self.process_state_registry.get_process_names():
-                process_data = self.process_state_registry.get_process_data(process_name)
-                if process_data and 'memory_blocks' in process_data.custom:
-                    for memories in process_data.custom['memory_blocks'].values():
-                        for shm in memories:
-                            try:
-                                if shm:
-                                    shm.close()
-                                    if shm.name:
-                                        try:
-                                            shm.unlink()
-                                        except FileNotFoundError:
-                                            pass
-                            except Exception as e:
-                                self._log_error(f"Error closing memory block: {e}")
-    
-    # ========================================================================
-    # ОСНОВНОЙ API - СОЗДАНИЕ ПАМЯТИ
-    # ========================================================================
-    
+
+    def reinitialize_handles(self) -> bool:
+        """
+        Открыть SharedMemory по именам после unpickle в дочернем процессе (ADR-019).
+
+        Имена берём из ProcessData.custom["memory_names"] — они pickle-safe.
+        Вызывается через SRM.reinitialize_in_child().
+        """
+        if not self._process_state_registry:
+            return True  # standalone-режим: handles уже живут локально
+        try:
+            self._is_owner = False
+            for process_name in self._process_state_registry.get_process_names():
+                pd = self._process_state_registry.get_process_data(process_name)
+                if pd is None:
+                    continue
+                memory_names_map: Dict[str, List[str]] = pd.custom.get("memory_names", {})
+                if not memory_names_map:
+                    continue
+                for shm_base_name, shm_names_list in memory_names_map.items():
+                    handles: List[Optional[shared_memory.SharedMemory]] = []
+                    for shm_name in shm_names_list:
+                        try:
+                            shm = shared_memory.SharedMemory(name=shm_name, create=False)
+                            handles.append(shm)
+                        except Exception as e:
+                            self._log_error(
+                                f"reinitialize_handles: cannot open '{shm_name}': {e}"
+                            )
+                            handles.append(None)
+                    self._local_handles.setdefault(process_name, {})[shm_base_name] = handles
+            return True
+        except Exception as e:
+            self._log_error(f"reinitialize_handles() failed: {e}")
+            return False
+
+    # =========================================================================
+    # IMemoryManager — создание
+    # =========================================================================
+
     def create_memory_dict(
-        self, 
-        process_name: str, 
-        memory_names: Dict[str, tuple], 
-        coll: int
+        self,
+        process_name: str,
+        memory_names: Dict[str, tuple],
+        coll: int,
     ) -> bool:
         """
-        Создает память с проверкой ошибок и сохраняет ссылки в ProcessData.
-        
-        Args:
-            process_name: Имя процесса для сохранения ссылок в ProcessData
-            memory_names: Словарь конфигураций памяти {name: (num_images, image_shape, dtype)}
-            coll: Количество блоков памяти для каждого типа
-        
-        Returns:
-            bool: True если успешно
+        Создать блоки SharedMemory для процесса (owner).
+
+        С PSR: сохраняет только shm.name строки в ProcessData.custom.
+        Без PSR: сохраняет метаданные в _local_meta.
+        В обоих случаях handles живут в _local_handles[process_name].
         """
-        if not self.process_state_registry:
-            # Локальный режим (для обратной совместимости)
-            return self._create_memory_dict_local(memory_names, coll)
-        
         try:
-            process_data = self.process_state_registry.get_process_data(process_name)
-            if not process_data:
-                # Автоматически регистрируем процесс если не зарегистрирован
-                self.process_state_registry.register_process(process_name)
-                process_data = self.process_state_registry.get_process_data(process_name)
-            
-            # Инициализируем структуру для хранения памяти в ProcessData.custom (через data_schema)
-            if 'memory_blocks' not in process_data.custom:
-                process_data.custom['memory_blocks'] = {}
-            if 'memory_params' not in process_data.custom:
-                process_data.custom['memory_params'] = {}
-            if 'memory_index_usage' not in process_data.custom:
-                process_data.custom['memory_index_usage'] = {}
-            if 'memory_coll' not in process_data.custom:
-                process_data.custom['memory_coll'] = {}
-            
-            for name, params in memory_names.items():
-                num_images, image_shape, dtype = params
-                size = self._calculate_memory_size(num_images, image_shape, dtype)
-                
-                shm_list = self.create_memory(name, size, coll)
-                
-                if not shm_list:
-                    self._log_warning(f"Failed to create memory for {name}")
-                    continue
-                
-                # Сохраняем ссылки в ProcessData.custom (данные хранятся через data_schema)
-                process_data.custom['memory_blocks'][name] = shm_list
-                process_data.custom['memory_params'][name] = params
-                process_data.custom['memory_index_usage'][name] = [0] * coll
-                process_data.custom['memory_coll'][name] = coll
-                self._stats['created'] += 1
-            
-            self._log_info(f"Created {len(memory_names)} memory blocks for process '{process_name}'")
-            return True
-            
+            if self._process_state_registry:
+                return self._create_with_psr(process_name, memory_names, coll)
+            else:
+                return self._create_standalone(process_name, memory_names, coll)
         except Exception as e:
-            self._log_error(f"Failed to create memory dict for {process_name}: {e}")
-            self._stats['errors'] += 1
+            self._log_error(f"create_memory_dict('{process_name}') failed: {e}")
+            self._stats["errors"] += 1
             return False
-    
-    def _create_memory_dict_local(self, memory_names: Dict[str, tuple], coll: int) -> bool:
-        """Локальное создание памяти (для обратной совместимости)."""
+
+    def _create_with_psr(
+        self,
+        process_name: str,
+        memory_names: Dict[str, tuple],
+        coll: int,
+    ) -> bool:
+        """Создание с PSR: метаданные в ProcessData.custom (pickle-safe)."""
+        pd = self._process_state_registry.get_process_data(process_name)
+        if pd is None:
+            self._process_state_registry.register_process(process_name)
+            pd = self._process_state_registry.get_process_data(process_name)
+
+        pd.custom.setdefault("memory_names", {})
+        pd.custom.setdefault("memory_params", {})
+        pd.custom.setdefault("memory_index_usage", {})
+        pd.custom.setdefault("memory_coll", {})
+
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
             size = self._calculate_memory_size(num_images, image_shape, dtype)
-            
-            shm_list = self.create_memory(name, size, coll)
-            
-            if not shm_list:
-                self._log_warning(f"Failed to create memory for {name}")
+            shm_list = self._create_shm_blocks(name, size, coll)
+            if shm_list is None:
+                self._log_warning(f"Failed to create memory for '{name}'")
                 continue
-            
-            self._local_memories[name] = shm_list
-            self._local_memory_params[name] = params
-            self._local_index_usage[name] = [0] * coll
-            self._local_coll_memories[name] = coll
-            self._stats['created'] += 1
-        
+
+            # Только имена в ProcessData — pickle-safe
+            pd.custom["memory_names"][name] = [shm.name for shm in shm_list]
+            pd.custom["memory_params"][name] = params
+            pd.custom["memory_index_usage"][name] = [0] * coll
+            pd.custom["memory_coll"][name] = coll
+
+            # Handles — локально, не pickle
+            self._local_handles.setdefault(process_name, {})[name] = shm_list
+            self._stats["created"] += 1
+
+        self._log_info(f"Created {len(memory_names)} memory blocks for '{process_name}'")
         return True
-    
-    def create_memory(self, shm_name_orig: str, size: int, coll: int = 1) -> Optional[List[shared_memory.SharedMemory]]:
+
+    def _create_standalone(
+        self,
+        process_name: str,
+        memory_names: Dict[str, tuple],
+        coll: int,
+    ) -> bool:
+        """Создание без PSR: метаданные в _local_meta (только для текущего процесса)."""
+        for name, params in memory_names.items():
+            num_images, image_shape, dtype = params
+            size = self._calculate_memory_size(num_images, image_shape, dtype)
+            shm_list = self._create_shm_blocks(name, size, coll)
+            if shm_list is None:
+                self._log_warning(f"Failed to create memory for '{name}'")
+                continue
+
+            self._local_handles.setdefault(process_name, {})[name] = shm_list
+            self._local_meta.setdefault(process_name, {})[name] = _MemoryMeta(params, coll)
+            self._stats["created"] += 1
+
+        self._log_info(f"Created {len(memory_names)} memory blocks for '{process_name}' (standalone)")
+        return True
+
+    # =========================================================================
+    # IMemoryManager — доступ к данным
+    # =========================================================================
+
+    def get_memory_data(
+        self,
+        process_name: str,
+        memory_name: str,
+    ) -> Optional[Dict]:
         """
-        Создает блоки разделенной памяти.
-        
-        Args:
-            shm_name_orig: Базовое имя блока памяти
-            size: Размер блока в байтах
-            coll: Количество блоков
-        
-        Returns:
-            Список блоков SharedMemory или None при ошибке
+        Получить унифицированный словарь метаданных блока памяти.
+
+        Возвращает одинаковую структуру независимо от режима (с PSR или без).
         """
-        shm_list = []
+        handles = self._local_handles.get(process_name, {}).get(memory_name)
+
+        if self._process_state_registry:
+            pd = self._process_state_registry.get_process_data(process_name)
+            if pd is None or "memory_params" not in pd.custom:
+                return None
+            if memory_name not in pd.custom.get("memory_params", {}):
+                return None
+            return {
+                "handles": handles,
+                "params": pd.custom["memory_params"],
+                "index_usage": pd.custom["memory_index_usage"],
+                "coll": pd.custom["memory_coll"],
+                "names": pd.custom["memory_names"],
+            }
+        else:
+            meta = self._local_meta.get(process_name, {}).get(memory_name)
+            if meta is None:
+                return None
+            return {
+                "handles": handles,
+                "params": {memory_name: meta.params},
+                "index_usage": {memory_name: meta.index_usage},
+                "coll": {memory_name: meta.coll},
+                "names": {},
+            }
+
+    def write_images(
+        self,
+        process_name: str,
+        shm_name: str,
+        images: List[np.ndarray],
+        index: int,
+    ) -> Optional[str]:
+        if not self._validate_memory_access(process_name, shm_name, index):
+            return None
+        if not self._validate_write_operation(process_name, shm_name, index, len(images)):
+            return None
+        try:
+            memory_data = self.get_memory_data(process_name, shm_name)
+            if not memory_data:
+                return None
+
+            handles = memory_data["handles"]
+            shm = handles[index]
+            buffer = shm.buf
+            max_images, max_shape, expected_dtype = memory_data["params"][shm_name]
+            max_h, max_w, max_c = max_shape
+
+            buffer[0:4] = struct.pack("I", len(images))
+            offset = 4
+            for img in images:
+                if img.dtype != expected_dtype:
+                    raise ValueError(f"dtype mismatch: {img.dtype} != {expected_dtype}")
+                h, w = img.shape[:2]
+                c = 1 if img.ndim == 2 else img.shape[2]
+                if h > max_h or w > max_w or c > max_c:
+                    raise ValueError(
+                        f"Image shape ({h}x{w}x{c}) exceeds max ({max_h}x{max_w}x{max_c})"
+                    )
+                buffer[offset:offset + 12] = struct.pack("III", h, w, c)
+                offset += 12
+                buffer[offset] = ord(img.dtype.char)
+                offset += 1
+                img_bytes = img.tobytes()
+                buffer[offset:offset + len(img_bytes)] = img_bytes
+                offset += len(img_bytes)
+                padding = max_h * max_w * max_c * img.dtype.itemsize - len(img_bytes)
+                if padding > 0:
+                    buffer[offset:offset + padding] = b"\x00" * padding
+                    offset += padding
+
+            self._stats["written"] += 1
+            return shm.name
+        except Exception as e:
+            self._log_error(f"write_images error: {e}")
+            self._stats["errors"] += 1
+            self._clear_memory(process_name, shm_name, index)
+            return None
+
+    def read_images(
+        self,
+        process_name: str,
+        shm_name: str,
+        index: int,
+        n: int = -1,
+    ) -> Optional[List[np.ndarray]]:
+        if not self._validate_read_operation(process_name, shm_name, index):
+            return None
+        try:
+            memory_data = self.get_memory_data(process_name, shm_name)
+            if not memory_data:
+                return None
+
+            handles = memory_data["handles"]
+            shm = handles[index]
+            buffer = shm.buf
+            _, max_shape, expected_dtype = memory_data["params"][shm_name]
+            max_h, max_w, max_c = max_shape
+            itemsize = np.dtype(expected_dtype).itemsize
+
+            num_images = struct.unpack("I", buffer[0:4])[0]
+            if num_images == 0:
+                return []
+            if n != -1:
+                num_images = min(n, num_images)
+
+            offset = 4
+            images = []
+            for _ in range(num_images):
+                h, w, c = struct.unpack("III", buffer[offset:offset + 12])
+                offset += 12
+                dtype_char = chr(buffer[offset])
+                dtype = np.dtype(dtype_char)
+                offset += 1
+                arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
+                images.append(arr.reshape((h, w, c)).copy())
+                offset += max_h * max_w * max_c * itemsize
+
+            self._stats["read"] += 1
+            return images
+        except Exception as e:
+            self._log_error(f"read_images error: {e}")
+            self._stats["errors"] += 1
+            return None
+
+    def release_memory(self, process_name: str, shm_name: str, index: int) -> None:
+        memory_data = self.get_memory_data(process_name, shm_name)
+        if not memory_data:
+            return
+        self._clear_memory(process_name, shm_name, index)
+        index_usage = memory_data["index_usage"]
+        if shm_name in index_usage and 0 <= index < len(index_usage[shm_name]):
+            index_usage[shm_name][index] = 0
+
+    def close_memory(self, process_name: str, shm_name: str) -> None:
+        """Закрыть и очистить один shm-блок."""
+        handles = self._local_handles.get(process_name, {}).get(shm_name, [])
+        for shm in handles:
+            self._safe_close_shm(shm, unlink=self._is_owner)
+        self._local_handles.get(process_name, {}).pop(shm_name, None)
+
+        # Удалить метаданные
+        if self._process_state_registry:
+            pd = self._process_state_registry.get_process_data(process_name)
+            if pd:
+                for key in ("memory_names", "memory_params", "memory_index_usage", "memory_coll"):
+                    pd.custom.get(key, {}).pop(shm_name, None)
+        else:
+            self._local_meta.get(process_name, {}).pop(shm_name, None)
+
+    # =========================================================================
+    # Вспомогательные методы
+    # =========================================================================
+
+    def find_free_index(self, process_name: str, shm_name: str) -> Optional[int]:
+        memory_data = self.get_memory_data(process_name, shm_name)
+        if not memory_data:
+            return None
+        usage = memory_data["index_usage"].get(shm_name)
+        if usage is None:
+            return None
+        for i, used in enumerate(usage):
+            if used == 0:
+                return i
+        return None
+
+    def close_all(self, process_name: Optional[str] = None) -> None:
+        if process_name:
+            for shm_name in list(self._local_handles.get(process_name, {}).keys()):
+                self.close_memory(process_name, shm_name)
+        else:
+            for pname in list(self._local_handles.keys()):
+                for shm_name in list(self._local_handles[pname].keys()):
+                    self.close_memory(pname, shm_name)
+
+    def _safe_close_shm(
+        self,
+        shm: Optional[shared_memory.SharedMemory],
+        unlink: bool = False,
+    ) -> None:
+        """Единый безопасный close/unlink (DRY)."""
+        if shm is None:
+            return
+        try:
+            shm.close()
+        except Exception as e:
+            self._log_error(f"shm.close() failed: {e}")
+        if unlink:
+            try:
+                shm.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                self._log_error(f"shm.unlink() failed: {e}")
+
+    def _close_all_handles(self) -> None:
+        for process_name, shm_map in list(self._local_handles.items()):
+            for shm_name, handles in shm_map.items():
+                for shm in handles:
+                    self._safe_close_shm(shm, unlink=self._is_owner)
+        self._local_handles.clear()
+
+    def _create_shm_blocks(
+        self, shm_name_orig: str, size: int, coll: int
+    ) -> Optional[List[shared_memory.SharedMemory]]:
+        shm_list: List[shared_memory.SharedMemory] = []
         for i in range(coll):
             shm_name = f"{shm_name_orig}_{i}"
             try:
                 shm = shared_memory.SharedMemory(name=shm_name, create=True, size=size)
                 shm_list.append(shm)
             except Exception as e:
-                self._log_error(f"Error creating memory '{shm_name}': {e}")
-                # Закрываем уже созданные блоки
-                for created_shm in shm_list:
-                    try:
-                        created_shm.close()
-                        created_shm.unlink()
-                    except Exception:
-                        pass
+                self._log_error(f"Cannot create SharedMemory '{shm_name}': {e}")
+                for created in shm_list:
+                    self._safe_close_shm(created, unlink=True)
                 return None
-        
         return shm_list
-    
-    def _calculate_memory_size(self, num_images: int, image_shape: tuple, dtype: type) -> int:
-        """
-        Вычисляет размер памяти для изображений.
-        
-        Формат: 4 байта (количество изображений) + для каждого изображения:
-        - 12 байт (h, w, c) + 1 байт (dtype) + данные изображения
-        
-        Args:
-            num_images: Количество изображений
-            image_shape: Форма изображения (height, width, channels)
-            dtype: Тип данных numpy
-        
-        Returns:
-            Размер в байтах
-        """
+
+    def _calculate_memory_size(
+        self, num_images: int, image_shape: tuple, dtype: Any
+    ) -> int:
         h, w, c = image_shape
         itemsize = np.dtype(dtype).itemsize
-        # 4 байта для количества изображений + для каждого изображения:
-        # 12 байт (h, w, c) + 1 байт (dtype) + данные
         return 4 + num_images * (12 + 1 + h * w * c * itemsize)
-    
-    # ========================================================================
-    # ОСНОВНОЙ API - РАБОТА С ПАМЯТЬЮ
-    # ========================================================================
-    
-    def _get_memory_data(self, process_name: str, shm_name: str) -> Optional[Dict]:
-        """
-        Получает данные памяти из ProcessData или локального хранилища.
-        
-        Returns:
-            Словарь с данными памяти или None
-        """
-        if self.process_state_registry:
-            process_data = self.process_state_registry.get_process_data(process_name)
-            if process_data and 'memory_blocks' in process_data.custom:
-                return {
-                    'memories': process_data.custom['memory_blocks'],
-                    'params': process_data.custom.get('memory_params', {}),
-                    'index_usage': process_data.custom.get('memory_index_usage', {}),
-                    'coll': process_data.custom.get('memory_coll', {})
-                }
-        else:
-            # Локальный режим
-            if shm_name in self._local_memories:
-                return {
-                    'memories': self._local_memories,
-                    'params': self._local_memory_params,
-                    'index_usage': self._local_index_usage,
-                    'coll': self._local_coll_memories
-                }
-        return None
-    
-    def _validate_memory_access(self, process_name: str, shm_name: str, index: int) -> bool:
-        """
-        Проверяет доступ к памяти перед операциями.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            index: Индекс блока
-        
-        Returns:
-            bool: True если доступ валиден
-        """
-        memory_data = self._get_memory_data(process_name, shm_name)
+
+    def _validate_memory_access(
+        self, process_name: str, shm_name: str, index: int
+    ) -> bool:
+        memory_data = self.get_memory_data(process_name, shm_name)
         if not memory_data:
-            self._log_warning(f"Memory '{shm_name}' not initialized for process '{process_name}'")
+            self._log_warning(f"Memory '{shm_name}' not initialized for '{process_name}'")
             return False
-        
-        memories = memory_data['memories']
-        coll = memory_data['coll']
-        
-        if shm_name not in memories:
-            self._log_warning(f"Memory '{shm_name}' not found")
-            return False
-        
+        coll = memory_data["coll"]
         if shm_name not in coll or index >= coll[shm_name]:
             self._log_warning(f"Invalid index {index} for '{shm_name}'")
             return False
-        
-        if index >= len(memories[shm_name]) or memories[shm_name][index] is None:
-            self._log_warning(f"Memory block {index} for '{shm_name}' is corrupted")
+        handles = memory_data.get("handles")
+        if handles is None or index >= len(handles) or handles[index] is None:
+            self._log_warning(f"Memory handle {index} for '{shm_name}' is None")
             return False
-        
         return True
-    
-    # ========================================================================
-    # СТАТИСТИКА
-    # ========================================================================
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """
-        Получить статистику менеджера памяти.
-        
-        Интегрируется со статистикой BaseManager и ObservableMixin.
-        """
-        stats = super().get_stats() if hasattr(super(), 'get_stats') else {}
-        
-        memory_stats = {
-            'created': self._stats['created'],
-            'written': self._stats['written'],
-            'read': self._stats['read'],
-            'errors': self._stats['errors'],
-            'local_memories_count': len(self._local_memories)
-        }
-        
-        if isinstance(stats, dict):
-            stats['memory'] = memory_stats
-        else:
-            stats = {'memory': memory_stats}
-        
-        return stats
-    
-    # ========================================================================
-    # ОСНОВНОЙ API - РАБОТА С ИЗОБРАЖЕНИЯМИ
-    # ========================================================================
-    
-    def find_free_index(self, process_name: str, shm_name: str) -> Optional[int]:
-        """
-        Находит первый свободный индекс для блока памяти.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-        
-        Returns:
-            int: Свободный индекс или None
-        """
-        memory_data = self._get_memory_data(process_name, shm_name)
-        if not memory_data:
-            return None
-        
-        index_usage = memory_data['index_usage']
-        if shm_name not in index_usage:
-            return None
-        
-        usage_list = index_usage[shm_name]
-        for i in range(len(usage_list)):
-            if usage_list[i] == 0:
-                return i
-        
-        return None
-    
-    def write_images(
-        self,
-        process_name: str,
-        shm_name: str,
-        images: List[np.ndarray],
-        index: int
-    ) -> Optional[str]:
-        """
-        Записывает изображения в разделяемую память.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            images: Список изображений для записи
-            index: Индекс блока памяти
-        
-        Returns:
-            str: Имя блока памяти или None при ошибке
-        """
-        if not self._validate_memory_access(process_name, shm_name, index):
-            return None
-        
-        # Проверяем возможность записи
-        if not self._validate_write_operation(process_name, shm_name, index, len(images)):
-            return None
-        
-        try:
-            memory_data = self._get_memory_data(process_name, shm_name)
-            if not memory_data:
-                return None
-            
-            shm = memory_data['memories'][shm_name][index]
-            buffer = shm.buf
-            max_images, max_shape, expected_dtype = memory_data['params'][shm_name]
-            max_h, max_w, max_c = max_shape
-            
-            # Записываем количество изображений
-            buffer[0:4] = struct.pack('I', len(images))
-            offset = 4
-            
-            for img in images:
-                # Проверяем размеры и тип
-                if img.dtype != expected_dtype:
-                    raise ValueError(f"Неверный тип данных: {img.dtype} вместо {expected_dtype}")
-                
-                h, w = img.shape[:2]
-                c = 1 if img.ndim == 2 else img.shape[2]
-                
-                # Проверка на максимальные размеры
-                if h > max_h or w > max_w or c > max_c:
-                    raise ValueError(
-                        f"Размеры изображения ({h}x{w}x{c}) "
-                        f"превышают максимальные ({max_h}x{max_w}x{max_c})"
-                    )
-                
-                # Записываем реальные размеры
-                buffer[offset:offset+12] = struct.pack('III', h, w, c)
-                offset += 12
-                
-                # Записываем тип данных
-                buffer[offset] = ord(img.dtype.char)
-                offset += 1
-                
-                # Записываем данные (автоматическое выравнивание)
-                img_bytes = img.tobytes()
-                buffer[offset:offset+len(img_bytes)] = img_bytes
-                offset += len(img_bytes)
-                
-                # Заполняем оставшееся пространство нулями (если нужно)
-                expected_size = max_h * max_w * max_c * img.dtype.itemsize
-                padding = expected_size - len(img_bytes)
-                if padding > 0:
-                    buffer[offset:offset+padding] = b'\x00' * padding
-                    offset += padding
-            
-            self._stats['written'] += 1
-            return shm.name
-        
-        except Exception as e:
-            self._log_error(f"Write error: {e}")
-            self._stats['errors'] += 1
-            self._clear_memory(process_name, shm_name, index)
-            return None
-    
-    def read_images(
-        self,
-        process_name: str,
-        shm_name: str,
-        index: int,
-        n: int = -1
-    ) -> Optional[List[np.ndarray]]:
-        """
-        Читает изображения из разделяемой памяти.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            index: Индекс блока памяти
-            n: Количество изображений для чтения (-1 для всех)
-        
-        Returns:
-            List[np.ndarray]: Список изображений или None при ошибке
-        """
-        if not self._validate_read_operation(process_name, shm_name, index):
-            return None
-        
-        try:
-            memory_data = self._get_memory_data(process_name, shm_name)
-            if not memory_data:
-                return None
-            
-            shm = memory_data['memories'][shm_name][index]
-            buffer = shm.buf
-            _, max_shape, expected_dtype = memory_data['params'][shm_name]
-            max_h, max_w, max_c = max_shape
-            itemsize = np.dtype(expected_dtype).itemsize
-            
-            images = []
-            num_images = struct.unpack('I', buffer[0:4])[0]
-            offset = 4
-            
-            if num_images == 0:
-                return []
-            
-            if n != -1:
-                num_images = min(n, num_images)
-            
-            for _ in range(num_images):
-                # Читаем реальные размеры
-                h, w, c = struct.unpack('III', buffer[offset:offset+12])
-                offset += 12
-                
-                # Читаем тип данных
-                dtype_char = chr(buffer[offset])
-                dtype = np.dtype(dtype_char)
-                offset += 1
-                
-                # Читаем данные
-                arr = np.frombuffer(buffer, dtype=dtype, count=h*w*c, offset=offset)
-                img = arr.reshape((h, w, c)).copy()
-                
-                # Пропускаем выравнивание
-                offset += max_h * max_w * max_c * itemsize
-                
-                images.append(img)
-            
-            self._stats['read'] += 1
-            return images
-        
-        except Exception as e:
-            self._log_error(f"Read error: {e}")
-            self._stats['errors'] += 1
-            return None
-    
-    def release_memory(self, process_name: str, shm_name: str, index: int) -> None:
-        """
-        Освобождает память с гарантированным закрытием.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            index: Индекс блока памяти
-        """
-        memory_data = self._get_memory_data(process_name, shm_name)
-        if not memory_data:
-            return
-        
-        index_usage = memory_data['index_usage']
-        if shm_name in index_usage and 0 <= index < len(index_usage[shm_name]):
-            self._clear_memory(process_name, shm_name, index)
-            # Помечаем индекс как свободный
-            if self.process_state_registry:
-                process_data = self.process_state_registry.get_process_data(process_name)
-                if process_data and 'memory_index_usage' in process_data.custom:
-                    if shm_name in process_data.custom['memory_index_usage']:
-                        process_data.custom['memory_index_usage'][shm_name][index] = 0
-            else:
-                # Локальный режим
-                if shm_name in self._local_index_usage:
-                    self._local_index_usage[shm_name][index] = 0
-    
-    def close_memory(self, process_name: str, shm_name: str) -> None:
-        """
-        Закрывает и очищает ресурсы для конкретной памяти.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-        """
-        if self.process_state_registry:
-            process_data = self.process_state_registry.get_process_data(process_name)
-            if process_data and 'memory_blocks' in process_data.custom:
-                if shm_name in process_data.custom['memory_blocks']:
-                    for shm in process_data.custom['memory_blocks'][shm_name]:
-                        try:
-                            if shm:
-                                shm.close()
-                                if shm.name:
-                                    try:
-                                        shm.unlink()
-                                    except FileNotFoundError:
-                                        pass
-                        except Exception as e:
-                            self._log_error(f"Error closing memory {shm_name}: {e}")
-                    process_data.custom['memory_blocks'].pop(shm_name, None)
-                    process_data.custom['memory_params'].pop(shm_name, None)
-                    process_data.custom['memory_index_usage'].pop(shm_name, None)
-                    process_data.custom['memory_coll'].pop(shm_name, None)
-        else:
-            # Локальный режим
-            if shm_name in self._local_memories:
-                for shm in self._local_memories[shm_name]:
-                    try:
-                        if shm:
-                            shm.close()
-                            if shm.name:
-                                try:
-                                    shm.unlink()
-                                except FileNotFoundError:
-                                    pass
-                    except Exception as e:
-                        self._log_error(f"Error closing memory {shm_name}: {e}")
-                del self._local_memories[shm_name]
-                self._local_memory_params.pop(shm_name, None)
-                self._local_index_usage.pop(shm_name, None)
-                self._local_coll_memories.pop(shm_name, None)
-    
-    def close_all(self, process_name: Optional[str] = None):
-        """
-        Гарантированное закрытие ресурсов.
-        
-        Args:
-            process_name: Имя процесса (если None, закрывает все локальные ресурсы)
-        """
-        if process_name and self.process_state_registry:
-            # Закрываем память для конкретного процесса
-            process_data = self.process_state_registry.get_process_data(process_name)
-            if process_data and 'memory_blocks' in process_data.custom:
-                for name, shm_list in process_data.custom['memory_blocks'].items():
-                    for shm in shm_list:
-                        try:
-                            if shm:
-                                shm.close()
-                                if shm.name:
-                                    try:
-                                        shm.unlink()
-                                    except FileNotFoundError:
-                                        pass
-                        except Exception as e:
-                            self._log_error(f"Error closing memory {name}: {e}")
-                # Очищаем данные
-                process_data.custom.pop('memory_blocks', None)
-                process_data.custom.pop('memory_params', None)
-                process_data.custom.pop('memory_index_usage', None)
-                process_data.custom.pop('memory_coll', None)
-        else:
-            # Закрываем локальные ресурсы
-            for name in list(self._local_memories.keys()):
-                for shm in self._local_memories[name]:
-                    try:
-                        if shm:
-                            shm.close()
-                            if shm.name:
-                                try:
-                                    shm.unlink()
-                                except FileNotFoundError:
-                                    pass
-                    except Exception as e:
-                        self._log_error(f"Error closing memory {name}: {e}")
-                del self._local_memories[name]
-                self._local_memory_params.pop(name, None)
-                self._local_index_usage.pop(name, None)
-                self._local_coll_memories.pop(name, None)
-    
-    # ========================================================================
-    # ВАЛИДАЦИЯ И ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
-    # ========================================================================
-    
-    def _validate_write_operation(
-        self,
-        process_name: str,
-        shm_name: str,
-        index: int,
-        num_images: int
-    ) -> bool:
-        """
-        Проверяет возможность записи.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            index: Индекс блока
-            num_images: Количество изображений для записи
-        
-        Returns:
-            bool: True если запись возможна
-        """
-        memory_data = self._get_memory_data(process_name, shm_name)
-        if not memory_data:
-            return False
-        
-        coll = memory_data['coll']
-        params = memory_data['params']
-        
-        if shm_name not in coll or index >= coll[shm_name]:
-            self._log_warning(f"Invalid index {index}!")
-            return False
-        
-        max_images = params[shm_name][0]
-        if num_images > max_images:
-            self._log_warning(f"Too many images ({num_images} > {max_images})!")
-            return False
-        
-        return True
-    
-    def _validate_read_operation(self, process_name: str, shm_name: str, index: int) -> bool:
-        """
-        Проверяет возможность чтения.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            index: Индекс блока
-        
-        Returns:
-            bool: True если чтение возможно
-        """
-        return self._validate_memory_access(process_name, shm_name, index)
-    
-    def _clear_memory(self, process_name: str, shm_name: str, index: int):
-        """
-        Безопасная очистка памяти.
-        
-        Args:
-            process_name: Имя процесса
-            shm_name: Имя блока памяти
-            index: Индекс блока
-        """
-        if self._validate_memory_access(process_name, shm_name, index):
-            memory_data = self._get_memory_data(process_name, shm_name)
-            if memory_data:
-                shm = memory_data['memories'][shm_name][index]
-                try:
-                    shm.buf[:] = b'\x00' * shm.size
-                except Exception as e:
-                    self._log_error(f"Clear error: {e}")
 
+    def _validate_write_operation(
+        self, process_name: str, shm_name: str, index: int, num_images: int
+    ) -> bool:
+        memory_data = self.get_memory_data(process_name, shm_name)
+        if not memory_data:
+            return False
+        coll = memory_data["coll"]
+        if shm_name not in coll or index >= coll[shm_name]:
+            self._log_warning(f"Invalid index {index} for '{shm_name}'")
+            return False
+        max_images = memory_data["params"][shm_name][0]
+        if num_images > max_images:
+            self._log_warning(f"Too many images ({num_images} > {max_images})")
+            return False
+        return True
+
+    def _validate_read_operation(
+        self, process_name: str, shm_name: str, index: int
+    ) -> bool:
+        return self._validate_memory_access(process_name, shm_name, index)
+
+    def _clear_memory(self, process_name: str, shm_name: str, index: int) -> None:
+        if self._validate_memory_access(process_name, shm_name, index):
+            memory_data = self.get_memory_data(process_name, shm_name)
+            if memory_data:
+                handles = memory_data.get("handles")
+                if handles and index < len(handles) and handles[index]:
+                    try:
+                        handles[index].buf[:] = b"\x00" * handles[index].size
+                    except Exception as e:
+                        self._log_error(f"_clear_memory error: {e}")
+
+    # =========================================================================
+    # Статистика
+    # =========================================================================
+
+    def get_stats(self) -> Dict[str, Any]:
+        base = super().get_stats() if hasattr(super(), "get_stats") else {}
+        mem_stats = {
+            **self._stats,
+            "processes_with_handles": len(self._local_handles),
+            "is_owner": self._is_owner,
+        }
+        if isinstance(base, dict):
+            base["memory"] = mem_stats
+        else:
+            base = {"memory": mem_stats}
+        return base

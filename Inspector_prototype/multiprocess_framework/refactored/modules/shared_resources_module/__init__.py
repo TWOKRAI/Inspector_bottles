@@ -1,32 +1,38 @@
 """
-SharedResources Module (Refactored) - Менеджер общих ресурсов.
+SharedResources Module — менеджер общих ресурсов для межпроцессного взаимодействия.
 
-Легковесный контейнер для межпроцессного взаимодействия.
-Использует BaseManager + ObservableMixin для единообразия со всеми менеджерами системы.
+Публичный API модуля. Внешние модули импортируют только отсюда.
 
-Архитектура:
-- SharedResourcesManager (архив) - легковесный контейнер
-- ProcessStateRegistry - реестр состояний процессов (теперь локально в state/)
-- ProcessData - данные процесса (теперь локально в state/)
-- EventManager - менеджер событий (BaseManager + ObservableMixin)
-- QueueRegistry - реестр очередей (BaseManager + ObservableMixin)
-- MemoryManager - менеджер разделенной памяти (BaseManager + ObservableMixin)
-- DataSchemaAdapter - адаптер для data_schema модуля
-- Интерфейсы - для всех компонентов модуля
+Быстрый старт:
+    srm = SharedResourcesManager()
+    srm.initialize()
+    srm.register_process("my_process", config_dict)
+    # Передать srm в дочерний процесс через pickle
+    # В дочернем процессе:
+    srm.reinitialize_in_child()
 """
 
+# Основной фасад
 from .core.shared_resources_manager import SharedResourcesManager
-from .events.event_manager import EventManager, EventType
+
+# Компоненты (для прямого использования)
+from .events.event_manager import EventManager
 from .queues.queue_registry import QueueRegistry
 from .memory.memory_manager import MemoryManager
-from .registry.data_schema_adapter import DataSchemaAdapter
+from .config.config_store import ConfigStore
+from .adapters.data_schema_adapter import DataSchemaAdapter
 
-# Данные процессов (перенесены из process_module для разрыва циклической зависимости)
+# Данные процессов
 from .state.process_data import ProcessData, ProcessDataKeys, QueuesProxy, EventsProxy
 from .state.process_state_registry import ProcessStateRegistry
 
+# Типы
+from .types import ProcessStatus, ResourceType, EventType
+from .types import ProcessDataDict, QueueConfigDict, MemoryConfigDict
+
 # Интерфейсы
 from .core.interfaces import (
+    IConfigStore,
     IQueueRegistry,
     IEventManager,
     IMemoryManager,
@@ -35,26 +41,36 @@ from .core.interfaces import (
 )
 
 __all__ = [
-    # Основные классы
-    'SharedResourcesManager',
-    'EventManager',
-    'EventType',
-    'QueueRegistry',
-    'MemoryManager',
-    'DataSchemaAdapter',
+    # Основной фасад
+    "SharedResourcesManager",
+
+    # Компоненты
+    "EventManager",
+    "QueueRegistry",
+    "MemoryManager",
+    "ConfigStore",
+    "DataSchemaAdapter",
 
     # Данные процессов
-    'ProcessData',
-    'ProcessDataKeys',
-    'QueuesProxy',
-    'EventsProxy',
-    'ProcessStateRegistry',
+    "ProcessData",
+    "ProcessDataKeys",
+    "QueuesProxy",
+    "EventsProxy",
+    "ProcessStateRegistry",
+
+    # Типы
+    "ProcessStatus",
+    "ResourceType",
+    "EventType",
+    "ProcessDataDict",
+    "QueueConfigDict",
+    "MemoryConfigDict",
 
     # Интерфейсы
-    'IQueueRegistry',
-    'IEventManager',
-    'IMemoryManager',
-    'IProcessStateRegistry',
-    'ISharedResourcesManager',
+    "IConfigStore",
+    "IQueueRegistry",
+    "IEventManager",
+    "IMemoryManager",
+    "IProcessStateRegistry",
+    "ISharedResourcesManager",
 ]
-

@@ -1,80 +1,80 @@
 """
-Реестр состояний процессов для межпроцессного взаимодействия.
+ProcessStateRegistry — реестр runtime-состояний процессов.
 
-Перенесён из process_module.state в shared_resources_module.state —
-разрыв циклической зависимости process_module <-> shared_resources_module.
+Dict[str, ProcessData] без Manager() и Lock().
+Queue и Event из multiprocessing pickle-safe нативно.
 
-Хранит состояния всех процессов:
-- Статусы процессов (ready, initializing, running, stopping, error)
-- События процессов (Event объекты)
-- Очереди процессов (Queue объекты)
-- Метаданные процессов
-- Кастомные данные для расширения
+Перенесён из process_module для устранения циклической зависимости.
 """
 
-import time
-from typing import Dict, Any, Optional
+import logging
+from typing import Any, Dict, List, Optional
 from multiprocessing import Queue, Event
 
 from .process_data import ProcessData
+from ..types import ProcessStatus, ProcessDataDict
+from ..core.interfaces import IProcessStateRegistry
+
+_logger = logging.getLogger(__name__)
 
 
-class ProcessStateRegistry:
+class ProcessStateRegistry(IProcessStateRegistry):
     """
-    Реестр состояний процессов (без Manager() и Lock()).
+    Реестр runtime-состояний процессов.
 
-    Использует простой словарь Dict[str, ProcessData] для хранения данных процессов.
-    Queue и Event из multiprocessing — pickle-safe нативно.
-
-    Перенесён из process_module для устранения циклической зависимости.
-    EventType импортируется локально из events.event_manager (в том же модуле).
+    Хранит Dict[str, ProcessData]. Является единственным source of truth
+    для Queue/Event ссылок — QueueRegistry и MemoryManager делегируют сюда.
     """
 
-    STATUS_INITIALIZING = "initializing"
-    STATUS_READY = "ready"
-    STATUS_RUNNING = "running"
-    STATUS_STOPPING = "stopping"
-    STATUS_ERROR = "error"
-
-    def __init__(self, event_manager: Optional[Any] = None):
-        """
-        Args:
-            event_manager: EventManager для отправки событий при изменениях (опционально)
-        """
+    def __init__(
+        self,
+        event_manager: Optional[Any] = None,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
         self.states: Dict[str, ProcessData] = {}
         self.event_manager = event_manager
+        self._logger = logger or _logger
 
-    def _emit(self, event_type_name: str, **kwargs):
-        """Отправить событие через EventManager (без lazy import — EventType локальный)."""
+    # ------------------------------------------------------------------
+    # Внутренние утилиты
+    # ------------------------------------------------------------------
+
+    def _log(self, level: str, msg: str) -> None:
+        getattr(self._logger, level, self._logger.debug)(msg)
+
+    def _emit(self, event_type_name: str, **kwargs: Any) -> None:
+        """Отправить событие через EventManager (если подключён)."""
         if not self.event_manager:
             return
         try:
-            from ..events.event_manager import EventType
+            from ..types import EventType
             event_type = getattr(EventType, event_type_name, None)
             if event_type is not None:
                 self.event_manager.emit_event(event_type, **kwargs)
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # IProcessStateRegistry
+    # ------------------------------------------------------------------
+
     def register_process(
         self,
         process_name: str,
         initial_state: Optional[Dict[str, Any]] = None,
-        queue_names: Optional[Dict[str, str]] = None,
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[Any] = None,
     ) -> bool:
-        """
-        Регистрация процесса с начальным состоянием.
-
-        Returns:
-            bool: True если регистрация успешна
-        """
+        """Зарегистрировать процесс. Если уже есть — обновить."""
         try:
             if process_name in self.states:
                 process_data = self.states[process_name]
                 if initial_state:
                     if "status" in initial_state:
-                        process_data.status = initial_state["status"]
+                        raw = initial_state["status"]
+                        process_data.status = (
+                            raw if isinstance(raw, ProcessStatus)
+                            else ProcessStatus(raw)
+                        )
                         process_data.update_timestamp()
                     if "metadata" in initial_state:
                         process_data.metadata.update(initial_state["metadata"])
@@ -82,86 +82,85 @@ class ProcessStateRegistry:
                     if "custom" in initial_state:
                         process_data.custom.update(initial_state["custom"])
                         process_data.update_timestamp()
-                if config is not None and isinstance(config, dict):
-                    self._apply_config_to_data(process_data, config)
             else:
-                status = initial_state.get("status", self.STATUS_INITIALIZING) if initial_state else self.STATUS_INITIALIZING
-                metadata = initial_state.get("metadata", {}) if initial_state else {}
-                custom = initial_state.get("custom", {}) if initial_state else {}
-
+                raw_status = (
+                    initial_state.get("status", ProcessStatus.INITIALIZING)
+                    if initial_state else ProcessStatus.INITIALIZING
+                )
+                status = (
+                    raw_status if isinstance(raw_status, ProcessStatus)
+                    else ProcessStatus(raw_status)
+                )
                 process_data = ProcessData(
                     name=process_name,
                     status=status,
-                    metadata=metadata,
-                    custom=custom,
+                    metadata=initial_state.get("metadata", {}) if initial_state else {},
+                    custom=initial_state.get("custom", {}) if initial_state else {},
                 )
-
-                if config and isinstance(config, dict):
-                    self._apply_config_to_data(process_data, config)
-
                 self.states[process_name] = process_data
                 self._emit("PROCESS_REGISTERED", process_name=process_name, state=process_data.to_dict())
 
             return True
         except Exception as e:
-            print(f"ProcessStateRegistry: Failed to register process '{process_name}': {e}")
+            self._log("error", f"ProcessStateRegistry: register_process('{process_name}') failed: {e}")
             return False
 
-    def _apply_config_to_data(self, process_data: ProcessData, config: Dict[str, Any]):
-        """Применить конфигурацию к ProcessData."""
-        if "process" in config:
-            process_data.custom["process_config"] = config["process"].copy()
-        if "managers" in config:
-            process_data.custom["component_managers_config"] = config["managers"].copy()
-        if "modules" in config:
-            process_data.custom["modules_config"] = config["modules"].copy()
-        if "custom" in config:
-            process_data.custom["config_custom"] = config["custom"].copy()
-        process_data.update_timestamp()
+    def has_process(self, process_name: str) -> bool:
+        return process_name in self.states
 
-    def register_process_with_config(
-        self,
-        process_name: str,
-        config: Any,
-        initial_state: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """Регистрация процесса с конфигурацией (ProcessConfiguration или dict)."""
-        if hasattr(config, "process") and hasattr(config, "to_dict"):
-            config = config.to_dict()
-        elif not isinstance(config, dict):
-            config = {}
-        return self.register_process(process_name, initial_state=initial_state or {}, config=config)
+    def unregister_process(self, process_name: str) -> bool:
+        try:
+            if process_name in self.states:
+                self._emit("PROCESS_UNREGISTERED", process_name=process_name)
+                del self.states[process_name]
+                return True
+            return False
+        except Exception as e:
+            self._log("error", f"ProcessStateRegistry: unregister_process('{process_name}') failed: {e}")
+            return False
+
+    def get_process_data(self, process_name: str) -> Optional[ProcessData]:
+        return self.states.get(process_name)
+
+    def get_all_process_data(self) -> Dict[str, ProcessData]:
+        return self.states.copy()
+
+    def get_process_names(self) -> List[str]:
+        return list(self.states.keys())
 
     def update_state(
         self,
         process_name: str,
-        status: Optional[str] = None,
+        status: Optional[Any] = None,
         events: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         queues: Optional[Dict[str, str]] = None,
         custom: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Обновление состояния процесса."""
         try:
             if process_name not in self.states:
-                return self.register_process(process_name, {
-                    "status": status or self.STATUS_INITIALIZING,
+                self.register_process(process_name, {
+                    "status": status or ProcessStatus.INITIALIZING,
                     "metadata": metadata or {},
                     "custom": custom or {},
                 })
 
             process_data = self.states[process_name]
-            old_status = process_data.status if status is not None else None
+            old_status = process_data.status
 
             if status is not None:
-                process_data.status = status
-                process_data.update_timestamp()
-                if old_status != status:
+                new_status = (
+                    status if isinstance(status, ProcessStatus)
+                    else ProcessStatus(status)
+                )
+                if old_status != new_status:
+                    process_data.status = new_status
+                    process_data.update_timestamp()
                     self._emit(
                         "PROCESS_STATE_CHANGED",
                         process_name=process_name,
-                        old_status=old_status,
-                        new_status=status,
+                        old_status=old_status.value if isinstance(old_status, ProcessStatus) else old_status,
+                        new_status=new_status.value,
                         state=process_data.to_dict(),
                     )
 
@@ -175,11 +174,10 @@ class ProcessStateRegistry:
 
             return True
         except Exception as e:
-            print(f"ProcessStateRegistry: Failed to update state for '{process_name}': {e}")
+            self._log("error", f"ProcessStateRegistry: update_state('{process_name}') failed: {e}")
             return False
 
     def add_queue(self, process_name: str, queue_type: str, queue: Queue) -> bool:
-        """Добавляет очередь в процесс."""
         try:
             if process_name not in self.states:
                 self.register_process(process_name)
@@ -187,11 +185,10 @@ class ProcessStateRegistry:
             self._emit("QUEUE_ADDED", process_name=process_name, queue_type=queue_type)
             return True
         except Exception as e:
-            print(f"ProcessStateRegistry: Failed to add queue '{queue_type}' to '{process_name}': {e}")
+            self._log("error", f"ProcessStateRegistry: add_queue('{process_name}', '{queue_type}') failed: {e}")
             return False
 
     def add_event(self, process_name: str, event_name: str, event: Event) -> bool:
-        """Добавляет событие в процесс."""
         try:
             if process_name not in self.states:
                 self.register_process(process_name)
@@ -199,87 +196,49 @@ class ProcessStateRegistry:
             self._emit("EVENT_ADDED", process_name=process_name, event_name=event_name)
             return True
         except Exception as e:
-            print(f"ProcessStateRegistry: Failed to add event '{event_name}' to '{process_name}': {e}")
+            self._log("error", f"ProcessStateRegistry: add_event('{process_name}', '{event_name}') failed: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # Дополнительные методы (обратная совместимость)
+    # ------------------------------------------------------------------
 
     def get_queue(self, process_name: str, queue_type: str) -> Optional[Queue]:
-        """Получает очередь процесса по типу."""
-        if process_name not in self.states:
-            return None
-        return self.states[process_name].get_queue(queue_type)
+        pd = self.states.get(process_name)
+        return pd.get_queue(queue_type) if pd else None
 
     def get_event(self, process_name: str, event_name: str) -> Optional[Event]:
-        """Получает событие процесса по имени."""
-        if process_name not in self.states:
-            return None
-        return self.states[process_name].get_event(event_name)
+        pd = self.states.get(process_name)
+        return pd.get_event(event_name) if pd else None
 
-    def get_state(self, process_name: str) -> Optional[Dict[str, Any]]:
-        """Получение состояния процесса как dict."""
-        try:
-            if process_name not in self.states:
-                return None
-            return self.states[process_name].to_dict()
-        except Exception as e:
-            print(f"ProcessStateRegistry: Failed to get state for '{process_name}': {e}")
-            return None
+    def get_state(self, process_name: str) -> Optional[ProcessDataDict]:
+        pd = self.states.get(process_name)
+        return pd.to_dict() if pd else None
 
-    def get_process_data(self, process_name: str) -> Optional[ProcessData]:
-        """Получает ProcessData объект процесса."""
-        return self.states.get(process_name)
+    def get_all_states(self) -> Dict[str, ProcessDataDict]:
+        return {name: pd.to_dict() for name, pd in self.states.items()}
 
-    def get_all_states(self) -> Dict[str, Dict[str, Any]]:
-        """Получение всех состояний процессов."""
-        try:
-            return {name: data.to_dict() for name, data in self.states.items()}
-        except Exception as e:
-            print(f"ProcessStateRegistry: Failed to get all states: {e}")
-            return {}
-
-    def get_all_process_data(self) -> Dict[str, ProcessData]:
-        """Получает все ProcessData объекты."""
-        return self.states.copy()
-
-    def get_process_names(self) -> list:
-        """Получение списка всех зарегистрированных процессов."""
-        try:
-            return list(self.states.keys())
-        except Exception as e:
-            print(f"ProcessStateRegistry: Failed to get process names: {e}")
-            return []
-
-    def unregister_process(self, process_name: str) -> bool:
-        """Удаление процесса из реестра."""
-        try:
-            if process_name in self.states:
-                self._emit("PROCESS_UNREGISTERED", process_name=process_name)
-                del self.states[process_name]
-                return True
-            return False
-        except Exception as e:
-            print(f"ProcessStateRegistry: Failed to unregister process '{process_name}': {e}")
-            return False
-
-    def has_process(self, process_name: str) -> bool:
-        """Проверка наличия процесса в реестре."""
-        try:
-            return process_name in self.states
-        except Exception:
-            return False
+    def register_process_with_config(
+        self,
+        process_name: str,
+        config: Any,
+        initial_state: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Регистрация с конфигурацией (ProcessConfiguration или dict)."""
+        if hasattr(config, "to_dict"):
+            config = config.to_dict()
+        elif not isinstance(config, dict):
+            config = {}
+        return self.register_process(process_name, initial_state=initial_state or {})
 
     def get_stats(self) -> Dict[str, Any]:
-        """Получение статистики реестра."""
-        try:
-            states = self.get_all_states()
-            status_counts: Dict[str, int] = {}
-            for state in states.values():
-                status = state.get("status", "unknown")
-                status_counts[status] = status_counts.get(status, 0) + 1
-            return {
-                "total_processes": len(states),
-                "status_counts": status_counts,
-                "processes": list(states.keys()),
-            }
-        except Exception as e:
-            print(f"ProcessStateRegistry: Failed to get stats: {e}")
-            return {"total_processes": 0, "status_counts": {}, "processes": []}
+        states = self.get_all_states()
+        status_counts: Dict[str, int] = {}
+        for state in states.values():
+            s = state.get("status", "unknown")
+            status_counts[s] = status_counts.get(s, 0) + 1
+        return {
+            "total_processes": len(states),
+            "status_counts": status_counts,
+            "processes": list(states.keys()),
+        }

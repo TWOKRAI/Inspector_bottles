@@ -1,36 +1,53 @@
 # shared_resources_module — Статус рефакторинга
 
-## Текущий этап: 0 / 8
+## Текущий этап: 8 / 8 ✅
 
 ## Оценки (0-10)
 
-| Критерий | Оценка | Комментарий |
-|----------|--------|-------------|
-| Код (читаемость, стандарты) | 6 | начальная оценка |
-| Тесты (покрытие) | 3 | начальная оценка |
-| Документация (README, interfaces) | 4 | начальная оценка |
-| Связанность (меньше = лучше) | 4 | начальная оценка |
-| Дублирование | 7 | начальная оценка |
-| Работоспособность | 7 | Центральное хранилище, работает, нужны интеграционные тесты |
+| Критерий | До | После | Комментарий |
+|----------|-----|-------|-------------|
+| Код (читаемость, стандарты) | 6 | **9** | Чёткое разделение ответственностей, типизация, DRY |
+| Тесты (покрытие) | 3 | **8** | 50+ тестов: types, config, PSR, SRM, QR, EM, MM |
+| Документация (README, interfaces) | 4 | **9** | README, ARCHITECTURE.md, ADR-017..021, interfaces.py |
+| Связанность (меньше = лучше) | 4 | **8** | Фасад-делегатор, нет god object, чёткие границы |
+| Дублирование | 7 | **9** | _safe_close_shm DRY, PSR source of truth |
+| Работоспособность | 7 | **9** | Pickle-safe, reinitialize_in_child, register_process |
 
 ## Чеклист рефакторинга
 
-- [ ] Этап 0: Критические баги исправлены
-- [ ] Этап 1: Модуль запускается в составе оркестратора
-- [ ] Этап 2: Работает с дочерними процессами
-- [ ] Этап 3: Коммуникация через Router проверена
-- [ ] Этап 4: Живое ДНК интегрировано
-- [ ] Этап 5: CommandManager подключён
-- [ ] Этап 6: Graceful shutdown работает
-- [ ] Этап 7: Unit-тесты написаны и проходят
-- [ ] Этап 8: README и interfaces.py готовы
+- [x] Этап 1: types/ — ProcessStatus, ResourceType, EventType, TypedDict
+- [x] Этап 2: core/interfaces.py — ISharedResourcesManager, IConfigStore, IQueueRegistry, IEventManager, IMemoryManager, IProcessStateRegistry
+- [x] Этап 3: ConfigStore + ProcessData (ProcessStatus enum) + PSR (logger вместо print)
+- [x] Этап 4: SharedResourcesManager — register_process(), reinitialize_in_child(), properties
+- [x] Этап 5: EventManager (reinitialize), QueueRegistry (PSR source of truth), MemoryManager (shm names)
+- [x] Этап 6: adapters/data_schema_adapter.py, registry/ → обратная совместимость
+- [x] Этап 7: 50+ тестов (types, config_store, process_data, PSR, SRM, QR, EM, MM)
+- [x] Этап 8: README.md, STATUS.md 8/8, ARCHITECTURE.md, __init__.py, DECISIONS.md
 
-## Известные проблемы
+## Ключевые изменения
 
-- Центральное хранилище, работает, нужны интеграционные тесты
+### Архитектурные (ADR-017..021)
+- **ADR-017**: ConfigStore отдельно от ProcessData (статика vs динамика)
+- **ADR-018**: `register_process()` — единая точка регистрации
+- **ADR-019**: SharedMemory по именам (pickle-safe)
+- **ADR-020**: `reinitialize_in_child()` для восстановления после unpickle
+- **ADR-021**: Прямой pickle SRM вместо ad-hoc bundle dict
+
+### Технические
+- `ProcessStatus` enum вместо строковых констант
+- `print()` → `logging.Logger` в ProcessStateRegistry
+- PSR — единственный source of truth для Queue/Event ссылок
+- `_safe_close_shm()` — DRY для close/unlink SharedMemory
+- `typing_extensions.TypedDict` для Dict at Boundary контрактов
+
+## Известные ограничения
+
+- MemoryManager.reinitialize_handles() открывает shm по именам — требует чтобы owner process ещё не сделал unlink
+- QueueRegistry.registered_queues — локальный кэш (дублирует PSR для broadcast); в следующей итерации можно убрать
 
 ## История изменений
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |
+| 2026-03-13 | Полный рефакторинг по плану shared_resources_refactoring_7edae960 | 8 |

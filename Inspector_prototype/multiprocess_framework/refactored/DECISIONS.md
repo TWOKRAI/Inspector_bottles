@@ -204,3 +204,76 @@
 - Отклонённые альтернативы:
   - Pydantic BaseModel напрямую (без RegisterBase) — отклонено: теряется интеграция с registers_module.
   - Единый монолитный конфиг со всеми полями всех менеджеров — отклонено как нарушение OCP.
+
+---
+
+## ADR-017: ConfigStore отдельно от ProcessData
+- Дата: 2026-03-13
+- Статус: принято
+- Контекст: Конфиги процессов хранились в `ProcessData.custom["process_config"]`, смешиваясь с
+  runtime-данными (статус, очереди, события). Это нарушало SRP и усложняло сериализацию.
+- Решение: `ConfigStore` — отдельный pickle-safe компонент SRM. `ProcessData.custom` — только
+  пользовательские runtime-данные. Конфиги статичны, ProcessData динамична.
+- Причина: Разные жизненные циклы. Конфиг создаётся один раз при `register_process()`.
+  ProcessData меняется в течение всего времени жизни процесса.
+- Отклонённые альтернативы:
+  - Конфиги в отдельном поле ProcessData — отклонено: ProcessData уже перегружен.
+
+---
+
+## ADR-018: SRM.register_process() — единая точка регистрации
+- Дата: 2026-03-13
+- Статус: принято
+- Контекст: ProcessManager вручную вызывал 5+ методов для регистрации процесса:
+  `register_process_state()`, `queue_registry.create_and_register_queues()`, `add_event()` и т.д.
+  Любое изменение формата требовало правок в ProcessManager.
+- Решение: `SRM.register_process(name, config_dict)` — один вызов. SRM сам создаёт Queue, Event,
+  сохраняет конфиг, инициализирует SharedMemory.
+- Причина: Инкапсуляция. ProcessManager не должен знать КАК создаются ресурсы.
+  Изменение внутренней структуры не ломает вызывающий код.
+- Отклонённые альтернативы:
+  - Builder pattern — отклонено как избыточный для текущего масштаба.
+
+---
+
+## ADR-019: SharedMemory по именам (pickle-safe)
+- Дата: 2026-03-13
+- Статус: принято
+- Контекст: `SharedMemory` объекты не pickle-able. Предыдущий код хранил их в `ProcessData.custom`,
+  что делало pickle SRM невозможным.
+- Решение: Хранить только `shm.name` строки в `ProcessData.custom["memory_names"]`.
+  SharedMemory объекты живут в `MemoryManager._local_handles` (не pickle-able, пересоздаются).
+  Owner process: `create=True`, `unlink()` при shutdown.
+  Consumer process: `create=False`, `close()` при shutdown.
+- Причина: Строки pickle-safe. OS-level shared memory доступна по имени из любого процесса.
+- Отклонённые альтернативы:
+  - `multiprocessing.Manager().dict()` — отклонено: требует Manager process, overhead.
+
+---
+
+## ADR-020: reinitialize_in_child() для восстановления после unpickle
+- Дата: 2026-03-13
+- Статус: принято
+- Контекст: После unpickle SRM в дочернем процессе `EventManager._event_queue = None`,
+  `MemoryManager._local_handles = {}`. Без восстановления они нефункциональны.
+- Решение: Явный метод `SRM.reinitialize_in_child()`. Вызывается в `ProcessModule.initialize()`.
+  НЕ автоматически в `__setstate__` — явное лучше неявного.
+- Причина: Явный вызов даёт контроль над порядком инициализации. `__setstate__` вызывается
+  в неопределённом контексте (может быть до инициализации других компонентов).
+- Отклонённые альтернативы:
+  - Автовосстановление в `__setstate__` — отклонено: скрытая логика, трудно дебажить.
+
+---
+
+## ADR-021: Прямой pickle SRM вместо ad-hoc bundle dict
+- Дата: 2026-03-13
+- Статус: принято
+- Контекст: `run_process_function` получал `bundle = {"queues": {}, "config": ..., "custom": {...}}`
+  и вручную пересоздавал SRM с нуля, копируя данные из bundle (~190 строк кода).
+  Routing map строилась ad-hoc. Хрупко, дублирует логику.
+- Решение: SRM pickle-ируется напрямую. Все Queue/Event ссылки сохраняются через OS pipe fd.
+  `run_process_function` получает готовый SRM, вызывает `reinitialize_in_child()` (~30 строк).
+- Причина: `multiprocessing.Queue` и `Event` нативно pickle-safe. Прямая передача SRM
+  исключает дублирование логики создания ресурсов и делает код масштабируемым.
+- Отклонённые альтернативы:
+  - Сохранить bundle подход с улучшенной валидацией — отклонено: фундаментально хрупкий паттерн.

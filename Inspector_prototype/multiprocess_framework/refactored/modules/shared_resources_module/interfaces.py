@@ -1,22 +1,10 @@
-"""
-shared_resources_module — публичный контракт (interfaces.py).
-
-Реэкспортирует интерфейсы из core/interfaces.py для удобства.
-Единственный файл, от которого должны зависеть другие модули.
-"""
-
-from .core.interfaces import (
+# Реэкспорт публичных интерфейсов модуля.
+# Внешние модули импортируют интерфейсы отсюда.
+from .core.interfaces import (  # noqa: F401
+    IConfigStore,
     IQueueRegistry,
     IEventManager,
     IMemoryManager,
     IProcessStateRegistry,
     ISharedResourcesManager,
 )
-
-__all__ = [
-    "IQueueRegistry",
-    "IEventManager",
-    "IMemoryManager",
-    "IProcessStateRegistry",
-    "ISharedResourcesManager",
-]
