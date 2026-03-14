@@ -346,7 +346,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     def worker_adapter(self):
         """Доступ к worker_adapter через менеджера."""
         return self.worker_manager.get_adapter() if self.worker_manager else None
-    
+
+    @property
+    def console_adapter(self):
+        """Доступ к console_adapter через менеджера."""
+        return self.console_manager.get_adapter() if self.console_manager else None
+
     # ========================================================================
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     # ========================================================================

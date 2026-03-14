@@ -112,6 +112,7 @@ ProcessManagerProcess ◄────────────┐
 │ ──────────────────────────────────────────────────────   │
 │ LoggerManager / ErrorManager (logging & error tracking)  │
 │ ConfigManager (configuration management)                │
+│ ConsoleManager (terminal I/O, 3 levels, cross-platform)  │
 │ SharedResourcesManager (inter-process resources)        │
 │   ├─ ProcessData (queues, events, memory)               │
 │   ├─ QueueRegistry (queue creation)                     │
@@ -285,7 +286,7 @@ STOPPED (exit code 0 или 1)
 | **logger_module** | Infra | BaseManager + ObservableMixin | Централизованное логирование | `LoggerManager`, `LogConfig`, `ILogChannel` |
 | **error_module** | Infra | LoggerManager | Управление ошибками | `ErrorManager`, `ErrorManagerConfig` |
 | **config_module** | Infra | BaseManager + ObservableMixin | Управление конфигурациями | `ConfigManager`, `Config`, `ConfigSection` |
-| **console_module** | Infra | BaseManager + ObservableMixin | Консоль | `ConsoleManager` |
+| **console_module** | Infra | BaseManager + ObservableMixin | Терминальный I/O, 3 уровня, IPlatformConsole | `ConsoleManager`, `ConsoleAdapter`, `IPlatformConsole` |
 | **shared_resources_module** | Infra | - | Межпроцессные ресурсы | `SharedResourcesManager`, `ProcessData` |
 | **registers_module** | Infra | - | Runtime реестр схем | `RegistersContainer` |
 | **router_module** | Comm | ChannelRoutingManager | Маршрутизация сообщений | `RouterManager`, `IMessageChannel` |

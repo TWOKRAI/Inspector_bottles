@@ -8,7 +8,6 @@ UnixConsole — реализация IPlatformConsole для Linux / macOS.
 import os
 import sys
 import shutil
-import subprocess
 from typing import Optional
 
 from .base import IPlatformConsole
@@ -34,7 +33,7 @@ class UnixConsole(IPlatformConsole):
         self._visible = True
         self._created = False
         self._title = ""
-        self._extra_proc: Optional[subprocess.Popen] = None  # type: ignore[type-arg]
+        self._extra_proc = None  # Reserved for future extra window support
         self._gui_available = _has_gui()
         self._terminal_cmd = _find_terminal() if self._gui_available else None
 
@@ -94,23 +93,3 @@ class UnixConsole(IPlatformConsole):
             return input()
         except (EOFError, KeyboardInterrupt):
             return None
-
-    # ------------------------------------------------------------------
-    # Дополнительное окно через xterm (вызывается из ConsoleManager)
-    # ------------------------------------------------------------------
-
-    def open_extra_window(self, title: str, script: str = "") -> bool:
-        """Открыть дополнительное терминальное окно (только при GUI)."""
-        if not self._terminal_cmd:
-            return False
-        try:
-            cmd = [self._terminal_cmd, "-T", title]
-            if script:
-                if self._terminal_cmd == "xterm":
-                    cmd += ["-e", script]
-                elif self._terminal_cmd in ("gnome-terminal", "xfce4-terminal"):
-                    cmd += ["--", "bash", "-c", script]
-            self._extra_proc = subprocess.Popen(cmd)
-            return True
-        except Exception:
-            return False

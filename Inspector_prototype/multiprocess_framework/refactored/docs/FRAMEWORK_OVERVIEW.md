@@ -162,11 +162,15 @@ process4 ──┴─→ ConfigManager ─→ unified configuration
 
 ---
 
-#### 7. **console_module** — Управление консольными окнами
-- **Роль:** Встроенная консоль для интерактивного ввода команд и вывода.
-- **Режимы:**
-  - Встроенный (в процессе) — перенаправление stdout/stderr
-  - Отдельный процесс — для отладки
+#### 7. **console_module** — Управление терминальным I/O
+- **Роль:** ConsoleManager управляет терминальным вводом-выводом процесса. Интеграция с LoggerManager (ConsoleLogChannel) и CommandManager для интерактивного управления.
+- **Ключевые классы:**
+  - `ConsoleManager(BaseManager, ObservableMixin)` — Менеджер консоли
+  - `IPlatformConsole` — Интерфейс платформенной консоли (WindowsConsole, UnixConsole)
+  - `ConsoleAdapter` — Адаптер для доступа из ProcessModule (`process.console_adapter`)
+  - `ConsoleLogChannel` — Канал логирования в консоль
+- **Три уровня:** пассивный (только вывод), активный (ввод+вывод), God Mode (интерактивное управление)
+- **Кроссплатформенность:** WindowsConsole (Windows), UnixConsole (Linux/macOS)
 
 ---
 
@@ -455,6 +459,7 @@ Return gracefully (без sys.exit)
         
         ┌────────────────────────────────────┐
         │  console_module (BaseManager)      │
+        │  IPlatformConsole, ConsoleAdapter  │
         └────────────────────────────────────┘
         
         ┌────────────────────────────────────┐

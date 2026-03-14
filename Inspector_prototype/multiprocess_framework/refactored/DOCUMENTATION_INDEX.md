@@ -163,7 +163,10 @@
    - docs/USAGE_GUIDE.md — примеры
 
 7. **console_module**
-   - README.md — ConsoleManager (встроенный + отдельный процесс)
+   - README.md — ConsoleManager, три уровня (пассивный/активный/God Mode), кроссплатформенность (Windows/Linux/macOS)
+   - STATUS.md — этап 8/8
+   - interfaces.py — IConsoleManager, IPlatformConsole
+   - tests/ — 5 файлов (manager, adapter, redirector, log_channel, platforms)
 
 8. **shared_resources_module**
    - README.md — SharedResourcesManager, ProcessData, MemoryManager
