@@ -13,18 +13,19 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-# Добавляем корень проекта в путь
-project_root = Path(__file__).parent.parent.parent.parent
+# Корень refactored/ и корень проекта
+refactored_root = Path(__file__).parent
+project_root = refactored_root.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Модули с unittest тестами
 UNITTEST_MODULES = [
-    'console_module',
     'config_module',
 ]
 
 # Модули с pytest тестами
 PYTEST_MODULES = [
+    'console_module',
     'worker_module',
     'process_module',
     'dispatch_module',
@@ -43,7 +44,7 @@ ALL_MODULES = UNITTEST_MODULES + PYTEST_MODULES
 
 def run_unittest(module_name: str) -> bool:
     """Запустить unittest тесты для модуля."""
-    tests_dir = project_root / 'src' / 'multiprocess_framework' / 'refactored' / 'modules' / module_name / 'tests'
+    tests_dir = refactored_root / 'modules' / module_name / 'tests'
     
     if not tests_dir.exists():
         print(f"⚠️  Тесты для {module_name} не найдены: {tests_dir}")
@@ -72,7 +73,7 @@ def run_unittest(module_name: str) -> bool:
 
 def run_pytest(module_name: str) -> bool:
     """Запустить pytest тесты для модуля."""
-    tests_dir = project_root / 'src' / 'multiprocess_framework' / 'refactored' / 'modules' / module_name / 'tests'
+    tests_dir = refactored_root / 'modules' / module_name / 'tests'
     
     if not tests_dir.exists():
         print(f"⚠️  Тесты для {module_name} не найдены: {tests_dir}")

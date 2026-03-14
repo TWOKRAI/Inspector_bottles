@@ -78,22 +78,45 @@ class ProcessManagers:
         router_manager.initialize()
         self.process.router_manager = router_manager
 
+        # 5. ConsoleManager (disabled по умолчанию)
+        from ...console_module import ConsoleManager
+        from ...console_module.core.console_config import ConsoleConfig
+        from ...console_module.adapters.console_adapter import ConsoleAdapter
+
+        console_cfg_dict = managers_config.get("console", {})
+        console_config = ConsoleConfig()
+        if isinstance(console_cfg_dict, dict):
+            for key, value in console_cfg_dict.items():
+                if hasattr(console_config, key):
+                    setattr(console_config, key, value)
+
+        self.process.console_manager = ConsoleManager(
+            manager_name=f"console_{self.process.name}",
+            config=console_config,
+            process=self.process,
+        )
+        self.process.console_manager.initialize()
+
         # Регистрируем менеджеры через ObservableMixin
         self.process.register_manager("worker", self.process.worker_manager, enabled=True)
         self.process.register_manager("logger", self.process.logger_manager, enabled=True)
         self.process.register_manager("command", self.process.command_manager, enabled=True)
         self.process.register_manager("router", self.process.router_manager, enabled=True)
+        self.process.register_manager("console", self.process.console_manager, enabled=console_config.enabled)
 
         # Создаём и прикрепляем адаптеры
         worker_adapter = WorkerAdapter(self.process.worker_manager, self.process)
         logger_adapter = LoggerAdapter(self.process.logger_manager, self.process)
         command_adapter = CommandAdapter(self.process.command_manager, self.process)
         router_adapter = RouterAdapter(self.process.router_manager, self.process)
+        console_adapter = ConsoleAdapter(self.process.console_manager, self.process)
 
         self.process.worker_manager.attach_adapter(worker_adapter, name="process")
         self.process.logger_manager.attach_adapter(logger_adapter, name="process")
         self.process.command_manager.attach_adapter(command_adapter, name="process")
         self.process.router_manager.attach_adapter(router_adapter, name="process")
+        self.process.console_manager.attach_adapter(console_adapter, name="process")
+        console_adapter.setup()
 
         # Обновляем EventManager в shared_resources с router_manager
         if (

@@ -1,10 +1,12 @@
 """
-Каналы для RouterManager.
+Каналы console_module.
+
+ConsoleLogChannel — канал для LoggerManager → ConsoleManager.write()
 """
 
-from .console_channel import ConsoleChannel
+from .console_log_channel import ConsoleLogChannel
 
 __all__ = [
-    "ConsoleChannel",
+    "ConsoleLogChannel",
 ]
 

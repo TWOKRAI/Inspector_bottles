@@ -1,102 +1,74 @@
 """
-Перенаправитель stdout/stderr в консоль.
+ConsoleRedirector — перенаправитель stdout/stderr в ConsoleManager.
 
-Поддерживает множественные получатели (дублирование в несколько консолей).
+Рефакторинг: убрана Queue; вместо неё прямой вызов console_manager.write().
+Сохраняет оригинальные sys.stdout / sys.stderr для restore().
 """
 import sys
-import queue
-from multiprocessing import Queue
-from typing import Optional, List, Union
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..interfaces import IConsoleManager
 
 
 class ConsoleRedirector:
     """
-    Перенаправитель вывода процесса в консоль(и).
-    
-    Поддерживает дублирование вывода в несколько консолей одновременно.
-    Может работать как file-like объект для sys.stdout и sys.stderr.
+    File-like объект, перенаправляющий вывод в ConsoleManager.write().
+
+    Использование:
+        redirector = ConsoleRedirector(console_manager)
+        sys.stdout = redirector
+        sys.stderr = redirector
+        ...
+        redirector.restore()
     """
-    
-    def __init__(self, output_queues: Union[Queue, List[Queue]], process_name: str):
-        """
-        Args:
-            output_queues: Один Queue или список Queue для отправки данных
-            process_name: Имя процесса для префикса
-        """
-        # Нормализуем в список
-        # Используем hasattr вместо isinstance для совместимости с multiprocessing.Queue
-        if hasattr(output_queues, 'put') and hasattr(output_queues, 'get'):
-            # Это один Queue объект
-            self.output_queues = [output_queues]
-        else:
-            # Это список или другой итерируемый объект
-            self.output_queues = list(output_queues) if output_queues else []
-        
-        self.process_name = process_name
-        self.original_stdout = sys.stdout
-        self.original_stderr = sys.stderr
+
+    def __init__(self, console_manager: "IConsoleManager") -> None:
+        self._console = console_manager
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
         self._closed = False
-    
-    def write(self, data: str):
-        """
-        Запись во все queues с префиксом имени процесса.
-        
-        Args:
-            data: Данные для записи
-        """
+
+    # -------------------------------------------------------------------------
+    # file-like interface
+    # -------------------------------------------------------------------------
+
+    def write(self, data: str) -> None:
         if self._closed or not data:
             return
-        
         try:
             if isinstance(data, bytes):
-                data = data.decode('utf-8', errors='replace')
-            
-            prefixed_data = f"[{self.process_name}] {data}"
-            
-            # Дублируем во все queues
-            for output_queue in self.output_queues:
-                try:
-                    output_queue.put(('stdout', prefixed_data), block=False)
-                except queue.Full:
-                    # Игнорируем полные очереди
-                    pass
-                except Exception:
-                    # Игнорируем ошибки отдельных очередей
-                    continue
+                data = data.decode("utf-8", errors="replace")
+            self._console.write(data, level="STDOUT")
         except Exception:
             self._closed = True
-    
-    def flush(self):
-        """Сброс буфера во все очереди."""
-        if self._closed:
-            return
-        
-        for output_queue in self.output_queues:
-            try:
-                output_queue.put(('flush', ''), block=False)
-            except Exception:
-                continue
-    
-    def close(self):
-        """Закрытие перенаправителя."""
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
         self._closed = True
-        for output_queue in self.output_queues:
-            try:
-                output_queue.put(('close', ''), block=False)
-            except Exception:
-                pass
-    
-    def restore(self):
-        """
-        Восстановить оригинальные stdout/stderr.
-        
-        Returns:
-            bool: True если восстановлено успешно
-        """
+
+    # -------------------------------------------------------------------------
+    # Восстановление
+    # -------------------------------------------------------------------------
+
+    def restore(self) -> bool:
+        """Восстановить оригинальные sys.stdout / sys.stderr."""
         try:
-            sys.stdout = self.original_stdout
-            sys.stderr = self.original_stderr
+            sys.stdout = self._original_stdout
+            sys.stderr = self._original_stderr
             return True
         except Exception:
             return False
 
+    # -------------------------------------------------------------------------
+    # Поддержка проверок is_atty и прочих атрибутов
+    # -------------------------------------------------------------------------
+
+    def isatty(self) -> bool:
+        return False
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._original_stdout, "encoding", "utf-8") or "utf-8"

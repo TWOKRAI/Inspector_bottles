@@ -90,6 +90,8 @@ class ProcessLifecycle:
                 self.process.worker_manager.stop_all_workers()
             
             # 4. Завершаем менеджеры
+            if self.process.console_manager:
+                self.process.console_manager.shutdown()
             if self.process.logger_manager:
                 self.process.logger_manager.shutdown()
             if self.process.command_manager:

@@ -89,6 +89,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.logger_manager = None
         self.command_manager = None
         self.router_manager = None
+        self.console_manager = None
 
         # Внутренние компоненты (композиция)
         self._lifecycle = ProcessLifecycle(self)
@@ -302,6 +303,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             'command': self.command_manager,
             'router': self.router_manager,
             'worker': self.worker_manager,
+            'console': self.console_manager,
         }
     
     @property

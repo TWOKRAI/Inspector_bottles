@@ -5,169 +5,11 @@ inspector_prototype.egg-info/dependency_links.txt
 inspector_prototype.egg-info/requires.txt
 inspector_prototype.egg-info/top_level.txt
 multiprocess_framework/__init__.py
-multiprocess_framework/examples/__init__.py
-multiprocess_framework/examples/chat_app.py
-multiprocess_framework/examples/chat_app_declarative.py
-multiprocess_framework/examples/multiprocess_chat_app copy.py
-multiprocess_framework/examples/multiprocess_chat_app.py
-multiprocess_framework/examples/pyqt_example.py
-multiprocess_framework/modules (no work!!!) go refactored/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Base_manager_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Base_manager_module/base_adapter.py
-multiprocess_framework/modules (no work!!!) go refactored/Base_manager_module/base_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Base_manager_module/manager_data.py
-multiprocess_framework/modules (no work!!!) go refactored/Base_manager_module/manager_extension_mixin.py
-multiprocess_framework/modules (no work!!!) go refactored/Base_manager_module/observable_mixin.py
-multiprocess_framework/modules (no work!!!) go refactored/Command_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Command_module/base_command_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Command_module/command_adapter.py
-multiprocess_framework/modules (no work!!!) go refactored/Command_module/command_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Config_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Config_module/base_config.py
-multiprocess_framework/modules (no work!!!) go refactored/Config_module/config_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Console_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Console_module/console_channel.py
-multiprocess_framework/modules (no work!!!) go refactored/Console_module/console_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Console_module/redirector.py
-multiprocess_framework/modules (no work!!!) go refactored/Console_module/window_process.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/base.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/dispatch_handler.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/dispatcher.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/scenario_builder.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/types.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/strategies/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/strategies/base_strategy.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/strategies/chain_match.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/strategies/exact_match.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/strategies/fallback_match.py
-multiprocess_framework/modules (no work!!!) go refactored/Dispatch_module/strategies/pattern_match.py
-multiprocess_framework/modules (no work!!!) go refactored/GUI_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/GUI_module/chat_gui.py
-multiprocess_framework/modules (no work!!!) go refactored/GUI_module/gui_process_module.py
-multiprocess_framework/modules (no work!!!) go refactored/GUI_module/window_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/batcher.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/channels.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/config.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/decorators.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/dispatcher.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/example.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/logger_adapter.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Logger_module/utils.py
-multiprocess_framework/modules (no work!!!) go refactored/Message_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Message_module/message.py
-multiprocess_framework/modules (no work!!!) go refactored/Message_module/message_types.py
-multiprocess_framework/modules (no work!!!) go refactored/Message_module/Tests/test.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/bootstrap/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/bootstrap/process_manager_bootstrap.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/builders/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/builders/configs.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/builders/decorators.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/builders/export.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/builders/registry.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/config/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/config/process_config.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/core/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/core/process_lifecycle.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/core/process_manager_core.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/core/process_priority.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/core/process_status.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/helpers/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/launcher/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/launcher/system_launcher.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/legacy/Processes_Manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/legacy/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/monitor/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/monitor/process_monitor.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/platforms/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/platforms/base.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/platforms/linux.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/platforms/windows.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/process/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/process/manager_process.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/runner/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_manager_module/runner/process_runner.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/communication.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/config_handler.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/core.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/managers.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/process_data.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/process_module.py
-multiprocess_framework/modules (no work!!!) go refactored/Process_module/process_state_registry.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/channel.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/router_adapter.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/router_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/channels/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/channels/fanout_channel.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/channels/queue_channel.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/extensions/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Router_module/extensions/register_routing.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/Memory_Manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/SharedResourcesManager.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/event_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/interfaces.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/queue_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/queue_registry.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/api/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/api/manager_adapter.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/api/simple_api.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/core/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/core/exceptions.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/core/interfaces.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/core/metrics.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/docs/examples/01_basic_usage.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/docs/examples/02_conversion.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/docs/examples/03_validation.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/factory/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/factory/dna_factory.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/factory/model_factory.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/models/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/models/base.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/models/dna.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/models/types.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/registry/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/registry/schema_registry.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/storage/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/storage/process_data_container.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/storage/storage_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/conftest.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_converters.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_factory.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_schema_documentation_generator.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_schema_registry.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_schema_visualizer.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_utils.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_validators.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tests/test_version_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tools/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tools/formatters.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tools/schema_documentation_generator.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tools/schema_visualizer.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/tools/examples/excel_formatter.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/utils/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/utils/converters.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/utils/helpers.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/utils/migration.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/utils/reference.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/utils/validators.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/versioning/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Shared_resources_module/data_schema/versioning/version_manager.py
-multiprocess_framework/modules (no work!!!) go refactored/Worker_module/__init__.py
-multiprocess_framework/modules (no work!!!) go refactored/Worker_module/worker_manager.py
 multiprocess_framework/refactored/__init__.py
 multiprocess_framework/refactored/run_all_tests.py
 multiprocess_framework/refactored/core/__init__.py
 multiprocess_framework/refactored/core/interfaces.py
 multiprocess_framework/refactored/core/logging_facade.py
-multiprocess_framework/refactored/docs/check_module.py
 multiprocess_framework/refactored/modules/__init__.py
 multiprocess_framework/refactored/modules/base_manager/__init__.py
 multiprocess_framework/refactored/modules/base_manager/interfaces.py
@@ -195,12 +37,28 @@ multiprocess_framework/refactored/modules/base_manager/mixins/proxies/__init__.p
 multiprocess_framework/refactored/modules/base_manager/mixins/proxies/proxy_creator.py
 multiprocess_framework/refactored/modules/base_manager/tests/__init__.py
 multiprocess_framework/refactored/modules/base_manager/tests/test_base_manager.py
+multiprocess_framework/refactored/modules/base_manager/tests/test_mixin_integration.py
 multiprocess_framework/refactored/modules/base_manager/tests/test_observable_mixin.py
 multiprocess_framework/refactored/modules/base_manager/tests/test_plugin_system.py
-multiprocess_framework/refactored/modules/base_manager/tests/test_refactored_mixin.py
 multiprocess_framework/refactored/modules/base_manager/types/__init__.py
 multiprocess_framework/refactored/modules/base_manager/utils/__init__.py
 multiprocess_framework/refactored/modules/base_manager/utils/name_utils.py
+multiprocess_framework/refactored/modules/channel_routing_module/__init__.py
+multiprocess_framework/refactored/modules/channel_routing_module/interfaces.py
+multiprocess_framework/refactored/modules/channel_routing_module/buffers/__init__.py
+multiprocess_framework/refactored/modules/channel_routing_module/buffers/async_sender_buffer.py
+multiprocess_framework/refactored/modules/channel_routing_module/buffers/base_buffer.py
+multiprocess_framework/refactored/modules/channel_routing_module/buffers/batch_buffer.py
+multiprocess_framework/refactored/modules/channel_routing_module/buffers/direct_buffer.py
+multiprocess_framework/refactored/modules/channel_routing_module/core/__init__.py
+multiprocess_framework/refactored/modules/channel_routing_module/core/channel_registry.py
+multiprocess_framework/refactored/modules/channel_routing_module/core/channel_routing_manager.py
+multiprocess_framework/refactored/modules/channel_routing_module/core/config.py
+multiprocess_framework/refactored/modules/channel_routing_module/core/config_normalizer.py
+multiprocess_framework/refactored/modules/channel_routing_module/tests/__init__.py
+multiprocess_framework/refactored/modules/channel_routing_module/tests/test_buffers.py
+multiprocess_framework/refactored/modules/channel_routing_module/tests/test_channel_registry.py
+multiprocess_framework/refactored/modules/channel_routing_module/tests/test_channel_routing_manager.py
 multiprocess_framework/refactored/modules/command_module/__init__.py
 multiprocess_framework/refactored/modules/command_module/interfaces.py
 multiprocess_framework/refactored/modules/command_module/adapters/__init__.py
@@ -214,6 +72,8 @@ multiprocess_framework/refactored/modules/command_module/tests/test_command_adap
 multiprocess_framework/refactored/modules/command_module/tests/test_command_manager.py
 multiprocess_framework/refactored/modules/config_module/__init__.py
 multiprocess_framework/refactored/modules/config_module/interfaces.py
+multiprocess_framework/refactored/modules/config_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/config_module/adapters/schema_adapter.py
 multiprocess_framework/refactored/modules/config_module/core/__init__.py
 multiprocess_framework/refactored/modules/config_module/core/base_config.py
 multiprocess_framework/refactored/modules/config_module/core/config_manager.py
@@ -225,33 +85,64 @@ multiprocess_framework/refactored/modules/config_module/tests/test_config_manage
 multiprocess_framework/refactored/modules/config_module/tests/test_config_section.py
 multiprocess_framework/refactored/modules/console_module/__init__.py
 multiprocess_framework/refactored/modules/console_module/interfaces.py
-multiprocess_framework/refactored/modules/console_module/test_basic.py
+multiprocess_framework/refactored/modules/console_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/console_module/adapters/console_adapter.py
 multiprocess_framework/refactored/modules/console_module/channels/__init__.py
-multiprocess_framework/refactored/modules/console_module/channels/console_channel.py
+multiprocess_framework/refactored/modules/console_module/channels/console_log_channel.py
+multiprocess_framework/refactored/modules/console_module/configs/__init__.py
+multiprocess_framework/refactored/modules/console_module/configs/console_process_config.py
 multiprocess_framework/refactored/modules/console_module/core/__init__.py
+multiprocess_framework/refactored/modules/console_module/core/console_config.py
 multiprocess_framework/refactored/modules/console_module/core/console_manager.py
-multiprocess_framework/refactored/modules/console_module/processes/__init__.py
-multiprocess_framework/refactored/modules/console_module/processes/window_process.py
+multiprocess_framework/refactored/modules/console_module/platforms/__init__.py
+multiprocess_framework/refactored/modules/console_module/platforms/base.py
+multiprocess_framework/refactored/modules/console_module/platforms/unix.py
+multiprocess_framework/refactored/modules/console_module/platforms/windows.py
 multiprocess_framework/refactored/modules/console_module/redirectors/__init__.py
 multiprocess_framework/refactored/modules/console_module/redirectors/console_redirector.py
 multiprocess_framework/refactored/modules/console_module/tests/__init__.py
-multiprocess_framework/refactored/modules/console_module/tests/test_console_channel.py
+multiprocess_framework/refactored/modules/console_module/tests/test_console_adapter.py
+multiprocess_framework/refactored/modules/console_module/tests/test_console_log_channel.py
 multiprocess_framework/refactored/modules/console_module/tests/test_console_manager.py
 multiprocess_framework/refactored/modules/console_module/tests/test_console_redirector.py
+multiprocess_framework/refactored/modules/console_module/tests/test_platforms.py
 multiprocess_framework/refactored/modules/data_schema_module/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/_compat.py
+multiprocess_framework/refactored/modules/data_schema_module/interfaces.py
 multiprocess_framework/refactored/modules/data_schema_module/api/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/api/manager_adapter.py
 multiprocess_framework/refactored/modules/data_schema_module/api/simple_api.py
+multiprocess_framework/refactored/modules/data_schema_module/container/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/container/config_converters.py
+multiprocess_framework/refactored/modules/data_schema_module/container/registers_container.py
 multiprocess_framework/refactored/modules/data_schema_module/core/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/core/exceptions.py
+multiprocess_framework/refactored/modules/data_schema_module/core/field_meta.py
+multiprocess_framework/refactored/modules/data_schema_module/core/field_routing.py
+multiprocess_framework/refactored/modules/data_schema_module/core/field_types.py
+multiprocess_framework/refactored/modules/data_schema_module/core/helpers.py
 multiprocess_framework/refactored/modules/data_schema_module/core/interfaces.py
 multiprocess_framework/refactored/modules/data_schema_module/core/metrics.py
+multiprocess_framework/refactored/modules/data_schema_module/core/reference.py
+multiprocess_framework/refactored/modules/data_schema_module/core/schema_base.py
+multiprocess_framework/refactored/modules/data_schema_module/core/schema_mixin.py
+multiprocess_framework/refactored/modules/data_schema_module/core/validators.py
 multiprocess_framework/refactored/modules/data_schema_module/docs/examples/00_quickstart.py
 multiprocess_framework/refactored/modules/data_schema_module/docs/examples/01_basic_usage.py
 multiprocess_framework/refactored/modules/data_schema_module/docs/examples/02_conversion.py
 multiprocess_framework/refactored/modules/data_schema_module/docs/examples/03_registers_and_data_packages.py
 multiprocess_framework/refactored/modules/data_schema_module/docs/examples/03_validation.py
 multiprocess_framework/refactored/modules/data_schema_module/docs/examples/04_field_meta_registers.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/manager_adapter.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/metrics.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/process_data_container.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/simple_api.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/storage_manager.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/versioning.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/factory/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/models/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/extensions/tools/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/factory/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/factory/dna_factory.py
 multiprocess_framework/refactored/modules/data_schema_module/factory/model_factory.py
@@ -266,10 +157,15 @@ multiprocess_framework/refactored/modules/data_schema_module/models/base.py
 multiprocess_framework/refactored/modules/data_schema_module/models/dna.py
 multiprocess_framework/refactored/modules/data_schema_module/models/types.py
 multiprocess_framework/refactored/modules/data_schema_module/registry/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/registry/discovery.py
 multiprocess_framework/refactored/modules/data_schema_module/registry/process_registry.py
 multiprocess_framework/refactored/modules/data_schema_module/registry/register_discovery.py
 multiprocess_framework/refactored/modules/data_schema_module/registry/registers_scanner.py
 multiprocess_framework/refactored/modules/data_schema_module/registry/schema_registry.py
+multiprocess_framework/refactored/modules/data_schema_module/serialization/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/serialization/converter.py
+multiprocess_framework/refactored/modules/data_schema_module/serialization/file_storage.py
+multiprocess_framework/refactored/modules/data_schema_module/serialization/io.py
 multiprocess_framework/refactored/modules/data_schema_module/storage/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/storage/file_storage.py
 multiprocess_framework/refactored/modules/data_schema_module/storage/process_data_container.py
@@ -277,20 +173,48 @@ multiprocess_framework/refactored/modules/data_schema_module/storage/storage_man
 multiprocess_framework/refactored/modules/data_schema_module/tests/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/conftest.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_config_converters.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_config_converters_new.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_container.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_converter.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_converters.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_factory.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_field_meta.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_field_types.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_integration.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_io.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_process_registry.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_register_discovery.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_registers_io.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_registers_scanner.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_registry.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/test_schema_base.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_schema_documentation_generator.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_schema_registry.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_schema_visualizer.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_utils.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_validators.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/test_version_manager.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/extensions/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/extensions/test_models.py
+multiprocess_framework/refactored/modules/data_schema_module/tests/extensions/test_versioning.py
 multiprocess_framework/refactored/modules/data_schema_module/tests/fixtures/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/__init__.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/conftest.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_config_converters.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_converters.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_factory.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_field_meta.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_process_registry.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_register_discovery.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_registers_io.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_registers_scanner.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_schema_documentation_generator.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_schema_registry.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_schema_visualizer.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_utils.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_validators.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/test_version_manager.py
+multiprocess_framework/refactored/modules/data_schema_module/tests_backup/fixtures/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/tools/__init__.py
 multiprocess_framework/refactored/modules/data_schema_module/tools/formatters.py
 multiprocess_framework/refactored/modules/data_schema_module/tools/schema_documentation_generator.py
@@ -327,6 +251,7 @@ multiprocess_framework/refactored/modules/dispatch_module/tests/test_types.py
 multiprocess_framework/refactored/modules/dispatch_module/types/__init__.py
 multiprocess_framework/refactored/modules/dispatch_module/types/types.py
 multiprocess_framework/refactored/modules/error_module/__init__.py
+multiprocess_framework/refactored/modules/error_module/interfaces.py
 multiprocess_framework/refactored/modules/error_module/config/__init__.py
 multiprocess_framework/refactored/modules/error_module/config/error_config.py
 multiprocess_framework/refactored/modules/error_module/core/__init__.py
@@ -349,6 +274,8 @@ multiprocess_framework/refactored/modules/logger_module/core/logger_manager.py
 multiprocess_framework/refactored/modules/logger_module/tests/test_logger_manager.py
 multiprocess_framework/refactored/modules/message_module/__init__.py
 multiprocess_framework/refactored/modules/message_module/interfaces.py
+multiprocess_framework/refactored/modules/message_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/message_module/adapters/message_adapter.py
 multiprocess_framework/refactored/modules/message_module/converters/__init__.py
 multiprocess_framework/refactored/modules/message_module/converters/message_converter.py
 multiprocess_framework/refactored/modules/message_module/core/__init__.py
@@ -360,6 +287,7 @@ multiprocess_framework/refactored/modules/message_module/schemas/base.py
 multiprocess_framework/refactored/modules/message_module/schemas/command.py
 multiprocess_framework/refactored/modules/message_module/schemas/log.py
 multiprocess_framework/refactored/modules/message_module/tests/__init__.py
+multiprocess_framework/refactored/modules/message_module/tests/test_adapter.py
 multiprocess_framework/refactored/modules/message_module/tests/test_message.py
 multiprocess_framework/refactored/modules/message_module/tests/test_schemas.py
 multiprocess_framework/refactored/modules/message_module/types/__init__.py
@@ -370,6 +298,9 @@ multiprocess_framework/refactored/modules/message_module/utils/utils.py
 multiprocess_framework/refactored/modules/message_module/validators/__init__.py
 multiprocess_framework/refactored/modules/message_module/validators/message_validator.py
 multiprocess_framework/refactored/modules/process_manager_module/__init__.py
+multiprocess_framework/refactored/modules/process_manager_module/interfaces.py
+multiprocess_framework/refactored/modules/process_manager_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/process_manager_module/adapters/schema_adapter.py
 multiprocess_framework/refactored/modules/process_manager_module/core/__init__.py
 multiprocess_framework/refactored/modules/process_manager_module/core/process_priority.py
 multiprocess_framework/refactored/modules/process_manager_module/core/process_registry.py
@@ -387,12 +318,21 @@ multiprocess_framework/refactored/modules/process_manager_module/process/process
 multiprocess_framework/refactored/modules/process_manager_module/runner/__init__.py
 multiprocess_framework/refactored/modules/process_manager_module/runner/process_runner.py
 multiprocess_framework/refactored/modules/process_manager_module/tests/__init__.py
+multiprocess_framework/refactored/modules/process_manager_module/tests/test_interfaces.py
+multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_manager_process.py
+multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_monitor.py
 multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_priority.py
 multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_registry.py
+multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_runner.py
 multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_spawner.py
 multiprocess_framework/refactored/modules/process_manager_module/tests/test_process_status.py
+multiprocess_framework/refactored/modules/process_manager_module/tests/test_schema_adapter.py
 multiprocess_framework/refactored/modules/process_manager_module/tests/test_system_launcher.py
 multiprocess_framework/refactored/modules/process_module/__init__.py
+multiprocess_framework/refactored/modules/process_module/interfaces.py
+multiprocess_framework/refactored/modules/process_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/process_module/adapters/process_adapter.py
+multiprocess_framework/refactored/modules/process_module/adapters/schema_adapter.py
 multiprocess_framework/refactored/modules/process_module/communication/__init__.py
 multiprocess_framework/refactored/modules/process_module/communication/process_communication.py
 multiprocess_framework/refactored/modules/process_module/config/__init__.py
@@ -408,9 +348,15 @@ multiprocess_framework/refactored/modules/process_module/state/process_data.py
 multiprocess_framework/refactored/modules/process_module/state/process_state.py
 multiprocess_framework/refactored/modules/process_module/state/process_state_registry.py
 multiprocess_framework/refactored/modules/process_module/tests/__init__.py
+multiprocess_framework/refactored/modules/process_module/tests/test_process_communication.py
+multiprocess_framework/refactored/modules/process_module/tests/test_process_config.py
+multiprocess_framework/refactored/modules/process_module/tests/test_process_lifecycle.py
 multiprocess_framework/refactored/modules/process_module/tests/test_process_module.py
+multiprocess_framework/refactored/modules/process_module/tests/test_types.py
 multiprocess_framework/refactored/modules/process_module/threads/__init__.py
 multiprocess_framework/refactored/modules/process_module/threads/system_threads.py
+multiprocess_framework/refactored/modules/process_module/types/__init__.py
+multiprocess_framework/refactored/modules/process_module/types/types.py
 multiprocess_framework/refactored/modules/registers_module/__init__.py
 multiprocess_framework/refactored/modules/registers_module/interfaces.py
 multiprocess_framework/refactored/modules/registers_module/manager.py
@@ -419,6 +365,7 @@ multiprocess_framework/refactored/modules/router_module/__init__.py
 multiprocess_framework/refactored/modules/router_module/interfaces.py
 multiprocess_framework/refactored/modules/router_module/adapters/__init__.py
 multiprocess_framework/refactored/modules/router_module/adapters/router_adapter.py
+multiprocess_framework/refactored/modules/router_module/adapters/schema_adapter.py
 multiprocess_framework/refactored/modules/router_module/channels/__init__.py
 multiprocess_framework/refactored/modules/router_module/channels/base_channel.py
 multiprocess_framework/refactored/modules/router_module/channels/queue_channel.py
@@ -432,6 +379,11 @@ multiprocess_framework/refactored/modules/router_module/tests/__init__.py
 multiprocess_framework/refactored/modules/router_module/tests/test_channels.py
 multiprocess_framework/refactored/modules/router_module/tests/test_router_manager.py
 multiprocess_framework/refactored/modules/shared_resources_module/__init__.py
+multiprocess_framework/refactored/modules/shared_resources_module/interfaces.py
+multiprocess_framework/refactored/modules/shared_resources_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/shared_resources_module/adapters/data_schema_adapter.py
+multiprocess_framework/refactored/modules/shared_resources_module/config/__init__.py
+multiprocess_framework/refactored/modules/shared_resources_module/config/config_store.py
 multiprocess_framework/refactored/modules/shared_resources_module/core/__init__.py
 multiprocess_framework/refactored/modules/shared_resources_module/core/interfaces.py
 multiprocess_framework/refactored/modules/shared_resources_module/core/shared_resources_manager.py
@@ -443,12 +395,25 @@ multiprocess_framework/refactored/modules/shared_resources_module/queues/__init_
 multiprocess_framework/refactored/modules/shared_resources_module/queues/queue_registry.py
 multiprocess_framework/refactored/modules/shared_resources_module/registry/__init__.py
 multiprocess_framework/refactored/modules/shared_resources_module/registry/data_schema_adapter.py
+multiprocess_framework/refactored/modules/shared_resources_module/state/__init__.py
+multiprocess_framework/refactored/modules/shared_resources_module/state/process_data.py
+multiprocess_framework/refactored/modules/shared_resources_module/state/process_state_registry.py
 multiprocess_framework/refactored/modules/shared_resources_module/tests/__init__.py
+multiprocess_framework/refactored/modules/shared_resources_module/tests/test_config_store.py
 multiprocess_framework/refactored/modules/shared_resources_module/tests/test_event_manager.py
 multiprocess_framework/refactored/modules/shared_resources_module/tests/test_memory_manager.py
+multiprocess_framework/refactored/modules/shared_resources_module/tests/test_process_data.py
+multiprocess_framework/refactored/modules/shared_resources_module/tests/test_process_state_registry.py
 multiprocess_framework/refactored/modules/shared_resources_module/tests/test_queue_registry.py
 multiprocess_framework/refactored/modules/shared_resources_module/tests/test_shared_resources_manager.py
+multiprocess_framework/refactored/modules/shared_resources_module/tests/test_types.py
+multiprocess_framework/refactored/modules/shared_resources_module/types/__init__.py
+multiprocess_framework/refactored/modules/shared_resources_module/types/types.py
 multiprocess_framework/refactored/modules/worker_module/__init__.py
+multiprocess_framework/refactored/modules/worker_module/interfaces.py
+multiprocess_framework/refactored/modules/worker_module/adapters/__init__.py
+multiprocess_framework/refactored/modules/worker_module/adapters/schema_adapter.py
+multiprocess_framework/refactored/modules/worker_module/adapters/worker_adapter.py
 multiprocess_framework/refactored/modules/worker_module/core/__init__.py
 multiprocess_framework/refactored/modules/worker_module/core/thread_config.py
 multiprocess_framework/refactored/modules/worker_module/core/worker_manager.py
@@ -457,7 +422,14 @@ multiprocess_framework/refactored/modules/worker_module/lifecycle/worker_lifecyc
 multiprocess_framework/refactored/modules/worker_module/registry/__init__.py
 multiprocess_framework/refactored/modules/worker_module/registry/worker_registry.py
 multiprocess_framework/refactored/modules/worker_module/tests/__init__.py
+multiprocess_framework/refactored/modules/worker_module/tests/test_thread_config.py
+multiprocess_framework/refactored/modules/worker_module/tests/test_types.py
+multiprocess_framework/refactored/modules/worker_module/tests/test_worker_adapter.py
+multiprocess_framework/refactored/modules/worker_module/tests/test_worker_lifecycle.py
 multiprocess_framework/refactored/modules/worker_module/tests/test_worker_manager.py
+multiprocess_framework/refactored/modules/worker_module/tests/test_worker_registry.py
+multiprocess_framework/refactored/modules/worker_module/types/__init__.py
+multiprocess_framework/refactored/modules/worker_module/types/types.py
 multiprocess_framework/refactored/tests/__init__.py
 multiprocess_framework/refactored/tests/test_base_manager_integration.py
 multiprocess_framework/refactored/tests/test_triada_integration.py
