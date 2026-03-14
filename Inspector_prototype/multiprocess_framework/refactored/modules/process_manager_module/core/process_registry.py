@@ -138,36 +138,53 @@ class ProcessRegistry:
                 if self.logger:
                     self.logger._log_error(f"Failed to start process {process.name}: {e}")
 
-    def stop_all(self, timeout: float = 3.0) -> None:
-        """Корректно остановить все процессы."""
+    def stop_all(self, timeout: float = 5.0) -> None:
+        """
+        Graceful остановка всех процессов.
+
+        Каскад для каждого процесса:
+            stop_event.set() → join(timeout) → terminate → join(1s) → kill
+
+        Args:
+            timeout: Время ожидания join для каждого процесса (секунды).
+        """
         if self.logger:
-            self.logger._log_info("Stopping all processes...")
+            self.logger._log_info(f"Stopping all processes (timeout={timeout}s)...")
         self.stop_event.set()
         self._join_all(timeout)
+
         for process in self.os_processes:
             if process.is_alive():
                 if self.logger:
-                    self.logger._log_warning(f"Terminating process {process.name}")
+                    self.logger._log_warning(
+                        f"Process '{process.name}' did not stop in {timeout}s, terminating..."
+                    )
                 try:
                     process.terminate()
-                    time.sleep(0.1)
+                    process.join(timeout=1.0)
                 except Exception as e:
                     if self.logger:
-                        self.logger._log_warning(f"Error terminating {process.name}: {e}")
+                        self.logger._log_warning(f"Error terminating '{process.name}': {e}")
+
         for process in self.os_processes:
             if process.is_alive():
                 if self.logger:
-                    self.logger._log_error(f"Force killing process {process.name}")
+                    self.logger._log_error(f"Force killing process '{process.name}'")
                 try:
                     process.kill()
                 except Exception as e:
                     if self.logger:
-                        self.logger._log_error(f"Error killing {process.name}: {e}")
+                        self.logger._log_error(f"Error killing '{process.name}': {e}")
+
         if self.logger:
             self.logger._log_info("All processes stopped")
 
-    def _join_all(self, timeout: float = 3.0) -> None:
-        """Ожидать завершения всех процессов."""
+    def _join_all(self, timeout: float = 5.0) -> None:
+        """Ожидать завершения всех процессов с логированием."""
         for process in self.os_processes:
             if process.is_alive():
+                if self.logger:
+                    self.logger._log_info(f"Waiting for process '{process.name}' (timeout={timeout}s)...")
                 process.join(timeout=timeout)
+                if process.is_alive() and self.logger:
+                    self.logger._log_warning(f"Process '{process.name}' still alive after join")

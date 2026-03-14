@@ -108,3 +108,42 @@ class TestSystemLauncher:
         assert proc_dict["priority"] == "normal"
         assert "workers" in proc_dict
         assert proc_dict["workers"] == {}
+
+    def test_init_with_stop_timeout(self) -> None:
+        """Инициализация с кастомным stop_timeout."""
+        launcher = SystemLauncher(stop_timeout=10.0)
+        assert launcher._stop_timeout == 10.0
+
+    def test_init_with_on_shutdown_callback(self) -> None:
+        """Инициализация с on_shutdown callback."""
+        from unittest.mock import MagicMock
+        callback = MagicMock()
+        launcher = SystemLauncher(on_shutdown=callback)
+        assert launcher._on_shutdown is callback
+
+    def test_create_spawner_passes_timeout(self) -> None:
+        """_create_spawner передаёт stop_timeout в ProcessSpawner."""
+        from unittest.mock import patch
+        launcher = SystemLauncher(stop_timeout=7.0)
+        with patch("multiprocess_framework.refactored.modules.process_manager_module.launcher.system_launcher.ProcessSpawner") as mock_spawner_cls:
+            mock_spawner_cls.return_value = MagicMock()
+            launcher._create_spawner({})
+            call_kwargs = mock_spawner_cls.call_args[1]
+            assert call_kwargs.get("stop_timeout") == 7.0
+
+    def test_stop_calls_spawner_stop(self) -> None:
+        """stop() вызывает spawner.stop()."""
+        from unittest.mock import MagicMock
+        launcher = SystemLauncher()
+        mock_spawner = MagicMock()
+        launcher._spawner = mock_spawner
+        launcher.stop()
+        mock_spawner.stop.assert_called_once()
+
+    def test_shutdown_is_alias_for_stop(self) -> None:
+        """shutdown() вызывает stop()."""
+        from unittest.mock import MagicMock, patch
+        launcher = SystemLauncher()
+        with patch.object(launcher, "stop") as mock_stop:
+            launcher.shutdown()
+            mock_stop.assert_called_once()

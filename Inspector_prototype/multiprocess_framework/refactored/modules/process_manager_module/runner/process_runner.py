@@ -1,5 +1,5 @@
 """
-Функции-обертки для запуска процессов (Top-level для сериализации).
+Функции-обёртки для запуска процессов (Top-level для сериализации).
 
 Отвечает за:
 - Создание процессов внутри целевого процесса ОС
@@ -11,179 +11,340 @@ Connection bundle: передаём только picklable (queues, config, cust
 
 import time
 import importlib
+import traceback
 from multiprocessing import Event
 from typing import Optional, Union, Dict, Any
 
 from multiprocess_framework.refactored.modules.shared_resources_module import SharedResourcesManager
 
 
+# ---------------------------------------------------------------------------
+# Вспомогательный логгер (не требует инициализации LoggerManager)
+# ---------------------------------------------------------------------------
+
+class _ProcessLogger:
+    """Лёгкий логгер: использует LoggerManager если доступен, иначе print."""
+
+    def __init__(self, process_name: str, logger_manager=None):
+        self._name = process_name
+        self._lm = logger_manager
+
+    def info(self, msg: str) -> None:
+        if self._lm:
+            self._lm.info(msg, module=self._name)
+        else:
+            print(f"[{self._name}] {msg}", flush=True)
+
+    def warning(self, msg: str) -> None:
+        if self._lm:
+            self._lm.warning(msg, module=self._name)
+        else:
+            print(f"[{self._name}] WARNING: {msg}", flush=True)
+
+    def error(self, msg: str) -> None:
+        if self._lm:
+            self._lm.error(msg, module=self._name)
+        else:
+            print(f"[{self._name}] ERROR: {msg}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
+
+def _load_process_class(class_path: str, log: _ProcessLogger):
+    """
+    Загрузить класс процесса по пути.
+
+    Args:
+        class_path: Полный путь к классу (например, 'my_module.MyProcess').
+        log: Логгер.
+
+    Returns:
+        Класс или None при ошибке.
+    """
+    try:
+        module_path, class_name = class_path.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        return getattr(module, class_name)
+    except (ImportError, AttributeError, ValueError) as e:
+        log.error(f"Failed to load process class '{class_path}': {e}")
+        traceback.print_exc()
+        return None
+
+
+def _build_shared_resources_from_bundle(
+    process_name: str,
+    bundle: Dict[str, Any],
+) -> SharedResourcesManager:
+    """
+    Построить SharedResourcesManager из connection bundle внутри дочернего процесса.
+
+    Args:
+        process_name: Имя процесса.
+        bundle: Dict с ключами queues, config, custom, routing_map.
+
+    Returns:
+        Инициализированный SharedResourcesManager.
+    """
+    shared_resources = SharedResourcesManager()
+    queues = bundle.get("queues", {})
+    process_config = bundle.get("config", {})
+    custom = dict(bundle.get("custom", {}))
+    custom.setdefault("process_config", process_config)
+
+    shared_resources.register_process_state(
+        process_name,
+        initial_state={"custom": custom},
+        config={"process": process_config, "managers": process_config.get("managers", {})},
+    )
+    for qtype, q in queues.items():
+        shared_resources.process_state_registry.add_queue(process_name, qtype, q)
+
+    routing_map = bundle.get("routing_map", {})
+    for target_name, target_queues in routing_map.items():
+        if target_name == process_name:
+            continue
+        shared_resources.register_process_state(target_name)
+        for qtype, q in (target_queues or {}).items():
+            shared_resources.process_state_registry.add_queue(target_name, qtype, q)
+
+    return shared_resources
+
+
+def _setup_console_redirect(process_name: str, process_data, log: _ProcessLogger):
+    """
+    Настроить перенаправление stdout/stderr если в custom есть console_queues.
+
+    Args:
+        process_name: Имя процесса.
+        process_data: ProcessData из shared_resources.
+        log: Логгер.
+
+    Returns:
+        Экземпляр ConsoleRedirector или None.
+    """
+    if not (process_data and process_data.custom):
+        return None
+    custom = process_data.custom
+    if "console_queues" not in custom and "console_queue" not in custom:
+        return None
+
+    try:
+        import sys
+        from multiprocess_framework.refactored.modules.console_module import ConsoleRedirector
+
+        if "console_queues" in custom:
+            output_queues = custom["console_queues"]
+            redirector = ConsoleRedirector(output_queues, process_name)
+        else:
+            output_queue = custom["console_queue"]
+            redirector = ConsoleRedirector(output_queue, process_name)
+
+        sys.stdout = redirector
+        sys.stderr = redirector
+        log.info("Console redirect enabled")
+        return redirector
+    except Exception as e:
+        log.warning(f"Failed to setup console redirect: {e}")
+        return None
+
+
+def _run_lifecycle(
+    process_instance,
+    stop_event: Optional[Event],
+    log: _ProcessLogger,
+) -> None:
+    """
+    Запустить жизненный цикл процесса: run() + ожидание stop_event.
+
+    Объединяет два цикла в один: run() вызывается, затем ждём stop_event
+    или should_stop(). Если run() не определён — сразу ждём.
+
+    Args:
+        process_instance: Экземпляр процесса.
+        stop_event: multiprocessing.Event для остановки.
+        log: Логгер.
+    """
+    if hasattr(process_instance, "run"):
+        process_instance.run()
+
+    while True:
+        if stop_event and stop_event.is_set():
+            log.info("Stop signal received")
+            if hasattr(process_instance, "stop"):
+                process_instance.stop()
+            break
+        if hasattr(process_instance, "should_stop") and process_instance.should_stop():
+            break
+        time.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции для error_module
+# ---------------------------------------------------------------------------
+
+def _log_exception_via_error_manager(
+    shared_resources,
+    exc: Exception,
+    context: str,
+) -> None:
+    """
+    Логировать исключение через ErrorManager из shared_resources если доступен.
+
+    Args:
+        shared_resources: SharedResourcesManager или None.
+        exc: Исключение.
+        context: Контекстное сообщение.
+    """
+    if not shared_resources:
+        return
+    try:
+        from multiprocess_framework.refactored.modules.error_module import ErrorManager
+        for process_name in shared_resources.process_state_registry.get_process_names():
+            process_data = shared_resources.get_process_data(process_name)
+            if process_data and process_data.custom:
+                error_manager = process_data.custom.get("error_manager")
+                if isinstance(error_manager, ErrorManager):
+                    error_manager.log_exception(exc, context, module="process_runner")
+                    return
+    except Exception:
+        pass
+
+
+def _update_process_state(
+    shared_resources,
+    process_name: str,
+    state: str,
+) -> None:
+    """
+    Обновить состояние процесса в shared_resources.
+
+    Args:
+        shared_resources: SharedResourcesManager или None.
+        process_name: Имя процесса.
+        state: Новое состояние (например, 'error').
+    """
+    if not shared_resources:
+        return
+    try:
+        process_data = shared_resources.get_process_data(process_name)
+        if process_data and hasattr(process_data, "state"):
+            if isinstance(process_data.state, dict):
+                process_data.state["status"] = state
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Основная функция
+# ---------------------------------------------------------------------------
+
 def run_process_function(
     class_path: str,
     process_name: str,
     stop_event: Optional[Event] = None,
-    shared_resources_or_bundle: Optional[Union[SharedResourcesManager, Dict[str, Any]]] = None
+    shared_resources_or_bundle: Optional[Union[SharedResourcesManager, Dict[str, Any]]] = None,
 ):
     """
-    Top-level функция для запуска процесса.
-    Создает все объекты внутри целевого процесса (важно для Windows spawn).
-    
+    Top-level функция для запуска процесса внутри OS-процесса.
+
+    Создаёт все объекты внутри целевого процесса (важно для Windows spawn).
+
+    Режимы работы:
+        - Bundle mode: shared_resources_or_bundle — dict с queues/config/custom.
+          SharedResourcesManager создаётся внутри процесса (pickle-safe).
+        - SRM mode: shared_resources_or_bundle — SharedResourcesManager (для тестов).
+
     Args:
-        class_path: Путь к классу процесса (например, 'module.path.ClassName')
-        process_name: Имя процесса
-        stop_event: Событие остановки (multiprocessing.Event)
-        shared_resources_or_bundle: SharedResourcesManager ИЛИ connection bundle
-            (dict с keys: queues, config, custom) — только picklable, без RLock
+        class_path: Путь к классу процесса (например, 'module.path.ClassName').
+        process_name: Имя процесса.
+        stop_event: Событие остановки (multiprocessing.Event).
+        shared_resources_or_bundle: SharedResourcesManager ИЛИ connection bundle.
     """
+    log = _ProcessLogger(process_name)
     redirector = None
+    process_instance = None
+    shared_resources = None
+
     try:
-        print(f"[{process_name}] Process starting...", flush=True)
-        
-        try:
-            module_path, class_name = class_path.rsplit('.', 1)
-            module = importlib.import_module(module_path)
-            process_class = getattr(module, class_name)
-        except (ImportError, AttributeError, ValueError) as e:
-            print(f"[{process_name}] Failed to load process class '{class_path}': {e}")
-            import traceback
-            traceback.print_exc()
+        log.info("Process starting...")
+
+        process_class = _load_process_class(class_path, log)
+        if process_class is None:
             return
-        
-        # Connection bundle: строим SharedResourcesManager в дочернем процессе
+
+        # Построить shared_resources
         if isinstance(shared_resources_or_bundle, dict):
-            shared_resources = SharedResourcesManager()
-            bundle = shared_resources_or_bundle
-            queues = bundle.get("queues", {})
-            process_config = bundle.get("config", {})
-            custom = dict(bundle.get("custom", {}))
-            custom.setdefault("process_config", process_config)
-            shared_resources.register_process_state(
-                process_name,
-                initial_state={"custom": custom},
-                config={"process": process_config, "managers": process_config.get("managers", {})}
+            shared_resources = _build_shared_resources_from_bundle(
+                process_name, shared_resources_or_bundle
             )
-            for qtype, q in queues.items():
-                shared_resources.process_state_registry.add_queue(process_name, qtype, q)
-            # Телефонная книга: добавляем очереди всех процессов из routing_map
-            routing_map = bundle.get("routing_map", {})
-            for target_name, target_queues in routing_map.items():
-                if target_name == process_name:
-                    continue
-                shared_resources.register_process_state(target_name)
-                for qtype, q in (target_queues or {}).items():
-                    shared_resources.process_state_registry.add_queue(target_name, qtype, q)
-                    if qtype == "worker_in":
-                        print(f"[{process_name}] routing_map: {target_name}.{qtype} queue_id={id(q)} handle={getattr(q._reader, 'fileno', lambda: '?')()}", flush=True)
-            # Own queues diagnostic
-            for qtype, q in queues.items():
-                if qtype == "worker_in":
-                    print(f"[{process_name}] own queue: {qtype} queue_id={id(q)} handle={getattr(q._reader, 'fileno', lambda: '?')()}", flush=True)
-            process_data = shared_resources.get_process_data(process_name)
         else:
             shared_resources = shared_resources_or_bundle or SharedResourcesManager()
             process_data = shared_resources.get_process_data(process_name)
             if process_data is None:
                 shared_resources.register_process_state(process_name)
-                process_data = shared_resources.get_process_data(process_name)
-        
-        process_config = {}
+
+        process_data = shared_resources.get_process_data(process_name)
+
+        # Извлечь конфиг процесса
+        process_config: Dict[str, Any] = {}
         if process_data:
-            if hasattr(process_data, 'config') and process_data.config and hasattr(process_data.config, 'process'):
+            if (
+                hasattr(process_data, "config")
+                and process_data.config
+                and hasattr(process_data.config, "process")
+            ):
                 process_config = process_data.config.process
             elif process_data.custom:
-                process_config = process_data.custom.get('process_config', process_data.custom.copy())
-        
-        # Настраиваем перенаправление stdout/stderr если есть queue соединение(я)
-        if process_data and process_data.custom and ('console_queues' in process_data.custom or 'console_queue' in process_data.custom):
-            try:
-                from Console_module.redirector import ConsoleRedirector
-                import sys
-                
-                # Новый формат: список queues для дублирования
-                if 'console_queues' in process_data.custom:
-                    output_queues = process_data.custom['console_queues']
-                    redirector = ConsoleRedirector(output_queues, process_name)
-                    sys.stdout = redirector
-                    sys.stderr = redirector
-                    print(f"[{process_name}] Console redirect enabled ({len(output_queues)} console(s))")
-                # Старый формат для обратной совместимости
-                elif 'console_queue' in process_data.custom:
-                    output_queue = process_data.custom['console_queue']
-                    redirector = ConsoleRedirector(output_queue, process_name)
-                    sys.stdout = redirector
-                    sys.stderr = redirector
-                    print(f"[{process_name}] Console redirect enabled (legacy format)")
-            except Exception as e:
-                print(f"[{process_name}] Failed to setup console redirect: {e}")
-        
-        # Создаем экземпляр процесса ВНУТРИ целевого процесса
-        # Конфигурация берется из process_data.config
+                process_config = process_data.custom.get(
+                    "process_config", process_data.custom.copy()
+                )
+
+        redirector = _setup_console_redirect(process_name, process_data, log)
+
         process_instance = process_class(
             name=process_name,
             shared_resources=shared_resources,
-            config=process_config
+            config=process_config,
         )
-        
-        # Инициализация процесса
-        if hasattr(process_instance, 'initialize'):
+
+        if hasattr(process_instance, "initialize"):
             try:
                 if not process_instance.initialize():
-                    print(f"[{process_name}] Process initialization failed", flush=True)
+                    log.error("Process initialization failed")
+                    _update_process_state(shared_resources, process_name, "error")
                     return
-                print(f"[{process_name}] Process initialized", flush=True)
+                log.info("Process initialized")
             except Exception as init_err:
-                print(f"[{process_name}] Process initialization error: {init_err}", flush=True)
-                import traceback
+                log.error(f"Process initialization error: {init_err}")
                 traceback.print_exc()
+                _log_exception_via_error_manager(shared_resources, init_err, "initialization error")
+                _update_process_state(shared_resources, process_name, "error")
                 return
-        
-        # Запускаем процесс
-        if hasattr(process_instance, 'run'):
-            process_instance.run()
-        else:
-            # Если нет метода run, просто ждем остановки
-            while not (hasattr(process_instance, 'should_stop') and process_instance.should_stop()):
-                if stop_event and stop_event.is_set():
-                    break
-                time.sleep(0.1)
-        
-        # Ожидаем завершения (следим за stop_event если он есть)
-        while True:
-            if stop_event and stop_event.is_set():
-                print(f"[{process_name}] Stop signal received", flush=True)
-                if hasattr(process_instance, 'stop'):
-                    process_instance.stop()
-                break
-            if hasattr(process_instance, 'should_stop') and process_instance.should_stop():
-                break
-            time.sleep(0.1)
-        
-        print(f"[{process_name}] Process finished", flush=True)
-        
+
+        _run_lifecycle(process_instance, stop_event, log)
+        log.info("Process finished")
+
     except KeyboardInterrupt:
-        print(f"[{process_name}] Interrupted by user", flush=True)
+        log.info("Interrupted by user")
     except Exception as e:
-        print(f"[{process_name}] Process failed: {e}", flush=True)
-        import traceback
+        log.error(f"Process failed: {e}")
         traceback.print_exc()
+        _log_exception_via_error_manager(shared_resources, e, "process failed")
+        _update_process_state(shared_resources, process_name, "error")
     finally:
-        # Восстанавливаем оригинальные stdout/stderr
         if redirector:
             import sys
             sys.stdout = redirector.original_stdout
             sys.stderr = redirector.original_stderr
             redirector.close()
-        
-        # Убедимся, что процесс останавливается корректно
-        if 'process_instance' in locals():
+
+        if process_instance is not None:
             try:
-                if hasattr(process_instance, 'shutdown'):
+                if hasattr(process_instance, "shutdown"):
                     process_instance.shutdown()
-                elif hasattr(process_instance, 'stop'):
+                elif hasattr(process_instance, "stop"):
                     process_instance.stop()
             except Exception as e:
-                print(f"[{process_name}] Error during cleanup: {e}")
-
-
-# Синоним для совместимости со старым кодом
-_run_process_function = run_process_function
-
+                log.error(f"Error during cleanup: {e}")
