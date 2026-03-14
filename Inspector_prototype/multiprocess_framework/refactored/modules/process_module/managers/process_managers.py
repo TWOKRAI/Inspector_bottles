@@ -59,16 +59,7 @@ class ProcessManagers:
         )
         self.process.logger_manager.initialize()
 
-        # 3. CommandManager
-        command_config = managers_config.get("command", {})
-        self.process.command_manager = CommandManager(
-            self.process.name,
-            managers={"logger": self.process.logger_manager},
-            config={"logger": command_config.get("enable_logging", True)},
-            config_manager=self.process.config_manager,
-        )
-
-        # 4. RouterManager
+        # 3. RouterManager
         router_manager = RouterManager(
             manager_name=f"router_{self.process.name}",
             process=self.process,
@@ -78,7 +69,41 @@ class ProcessManagers:
         router_manager.initialize()
         self.process.router_manager = router_manager
 
-        # 5. ConsoleManager (disabled по умолчанию)
+        # 4. StatsManager
+        from ...statistics_module import StatsManager, StatsManagerConfig
+
+        stats_config_dict = managers_config.get("stats", {})
+        stats_config = StatsManagerConfig()
+        if isinstance(stats_config_dict, dict):
+            for key, value in stats_config_dict.items():
+                if hasattr(stats_config, key):
+                    setattr(stats_config, key, value)
+
+        self.process.stats_manager = StatsManager(
+            manager_name=f"stats_{self.process.name}",
+            config=stats_config,
+            process=self.process,
+            router_manager=self.process.router_manager,
+            managers={"logger": self.process.logger_manager},
+        )
+        self.process.stats_manager.initialize()
+
+        # 5. CommandManager
+        command_config = managers_config.get("command", {})
+        self.process.command_manager = CommandManager(
+            self.process.name,
+            managers={
+                "logger": self.process.logger_manager,
+                "stats": self.process.stats_manager,
+            },
+            config={
+                "logger": command_config.get("enable_logging", True),
+                "stats": command_config.get("enable_statistics", True),
+            },
+            config_manager=self.process.config_manager,
+        )
+
+        # 6. ConsoleManager (disabled по умолчанию)
         from ...console_module import ConsoleManager
         from ...console_module.core.console_config import ConsoleConfig
         from ...console_module.adapters.console_adapter import ConsoleAdapter
@@ -100,22 +125,28 @@ class ProcessManagers:
         # Регистрируем менеджеры через ObservableMixin
         self.process.register_manager("worker", self.process.worker_manager, enabled=True)
         self.process.register_manager("logger", self.process.logger_manager, enabled=True)
+        self.process.register_manager("stats", self.process.stats_manager, enabled=True)
         self.process.register_manager("command", self.process.command_manager, enabled=True)
         self.process.register_manager("router", self.process.router_manager, enabled=True)
         self.process.register_manager("console", self.process.console_manager, enabled=console_config.enabled)
 
         # Создаём и прикрепляем адаптеры
+        from ...statistics_module import StatsAdapter
+
         worker_adapter = WorkerAdapter(self.process.worker_manager, self.process)
         logger_adapter = LoggerAdapter(self.process.logger_manager, self.process)
+        stats_adapter = StatsAdapter(self.process.stats_manager, self.process)
         command_adapter = CommandAdapter(self.process.command_manager, self.process)
         router_adapter = RouterAdapter(self.process.router_manager, self.process)
         console_adapter = ConsoleAdapter(self.process.console_manager, self.process)
 
         self.process.worker_manager.attach_adapter(worker_adapter, name="process")
         self.process.logger_manager.attach_adapter(logger_adapter, name="process")
+        self.process.stats_manager.attach_adapter(stats_adapter, name="process")
         self.process.command_manager.attach_adapter(command_adapter, name="process")
         self.process.router_manager.attach_adapter(router_adapter, name="process")
         self.process.console_manager.attach_adapter(console_adapter, name="process")
+        stats_adapter.setup()
         console_adapter.setup()
 
         # Обновляем EventManager в shared_resources с router_manager

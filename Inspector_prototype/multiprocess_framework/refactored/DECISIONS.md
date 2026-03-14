@@ -278,3 +278,19 @@
   исключает дублирование логики создания ресурсов и делает код масштабируемым.
 - Отклонённые альтернативы:
   - Сохранить bundle подход с улучшенной валидацией — отклонено: фундаментально хрупкий паттерн.
+
+---
+
+## ADR-022: StatsManager — прямой наследник ChannelRoutingManager (не LoggerManager)
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: Нужен менеджер статистики и метрик по аналогии с logger_module и error_module.
+  Рассматривалось наследование от LoggerManager (как ErrorManager).
+- Решение: `StatsManager(ChannelRoutingManager, IStatsManager)` — прямой наследник CRM.
+  Буфер: `AggregationWindow(IBufferStrategy)` с агрегацией (counter, gauge, timing, histogram).
+  Каналы: `LogStatsChannel` → LoggerManager.performance(), `FileStatsChannel` → JSON/CSV.
+  Конфиг: `StatsManagerConfig(ChannelRoutingConfig)` через `@register_schema`.
+- Причина: LoggerManager добавляет scope/level — не нужны для метрик. StatsManager имеет свою
+  специфику: агрегация, flush-таймер, типы метрик. CRM даёт каналы и буфер без лишнего.
+- Отклонённые альтернативы:
+  - StatsManager(LoggerManager) — отклонено: scope/level избыточны для метрик.

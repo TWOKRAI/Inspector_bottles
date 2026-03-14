@@ -36,6 +36,7 @@ PYTEST_MODULES = [
     'router_module',
     'command_module',
     'logger_module',
+    'statistics_module',
 ]
 
 # Все модули
