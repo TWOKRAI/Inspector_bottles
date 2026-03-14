@@ -6,7 +6,27 @@
 
 ## 📚 Структура документации
 
-### 1. **FRAMEWORK_OVERVIEW.md** ← START HERE
+### 0. **ARCHITECTURE_PHILOSOPHY.md** ← FOR NEURAL AGENTS
+**Философская архитектура для нейросетевых агентов (5000+ слов)**
+
+Содержит:
+- ✅ Основная проблема (почему Python multiprocessing сложен)
+- ✅ Два взаимодополняющих взгляда (иерархия + биология)
+- ✅ Тройца создания циклов (ProcessManagerCore, ProcessModule, WorkerManager)
+- ✅ Аналогия с живым организмом
+- ✅ Архитектурные слои
+- ✅ Фундаментальные принципы (6 принципов)
+- ✅ Жизненный цикл системы
+
+**Используй когда:**
+- Первый раз анализируешь архитектуру (лучше всего начать отсюда!)
+- Нужно понять глубокую философию системы
+- Хочешь объяснить архитектуру нейросети
+- Планируешь расширение фреймворка
+
+---
+
+### 1. **FRAMEWORK_OVERVIEW.md** ← START HERE (AFTER PHILOSOPHY)
 **Comprehensive overview всего фреймворка (8000+ строк)**
 
 Содержит:
@@ -183,7 +203,7 @@
 ### Я хочу...
 
 **...понять архитектуру сразу**
-→ Прочитай FRAMEWORK_OVERVIEW.md (Part 1-7)
+→ Начни с ARCHITECTURE_PHILOSOPHY.md, потом FRAMEWORK_OVERVIEW.md (Part 1-7)
 
 **...быстро найти информацию**
 → Используй ARCHITECTURE_REFERENCE.md + `Ctrl+F`
@@ -231,8 +251,9 @@
 ## 🎯 Learning Path
 
 ### День 1: Основы
-1. FRAMEWORK_OVERVIEW.md (Part 1-7)
-2. ARCHITECTURE_REFERENCE.md (иерархия классов, слои)
+1. ARCHITECTURE_PHILOSOPHY.md (введение в философию)
+2. FRAMEWORK_OVERVIEW.md (Part 1-7)
+3. ARCHITECTURE_REFERENCE.md (иерархия классов, слои)
 
 ### День 2: Детали
 1. ARCHITECTURE_ESSAY.md (Part 1-7)
