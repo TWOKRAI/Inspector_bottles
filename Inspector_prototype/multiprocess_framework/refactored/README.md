@@ -7,6 +7,14 @@
 
 ---
 
+## Start Here
+
+1. **Новичок?** Прочитай этот README (10 мин) → [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) → выбери путь.
+2. **AI-агент?** [docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md) → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md).
+3. **Разработчик?** Quick Start ниже → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) → `modules/*/README.md`.
+
+---
+
 ## What is This?
 
 **Multiprocess Framework** is a **comprehensive architectural system** for building reliable, scalable, multithreaded and multiprocessing applications in Python.
@@ -297,10 +305,13 @@ config.update_field("confidence", 1.5)  # ✗ Error
 | Document | Purpose | Read Time |
 |----------|---------|-----------|
 | **[DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md)** | Navigation & quick links | 5 min |
-| **[FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)** | Complete overview (8000+ lines) | 45 min |
-| **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Diagrams & tables | 30 min |
-| **[ARCHITECTURE_ESSAY.md](./ARCHITECTURE_ESSAY.md)** | Design philosophy | 30 min |
+| **[docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md)** | Complete overview | 45 min |
+| **[docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md)** | Diagrams & tables | 30 min |
+| **[docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md)** | Design philosophy | 30 min |
+| **[docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md)** | For AI agents — philosophy | 15 min |
 | **[DECISIONS.md](./DECISIONS.md)** | 21 architectural decisions (ADRs) | 20 min |
+| **[MODULES_STATUS.md](./MODULES_STATUS.md)** | Module status & scores | 2 min |
+| **[DOCUMENTATION_SCORE.md](./DOCUMENTATION_SCORE.md)** | Team lead evaluation (8.2/10) | 3 min |
 
 **Each module also has:**
 - `README.md` — module documentation
@@ -389,11 +400,16 @@ pytest modules/ --cov=modules --cov-report=html
 
 ```
 Inspector_prototype/multiprocess_framework/refactored/
-├── FRAMEWORK_OVERVIEW.md          # Main documentation (start here)
-├── ARCHITECTURE_REFERENCE.md      # Diagrams & tables
-├── ARCHITECTURE_ESSAY.md          # Design philosophy
-├── DECISIONS.md                   # 21 architectural decisions
+├── README.md                      # ← Start here
 ├── DOCUMENTATION_INDEX.md         # Navigation guide
+├── DECISIONS.md                   # 21 architectural decisions (ADRs)
+├── MODULES_STATUS.md               # Module status & scores
+│
+├── docs/                           # Detailed documentation
+│   ├── FRAMEWORK_OVERVIEW.md      # Complete overview
+│   ├── ARCHITECTURE_REFERENCE.md  # Diagrams & tables
+│   ├── ARCHITECTURE_ESSAY.md      # Design philosophy
+│   └── ARCHITECTURE_PHILOSOPHY.md # For AI agents
 │
 ├── modules/                       # 15 modules
 │   ├── base_manager/
@@ -428,7 +444,7 @@ When adding new features:
 4. Update module `README.md`
 5. Run `pytest` — all tests must pass
 6. Update `DECISIONS.md` if architectural
-7. Update `DOCUMENTATION_INDEX.md`
+7. Update `DOCUMENTATION_INDEX.md` if structure changed
 
 ---
 
@@ -456,8 +472,8 @@ MIT
 For questions or issues:
 
 1. Check `DOCUMENTATION_INDEX.md` for navigation
-2. Read `FRAMEWORK_OVERVIEW.md` for the concept
-3. Look at `ARCHITECTURE_REFERENCE.md` for specifics
+2. Read `docs/FRAMEWORK_OVERVIEW.md` for the concept
+3. Look at `docs/ARCHITECTURE_REFERENCE.md` for specifics
 4. Check module `README.md` files
 5. Review `tests/` for usage examples
 
@@ -465,4 +481,4 @@ For questions or issues:
 
 **Built with ❤️ for reliable multiprocessing in Python**
 
-Last Updated: March 13, 2026
+Last Updated: March 14, 2026
