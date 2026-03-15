@@ -281,6 +281,28 @@
 
 ---
 
+## ADR-023: config_module — тонкая обёртка над data_schema_module
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: config_module на этапе 0/8, дублировал функционал data_schema_module
+  (собственная валидация, _deep_update, мёртвая зависимость на StorageManager).
+  Вопрос: нужен ли отдельный модуль или достаточно data_schema_module + ConfigStore?
+- Решение: config_module остаётся. Переписан как тонкая обёртка:
+  - `data_schema_module` = ЧТО (схемы, валидация, merge_with_defaults)
+  - `config_module` = КАК (runtime доступ, dot-notation, подписки, секции, env-fallback)
+  - `ConfigStore` (SRM) = ГДЕ (pickle-safe cross-process хранение)
+  - StorageManager и EventManager удалены из ConfigManager — не нужны
+  - `ConfigManagerConfig(SchemaBase)` через `@register_schema("config_manager")`
+  - Импорты между модулями: абсолютные (pythonpath = refactored/modules)
+- Причина: Runtime config management (подписки, секции, env fallback, dot-notation)
+  — отдельная ответственность, которую не покрывает ни data_schema_module, ни ConfigStore.
+- Отклонённые альтернативы:
+  - Удаление config_module — отклонено: потеря runtime-API (уже интегрирован в spawner.py,
+    process_module.py, process_registry.py).
+  - Объединение с data_schema_module — отклонено: нарушает SRP.
+
+---
+
 ## ADR-022: StatsManager — прямой наследник ChannelRoutingManager (не LoggerManager)
 - Дата: 2026-03-15
 - Статус: принято

@@ -19,11 +19,11 @@ ConfigSchemaAdapter — преобразование SchemaBase в дерево 
     - Добавить экспорт в JSON Schema через adapt_to_json_schema().
 
 Использование:
-    from config_module.adapters.schema_adapter import ConfigSchemaAdapter
-    from my_module.config import ProcessConfig
+    from modules.config_module.adapters.schema_adapter import ConfigSchemaAdapter
+    from my_module.config.my_config import MyConfig
 
     adapter = ConfigSchemaAdapter()
-    params = adapter.adapt(ProcessConfig)
+    params = adapter.adapt(MyConfig)
     # {
     #     "timeout": {
     #         "type": "float",

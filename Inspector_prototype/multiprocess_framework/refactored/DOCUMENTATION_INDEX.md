@@ -158,9 +158,13 @@
    - README.md — ErrorManager (extends LoggerManager)
    - config/error_config.py — конфигурация
 
-6. **config_module**
-   - README.md — ConfigManager, Config, ConfigSection
-   - docs/USAGE_GUIDE.md — примеры
+6. **config_module** ✅ PRODUCTION READY (8/8)
+   - README.md — Config, ConfigManager, ConfigSection (runtime API для конфигов)
+   - docs/ARCHITECTURE.md — три слоя конфигурации, компоненты, интеграция
+   - docs/USAGE_GUIDE.md — подробное руководство с 20+ примерами кода
+   - STATUS.md — этап 8/8, оценки 9-9
+   - 49 unit-тестов ✅
+   - **Особенность:** Тонкая обёртка над data_schema_module. Dot-notation доступ, подписки, env-fallback, Dict at Boundary
 
 7. **console_module**
    - README.md — ConsoleManager, три уровня (пассивный/активный/God Mode), кроссплатформенность (Windows/Linux/macOS)
@@ -222,8 +226,8 @@
 **...добавить новый менеджер**
 → base_manager README + [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Dependency Injection)
 
-**...отладить сообщения между процессами**
-→ message_module README + router_module README + [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) (Message Flow)
+**...разобраться с конфигурацией процесса**
+→ config_module README + docs/USAGE_GUIDE.md (20+ примеров) + [DECISIONS.md](./DECISIONS.md) (ADR-023)
 
 **...правильно остановить приложение**
 → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Graceful Shutdown) + process_manager_module STATUS.md

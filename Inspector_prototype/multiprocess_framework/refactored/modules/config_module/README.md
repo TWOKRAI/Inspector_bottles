@@ -1,233 +1,226 @@
-# Config Module (Refactored)
+# config_module
 
-Модуль управления конфигурациями с интеграцией всех модулей системы.
+Runtime-управление конфигурациями в multiprocess-фреймворке.
 
-## 🚀 Особенности
+**Статус:** 8/8 · Рефакторинг завершён · 49 тестов ✅
 
-- ✅ **Интеграция с BaseManager** - единообразие со всеми менеджерами системы
-- ✅ **Валидация через Pydantic** - опциональная валидация конфигураций через схемы
-- ✅ **Конвертация форматов** - использование DataConverter из data_schema_module
-- ✅ **Межпроцессное хранение** - хранение в ProcessData через SharedResourcesManager
-- ✅ **Автоматическая синхронизация** - синхронизация изменений через EventManager
-- ✅ **Ручная синхронизация** - возможность вручную синхронизировать конфигурации
-- ✅ **Вложенные ключи** - поддержка вложенных ключей через точку
-- ✅ **Работа с секциями** - удобная работа с частями конфигурации
-- ✅ **Переменные окружения** - поддержка переменных окружения
-- ✅ **Подписка на изменения** - callback-функции для отслеживания изменений
+---
 
-## 📦 Структура модуля
+## Назначение
+
+config_module предоставляет runtime-API для работы с конфигурациями:
+- Dot-notation доступ: `config.get("database.host")`
+- Реактивные подписки на изменения
+- Работа с секциями конфигурации
+- Environment fallback: автоматический поиск в переменных окружения
+- Cross-process синхронизация через ConfigStore (Dict at Boundary)
+
+**Ключевая идея:** config_module — это NOT валидация, NOT сериализация, NOT файловый I/O.
+Это только **runtime доступ и подписки**. Валидация делегируется `data_schema_module`.
+
+---
+
+## Роль в архитектуре
+
+```
+data_schema_module          ← ЧТО: схемы, валидация, сериализация
+       ↓
+config_module               ← КАК: runtime доступ, подписки, секции
+       ↓
+ConfigStore (SRM)           ← ГДЕ: pickle-safe хранение между процессами
+```
+
+---
+
+## Структура модуля
 
 ```
 config_module/
-├── __init__.py              # Экспорт основных классов
-├── README.md                # Документация
-├── core/                    # Основные классы
-│   ├── base_config.py       # Базовый класс Config
-│   └── config_manager.py    # ConfigManager
-├── sections/                # Секции конфигурации
-│   └── config_section.py    # ConfigSection
-├── interfaces.py            # Интерфейсы IConfigManager, IConfig
-├── docs/                    # Документация
-└── tests/                   # Тесты
+├── __init__.py              # Публичный API: Config, ConfigManager, ConfigSection
+├── interfaces.py            # IConfig, IConfigManager, IConfigObserver
+├── core/
+│   ├── config.py            # Config (~160 строк) — runtime контейнер
+│   └── config_manager.py    # ConfigManager (~215 строк) — менеджер конфигов
+├── sections/
+│   └── config_section.py    # ConfigSection — view на часть Config
+├── config/
+│   └── config_config.py     # ConfigManagerConfig (SchemaBase) — конфиг самого модуля
+├── adapters/
+│   └── schema_adapter.py    # ConfigSchemaAdapter — адаптер SchemaBase
+├── docs/
+│   ├── ARCHITECTURE.md      # Архитектура модуля
+│   └── USAGE_GUIDE.md       # Подробное руководство с примерами
+├── tests/
+│   ├── conftest.py
+│   ├── test_config.py       # 21 тест
+│   ├── test_config_manager.py # 18 тестов
+│   └── test_config_section.py # 10 тестов
+└── README.md               # Этот файл
 ```
 
-## 📋 Config vs ConfigManager
+---
 
-**Важно понимать разницу:**
+## Быстрый старт
 
-### Config (base_config.py)
-- **Контейнер данных** для ОДНОЙ конфигурации
-- Работает с данными: get/set, файлы, валидация, секции
-- **Не зависит от системы** - можно использовать отдельно
-- Аналогия: как `ProcessData` - просто контейнер данных
-
-### ConfigManager (config_manager.py)
-- **Менеджер** для управления МНОЖЕСТВОМ конфигураций
-- Управляет несколькими `Config` объектами
-- **Интегрируется с системой**: BaseManager, ProcessData, EventManager
-- Хранит конфигурации в ProcessData для межпроцессного доступа
-- Синхронизирует изменения между процессами
-
-**Когда использовать:**
-- `Config` - если нужна одна простая конфигурация без интеграции с системой
-- `ConfigManager` - если нужно управлять несколькими конфигурациями + интеграция с системой
-
-## 💡 Быстрый старт
-
-### Базовое использование Config (одна конфигурация)
+### Простое использование
 
 ```python
-from multiprocess_framework.refactored.modules.config_module import Config
+from config_module import Config
 
-# Создание конфигурации
-config = Config()
-config.set('database.host', 'localhost')
-config.set('database.port', 5432)
+# Создать конфиг
+cfg = Config(initial_data={"database": {"host": "localhost"}})
 
-# Получение значений
-host = config.get('database.host')  # 'localhost'
-port = config.get('database.port', 5432)  # 5432 или значение по умолчанию
+# Получить значение
+host = cfg.get("database.host")  # "localhost"
+
+# Установить значение
+cfg.set("database.port", 5432)
+
+# Работать как словарь
+cfg["debug"] = True
 ```
 
-### Использование ConfigManager (несколько конфигураций + интеграция)
-
-### Использование ConfigManager
+### С менеджером и синхронизацией
 
 ```python
-from multiprocess_framework.refactored.modules.config_module import ConfigManager
-from multiprocess_framework.refactored.modules.shared_resources_module import SharedResourcesManager
+from config_module import ConfigManager
+from shared_resources_module import SharedResourcesManager
 
-# Создание ConfigManager с интеграцией
-shared_resources = SharedResourcesManager()
-config_manager = ConfigManager(
-    manager_name="MyConfigManager",
-    shared_resources=shared_resources,
-    auto_sync=True
-)
+# Создать менеджер
+sr = SharedResourcesManager()
+cm = ConfigManager(shared_resources=sr)
 
-# Инициализация
-config_manager.initialize()
+# Создать конфиг
+cfg = cm.create_config("app", {"debug": False})
 
-# Создание конфигурации
-app_config = config_manager.create_config(
-    name='app',
-    initial_data={'name': 'MyApp', 'version': '1.0.0'}
-)
+# Сохранить в ConfigStore (для других процессов)
+cm.sync_config("app")
 
-# Получение конфигурации
-app_config = config_manager.get_config('app')
-
-# Синхронизация (ручная)
-config_manager.sync_config('app')
-
-# Загрузка из ProcessData
-config_manager.load_config_from_storage('app')
+# В другом процессе загрузить
+cm2 = ConfigManager(shared_resources=sr)
+cm2.load_config_from_storage("app")
+cfg2 = cm2.get_config("app")
 ```
 
-### Валидация через Pydantic
+### С подписками
 
 ```python
-from pydantic import BaseModel
-from multiprocess_framework.refactored.modules.config_module import Config
+cfg = Config(initial_data={"port": 8000})
 
-# Определение схемы
-class DatabaseConfig(BaseModel):
-    host: str = "localhost"
-    port: int = 5432
-    name: str
+# Подписаться на изменение
+@cfg.subscribe(key="port")
+def on_port_change(key, old_value, new_value):
+    print(f"Port changed: {old_value} → {new_value}")
 
-# Создание конфигурации с валидацией
-config = Config(
-    validation_schema=DatabaseConfig,
-    validate_on_set=True
-)
-
-# Валидация происходит автоматически при установке значений
-config.set('host', 'localhost')
-config.set('port', 5432)
-config.set('name', 'mydb')
+# При изменении callback сработает
+cfg.set("port", 9000)  # Output: Port changed: 8000 → 9000
 ```
 
-### Работа с файлами
+---
+
+## Основные компоненты
+
+### Config
+
+**Ответственность:** runtime-контейнер одной конфигурации.
+
+**Интерфейс:**
+- `get(key, default, env_fallback)` — dot-notation доступ
+- `set(key, value, notify)` — установка с уведомлением
+- `update(data)` — рекурсивное слияние
+- `has(key)`, `remove(key)`, `clear()` — проверка/удаление
+- `section(key)` — работа с подсекциями
+- `subscribe(callback, key)` / `unsubscribe()` — подписки
+- `data` property — копия всех данных
+
+**Особенности:**
+- Потокобезопасность через RLock
+- Env-fallback: если нет ключа, ищет в `{env_prefix}_{KEY}`
+- Dict-подобный интерфейс: `config["key"]`, `"key" in config`
+
+### ConfigManager
+
+**Ответственность:** менеджер множества Config объектов.
+
+**Интерфейс:**
+- `create_config(name, initial_data, ...)` → Config
+- `get_config(name)` → Optional[Config]
+- `remove_config(name)` → bool
+- `list_configs()` → List[str]
+- `sync_config(name)` → bool — в ConfigStore (dict)
+- `load_config_from_storage(name)` → bool — из ConfigStore
+- `initialize()` / `shutdown()` — lifecycle
+
+**Синхронизация:** через `shared_resources.config_store` (Dict[str, dict])
+
+### ConfigSection
+
+Представление части конфигурации как отдельного объекта.
 
 ```python
-from multiprocess_framework.refactored.modules.config_module import Config
-
-# Загрузка из файла
-config = Config()
-config.load('config/app.yaml')
-
-# Сохранение в файл
-config.save('config/app.yaml')
-
-# Перезагрузка
-config.reload()
+cfg = Config(initial_data={"database": {"host": "localhost"}})
+db = cfg.section("database")
+db.get("host")  # "localhost"
+db.set("port", 5432)  # отражается в cfg
 ```
 
-### Работа с секциями
+---
 
-```python
-from multiprocess_framework.refactored.modules.config_module import Config
+## Документация
 
-config = Config()
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — детальная архитектура модуля
+- **[USAGE_GUIDE.md](docs/USAGE_GUIDE.md)** — полное руководство с примерами
 
-# Получение секции
-db_config = config.section('database')
+---
 
-# Работа с секцией
-db_config.set('host', 'localhost')
-db_config.set('port', 5432)
-host = db_config.get('host')
+## Публичный API
 
-# Все изменения отражаются в основном конфиге
-assert config.get('database.host') == 'localhost'
-```
+| Метод | Описание |
+|-------|----------|
+| `Config(initial_data, env_prefix)` | Создать контейнер |
+| `config.get(key, default, env_fallback)` | Получить значение (dot-notation) |
+| `config.set(key, value, notify)` | Установить значение |
+| `config.update(data)` | Рекурсивно слить словарь |
+| `config.section(key)` | Вернуть ConfigSection |
+| `config.subscribe(callback, key)` | Подписаться на изменения |
+| `config.unsubscribe(callback, key)` | Отписаться |
+| `config.data` | Копия всех данных |
+| `ConfigManager(manager_name, shared_resources)` | Создать менеджер |
+| `cm.create_config(name, initial_data, ...)` | Создать конфиг |
+| `cm.get_config(name)` | Получить конфиг |
+| `cm.sync_config(name)` | Сохранить в ConfigStore |
+| `cm.load_config_from_storage(name)` | Загрузить из ConfigStore |
 
-### Подписка на изменения
+---
 
-```python
-from multiprocess_framework.refactored.modules.config_module import Config
+## Зависимости модуля
 
-config = Config()
+| Модуль | Что используется |
+|--------|-----------------|
+| `data_schema_module` | `merge_with_defaults`, `SchemaBase`, `FieldMeta`, `register_schema` |
+| `base_manager` | `BaseManager`, `ObservableMixin` |
+| `shared_resources_module` | `ConfigStore` (опционально) |
 
-# Подписка на изменения конкретного ключа
-@config.subscribe(key='database.host')
-def on_db_host_change(key, old_value, new_value):
-    print(f"Database host changed: {old_value} -> {new_value}")
+---
 
-# Подписка на все изменения
-@config.subscribe()
-def on_any_change(key, old_value, new_value):
-    print(f"Config changed: {key} = {new_value}")
-
-# Изменение значения вызовет callback
-config.set('database.host', 'newhost')
-```
-
-## 🔗 Интеграция с другими модулями
-
-### data_schema_module
-
-- **DataConverter** - конвертация между форматами (JSON, YAML, dict, Pydantic model)
-- **DataValidator** - валидация данных через Pydantic схемы
-- **SchemaRegistry** - реестр схем для валидации
-
-### shared_resources_module
-
-- **SharedResourcesManager** - доступ к ProcessData для хранения конфигураций
-- **EventManager** - синхронизация изменений между процессами
-- **ProcessStateRegistry** - реестр состояний процессов
-
-## 📖 Документация
-
-Подробная документация находится в папке `docs/`:
-- `README.md` - основная документация
-- `USAGE_GUIDE.md` - руководство пользователя
-- `ARCHITECTURE.md` - архитектура модуля
-- `API_REFERENCE.md` - справочник API
-
-## 🧪 Тестирование
-
-Модуль включает unit тесты в папке `tests/`.
-
-### Запуск тестов
+## Запуск тестов
 
 ```bash
-# Все тесты модуля
-pytest src/multiprocess_framework/refactored/modules/config_module/tests/ -v
-
-# Конкретный тест
-pytest src/multiprocess_framework/refactored/modules/config_module/tests/test_config.py -v
+pytest modules/config_module/tests/ -v
 ```
 
-## 📝 Примечания
+---
 
-- Модуль полностью интегрирован с новой архитектурой системы
-- Обратная совместимость со старым модулем не поддерживается
-- Все конфигурации могут храниться в ProcessData для межпроцессного доступа
-- Синхронизация происходит автоматически при изменениях (если включена)
+## Дизайн-решения
 
-## 📄 Лицензия
+- **Dict at Boundary:** ConfigStore хранит `Dict[str, dict]`, не объекты
+- **No file I/O:** загрузка файлов — ответственность DataConverter
+- **No validation:** Config хранит любые данные, валидация снаружи
+- **No configuration of config:** простой контейнер без meta-конфигов
+- **Env-fallback opt-in:** отключаемый по запросу
 
-См. основной файл лицензии проекта.
+---
 
+## ADR
+
+- **ADR-023:** config_module — тонкая обёртка над data_schema_module (2026-03-15) · [подробнее](../DECISIONS.md#adr-023)

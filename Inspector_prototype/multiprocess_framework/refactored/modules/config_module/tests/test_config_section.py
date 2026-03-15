@@ -1,74 +1,112 @@
 """
-Тесты для класса ConfigSection.
+Unit-тесты для класса ConfigSection.
 """
-import unittest
-import sys
-from pathlib import Path
+import pytest
 
-# Добавляем путь к модулю для абсолютных импортов
-module_path = Path(__file__).parent.parent.parent.parent.parent.parent
-sys.path.insert(0, str(module_path))
-
-from src.multiprocess_framework.refactored.modules.config_module.core.base_config import Config
-from src.multiprocess_framework.refactored.modules.config_module.sections.config_section import ConfigSection
+from config_module.core.config import Config
+from config_module.sections.config_section import ConfigSection
 
 
-class TestConfigSection(unittest.TestCase):
-    """Тесты для класса ConfigSection."""
-    
-    def setUp(self):
-        """Подготовка к тестам."""
-        self.config = Config()
-        self.section = self.config.section('database')
-    
-    def test_get_set(self):
-        """Тест получения и установки значений в секции."""
-        self.section.set('host', 'localhost')
-        self.assertEqual(self.section.get('host'), 'localhost')
-        
-        # Проверяем что изменения отражаются в основном конфиге
-        self.assertEqual(self.config.get('database.host'), 'localhost')
-    
-    def test_update(self):
-        """Тест обновления секции из словаря."""
-        self.section.update({'host': 'localhost', 'port': 5432})
-        
-        self.assertEqual(self.section.get('host'), 'localhost')
-        self.assertEqual(self.section.get('port'), 5432)
-        self.assertEqual(self.config.get('database.host'), 'localhost')
-        self.assertEqual(self.config.get('database.port'), 5432)
-    
-    def test_has(self):
-        """Тест проверки наличия ключа в секции."""
-        self.section.set('host', 'localhost')
-        self.assertTrue(self.section.has('host'))
-        self.assertFalse(self.section.has('port'))
-    
-    def test_remove(self):
-        """Тест удаления ключа из секции."""
-        self.section.set('host', 'localhost')
-        self.assertTrue(self.section.remove('host'))
-        self.assertFalse(self.section.has('host'))
-        self.assertFalse(self.config.has('database.host'))
-    
-    def test_data_property(self):
-        """Тест свойства data."""
-        self.section.set('host', 'localhost')
-        self.section.set('port', 5432)
-        
-        data = self.section.data
-        self.assertEqual(data['host'], 'localhost')
-        self.assertEqual(data['port'], 5432)
-    
-    def test_dict_syntax(self):
-        """Тест синтаксиса словаря."""
-        self.section['host'] = 'localhost'
-        self.assertEqual(self.section['host'], 'localhost')
-        self.assertTrue('host' in self.section)
-        del self.section['host']
-        self.assertFalse('host' in self.section)
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cfg_and_sec():
+    cfg = Config()
+    sec = cfg.section("database")
+    return cfg, sec
 
 
-if __name__ == '__main__':
-    unittest.main()
+# ---------------------------------------------------------------------------
+# get / set
+# ---------------------------------------------------------------------------
 
+def test_set_get(cfg_and_sec):
+    cfg, sec = cfg_and_sec
+    sec.set("host", "localhost")
+    assert sec.get("host") == "localhost"
+    assert cfg.get("database.host") == "localhost"
+
+
+def test_get_default(cfg_and_sec):
+    _, sec = cfg_and_sec
+    assert sec.get("missing", "default") == "default"
+
+
+# ---------------------------------------------------------------------------
+# update
+# ---------------------------------------------------------------------------
+
+def test_update(cfg_and_sec):
+    cfg, sec = cfg_and_sec
+    sec.update({"host": "localhost", "port": 5432})
+    assert sec.get("host") == "localhost"
+    assert sec.get("port") == 5432
+    assert cfg.get("database.host") == "localhost"
+    assert cfg.get("database.port") == 5432
+
+
+# ---------------------------------------------------------------------------
+# has / remove
+# ---------------------------------------------------------------------------
+
+def test_has(cfg_and_sec):
+    _, sec = cfg_and_sec
+    sec.set("host", "localhost")
+    assert sec.has("host")
+    assert not sec.has("port")
+
+
+def test_remove(cfg_and_sec):
+    cfg, sec = cfg_and_sec
+    sec.set("host", "localhost")
+    assert sec.remove("host")
+    assert not sec.has("host")
+    assert not cfg.has("database.host")
+
+
+def test_remove_nonexistent(cfg_and_sec):
+    _, sec = cfg_and_sec
+    assert not sec.remove("ghost")
+
+
+# ---------------------------------------------------------------------------
+# data property
+# ---------------------------------------------------------------------------
+
+def test_data_property(cfg_and_sec):
+    _, sec = cfg_and_sec
+    sec.update({"host": "localhost", "port": 5432})
+    d = sec.data
+    assert d["host"] == "localhost"
+    assert d["port"] == 5432
+
+
+def test_data_empty_section(cfg_and_sec):
+    _, sec = cfg_and_sec
+    assert sec.data == {}
+
+
+# ---------------------------------------------------------------------------
+# dict-syntax
+# ---------------------------------------------------------------------------
+
+def test_dict_syntax_get_set(cfg_and_sec):
+    _, sec = cfg_and_sec
+    sec["host"] = "localhost"
+    assert sec["host"] == "localhost"
+    assert "host" in sec
+
+
+def test_dict_syntax_del(cfg_and_sec):
+    _, sec = cfg_and_sec
+    sec["host"] = "localhost"
+    del sec["host"]
+    assert "host" not in sec
+
+
+def test_dict_syntax_del_missing_raises(cfg_and_sec):
+    _, sec = cfg_and_sec
+    with pytest.raises(KeyError):
+        del sec["missing"]

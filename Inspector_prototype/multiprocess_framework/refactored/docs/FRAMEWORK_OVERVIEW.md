@@ -151,14 +151,26 @@ process4 ──┴─→ ConfigManager ─→ unified configuration
 
 ---
 
-#### 6. **config_module** — Управление конфигурациями
-- **Роль:** Хранение, валидация, синхронизация конфигов между процессами.
-- **Ключевые классы:**
-  - `ConfigManager(BaseManager, ObservableMixin)` — Менеджер конфигураций
-  - `Config` — Одна конфигурация с методами get/set, валидация, секции
-  - `ConfigSection` — Работа с частями конфига (вложенные ключи через точку)
+#### 6. **config_module** — Runtime управление конфигурациями
 
-**Dict at Boundary:** Конфиги хранятся как `dict`, внутри процесса используются Pydantic модели для валидации.
+- **Роль:** Runtime API для работы с конфигурациями. **Тонкая обёртка над data_schema_module** + управление жизненным циклом конфигов.
+- **Ключевые классы:**
+  - `ConfigManager(BaseManager, ObservableMixin, IConfigManager)` — Менеджер множества конфигов (создание, получение, удаление, синхронизация)
+  - `Config` — Runtime контейнер одной конфигурации (~160 строк)
+  - `ConfigSection` — View на часть конфигурации (вложенные ключи через точку)
+  - `ConfigManagerConfig(SchemaBase)` — Конфиг самого менеджера через @register_schema
+
+**Особенности:**
+- **Dot-notation:** `config.get("database.host")`, `config.set("database.port", 5432)`
+- **Подписки на изменения:** `@config.subscribe(key="debug")` или `config.subscribe(callback, key="*")`
+- **Env-fallback:** если ключа нет, ищет в переменных окружения `{env_prefix}_{KEY}`
+- **Синхронизация:** `cm.sync_config("app")` ← ConfigStore (Dict at Boundary), `cm.load_config_from_storage("app")`
+- **Потокобезопасность:** RLock для всех операций
+- **49 тестов:** Config, ConfigManager, ConfigSection полностью покрыты
+
+**Интеграция:** С data_schema_module (merge_with_defaults, SchemaBase) и shared_resources_module (ConfigStore).
+
+**ADR-023:** config_module — тонкая обёртка над data_schema_module (2026-03-15). Валидация и сериализация делегируются data_schema_module, config_module отвечает за runtime доступ и подписки.
 
 ---
 

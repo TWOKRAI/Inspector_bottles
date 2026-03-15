@@ -1,221 +1,179 @@
-# Архитектура ConfigModule
+# Архитектура config_module
 
-Описание архитектуры модуля управления конфигурациями.
+## Концепция: три слоя конфигурации
 
-## Обзор
+```
+┌──────────────────────────────────────────────────────────────┐
+│ data_schema_module (ЧТО: схемы, валидация, сериализация)    │
+├──────────────────────────────────────────────────────────────┤
+│              ↓ merge_with_defaults, SchemaBase ↓             │
+├──────────────────────────────────────────────────────────────┤
+│ config_module (КАК: runtime доступ, подписки, секции)       │
+├──────────────────────────────────────────────────────────────┤
+│         ↓ sync/load (dict) ↓                                 │
+├──────────────────────────────────────────────────────────────┤
+│ ConfigStore в shared_resources_module                        │
+│ (ГДЕ: Dict at Boundary для cross-process хранения)          │
+└──────────────────────────────────────────────────────────────┘
+```
 
-ConfigModule предоставляет систему управления конфигурациями с интеграцией всех модулей системы:
-- **BaseManager** - для единообразия со всеми менеджерами
-- **data_schema_module** - для валидации и конвертации
-- **shared_resources_module** - для межпроцессного хранения
+## Основные компоненты
 
-## Компоненты
+### Config (~160 строк)
 
-### Config
+**Ответственность:** runtime-контейнер одной конфигурации.
 
-Базовый класс для работы с конфигурацией.
+**Интерфейс:**
+- `get(key, default, env_fallback)` — dot-notation доступ
+- `set(key, value, notify)` — установка с уведомлением подписчиков
+- `update(data)` — рекурсивное слияние словаря
+- `section(key)` → ConfigSection — работа с подсекциями
+- `subscribe(callback, key)` / `unsubscribe()` — управление подписками
+- `has(key)`, `remove(key)`, `clear()` — проверка/удаление
+- `data` property — копия всех данных
 
-**Основные возможности:**
-- Вложенные ключи через точку
-- Загрузка/сохранение JSON/YAML файлов через DataConverter
-- Опциональная валидация через Pydantic схемы
-- Работа с секциями
-- Подписка на изменения
+**Особенности:**
+- Dot-notation: `config.get("database.host")`
+- Потокобезопасность через `RLock`
+- Env-fallback: если ключ не найден, ищет `{env_prefix}_{KEY}` в переменных окружения
+- Подписки на конкретные ключи или все ("*")
+- Dict-подобный интерфейс: `config["key"]`, `"key" in config`
 
-**Интеграция:**
-- `DataConverter` - для конвертации форматов
-- `DataValidator` - для валидации данных
+**НЕ входит в ответственность Config:**
+- Загрузка/сохранение файлов (JSON/YAML) — делегируется `DataConverter` снаружи
+- Валидация схем — делегируется `DataValidator` при необходимости
+- Конвертация в/из Pydantic моделей — делегируется `DataConverter`
 
-### ConfigManager
+### ConfigManager (~215 строк)
 
-Менеджер для управления несколькими конфигурациями.
+**Ответственность:** менеджер множества Config объектов.
 
 **Наследование:**
-- `BaseManager` - базовый менеджер
-- `ObservableMixin` - для логирования и метрик
-- `IConfigManager` - интерфейс менеджера
+- `BaseManager` — единообразие со всеми менеджерами
+- `ObservableMixin` — логирование и метрики
+- `IConfigManager` — публичный контракт
 
-**Интеграция:**
-- `SharedResourcesManager` - для доступа к ProcessData
-- `StorageManager` - для хранения в ProcessData
-- `EventManager` - для синхронизации изменений
+**Интерфейс:**
+- `create_config(name, initial_data, ...)` → Config
+- `get_config(name)` → Optional[Config]
+- `remove_config(name)` → bool
+- `list_configs()` → List[str]
+- `has_config(name)` → bool
+- `sync_config(name)` → bool — сохранить в ConfigStore (pickle-safe dict)
+- `load_config_from_storage(name)` → bool — загрузить из ConfigStore
+- `initialize()` / `shutdown()` — lifecycle
 
-**Основные возможности:**
-- Создание/удаление конфигураций
-- Хранение в ProcessData
-- Автоматическая и ручная синхронизация
-- Управление метаданными конфигураций
+**Синхронизация с ConfigStore:**
+```python
+# Сохранить в ConfigStore (Dict at Boundary)
+if self._shared_resources:
+    self._shared_resources.config_store.store(name, config.data)
+
+# Загрузить из ConfigStore
+data = self._shared_resources.config_store.get(name)
+if data:
+    self.create_config(name, initial_data=data)
+```
+
+**НЕ входит в ответственность ConfigManager:**
+- StorageManager (удалён в рефакторинге) — заменён прямым доступом к ConfigStore
+- EventManager (удалён в рефакторинге) — события остаются за вызывающим кодом
+- Метаданные конфигураций — убрана сложная система сохранения метаданных
 
 ### ConfigSection
 
-Представление части конфигурации как отдельного объекта.
+**Ответственность:** представление части конфигурации как отдельного объекта.
 
 **Особенности:**
-- Все изменения автоматически отражаются в родительском конфиге
-- Удобный API для работы с секциями
-- Поддержка синтаксиса словаря
+- Все изменения в ConfigSection автоматически отражаются в родительском Config
+- Тот же API что и Config
+- Делегирует все операции родительскому Config через префикс
 
-## Архитектура хранения
-
-### Локальное хранение
-
-Конфигурации хранятся в памяти в словаре `_configs`:
+**Пример:**
 ```python
-_configs: Dict[str, Config] = {
-    'app': Config(...),
-    'database': Config(...)
-}
+config = Config(initial_data={"database": {"host": "localhost"}})
+db_section = config.section("database")
+db_section.get("host")   # "localhost"
+db_section.set("port", 5432)  # config.get("database.port") == 5432
 ```
 
-### Межпроцессное хранение
+### ConfigSchemaAdapter
 
-Конфигурации сохраняются в `ProcessData.custom`:
-```python
-process_data.custom['configurations'] = {
-    'app': {
-        'data': {...},
-        'metadata': {...},
-        'updated_at': timestamp
-    }
-}
-```
+**Ответственность:** адаптация SchemaBase в параметры для Config.
 
-## Синхронизация
-
-### Автоматическая синхронизация
-
-При изменении конфигурации (если `auto_sync=True`):
-1. Вызывается callback `_on_config_change`
-2. Конфигурация сохраняется в ProcessData
-3. Отправляется событие через EventManager
-
-### Ручная синхронизация
-
-Метод `sync_config()` позволяет вручную синхронизировать конфигурацию:
-```python
-config_manager.sync_config('app')
-```
-
-## Валидация
-
-### Валидация через Pydantic
-
-Конфигурации могут быть валидированы через Pydantic схемы:
-
-```python
-config = Config(
-    validation_schema=DatabaseConfig,
-    validate_on_set=True
-)
-```
-
-При установке значений происходит валидация через `DataValidator`.
+Преобразует Pydantic/SchemaBase в dict параметров конфига.
+Реализует `ISchemaAdapter` из `data_schema_module`.
 
 ## Интеграция с другими модулями
 
 ### data_schema_module
 
-- **DataConverter** - конвертация между форматами (JSON, YAML, dict, Pydantic model)
-- **DataValidator** - валидация данных через Pydantic схемы
-- **SchemaRegistry** - реестр схем для валидации
+- **merge_with_defaults()** — рекурсивное слияние, используется в `Config.update()`
+- **SchemaBase** — базовый класс для схем
+- **FieldMeta**, **register_schema** — для ConfigManagerConfig
 
 ### shared_resources_module
 
-- **SharedResourcesManager** - доступ к ProcessData
-- **EventManager** - синхронизация изменений между процессами
-- **ProcessStateRegistry** - реестр состояний процессов
+- **ConfigStore** (Dict[str, dict]) — хранилище конфигов между процессами (Dict at Boundary)
+- Опциональное; если нет `shared_resources` → ConfigManager работает только локально
 
 ### base_manager
 
-- **BaseManager** - базовый класс для всех менеджеров
-- **ObservableMixin** - логирование, метрики, отслеживание ошибок
+- **BaseManager** — базовый класс менеджера
+- **ObservableMixin** — логирование, метрики
 
-## Поток данных
+## Дизайн-решения
 
-### Создание конфигурации
+1. **Config ≠ ConfigManager**
+   - Config — простой контейнер (160 строк), НЕ управляет другими конфигами
+   - ConfigManager — коллекция Config объектов с синхронизацией
 
-```
-create_config()
-    ↓
-Config создается
-    ↓
-Метаданные сохраняются
-    ↓
-Подписка на изменения (если auto_sync)
-    ↓
-Сохранение в ProcessData (если shared_resources доступен)
-    ↓
-Отправка события через EventManager
-```
+2. **Нет файловой I/O в модуле**
+   - Загрузка JSON/YAML/TOML — ответственность DataConverter (из data_schema_module)
+   - Config принимает dict, возвращает dict — максимальная гибкость
 
-### Изменение конфигурации
+3. **Нет собственной валидации**
+   - Config хранит любые данные
+   - Валидация (если нужна) — через DataValidator снаружи
+   - Сохраняет простоту и производительность
 
-```
-config.set(key, value)
-    ↓
-Валидация (если включена)
-    ↓
-Значение устанавливается
-    ↓
-Callback _on_config_change (если auto_sync)
-    ↓
-Сохранение в ProcessData
-    ↓
-Отправка события через EventManager
-```
+4. **Dict at Boundary**
+   - ConfigStore хранит Dict[str, dict], не объекты Config
+   - Обеспечивает безопасность при cross-process сериализации
 
-### Загрузка из ProcessData
+5. **Env-fallback в Config**
+   - Если `env_prefix="APP"` и ключа нет, ищет переменную `APP_KEY` (с заменой точек на `_`)
+   - Опциональное и отключаемое
 
-```
-load_config_from_storage()
-    ↓
-Получение ProcessData
-    ↓
-Извлечение данных из custom['configurations']
-    ↓
-Создание или обновление Config
-    ↓
-Восстановление метаданных
-    ↓
-Подписка на изменения (если auto_sync)
+## Поток использования
+
+### Локальное использование
+
+```python
+config = Config(initial_data={"db_host": "localhost"})
+config.get("db_host")
+config.set("db_host", "remote.host")
 ```
 
-## Безопасность
+### С менеджером и ConfigStore
 
-### Потокобезопасность
+```python
+cm = ConfigManager(shared_resources=sr)
+cfg = cm.create_config("app", {"debug": False})
+cm.sync_config("app")  # → ConfigStore (dict)
+```
 
-Все операции защищены блокировкой `RLock`:
-- Операции с конфигурациями
-- Доступ к метаданным
-- Работа с ProcessData
+### В другом процессе (загрузка)
 
-### Валидация данных
-
-Опциональная валидация через Pydantic предотвращает установку невалидных данных.
+```python
+cm2 = ConfigManager(shared_resources=sr)
+cm2.load_config_from_storage("app")  # ← ConfigStore (dict)
+cfg = cm2.get_config("app")  # Config объект в памяти
+```
 
 ## Производительность
 
-### Кэширование
-
-Конфигурации хранятся в памяти для быстрого доступа.
-
-### Оптимизация
-
-- Глубокая копия данных выполняется только при необходимости
-- Синхронизация происходит только при изменениях (если auto_sync включен)
-- Ленивая загрузка из ProcessData
-
-## Расширяемость
-
-### Кастомные схемы валидации
-
-Можно создавать свои Pydantic схемы для валидации конфигураций.
-
-### Подписка на события
-
-Можно подписываться на изменения конфигураций через callback-функции.
-
-### Интеграция с другими модулями
-
-Модуль легко интегрируется с другими модулями системы через интерфейсы.
-
+- **Кэширование в памяти:** Config объекты хранятся в `_configs` (O(1) доступ)
+- **Глубокая копия только на get:** property `data` возвращает копию для изоляции
+- **RLock для thread-safety:** минимальные блокировки, отпускаются сразу
+- **Ленивая загрузка:** конфиги загружаются из ConfigStore только при явном запросе

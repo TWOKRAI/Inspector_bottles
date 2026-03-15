@@ -1,165 +1,152 @@
 """
-Тесты для класса ConfigManager.
+Unit-тесты для класса ConfigManager.
 """
-import unittest
-import sys
-from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock
 
-# Добавляем путь к модулю для абсолютных импортов
-module_path = Path(__file__).parent.parent.parent.parent.parent.parent
-sys.path.insert(0, str(module_path))
+import pytest
 
-from src.multiprocess_framework.refactored.modules.config_module.core.config_manager import ConfigManager
-from src.multiprocess_framework.refactored.modules.config_module.core.base_config import Config
+from config_module.core.config import Config
+from config_module.core.config_manager import ConfigManager
 
 
-class TestConfigManager(unittest.TestCase):
-    """Тесты для класса ConfigManager."""
-    
-    def setUp(self):
-        """Подготовка к тестам."""
-        # Создаем моки для зависимостей
-        self.mock_shared_resources = Mock()
-        self.mock_event_manager = Mock()
-        self.mock_storage_manager = Mock()
-        
-        # Настраиваем моки
-        self.mock_shared_resources.get_process_data = Mock(return_value=None)
-        self.mock_shared_resources.get_all_process_data = Mock(return_value={})
-        
-        self.config_manager = ConfigManager(
-            manager_name="TestConfigManager",
-            shared_resources=self.mock_shared_resources,
-            event_manager=self.mock_event_manager,
-            storage_manager=self.mock_storage_manager,
-            auto_sync=False  # Отключаем автосинхронизацию для тестов
-        )
-    
-    def test_create_config(self):
-        """Тест создания конфигурации."""
-        config = self.config_manager.create_config(
-            name='test',
-            initial_data={'key': 'value'}
-        )
-        
-        self.assertIsInstance(config, Config)
-        self.assertEqual(config.get('key'), 'value')
-        self.assertTrue(self.config_manager.has_config('test'))
-    
-    def test_get_config(self):
-        """Тест получения конфигурации."""
-        self.config_manager.create_config(name='test', initial_data={'key': 'value'})
-        
-        config = self.config_manager.get_config('test')
-        self.assertIsNotNone(config)
-        self.assertEqual(config.get('key'), 'value')
-        
-        # Несуществующая конфигурация
-        self.assertIsNone(self.config_manager.get_config('nonexistent'))
-    
-    def test_remove_config(self):
-        """Тест удаления конфигурации."""
-        self.config_manager.create_config(name='test', initial_data={'key': 'value'})
-        self.assertTrue(self.config_manager.has_config('test'))
-        
-        result = self.config_manager.remove_config('test')
-        self.assertTrue(result)
-        self.assertFalse(self.config_manager.has_config('test'))
-        
-        # Удаление несуществующей конфигурации
-        result = self.config_manager.remove_config('nonexistent')
-        self.assertFalse(result)
-    
-    def test_list_configs(self):
-        """Тест получения списка конфигураций."""
-        self.config_manager.create_config(name='config1')
-        self.config_manager.create_config(name='config2')
-        
-        configs = self.config_manager.list_configs()
-        self.assertEqual(len(configs), 2)
-        self.assertIn('config1', configs)
-        self.assertIn('config2', configs)
-    
-    def test_get_all_configs(self):
-        """Тест получения всех конфигураций."""
-        self.config_manager.create_config(name='config1', initial_data={'key1': 'value1'})
-        self.config_manager.create_config(name='config2', initial_data={'key2': 'value2'})
-        
-        all_configs = self.config_manager.get_all_configs()
-        self.assertEqual(len(all_configs), 2)
-        self.assertEqual(all_configs['config1'].get('key1'), 'value1')
-        self.assertEqual(all_configs['config2'].get('key2'), 'value2')
-    
-    def test_has_config(self):
-        """Тест проверки наличия конфигурации."""
-        self.config_manager.create_config(name='test')
-        
-        self.assertTrue(self.config_manager.has_config('test'))
-        self.assertFalse(self.config_manager.has_config('nonexistent'))
-    
-    def test_get_config_metadata(self):
-        """Тест получения метаданных конфигурации."""
-        # Создаем конфигурацию без файла (file_path=None или не указываем)
-        self.config_manager.create_config(
-            name='test',
-            initial_data={'key': 'value'},
-            env_prefix='TEST'
-        )
-        
-        metadata = self.config_manager.get_config_metadata('test')
-        self.assertIsNotNone(metadata)
-        self.assertEqual(metadata['env_prefix'], 'TEST')
-        # file_path может быть None если файл не был указан при создании
-        # self.assertEqual(metadata['file_path'], 'test.yaml')
-    
-    def test_set_auto_sync(self):
-        """Тест установки автоматической синхронизации."""
-        self.config_manager.create_config(name='test')
-        
-        result = self.config_manager.set_auto_sync('test', True)
-        self.assertTrue(result)
-        
-        metadata = self.config_manager.get_config_metadata('test')
-        self.assertTrue(metadata['auto_sync'])
-        
-        # Несуществующая конфигурация
-        result = self.config_manager.set_auto_sync('nonexistent', True)
-        self.assertFalse(result)
-    
-    def test_initialize(self):
-        """Тест инициализации ConfigManager."""
-        result = self.config_manager.initialize()
-        self.assertTrue(result)
-        self.assertTrue(self.config_manager.is_initialized)
-    
-    def test_shutdown(self):
-        """Тест завершения работы ConfigManager."""
-        self.config_manager.create_config(name='test')
-        self.config_manager.initialize()
-        
-        result = self.config_manager.shutdown()
-        self.assertTrue(result)
-        self.assertFalse(self.config_manager.is_initialized)
-        self.assertEqual(len(self.config_manager.list_configs()), 0)
-    
-    def test_validation_schema(self):
-        """Тест создания конфигурации с валидацией."""
-        from pydantic import BaseModel
-        
-        class TestSchema(BaseModel):
-            key: str = "default"
-        
-        config = self.config_manager.create_config(
-            name='test',
-            validation_schema=TestSchema,
-            validate_on_set=False
-        )
-        
-        metadata = self.config_manager.get_config_metadata('test')
-        self.assertEqual(metadata['validation_schema'], TestSchema)
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cm() -> ConfigManager:
+    """ConfigManager без shared_resources (автономный режим)."""
+    return ConfigManager(manager_name="TestCM")
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.fixture
+def cm_with_store() -> ConfigManager:
+    """ConfigManager с mock-ConfigStore."""
+    store = MagicMock()
+    store.get.return_value = None
+    store.list_keys.return_value = []
 
+    sr = MagicMock()
+    sr.config_store = store
+
+    return ConfigManager(manager_name="TestCM", shared_resources=sr)
+
+
+# ---------------------------------------------------------------------------
+# create_config / get_config / has_config / list_configs
+# ---------------------------------------------------------------------------
+
+def test_create_config_returns_config(cm):
+    cfg = cm.create_config("app", initial_data={"debug": False})
+    assert isinstance(cfg, Config)
+    assert cfg.get("debug") is False
+
+
+def test_create_config_idempotent(cm):
+    c1 = cm.create_config("app")
+    c2 = cm.create_config("app")
+    assert c1 is c2
+
+
+def test_get_config(cm):
+    cm.create_config("app")
+    assert cm.get_config("app") is not None
+    assert cm.get_config("nonexistent") is None
+
+
+def test_has_config(cm):
+    cm.create_config("app")
+    assert cm.has_config("app")
+    assert not cm.has_config("nonexistent")
+
+
+def test_list_configs(cm):
+    cm.create_config("a")
+    cm.create_config("b")
+    assert sorted(cm.list_configs()) == ["a", "b"]
+
+
+def test_get_all_configs(cm):
+    cm.create_config("x", initial_data={"v": 1})
+    cm.create_config("y", initial_data={"v": 2})
+    all_cfgs = cm.get_all_configs()
+    assert set(all_cfgs.keys()) == {"x", "y"}
+
+
+# ---------------------------------------------------------------------------
+# remove_config
+# ---------------------------------------------------------------------------
+
+def test_remove_config(cm):
+    cm.create_config("app")
+    assert cm.remove_config("app")
+    assert not cm.has_config("app")
+
+
+def test_remove_nonexistent(cm):
+    assert not cm.remove_config("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# initialize / shutdown
+# ---------------------------------------------------------------------------
+
+def test_initialize(cm):
+    assert cm.initialize()
+    assert cm.is_initialized
+
+
+def test_shutdown_clears_configs(cm):
+    cm.create_config("app")
+    cm.initialize()
+    assert cm.shutdown()
+    assert not cm.is_initialized
+    assert cm.list_configs() == []
+
+
+# ---------------------------------------------------------------------------
+# sync_config / load_config_from_storage
+# ---------------------------------------------------------------------------
+
+def test_sync_config(cm_with_store):
+    store = cm_with_store._shared_resources.config_store
+    cm_with_store.create_config("svc", initial_data={"key": "val"})
+    result = cm_with_store.sync_config("svc")
+    assert result
+    store.store.assert_called_once_with("svc", {"key": "val"})
+
+
+def test_sync_config_missing_config(cm_with_store):
+    assert not cm_with_store.sync_config("ghost")
+
+
+def test_sync_config_no_shared_resources(cm):
+    cm.create_config("app")
+    assert not cm.sync_config("app")
+
+
+def test_load_config_from_storage(cm_with_store):
+    store = cm_with_store._shared_resources.config_store
+    store.get.return_value = {"host": "db.local"}
+    result = cm_with_store.load_config_from_storage("db")
+    assert result
+    assert cm_with_store.has_config("db")
+    assert cm_with_store.get_config("db").get("host") == "db.local"
+
+
+def test_load_config_from_storage_not_found(cm_with_store):
+    store = cm_with_store._shared_resources.config_store
+    store.get.return_value = None
+    assert not cm_with_store.load_config_from_storage("missing")
+
+
+def test_load_config_from_storage_updates_existing(cm_with_store):
+    store = cm_with_store._shared_resources.config_store
+    store.get.return_value = {"k": "new"}
+    cm_with_store.create_config("svc", initial_data={"k": "old"})
+    cm_with_store.load_config_from_storage("svc")
+    assert cm_with_store.get_config("svc").get("k") == "new"
+
+
+def test_load_no_shared_resources(cm):
+    assert not cm.load_config_from_storage("any")

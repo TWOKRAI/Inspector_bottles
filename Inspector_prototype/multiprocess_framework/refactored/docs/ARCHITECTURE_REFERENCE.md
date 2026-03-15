@@ -285,7 +285,7 @@ STOPPED (exit code 0 или 1)
 | **message_module** | Foundation | Pydantic | Протокол сообщений | `Message`, `MessageAdapter`, `MessageType` |
 | **logger_module** | Infra | BaseManager + ObservableMixin | Централизованное логирование | `LoggerManager`, `LogConfig`, `ILogChannel` |
 | **error_module** | Infra | LoggerManager | Управление ошибками | `ErrorManager`, `ErrorManagerConfig` |
-| **config_module** | Infra | BaseManager + ObservableMixin | Управление конфигурациями | `ConfigManager`, `Config`, `ConfigSection` |
+| **config_module** | Infra | BaseManager + ObservableMixin | Runtime конфиги: dot-notation, подписки, env-fallback; тонкая обёртка над data_schema_module; ADR-023; 49 тестов ✅ | `ConfigManager`, `Config`, `ConfigSection` |
 | **console_module** | Infra | BaseManager + ObservableMixin | Терминальный I/O, 3 уровня, IPlatformConsole | `ConsoleManager`, `ConsoleAdapter`, `IPlatformConsole` |
 | **shared_resources_module** | Infra | - | Межпроцессные ресурсы | `SharedResourcesManager`, `ProcessData` |
 | **registers_module** | Infra | - | Runtime реестр схем | `RegistersContainer` |

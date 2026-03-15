@@ -63,19 +63,20 @@ launcher.run()  # blocks until Ctrl+C, graceful shutdown
 Application (Your Code)
     ↓
 ProcessModule (base class for each process)
-    ├─ RouterManager (send/receive messages)
+    ├─ RouterManager (send/receive messages via channels)
     ├─ CommandManager (dispatch commands)
-    ├─ WorkerManager (manage threads)
-    ├─ LoggerManager (centralized logging)
-    └─ ConfigManager (manage configuration)
+    ├─ WorkerManager (manage threads safely)
+    ├─ LoggerManager (centralized logging through channels)
+    ├─ ConfigManager (runtime config: get/set, subscriptions, env-fallback)
+    └─ ErrorManager (error handling through channels)
     ↓
 ProcessManagerProcess (orchestrator)
-    ├─ ProcessRegistry (all processes)
-    ├─ ProcessMonitor (state tracking)
-    └─ SharedResourcesManager (inter-process resources)
+    ├─ ProcessRegistry (track all processes)
+    ├─ ProcessMonitor (monitor state & health)
+    └─ SharedResourcesManager (ConfigStore for cross-process sync)
     ↓
 SystemLauncher (entry point)
-    └─ Fork/spawn processes, handle signals
+    └─ Fork/spawn, signal handling, graceful shutdown
 ```
 
 **15 Modules Organized in 5 Layers:**
