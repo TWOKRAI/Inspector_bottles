@@ -11,7 +11,7 @@ ConfigStore хранит только dict (Dict at Boundary, ADR-008).
 
 from typing import Dict, Optional
 
-from ..core.interfaces import IConfigStore
+from .interfaces import IConfigStore
 
 
 class ConfigStore(IConfigStore):

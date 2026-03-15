@@ -98,22 +98,25 @@ shared_resources_module/
 │   ├── __init__.py
 │   └── types.py                     # ProcessStatus, ResourceType, EventType, TypedDict
 ├── core/
-│   ├── interfaces.py                # ISharedResourcesManager, IConfigStore, ...
+│   ├── interfaces.py                # ISharedResourcesManager + re-export остальных
 │   └── shared_resources_manager.py  # SRM (фасад)
+├── config/
+│   ├── interfaces.py                # IConfigStore
+│   └── config_store.py
 ├── state/
+│   ├── interfaces.py                # IProcessStateRegistry
 │   ├── process_data.py              # ProcessData (runtime: status + queues + events)
 │   └── process_state_registry.py    # PSR: Dict[str, ProcessData]
-├── config/
-│   └── config_store.py              # ConfigStore: Dict[str, dict]
 ├── events/
+│   ├── interfaces.py                # IEventManager
 │   ├── core/manager.py              # EventManager: emit, subscribe, reinitialize()
-│   ├── interfaces.py
 │   └── README.md
 ├── queues/
+│   ├── interfaces.py                # IQueueRegistry
 │   ├── core/manager.py              # QueueRegistry: create + access через PSR
-│   ├── interfaces.py
 │   └── README.md
 ├── memory/
+│   ├── interfaces.py                # IMemoryManager
 │   ├── core/manager.py              # MemoryManager: shm.name, owner/consumer
 │   ├── format/buffer.py              # pack/unpack изображений
 │   ├── platform/shm.py               # create_shm_block, close_shm

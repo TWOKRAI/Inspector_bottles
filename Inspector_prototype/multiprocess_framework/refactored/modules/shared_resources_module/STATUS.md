@@ -56,6 +56,7 @@
 | 2026-03-15 | memory: рефакторинг на подмодули (format, platform_ops, validation, types), README, STATUS, тесты | 8 |
 | 2026-03-15 | events, queues: рефакторинг по примеру memory (core/, interfaces, ManagerStatsMixin, README, STATUS) | 8 |
 | 2026-03-15 | Проверочный рефакторинг: документация data_schema_module, ARCHITECTURE, INTERFACES_GUIDE, DataSchemaAdapter | 8 |
+| 2026-03-15 | Интерфейсы раскиданы по подмодулям: config/, state/, queues/, events/, memory/interfaces.py; core — ISharedResourcesManager + re-export | 8 |
 
 ## Проверочный рефакторинг (2026-03-15)
 

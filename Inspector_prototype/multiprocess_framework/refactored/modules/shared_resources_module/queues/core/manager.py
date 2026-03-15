@@ -13,7 +13,7 @@ from multiprocessing import Queue
 from typing import Any, Dict, List, Optional
 
 from ....base_manager import BaseManager, ObservableMixin
-from ...core.interfaces import IQueueRegistry
+from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 
 try:

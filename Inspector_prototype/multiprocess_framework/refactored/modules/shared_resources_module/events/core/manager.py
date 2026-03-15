@@ -14,7 +14,7 @@ from multiprocessing import Event, Queue
 
 from ....base_manager import BaseManager, ObservableMixin
 from ...types import EventType
-from ...core.interfaces import IEventManager
+from ..interfaces import IEventManager
 from ...mixins import ManagerStatsMixin
 
 

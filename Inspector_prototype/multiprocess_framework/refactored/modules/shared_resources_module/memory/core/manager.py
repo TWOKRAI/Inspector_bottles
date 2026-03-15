@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from ....base_manager import BaseManager, ObservableMixin
-from ...core.interfaces import IMemoryManager
+from ..interfaces import IMemoryManager
 from ...mixins import ManagerStatsMixin
 
 from .. import format as fmt

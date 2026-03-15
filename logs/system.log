@@ -17984,3 +17984,1007 @@
 2026-03-15 22:32:53,015 [DEBUG] [robot] command_manager: Handling command: reject_item
 2026-03-15 22:32:53,015 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
 2026-03-15 22:32:53,015 [INFO] [robot] main: REJECT #96: frame=190, pos=(319, 239), area=234066
+2026-03-15 22:40:21,269 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:40:21,269 [INFO] [-] main: RouterManager 'router_camera' initialized (channels: [])
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:40:21,269 [INFO] [-] main: [stats_camera] initialized
+2026-03-15 22:40:21,269 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:40:21,269 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:40:21,269 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:40:21,269 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:40:21,269 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:40:21,269 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:40:21,269 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:40:21,269 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:40:21,269 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:40:21,269 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:40:21,269 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:40:21,269 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:40:21,269 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:40:21,269 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:40:21,269 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,269 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,269 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:40:21,269 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:40:21,269 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:40:21,269 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:40:21,269 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,269 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_local' registered (type=queue)
+2026-03-15 22:40:21,269 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:40:21,269 [INFO] [-] main: Process state registered: camera
+2026-03-15 22:40:21,270 [INFO] [-] main: CameraProcess initializing...
+2026-03-15 22:40:21,270 [DEBUG] [-] command_manager: Registering command: start_capture
+2026-03-15 22:40:21,270 [DEBUG] [-] dispatcher: Registering handler: start_capture
+2026-03-15 22:40:21,270 [INFO] [-] dispatcher: Handler 'start_capture' registered successfully
+2026-03-15 22:40:21,270 [INFO] [-] command_manager: Command 'start_capture' registered successfully
+2026-03-15 22:40:21,270 [DEBUG] [-] command_manager: Registering command: stop_capture
+2026-03-15 22:40:21,270 [DEBUG] [-] dispatcher: Registering handler: stop_capture
+2026-03-15 22:40:21,270 [INFO] [-] dispatcher: Handler 'stop_capture' registered successfully
+2026-03-15 22:40:21,270 [INFO] [-] command_manager: Command 'stop_capture' registered successfully
+2026-03-15 22:40:21,270 [DEBUG] [-] command_manager: Registering command: set_fps
+2026-03-15 22:40:21,270 [DEBUG] [-] dispatcher: Registering handler: set_fps
+2026-03-15 22:40:21,270 [INFO] [-] dispatcher: Handler 'set_fps' registered successfully
+2026-03-15 22:40:21,270 [INFO] [-] command_manager: Command 'set_fps' registered successfully
+2026-03-15 22:40:21,270 [DEBUG] [-] command_manager: Registering command: set_resolution
+2026-03-15 22:40:21,270 [DEBUG] [-] dispatcher: Registering handler: set_resolution
+2026-03-15 22:40:21,270 [INFO] [-] dispatcher: Handler 'set_resolution' registered successfully
+2026-03-15 22:40:21,270 [INFO] [-] command_manager: Command 'set_resolution' registered successfully
+2026-03-15 22:40:21,270 [INFO] [-] main: CameraProcess ready: 640x480 @ 30 FPS
+2026-03-15 22:40:21,270 [INFO] [-] main: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution']
+2026-03-15 22:40:21,270 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,270 [INFO] [camera] main: Process 'camera' initialized successfully
+2026-03-15 22:40:21,270 [INFO] [camera] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,270 [INFO] [camera] lifecycle: Process 'camera' started
+2026-03-15 22:40:21,270 [INFO] [camera] main: [DEBUG] camera: frame=1 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:21,270 [INFO] [camera] main: [DEBUG] camera: frame=2 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:21,270 [INFO] [camera] main: [DEBUG] camera: frame=3 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:21,379 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:40:21,379 [INFO] [-] main: RouterManager 'router_processor' initialized (channels: [])
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:40:21,379 [INFO] [-] main: [stats_processor] initialized
+2026-03-15 22:40:21,379 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:40:21,379 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:40:21,379 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:40:21,379 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:40:21,379 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:40:21,379 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:40:21,379 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:40:21,379 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:40:21,379 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:40:21,379 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:40:21,379 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:40:21,379 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:40:21,379 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:40:21,379 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:40:21,379 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,379 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,379 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:40:21,379 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:40:21,379 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:40:21,379 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:40:21,379 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,379 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_local' registered (type=queue)
+2026-03-15 22:40:21,379 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:40:21,379 [INFO] [-] main: Process state registered: processor
+2026-03-15 22:40:21,379 [INFO] [-] main: ProcessorProcess initializing...
+2026-03-15 22:40:21,379 [DEBUG] [-] command_manager: Registering command: set_color_range
+2026-03-15 22:40:21,380 [DEBUG] [-] dispatcher: Registering handler: set_color_range
+2026-03-15 22:40:21,380 [INFO] [-] dispatcher: Handler 'set_color_range' registered successfully
+2026-03-15 22:40:21,380 [INFO] [-] command_manager: Command 'set_color_range' registered successfully
+2026-03-15 22:40:21,380 [DEBUG] [-] command_manager: Registering command: set_min_area
+2026-03-15 22:40:21,380 [DEBUG] [-] dispatcher: Registering handler: set_min_area
+2026-03-15 22:40:21,380 [INFO] [-] dispatcher: Handler 'set_min_area' registered successfully
+2026-03-15 22:40:21,380 [INFO] [-] command_manager: Command 'set_min_area' registered successfully
+2026-03-15 22:40:21,380 [INFO] [-] main: [DEBUG] processor: frame_ready received frame_id=1
+2026-03-15 22:40:21,380 [INFO] [-] main: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500
+2026-03-15 22:40:21,380 [INFO] [-] main: Registered 7 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area']
+2026-03-15 22:40:21,380 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,380 [INFO] [processor] main: Process 'processor' initialized successfully
+2026-03-15 22:40:21,380 [INFO] [processor] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,380 [INFO] [processor] lifecycle: Process 'processor' started
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=1, processing_time=6.3ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=2
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=2, processing_time=5.7ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=3
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=3, processing_time=5.9ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=4, processing_time=5.8ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=5, processing_time=6.1ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=6, processing_time=5.9ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=7, processing_time=5.5ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=8, processing_time=6.0ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=9, processing_time=5.8ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=10, processing_time=6.0ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=11, processing_time=5.6ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=12, processing_time=5.5ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=13, processing_time=6.0ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=14, processing_time=5.4ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=15, processing_time=5.5ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=16, processing_time=5.6ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=17, processing_time=5.9ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=18, processing_time=6.7ms, detections=0
+2026-03-15 22:40:21,380 [INFO] [processor] main: [PERF] processor: frame=19, processing_time=5.2ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=20, processing_time=5.3ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=21, processing_time=5.2ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=22, processing_time=5.6ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=23, processing_time=5.7ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=24, processing_time=6.1ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=25, processing_time=5.6ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=26, processing_time=5.2ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=27, processing_time=5.4ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=28, processing_time=5.7ms, detections=0
+2026-03-15 22:40:22,380 [INFO] [processor] main: [PERF] processor: frame=29, processing_time=6.0ms, detections=0
+2026-03-15 22:40:21,491 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:40:21,491 [INFO] [-] main: RouterManager 'router_renderer' initialized (channels: [])
+2026-03-15 22:40:21,491 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:40:21,491 [INFO] [-] main: [stats_renderer] initialized
+2026-03-15 22:40:21,491 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:40:21,491 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:40:21,491 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:40:21,491 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:40:21,491 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:40:21,491 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:40:21,491 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:40:21,491 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:40:21,491 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:40:21,491 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:40:21,491 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:40:21,491 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:40:21,491 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:40:21,491 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:40:21,491 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,491 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,491 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:40:21,491 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:40:21,491 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:40:21,491 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:40:21,491 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,491 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,491 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:40:21,491 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:40:21,491 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_local' registered (type=queue)
+2026-03-15 22:40:21,492 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:40:21,492 [INFO] [-] main: Process state registered: renderer
+2026-03-15 22:40:21,492 [INFO] [-] main: RendererProcess initializing...
+2026-03-15 22:40:21,492 [DEBUG] [-] command_manager: Registering command: set_draw_contours
+2026-03-15 22:40:21,492 [DEBUG] [-] dispatcher: Registering handler: set_draw_contours
+2026-03-15 22:40:21,492 [INFO] [-] dispatcher: Handler 'set_draw_contours' registered successfully
+2026-03-15 22:40:21,492 [INFO] [-] command_manager: Command 'set_draw_contours' registered successfully
+2026-03-15 22:40:21,492 [DEBUG] [-] command_manager: Registering command: set_show_original
+2026-03-15 22:40:21,492 [DEBUG] [-] dispatcher: Registering handler: set_show_original
+2026-03-15 22:40:21,492 [INFO] [-] dispatcher: Handler 'set_show_original' registered successfully
+2026-03-15 22:40:21,492 [INFO] [-] command_manager: Command 'set_show_original' registered successfully
+2026-03-15 22:40:21,492 [DEBUG] [-] command_manager: Registering command: set_show_mask
+2026-03-15 22:40:21,492 [DEBUG] [-] dispatcher: Registering handler: set_show_mask
+2026-03-15 22:40:21,492 [INFO] [-] dispatcher: Handler 'set_show_mask' registered successfully
+2026-03-15 22:40:21,492 [INFO] [-] command_manager: Command 'set_show_mask' registered successfully
+2026-03-15 22:40:21,492 [INFO] [-] main: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-15 22:40:21,492 [INFO] [-] main: RendererProcess ready
+2026-03-15 22:40:21,492 [INFO] [-] main: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask']
+2026-03-15 22:40:21,492 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,492 [INFO] [renderer] main: Process 'renderer' initialized successfully
+2026-03-15 22:40:21,492 [INFO] [renderer] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,492 [INFO] [renderer] lifecycle: Process 'renderer' started
+2026-03-15 22:40:21,492 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1
+2026-03-15 22:40:21,492 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=2
+2026-03-15 22:40:21,492 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=2
+2026-03-15 22:40:21,492 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=3
+2026-03-15 22:40:21,492 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
+2026-03-15 22:40:21,594 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:40:21,594 [INFO] [-] main: RouterManager 'router_robot' initialized (channels: [])
+2026-03-15 22:40:21,594 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:40:21,594 [INFO] [-] main: [stats_robot] initialized
+2026-03-15 22:40:21,594 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:40:21,594 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:40:21,595 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:40:21,595 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:40:21,595 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:40:21,595 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:40:21,595 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:40:21,595 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:40:21,595 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:40:21,595 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:40:21,595 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:40:21,595 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,595 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:40:21,595 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:40:21,595 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,595 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_local' registered (type=queue)
+2026-03-15 22:40:21,595 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:40:21,595 [INFO] [-] main: Process state registered: robot
+2026-03-15 22:40:21,595 [INFO] [-] main: RobotSimulatorProcess initializing...
+2026-03-15 22:40:21,595 [DEBUG] [-] command_manager: Registering command: reject_item
+2026-03-15 22:40:21,595 [DEBUG] [-] dispatcher: Registering handler: reject_item
+2026-03-15 22:40:21,595 [INFO] [-] dispatcher: Handler 'reject_item' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] command_manager: Command 'reject_item' registered successfully
+2026-03-15 22:40:21,595 [INFO] [-] main: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-15 22:40:21,595 [INFO] [-] main: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-15 22:40:21,595 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,595 [INFO] [robot] main: Process 'robot' initialized successfully
+2026-03-15 22:40:21,595 [INFO] [robot] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,595 [INFO] [robot] lifecycle: Process 'robot' started
+2026-03-15 22:40:21,701 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:40:21,702 [INFO] [-] main: RouterManager 'router_gui' initialized (channels: [])
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:40:21,702 [INFO] [-] main: [stats_gui] initialized
+2026-03-15 22:40:21,702 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:40:21,702 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:40:21,702 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:40:21,702 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:40:21,702 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:40:21,702 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:40:21,702 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:40:21,702 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:40:21,702 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:40:21,702 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:40:21,702 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:40:21,702 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:40:21,702 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:40:21,702 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:40:21,702 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,702 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:40:21,702 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:40:21,702 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:40:21,702 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:40:21,702 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:40:21,702 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,702 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_local' registered (type=queue)
+2026-03-15 22:40:21,702 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:40:21,702 [INFO] [-] main: Process state registered: gui
+2026-03-15 22:40:21,702 [INFO] [-] main: GuiProcess initializing...
+2026-03-15 22:40:21,702 [INFO] [-] main: GuiProcess ready (no workers)
+2026-03-15 22:40:21,702 [INFO] [-] main: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-15 22:40:21,702 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:40:21,702 [INFO] [gui] main: Process 'gui' initialized successfully
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:40:22,702 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:40:23,271 [INFO] [camera] main: [DEBUG] camera: frame=50 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:22,385 [INFO] [processor] main: [PERF] processor: frame=30, processing_time=6.5ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=31, processing_time=5.9ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=32, processing_time=6.0ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=33, processing_time=6.1ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=34, processing_time=5.7ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=35, processing_time=6.6ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=36, processing_time=6.5ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=37, processing_time=6.4ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=38, processing_time=6.7ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=39, processing_time=7.4ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=40, processing_time=7.0ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=41, processing_time=6.4ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=42, processing_time=7.0ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=43, processing_time=6.5ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=44, processing_time=6.6ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=45, processing_time=6.9ms, detections=0
+2026-03-15 22:40:22,386 [INFO] [processor] main: [PERF] processor: frame=46, processing_time=6.9ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=47, processing_time=6.7ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=48, processing_time=6.7ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=49, processing_time=6.6ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=50
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=50, processing_time=6.8ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=51, processing_time=6.5ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=52, processing_time=6.7ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=53, processing_time=7.2ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=54, processing_time=7.1ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=55, processing_time=7.4ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=56, processing_time=7.3ms, detections=0
+2026-03-15 22:40:23,386 [INFO] [processor] main: [PERF] processor: frame=57, processing_time=7.0ms, detections=0
+2026-03-15 22:40:23,497 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=50
+2026-03-15 22:40:23,497 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
+2026-03-15 22:40:23,707 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=58, processing_time=7.0ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=59, processing_time=7.2ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=60, processing_time=5.6ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=61, processing_time=6.3ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=62, processing_time=6.4ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=63, processing_time=6.7ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=64, processing_time=7.0ms, detections=0
+2026-03-15 22:40:23,391 [INFO] [processor] main: [PERF] processor: frame=65, processing_time=6.9ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=66, processing_time=7.2ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=67, processing_time=7.1ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=68, processing_time=7.3ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=69, processing_time=7.6ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=70, processing_time=7.2ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=71, processing_time=7.3ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=72, processing_time=7.0ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=73, processing_time=7.3ms, detections=0
+2026-03-15 22:40:23,392 [INFO] [processor] main: [PERF] processor: frame=74, processing_time=7.1ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=75, processing_time=7.2ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=76, processing_time=6.5ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=77, processing_time=6.9ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=78, processing_time=6.8ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=79, processing_time=6.9ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=80, processing_time=6.7ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=81, processing_time=6.7ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=82, processing_time=6.8ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=83, processing_time=7.1ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=84, processing_time=7.5ms, detections=0
+2026-03-15 22:40:24,392 [INFO] [processor] main: [PERF] processor: frame=85, processing_time=7.2ms, detections=0
+2026-03-15 22:40:24,930 [INFO] [camera] main: [DEBUG] camera: frame=100 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:24,938 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=100
+2026-03-15 22:40:24,945 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:24,277 [INFO] [camera] main: [PERF] camera: frames=100, actual_fps=27.6, target_fps=30
+2026-03-15 22:40:25,277 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,277 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,277 [INFO] [camera] main: FPS set to 27
+2026-03-15 22:40:25,277 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,277 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=86, processing_time=6.5ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=87, processing_time=7.2ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=88, processing_time=7.0ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=89, processing_time=7.1ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=90, processing_time=7.7ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=91, processing_time=7.5ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=92, processing_time=7.0ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=93, processing_time=7.6ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=94, processing_time=6.9ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=95, processing_time=7.0ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=96, processing_time=6.8ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=97, processing_time=6.9ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=98, processing_time=7.1ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=99, processing_time=7.1ms, detections=0
+2026-03-15 22:40:24,393 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=100
+2026-03-15 22:40:24,393 [INFO] [processor] main: [PERF] processor: frame=100, processing_time=7.6ms, detections=0
+2026-03-15 22:40:24,394 [INFO] [processor] main: [PERF] processor: frame=101, processing_time=7.1ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=102, processing_time=7.0ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=103, processing_time=6.8ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=104, processing_time=7.7ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=105, processing_time=7.5ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=106, processing_time=7.7ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=107, processing_time=7.0ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=108, processing_time=6.5ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=109, processing_time=6.8ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=110, processing_time=5.6ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=111, processing_time=5.4ms, detections=0
+2026-03-15 22:40:25,394 [INFO] [processor] main: [PERF] processor: frame=112, processing_time=5.7ms, detections=0
+2026-03-15 22:40:24,504 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=100
+2026-03-15 22:40:25,279 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,279 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,279 [INFO] [camera] main: FPS set to 26
+2026-03-15 22:40:25,279 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,279 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,279 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,279 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,280 [INFO] [camera] main: FPS set to 24
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,280 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,280 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,280 [INFO] [camera] main: FPS set to 21
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,280 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,280 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,280 [INFO] [camera] main: FPS set to 14
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,280 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,280 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,280 [INFO] [camera] main: FPS set to 12
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,280 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,280 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,280 [INFO] [camera] main: FPS set to 4
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,280 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,280 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:25,280 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:25,280 [INFO] [camera] main: FPS set to 1
+2026-03-15 22:40:25,281 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:25,281 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:25,399 [INFO] [processor] main: [PERF] processor: frame=113, processing_time=5.9ms, detections=0
+2026-03-15 22:40:25,399 [INFO] [processor] main: [PERF] processor: frame=114, processing_time=6.1ms, detections=0
+2026-03-15 22:40:25,399 [INFO] [processor] main: [PERF] processor: frame=115, processing_time=6.2ms, detections=0
+2026-03-15 22:40:25,399 [INFO] [processor] main: [PERF] processor: frame=116, processing_time=12.4ms, detections=0
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 13
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 17
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 23
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 27
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 30
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 31
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:26,285 [INFO] [camera] main: FPS set to 30
+2026-03-15 22:40:26,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:26,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,285 [INFO] [camera] main: FPS set to 29
+2026-03-15 22:40:27,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,285 [INFO] [camera] main: FPS set to 27
+2026-03-15 22:40:27,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,285 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,285 [INFO] [camera] main: FPS set to 23
+2026-03-15 22:40:27,285 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,285 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,285 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,286 [INFO] [camera] main: FPS set to 21
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,286 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,286 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,286 [INFO] [camera] main: FPS set to 18
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,286 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,286 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,286 [INFO] [camera] main: FPS set to 17
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,286 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,286 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,286 [INFO] [camera] main: FPS set to 16
+2026-03-15 22:40:27,286 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,286 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:26,403 [INFO] [processor] main: [PERF] processor: frame=117, processing_time=12.2ms, detections=0
+2026-03-15 22:40:26,403 [INFO] [processor] main: [PERF] processor: frame=118, processing_time=8.5ms, detections=0
+2026-03-15 22:40:26,403 [INFO] [processor] main: [PERF] processor: frame=119, processing_time=7.7ms, detections=0
+2026-03-15 22:40:26,403 [INFO] [processor] main: [PERF] processor: frame=120, processing_time=7.2ms, detections=0
+2026-03-15 22:40:26,403 [INFO] [processor] main: [PERF] processor: frame=121, processing_time=6.8ms, detections=0
+2026-03-15 22:40:26,404 [INFO] [processor] main: [PERF] processor: frame=122, processing_time=7.2ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=123, processing_time=6.4ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=124, processing_time=6.2ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=125, processing_time=6.7ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=126, processing_time=7.8ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=127, processing_time=8.2ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=128, processing_time=6.9ms, detections=0
+2026-03-15 22:40:27,404 [INFO] [processor] main: [PERF] processor: frame=129, processing_time=8.6ms, detections=0
+2026-03-15 22:40:27,290 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:40:27,290 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:40:27,290 [INFO] [camera] main: FPS set to 17
+2026-03-15 22:40:27,290 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:40:27,290 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=130, processing_time=7.8ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=131, processing_time=7.8ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=132, processing_time=8.1ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=133, processing_time=8.2ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=134, processing_time=8.0ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=135, processing_time=8.1ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=136, processing_time=8.0ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=137, processing_time=7.8ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=138, processing_time=7.8ms, detections=0
+2026-03-15 22:40:27,405 [INFO] [processor] main: [PERF] processor: frame=139, processing_time=8.0ms, detections=0
+2026-03-15 22:40:28,405 [INFO] [processor] main: [PERF] processor: frame=140, processing_time=8.0ms, detections=0
+2026-03-15 22:40:28,405 [INFO] [processor] main: [PERF] processor: frame=141, processing_time=7.9ms, detections=0
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 82, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 96, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 101, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 115, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] main: [PERF] processor: frame=142, processing_time=6.2ms, detections=0
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 120, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 125, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 164, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] main: [PERF] processor: frame=143, processing_time=6.9ms, detections=0
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 183, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 217, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,405 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 236, 255]
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,405 [INFO] [processor] main: [PERF] processor: frame=144, processing_time=6.4ms, detections=0
+2026-03-15 22:40:28,405 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,405 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,406 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 241, 255]
+2026-03-15 22:40:28,406 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,406 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,406 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,406 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,406 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 245, 255]
+2026-03-15 22:40:28,406 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,406 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,406 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:28,406 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:28,406 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 255, 255]
+2026-03-15 22:40:28,406 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:28,406 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:28,406 [INFO] [processor] main: [PERF] processor: frame=145, processing_time=6.9ms, detections=0
+2026-03-15 22:40:28,406 [INFO] [processor] main: [PERF] processor: frame=146, processing_time=7.5ms, detections=0
+2026-03-15 22:40:28,646 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=150
+2026-03-15 22:40:28,649 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=150 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:28,292 [INFO] [camera] main: [DEBUG] camera: frame=150 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:28,409 [INFO] [processor] main: [PERF] processor: frame=147, processing_time=8.6ms, detections=0
+2026-03-15 22:40:28,409 [INFO] [processor] main: [PERF] processor: frame=148, processing_time=7.8ms, detections=0
+2026-03-15 22:40:28,409 [INFO] [processor] main: [PERF] processor: frame=149, processing_time=8.2ms, detections=0
+2026-03-15 22:40:28,410 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=150
+2026-03-15 22:40:28,410 [INFO] [processor] main: [PERF] processor: frame=150, processing_time=8.6ms, detections=0
+2026-03-15 22:40:28,410 [INFO] [processor] main: [PERF] processor: frame=151, processing_time=7.7ms, detections=0
+2026-03-15 22:40:28,410 [INFO] [processor] main: [PERF] processor: frame=152, processing_time=7.4ms, detections=0
+2026-03-15 22:40:28,410 [INFO] [processor] main: [PERF] processor: frame=153, processing_time=7.9ms, detections=0
+2026-03-15 22:40:28,410 [INFO] [processor] main: [PERF] processor: frame=154, processing_time=8.1ms, detections=0
+2026-03-15 22:40:28,410 [INFO] [processor] main: [PERF] processor: frame=155, processing_time=7.8ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=156, processing_time=7.7ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=157, processing_time=8.4ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=158, processing_time=8.1ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=159, processing_time=8.0ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=160, processing_time=8.0ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=161, processing_time=8.1ms, detections=0
+2026-03-15 22:40:29,410 [INFO] [processor] main: [PERF] processor: frame=162, processing_time=8.0ms, detections=0
+2026-03-15 22:40:28,518 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=150
+2026-03-15 22:40:29,519 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:29,612 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:29,612 [INFO] [robot] main: REJECT #1: frame=164, pos=(307, 249), area=1591
+2026-03-15 22:40:29,330 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,330 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,330 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[115, 255, 255]
+2026-03-15 22:40:29,330 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,330 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,330 [INFO] [processor] main: [PERF] processor: frame=163, processing_time=8.0ms, detections=0
+2026-03-15 22:40:29,330 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,330 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,330 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[130, 255, 255]
+2026-03-15 22:40:29,330 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,330 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,330 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,330 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,330 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[140, 255, 255]
+2026-03-15 22:40:29,330 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=164, processing_time=6.9ms, detections=1
+2026-03-15 22:40:29,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[154, 255, 255]
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[159, 255, 255]
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[183, 255, 255]
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[217, 255, 255]
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=165, processing_time=7.4ms, detections=1
+2026-03-15 22:40:29,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:29,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[255, 255, 255]
+2026-03-15 22:40:29,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=166, processing_time=8.0ms, detections=1
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=167, processing_time=8.3ms, detections=1
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=168, processing_time=8.9ms, detections=1
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=169, processing_time=8.7ms, detections=1
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=170, processing_time=8.9ms, detections=1
+2026-03-15 22:40:29,331 [INFO] [processor] main: [PERF] processor: frame=171, processing_time=8.3ms, detections=1
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[250, 255, 255]
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] main: [PERF] processor: frame=172, processing_time=8.9ms, detections=1
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[245, 255, 255]
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[241, 255, 255]
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] main: [PERF] processor: frame=173, processing_time=8.2ms, detections=1
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[226, 255, 255]
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] main: [PERF] processor: frame=174, processing_time=8.5ms, detections=1
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,331 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[217, 255, 255]
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,331 [INFO] [processor] main: [PERF] processor: frame=175, processing_time=9.3ms, detections=1
+2026-03-15 22:40:30,331 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,331 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,332 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[212, 255, 255]
+2026-03-15 22:40:30,332 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,332 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,332 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,332 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,332 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[207, 255, 255]
+2026-03-15 22:40:30,332 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,332 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,332 [INFO] [processor] main: [PERF] processor: frame=176, processing_time=7.8ms, detections=1
+2026-03-15 22:40:30,332 [INFO] [processor] main: [PERF] processor: frame=177, processing_time=7.9ms, detections=1
+2026-03-15 22:40:30,412 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,412 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,412 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[212, 255, 255]
+2026-03-15 22:40:30,412 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,412 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,412 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,412 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,412 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[221, 255, 255]
+2026-03-15 22:40:30,412 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,412 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,412 [INFO] [processor] main: [PERF] processor: frame=178, processing_time=8.2ms, detections=1
+2026-03-15 22:40:30,412 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,412 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,412 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[226, 255, 255]
+2026-03-15 22:40:30,616 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:40:30,616 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:40:30,616 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:30,616 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:30,616 [INFO] [robot] main: REJECT #2: frame=164, pos=(307, 249), area=1591
+2026-03-15 22:40:30,616 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.502s
+2026-03-15 22:40:30,616 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-15 22:40:30,616 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:30,616 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:30,616 [INFO] [robot] main: REJECT #3: frame=165, pos=(321, 242), area=27240
+2026-03-15 22:40:31,273 [INFO] [camera] stats: metrics snapshot (ts=1773603631, count=44): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'start_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'start_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'start_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'start_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stop_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stop_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stop_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stop_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_resolution'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_resolution'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_resolution'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_resolution'}, 'count': 1.0}, {'name': 'camera.frames_captured', 'type': 'counter', 'tags': {'target_fps': '30'}, 'count': 100.0}, {'name': 'camera.actual_fps', 'type': 'counter', 'tags': {}, 'count': 27.596218552525997}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 23.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 23.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'set_fps'}, 'count': 23, 'min': 1.2159347534179688e-05, 'max': 5.3882598876953125e-05, 'avg': 2.6153481524923574e-05, 'p95': 3.910064697265625e-05}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 23.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 23.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'set_fps'}, 'count': 23, 'min': 3.62396240234375e-05, 'max': 0.00019621849060058594, 'avg': 8.771730505901834e-05, 'p95': 0.00017905235290527344}]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.001s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.001s
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=179, processing_time=8.5ms, detections=1
+2026-03-15 22:40:30,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[231, 255, 255]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=180, processing_time=8.0ms, detections=1
+2026-03-15 22:40:30,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[241, 255, 255]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[245, 255, 255]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=181, processing_time=8.1ms, detections=1
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=182, processing_time=8.6ms, detections=1
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=183, processing_time=9.0ms, detections=1
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=184, processing_time=9.3ms, detections=1
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=185, processing_time=9.1ms, detections=1
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=186, processing_time=8.9ms, detections=1
+2026-03-15 22:40:30,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[241, 255, 255]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] main: [PERF] processor: frame=187, processing_time=8.6ms, detections=1
+2026-03-15 22:40:30,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:30,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-15 22:40:30,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:30,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:31,417 [INFO] [processor] main: [PERF] processor: frame=188, processing_time=8.6ms, detections=1
+2026-03-15 22:40:31,417 [INFO] [processor] main: [PERF] processor: frame=189, processing_time=9.5ms, detections=1
+2026-03-15 22:40:31,417 [INFO] [processor] main: [PERF] processor: frame=190, processing_time=9.3ms, detections=1
+2026-03-15 22:40:31,417 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:40:31,417 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:40:31,417 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[241, 255, 255]
+2026-03-15 22:40:31,417 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:40:31,417 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:40:31,417 [INFO] [processor] main: [PERF] processor: frame=191, processing_time=8.5ms, detections=1
+2026-03-15 22:40:31,417 [INFO] [processor] main: [PERF] processor: frame=192, processing_time=8.8ms, detections=1
+2026-03-15 22:40:31,418 [INFO] [processor] main: [PERF] processor: frame=193, processing_time=9.4ms, detections=1
+2026-03-15 22:40:31,418 [INFO] [processor] main: [PERF] processor: frame=194, processing_time=9.7ms, detections=1
+2026-03-15 22:40:31,418 [INFO] [processor] stats: metrics snapshot (ts=1773603631, count=36): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_min_area'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_min_area'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_min_area'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_min_area'}, 'count': 1.0}, {'name': 'processor.processing_time_ms', 'type': 'counter', 'tags': {}, 'count': 1398.3368873596191}, {'name': 'processor.detections_count', 'type': 'counter', 'tags': {}, 'count': 31.0}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 40.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 40.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'set_color_range'}, 'count': 40, 'min': 2.288818359375e-05, 'max': 0.0008649826049804688, 'avg': 5.8722496032714846e-05, 'p95': 5.698204040527344e-05}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 40.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 40.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'set_color_range'}, 'count': 40, 'min': 5.3882598876953125e-05, 'max': 0.0009369850158691406, 'avg': 0.00011602044105529785, 'p95': 0.0001480579376220703}]
+2026-03-15 22:40:31,498 [INFO] [renderer] stats: metrics snapshot (ts=1773603631, count=34): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_draw_contours'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_draw_contours'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_draw_contours'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_draw_contours'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_show_original'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_show_original'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_show_original'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_show_original'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_show_mask'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_show_mask'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_show_mask'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_show_mask'}, 'count': 1.0}, {'name': 'renderer.frames_rendered', 'type': 'counter', 'tags': {}, 'count': 195.0}, {'name': 'renderer.detections_per_frame', 'type': 'counter', 'tags': {}, 'count': 32.0}]
+2026-03-15 22:40:31,621 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:40:31,621 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:40:31,621 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:31,621 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:31,621 [INFO] [robot] main: REJECT #4: frame=165, pos=(321, 242), area=27240
+2026-03-15 22:40:31,621 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:40:31,621 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:40:31,621 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:31,621 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:31,621 [INFO] [robot] main: REJECT #5: frame=166, pos=(319, 239), area=234066
+2026-03-15 22:40:31,621 [INFO] [robot] stats: metrics snapshot (ts=1773603632, count=30): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 1.0}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 5.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 5.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'reject_item'}, 'count': 4, 'min': 0.5020091533660889, 'max': 0.50498366355896, 'avg': 0.5033264756202698, 'p95': 0.5036001205444336}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 4.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 4.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'reject_item'}, 'count': 4, 'min': 0.5021531581878662, 'max': 0.5051190853118896, 'avg': 0.503494918346405, 'p95': 0.5036990642547607}]
+2026-03-15 22:40:31,704 [INFO] [gui] stats: metrics snapshot (ts=1773603632, count=20): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}]
+2026-03-15 22:40:31,303 [INFO] [camera] main: [DEBUG] camera: frame=200 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:31,303 [INFO] [camera] main: [PERF] camera: frames=200, actual_fps=14.7, target_fps=17
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=195, processing_time=8.9ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=196, processing_time=10.0ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=197, processing_time=9.1ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=198, processing_time=9.4ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=199, processing_time=9.0ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=200
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=200, processing_time=9.1ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=201, processing_time=9.0ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=202, processing_time=8.4ms, detections=1
+2026-03-15 22:40:31,420 [INFO] [processor] main: [PERF] processor: frame=203, processing_time=8.4ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=204, processing_time=9.1ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=205, processing_time=8.9ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=206, processing_time=9.8ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=207, processing_time=8.6ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=208, processing_time=9.5ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=209, processing_time=9.8ms, detections=1
+2026-03-15 22:40:32,420 [INFO] [processor] main: [PERF] processor: frame=210, processing_time=9.3ms, detections=1
+2026-03-15 22:40:31,525 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=200
+2026-03-15 22:40:31,525 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=200
+2026-03-15 22:40:32,625 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.501s
+2026-03-15 22:40:32,625 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-15 22:40:32,625 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:32,625 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:32,625 [INFO] [robot] main: REJECT #6: frame=166, pos=(319, 239), area=234066
+2026-03-15 22:40:32,625 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:40:32,625 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:40:32,625 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:32,625 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:32,625 [INFO] [robot] main: REJECT #7: frame=167, pos=(319, 239), area=234066
+2026-03-15 22:40:31,734 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=200 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=211, processing_time=9.4ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=212, processing_time=9.1ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=213, processing_time=9.5ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=214, processing_time=9.2ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=215, processing_time=9.5ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=216, processing_time=8.8ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=217, processing_time=8.9ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=218, processing_time=9.5ms, detections=1
+2026-03-15 22:40:32,423 [INFO] [processor] main: [PERF] processor: frame=219, processing_time=9.0ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=220, processing_time=9.5ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=221, processing_time=9.5ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=222, processing_time=9.3ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=223, processing_time=8.7ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=224, processing_time=8.6ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=225, processing_time=8.9ms, detections=1
+2026-03-15 22:40:33,423 [INFO] [processor] main: [PERF] processor: frame=226, processing_time=8.8ms, detections=1
+2026-03-15 22:40:33,630 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.501s
+2026-03-15 22:40:33,630 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-15 22:40:33,630 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:33,630 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:33,630 [INFO] [robot] main: REJECT #8: frame=167, pos=(319, 239), area=234066
+2026-03-15 22:40:33,630 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:40:33,630 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=227, processing_time=9.2ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=228, processing_time=8.5ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=229, processing_time=8.6ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=230, processing_time=8.9ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=231, processing_time=8.7ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=232, processing_time=8.5ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=233, processing_time=9.0ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=234, processing_time=8.7ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=235, processing_time=9.1ms, detections=1
+2026-03-15 22:40:33,427 [INFO] [processor] main: [PERF] processor: frame=236, processing_time=8.9ms, detections=1
+2026-03-15 22:40:34,427 [INFO] [processor] main: [PERF] processor: frame=237, processing_time=8.4ms, detections=1
+2026-03-15 22:40:34,427 [INFO] [processor] main: [PERF] processor: frame=238, processing_time=8.8ms, detections=1
+2026-03-15 22:40:34,427 [INFO] [processor] main: [PERF] processor: frame=239, processing_time=8.6ms, detections=1
+2026-03-15 22:40:34,427 [INFO] [processor] main: [PERF] processor: frame=240, processing_time=9.1ms, detections=1
+2026-03-15 22:40:34,427 [INFO] [processor] main: [PERF] processor: frame=241, processing_time=9.7ms, detections=1
+2026-03-15 22:40:34,427 [INFO] [processor] main: [PERF] processor: frame=242, processing_time=8.8ms, detections=1
+2026-03-15 22:40:33,634 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:33,634 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:33,634 [INFO] [robot] main: REJECT #9: frame=181, pos=(319, 239), area=157955
+2026-03-15 22:40:34,634 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.502s
+2026-03-15 22:40:34,634 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-15 22:40:34,634 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:34,634 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:34,634 [INFO] [robot] main: REJECT #10: frame=181, pos=(319, 239), area=157955
+2026-03-15 22:40:34,864 [INFO] [camera] main: [DEBUG] camera: frame=250 -> processor, shm=camera_frame_0...
+2026-03-15 22:40:34,872 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=250
+2026-03-15 22:40:34,881 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=250 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:40:34,432 [INFO] [processor] main: [PERF] processor: frame=243, processing_time=8.9ms, detections=1
+2026-03-15 22:40:34,432 [INFO] [processor] main: [PERF] processor: frame=244, processing_time=9.8ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=245, processing_time=9.1ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=246, processing_time=8.9ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=247, processing_time=8.7ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=248, processing_time=8.7ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=249, processing_time=7.2ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=250
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=250, processing_time=7.1ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=251, processing_time=7.0ms, detections=1
+2026-03-15 22:40:34,433 [INFO] [processor] main: [PERF] processor: frame=252, processing_time=8.5ms, detections=1
+2026-03-15 22:40:35,433 [INFO] [processor] main: [PERF] processor: frame=253, processing_time=8.1ms, detections=1
+2026-03-15 22:40:35,433 [INFO] [processor] main: [PERF] processor: frame=254, processing_time=8.7ms, detections=1
+2026-03-15 22:40:35,433 [INFO] [processor] main: [PERF] processor: frame=255, processing_time=9.0ms, detections=1
+2026-03-15 22:40:35,433 [INFO] [processor] main: [PERF] processor: frame=256, processing_time=9.9ms, detections=1
+2026-03-15 22:40:35,433 [INFO] [processor] main: [PERF] processor: frame=257, processing_time=10.3ms, detections=1
+2026-03-15 22:40:35,433 [INFO] [processor] main: [PERF] processor: frame=258, processing_time=9.1ms, detections=1
+2026-03-15 22:40:34,537 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=250
+2026-03-15 22:40:34,640 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:40:34,640 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:40:34,640 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:34,640 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:34,640 [INFO] [robot] main: REJECT #11: frame=197, pos=(319, 239), area=157280
+2026-03-15 22:40:35,640 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.502s
+2026-03-15 22:40:35,640 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-15 22:40:35,640 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:35,640 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:35,640 [INFO] [robot] main: REJECT #12: frame=197, pos=(319, 239), area=157280
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=259, processing_time=9.4ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=260, processing_time=8.4ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=261, processing_time=8.5ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=262, processing_time=9.0ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=263, processing_time=8.8ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=264, processing_time=9.4ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=265, processing_time=8.7ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=266, processing_time=9.3ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=267, processing_time=8.7ms, detections=1
+2026-03-15 22:40:35,438 [INFO] [processor] main: [PERF] processor: frame=268, processing_time=9.1ms, detections=1
+2026-03-15 22:40:36,438 [INFO] [processor] main: [PERF] processor: frame=269, processing_time=9.6ms, detections=1
+2026-03-15 22:40:36,439 [INFO] [processor] main: [PERF] processor: frame=270, processing_time=10.0ms, detections=1
+2026-03-15 22:40:36,439 [INFO] [processor] main: [PERF] processor: frame=271, processing_time=10.1ms, detections=1
+2026-03-15 22:40:36,439 [INFO] [processor] main: [PERF] processor: frame=272, processing_time=9.3ms, detections=1
+2026-03-15 22:40:36,439 [INFO] [processor] main: [PERF] processor: frame=273, processing_time=29.2ms, detections=1
+2026-03-15 22:40:36,439 [INFO] [processor] main: [PERF] processor: frame=274, processing_time=14.9ms, detections=1
+2026-03-15 22:40:35,644 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.501s
+2026-03-15 22:40:35,644 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-15 22:40:35,644 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:35,644 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:35,644 [INFO] [robot] main: REJECT #13: frame=214, pos=(319, 239), area=157280
+2026-03-15 22:40:36,644 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.501s
+2026-03-15 22:40:36,644 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-15 22:40:36,644 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:40:36,644 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:40:36,644 [INFO] [robot] main: REJECT #14: frame=214, pos=(319, 239), area=157280
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=275, processing_time=10.2ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=276, processing_time=6.2ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=277, processing_time=8.0ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=278, processing_time=9.0ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=279, processing_time=8.4ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=280, processing_time=9.0ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=281, processing_time=9.8ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=282, processing_time=9.3ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=283, processing_time=10.1ms, detections=1
+2026-03-15 22:40:36,440 [INFO] [processor] main: [PERF] processor: frame=284, processing_time=9.8ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=285, processing_time=9.7ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=286, processing_time=10.3ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=287, processing_time=10.2ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=288, processing_time=6.8ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=289, processing_time=7.9ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=290, processing_time=9.3ms, detections=1
+2026-03-15 22:40:37,440 [INFO] [processor] main: [PERF] processor: frame=291, processing_time=8.7ms, detections=1

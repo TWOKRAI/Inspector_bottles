@@ -13,7 +13,7 @@ from multiprocessing import Queue, Event
 
 from .process_data import ProcessData
 from ..types import ProcessStatus, ProcessDataDict
-from ..core.interfaces import IProcessStateRegistry
+from .interfaces import IProcessStateRegistry
 
 _logger = logging.getLogger(__name__)
 
