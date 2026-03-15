@@ -10,7 +10,6 @@ integration/
 ├── INTEGRATION_TESTS_GUIDE.md         # Подробное руководство по тестам
 ├── TEST_ISSUES.md                     # Известные проблемы и их решения
 ├── TESTS_STRUCTURE.md                 # Структура тестов
-├── IMPROVEMENTS.md                    # Описание улучшений
 ├── run_integration_tests.py           # Скрипт для запуска всех тестов
 │
 ├── __init__.py                        # Экспорт основных классов
@@ -244,9 +243,8 @@ integration/
 - [INTEGRATION_TESTS_GUIDE.md](INTEGRATION_TESTS_GUIDE.md) - подробное руководство
 - [TESTS_STRUCTURE.md](TESTS_STRUCTURE.md) - структура тестов
 - [TEST_ISSUES.md](TEST_ISSUES.md) - известные проблемы и их решения ⚠️
-- [IMPROVEMENTS.md](IMPROVEMENTS.md) - описание улучшений
 - [run_integration_tests.py](run_integration_tests.py) - скрипт для запуска тестов
-- [Архитектура фреймворка](../../docs/ARCHITECTURE.md)
-- [Руководство по тестированию](../../docs/TESTING_GUIDE.md)
+- [Архитектура фреймворка](../../docs/ARCHITECTURE_REFERENCE.md)
+- [Обзор фреймворка](../../docs/FRAMEWORK_OVERVIEW.md)
 - [Документация модулей](../../modules/)
 

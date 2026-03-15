@@ -22,10 +22,8 @@ class ExcelVisualizationFormatter(IVisualizationFormatter):
     Экспортирует информацию о схеме в Excel файл.
     
     Example:
-        from multiprocess_framework.modules.Shared_resources_module.data_schema import (
-            SchemaVisualizer
-        )
-        from multiprocess_framework.modules.Shared_resources_module.data_schema.tools.examples.excel_formatter import (
+        from data_schema_module.extensions.tools import SchemaVisualizer
+        from data_schema_module.tools.examples.excel_formatter import (
             ExcelVisualizationFormatter
         )
         

@@ -9,6 +9,7 @@ description = "Multiprocess Framework — распределённое прил�
 requires-python = ">=3.9"
 dependencies = [
     "pydantic>=2.0",
+    "numpy>=1.20",
 ]
 
 [tool.setuptools.packages.find]

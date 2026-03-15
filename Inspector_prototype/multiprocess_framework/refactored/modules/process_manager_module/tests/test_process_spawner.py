@@ -85,7 +85,7 @@ class TestProcessSpawner:
         """stop() устанавливает stop_event при живом процессе."""
         spawner = ProcessSpawner()
         mock_process = MagicMock()
-        mock_process.is_alive.return_value = False
+        mock_process.is_alive.return_value = True  # процесс жив — stop_event.set() будет вызван
         spawner._process = mock_process
 
         spawner.stop(timeout=0.1)

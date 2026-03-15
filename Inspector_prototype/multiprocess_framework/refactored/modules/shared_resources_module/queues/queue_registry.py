@@ -8,6 +8,7 @@ QueueRegistry делегирует хранение в PSR, сам держит 
 Pickle-safe: registered_queues — dict с Queue (нативно pickle-safe).
 """
 
+import time
 from multiprocessing import Queue
 from typing import Any, Dict, List, Optional
 
@@ -227,7 +228,9 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry):
     # =========================================================================
 
     def clear_queue(self, queue: Queue, keep_elements: int = 0) -> None:
-        """Надёжная очистка очереди (Windows-safe: не использует queue.empty())."""
+        """Надёжная очистка очереди (Windows-safe: не использует queue.empty()).
+        Учитывает асинхронность multiprocessing.Queue на macOS/spawn — повторный
+        проход после короткой паузы для «задержанных» элементов."""
         saved = []
         try:
             for _ in range(10_000):
@@ -235,6 +238,14 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry):
                     saved.append(queue.get_nowait())
                 except Empty:
                     break
+            # Повторный проход для macOS: put() может быть асинхронным
+            for _ in range(3):
+                time.sleep(0.05)
+                for _ in range(1_000):
+                    try:
+                        saved.append(queue.get_nowait())
+                    except Empty:
+                        break
             if keep_elements > 0 and len(saved) > keep_elements:
                 saved = saved[-keep_elements:]
             elif keep_elements == 0:

@@ -287,8 +287,8 @@ def test_configuration():
 
 - [Руководство по использованию шаблона](TEMPLATE_USAGE.md)
 - [README интеграционных тестов](README.md)
-- [Архитектура фреймворка](../../docs/ARCHITECTURE.md)
-- [Руководство по тестированию](../../docs/TESTING_GUIDE.md)
+- [Архитектура фреймворка](../../docs/ARCHITECTURE_REFERENCE.md)
+- [Обзор фреймворка](../../docs/FRAMEWORK_OVERVIEW.md)
 
 ## 🎓 Лучшие Практики
 

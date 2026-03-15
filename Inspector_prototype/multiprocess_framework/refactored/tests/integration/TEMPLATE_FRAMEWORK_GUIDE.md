@@ -369,7 +369,7 @@ template_app/
 
 ## 📖 Дополнительные Ресурсы
 
-- [Архитектура фреймворка](../../docs/ARCHITECTURE.md)
-- [Руководство по тестированию](../../docs/TESTING_GUIDE.md)
+- [Архитектура фреймворка](../../docs/ARCHITECTURE_REFERENCE.md)
+- [Обзор фреймворка](../../docs/FRAMEWORK_OVERVIEW.md)
 - [Документация модулей](../../modules/)
 

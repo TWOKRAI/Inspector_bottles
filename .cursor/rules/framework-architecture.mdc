@@ -8,6 +8,7 @@ alwaysApply: true
 ## Где что находится
 
 - **Фреймворк**: `Inspector_prototype/multiprocess_framework/refactored/modules/` (15 модулей)
+- **Архив документации**: `refactored/docs/archived/` — исторические отчёты, **не использовать** при анализе фреймворка
 - **Тестовое приложение**: `Inspector_prototype/multiprocess_prototype/`
 - **Точка входа**: `Inspector_prototype/multiprocess_prototype/main.py`
 - **Оркестратор**: `process_manager_module/launcher/system_launcher.py`

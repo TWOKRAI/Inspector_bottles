@@ -256,10 +256,10 @@ if config.ui_process_enabled:
 
 ## 📚 Дополнительные Ресурсы
 
-- [Архитектура фреймворка](../../docs/ARCHITECTURE.md)
+- [Архитектура фреймворка](../../docs/ARCHITECTURE_REFERENCE.md)
 - [Руководство по использованию шаблона](./TEMPLATE_FRAMEWORK_GUIDE.md)
 - [Руководство по использованию шаблона (детальное)](./TEMPLATE_USAGE.md)
-- [Руководство по тестированию](../../docs/TESTING_GUIDE.md)
+- [Руководство по интеграционным тестам](INTEGRATION_TESTS_GUIDE.md)
 - [Документация модулей](../../modules/)
 
 ## 🧪 Запуск Тестов

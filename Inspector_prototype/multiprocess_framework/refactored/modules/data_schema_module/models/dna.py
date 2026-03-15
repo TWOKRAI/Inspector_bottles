@@ -68,7 +68,7 @@ class ComponentLocation(BaseModel):
     Хранит пути к модулю, классу, файлам конфигурации и т.д.
     """
     
-    module_path: str  # Путь к модулю (например, "multiprocess_framework.modules.Logger_module.manager")
+    module_path: str  # Путь к модулю (например, "logger_module.core.logger_manager")
     class_name: str  # Имя класса (например, "LoggerManager")
     file_path: Optional[str] = None  # Путь к файлу с кодом
     config_path: Optional[str] = None  # Путь к файлу конфигурации

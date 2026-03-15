@@ -123,7 +123,7 @@ class TestSystemLauncher:
 
     def test_create_spawner_passes_timeout(self) -> None:
         """_create_spawner передаёт stop_timeout в ProcessSpawner."""
-        from unittest.mock import patch
+        from unittest.mock import patch, MagicMock
         launcher = SystemLauncher(stop_timeout=7.0)
         with patch("multiprocess_framework.refactored.modules.process_manager_module.launcher.system_launcher.ProcessSpawner") as mock_spawner_cls:
             mock_spawner_cls.return_value = MagicMock()

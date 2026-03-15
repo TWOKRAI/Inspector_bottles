@@ -101,8 +101,7 @@ class TestMultipleConsoles:
         mgr = _make_manager()
         mgr.initialize()
         with patch.object(mgr._platform, "supports_multiple_windows", return_value=True):
-            with patch("Inspector_prototype.multiprocess_framework.refactored.modules"
-                       ".console_module.core.console_manager.create_platform_console") as mock_factory:
+            with patch("multiprocess_framework.refactored.modules.console_module.core.console_manager.create_platform_console") as mock_factory:
                 fake_console = MagicMock()
                 fake_console.create.return_value = True
                 mock_factory.return_value = fake_console

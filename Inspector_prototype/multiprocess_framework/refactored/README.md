@@ -365,23 +365,33 @@ config.update_field("confidence", 1.5)  # ✗ Error
 
 ## Testing
 
-Run all tests:
+**Полная проверка** (unit-тесты + валидация документации):
 
 ```bash
-cd Inspector_prototype/multiprocess_framework/refactored
-pytest modules/ -v
+cd Inspector_prototype
+python multiprocess_framework/refactored/tests/run_all_tests.py
 ```
 
-Test specific module:
+**Только unit-тесты:**
 
 ```bash
-pytest modules/router_module/tests/ -v
+cd Inspector_prototype
+python multiprocess_framework/refactored/tests/run_unit_tests.py
 ```
 
-With coverage:
+**Тесты конкретного модуля:**
 
 ```bash
-pytest modules/ --cov=modules --cov-report=html
+python multiprocess_framework/refactored/tests/run_unit_tests.py --module config_module
+```
+
+**Известные проблемы:** см. [PROBLEMS.md](PROBLEMS.md)
+
+С coverage (через pytest напрямую):
+
+```bash
+cd Inspector_prototype
+PYTHONPATH=multiprocess_framework/refactored/modules pytest multiprocess_framework/refactored/modules --cov=modules --cov-report=html
 ```
 
 ---

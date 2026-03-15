@@ -363,8 +363,8 @@ class MultiWorkerProcess(ProcessModule):
 
 ## Дополнительные ресурсы
 
-- [Архитектура фреймворка](../../../docs/ARCHITECTURE.md)
-- [Руководство по тестированию](../../../docs/TESTING_GUIDE.md)
+- [Архитектура фреймворка](../../../docs/ARCHITECTURE_REFERENCE.md)
+- [Обзор фреймворка](../../../docs/FRAMEWORK_OVERVIEW.md)
 - [Документация модулей](../../../modules/)
 
 ---

@@ -347,6 +347,10 @@
 - Помни: после unpickle нужен `srm.reinitialize_in_child()`
 - Дебажь через: [DECISIONS.md](./DECISIONS.md) (ADR-021)
 
+### Известные проблемы
+- [PROBLEMS.md](./PROBLEMS.md) — падающие unit-тесты, валидация документации, Pydantic warnings
+- [tests/integration/TEST_ISSUES.md](./tests/integration/TEST_ISSUES.md) — интеграционные тесты
+
 ---
 
 ## 📄 Version History

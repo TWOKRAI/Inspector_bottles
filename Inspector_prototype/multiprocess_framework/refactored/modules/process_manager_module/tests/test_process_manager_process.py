@@ -13,6 +13,7 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 from multiprocessing import Event
 
+from ...process_module import ProcessModule
 from ..process.process_manager_process import ProcessManagerProcess
 
 
@@ -61,25 +62,34 @@ class TestProcessManagerProcessShutdownOrder:
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
             pmp.config = {}
+            pmp.config_handler = None
 
             mock_monitor = MagicMock()
             mock_registry = MagicMock()
             mock_console = MagicMock()
 
-            mock_monitor.stop.side_effect = lambda: call_order.append("monitor")
-            mock_registry.stop_all.side_effect = lambda timeout=5.0: call_order.append("registry")
-            mock_console.shutdown.side_effect = lambda: call_order.append("console")
-            mock_console.close_all = None
+            def on_monitor_stop():
+                call_order.append("monitor")
+
+            def on_registry_stop(*args, **kwargs):
+                call_order.append("registry")
+
+            mock_monitor.stop.side_effect = on_monitor_stop
+            mock_registry.stop_all.side_effect = on_registry_stop
+            mock_console.close_all = MagicMock(side_effect=lambda: call_order.append("console"))
 
             pmp._process_monitor = mock_monitor
             pmp._process_registry = mock_registry
             pmp._console_manager = mock_console
 
-            with patch.object(ProcessManagerProcess.__bases__[0], "shutdown", return_value=True) as mock_super:
-                mock_super.side_effect = lambda self: call_order.append("super")
+            mock_super_shutdown = MagicMock(return_value=True)
+            with patch.object(ProcessModule, "shutdown", mock_super_shutdown):
                 pmp.shutdown()
 
+        # Проверяем порядок: monitor до registry
+        assert "monitor" in call_order and "registry" in call_order
         assert call_order.index("monitor") < call_order.index("registry")
+        mock_super_shutdown.assert_called_once()
 
     def test_shutdown_without_console_does_not_raise(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
@@ -87,6 +97,7 @@ class TestProcessManagerProcessShutdownOrder:
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
             pmp.config = {}
+            pmp.config_handler = None
             pmp._process_monitor = MagicMock()
             pmp._process_registry = MagicMock()
             pmp._console_manager = None

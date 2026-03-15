@@ -132,4 +132,4 @@ TypeError: WorkerManager.create_worker() got an unexpected keyword argument 'nam
 
 1. Запустить `python multiprocess_prototype/test_init.py` — должен вернуть `Result: True`.
 2. Запустить `python -m multiprocess_prototype.main` — процессы должны стартовать и корректно останавливаться.
-3. Запустить тесты framework: `python multiprocess_framework/refactored/run_all_tests.py` (если есть) — убедиться, что изменения в refactored не ломают существующие сценарии.
+3. Запустить тесты framework: `python multiprocess_framework/refactored/tests/run_all_tests.py` — убедиться, что изменения в refactored не ломают существующие сценарии.

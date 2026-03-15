@@ -173,7 +173,7 @@ mgr.shutdown()
 
 ```bash
 # Из корня Inspector_bottles (с активированным venv)
-python Inspector_prototype/multiprocess_framework/refactored/run_all_tests.py --module console_module
+python multiprocess_framework/refactored/tests/run_all_tests.py --module console_module
 
 # Или напрямую pytest
 python -m pytest Inspector_prototype/multiprocess_framework/refactored/modules/console_module/tests/ -v

@@ -291,9 +291,9 @@ def test_my_feature():
 
 ## 📚 Дополнительные Ресурсы
 
-- [Архитектура фреймворка](../../docs/ARCHITECTURE.md)
+- [Архитектура фреймворка](../../docs/ARCHITECTURE_REFERENCE.md)
 - [Документация модулей](../../modules/)
-- [Руководство по тестированию](../../docs/TESTING_GUIDE.md)
+- [Руководство по интеграционным тестам](../INTEGRATION_TESTS_GUIDE.md)
 
 ## ⚠️ Важные Замечания
 

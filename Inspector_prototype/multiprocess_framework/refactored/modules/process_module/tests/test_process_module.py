@@ -72,10 +72,13 @@ class TestProcessModule:
         """Тест запуска и остановки процесса."""
         process = ProcessModule("test_process")
         
-        # Мокируем компоненты
+        # Мокируем компоненты (run/stop вызывают log -> log_info)
         process.worker_manager = Mock()
         process.worker_manager.start_all_workers = Mock()
+        process.worker_manager.stop_all_workers = Mock()
         process.update_process_state = Mock()
+        process.log = Mock()
+        process.shutdown = Mock(return_value=True)
         
         # Запуск
         process.run()
