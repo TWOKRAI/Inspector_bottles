@@ -103,21 +103,18 @@ class ProcessCommunication(IProcessCommunication):
                 self.router_manager.register_channel(local_channel)
                 self.logger_callback("DEBUG", f"Registered local intra-process channel '{local_channel_name}'", "communication")
 
-            # Регистрируем канал system_events для событий (если есть очередь events)
-            if 'events' in self.queues or self.shared_resources:
-                # Создаем или получаем очередь для событий
+            # Регистрируем канал system_events для событий (EventManager.emit_event)
+            if not self.router_manager.get_channel("system_events"):
                 events_queue = self.queues.get('events')
                 if not events_queue and self.shared_resources:
-                    # Пытаемся получить очередь событий из EventManager
-                    event_manager = self.shared_resources.event_manager
+                    event_manager = getattr(self.shared_resources, "event_manager", None)
                     if event_manager:
                         events_queue = event_manager.get_event_queue()
-                
-                if events_queue:
-                    # Регистрируем канал system_events
-                    events_channel = QueueChannel("system_events", events_queue)
-                    self.router_manager.register_channel(events_channel)
-                    self.logger_callback("DEBUG", "Registered system_events channel in router", "communication")
+                if not events_queue:
+                    events_queue = Queue()
+                events_channel = QueueChannel("system_events", events_queue)
+                self.router_manager.register_channel(events_channel)
+                self.logger_callback("DEBUG", "Registered system_events channel in router", "communication")
         
         except Exception as e:
             self.logger_callback("ERROR", f"Failed to register queues in router: {e}", "communication")
@@ -149,12 +146,18 @@ class ProcessCommunication(IProcessCommunication):
             self.logger_callback("ERROR", f"Failed to send message: {e}", "communication")
             return {"status": "error", "reason": str(e)}
     
-    def receive(self, timeout: float = 0.01) -> List[Dict[str, Any]]:
+    def receive(
+        self,
+        timeout: float = 0.01,
+        channel_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """
-        Получить входящие сообщения из всех каналов.
+        Получить входящие сообщения из каналов.
         
         Args:
             timeout: Таймаут опроса
+            channel_types: Фильтр каналов (например ['data'] или ['system']).
+                None — опрашивать все каналы процесса (обратная совместимость).
             
         Returns:
             List[Dict]: Список полученных сообщений
@@ -163,7 +166,10 @@ class ProcessCommunication(IProcessCommunication):
             if not self.router_manager:
                 return []
             
-            return self.router_manager.receive(timeout)
+            return self.router_manager.receive(
+                timeout=timeout,
+                channel_types=channel_types,
+            )
         except Exception as e:
             self.logger_callback("ERROR", f"Failed to receive messages: {e}", "communication")
             return []
@@ -185,7 +191,11 @@ class ProcessCommunication(IProcessCommunication):
             
             # Используем queue_registry если доступен
             if hasattr(self.router_manager, 'queue_registry') and self.router_manager.queue_registry:
-                queue_type = message.get('queue_type', 'system')
+                msg_type = message.get('type', '')
+                queue_type = (
+                    message.get('queue_type')
+                    or ('system' if msg_type == 'command' else 'data')
+                )
                 result = self.router_manager.queue_registry.send_to_queue(
                     target, 
                     queue_type, 
@@ -274,8 +284,18 @@ class ProcessCommunication(IProcessCommunication):
         """Разослать сообщение всем процессам (алиас broadcast, возвращает bool)."""
         return self.broadcast(message, exclude_self) > 0
 
-    def receive_message(self, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
-        """Получить одно сообщение из очереди."""
-        messages = self.receive(timeout=timeout if timeout is not None else 0.01)
+    def receive_message(
+        self,
+        timeout: Optional[float] = None,
+        channel_types: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Получить одно сообщение из очереди.
+        channel_types=['data'] — для воркеров, получающих DATA/EVENT.
+        channel_types=['system'] — для воркеров, получающих COMMAND (например Robot).
+        """
+        messages = self.receive(
+            timeout=timeout if timeout is not None else 0.01,
+            channel_types=channel_types,
+        )
         return messages[0] if messages else None
 

@@ -22,7 +22,7 @@
 - [x] `_level_to_channel: Dict[str, str]` — прямой O(1) маппинг уровня в имя канала
 - [x] `_setup_level_routes()` — строит `_level_to_channel` из severity-каналов
 - [x] `log()` override — WARNING/ERROR/CRITICAL используют `_level_to_channel`; DEBUG/INFO → `super().log()`
-- [x] `get_stats()` — включает `level_to_channel` маппинг
+- [x] `get_stats()` — включает `level_routes` маппинг
 
 ## Решённая архитектурная проблема
 

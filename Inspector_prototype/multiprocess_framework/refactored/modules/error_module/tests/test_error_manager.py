@@ -60,3 +60,14 @@ class TestErrorManager:
         """Невалидный config вызывает TypeError."""
         with pytest.raises(TypeError, match="config must be dict"):
             ErrorManager(config=123)
+
+    def test_get_stats_includes_level_routes(self) -> None:
+        """get_stats() возвращает level_routes (маппинг level → channel)."""
+        em = ErrorManager(config=None)
+        em.initialize()
+        stats = em.get_stats()
+        em.shutdown()
+
+        assert "level_routes" in stats
+        assert isinstance(stats["level_routes"], dict)
+        assert "include_stacktrace" in stats

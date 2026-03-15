@@ -54,6 +54,22 @@ def _create_process_impl(
         process_data = shared_resources.get_process_data(name) if shared_resources else None
         custom = dict(process_data.custom) if process_data and process_data.custom else {}
         custom.setdefault("process_config", process_config)
+        # Исключить non-picklable объекты (Event, ErrorManager и т.д.) для spawn
+        for key in ("stop_event", "error_manager", "pause_event"):
+            custom.pop(key, None)
+
+        # memory_names других процессов — для consumer (processor, renderer, gui)
+        # чтобы reinitialize_handles мог открыть camera_frame / rendered_frame
+        all_process_memory: Dict[str, Dict[str, Any]] = {}
+        if shared_resources:
+            for pname in shared_resources.get_process_names():
+                pd = shared_resources.get_process_data(pname)
+                if pd and pd.custom and pd.custom.get("memory_names"):
+                    mem = {k: v for k, v in pd.custom.items() if k in ("memory_names", "memory_params", "memory_index_usage", "memory_coll")}
+                    if mem:
+                        all_process_memory[pname] = mem
+        custom["_all_process_memory"] = all_process_memory
+
         bundle = {
             "queues": queues,
             "config": process_config,

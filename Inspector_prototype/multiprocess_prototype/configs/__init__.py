@@ -1,0 +1,23 @@
+"""
+Конфигурационные схемы Inspector Prototype.
+
+Все схемы наследуют SchemaBase из data_schema_module.
+Используются для валидации и передачи конфигов в main.py.
+"""
+
+from .app_config import get_log_dir, get_default_managers_config
+from .camera_config import CameraConfig
+from .processor_config import ProcessorConfig
+from .renderer_config import RendererConfig
+from .robot_config import RobotConfig
+from .gui_config import GuiConfig
+
+__all__ = [
+    "get_log_dir",
+    "get_default_managers_config",
+    "CameraConfig",
+    "ProcessorConfig",
+    "RendererConfig",
+    "RobotConfig",
+    "GuiConfig",
+]

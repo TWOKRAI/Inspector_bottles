@@ -235,11 +235,23 @@ class RouterManager(ChannelRoutingManager):
         self,
         timeout: float = 0.0,
         return_messages: bool = True,
+        input_channels_only: bool = True,
+        channel_types: Optional[List[str]] = None,
     ) -> List[Union["Message", Dict[str, Any]]]:
-        """Sync опрос всех каналов + receive middleware + message_dispatcher."""
+        """Sync опрос каналов + receive middleware + message_dispatcher.
+        input_channels_only=True: опрашивать только каналы процесса (process.name_*).
+        channel_types: если задан (например ['system'] или ['data']), опрашивать только
+        каналы с соответствующим суффиксом (process_system, process_data).
+        Это устраняет гонку между system_thread и worker: system_thread опрашивает
+        только system, worker — только data.
+        """
         from ...message_module import Message
 
-        raw = self._poll_all_channels(timeout)
+        raw = self._poll_all_channels(
+            timeout,
+            input_channels_only=input_channels_only,
+            channel_types=channel_types,
+        )
         result = []
 
         for msg_dict in raw:
@@ -275,11 +287,31 @@ class RouterManager(ChannelRoutingManager):
 
         return result
 
-    def _poll_all_channels(self, timeout: float = 0.0) -> List[Dict[str, Any]]:
-        """Опросить все каналы в registry. Добавляет _source_channel к каждому msg."""
+    def _poll_all_channels(
+        self,
+        timeout: float = 0.0,
+        input_channels_only: bool = True,
+        channel_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Опросить каналы.
+        input_channels_only: только process.name_* (входные очереди).
+        channel_types: если задан, только каналы с суффиксом _system, _data и т.д.
+        """
         snapshot = self._channel_registry.snapshot()
         messages: List[Dict[str, Any]] = []
+        process_name = getattr(self.process, "name", None) if self.process else None
+        prefix = f"{process_name}_" if (input_channels_only and process_name) else None
+
         for ch_name, ch in snapshot.items():
+            if prefix and not ch_name.startswith(prefix):
+                continue
+            if channel_types:
+                suffix = (
+                    ch_name[len(prefix):] if prefix and len(ch_name) > len(prefix)
+                    else ch_name.split("_")[-1] if "_" in ch_name else ch_name
+                )
+                if suffix not in channel_types:
+                    continue
             if not hasattr(ch, "poll"):
                 continue
             try:

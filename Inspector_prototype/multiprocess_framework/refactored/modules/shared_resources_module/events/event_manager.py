@@ -124,14 +124,16 @@ class EventManager(BaseManager, ObservableMixin, IEventManager):
 
             if self._router_manager:
                 try:
-                    self._router_manager.send({
-                        "type": "system_event",
-                        "command": "system_event",
-                        "channel": "system_events",
-                        "sender": "EventManager",
-                        "content": event_data,
-                        "targets": ["ProcessManager"],
-                    })
+                    ch = getattr(self._router_manager, "get_channel", None)
+                    if ch and ch("system_events"):
+                        self._router_manager.send({
+                            "type": "system_event",
+                            "command": "system_event",
+                            "channel": "system_events",
+                            "sender": "EventManager",
+                            "content": event_data,
+                            "targets": ["ProcessManager"],
+                        })
                 except Exception as e:
                     self._log_error(f"Failed to send event via router: {e}")
                     self._stats["errors"] += 1

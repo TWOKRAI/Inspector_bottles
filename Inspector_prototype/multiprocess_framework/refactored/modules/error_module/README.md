@@ -182,6 +182,15 @@ except ValueError as e:
 
 Параметр `include_stacktrace` в конфиге (`True` по умолчанию) можно переопределить на уровне вызова.
 
+### track_error() — интеграция с ObservableMixin
+
+Для использования через `_track_error()` из ObservableMixin (регистрация как `errors`):
+
+```python
+em.track_error(error, context={"message": "context", "module": "my_module"})
+# → вызывает log_exception() с контекстом
+```
+
 ### get_stats()
 
 ```python
@@ -193,7 +202,7 @@ stats = em.get_stats()
 #     "channels_count": 3,
 #     "batching_enabled": True,
 #     "include_stacktrace": True,
-#     "level_to_channel": {           ← новое поле
+#     "level_routes": {               ← новое поле (level → channel)
 #         "CRITICAL": "critical_file",
 #         "ERROR":    "errors_file",
 #         "WARNING":  "warnings_file",
@@ -378,11 +387,9 @@ cd Inspector_prototype/multiprocess_framework/refactored
 pytest modules/error_module/tests/ -v
 ```
 
-Покрытие (~30 тестов):
+Покрытие (11 тестов):
 - ErrorManagerConfig.build(): tuple, required keys, include_stacktrace, custom values
 - ErrorManager.__init__(): None / dict / ErrorManagerConfig / build-object / invalid
 - log_exception(): не падает при активном исключении
-- Level routing: CRITICAL/ERROR/WARNING попадают в нужные файлы
+- get_stats(): level_routes, include_stacktrace
 - TypeError при невалидном config
-- Батчинг: size-based, time-based flush
-- Интеграция с LoggerManager

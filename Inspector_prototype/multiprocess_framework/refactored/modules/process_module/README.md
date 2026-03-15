@@ -175,7 +175,19 @@ shutdown()
 | **Коммуникация** | `ProcessCommunication` | Отправка/получение сообщений |
 | **Логгер** | `LoggerManager` | Логирование с категоризацией |
 
-### 3. Разрыв циклической зависимости (Рефакторинг)
+### 3. Опциональная конфигурация менеджеров (managers)
+
+Через `proc_dict["managers"]` можно включить дополнительные возможности (все опциональны, обратная совместимость сохранена):
+
+| Ключ | Назначение | Условие |
+|------|------------|---------|
+| `managers.logger` | Полный dict-конфиг LoggerManager (channels, scopes, modules) | При наличии `channels` |
+| `managers.error` | ErrorManager (errors.log, critical.log, warnings.log) | При непустом dict |
+| `managers.router.duplicate_messages_to_logger` | Дублирование сообщений в LoggerManager для отладки | При `True` |
+
+Без `managers` в конфиге процессы работают как раньше (только LoggerManager, StatsManager, RouterManager по умолчанию).
+
+### 4. Разрыв циклической зависимости (Рефакторинг)
 
 **Проблема была:** `process_module` ↔ `shared_resources_module` (циклическая зависимость)
 
@@ -197,7 +209,7 @@ class ProcessModule(BaseManager, ObservableMixin):
 
 Это обеспечивает **однонаправленный** граф зависимостей.
 
-### 4. Dict at Boundary
+### 5. Dict at Boundary
 
 Все данные, пересекающие границу процессов, передаются как обычные `dict`:
 
@@ -217,7 +229,7 @@ config_dict = {
 process = ProcessModule("process_1", config=config_dict)
 ```
 
-### 5. IPC через RouterManager
+### 6. IPC через RouterManager
 
 ```python
 # Отправить сообщение другому процессу

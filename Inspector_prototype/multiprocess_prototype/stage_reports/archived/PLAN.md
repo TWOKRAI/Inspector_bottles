@@ -46,6 +46,7 @@ ProcessManagerProcess (фреймворк)
 - **Dict at Boundary** (ADR-008): все данные через Queue/Router — только `dict`
 - **SharedMemory по именам** (ADR-019): кадры в shared memory, уведомления — лёгкие DATA
 - **Owner/Consumer**: Camera создаёт `camera_frame`, Renderer создаёт `rendered_frame`
+- **Конфиг с build()** (HasBuild): каждый конфиг — SchemaBase + `build() -> (name, proc_dict)` для `process()`: `launcher.add_process(*process(CameraConfig()))`
 - **GUI без воркеров**: PyQt в главном потоке, QTimer для опроса сообщений
 
 ---
@@ -82,10 +83,11 @@ multiprocess_prototype/
 | # | Задача | Результат |
 |---|--------|------------|
 | 0.1 | Создать `utils/frame_generator.py` | Класс `FrameGenerator` — генерация numpy-кадров с цветным пятном |
-| 0.2 | Создать `configs/` с 5 схемами | `CameraConfig`, `ProcessorConfig`, `RendererConfig`, `RobotConfig`, `GuiConfig` (SchemaBase) |
-| 0.3 | Реализовать `configs/__init__.py` | Реэкспорт всех конфигов |
+| 0.2 | Создать `configs/` с 5 схемами | `CameraConfig`, `ProcessorConfig`, `RendererConfig`, `RobotConfig`, `GuiConfig` (SchemaBase + FieldMeta) |
+| 0.3 | Добавить `build()` в каждый конфиг | HasBuild: `build() -> (name, proc_dict)` для `process()` |
+| 0.4 | Реализовать `configs/__init__.py` | Реэкспорт всех конфигов |
 
-**Ссылки:** `data_schema_module/README.md`, `config_module/docs/USAGE_GUIDE.md`
+**Ссылки:** `data_schema_module/README.md`, `data_schema_module/container/config_converters.py` (process)
 
 ---
 
@@ -156,8 +158,8 @@ multiprocess_prototype/
 
 | # | Задача | Результат |
 |---|--------|-----------|
-| 6.1 | Создать `main.py` | SystemLauncher, add_process для 5 процессов с config |
-| 6.2 | Настроить очереди | system, data для каждого процесса |
+| 6.1 | Создать `main.py` | SystemLauncher, `add_process(*process(Config()))` для 5 процессов |
+| 6.2 | Использовать конфиги с build() | `launcher.add_process(*process(CameraConfig()))` и т.д. |
 | 6.3 | Проверить порядок запуска | Camera создаёт shm до того, как Processor читает |
 
 **Запуск:** `PYTHONPATH=. python -m multiprocess_prototype.main`
@@ -169,7 +171,11 @@ multiprocess_prototype/
 | # | Задача | Результат |
 |---|--------|-----------|
 | 7.1 | Убедиться в наличии EVENT | `frame_processed`, `frame_rendered` |
-| 7.2 | Добавить логирование метрик | FPS, processing_time через `log_info` |
+| 7.2 | Метрики в StatsManager | `_record_metric` для FPS, processing_time, detections |
+| 7.3 | Логи в LoggerManager | system.log (system/business/performance) |
+| 7.4 | Ошибки в ErrorManager | errors.log, critical.log, warnings.log |
+| 7.5 | Сообщения в LoggerManager | messages.log (дублирование из RouterManager) |
+| 7.6 | Конфигурация | `configs/app_config.py`, пути через `INSPECTOR_LOG_DIR` |
 
 ---
 
@@ -227,15 +233,15 @@ Camera  ──frame_ready──► Processor ──detection_result──► Ren
 ## 6. Чеклист
 
 ```
-Этап 0:  [ ] frame_generator.py  [ ] 5 configs  [ ] configs/__init__.py
-Этап 1:  [ ] camera_process.py   [ ] Тест изоляции
-Этап 2:  [ ] processor_process.py [ ] Тест Camera+Processor
-Этап 3:  [ ] renderer_process.py [ ] Тест пайплайна
-Этап 4:  [ ] robot_simulator_process.py
-Этап 5:  [ ] gui_process.py  [ ] main_window.py
-Этап 6:  [ ] main.py  [ ] Полный запуск
-Этап 7:  [ ] Метрики в логах
-Этап 8:  [ ] Тесты  [ ] Graceful shutdown
+Этап 0:  [x] frame_generator.py  [x] 5 configs с build()  [x] configs/__init__.py
+Этап 1:  [x] camera_process.py   [x] Тест изоляции
+Этап 2:  [x] processor_process.py [x] Тест Camera+Processor
+Этап 3:  [x] renderer_process.py [x] Тест пайплайна
+Этап 4:  [x] robot_simulator_process.py
+Этап 5:  [x] gui_process.py  [x] main_window.py
+Этап 6:  [x] main.py  [x] Полный запуск
+Этап 7:  [x] Метрики (StatsManager)  [x] Логи (LoggerManager)  [x] Ошибки (ErrorManager)  [x] Сообщения (messages.log)
+Этап 8:  [x] test_pipeline (4 proc)  [x] test_shared_memory  [x] test_full_integration (5 proc + graceful)
 ```
 
 ---

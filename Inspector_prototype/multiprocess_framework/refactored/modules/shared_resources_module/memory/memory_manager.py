@@ -123,11 +123,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
 
         Имена берём из ProcessData.custom["memory_names"] — они pickle-safe.
         Вызывается через SRM.reinitialize_in_child().
+        Не перезаписывает handles, если они уже есть (owner создал в fallback).
         """
         if not self._process_state_registry:
             return True  # standalone-режим: handles уже живут локально
         try:
-            self._is_owner = False
             for process_name in self._process_state_registry.get_process_names():
                 pd = self._process_state_registry.get_process_data(process_name)
                 if pd is None:
@@ -136,6 +136,10 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
                 if not memory_names_map:
                     continue
                 for shm_base_name, shm_names_list in memory_names_map.items():
+                    existing = self._local_handles.get(process_name, {}).get(shm_base_name)
+                    if existing and all(h is not None for h in existing):
+                        continue  # Уже есть валидные handles (owner создал в fallback)
+                    self._is_owner = False
                     handles: List[Optional[shared_memory.SharedMemory]] = []
                     for shm_name in shm_names_list:
                         try:
@@ -294,6 +298,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         try:
             memory_data = self.get_memory_data(process_name, shm_name)
             if not memory_data:
+                print(
+                    f"[MemoryManager] WARNING: get_memory_data returned None for "
+                    f"'{process_name}'/'{shm_name}' — write_images aborted",
+                    flush=True,
+                )
                 return None
 
             handles = memory_data["handles"]
@@ -329,6 +338,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
             return shm.name
         except Exception as e:
             self._log_error(f"write_images error: {e}")
+            print(
+                f"[MemoryManager] ERROR: write_images failed for '{process_name}'/"
+                f"'{shm_name}': {e}",
+                flush=True,
+            )
             self._stats["errors"] += 1
             self._clear_memory(process_name, shm_name, index)
             return None
@@ -462,11 +476,24 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         shm_list: List[shared_memory.SharedMemory] = []
         for i in range(coll):
             shm_name = f"{shm_name_orig}_{i}"
+            # Очистка устаревших POSIX shm от предыдущих аварийных запусков (macOS/Linux)
+            try:
+                stale = shared_memory.SharedMemory(name=shm_name, create=False)
+                stale.close()
+                stale.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
             try:
                 shm = shared_memory.SharedMemory(name=shm_name, create=True, size=size)
                 shm_list.append(shm)
             except Exception as e:
                 self._log_error(f"Cannot create SharedMemory '{shm_name}': {e}")
+                print(
+                    f"[MemoryManager] ERROR: Cannot create SharedMemory '{shm_name}': {e}",
+                    flush=True,
+                )
                 for created in shm_list:
                     self._safe_close_shm(created, unlink=True)
                 return None
@@ -485,14 +512,26 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         memory_data = self.get_memory_data(process_name, shm_name)
         if not memory_data:
             self._log_warning(f"Memory '{shm_name}' not initialized for '{process_name}'")
+            print(
+                f"[MemoryManager] WARNING: Memory '{shm_name}' not initialized for '{process_name}'",
+                flush=True,
+            )
             return False
         coll = memory_data["coll"]
         if shm_name not in coll or index >= coll[shm_name]:
             self._log_warning(f"Invalid index {index} for '{shm_name}'")
+            print(
+                f"[MemoryManager] WARNING: Invalid index {index} for '{shm_name}'",
+                flush=True,
+            )
             return False
         handles = memory_data.get("handles")
         if handles is None or index >= len(handles) or handles[index] is None:
             self._log_warning(f"Memory handle {index} for '{shm_name}' is None")
+            print(
+                f"[MemoryManager] WARNING: Memory handle {index} for '{shm_name}' is None",
+                flush=True,
+            )
             return False
         return True
 

@@ -277,11 +277,9 @@ class TestRunProcessFunction:
                     stop_event,
                     bundle,
                 )
-                mock_update.assert_called_with(
-                    pytest.approx(mock_update.call_args[0][0], abs=1),
-                    "TestProcess",
-                    "error",
-                )
+                mock_update.assert_called_once()
+                assert mock_update.call_args[0][1] == "TestProcess"
+                assert mock_update.call_args[0][2] == "error"
 
     def test_shutdown_called_in_finally(self) -> None:
         """shutdown() вызывается в блоке finally."""

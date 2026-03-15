@@ -73,7 +73,8 @@
 4. **Воркеры с stop_event** (worker_module): все циклические задачи через `WorkerManager`
 5. **Команды через CommandManager**: каждый процесс регистрирует обработчики
 6. **Конфигурация через SchemaBase**: валидация через Pydantic, подписки на изменения
-7. **GUI без воркеров**: PyQt работает в главном потоке, QTimer для опроса сообщений
+7. **Конфиг с build()** (HasBuild): каждый конфиг реализует `build() -> (name, proc_dict)` для `process()` из data_schema_module — `launcher.add_process(*process(CameraConfig()))`
+8. **GUI без воркеров**: PyQt работает в главном потоке, QTimer для опроса сообщений
 
 ---
 
@@ -175,9 +176,9 @@ __all__ = [
 
 ### 3.3 Конфигурационные схемы
 
-Каждая схема наследует `SchemaBase` из `data_schema_module`. Поля описываются через `Annotated[type, FieldMeta(...)]`.
+Каждая схема наследует `SchemaBase` из `data_schema_module`. Поля описываются через `Annotated[type, FieldMeta(...)]`. **Обязательно:** метод `build() -> (name, proc_dict)` (протокол HasBuild) для интеграции с `process()` — `launcher.add_process(*process(CameraConfig()))`.
 
-**Документация:** `modules/data_schema_module/README.md`, `modules/config_module/docs/USAGE_GUIDE.md`
+**Документация:** `modules/data_schema_module/README.md`, `modules/data_schema_module/container/config_converters.py` (process, build_process_with_workers)
 
 #### `configs/camera_config.py`
 
@@ -196,6 +197,16 @@ class CameraConfig(SchemaBase):
     resolution_height: Annotated[int, FieldMeta("Высота кадра", min=240, max=1080)] = 480
     device_id: Annotated[int, FieldMeta("ID камеры", min=0, max=10)] = 0
     use_simulator: bool = True  # True = FrameGenerator, False = cv2.VideoCapture
+
+    def build(self) -> tuple[str, dict]:
+        """HasBuild: (name, proc_dict) для launcher.add_process(*process(CameraConfig()))."""
+        return (self.process_name, {
+            "class": "multiprocess_prototype.processes.camera_process.CameraProcess",
+            "queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}},
+            "priority": "high",
+            "workers": {},
+            "config": self.model_dump(),
+        })
 ```
 
 #### `configs/processor_config.py`
@@ -209,6 +220,9 @@ class ProcessorConfig(SchemaBase):
     min_area: Annotated[int, FieldMeta("Мин. площадь пятна", min=10, max=10000)] = 500
     color_lower: list = [0, 0, 150]   # нижняя граница BGR для красного
     color_upper: list = [100, 100, 255]  # верхняя граница BGR для красного
+
+    def build(self) -> tuple[str, dict]:
+        return (self.process_name, {"class": "...", "queues": {...}, "config": self.model_dump(), ...})
 ```
 
 #### `configs/renderer_config.py`
@@ -245,7 +259,12 @@ class GuiConfig(SchemaBase):
     window_width: Annotated[int, FieldMeta("Ширина окна", min=400, max=1920)] = 1024
     window_height: Annotated[int, FieldMeta("Высота окна", min=300, max=1080)] = 768
     poll_interval_ms: Annotated[int, FieldMeta("Интервал опроса сообщений, мс", min=5, max=100)] = 16
+
+    def build(self) -> tuple[str, dict]:
+        return (self.process_name, {"class": "...", "queues": {...}, "config": self.model_dump(), ...})
 ```
+
+**Примечание:** RendererConfig и RobotConfig — аналогично, каждый имеет `build()`.
 
 ---
 
@@ -1015,6 +1034,8 @@ class InspectorWindow(QMainWindow):
 
 ### 9.1 Точка входа
 
+**Конфиги с build()** — каждый процесс регистрируется через `process(Config())` из data_schema_module. Валидация через SchemaBase, Dict at Boundary через HasBuild.
+
 ```python
 """
 Inspector Prototype — точка входа.
@@ -1035,90 +1056,20 @@ def main() -> int:
     from multiprocess_framework.refactored.modules.process_manager_module import (
         SystemLauncher,
     )
+    from multiprocess_framework.refactored.modules.data_schema_module import process
+    from multiprocess_prototype.configs import (
+        CameraConfig, ProcessorConfig, RendererConfig,
+        RobotConfig, GuiConfig,
+    )
     
     launcher = SystemLauncher(stop_timeout=10.0)
     
-    # 1. Camera Process
-    launcher.add_process("camera", {
-        "class": "multiprocess_prototype.processes.camera_process.CameraProcess",
-        "queues": {
-            "system": {"maxsize": 100},
-            "data": {"maxsize": 50},
-        },
-        "priority": "high",
-        "workers": {},  # воркер создаётся в initialize()
-        "config": {
-            "fps": 30,
-            "resolution_width": 640,
-            "resolution_height": 480,
-            "use_simulator": True,
-        },
-    })
-    
-    # 2. Processor Process
-    launcher.add_process("processor", {
-        "class": "multiprocess_prototype.processes.processor_process.ProcessorProcess",
-        "queues": {
-            "system": {"maxsize": 100},
-            "data": {"maxsize": 50},
-        },
-        "priority": "high",
-        "workers": {},
-        "config": {
-            "threshold": 200.0,
-            "min_area": 500,
-            "color_lower": [0, 0, 150],
-            "color_upper": [100, 100, 255],
-        },
-    })
-    
-    # 3. Renderer Process
-    launcher.add_process("renderer", {
-        "class": "multiprocess_prototype.processes.renderer_process.RendererProcess",
-        "queues": {
-            "system": {"maxsize": 100},
-            "data": {"maxsize": 50},
-        },
-        "priority": "normal",
-        "workers": {},
-        "config": {
-            "output_dir": "./output_frames",
-            "save_frames": False,
-            "draw_bboxes": True,
-        },
-    })
-    
-    # 4. Robot Simulator Process
-    launcher.add_process("robot", {
-        "class": "multiprocess_prototype.processes.robot_simulator_process.RobotSimulatorProcess",
-        "queues": {
-            "system": {"maxsize": 50},
-            "data": {"maxsize": 20},
-        },
-        "priority": "low",
-        "workers": {},
-        "config": {
-            "log_file": "./robot_actions.log",
-            "reject_delay": 0.5,
-        },
-    })
-    
-    # 5. GUI Process
-    launcher.add_process("gui", {
-        "class": "multiprocess_prototype.processes.gui_process.GuiProcess",
-        "queues": {
-            "system": {"maxsize": 100},
-            "data": {"maxsize": 50},
-        },
-        "priority": "normal",
-        "workers": {},
-        "config": {
-            "window_title": "Inspector Prototype",
-            "window_width": 1024,
-            "window_height": 768,
-            "poll_interval_ms": 16,
-        },
-    })
+    # Конфиги с build() — валидация + Dict at Boundary
+    launcher.add_process(*process(CameraConfig()))
+    launcher.add_process(*process(ProcessorConfig()))
+    launcher.add_process(*process(RendererConfig()))
+    launcher.add_process(*process(RobotConfig()))
+    launcher.add_process(*process(GuiConfig()))
     
     print("=" * 60)
     print("  Inspector Prototype — 5 Process Demo")

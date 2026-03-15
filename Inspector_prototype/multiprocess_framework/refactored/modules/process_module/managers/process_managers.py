@@ -42,13 +42,16 @@ class ProcessManagers:
         self.process.worker_manager.initialize()
 
         # 2. LoggerManager
-        log_config = LogConfig()
-        log_config.app_name = self.process.name
         logger_config = managers_config.get("logger", {})
-        if isinstance(logger_config, dict):
-            for key, value in logger_config.items():
-                if hasattr(log_config, key):
-                    setattr(log_config, key, value)
+        if isinstance(logger_config, dict) and "channels" in logger_config:
+            log_config = LogConfig.from_dict({**logger_config, "app_name": logger_config.get("app_name", self.process.name)})
+        else:
+            log_config = LogConfig()
+            log_config.app_name = self.process.name
+            if isinstance(logger_config, dict):
+                for key, value in logger_config.items():
+                    if hasattr(log_config, key):
+                        setattr(log_config, key, value)
 
         self.process.logger_manager = LoggerManager(
             manager_name=f"logger_{self.process.name}",
@@ -59,7 +62,30 @@ class ProcessManagers:
         )
         self.process.logger_manager.initialize()
 
+        # 2b. ErrorManager (опционально, если есть конфиг)
+        error_config_dict = managers_config.get("error", {})
+        if isinstance(error_config_dict, dict) and error_config_dict:
+            from ...error_module import ErrorManager, ErrorManagerConfig
+
+            error_config = ErrorManagerConfig()
+            for key, value in error_config_dict.items():
+                if hasattr(error_config, key):
+                    setattr(error_config, key, value)
+
+            self.process.error_manager = ErrorManager(
+                manager_name=f"error_{self.process.name}",
+                config=error_config,
+                process=self.process,
+            )
+            self.process.error_manager.initialize()
+            self.process.register_manager("errors", self.process.error_manager, enabled=True)
+        else:
+            self.process.error_manager = None
+
         # 3. RouterManager
+        router_config = managers_config.get("router", {}) or {}
+        duplicate_messages = router_config.get("duplicate_messages_to_logger", False)
+
         router_manager = RouterManager(
             manager_name=f"router_{self.process.name}",
             process=self.process,
@@ -67,6 +93,33 @@ class ProcessManagers:
             logger=self.process.logger_manager,
         )
         router_manager.initialize()
+
+        # Дублирование сообщений в LoggerManager для отладки (messages.log)
+        if duplicate_messages and self.process.logger_manager:
+            def _log_message_middleware(msg):
+                try:
+                    log_parts = [
+                        msg.get("type", "?"),
+                        msg.get("sender", "?"),
+                        "->",
+                        str(msg.get("targets", [])),
+                    ]
+                    if msg.get("data_type"):
+                        log_parts.append(f" data_type={msg.get('data_type')}")
+                    if msg.get("command"):
+                        log_parts.append(f" cmd={msg.get('command')}")
+                    if msg.get("event_type"):
+                        log_parts.append(f" event={msg.get('event_type')}")
+                    self.process.logger_manager.info(
+                        " ".join(log_parts),
+                        module="router_messages",
+                    )
+                except Exception:
+                    pass
+                return msg
+
+            router_manager._send_mw.add(_log_message_middleware)
+
         self.process.router_manager = router_manager
 
         # 4. StatsManager

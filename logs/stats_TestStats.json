@@ -1,0 +1,64 @@
+{"timestamp": 1773600275.9473128, "metrics": [{"name": "x", "type": "counter", "tags": {}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600275.9476302, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.948428, "metrics": [{"name": "ops.count", "type": "counter", "tags": {}, "count": 5.0}], "total_count": 1}
+{"timestamp": 1773600275.94857, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.9491022, "metrics": [{"name": "ops.count", "type": "counter", "tags": {}, "count": 3.0}], "total_count": 1}
+{"timestamp": 1773600275.949229, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.9501178, "metrics": [{"name": "req.duration", "type": "timing", "tags": {}, "count": 2, "min": 0.5, "max": 1.0, "avg": 0.75, "p95": 0.5}], "total_count": 1}
+{"timestamp": 1773600275.950251, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.9508731, "metrics": [{"name": "mem.used", "type": "gauge", "tags": {}, "value": 2048.0}], "total_count": 1}
+{"timestamp": 1773600275.951045, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.951954, "metrics": [{"name": "req.size", "type": "histogram", "tags": {}, "count": 5, "min": 1.0, "max": 5.0, "avg": 3.0, "p95": 4.0}], "total_count": 1}
+{"timestamp": 1773600275.952117, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.9527218, "metrics": [{"name": "a", "type": "counter", "tags": {}, "count": 1.0}, {"name": "b", "type": "gauge", "tags": {}, "value": 1.0}, {"name": "c", "type": "timing", "tags": {}, "count": 1, "min": 0.1, "max": 0.1, "avg": 0.1, "p95": 0.1}], "total_count": 3}
+{"timestamp": 1773600275.952841, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.953403, "metrics": [{"name": "x", "type": "counter", "tags": {}, "count": 1.0}, {"name": "y", "type": "gauge", "tags": {}, "value": 1.0}], "total_count": 2}
+{"timestamp": 1773600275.953533, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.953912, "metrics": [{"name": "x", "type": "counter", "tags": {"env": "test"}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600275.95403, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.95452, "metrics": [{"name": "x", "type": "counter", "tags": {"env": "staging"}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600275.954664, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.955141, "metrics": [{"name": "x", "type": "counter", "tags": {"region": "eu"}, "count": 1.0}, {"name": "x", "type": "counter", "tags": {"region": "us"}, "count": 1.0}], "total_count": 2}
+{"timestamp": 1773600275.955256, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.955722, "metrics": [{"name": "x", "type": "counter", "tags": {"env": "test", "host": "a"}, "count": 8.0}], "total_count": 1}
+{"timestamp": 1773600275.95583, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.956424, "metrics": [{"name": "ops", "type": "counter", "tags": {}, "count": 3.0}], "total_count": 1}
+{"timestamp": 1773600275.956505, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.956608, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.957083, "metrics": [{"name": "x", "type": "counter", "tags": {}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600275.9571579, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.957249, "metrics": [], "total_count": 0}
+{"timestamp": 1773600275.957727, "metrics": [{"name": "a", "type": "counter", "tags": {}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600275.957807, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.706115, "metrics": [{"name": "x", "type": "counter", "tags": {}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600330.70639, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7071218, "metrics": [{"name": "ops.count", "type": "counter", "tags": {}, "count": 5.0}], "total_count": 1}
+{"timestamp": 1773600330.70727, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.70776, "metrics": [{"name": "ops.count", "type": "counter", "tags": {}, "count": 3.0}], "total_count": 1}
+{"timestamp": 1773600330.707894, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.708423, "metrics": [{"name": "req.duration", "type": "timing", "tags": {}, "count": 2, "min": 0.5, "max": 1.0, "avg": 0.75, "p95": 0.5}], "total_count": 1}
+{"timestamp": 1773600330.7086, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.709332, "metrics": [{"name": "mem.used", "type": "gauge", "tags": {}, "value": 2048.0}], "total_count": 1}
+{"timestamp": 1773600330.7095182, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.710358, "metrics": [{"name": "req.size", "type": "histogram", "tags": {}, "count": 5, "min": 1.0, "max": 5.0, "avg": 3.0, "p95": 4.0}], "total_count": 1}
+{"timestamp": 1773600330.710528, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7111611, "metrics": [{"name": "a", "type": "counter", "tags": {}, "count": 1.0}, {"name": "b", "type": "gauge", "tags": {}, "value": 1.0}, {"name": "c", "type": "timing", "tags": {}, "count": 1, "min": 0.1, "max": 0.1, "avg": 0.1, "p95": 0.1}], "total_count": 3}
+{"timestamp": 1773600330.7113018, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.711804, "metrics": [{"name": "x", "type": "counter", "tags": {}, "count": 1.0}, {"name": "y", "type": "gauge", "tags": {}, "value": 1.0}], "total_count": 2}
+{"timestamp": 1773600330.7119539, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.712308, "metrics": [{"name": "x", "type": "counter", "tags": {"env": "test"}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600330.7124329, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7129111, "metrics": [{"name": "x", "type": "counter", "tags": {"env": "staging"}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600330.713023, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.713461, "metrics": [{"name": "x", "type": "counter", "tags": {"region": "eu"}, "count": 1.0}, {"name": "x", "type": "counter", "tags": {"region": "us"}, "count": 1.0}], "total_count": 2}
+{"timestamp": 1773600330.713585, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.71403, "metrics": [{"name": "x", "type": "counter", "tags": {"env": "test", "host": "a"}, "count": 8.0}], "total_count": 1}
+{"timestamp": 1773600330.7141461, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7145941, "metrics": [{"name": "ops", "type": "counter", "tags": {}, "count": 3.0}], "total_count": 1}
+{"timestamp": 1773600330.7146728, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7147799, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7151968, "metrics": [{"name": "x", "type": "counter", "tags": {}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600330.715274, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.71537, "metrics": [], "total_count": 0}
+{"timestamp": 1773600330.7157838, "metrics": [{"name": "a", "type": "counter", "tags": {}, "count": 1.0}], "total_count": 1}
+{"timestamp": 1773600330.715884, "metrics": [], "total_count": 0}

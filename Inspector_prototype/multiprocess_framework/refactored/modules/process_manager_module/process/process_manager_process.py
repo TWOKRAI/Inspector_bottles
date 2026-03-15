@@ -72,9 +72,11 @@ class ProcessManagerProcess(ProcessModule):
 
     def _resolve_queue_registry(self):
         """Получить QueueRegistry из shared_resources или создать новый."""
-        if self.shared_resources and hasattr(self.shared_resources, "process_state_registry"):
+        if self.shared_resources:
             try:
-                registry = self.shared_resources.process_state_registry
+                if hasattr(self.shared_resources, "queue_registry"):
+                    return self.shared_resources.queue_registry
+                registry = getattr(self.shared_resources, "process_state_registry", None)
                 if registry and hasattr(registry, "queue_registry"):
                     return registry.queue_registry
             except Exception:
@@ -104,6 +106,13 @@ class ProcessManagerProcess(ProcessModule):
     def initialize(self) -> bool:
         """Инициализация: ProcessModule + создание процессов из config + запуск монитора."""
         try:
+            # Регистрация ProcessManager для приёма команд (system.shutdown от GUI и др.)
+            if self.shared_resources:
+                self.shared_resources.register_process(
+                    self.name,
+                    {"queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}}},
+                )
+
             if not super().initialize():
                 return False
 
@@ -224,13 +233,7 @@ class ProcessManagerProcess(ProcessModule):
 
         for name, proc_config in valid:
             if self.shared_resources:
-                self.shared_resources.register_process_state(
-                    name, config={"process": proc_config}
-                )
-            if self._process_registry.queue_registry:
-                self._process_registry.queue_registry.create_and_register_queues(
-                    name, proc_config.get("queues", {})
-                )
+                self.shared_resources.register_process(name, proc_config)
 
         for name, proc_config in valid:
             priority = proc_config.get("priority", "normal")

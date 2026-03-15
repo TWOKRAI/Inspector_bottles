@@ -52,3 +52,4 @@
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |
 | 2026-03-13 | Полный рефакторинг по плану shared_resources_refactoring_7edae960 | 8 |
 | 2026-03-15 | clear_queue(): учёт асинхронности multiprocessing.Queue на macOS (повторный проход drain) | 8 |
+| 2026-03-15 | ADR-026: _create_shm_blocks stale cleanup, print fallback в write_images/_validate_memory_access | 8 |

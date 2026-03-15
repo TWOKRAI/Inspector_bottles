@@ -386,10 +386,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             return self.communication.broadcast_message(message, exclude_self)
         return False
     
-    def receive_message(self, timeout: float = None):
-        """Получить сообщение из очереди."""
+    def receive_message(self, timeout: float = None, channel_types=None):
+        """Получить сообщение из очереди.
+        channel_types=['data'] — для воркеров, получающих DATA/EVENT (по умолчанию).
+        channel_types=['system'] — для воркеров, получающих COMMAND (например Robot).
+        """
         if self.communication:
-            return self.communication.receive_message(timeout)
+            return self.communication.receive_message(timeout, channel_types)
         return None
     
     # ========================================================================
@@ -428,18 +431,19 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             return self.communication.send(message)
         return {"status": "error", "reason": "Communication not initialized"}
     
-    def receive(self, timeout: float = 0.01) -> list:
+    def receive(self, timeout: float = 0.01, channel_types=None) -> list:
         """
-        Получение входящих сообщений из всех каналов.
+        Получение входящих сообщений из каналов.
         
         Args:
             timeout: Таймаут опроса
+            channel_types: Фильтр каналов (['data'] или ['system']). None — все каналы.
             
         Returns:
             List[Dict]: Список полученных сообщений
         """
         if self.communication:
-            return self.communication.receive(timeout)
+            return self.communication.receive(timeout, channel_types)
         return []
     
     def send_to_process(self, target: str, message: Dict) -> bool:

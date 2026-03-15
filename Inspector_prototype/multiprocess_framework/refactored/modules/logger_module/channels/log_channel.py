@@ -72,6 +72,8 @@ class FileChannel(LogChannel):
                 exc_info=None
             )
             log_record.created = record['timestamp']
+            extra = record.get('extra') or {}
+            log_record.proc_name = extra.get('proc_name') or '-'
             
             self.handler.emit(log_record)
             return {'status': 'success', 'channel': self.name}
@@ -105,6 +107,8 @@ class ConsoleChannel(LogChannel):
                 exc_info=None
             )
             log_record.created = record['timestamp']
+            extra = record.get('extra') or {}
+            log_record.proc_name = extra.get('proc_name') or '-'
             
             self.handler.emit(log_record)
             return {'status': 'success', 'channel': self.name}

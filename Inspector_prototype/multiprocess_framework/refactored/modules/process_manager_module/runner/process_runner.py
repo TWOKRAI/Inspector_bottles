@@ -98,6 +98,32 @@ def _build_shared_resources_from_bundle(
         initial_state={"custom": custom},
         config={"process": process_config, "managers": process_config.get("managers", {})},
     )
+
+    all_process_memory = custom.pop("_all_process_memory", {})
+
+    # Fallback: if bundle lacks memory_names (parent didn't create), create in child (owner)
+    has_mem_names = bool(custom.get("memory_names"))
+    has_mem_cfg = bool(process_config.get("memory"))
+    if not has_mem_names and has_mem_cfg:
+        mem_cfg = process_config["memory"]
+        if isinstance(mem_cfg, dict):
+            names = mem_cfg.get("names", {})
+            coll = mem_cfg.get("coll", 2)
+            if names:
+                ok = shared_resources.memory_manager.create_memory_dict(
+                    process_name, names, coll
+                )
+                pd = shared_resources.get_process_data(process_name)
+                mm = shared_resources.memory_manager
+                # Явно синхронизировать pd.custom из _local_handles (на случай если PSR не обновился)
+                if ok and pd and mm and hasattr(mm, "_local_handles"):
+                    for shm_base_name, shm_list in mm._local_handles.get(process_name, {}).items():
+                        if shm_list and shm_base_name in names:
+                            pd.custom.setdefault("memory_names", {})[shm_base_name] = [s.name for s in shm_list]
+                            pd.custom.setdefault("memory_params", {})[shm_base_name] = names[shm_base_name]
+                            pd.custom.setdefault("memory_index_usage", {})[shm_base_name] = [0] * coll
+                            pd.custom.setdefault("memory_coll", {})[shm_base_name] = coll
+                    custom.update(pd.custom)
     for qtype, q in queues.items():
         shared_resources.process_state_registry.add_queue(process_name, qtype, q)
 
@@ -108,6 +134,24 @@ def _build_shared_resources_from_bundle(
         shared_resources.register_process_state(target_name)
         for qtype, q in (target_queues or {}).items():
             shared_resources.process_state_registry.add_queue(target_name, qtype, q)
+
+    # Синхронизировать memory_names других процессов для consumer (processor, renderer, gui)
+    for other_name, mem_data in all_process_memory.items():
+        if other_name == process_name:
+            continue
+        pd = shared_resources.get_process_data(other_name)
+        if pd:
+            for k, v in mem_data.items():
+                pd.custom[k] = v
+
+    # Инициализация SRM для MemoryManager и QueueRegistry (важно для SharedMemory)
+    try:
+        shared_resources.initialize()
+        shared_resources.reinitialize_in_child()
+    except Exception as e:
+        # Не критично для очередей (уже в PSR), но MemoryManager может не работать
+        import warnings
+        warnings.warn(f"SRM.initialize() failed: {e}", UserWarning)
 
     return shared_resources
 

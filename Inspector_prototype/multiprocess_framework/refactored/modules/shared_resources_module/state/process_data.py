@@ -198,11 +198,17 @@ class ProcessData:
 
     def to_dict(self) -> ProcessDataDict:
         """Конвертировать в Dict at Boundary (без Queue/Event ссылок)."""
+        # Исключить non-picklable объекты из custom (Event, Manager и т.д.)
+        custom_safe = {
+            k: v for k, v in self.custom.items()
+            if k not in ("stop_event", "error_manager", "pause_event")
+            and isinstance(v, (str, int, float, bool, type(None), dict, list))
+        }
         return ProcessDataDict(
             name=self.name,
             status=self.status.value if isinstance(self.status, ProcessStatus) else str(self.status),
             metadata=self.metadata.copy(),
-            custom=self.custom.copy(),
+            custom=custom_safe,
             queue_types=list(self._queues_dict.keys()),
             event_names=list(self._events_dict.keys()),
             created_at=self.created_at,

@@ -316,3 +316,63 @@
   специфику: агрегация, flush-таймер, типы метрик. CRM даёт каналы и буфер без лишнего.
 - Отклонённые альтернативы:
   - StatsManager(LoggerManager) — отклонено: scope/level избыточны для метрик.
+
+---
+
+## ADR-024: channel_types в receive() — разделение system и data очередей
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: message_processor (system thread) и worker-потоки оба вызывали router.receive().
+  DATA/EVENT сообщения потреблялись system thread и терялись — GUI не получал кадры.
+- Решение:
+  - `RouterManager.receive(channel_types=['system']|['data']|None)` — фильтр по типу канала
+  - System thread опрашивает только `channel_types=['system']`
+  - Worker-потоки (Processor, Renderer, GUI) — `channel_types=['data']`
+  - Robot (только команды) — `channel_types=['system']`, без system thread
+- Причина: Разделение ответственности: system — команды и управление, data — поток кадров и событий.
+- Отклонённые альтернативы:
+  - Отдельные очереди без фильтра — уже есть, но receive() читал из всех.
+
+---
+
+## ADR-025: multiprocess_prototype — ProcessConfigBase, config-driven memory, logging
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: Рефакторинг тестового приложения Inspector Prototype после этапов 0–6.
+- Решение:
+  - **ProcessConfigBase** — базовый класс конфигов с `_build_proc_dict(class_path, queues, priority, memory)`
+  - **Config-driven SharedMemory** — Camera/Renderer создают память из `config["memory"]` в build()
+  - **Logging** — console channel, INSPECTOR_LOG_LEVEL, push_context(proc_name) в ProcessLifecycle
+  - **MessageAdapter** — все процессы используют MessageAdapter для DATA/COMMAND/EVENT
+- Причина: Устранение дублирования, единая точка конфигурации, отладочные логи в консоли.
+
+---
+
+## ADR-026: SharedMemory pipeline — unlink при shutdown, stale cleanup, print fallback
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: На macOS POSIX shm сегменты не удаляются при Ctrl+C/crash. Следующий запуск падал с
+  FileExistsError при create=True. MemoryManager._log_error шёл в ObservableMixin без logger → silent NO-OP.
+  write_images возвращал None, GUI показывал "Waiting for frames...".
+- Решение:
+  1. **ProcessLifecycle.shutdown()** — вызов `shared_resources.shutdown()` для unlink SharedMemory
+  2. **MemoryManager._create_shm_blocks** — перед create=True попытка открыть+unlink устаревший сегмент
+  3. **print() fallback** — в _create_shm_blocks, _validate_memory_access, write_images при критических ошибках
+  4. **run.sh** — preamble очистки stale shm (camera_frame_0/1, rendered_frame_0/1)
+  5. **CameraProcess** — auto_start=False, в _cmd_start явный start_worker если не запущен
+- Причина: POSIX shm персистит до unlink/reboot. Без SRM.shutdown() MemoryManager.shutdown() не вызывался.
+  print() гарантирует видимость ошибок при отсутствии logger.
+
+---
+
+## ADR-027: rendered_frame_ready — два изображения (original + mask)
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: multiprocess_prototype расширен: два изображения (оригинал с контурами и маска),
+  чекбоксы отправляют команды в Renderer.
+- Решение:
+  - `rendered_frame_ready` содержит два блока: `shm_actual_name`/`shm_index` для rendered_frame,
+    `mask_shm_actual_name`/`mask_shm_index` для mask_frame
+  - Дополнительно: `show_original`, `show_mask`, `draw_contours` — состояние отображения
+  - Processor owner `processor_mask`, Renderer owner `rendered_frame` и `mask_frame`
+- Причина: Явное разделение original/mask в одном сообщении. Dict at Boundary.

@@ -64,9 +64,13 @@ class SystemThreads:
                 continue
                 
             try:
-                # Получаем сообщения из очередей через роутер
+                # Получаем ТОЛЬКО команды из system-очереди (channel_types=['system']).
+                # DATA/EVENT остаются в data-очереди для воркеров — устраняет гонку потоков.
                 if self.process.router_manager:
-                    messages = self.process.router_manager.receive(timeout=0.0)
+                    messages = self.process.router_manager.receive(
+                        timeout=0.0,
+                        channel_types=['system'],
+                    )
                     for message in messages:
                         self._handle_message(message)
                 
@@ -81,20 +85,14 @@ class SystemThreads:
         """
         Обработка входящего сообщения.
         
-        Args:
-            message: Сообщение для обработки
+        Команды (type='command') уже обработаны в router.receive() через message_dispatcher.
+        Не вызываем router.send(channel='internal') — канал 'internal' не существует.
         """
         try:
-            msg_type = message.get('type')
-            
-            # Маршрутизуем через router для внутренней обработки
-            message['channel'] = 'internal'
-            if self.process.router_manager:
-                result = self.process.router_manager.send(message)
-                
-                if result.get('status') == 'error':
-                    self.process._log_error(f"Message handling failed: {result.get('reason')}")
-                    
+            # Команды обрабатываются в receive() -> message_dispatcher.dispatch()
+            if message.get('type') == 'command':
+                return
+            # Для других типов — при необходимости добавить логику
         except Exception as e:
             self.process._log_error(f"Message handling error: {e}")
 

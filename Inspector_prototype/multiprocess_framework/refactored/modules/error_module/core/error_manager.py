@@ -251,6 +251,19 @@ class ErrorManager(LoggerManager):
 
         self.error(full_message, module=module)
 
+    def track_error(
+        self,
+        error: BaseException,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Интеграция с ObservableMixin._track_error. Логирует через log_exception."""
+        ctx = context or {}
+        message = ctx.get("message", ctx.get("context", ""))
+        if isinstance(message, dict):
+            message = str(message)
+        module = ctx.get("module", "unknown")
+        self.log_exception(error, message=message or "", module=module)
+
     def get_stats(self) -> Dict[str, Any]:
         """Статистика ErrorManager — расширяет LoggerManager.get_stats()."""
         stats = super().get_stats()
