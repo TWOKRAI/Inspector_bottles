@@ -11,7 +11,7 @@ import platform
 import numpy as np
 import pytest
 
-from ..memory.memory_manager import MemoryManager
+from ..memory.core import MemoryManager
 
 # SharedMemory на macOS (особенно M1/M2) может возвращать None — см. PROBLEMS.md
 pytestmark = pytest.mark.skipif(

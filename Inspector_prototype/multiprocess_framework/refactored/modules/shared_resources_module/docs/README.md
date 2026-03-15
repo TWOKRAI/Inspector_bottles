@@ -41,12 +41,12 @@
 - Инкапсулирует логику работы с multiprocessing.shared_memory
 - Данные хранятся в ProcessData.custom через data_schema
 
-### data_schema (Книга)
+### data_schema_module
 
-Отдельный модуль для работы с данными:
-- Модели данных (ProcessData, ProcessConfiguration и т.д.)
-- Утилиты для валидации, конвертации, миграции
-- Фабрики для создания объектов данных
+Отдельный модуль (см. ARCHITECTURE.md «Связь с data_schema_module»):
+- Схемы (RegisterBase), валидация, ProcessDataContainer
+- shared_resources_module — runtime (ProcessData, Queue, Event, ConfigStore)
+- DataSchemaAdapter — мост к StorageManager
 
 
 

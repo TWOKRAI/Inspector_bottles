@@ -1,8 +1,9 @@
 """
-DataSchemaAdapter — тонкий адаптер для data_schema_module.
+DataSchemaAdapter — тонкий мост к data_schema_module.
 
-Предоставляет доступ к StorageManager через SharedResourcesManager.
-Ленивый импорт: data_schema_module опционален.
+Делегирует в data_schema_module.extensions.StorageManager.
+Не содержит схемной логики, валидации или типов — всё в data_schema_module.
+Ленивый импорт: data_schema_module опционален (graceful degradation).
 """
 
 from typing import Optional, Any
@@ -10,9 +11,11 @@ from typing import Optional, Any
 
 class DataSchemaAdapter:
     """
-    Адаптер для работы с data_schema_module.
+    Мост к StorageManager из data_schema_module.
 
-    Graceful degradation: возвращает None если модуль недоступен.
+    Предоставляет доступ к хранению ComponentDNA и manager-моделей в ProcessData.custom.
+    Вся логика схем, валидации, RegisterBase — в data_schema_module.
+    Graceful degradation: возвращает None если data_schema_module недоступен.
     """
 
     def __init__(self, shared_resources_manager: Any) -> None:

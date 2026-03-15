@@ -12,8 +12,9 @@ import time
 from multiprocessing import Queue
 from typing import Any, Dict, List, Optional
 
-from ...base_manager import BaseManager, ObservableMixin
-from ..core.interfaces import IQueueRegistry
+from ....base_manager import BaseManager, ObservableMixin
+from ...core.interfaces import IQueueRegistry
+from ...mixins import ManagerStatsMixin
 
 try:
     from multiprocessing.queues import Empty
@@ -21,7 +22,7 @@ except ImportError:
     from queue import Empty
 
 
-class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry):
+class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMixin):
     """
     Реестр очередей для межпроцессного взаимодействия.
 
@@ -268,7 +269,6 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry):
     # =========================================================================
 
     def get_stats(self) -> Dict[str, Any]:
-        base = super().get_stats() if hasattr(super(), "get_stats") else {}
         total = sum(len(q) for q in self.registered_queues.values())
         queue_stats = {
             **self._stats,
@@ -276,8 +276,4 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry):
             "processes_count": len(self.registered_queues),
             "processes": list(self.registered_queues.keys()),
         }
-        if isinstance(base, dict):
-            base["queues"] = queue_stats
-        else:
-            base = {"queues": queue_stats}
-        return base
+        return self._merge_stats("queues", queue_stats)

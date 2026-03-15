@@ -159,8 +159,13 @@ class IMemoryManager(ABC):
         memory_name: str,
         images: List[Any],
         index: int,
+        pack_fast: bool = True,
     ) -> Optional[str]:
-        """Записать изображения в SharedMemory."""
+        """
+        Записать изображения в SharedMemory.
+
+        pack_fast: True — np.copyto (быстрее). False — tobytes (legacy, совместимость).
+        """
 
     @abstractmethod
     def read_images(
@@ -169,8 +174,13 @@ class IMemoryManager(ABC):
         memory_name: str,
         index: int,
         n: int = -1,
+        copy: bool = True,
     ) -> Optional[List[Any]]:
-        """Прочитать изображения из SharedMemory."""
+        """
+        Прочитать изображения из SharedMemory.
+
+        copy: True — копии (безопасно). False — view (быстрее, использовать до следующей записи).
+        """
 
     @abstractmethod
     def release_memory(

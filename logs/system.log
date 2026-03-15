@@ -16671,3 +16671,1316 @@
 2026-03-15 21:35:03,924 [DEBUG] [robot] command_manager: Handling command: reject_item
 2026-03-15 21:35:03,924 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
 2026-03-15 21:35:03,924 [INFO] [robot] main: REJECT #118: frame=183, pos=(319, 239), area=158374
+2026-03-15 22:31:55,523 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:31:55,524 [INFO] [-] main: RouterManager 'router_camera' initialized (channels: [])
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:31:55,524 [INFO] [-] main: [stats_camera] initialized
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,524 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_local' registered (type=queue)
+2026-03-15 22:31:55,524 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:31:55,524 [INFO] [-] main: Process state registered: camera
+2026-03-15 22:31:55,524 [INFO] [-] main: CameraProcess initializing...
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: start_capture
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: start_capture
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'start_capture' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'start_capture' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: stop_capture
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: stop_capture
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'stop_capture' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'stop_capture' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: set_fps
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: set_fps
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'set_fps' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'set_fps' registered successfully
+2026-03-15 22:31:55,524 [DEBUG] [-] command_manager: Registering command: set_resolution
+2026-03-15 22:31:55,524 [DEBUG] [-] dispatcher: Registering handler: set_resolution
+2026-03-15 22:31:55,524 [INFO] [-] dispatcher: Handler 'set_resolution' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] command_manager: Command 'set_resolution' registered successfully
+2026-03-15 22:31:55,524 [INFO] [-] main: CameraProcess ready: 640x480 @ 30 FPS
+2026-03-15 22:31:55,524 [INFO] [-] main: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution']
+2026-03-15 22:31:55,524 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,524 [INFO] [camera] main: Process 'camera' initialized successfully
+2026-03-15 22:31:55,524 [INFO] [camera] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,524 [INFO] [camera] lifecycle: Process 'camera' started
+2026-03-15 22:31:55,524 [INFO] [camera] main: [DEBUG] camera: frame=1 -> processor, shm=camera_frame_0...
+2026-03-15 22:31:55,524 [INFO] [camera] main: [DEBUG] camera: frame=2 -> processor, shm=camera_frame_0...
+2026-03-15 22:31:55,524 [INFO] [camera] main: [DEBUG] camera: frame=3 -> processor, shm=camera_frame_0...
+2026-03-15 22:31:55,549 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:31:55,549 [INFO] [-] main: RouterManager 'router_processor' initialized (channels: [])
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:31:55,549 [INFO] [-] main: [stats_processor] initialized
+2026-03-15 22:31:55,549 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:31:55,549 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:31:55,549 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:31:55,549 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:31:55,549 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:31:55,549 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:31:55,549 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:31:55,549 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:31:55,549 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:31:55,549 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:31:55,549 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:31:55,549 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:31:55,549 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:31:55,549 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:31:55,549 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,549 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,549 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:31:55,549 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:31:55,549 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:31:55,549 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:31:55,549 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,549 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:31:55,549 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:31:55,550 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:31:55,550 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:31:55,550 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:31:55,550 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:31:55,550 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_local' registered (type=queue)
+2026-03-15 22:31:55,550 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:31:55,550 [INFO] [-] main: Process state registered: processor
+2026-03-15 22:31:55,550 [INFO] [-] main: ProcessorProcess initializing...
+2026-03-15 22:31:55,550 [DEBUG] [-] command_manager: Registering command: set_color_range
+2026-03-15 22:31:55,550 [DEBUG] [-] dispatcher: Registering handler: set_color_range
+2026-03-15 22:31:55,550 [INFO] [-] dispatcher: Handler 'set_color_range' registered successfully
+2026-03-15 22:31:55,550 [INFO] [-] command_manager: Command 'set_color_range' registered successfully
+2026-03-15 22:31:55,550 [DEBUG] [-] command_manager: Registering command: set_min_area
+2026-03-15 22:31:55,550 [DEBUG] [-] dispatcher: Registering handler: set_min_area
+2026-03-15 22:31:55,550 [INFO] [-] dispatcher: Handler 'set_min_area' registered successfully
+2026-03-15 22:31:55,550 [INFO] [-] command_manager: Command 'set_min_area' registered successfully
+2026-03-15 22:31:55,550 [INFO] [-] main: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500
+2026-03-15 22:31:55,550 [INFO] [-] main: Registered 7 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area']
+2026-03-15 22:31:55,550 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,550 [INFO] [processor] main: Process 'processor' initialized successfully
+2026-03-15 22:31:55,550 [INFO] [processor] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,550 [INFO] [processor] lifecycle: Process 'processor' started
+2026-03-15 22:31:55,550 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=1
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=1, processing_time=6.8ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=2
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=2, processing_time=5.9ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=3
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=3, processing_time=6.2ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=4, processing_time=6.0ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=5, processing_time=5.7ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=6, processing_time=6.0ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=7, processing_time=5.5ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=8, processing_time=5.7ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=9, processing_time=5.8ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=10, processing_time=6.1ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=11, processing_time=5.8ms, detections=0
+2026-03-15 22:31:55,550 [INFO] [processor] main: [PERF] processor: frame=12, processing_time=5.9ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=13, processing_time=5.5ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=14, processing_time=5.9ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=15, processing_time=6.4ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=16, processing_time=6.1ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=17, processing_time=6.4ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=18, processing_time=7.2ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=19, processing_time=6.1ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=20, processing_time=6.3ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=21, processing_time=5.9ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=22, processing_time=5.9ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=23, processing_time=6.2ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=24, processing_time=6.0ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=25, processing_time=5.9ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=26, processing_time=5.5ms, detections=0
+2026-03-15 22:31:56,550 [INFO] [processor] main: [PERF] processor: frame=27, processing_time=5.6ms, detections=0
+2026-03-15 22:31:55,664 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:31:55,664 [INFO] [-] main: RouterManager 'router_renderer' initialized (channels: [])
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:31:55,664 [INFO] [-] main: [stats_renderer] initialized
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,664 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_local' registered (type=queue)
+2026-03-15 22:31:55,664 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:31:55,664 [INFO] [-] main: Process state registered: renderer
+2026-03-15 22:31:55,664 [INFO] [-] main: RendererProcess initializing...
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: set_draw_contours
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: set_draw_contours
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'set_draw_contours' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'set_draw_contours' registered successfully
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: set_show_original
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: set_show_original
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'set_show_original' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'set_show_original' registered successfully
+2026-03-15 22:31:55,664 [DEBUG] [-] command_manager: Registering command: set_show_mask
+2026-03-15 22:31:55,664 [DEBUG] [-] dispatcher: Registering handler: set_show_mask
+2026-03-15 22:31:55,664 [INFO] [-] dispatcher: Handler 'set_show_mask' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] command_manager: Command 'set_show_mask' registered successfully
+2026-03-15 22:31:55,664 [INFO] [-] main: RendererProcess ready
+2026-03-15 22:31:55,664 [INFO] [-] main: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask']
+2026-03-15 22:31:55,664 [INFO] [-] main: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-15 22:31:55,664 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,664 [INFO] [renderer] main: Process 'renderer' initialized successfully
+2026-03-15 22:31:55,664 [INFO] [renderer] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,664 [INFO] [renderer] lifecycle: Process 'renderer' started
+2026-03-15 22:31:55,664 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1
+2026-03-15 22:31:55,664 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=2
+2026-03-15 22:31:55,664 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=2
+2026-03-15 22:31:55,664 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=3
+2026-03-15 22:31:55,664 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
+2026-03-15 22:31:55,770 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:31:55,770 [INFO] [-] main: RouterManager 'router_robot' initialized (channels: [])
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:31:55,770 [INFO] [-] main: [stats_robot] initialized
+2026-03-15 22:31:55,770 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:31:55,770 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:31:55,770 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:31:55,770 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:31:55,770 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:31:55,770 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:31:55,770 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:31:55,770 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:31:55,770 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:31:55,770 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:31:55,770 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:31:55,770 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,770 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:31:55,770 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:31:55,770 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,770 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_local' registered (type=queue)
+2026-03-15 22:31:55,770 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:31:55,770 [INFO] [-] main: Process state registered: robot
+2026-03-15 22:31:55,770 [INFO] [-] main: RobotSimulatorProcess initializing...
+2026-03-15 22:31:55,770 [DEBUG] [-] command_manager: Registering command: reject_item
+2026-03-15 22:31:55,770 [DEBUG] [-] dispatcher: Registering handler: reject_item
+2026-03-15 22:31:55,770 [INFO] [-] dispatcher: Handler 'reject_item' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] command_manager: Command 'reject_item' registered successfully
+2026-03-15 22:31:55,770 [INFO] [-] main: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-15 22:31:55,770 [INFO] [-] main: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-15 22:31:55,770 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,770 [INFO] [robot] main: Process 'robot' initialized successfully
+2026-03-15 22:31:55,770 [INFO] [robot] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,770 [INFO] [robot] lifecycle: Process 'robot' started
+2026-03-15 22:31:55,863 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-15 22:31:55,864 [INFO] [-] main: RouterManager 'router_gui' initialized (channels: [])
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'log_stats' registered (type=log)
+2026-03-15 22:31:55,864 [INFO] [-] main: [stats_gui] initialized
+2026-03-15 22:31:55,864 [DEBUG] [-] command_manager: Registering command: get_metrics
+2026-03-15 22:31:55,864 [DEBUG] [-] dispatcher: Registering handler: get_metrics
+2026-03-15 22:31:55,864 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-15 22:31:55,864 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-15 22:31:55,864 [DEBUG] [-] command_manager: Registering command: get_metric
+2026-03-15 22:31:55,864 [DEBUG] [-] dispatcher: Registering handler: get_metric
+2026-03-15 22:31:55,864 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-15 22:31:55,864 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-15 22:31:55,864 [DEBUG] [-] command_manager: Registering command: reset_metrics
+2026-03-15 22:31:55,864 [DEBUG] [-] dispatcher: Registering handler: reset_metrics
+2026-03-15 22:31:55,864 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-15 22:31:55,864 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-15 22:31:55,864 [DEBUG] [-] command_manager: Registering command: stats_snapshot
+2026-03-15 22:31:55,864 [DEBUG] [-] dispatcher: Registering handler: stats_snapshot
+2026-03-15 22:31:55,864 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,864 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-15 22:31:55,864 [DEBUG] [-] command_manager: Registering command: flush_stats
+2026-03-15 22:31:55,864 [DEBUG] [-] dispatcher: Registering handler: flush_stats
+2026-03-15 22:31:55,864 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-15 22:31:55,864 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-15 22:31:55,864 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,864 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_system' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_data' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_system' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'ProcessManager_data' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_system' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'camera_data' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_system' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'processor_data' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_system' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'renderer_data' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_system' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'robot_data' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'gui_local' registered (type=queue)
+2026-03-15 22:31:55,864 [DEBUG] [-] main: [ChannelRegistry] channel 'system_events' registered (type=queue)
+2026-03-15 22:31:55,864 [INFO] [-] main: Process state registered: gui
+2026-03-15 22:31:55,864 [INFO] [-] main: GuiProcess initializing...
+2026-03-15 22:31:55,864 [INFO] [-] main: GuiProcess ready (no workers)
+2026-03-15 22:31:55,864 [INFO] [-] main: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-15 22:31:55,864 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-15 22:31:55,864 [INFO] [gui] main: Process 'gui' initialized successfully
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:31:56,864 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-15 22:31:57,528 [INFO] [camera] main: [DEBUG] camera: frame=50 -> processor, shm=camera_frame_0...
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=28, processing_time=5.4ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=29, processing_time=5.9ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=30, processing_time=6.1ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=31, processing_time=6.4ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=32, processing_time=6.4ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=33, processing_time=6.6ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=34, processing_time=6.8ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=35, processing_time=6.4ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=36, processing_time=7.3ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=37, processing_time=7.3ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=38, processing_time=7.0ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=39, processing_time=7.1ms, detections=0
+2026-03-15 22:31:56,556 [INFO] [processor] main: [PERF] processor: frame=40, processing_time=7.4ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=41, processing_time=6.8ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=42, processing_time=7.5ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=43, processing_time=7.2ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=44, processing_time=7.8ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=45, processing_time=7.7ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=46, processing_time=7.8ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=47, processing_time=7.1ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=48, processing_time=7.3ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=49, processing_time=7.4ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=50
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=50, processing_time=7.9ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=51, processing_time=7.1ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=52, processing_time=6.9ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=53, processing_time=7.4ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=54, processing_time=7.3ms, detections=0
+2026-03-15 22:31:57,556 [INFO] [processor] main: [PERF] processor: frame=55, processing_time=7.4ms, detections=0
+2026-03-15 22:31:57,667 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=50
+2026-03-15 22:31:57,667 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
+2026-03-15 22:31:57,866 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=56, processing_time=7.2ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=57, processing_time=7.8ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=58, processing_time=7.4ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=59, processing_time=6.9ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=60, processing_time=7.7ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=61, processing_time=8.1ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=62, processing_time=7.3ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=63, processing_time=7.3ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=64, processing_time=7.1ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=65, processing_time=7.1ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=66, processing_time=7.6ms, detections=0
+2026-03-15 22:31:57,558 [INFO] [processor] main: [PERF] processor: frame=67, processing_time=7.1ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=68, processing_time=6.8ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=69, processing_time=7.0ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=70, processing_time=7.7ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=71, processing_time=7.7ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=72, processing_time=8.2ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=73, processing_time=7.1ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=74, processing_time=6.4ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=75, processing_time=7.0ms, detections=0
+2026-03-15 22:31:58,558 [INFO] [processor] main: [PERF] processor: frame=76, processing_time=7.7ms, detections=0
+2026-03-15 22:31:58,559 [INFO] [processor] main: [PERF] processor: frame=77, processing_time=7.6ms, detections=0
+2026-03-15 22:31:58,559 [INFO] [processor] main: [PERF] processor: frame=78, processing_time=7.1ms, detections=0
+2026-03-15 22:31:58,559 [INFO] [processor] main: [PERF] processor: frame=79, processing_time=7.3ms, detections=0
+2026-03-15 22:31:58,559 [INFO] [processor] main: [PERF] processor: frame=80, processing_time=7.3ms, detections=0
+2026-03-15 22:31:58,559 [INFO] [processor] main: [PERF] processor: frame=81, processing_time=7.6ms, detections=0
+2026-03-15 22:31:58,559 [INFO] [processor] main: [PERF] processor: frame=82, processing_time=7.6ms, detections=0
+2026-03-15 22:31:59,186 [INFO] [camera] main: [DEBUG] camera: frame=100 -> processor, shm=camera_frame_0...
+2026-03-15 22:31:59,194 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=100
+2026-03-15 22:31:59,195 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:31:59,534 [INFO] [camera] main: [PERF] camera: frames=100, actual_fps=27.7, target_fps=30
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=83, processing_time=8.0ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=84, processing_time=7.4ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=85, processing_time=6.8ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=86, processing_time=6.8ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=87, processing_time=7.3ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=88, processing_time=7.2ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=89, processing_time=7.5ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=90, processing_time=6.9ms, detections=0
+2026-03-15 22:31:58,564 [INFO] [processor] main: [PERF] processor: frame=91, processing_time=7.5ms, detections=0
+2026-03-15 22:31:58,565 [INFO] [processor] main: [PERF] processor: frame=92, processing_time=6.7ms, detections=0
+2026-03-15 22:31:58,565 [INFO] [processor] main: [PERF] processor: frame=93, processing_time=8.1ms, detections=0
+2026-03-15 22:31:58,565 [INFO] [processor] main: [PERF] processor: frame=94, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=95, processing_time=7.3ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=96, processing_time=6.9ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=97, processing_time=7.8ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=98, processing_time=7.8ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=99, processing_time=7.2ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=100
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=100, processing_time=7.1ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=101, processing_time=7.3ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=102, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=103, processing_time=7.8ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=104, processing_time=7.2ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=105, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=106, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=107, processing_time=7.4ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=108, processing_time=7.5ms, detections=0
+2026-03-15 22:31:59,565 [INFO] [processor] main: [PERF] processor: frame=109, processing_time=7.9ms, detections=0
+2026-03-15 22:31:59,676 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=100
+2026-03-15 22:31:59,539 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:31:59,539 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:31:59,539 [INFO] [camera] main: FPS set to 26
+2026-03-15 22:31:59,539 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:31:59,539 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,539 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,539 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,539 [INFO] [camera] main: FPS set to 24
+2026-03-15 22:32:00,539 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,539 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,539 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,539 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,539 [INFO] [camera] main: FPS set to 23
+2026-03-15 22:32:00,539 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,539 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,539 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,539 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,539 [INFO] [camera] main: FPS set to 22
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 20
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 19
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 18
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 16
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 13
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 12
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 9
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 6
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:00,540 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:00,540 [INFO] [camera] main: FPS set to 1
+2026-03-15 22:32:00,540 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:00,540 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=110, processing_time=7.6ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=111, processing_time=7.1ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=112, processing_time=7.6ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=113, processing_time=7.9ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=114, processing_time=7.9ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=115, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=116, processing_time=7.5ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=117, processing_time=7.4ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=118, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=119, processing_time=7.9ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=120, processing_time=7.7ms, detections=0
+2026-03-15 22:31:59,566 [INFO] [processor] main: [PERF] processor: frame=121, processing_time=6.3ms, detections=0
+2026-03-15 22:32:00,566 [INFO] [processor] main: [PERF] processor: frame=122, processing_time=6.4ms, detections=0
+2026-03-15 22:32:00,566 [INFO] [processor] main: [PERF] processor: frame=123, processing_time=6.0ms, detections=0
+2026-03-15 22:32:00,566 [INFO] [processor] main: [PERF] processor: frame=124, processing_time=6.7ms, detections=0
+2026-03-15 22:32:00,567 [INFO] [processor] main: [PERF] processor: frame=125, processing_time=6.7ms, detections=0
+2026-03-15 22:32:00,567 [INFO] [processor] main: [PERF] processor: frame=126, processing_time=6.5ms, detections=0
+2026-03-15 22:32:00,567 [INFO] [processor] main: [PERF] processor: frame=127, processing_time=7.1ms, detections=0
+2026-03-15 22:32:00,567 [INFO] [processor] main: [PERF] processor: frame=128, processing_time=7.7ms, detections=0
+2026-03-15 22:32:00,567 [INFO] [processor] main: [PERF] processor: frame=129, processing_time=6.9ms, detections=0
+2026-03-15 22:32:00,567 [INFO] [processor] main: [PERF] processor: frame=130, processing_time=7.8ms, detections=0
+2026-03-15 22:32:01,568 [INFO] [processor] main: [PERF] processor: frame=131, processing_time=9.4ms, detections=0
+2026-03-15 22:32:02,573 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,573 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 149, 255]
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,573 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,573 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,573 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 154, 255]
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,573 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,573 [INFO] [processor] main: [PERF] processor: frame=132, processing_time=11.4ms, detections=0
+2026-03-15 22:32:02,573 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,573 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 178, 255]
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,573 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,573 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,573 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 207, 255]
+2026-03-15 22:32:02,573 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,573 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,574 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,574 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,574 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 217, 255]
+2026-03-15 22:32:02,574 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,574 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,574 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,574 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,574 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 226, 255]
+2026-03-15 22:32:02,574 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,574 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,579 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,579 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,579 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 236, 255]
+2026-03-15 22:32:02,579 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,579 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,579 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,579 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,579 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 250, 255]
+2026-03-15 22:32:02,579 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,579 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:02,579 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:02,579 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:02,579 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[100, 255, 255]
+2026-03-15 22:32:02,579 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:02,579 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,579 [INFO] [processor] main: [PERF] processor: frame=133, processing_time=16.0ms, detections=0
+2026-03-15 22:32:03,342 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,342 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,342 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[58, 255, 255]
+2026-03-15 22:32:03,342 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,342 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,342 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,342 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,342 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[63, 255, 255]
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[77, 255, 255]
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[101, 255, 255]
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[111, 255, 255]
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[120, 255, 255]
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:03,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:03,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[149, 255, 255]
+2026-03-15 22:32:03,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:03,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[159, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[173, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[178, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[197, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[212, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[217, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[221, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[226, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,343 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,343 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[231, 255, 255]
+2026-03-15 22:32:04,343 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,343 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,344 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,344 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,344 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,344 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,344 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[241, 255, 255]
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,344 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,344 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,344 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[250, 255, 255]
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,344 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,344 [DEBUG] [processor] command_manager: Handling command: set_color_range
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatching message with key 'set_color_range'
+2026-03-15 22:32:04,344 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[255, 255, 255]
+2026-03-15 22:32:04,344 [DEBUG] [processor] dispatcher: Dispatch completed for key 'set_color_range' in 0.000s
+2026-03-15 22:32:04,344 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-15 22:32:04,489 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:04,581 [INFO] [processor] main: [PERF] processor: frame=134, processing_time=15.7ms, detections=1
+2026-03-15 22:32:04,793 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:04,796 [INFO] [robot] main: REJECT #1: frame=134, pos=(319, 239), area=234066
+2026-03-15 22:32:05,526 [INFO] [camera] stats: metrics snapshot (ts=1773603126, count=44): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'start_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'start_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'start_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'start_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stop_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stop_capture'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stop_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stop_capture'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_resolution'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_resolution'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_resolution'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_resolution'}, 'count': 1.0}, {'name': 'camera.frames_captured', 'type': 'counter', 'tags': {'target_fps': '30'}, 'count': 100.0}, {'name': 'camera.actual_fps', 'type': 'counter', 'tags': {}, 'count': 27.65909686207407}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 13.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 13.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'set_fps'}, 'count': 13, 'min': 1.6927719116210938e-05, 'max': 4.124641418457031e-05, 'avg': 2.3585099440354567e-05, 'p95': 3.0994415283203125e-05}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 13.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 13.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'set_fps'}, 'count': 13, 'min': 5.507469177246094e-05, 'max': 0.00011897087097167969, 'avg': 8.302468519944411e-05, 'p95': 0.00011491775512695312}]
+2026-03-15 22:32:05,587 [INFO] [processor] main: [PERF] processor: frame=135, processing_time=15.6ms, detections=1
+2026-03-15 22:32:05,587 [INFO] [processor] stats: metrics snapshot (ts=1773603126, count=36): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_min_area'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_min_area'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_min_area'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_min_area'}, 'count': 1.0}, {'name': 'processor.processing_time_ms', 'type': 'counter', 'tags': {}, 'count': 977.7836799621582}, {'name': 'processor.detections_count', 'type': 'counter', 'tags': {}, 'count': 2.0}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 29.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 29.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'set_color_range'}, 'count': 29, 'min': 3.4809112548828125e-05, 'max': 0.00011301040649414062, 'avg': 5.2945367221174566e-05, 'p95': 7.987022399902344e-05}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'set_color_range'}, 'count': 29.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'set_color_range'}, 'count': 29.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'set_color_range'}, 'count': 29, 'min': 7.867813110351562e-05, 'max': 0.00029206275939941406, 'avg': 0.00012697844669736665, 'p95': 0.0001957416534423828}]
+2026-03-15 22:32:05,670 [INFO] [renderer] stats: metrics snapshot (ts=1773603126, count=34): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_draw_contours'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_draw_contours'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_draw_contours'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_draw_contours'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_show_original'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_show_original'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_show_original'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_show_original'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'set_show_mask'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'set_show_mask'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'set_show_mask'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'set_show_mask'}, 'count': 1.0}, {'name': 'renderer.frames_rendered', 'type': 'counter', 'tags': {}, 'count': 135.0}, {'name': 'renderer.detections_per_frame', 'type': 'counter', 'tags': {}, 'count': 2.0}]
+2026-03-15 22:32:04,801 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:04,801 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:04,801 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:04,801 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:04,801 [INFO] [robot] main: REJECT #2: frame=134, pos=(319, 239), area=234066
+2026-03-15 22:32:05,801 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:05,801 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:05,801 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:05,801 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:05,801 [INFO] [robot] main: REJECT #3: frame=135, pos=(319, 239), area=234066
+2026-03-15 22:32:05,801 [INFO] [robot] stats: metrics snapshot (ts=1773603126, count=30): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 1.0}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 3.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 3.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'reject_item'}, 'count': 2, 'min': 0.5028908252716064, 'max': 0.5058841705322266, 'avg': 0.5043874979019165, 'p95': 0.5028908252716064}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 2.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 2.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'reject_item'}, 'count': 2, 'min': 0.5030972957611084, 'max': 0.5068120956420898, 'avg': 0.5049546957015991, 'p95': 0.5030972957611084}]
+2026-03-15 22:32:05,865 [INFO] [gui] stats: metrics snapshot (ts=1773603126, count=20): [{'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'get_metric'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'reset_metrics'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'stats_snapshot'}, 'count': 1.0}, {'name': 'command_manager.command.registration.attempts', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.attempts', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'dispatcher.handler.registration.success', 'type': 'counter', 'tags': {'key': 'flush_stats'}, 'count': 1.0}, {'name': 'command_manager.command.registration.success', 'type': 'counter', 'tags': {'command': 'flush_stats'}, 'count': 1.0}]
+2026-03-15 22:32:06,588 [INFO] [processor] main: [PERF] processor: frame=136, processing_time=12.7ms, detections=1
+2026-03-15 22:32:06,802 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:06,803 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:06,803 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:06,803 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:06,803 [INFO] [robot] main: REJECT #4: frame=135, pos=(319, 239), area=234066
+2026-03-15 22:32:06,803 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:06,803 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:06,803 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:06,803 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:06,803 [INFO] [robot] main: REJECT #5: frame=136, pos=(319, 239), area=234066
+2026-03-15 22:32:07,588 [INFO] [processor] main: [PERF] processor: frame=137, processing_time=14.7ms, detections=1
+2026-03-15 22:32:07,809 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:07,809 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:07,809 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:07,809 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:07,809 [INFO] [robot] main: REJECT #6: frame=136, pos=(319, 239), area=234066
+2026-03-15 22:32:07,809 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:07,809 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:07,809 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:07,809 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:07,809 [INFO] [robot] main: REJECT #7: frame=137, pos=(319, 239), area=234066
+2026-03-15 22:32:08,330 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 14
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.001s
+2026-03-15 22:32:08,560 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 15
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,560 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 16
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,560 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 17
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,560 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 18
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,560 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 19
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,560 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,560 [INFO] [camera] main: FPS set to 21
+2026-03-15 22:32:08,560 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,560 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,591 [INFO] [processor] main: [PERF] processor: frame=138, processing_time=12.1ms, detections=1
+2026-03-15 22:32:08,591 [INFO] [processor] main: [PERF] processor: frame=139, processing_time=9.5ms, detections=1
+2026-03-15 22:32:08,814 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:08,814 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:08,814 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:08,814 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:08,814 [INFO] [robot] main: REJECT #8: frame=137, pos=(319, 239), area=234066
+2026-03-15 22:32:08,814 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:08,814 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:08,814 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:08,814 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:08,814 [INFO] [robot] main: REJECT #9: frame=138, pos=(319, 239), area=234066
+2026-03-15 22:32:09,082 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=150
+2026-03-15 22:32:09,092 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=150 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:32:08,565 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,565 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,566 [INFO] [camera] main: FPS set to 22
+2026-03-15 22:32:08,566 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,566 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:08,566 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:08,566 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:08,566 [INFO] [camera] main: FPS set to 23
+2026-03-15 22:32:08,566 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:08,566 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:09,566 [INFO] [camera] main: [DEBUG] camera: frame=150 -> processor, shm=camera_frame_0...
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=140, processing_time=8.8ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=141, processing_time=8.7ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=142, processing_time=8.0ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=143, processing_time=8.3ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=144, processing_time=8.1ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=145, processing_time=8.4ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=146, processing_time=8.8ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=147, processing_time=8.1ms, detections=1
+2026-03-15 22:32:08,596 [INFO] [processor] main: [PERF] processor: frame=148, processing_time=8.6ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=149, processing_time=8.2ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=150
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=150, processing_time=8.0ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=151, processing_time=8.6ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=152, processing_time=8.0ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=153, processing_time=8.4ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=154, processing_time=8.8ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=155, processing_time=9.1ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=156, processing_time=9.0ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=157, processing_time=8.6ms, detections=1
+2026-03-15 22:32:09,596 [INFO] [processor] main: [PERF] processor: frame=158, processing_time=8.3ms, detections=1
+2026-03-15 22:32:09,597 [INFO] [processor] main: [PERF] processor: frame=159, processing_time=8.8ms, detections=1
+2026-03-15 22:32:09,597 [INFO] [processor] main: [PERF] processor: frame=160, processing_time=8.3ms, detections=1
+2026-03-15 22:32:09,706 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=150
+2026-03-15 22:32:09,818 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:09,818 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:09,818 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:09,818 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:09,818 [INFO] [robot] main: REJECT #10: frame=138, pos=(319, 239), area=234066
+2026-03-15 22:32:09,818 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:09,818 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:09,818 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:09,818 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:09,818 [INFO] [robot] main: REJECT #11: frame=139, pos=(319, 239), area=234066
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=161, processing_time=8.8ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=162, processing_time=9.2ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=163, processing_time=8.9ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=164, processing_time=8.8ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=165, processing_time=9.0ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=166, processing_time=8.4ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=167, processing_time=8.2ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=168, processing_time=8.1ms, detections=1
+2026-03-15 22:32:09,602 [INFO] [processor] main: [PERF] processor: frame=169, processing_time=8.6ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=170, processing_time=8.6ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=171, processing_time=8.4ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=172, processing_time=8.3ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=173, processing_time=8.7ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=174, processing_time=8.3ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=175, processing_time=8.1ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=176, processing_time=8.5ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=177, processing_time=8.4ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=178, processing_time=8.9ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=179, processing_time=8.8ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=180, processing_time=8.7ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=181, processing_time=8.2ms, detections=1
+2026-03-15 22:32:10,602 [INFO] [processor] main: [PERF] processor: frame=182, processing_time=8.7ms, detections=1
+2026-03-15 22:32:10,819 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:10,819 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:10,819 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:10,819 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:10,819 [INFO] [robot] main: REJECT #12: frame=139, pos=(319, 239), area=234066
+2026-03-15 22:32:10,819 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:10,819 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:10,819 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:10,819 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:10,819 [INFO] [robot] main: REJECT #13: frame=140, pos=(319, 239), area=234066
+2026-03-15 22:32:11,177 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:11,573 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:11,574 [INFO] [camera] main: FPS set to 22
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:11,574 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:11,574 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:11,574 [INFO] [camera] main: FPS set to 21
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:11,574 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:11,574 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:11,574 [INFO] [camera] main: FPS set to 11
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:11,574 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:11,574 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:11,574 [INFO] [camera] main: FPS set to 7
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:11,574 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:11,574 [DEBUG] [camera] command_manager: Handling command: set_fps
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatching message with key 'set_fps'
+2026-03-15 22:32:11,574 [INFO] [camera] main: FPS set to 1
+2026-03-15 22:32:11,574 [DEBUG] [camera] dispatcher: Dispatch completed for key 'set_fps' in 0.000s
+2026-03-15 22:32:11,574 [INFO] [camera] command_manager: Command 'set_fps' executed successfully in 0.000s
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=183, processing_time=8.9ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=184, processing_time=8.3ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=185, processing_time=8.5ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=186, processing_time=8.3ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=187, processing_time=8.3ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=188, processing_time=8.6ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=189, processing_time=8.6ms, detections=1
+2026-03-15 22:32:10,606 [INFO] [processor] main: [PERF] processor: frame=190, processing_time=8.7ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=191, processing_time=8.4ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=192, processing_time=9.2ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=193, processing_time=8.9ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=194, processing_time=9.1ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=195, processing_time=8.2ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=196, processing_time=8.1ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=197, processing_time=8.1ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=198, processing_time=7.1ms, detections=1
+2026-03-15 22:32:11,606 [INFO] [processor] main: [PERF] processor: frame=199, processing_time=10.6ms, detections=1
+2026-03-15 22:32:11,821 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:11,821 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:11,821 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:11,821 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:11,821 [INFO] [robot] main: REJECT #14: frame=140, pos=(319, 239), area=234066
+2026-03-15 22:32:11,821 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:11,821 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:11,821 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:11,821 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:11,821 [INFO] [robot] main: REJECT #15: frame=150, pos=(319, 239), area=234066
+2026-03-15 22:32:12,490 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=200
+2026-03-15 22:32:12,500 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=200 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-15 22:32:12,579 [INFO] [camera] main: [DEBUG] camera: frame=200 -> processor, shm=camera_frame_0...
+2026-03-15 22:32:12,579 [INFO] [camera] main: [PERF] camera: frames=200, actual_fps=7.5, target_fps=1
+2026-03-15 22:32:12,611 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=200
+2026-03-15 22:32:12,611 [INFO] [processor] main: [PERF] processor: frame=200, processing_time=15.2ms, detections=1
+2026-03-15 22:32:12,716 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=200
+2026-03-15 22:32:12,827 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.507s
+2026-03-15 22:32:12,827 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:12,827 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:12,827 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:12,827 [INFO] [robot] main: REJECT #16: frame=150, pos=(319, 239), area=234066
+2026-03-15 22:32:12,827 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:12,827 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:12,827 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:12,827 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:12,827 [INFO] [robot] main: REJECT #17: frame=151, pos=(319, 239), area=234066
+2026-03-15 22:32:13,581 [DEBUG] [camera] command_manager: Handling command: stop_capture
+2026-03-15 22:32:13,581 [DEBUG] [camera] dispatcher: Dispatching message with key 'stop_capture'
+2026-03-15 22:32:13,581 [INFO] [camera] main: Capture stopped
+2026-03-15 22:32:13,581 [DEBUG] [camera] dispatcher: Dispatch completed for key 'stop_capture' in 0.000s
+2026-03-15 22:32:13,581 [INFO] [camera] command_manager: Command 'stop_capture' executed successfully in 0.000s
+2026-03-15 22:32:13,613 [INFO] [processor] main: [PERF] processor: frame=201, processing_time=14.7ms, detections=1
+2026-03-15 22:32:13,829 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:13,830 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:13,830 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:13,830 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:13,830 [INFO] [robot] main: REJECT #18: frame=151, pos=(319, 239), area=234066
+2026-03-15 22:32:13,830 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:13,830 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:13,830 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:13,830 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:13,830 [INFO] [robot] main: REJECT #19: frame=152, pos=(319, 239), area=234066
+2026-03-15 22:32:14,831 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:14,831 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:14,831 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:14,832 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:14,833 [INFO] [robot] main: REJECT #20: frame=152, pos=(319, 239), area=234066
+2026-03-15 22:32:14,833 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.508s
+2026-03-15 22:32:14,833 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.508s
+2026-03-15 22:32:14,833 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:14,833 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:14,833 [INFO] [robot] main: REJECT #21: frame=153, pos=(319, 239), area=234066
+2026-03-15 22:32:15,531 [INFO] [camera] stats: metrics snapshot (ts=1773603136, count=14): [{'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 14.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 14.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'set_fps'}, 'count': 14, 'min': 1.1920928955078125e-05, 'max': 0.00013375282287597656, 'avg': 3.8760049002511164e-05, 'p95': 6.699562072753906e-05}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'set_fps'}, 'count': 14.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'set_fps'}, 'count': 14.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'set_fps'}, 'count': 14, 'min': 2.9325485229492188e-05, 'max': 0.0005168914794921875, 'avg': 0.00013872555324009487, 'p95': 0.0002899169921875}, {'name': 'camera.frames_captured', 'type': 'counter', 'tags': {'target_fps': '1'}, 'count': 100.0}, {'name': 'camera.actual_fps', 'type': 'counter', 'tags': {}, 'count': 7.526868965650409}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'stop_capture'}, 'count': 1.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'stop_capture'}, 'count': 1.0}, {'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'stop_capture'}, 'count': 1, 'min': 3.933906555175781e-05, 'max': 3.933906555175781e-05, 'avg': 3.933906555175781e-05, 'p95': 3.933906555175781e-05}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'stop_capture'}, 'count': 1.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'stop_capture'}, 'count': 1.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'stop_capture'}, 'count': 1, 'min': 0.00012993812561035156, 'max': 0.00012993812561035156, 'avg': 0.00012993812561035156, 'p95': 0.00012993812561035156}]
+2026-03-15 22:32:15,557 [INFO] [processor] stats: metrics snapshot (ts=1773603136, count=2): [{'name': 'processor.processing_time_ms', 'type': 'counter', 'tags': {}, 'count': 591.4924144744873}, {'name': 'processor.detections_count', 'type': 'counter', 'tags': {}, 'count': 66.0}]
+2026-03-15 22:32:15,673 [INFO] [renderer] stats: metrics snapshot (ts=1773603136, count=2): [{'name': 'renderer.frames_rendered', 'type': 'counter', 'tags': {}, 'count': 66.0}, {'name': 'renderer.detections_per_frame', 'type': 'counter', 'tags': {}, 'count': 66.0}]
+2026-03-15 22:32:15,837 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:15,838 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:15,838 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:15,838 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:15,838 [INFO] [robot] main: REJECT #22: frame=153, pos=(319, 239), area=234066
+2026-03-15 22:32:15,838 [INFO] [robot] stats: metrics snapshot (ts=1773603136, count=6): [{'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'reject_item'}, 'count': 19, 'min': 0.5028009414672852, 'max': 0.5075180530548096, 'avg': 0.5046425869590357, 'p95': 0.5067300796508789}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 19.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 19.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'reject_item'}, 'count': 19, 'min': 0.5029950141906738, 'max': 0.5079078674316406, 'avg': 0.5049533091093364, 'p95': 0.5072331428527832}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 19.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 19.0}]
+2026-03-15 22:32:15,871 [INFO] [gui] stats: metrics snapshot (ts=1773603136, count=0): []
+2026-03-15 22:32:15,840 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:15,842 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:15,844 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:15,844 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:15,844 [INFO] [robot] main: REJECT #23: frame=154, pos=(319, 239), area=234066
+2026-03-15 22:32:16,844 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:16,844 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:16,845 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:16,845 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:16,845 [INFO] [robot] main: REJECT #24: frame=154, pos=(319, 239), area=234066
+2026-03-15 22:32:16,848 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:16,848 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:16,848 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:16,848 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:16,848 [INFO] [robot] main: REJECT #25: frame=155, pos=(319, 239), area=234066
+2026-03-15 22:32:17,848 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:17,848 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:17,848 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:17,848 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:17,848 [INFO] [robot] main: REJECT #26: frame=155, pos=(319, 239), area=234066
+2026-03-15 22:32:18,296 [INFO] [gui] main: GUI: requesting system shutdown
+2026-03-15 22:32:17,849 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.507s
+2026-03-15 22:32:17,850 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:17,850 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:17,850 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:17,850 [INFO] [robot] main: REJECT #27: frame=156, pos=(319, 239), area=234066
+2026-03-15 22:32:18,850 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:18,850 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:18,850 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:18,850 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:18,850 [INFO] [robot] main: REJECT #28: frame=156, pos=(319, 239), area=234066
+2026-03-15 22:32:18,937 [INFO] [gui] main: GUI: shutdown request sent, ok=True
+2026-03-15 22:32:18,937 [INFO] [gui] main: GUI: requesting system shutdown
+2026-03-15 22:32:18,937 [INFO] [gui] main: GUI: shutdown request sent, ok=True
+2026-03-15 22:32:18,852 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:18,852 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:18,852 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:18,852 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:18,852 [INFO] [robot] main: REJECT #29: frame=157, pos=(319, 239), area=234066
+2026-03-15 22:32:19,852 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:19,852 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:19,852 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:19,852 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:19,852 [INFO] [robot] main: REJECT #30: frame=157, pos=(319, 239), area=234066
+2026-03-15 22:32:19,858 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:19,858 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:20,858 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:20,859 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:20,859 [INFO] [robot] main: REJECT #31: frame=158, pos=(319, 239), area=234066
+2026-03-15 22:32:20,859 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.508s
+2026-03-15 22:32:20,859 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.508s
+2026-03-15 22:32:20,859 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:20,859 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:20,859 [INFO] [robot] main: REJECT #32: frame=158, pos=(319, 239), area=234066
+2026-03-15 22:32:21,861 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:21,861 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:21,861 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:21,862 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:21,862 [INFO] [robot] main: REJECT #33: frame=159, pos=(319, 239), area=234066
+2026-03-15 22:32:21,862 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:21,862 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:21,862 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:21,862 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:21,862 [INFO] [robot] main: REJECT #34: frame=159, pos=(319, 239), area=234066
+2026-03-15 22:32:22,865 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:22,866 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:22,866 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:22,866 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:22,866 [INFO] [robot] main: REJECT #35: frame=160, pos=(319, 239), area=234066
+2026-03-15 22:32:22,866 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:22,866 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:22,867 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:22,867 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:22,867 [INFO] [robot] main: REJECT #36: frame=160, pos=(319, 239), area=234066
+2026-03-15 22:32:23,872 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:23,873 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:23,873 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:23,873 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:23,873 [INFO] [robot] main: REJECT #37: frame=161, pos=(319, 239), area=234066
+2026-03-15 22:32:23,873 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:23,873 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:23,873 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:23,873 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:23,873 [INFO] [robot] main: REJECT #38: frame=161, pos=(319, 239), area=234066
+2026-03-15 22:32:24,876 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:24,876 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:24,877 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:24,877 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:24,877 [INFO] [robot] main: REJECT #39: frame=162, pos=(319, 239), area=234066
+2026-03-15 22:32:24,877 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:24,877 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:24,877 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:24,877 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:24,877 [INFO] [robot] main: REJECT #40: frame=162, pos=(319, 239), area=234066
+2026-03-15 22:32:25,537 [INFO] [camera] stats: metrics snapshot (ts=1773603146, count=0): []
+2026-03-15 22:32:25,562 [INFO] [processor] stats: metrics snapshot (ts=1773603146, count=0): []
+2026-03-15 22:32:25,676 [INFO] [renderer] stats: metrics snapshot (ts=1773603146, count=0): []
+2026-03-15 22:32:25,877 [INFO] [gui] stats: metrics snapshot (ts=1773603146, count=0): []
+2026-03-15 22:32:25,880 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:25,880 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:25,881 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:25,881 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:25,881 [INFO] [robot] main: REJECT #41: frame=163, pos=(319, 239), area=234066
+2026-03-15 22:32:25,881 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:25,881 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:25,881 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:25,881 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:25,881 [INFO] [robot] main: REJECT #42: frame=163, pos=(319, 239), area=234066
+2026-03-15 22:32:25,881 [INFO] [robot] stats: metrics snapshot (ts=1773603146, count=6): [{'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'reject_item'}, 'count': 20, 'min': 0.5032093524932861, 'max': 0.5075998306274414, 'avg': 0.5054365277290345, 'p95': 0.5067610740661621}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 20.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 20.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'reject_item'}, 'count': 20, 'min': 0.5036709308624268, 'max': 0.5079219341278076, 'avg': 0.50580233335495, 'p95': 0.5070219039916992}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 20.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 20.0}]
+2026-03-15 22:32:26,883 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:26,884 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:26,884 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:26,884 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:26,884 [INFO] [robot] main: REJECT #43: frame=164, pos=(319, 239), area=234066
+2026-03-15 22:32:26,884 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:26,884 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:26,884 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:26,885 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:26,885 [INFO] [robot] main: REJECT #44: frame=164, pos=(319, 239), area=234066
+2026-03-15 22:32:27,889 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:27,889 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:27,890 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:27,890 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:27,890 [INFO] [robot] main: REJECT #45: frame=165, pos=(319, 239), area=234066
+2026-03-15 22:32:27,890 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:27,890 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:27,890 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:27,890 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:27,890 [INFO] [robot] main: REJECT #46: frame=165, pos=(319, 239), area=234066
+2026-03-15 22:32:28,893 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:28,893 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:28,893 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:28,893 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:28,893 [INFO] [robot] main: REJECT #47: frame=166, pos=(319, 239), area=234066
+2026-03-15 22:32:28,893 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:28,893 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:28,893 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:28,893 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:28,893 [INFO] [robot] main: REJECT #48: frame=166, pos=(319, 239), area=234066
+2026-03-15 22:32:29,897 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:29,898 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:29,898 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:29,898 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:29,898 [INFO] [robot] main: REJECT #49: frame=167, pos=(319, 239), area=234066
+2026-03-15 22:32:29,898 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:29,898 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.508s
+2026-03-15 22:32:29,898 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:29,898 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:29,898 [INFO] [robot] main: REJECT #50: frame=167, pos=(319, 239), area=234066
+2026-03-15 22:32:30,903 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.501s
+2026-03-15 22:32:30,904 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-15 22:32:30,904 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:30,904 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:30,904 [INFO] [robot] main: REJECT #51: frame=168, pos=(319, 239), area=234066
+2026-03-15 22:32:30,904 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:30,904 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:30,904 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:30,904 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:30,904 [INFO] [robot] main: REJECT #52: frame=168, pos=(319, 239), area=234066
+2026-03-15 22:32:31,905 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:31,906 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:31,906 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:31,906 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:31,906 [INFO] [robot] main: REJECT #53: frame=169, pos=(319, 239), area=234066
+2026-03-15 22:32:31,906 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:31,906 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:31,906 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:31,909 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:31,909 [INFO] [robot] main: REJECT #54: frame=169, pos=(319, 239), area=234066
+2026-03-15 22:32:32,913 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:32,914 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:32,914 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:32,914 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:32,914 [INFO] [robot] main: REJECT #55: frame=170, pos=(319, 239), area=234066
+2026-03-15 22:32:32,919 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:32,920 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:32,920 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:32,920 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:32,920 [INFO] [robot] main: REJECT #56: frame=170, pos=(319, 239), area=234066
+2026-03-15 22:32:33,920 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:33,920 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:33,920 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:33,920 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:33,920 [INFO] [robot] main: REJECT #57: frame=171, pos=(319, 239), area=234066
+2026-03-15 22:32:33,922 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:33,924 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:33,924 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:33,924 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:33,924 [INFO] [robot] main: REJECT #58: frame=171, pos=(319, 239), area=234066
+2026-03-15 22:32:34,924 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:34,924 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:34,924 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:34,924 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:34,924 [INFO] [robot] main: REJECT #59: frame=172, pos=(319, 239), area=234066
+2026-03-15 22:32:35,542 [INFO] [camera] stats: metrics snapshot (ts=1773603156, count=0): []
+2026-03-15 22:32:35,566 [INFO] [processor] stats: metrics snapshot (ts=1773603156, count=0): []
+2026-03-15 22:32:35,681 [INFO] [renderer] stats: metrics snapshot (ts=1773603156, count=0): []
+2026-03-15 22:32:35,882 [INFO] [gui] stats: metrics snapshot (ts=1773603156, count=0): []
+2026-03-15 22:32:35,926 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:35,927 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:35,927 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:35,927 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:35,927 [INFO] [robot] main: REJECT #60: frame=172, pos=(319, 239), area=234066
+2026-03-15 22:32:35,927 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.502s
+2026-03-15 22:32:35,927 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-15 22:32:35,927 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:35,927 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:35,927 [INFO] [robot] main: REJECT #61: frame=173, pos=(319, 239), area=234066
+2026-03-15 22:32:35,927 [INFO] [robot] stats: metrics snapshot (ts=1773603156, count=6): [{'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'reject_item'}, 'count': 19, 'min': 0.5009281635284424, 'max': 0.5063369274139404, 'avg': 0.5045146063754433, 'p95': 0.5062341690063477}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 19.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 19.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'reject_item'}, 'count': 19, 'min': 0.5014748573303223, 'max': 0.5078814029693604, 'avg': 0.5050941768445467, 'p95': 0.50730299949646}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 19.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 19.0}]
+2026-03-15 22:32:36,932 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:36,932 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:36,932 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:36,932 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:36,932 [INFO] [robot] main: REJECT #62: frame=173, pos=(319, 239), area=234066
+2026-03-15 22:32:36,932 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:36,932 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:36,932 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:36,932 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:36,932 [INFO] [robot] main: REJECT #63: frame=174, pos=(319, 239), area=234066
+2026-03-15 22:32:37,935 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:37,935 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:37,935 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:37,935 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:37,935 [INFO] [robot] main: REJECT #64: frame=174, pos=(319, 239), area=234066
+2026-03-15 22:32:37,935 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:37,935 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:37,936 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:37,936 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:37,936 [INFO] [robot] main: REJECT #65: frame=175, pos=(319, 239), area=234066
+2026-03-15 22:32:38,940 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:38,940 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:38,940 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:38,940 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:38,940 [INFO] [robot] main: REJECT #66: frame=175, pos=(319, 239), area=234066
+2026-03-15 22:32:38,940 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.502s
+2026-03-15 22:32:38,940 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-15 22:32:38,940 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:38,940 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:38,941 [INFO] [robot] main: REJECT #67: frame=176, pos=(319, 239), area=234066
+2026-03-15 22:32:39,945 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:39,945 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:39,945 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:39,945 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:39,945 [INFO] [robot] main: REJECT #68: frame=176, pos=(319, 239), area=234066
+2026-03-15 22:32:39,946 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.507s
+2026-03-15 22:32:39,946 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:39,946 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:39,946 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:39,946 [INFO] [robot] main: REJECT #69: frame=177, pos=(319, 239), area=234066
+2026-03-15 22:32:40,950 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:40,950 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:40,951 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:40,951 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:40,951 [INFO] [robot] main: REJECT #70: frame=177, pos=(319, 239), area=234066
+2026-03-15 22:32:40,951 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.507s
+2026-03-15 22:32:40,951 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.508s
+2026-03-15 22:32:40,951 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:40,951 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:40,951 [INFO] [robot] main: REJECT #71: frame=178, pos=(319, 239), area=234066
+2026-03-15 22:32:41,953 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:41,954 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:41,954 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:41,954 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:41,954 [INFO] [robot] main: REJECT #72: frame=178, pos=(319, 239), area=234066
+2026-03-15 22:32:41,955 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:41,955 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:41,955 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:41,955 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:41,955 [INFO] [robot] main: REJECT #73: frame=179, pos=(319, 239), area=234066
+2026-03-15 22:32:42,961 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.507s
+2026-03-15 22:32:42,962 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:42,962 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:42,962 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:42,962 [INFO] [robot] main: REJECT #74: frame=179, pos=(319, 239), area=234066
+2026-03-15 22:32:42,962 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:42,962 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:42,962 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:42,962 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:42,962 [INFO] [robot] main: REJECT #75: frame=180, pos=(319, 239), area=234066
+2026-03-15 22:32:43,967 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:43,967 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:43,967 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:43,967 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:43,967 [INFO] [robot] main: REJECT #76: frame=180, pos=(319, 239), area=234066
+2026-03-15 22:32:43,967 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:43,967 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:43,967 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:43,967 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:43,967 [INFO] [robot] main: REJECT #77: frame=181, pos=(319, 239), area=234066
+2026-03-15 22:32:44,972 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:44,972 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:44,972 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:44,972 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:44,973 [INFO] [robot] main: REJECT #78: frame=181, pos=(319, 239), area=234066
+2026-03-15 22:32:44,973 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:44,973 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:44,973 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:44,973 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:44,973 [INFO] [robot] main: REJECT #79: frame=182, pos=(319, 239), area=234066
+2026-03-15 22:32:45,548 [INFO] [camera] stats: metrics snapshot (ts=1773603166, count=0): []
+2026-03-15 22:32:45,572 [INFO] [processor] stats: metrics snapshot (ts=1773603166, count=0): []
+2026-03-15 22:32:45,686 [INFO] [renderer] stats: metrics snapshot (ts=1773603166, count=0): []
+2026-03-15 22:32:45,888 [INFO] [gui] stats: metrics snapshot (ts=1773603166, count=0): []
+2026-03-15 22:32:45,975 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:45,975 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:45,975 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:45,975 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:45,976 [INFO] [robot] main: REJECT #80: frame=182, pos=(319, 239), area=234066
+2026-03-15 22:32:45,976 [INFO] [robot] stats: metrics snapshot (ts=1773603166, count=6): [{'name': 'dispatcher.dispatch.duration', 'type': 'timing', 'tags': {'key': 'reject_item'}, 'count': 19, 'min': 0.5016481876373291, 'max': 0.5071651935577393, 'avg': 0.5053919867465371, 'p95': 0.5065920352935791}, {'name': 'dispatcher.dispatch.success', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 19.0}, {'name': 'command_manager.command.execution.success', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 19.0}, {'name': 'command_manager.command.execution.duration', 'type': 'timing', 'tags': {'command': 'reject_item'}, 'count': 19, 'min': 0.502000093460083, 'max': 0.5077660083770752, 'avg': 0.5058849736263877, 'p95': 0.5071430206298828}, {'name': 'command_manager.command.execution.attempts', 'type': 'counter', 'tags': {'command': 'reject_item'}, 'count': 19.0}, {'name': 'dispatcher.dispatch.attempts', 'type': 'counter', 'tags': {'key': 'reject_item'}, 'count': 19.0}]
+2026-03-15 22:32:45,976 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:45,976 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:45,976 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:45,976 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:45,976 [INFO] [robot] main: REJECT #81: frame=183, pos=(319, 239), area=234066
+2026-03-15 22:32:46,981 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.508s
+2026-03-15 22:32:46,981 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.509s
+2026-03-15 22:32:46,981 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:46,981 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:46,981 [INFO] [robot] main: REJECT #82: frame=183, pos=(319, 239), area=234066
+2026-03-15 22:32:46,982 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.502s
+2026-03-15 22:32:46,982 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-15 22:32:46,982 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:46,982 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:46,982 [INFO] [robot] main: REJECT #83: frame=184, pos=(319, 239), area=234066
+2026-03-15 22:32:47,985 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:47,985 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:47,985 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:47,985 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:47,985 [INFO] [robot] main: REJECT #84: frame=184, pos=(319, 239), area=234066
+2026-03-15 22:32:47,985 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:47,985 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:47,985 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:47,985 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:47,985 [INFO] [robot] main: REJECT #85: frame=185, pos=(319, 239), area=234066
+2026-03-15 22:32:48,989 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:48,990 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:48,990 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:48,990 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:48,990 [INFO] [robot] main: REJECT #86: frame=185, pos=(319, 239), area=234066
+2026-03-15 22:32:48,990 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.508s
+2026-03-15 22:32:48,990 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.508s
+2026-03-15 22:32:49,994 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:49,994 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:49,996 [INFO] [robot] main: REJECT #87: frame=186, pos=(319, 239), area=234066
+2026-03-15 22:32:49,996 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:49,996 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:49,996 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:49,996 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:49,996 [INFO] [robot] main: REJECT #88: frame=186, pos=(319, 239), area=234066
+2026-03-15 22:32:50,999 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:50,999 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.504s
+2026-03-15 22:32:50,999 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:50,999 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:50,999 [INFO] [robot] main: REJECT #89: frame=187, pos=(319, 239), area=234066
+2026-03-15 22:32:50,999 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:50,999 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.507s
+2026-03-15 22:32:50,999 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:50,999 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:50,999 [INFO] [robot] main: REJECT #90: frame=187, pos=(319, 239), area=234066
+2026-03-15 22:32:51,008 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.503s
+2026-03-15 22:32:51,008 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.503s
+2026-03-15 22:32:51,008 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:51,008 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:51,008 [INFO] [robot] main: REJECT #91: frame=188, pos=(319, 239), area=234066
+2026-03-15 22:32:51,008 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.506s
+2026-03-15 22:32:51,008 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:51,008 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:51,008 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:51,008 [INFO] [robot] main: REJECT #92: frame=188, pos=(319, 239), area=234066
+2026-03-15 22:32:52,014 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:52,014 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:52,014 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:52,014 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:52,014 [INFO] [robot] main: REJECT #93: frame=189, pos=(319, 239), area=234066
+2026-03-15 22:32:52,014 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:52,014 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:52,014 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:52,014 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:52,014 [INFO] [robot] main: REJECT #94: frame=189, pos=(319, 239), area=234066
+2026-03-15 22:32:53,015 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.504s
+2026-03-15 22:32:53,015 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.505s
+2026-03-15 22:32:53,015 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:53,015 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:53,015 [INFO] [robot] main: REJECT #95: frame=190, pos=(319, 239), area=234066
+2026-03-15 22:32:53,015 [DEBUG] [robot] dispatcher: Dispatch completed for key 'reject_item' in 0.505s
+2026-03-15 22:32:53,015 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.506s
+2026-03-15 22:32:53,015 [DEBUG] [robot] command_manager: Handling command: reject_item
+2026-03-15 22:32:53,015 [DEBUG] [robot] dispatcher: Dispatching message with key 'reject_item'
+2026-03-15 22:32:53,015 [INFO] [robot] main: REJECT #96: frame=190, pos=(319, 239), area=234066

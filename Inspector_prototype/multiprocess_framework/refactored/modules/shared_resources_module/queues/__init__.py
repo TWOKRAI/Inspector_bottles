@@ -1,8 +1,8 @@
 """Модуль очередей для межпроцессного взаимодействия."""
 
-from .queue_registry import QueueRegistry
+from .core import QueueRegistry
 
-__all__ = ['QueueRegistry']
+__all__ = ["QueueRegistry"]
 
 
 

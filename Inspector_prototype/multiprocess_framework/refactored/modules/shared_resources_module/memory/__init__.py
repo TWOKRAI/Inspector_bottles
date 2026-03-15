@@ -1,8 +1,8 @@
 """Модуль разделенной памяти для межпроцессного взаимодействия."""
 
-from .memory_manager import MemoryManager
+from .core import MemoryManager
 
-__all__ = ['MemoryManager']
+__all__ = ["MemoryManager"]
 
 
 

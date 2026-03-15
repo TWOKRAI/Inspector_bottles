@@ -1,9 +1,6 @@
 """Модуль событий для межпроцессного взаимодействия."""
 
-from .event_manager import EventManager, EventType
+from .core import EventManager
+from ..types import EventType
 
-__all__ = ['EventManager', 'EventType']
-
-
-
-
+__all__ = ["EventManager", "EventType"]

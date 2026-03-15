@@ -7,7 +7,11 @@
 
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from typing_extensions import TypedDict
+
+try:
+    from typing import TypedDict
+except ImportError:
+    from typing_extensions import TypedDict
 
 
 class ProcessStatus(Enum):

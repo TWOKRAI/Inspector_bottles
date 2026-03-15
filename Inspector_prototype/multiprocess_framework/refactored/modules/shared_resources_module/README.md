@@ -146,6 +146,18 @@ pytest Inspector_prototype/multiprocess_framework/refactored/modules/shared_reso
 
 ---
 
+## Связь с data_schema_module
+
+Модули не дублируют логику:
+
+- **shared_resources_module** — runtime: ProcessData, Queue, Event, SharedMemory, ConfigStore (dict)
+- **data_schema_module** — схемы, валидация, RegisterBase, ProcessDataContainer (использует ProcessData.custom)
+- **DataSchemaAdapter** — тонкий мост: `srm.data_manager` → `StorageManager(shared_resources=srm)` из data_schema_module
+
+Валидация конфигов — в config_module через data_schema_module. ConfigStore хранит только dict (Dict at Boundary).
+
+---
+
 ## Архитектурные решения
 
 - **ADR-017**: ConfigStore отдельно от ProcessData — разные жизненные циклы

@@ -1,11 +1,11 @@
 """
-Тесты для queues/queue_registry.py.
+Тесты для queues/core/manager.py.
 """
 
 import pytest
 import multiprocessing
 
-from ..queues.queue_registry import QueueRegistry
+from ..queues import QueueRegistry
 from ..state.process_state_registry import ProcessStateRegistry
 
 

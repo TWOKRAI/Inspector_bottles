@@ -1,11 +1,11 @@
 """
-Тесты для events/event_manager.py.
+Тесты для events/core/manager.py.
 """
 
 import pickle
 import pytest
 
-from ..events.event_manager import EventManager
+from ..events import EventManager
 from ..types import EventType
 
 

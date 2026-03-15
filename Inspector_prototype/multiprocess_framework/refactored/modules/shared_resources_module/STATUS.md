@@ -53,3 +53,13 @@
 | 2026-03-13 | Полный рефакторинг по плану shared_resources_refactoring_7edae960 | 8 |
 | 2026-03-15 | clear_queue(): учёт асинхронности multiprocessing.Queue на macOS (повторный проход drain) | 8 |
 | 2026-03-15 | ADR-026: _create_shm_blocks stale cleanup, print fallback в write_images/_validate_memory_access | 8 |
+| 2026-03-15 | memory: рефакторинг на подмодули (format, platform_ops, validation, types), README, STATUS, тесты | 8 |
+| 2026-03-15 | events, queues: рефакторинг по примеру memory (core/, interfaces, ManagerStatsMixin, README, STATUS) | 8 |
+| 2026-03-15 | Проверочный рефакторинг: документация data_schema_module, ARCHITECTURE, INTERFACES_GUIDE, DataSchemaAdapter | 8 |
+
+## Проверочный рефакторинг (2026-03-15)
+
+- **Документация**: ARCHITECTURE.md — актуальная файловая структура, раздел «Связь с data_schema_module»
+- **README.md**: секция о разделении ответственностей с data_schema_module
+- **DataSchemaAdapter**: уточнён docstring — делегирует в data_schema_module, без дублирования логики
+- **INTERFACES_GUIDE.md**: исправлены пути (memory/core/manager.py, state/process_state_registry.py)

@@ -18,35 +18,28 @@ Consumer process (дочерние): create=False, close() при shutdown.
   Метаданные (params, index_usage, coll):
     - С PSR: хранятся в ProcessData.custom (pickle-safe, видны всем процессам)
     - Без PSR: хранятся в _local_meta (только для standalone/unit-test режима)
-
-  Нет _local_memories, нет дублирующих путей.
 """
 
-import struct
 from multiprocessing import shared_memory
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from ...base_manager import BaseManager, ObservableMixin
-from ..core.interfaces import IMemoryManager
+from ....base_manager import BaseManager, ObservableMixin
+from ...core.interfaces import IMemoryManager
+from ...mixins import ManagerStatsMixin
 
-# Синтетическое имя процесса для standalone-режима (без PSR)
-_STANDALONE_PROCESS = "_standalone"
+from .. import format as fmt
+from .. import platform as po
+from .. import validation as val
+from .types import _MemoryMeta
 
-
-class _MemoryMeta:
-    """Метаданные одного shm-блока (params, index_usage, coll)."""
-
-    __slots__ = ("params", "index_usage", "coll")
-
-    def __init__(self, params: tuple, coll: int) -> None:
-        self.params = params          # (num_images, image_shape, dtype)
-        self.index_usage: List[int] = [0] * coll
-        self.coll: int = coll
+# =============================================================================
+# Жизненный цикл
+# =============================================================================
 
 
-class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
+class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMixin):
     """
     Менеджер разделяемой памяти для изображений и данных.
 
@@ -80,22 +73,12 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         self._process_state_registry = process_state_registry
 
         # Единственное хранилище handles — НЕ pickle-safe
-        # {process_name: {shm_base_name: [SharedMemory, ...]}}
         self._local_handles: Dict[str, Dict[str, List[shared_memory.SharedMemory]]] = {}
-
         # Метаданные для standalone-режима (без PSR)
-        # {process_name: {shm_base_name: _MemoryMeta}}
         self._local_meta: Dict[str, Dict[str, _MemoryMeta]] = {}
-
-        # Owner создаёт (create=True) и unlink при shutdown.
-        # Consumer только открывает (create=False) и close при shutdown.
+        # Owner создаёт (create=True) и unlink при shutdown
         self._is_owner: bool = True
-
         self._stats = {"created": 0, "written": 0, "read": 0, "errors": 0}
-
-    # =========================================================================
-    # Жизненный цикл
-    # =========================================================================
 
     def initialize(self) -> bool:
         try:
@@ -123,10 +106,9 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
 
         Имена берём из ProcessData.custom["memory_names"] — они pickle-safe.
         Вызывается через SRM.reinitialize_in_child().
-        Не перезаписывает handles, если они уже есть (owner создал в fallback).
         """
         if not self._process_state_registry:
-            return True  # standalone-режим: handles уже живут локально
+            return True
         try:
             for process_name in self._process_state_registry.get_process_names():
                 pd = self._process_state_registry.get_process_data(process_name)
@@ -138,18 +120,16 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
                 for shm_base_name, shm_names_list in memory_names_map.items():
                     existing = self._local_handles.get(process_name, {}).get(shm_base_name)
                     if existing and all(h is not None for h in existing):
-                        continue  # Уже есть валидные handles (owner создал в fallback)
+                        continue
                     self._is_owner = False
                     handles: List[Optional[shared_memory.SharedMemory]] = []
                     for shm_name in shm_names_list:
-                        try:
-                            shm = shared_memory.SharedMemory(name=shm_name, create=False)
-                            handles.append(shm)
-                        except Exception as e:
-                            self._log_error(
-                                f"reinitialize_handles: cannot open '{shm_name}': {e}"
-                            )
+                        shm = po.open_shm_block(shm_name)
+                        if shm is None:
+                            self._log_error(f"reinitialize_handles: cannot open '{shm_name}'")
                             handles.append(None)
+                        else:
+                            handles.append(shm)
                     self._local_handles.setdefault(process_name, {})[shm_base_name] = handles
             return True
         except Exception as e:
@@ -171,7 +151,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
 
         С PSR: сохраняет только shm.name строки в ProcessData.custom.
         Без PSR: сохраняет метаданные в _local_meta.
-        В обоих случаях handles живут в _local_handles[process_name].
         """
         try:
             if self._process_state_registry:
@@ -202,19 +181,20 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
 
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
-            size = self._calculate_memory_size(num_images, image_shape, dtype)
-            shm_list = self._create_shm_blocks(name, size, coll)
+            size = fmt.calculate_buffer_size(num_images, image_shape, dtype)
+            shm_list = po.create_shm_blocks(name, size, coll)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
+                print(
+                    f"[MemoryManager] ERROR: Cannot create SharedMemory for '{name}'",
+                    flush=True,
+                )
                 continue
 
-            # Только имена в ProcessData — pickle-safe
             pd.custom["memory_names"][name] = [shm.name for shm in shm_list]
             pd.custom["memory_params"][name] = params
             pd.custom["memory_index_usage"][name] = [0] * coll
             pd.custom["memory_coll"][name] = coll
-
-            # Handles — локально, не pickle
             self._local_handles.setdefault(process_name, {})[name] = shm_list
             self._stats["created"] += 1
 
@@ -227,11 +207,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         memory_names: Dict[str, tuple],
         coll: int,
     ) -> bool:
-        """Создание без PSR: метаданные в _local_meta (только для текущего процесса)."""
+        """Создание без PSR: метаданные в _local_meta."""
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
-            size = self._calculate_memory_size(num_images, image_shape, dtype)
-            shm_list = self._create_shm_blocks(name, size, coll)
+            size = fmt.calculate_buffer_size(num_images, image_shape, dtype)
+            shm_list = po.create_shm_blocks(name, size, coll)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
                 continue
@@ -290,61 +270,33 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         shm_name: str,
         images: List[np.ndarray],
         index: int,
+        *,
+        pack_fast: bool = True,
     ) -> Optional[str]:
-        if not self._validate_memory_access(process_name, shm_name, index):
+        memory_data = self.get_memory_data(process_name, shm_name)
+        if not val.validate_memory_access(memory_data, shm_name, index):
+            self._warn_access(process_name, shm_name, index, "not initialized or invalid index")
             return None
-        if not self._validate_write_operation(process_name, shm_name, index, len(images)):
+        if not val.validate_write_operation(memory_data, shm_name, index, len(images)):
+            self._log_warning(f"Invalid write: index {index} or too many images")
             return None
         try:
-            memory_data = self.get_memory_data(process_name, shm_name)
-            if not memory_data:
-                print(
-                    f"[MemoryManager] WARNING: get_memory_data returned None for "
-                    f"'{process_name}'/'{shm_name}' — write_images aborted",
-                    flush=True,
-                )
-                return None
-
             handles = memory_data["handles"]
             shm = handles[index]
-            buffer = shm.buf
             max_images, max_shape, expected_dtype = memory_data["params"][shm_name]
-            max_h, max_w, max_c = max_shape
-
-            buffer[0:4] = struct.pack("I", len(images))
-            offset = 4
-            for img in images:
-                if img.dtype != expected_dtype:
-                    raise ValueError(f"dtype mismatch: {img.dtype} != {expected_dtype}")
-                h, w = img.shape[:2]
-                c = 1 if img.ndim == 2 else img.shape[2]
-                if h > max_h or w > max_w or c > max_c:
-                    raise ValueError(
-                        f"Image shape ({h}x{w}x{c}) exceeds max ({max_h}x{max_w}x{max_c})"
-                    )
-                buffer[offset:offset + 12] = struct.pack("III", h, w, c)
-                offset += 12
-                buffer[offset] = ord(img.dtype.char)
-                offset += 1
-                img_bytes = img.tobytes()
-                buffer[offset:offset + len(img_bytes)] = img_bytes
-                offset += len(img_bytes)
-                padding = max_h * max_w * max_c * img.dtype.itemsize - len(img_bytes)
-                if padding > 0:
-                    buffer[offset:offset + padding] = b"\x00" * padding
-                    offset += padding
-
+            fmt.pack_images(
+                shm.buf, images, max_shape, np.dtype(expected_dtype), fast=pack_fast
+            )
             self._stats["written"] += 1
             return shm.name
         except Exception as e:
             self._log_error(f"write_images error: {e}")
             print(
-                f"[MemoryManager] ERROR: write_images failed for '{process_name}'/"
-                f"'{shm_name}': {e}",
+                f"[MemoryManager] ERROR: write_images failed for '{process_name}'/'{shm_name}': {e}",
                 flush=True,
             )
             self._stats["errors"] += 1
-            self._clear_memory(process_name, shm_name, index)
+            val.clear_memory_slot(memory_data.get("handles"), index)
             return None
 
     def read_images(
@@ -353,39 +305,19 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         shm_name: str,
         index: int,
         n: int = -1,
+        *,
+        copy: bool = True,
     ) -> Optional[List[np.ndarray]]:
-        if not self._validate_read_operation(process_name, shm_name, index):
+        memory_data = self.get_memory_data(process_name, shm_name)
+        if not val.validate_memory_access(memory_data, shm_name, index):
             return None
         try:
-            memory_data = self.get_memory_data(process_name, shm_name)
-            if not memory_data:
-                return None
-
             handles = memory_data["handles"]
             shm = handles[index]
-            buffer = shm.buf
             _, max_shape, expected_dtype = memory_data["params"][shm_name]
-            max_h, max_w, max_c = max_shape
-            itemsize = np.dtype(expected_dtype).itemsize
-
-            num_images = struct.unpack("I", buffer[0:4])[0]
-            if num_images == 0:
-                return []
-            if n != -1:
-                num_images = min(n, num_images)
-
-            offset = 4
-            images = []
-            for _ in range(num_images):
-                h, w, c = struct.unpack("III", buffer[offset:offset + 12])
-                offset += 12
-                dtype_char = chr(buffer[offset])
-                dtype = np.dtype(dtype_char)
-                offset += 1
-                arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
-                images.append(arr.reshape((h, w, c)).copy())
-                offset += max_h * max_w * max_c * itemsize
-
+            images = fmt.unpack_images(
+                shm.buf, max_shape, np.dtype(expected_dtype), n=n, copy=copy
+            )
             self._stats["read"] += 1
             return images
         except Exception as e:
@@ -397,7 +329,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
         memory_data = self.get_memory_data(process_name, shm_name)
         if not memory_data:
             return
-        self._clear_memory(process_name, shm_name, index)
+        val.clear_memory_slot(memory_data.get("handles"), index)
         index_usage = memory_data["index_usage"]
         if shm_name in index_usage and 0 <= index < len(index_usage[shm_name]):
             index_usage[shm_name][index] = 0
@@ -409,7 +341,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
             self._safe_close_shm(shm, unlink=self._is_owner)
         self._local_handles.get(process_name, {}).pop(shm_name, None)
 
-        # Удалить метаданные
         if self._process_state_registry:
             pd = self._process_state_registry.get_process_data(process_name)
             if pd:
@@ -443,25 +374,30 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
                 for shm_name in list(self._local_handles[pname].keys()):
                     self.close_memory(pname, shm_name)
 
+    def _warn_access(
+        self, process_name: str, shm_name: str, index: int, msg: str
+    ) -> None:
+        """Логирование и print fallback при ошибках доступа (ADR-026)."""
+        self._log_warning(f"Memory '{shm_name}' {msg} for '{process_name}'")
+        print(
+            f"[MemoryManager] WARNING: Memory '{shm_name}' {msg} for '{process_name}'",
+            flush=True,
+        )
+
     def _safe_close_shm(
         self,
         shm: Optional[shared_memory.SharedMemory],
         unlink: bool = False,
     ) -> None:
-        """Единый безопасный close/unlink (DRY)."""
+        """Безопасный close/unlink с логированием."""
         if shm is None:
             return
         try:
-            shm.close()
+            po.close_shm(shm, unlink=unlink)
+        except FileNotFoundError:
+            pass
         except Exception as e:
-            self._log_error(f"shm.close() failed: {e}")
-        if unlink:
-            try:
-                shm.unlink()
-            except FileNotFoundError:
-                pass
-            except Exception as e:
-                self._log_error(f"shm.unlink() failed: {e}")
+            self._log_error(f"shm.close/unlink failed: {e}")
 
     def _close_all_handles(self) -> None:
         for process_name, shm_map in list(self._local_handles.items()):
@@ -470,116 +406,14 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager):
                     self._safe_close_shm(shm, unlink=self._is_owner)
         self._local_handles.clear()
 
-    def _create_shm_blocks(
-        self, shm_name_orig: str, size: int, coll: int
-    ) -> Optional[List[shared_memory.SharedMemory]]:
-        shm_list: List[shared_memory.SharedMemory] = []
-        for i in range(coll):
-            shm_name = f"{shm_name_orig}_{i}"
-            # Очистка устаревших POSIX shm от предыдущих аварийных запусков (macOS/Linux)
-            try:
-                stale = shared_memory.SharedMemory(name=shm_name, create=False)
-                stale.close()
-                stale.unlink()
-            except FileNotFoundError:
-                pass
-            except Exception:
-                pass
-            try:
-                shm = shared_memory.SharedMemory(name=shm_name, create=True, size=size)
-                shm_list.append(shm)
-            except Exception as e:
-                self._log_error(f"Cannot create SharedMemory '{shm_name}': {e}")
-                print(
-                    f"[MemoryManager] ERROR: Cannot create SharedMemory '{shm_name}': {e}",
-                    flush=True,
-                )
-                for created in shm_list:
-                    self._safe_close_shm(created, unlink=True)
-                return None
-        return shm_list
-
-    def _calculate_memory_size(
-        self, num_images: int, image_shape: tuple, dtype: Any
-    ) -> int:
-        h, w, c = image_shape
-        itemsize = np.dtype(dtype).itemsize
-        return 4 + num_images * (12 + 1 + h * w * c * itemsize)
-
-    def _validate_memory_access(
-        self, process_name: str, shm_name: str, index: int
-    ) -> bool:
-        memory_data = self.get_memory_data(process_name, shm_name)
-        if not memory_data:
-            self._log_warning(f"Memory '{shm_name}' not initialized for '{process_name}'")
-            print(
-                f"[MemoryManager] WARNING: Memory '{shm_name}' not initialized for '{process_name}'",
-                flush=True,
-            )
-            return False
-        coll = memory_data["coll"]
-        if shm_name not in coll or index >= coll[shm_name]:
-            self._log_warning(f"Invalid index {index} for '{shm_name}'")
-            print(
-                f"[MemoryManager] WARNING: Invalid index {index} for '{shm_name}'",
-                flush=True,
-            )
-            return False
-        handles = memory_data.get("handles")
-        if handles is None or index >= len(handles) or handles[index] is None:
-            self._log_warning(f"Memory handle {index} for '{shm_name}' is None")
-            print(
-                f"[MemoryManager] WARNING: Memory handle {index} for '{shm_name}' is None",
-                flush=True,
-            )
-            return False
-        return True
-
-    def _validate_write_operation(
-        self, process_name: str, shm_name: str, index: int, num_images: int
-    ) -> bool:
-        memory_data = self.get_memory_data(process_name, shm_name)
-        if not memory_data:
-            return False
-        coll = memory_data["coll"]
-        if shm_name not in coll or index >= coll[shm_name]:
-            self._log_warning(f"Invalid index {index} for '{shm_name}'")
-            return False
-        max_images = memory_data["params"][shm_name][0]
-        if num_images > max_images:
-            self._log_warning(f"Too many images ({num_images} > {max_images})")
-            return False
-        return True
-
-    def _validate_read_operation(
-        self, process_name: str, shm_name: str, index: int
-    ) -> bool:
-        return self._validate_memory_access(process_name, shm_name, index)
-
-    def _clear_memory(self, process_name: str, shm_name: str, index: int) -> None:
-        if self._validate_memory_access(process_name, shm_name, index):
-            memory_data = self.get_memory_data(process_name, shm_name)
-            if memory_data:
-                handles = memory_data.get("handles")
-                if handles and index < len(handles) and handles[index]:
-                    try:
-                        handles[index].buf[:] = b"\x00" * handles[index].size
-                    except Exception as e:
-                        self._log_error(f"_clear_memory error: {e}")
-
     # =========================================================================
-    # Статистика
+    # Статистика (ManagerStatsMixin._merge_stats)
     # =========================================================================
 
     def get_stats(self) -> Dict[str, Any]:
-        base = super().get_stats() if hasattr(super(), "get_stats") else {}
         mem_stats = {
             **self._stats,
             "processes_with_handles": len(self._local_handles),
             "is_owner": self._is_owner,
         }
-        if isinstance(base, dict):
-            base["memory"] = mem_stats
-        else:
-            base = {"memory": mem_stats}
-        return base
+        return self._merge_stats("memory", mem_stats)

@@ -19,9 +19,9 @@ from ...base_manager import BaseManager, ObservableMixin
 from ...base_manager.core.base_manager import _noop
 
 from ..config.config_store import ConfigStore
-from ..events.event_manager import EventManager
-from ..queues.queue_registry import QueueRegistry
-from ..memory.memory_manager import MemoryManager
+from ..events import EventManager
+from ..queues import QueueRegistry
+from ..memory.core import MemoryManager
 from ..state.process_data import ProcessData
 from ..state.process_state_registry import ProcessStateRegistry
 from ..types import ProcessStatus

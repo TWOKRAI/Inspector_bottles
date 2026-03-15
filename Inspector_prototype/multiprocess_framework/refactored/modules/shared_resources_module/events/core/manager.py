@@ -12,12 +12,13 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 from multiprocessing import Event, Queue
 
-from ...base_manager import BaseManager, ObservableMixin
-from ..types import EventType
-from ..core.interfaces import IEventManager
+from ....base_manager import BaseManager, ObservableMixin
+from ...types import EventType
+from ...core.interfaces import IEventManager
+from ...mixins import ManagerStatsMixin
 
 
-class EventManager(BaseManager, ObservableMixin, IEventManager):
+class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixin):
     """
     Менеджер системных событий.
 
@@ -210,17 +211,12 @@ class EventManager(BaseManager, ObservableMixin, IEventManager):
         return self._new_event_event
 
     def get_stats(self) -> Dict[str, Any]:
-        base = super().get_stats() if hasattr(super(), "get_stats") else {}
         event_stats = {
             **self._stats,
             "subscribers_count": sum(len(v) for v in self._subscribers.values()),
             "event_types": [et.value for et in self._subscribers],
         }
-        if isinstance(base, dict):
-            base["events"] = event_stats
-        else:
-            base = {"events": event_stats}
-        return base
+        return self._merge_stats("events", event_stats)
 
     # =========================================================================
     # Pickle

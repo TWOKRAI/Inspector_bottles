@@ -94,7 +94,7 @@ event_mgr: IEventManager = manager.event_manager
 **Интерфейс реестра очередей для межпроцессного взаимодействия.**
 
 ### Реализация
-`QueueRegistry` (в `queues/queue_registry.py`)
+`QueueRegistry` (в `queues/core/manager.py`)
 
 ### Основные методы
 
@@ -172,7 +172,7 @@ registry.send_to_queue("MyProcess", "system", {"type": "test"})
 **Интерфейс менеджера событий для системы уведомлений.**
 
 ### Реализация
-`EventManager` (в `events/event_manager.py`)
+`EventManager` (в `events/core/manager.py`)
 
 ### Основные методы
 
@@ -244,7 +244,7 @@ event_data = event_manager.wait_for_event(
 **Интерфейс менеджера разделенной памяти для больших данных.**
 
 ### Реализация
-`MemoryManager` (в `memory/memory_manager.py`)
+`MemoryManager` (в `memory/core/manager.py`)
 
 ### Основные методы
 
@@ -318,7 +318,7 @@ read_images = memory_manager.read_images("MyProcess", "camera_feed", index=0, n=
 **Интерфейс реестра состояний процессов (из Process_module).**
 
 ### Реализация
-`ProcessStateRegistry` (в `process_module/process_state_registry.py`)
+`ProcessStateRegistry` (в `state/process_state_registry.py`)
 
 ### Основные методы
 

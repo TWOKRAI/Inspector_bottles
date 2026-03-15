@@ -95,6 +95,7 @@ shared_resources_module/
 ├── __init__.py                      # Чистый экспорт
 ├── interfaces.py                    # Реэкспорт из core/interfaces.py
 ├── types/
+│   ├── __init__.py
 │   └── types.py                     # ProcessStatus, ResourceType, EventType, TypedDict
 ├── core/
 │   ├── interfaces.py                # ISharedResourcesManager, IConfigStore, ...
@@ -105,16 +106,42 @@ shared_resources_module/
 ├── config/
 │   └── config_store.py              # ConfigStore: Dict[str, dict]
 ├── events/
-│   └── event_manager.py             # EventManager: emit, subscribe, reinitialize()
+│   ├── core/manager.py              # EventManager: emit, subscribe, reinitialize()
+│   ├── interfaces.py
+│   └── README.md
 ├── queues/
-│   └── queue_registry.py            # QueueRegistry: create + access через PSR
+│   ├── core/manager.py              # QueueRegistry: create + access через PSR
+│   ├── interfaces.py
+│   └── README.md
 ├── memory/
-│   └── memory_manager.py            # MemoryManager: shm.name, owner/consumer
+│   ├── core/manager.py              # MemoryManager: shm.name, owner/consumer
+│   ├── format/buffer.py              # pack/unpack изображений
+│   ├── platform/shm.py               # create_shm_block, close_shm
+│   ├── validation/access.py         # validate_memory_access
+│   └── docs/FORMATS.md
 ├── adapters/
-│   └── data_schema_adapter.py       # Адаптер для data_schema_module
+│   └── data_schema_adapter.py       # Мост к data_schema_module.StorageManager
 ├── registry/
 │   └── data_schema_adapter.py       # Обратная совместимость → adapters/
+├── mixins/
+│   └── stats_mixin.py               # ManagerStatsMixin
 ├── tests/                           # 50+ тестов
 └── docs/
     └── ARCHITECTURE.md              # Этот файл
 ```
+
+## Связь с data_schema_module
+
+**shared_resources_module** и **data_schema_module** — разные ответственности:
+
+| shared_resources_module | data_schema_module |
+|-------------------------|-------------------|
+| Runtime: ProcessData, Queue, Event, SharedMemory | Схемы: RegisterBase, валидация, merge_with_defaults |
+| ConfigStore — хранит dict (без валидации) | SchemaRegistry — валидирует по схемам |
+| TypedDict для Dict at Boundary | Pydantic модели, field_meta |
+| DataSchemaAdapter — тонкий мост | StorageManager, ProcessDataContainer — используют ProcessData.custom |
+
+**Нет дублирования логики:**
+- ConfigStore хранит только dict — валидация конфигов (если нужна) — в config_module через data_schema_module
+- ProcessData — runtime-контейнер; ProcessDataContainer (data_schema) расширяет его через custom["component_dnas"]
+- DataSchemaAdapter делегирует в data_schema_module.StorageManager — не содержит схемной логики

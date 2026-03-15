@@ -365,6 +365,20 @@
 
 ---
 
+## ADR-028: shared_resources_module и data_schema_module — разделение ответственностей
+- Дата: 2026-03-15
+- Статус: принято
+- Контекст: Проверочный рефакторинг shared_resources_module. Вопрос о дублировании логики с data_schema_module.
+- Решение:
+  - shared_resources_module — runtime: ProcessData, Queue, Event, SharedMemory, ConfigStore (dict). Без схем, без валидации.
+  - data_schema_module — схемы (RegisterBase), валидация, ProcessDataContainer (использует ProcessData.custom).
+  - DataSchemaAdapter — тонкий мост: делегирует в data_schema_module.StorageManager. Не содержит схемной логики.
+  - ConfigStore хранит только dict (Dict at Boundary). Валидация конфигов — в config_module через data_schema_module.
+- Причина: SRP. shared_resources — инфраструктура межпроцессного взаимодействия. data_schema — структура и валидация данных.
+- Отклонённые альтернативы: Объединение — отклонено (разные жизненные циклы, разные зависимости).
+
+---
+
 ## ADR-027: rendered_frame_ready — два изображения (original + mask)
 - Дата: 2026-03-15
 - Статус: принято
