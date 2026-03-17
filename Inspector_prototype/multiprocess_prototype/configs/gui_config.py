@@ -29,7 +29,7 @@ class GuiConfig(ProcessConfigBase):
     ] = 1024
     window_height: Annotated[
         int, FieldMeta("Высота окна", min=300, max=1080)
-    ] = 768
+    ] = 600
     poll_interval_ms: Annotated[
         int, FieldMeta("Интервал опроса сообщений, мс", min=5, max=100)
     ] = 16

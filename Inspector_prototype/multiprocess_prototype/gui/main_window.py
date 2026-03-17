@@ -62,13 +62,13 @@ class InspectorWindow(QMainWindow):
 
         self._video_label_original = QLabel("Original (waiting...)")
         self._video_label_original.setAlignment(Qt.AlignCenter)
-        self._video_label_original.setMinimumSize(320, 240)
+        self._video_label_original.setMinimumSize(280, 180)
         self._video_label_original.setStyleSheet("background-color: #1e1e1e; color: white;")
         video_layout.addWidget(self._video_label_original, 1)
 
         self._video_label_mask = QLabel("Mask (waiting...)")
         self._video_label_mask.setAlignment(Qt.AlignCenter)
-        self._video_label_mask.setMinimumSize(320, 240)
+        self._video_label_mask.setMinimumSize(280, 180)
         self._video_label_mask.setStyleSheet("background-color: #1e1e1e; color: white;")
         video_layout.addWidget(self._video_label_mask, 1)
 
@@ -221,6 +221,10 @@ class InspectorWindow(QMainWindow):
 
         self._frame_counter_label = QLabel("Frames: 0")
         control_panel.addWidget(self._frame_counter_label)
+
+        self._camera_fps_label = QLabel("Camera FPS: —")
+        self._camera_fps_label.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        control_panel.addWidget(self._camera_fps_label)
 
         control_panel.addStretch()
 
@@ -377,6 +381,13 @@ class InspectorWindow(QMainWindow):
         """Показать ошибку камеры (Hikvision)."""
         self._status_label.setText(f"Error: {text}")
         self._status_label.setStyleSheet("color: #e74c3c; padding: 5px;")
+
+    def update_camera_fps(self, fps: float):
+        """Обновить отображение реального FPS с камеры."""
+        if fps <= 0:
+            self._camera_fps_label.setText("Camera FPS: —")
+        else:
+            self._camera_fps_label.setText(f"Camera FPS: {fps:.1f}")
 
     def update_camera_parameters(self, params: dict):
         """Обновить отображение параметров камеры (Hikvision)."""

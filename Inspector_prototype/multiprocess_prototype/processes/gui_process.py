@@ -33,7 +33,7 @@ class GuiProcess(ProcessModule):
         self._poll_interval = app_cfg.get("poll_interval_ms", 16)
         self._window_title = app_cfg.get("window_title", "Inspector Prototype")
         self._window_width = app_cfg.get("window_width", 1024)
-        self._window_height = app_cfg.get("window_height", 768)
+        self._window_height = app_cfg.get("window_height", 600)
         self._camera_type = app_cfg.get("camera_type", "simulator")
         self._log_info("GuiProcess ready (no workers)")
 
@@ -105,6 +105,8 @@ class GuiProcess(ProcessModule):
                 self._handle_enum_devices_response(data)
             elif data_type == "camera_type_changed":
                 self._handle_camera_type_changed(data)
+            elif data_type == "fps_update":
+                self._handle_fps_update(data)
 
     def _handle_camera_status(self, text: str):
         """Сообщение status от камеры (Hikvision)."""
@@ -133,6 +135,11 @@ class GuiProcess(ProcessModule):
         """Подтверждение переключения типа камеры — синхронизация UI."""
         if self._window and hasattr(self._window, "sync_camera_type"):
             self._window.sync_camera_type(data.get("camera_type", "simulator"))
+
+    def _handle_fps_update(self, data: dict):
+        """Обновление реального FPS с камеры."""
+        if self._window and hasattr(self._window, "update_camera_fps"):
+            self._window.update_camera_fps(data.get("fps", 0))
 
     def _handle_new_frame(self, data: dict):
         """Получен новый отрендеренный кадр (оригинал + маска)."""

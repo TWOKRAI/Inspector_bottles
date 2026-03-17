@@ -35,16 +35,24 @@ def _save_prefs(data: dict) -> bool:
 def get_camera_type() -> str:
     """
     Получить тип камеры: из prefs → env → default.
+    Default: simulator на macOS (Hikvision только на Windows), hikvision на Windows.
     """
+    import os
+    import sys
+
     prefs = _load_prefs()
     ct = prefs.get("camera_type")
     if ct in _VALID_TYPES:
+        # На macOS Hikvision не поддерживается — fallback на simulator
+        if ct == "hikvision" and sys.platform != "win32":
+            return "simulator"
         return ct
-    import os
     env_ct = os.environ.get("INSPECTOR_CAMERA_TYPE")
     if env_ct in _VALID_TYPES:
+        if env_ct == "hikvision" and sys.platform != "win32":
+            return "simulator"
         return env_ct
-    return "hikvision"
+    return "simulator" if sys.platform != "win32" else "hikvision"
 
 
 def set_camera_type(camera_type: str) -> bool:
