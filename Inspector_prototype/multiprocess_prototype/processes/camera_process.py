@@ -81,6 +81,7 @@ class CameraProcess(ProcessModule):
         """Циклический захват кадров. Режим LOOP."""
         frame_count = 0
         stats_start = time.time()
+        
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.05)

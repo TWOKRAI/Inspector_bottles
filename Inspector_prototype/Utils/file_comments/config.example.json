@@ -1,0 +1,28 @@
+{
+    "default": {
+        "extensions": [".py", ".md"],
+        "comment_symbols": {
+            ".py": "#",
+            ".md": "#"
+        },
+        "use_absolute_path": false,
+        "ignore_dirs": [".git", "__pycache__", "venv"]
+    },
+    "windows": {
+        "comment_symbols": {
+            ".py": "#",
+            ".md": "REM"
+        }
+    },
+    "linux": {
+        "use_absolute_path": true
+    },
+    "darwin": {
+        "extensions": [".py", ".md", ".txt"],
+        "comment_symbols": {
+            ".py": "#",
+            ".md": "#",
+            ".txt": "//"
+        }
+    }
+}
