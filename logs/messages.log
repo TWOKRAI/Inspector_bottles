@@ -22827,3 +22827,705 @@
 2026-03-17 16:50:00,155 [INFO] [camera] lifecycle: Process 'camera' stopping
 2026-03-17 16:50:00,155 [INFO] [camera] main: UnifiedCameraProcess shutting down...
 2026-03-17 16:50:00,155 [INFO] [-] logger_manager: LoggerManager shutting down
+2026-03-17 16:55:48,766 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 16:55:48,767 [INFO] [-] main: RouterManager 'router_camera' initialized (channels: [])
+2026-03-17 16:55:48,767 [INFO] [-] main: [stats_camera] initialized
+2026-03-17 16:55:48,767 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 16:55:48,767 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:48,767 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:48,768 [INFO] [-] main: Process state registered: camera
+2026-03-17 16:55:48,768 [INFO] [-] main: UnifiedCameraProcess initializing...
+2026-03-17 16:55:49,032 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 16:55:49,032 [INFO] [-] main: RouterManager 'router_processor' initialized (channels: [])
+2026-03-17 16:55:49,032 [INFO] [-] main: [stats_processor] initialized
+2026-03-17 16:55:49,032 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 16:55:49,032 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 16:55:49,033 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,033 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,033 [INFO] [-] main: Process state registered: processor
+2026-03-17 16:55:49,034 [INFO] [-] main: ProcessorProcess initializing...
+2026-03-17 16:55:49,034 [INFO] [-] dispatcher: Handler 'set_color_range' registered successfully
+2026-03-17 16:55:49,034 [INFO] [-] command_manager: Command 'set_color_range' registered successfully
+2026-03-17 16:55:49,034 [INFO] [-] dispatcher: Handler 'set_min_area' registered successfully
+2026-03-17 16:55:49,035 [INFO] [-] command_manager: Command 'set_min_area' registered successfully
+2026-03-17 16:55:49,035 [INFO] [-] main: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500
+2026-03-17 16:55:49,035 [INFO] [-] main: Registered 7 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area']
+2026-03-17 16:55:49,035 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,035 [INFO] [processor] main: Process 'processor' initialized successfully
+2026-03-17 16:55:49,035 [INFO] [processor] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,035 [INFO] [processor] lifecycle: Process 'processor' started
+2026-03-17 16:55:49,210 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 16:55:49,210 [INFO] [-] main: RouterManager 'router_renderer' initialized (channels: [])
+2026-03-17 16:55:49,210 [INFO] [-] main: [stats_renderer] initialized
+2026-03-17 16:55:49,210 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 16:55:49,210 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 16:55:49,211 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,211 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,212 [INFO] [-] main: Process state registered: renderer
+2026-03-17 16:55:49,212 [INFO] [-] main: RendererProcess initializing...
+2026-03-17 16:55:49,212 [INFO] [-] dispatcher: Handler 'set_draw_contours' registered successfully
+2026-03-17 16:55:49,212 [INFO] [-] command_manager: Command 'set_draw_contours' registered successfully
+2026-03-17 16:55:49,212 [INFO] [-] dispatcher: Handler 'set_show_original' registered successfully
+2026-03-17 16:55:49,212 [INFO] [-] command_manager: Command 'set_show_original' registered successfully
+2026-03-17 16:55:49,212 [INFO] [-] dispatcher: Handler 'set_show_mask' registered successfully
+2026-03-17 16:55:49,212 [INFO] [-] command_manager: Command 'set_show_mask' registered successfully
+2026-03-17 16:55:49,213 [INFO] [-] main: RendererProcess ready
+2026-03-17 16:55:49,213 [INFO] [-] main: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask']
+2026-03-17 16:55:49,213 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,213 [INFO] [renderer] main: Process 'renderer' initialized successfully
+2026-03-17 16:55:49,213 [INFO] [renderer] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,213 [INFO] [renderer] lifecycle: Process 'renderer' started
+2026-03-17 16:55:49,333 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 16:55:49,333 [INFO] [-] main: RouterManager 'router_robot' initialized (channels: [])
+2026-03-17 16:55:49,333 [INFO] [-] main: [stats_robot] initialized
+2026-03-17 16:55:49,333 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 16:55:49,333 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,334 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 16:55:49,335 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 16:55:49,335 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,335 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,335 [INFO] [-] main: Process state registered: robot
+2026-03-17 16:55:49,335 [INFO] [-] main: RobotSimulatorProcess initializing...
+2026-03-17 16:55:49,335 [INFO] [-] dispatcher: Handler 'reject_item' registered successfully
+2026-03-17 16:55:49,335 [INFO] [-] command_manager: Command 'reject_item' registered successfully
+2026-03-17 16:55:49,336 [INFO] [-] main: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-17 16:55:49,336 [INFO] [-] main: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-17 16:55:49,336 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,336 [INFO] [robot] main: Process 'robot' initialized successfully
+2026-03-17 16:55:49,336 [INFO] [robot] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,336 [INFO] [robot] lifecycle: Process 'robot' started
+2026-03-17 16:55:49,440 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 16:55:49,441 [INFO] [-] main: RouterManager 'router_gui' initialized (channels: [])
+2026-03-17 16:55:49,441 [INFO] [-] main: [stats_gui] initialized
+2026-03-17 16:55:49,441 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 16:55:49,441 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 16:55:49,441 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 16:55:49,442 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 16:55:49,442 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 16:55:49,442 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 16:55:49,442 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,442 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 16:55:49,442 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 16:55:49,443 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 16:55:49,443 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,443 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 16:55:49,443 [INFO] [-] main: Process state registered: gui
+2026-03-17 16:55:49,443 [INFO] [-] main: GuiProcess initializing...
+2026-03-17 16:55:49,444 [INFO] [-] main: GuiProcess ready (no workers)
+2026-03-17 16:55:49,444 [INFO] [-] main: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-17 16:55:49,444 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:49,444 [INFO] [gui] main: Process 'gui' initialized successfully
+2026-03-17 16:55:50,902 [INFO] [-] dispatcher: Handler 'set_camera_type' registered successfully
+2026-03-17 16:55:51,506 [INFO] [gui] main: [DEBUG] gui: gui_start_capture -> sending start_capture to camera
+2026-03-17 16:55:51,525 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=1
+2026-03-17 16:55:51,546 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-17 16:55:50,786 [INFO] [-] command_manager: Command 'set_camera_type' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'get_camera_type' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'get_camera_type' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'start_capture' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'start_capture' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'stop_capture' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'stop_capture' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'set_fps' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'set_fps' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'set_resolution' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'set_resolution' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'enum_devices' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'enum_devices' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'open' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] command_manager: Command 'open' registered successfully
+2026-03-17 16:55:50,787 [INFO] [-] dispatcher: Handler 'close' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] command_manager: Command 'close' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] dispatcher: Handler 'start_grabbing' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] command_manager: Command 'start_grabbing' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] dispatcher: Handler 'stop_grabbing' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] command_manager: Command 'stop_grabbing' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] dispatcher: Handler 'get_parameters' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] command_manager: Command 'get_parameters' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] dispatcher: Handler 'set_parameters' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] command_manager: Command 'set_parameters' registered successfully
+2026-03-17 16:55:50,788 [INFO] [-] main: UnifiedCameraProcess ready, camera_type=webcam
+2026-03-17 16:55:50,788 [INFO] [-] main: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-03-17 16:55:50,788 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:50,788 [INFO] [camera] main: Process 'camera' initialized successfully
+2026-03-17 16:55:50,788 [INFO] [camera] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 16:55:50,788 [INFO] [camera] lifecycle: Process 'camera' started
+2026-03-17 16:55:51,789 [INFO] [camera] command_manager: Command 'start_capture' executed successfully in 0.000s
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=1, processing_time=10.5ms, detections=0
+2026-03-17 16:55:51,053 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=2
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=2, processing_time=5.2ms, detections=0
+2026-03-17 16:55:51,053 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=3
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=3, processing_time=5.2ms, detections=0
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=4, processing_time=6.0ms, detections=0
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=5, processing_time=6.0ms, detections=0
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=6, processing_time=5.0ms, detections=0
+2026-03-17 16:55:51,053 [INFO] [processor] main: [PERF] processor: frame=7, processing_time=6.0ms, detections=0
+2026-03-17 16:55:51,054 [INFO] [processor] main: [PERF] processor: frame=8, processing_time=6.2ms, detections=0
+2026-03-17 16:55:51,054 [INFO] [processor] main: [PERF] processor: frame=9, processing_time=5.9ms, detections=0
+2026-03-17 16:55:51,054 [INFO] [processor] main: [PERF] processor: frame=10, processing_time=6.0ms, detections=0
+2026-03-17 16:55:51,054 [INFO] [processor] main: [PERF] processor: frame=11, processing_time=6.0ms, detections=0
+2026-03-17 16:55:52,054 [INFO] [processor] main: [PERF] processor: frame=12, processing_time=5.7ms, detections=0
+2026-03-17 16:55:51,232 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1
+2026-03-17 16:55:51,232 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=2
+2026-03-17 16:55:51,233 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=2
+2026-03-17 16:55:51,233 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=3
+2026-03-17 16:55:51,233 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-17 16:55:51,446 [INFO] [gui] main: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-17 16:55:52,061 [INFO] [processor] main: [PERF] processor: frame=13, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,061 [INFO] [processor] main: [PERF] processor: frame=14, processing_time=5.2ms, detections=0
+2026-03-17 16:55:52,062 [INFO] [processor] main: [PERF] processor: frame=15, processing_time=5.0ms, detections=0
+2026-03-17 16:55:52,062 [INFO] [processor] main: [PERF] processor: frame=16, processing_time=6.0ms, detections=0
+2026-03-17 16:55:52,062 [INFO] [processor] main: [PERF] processor: frame=17, processing_time=5.7ms, detections=0
+2026-03-17 16:55:52,063 [INFO] [processor] main: [PERF] processor: frame=18, processing_time=6.1ms, detections=0
+2026-03-17 16:55:52,063 [INFO] [processor] main: [PERF] processor: frame=19, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,063 [INFO] [processor] main: [PERF] processor: frame=20, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,063 [INFO] [processor] main: [PERF] processor: frame=21, processing_time=6.0ms, detections=0
+2026-03-17 16:55:52,063 [INFO] [processor] main: [PERF] processor: frame=22, processing_time=5.0ms, detections=0
+2026-03-17 16:55:52,063 [INFO] [processor] main: [PERF] processor: frame=23, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,064 [INFO] [processor] main: [PERF] processor: frame=24, processing_time=6.0ms, detections=0
+2026-03-17 16:55:52,064 [INFO] [processor] main: [PERF] processor: frame=25, processing_time=5.6ms, detections=0
+2026-03-17 16:55:52,064 [INFO] [processor] main: [PERF] processor: frame=26, processing_time=7.0ms, detections=0
+2026-03-17 16:55:52,064 [INFO] [processor] main: [PERF] processor: frame=27, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,064 [INFO] [processor] main: [PERF] processor: frame=28, processing_time=6.1ms, detections=0
+2026-03-17 16:55:52,065 [INFO] [processor] main: [PERF] processor: frame=29, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,065 [INFO] [processor] main: [PERF] processor: frame=30, processing_time=5.1ms, detections=0
+2026-03-17 16:55:52,065 [INFO] [processor] main: [PERF] processor: frame=31, processing_time=6.1ms, detections=0
+2026-03-17 16:55:52,065 [INFO] [processor] main: [PERF] processor: frame=32, processing_time=6.0ms, detections=0
+2026-03-17 16:55:52,065 [INFO] [processor] main: [PERF] processor: frame=33, processing_time=6.0ms, detections=0
+2026-03-17 16:55:52,065 [INFO] [processor] main: [PERF] processor: frame=34, processing_time=5.9ms, detections=0
+2026-03-17 16:55:53,066 [INFO] [processor] main: [PERF] processor: frame=35, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,672 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=50
+2026-03-17 16:55:53,689 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:53,066 [INFO] [processor] main: [PERF] processor: frame=36, processing_time=8.0ms, detections=0
+2026-03-17 16:55:53,066 [INFO] [processor] main: [PERF] processor: frame=37, processing_time=7.5ms, detections=0
+2026-03-17 16:55:53,067 [INFO] [processor] main: [PERF] processor: frame=38, processing_time=6.5ms, detections=0
+2026-03-17 16:55:53,067 [INFO] [processor] main: [PERF] processor: frame=39, processing_time=7.0ms, detections=0
+2026-03-17 16:55:53,067 [INFO] [processor] main: [PERF] processor: frame=40, processing_time=6.0ms, detections=0
+2026-03-17 16:55:53,067 [INFO] [processor] main: [PERF] processor: frame=41, processing_time=6.0ms, detections=0
+2026-03-17 16:55:53,067 [INFO] [processor] main: [PERF] processor: frame=42, processing_time=5.1ms, detections=0
+2026-03-17 16:55:53,067 [INFO] [processor] main: [PERF] processor: frame=43, processing_time=6.0ms, detections=0
+2026-03-17 16:55:53,068 [INFO] [processor] main: [PERF] processor: frame=44, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,068 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[103, 100, 255]
+2026-03-17 16:55:53,068 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:53,068 [INFO] [processor] main: [PERF] processor: frame=45, processing_time=5.6ms, detections=0
+2026-03-17 16:55:53,068 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 100, 255]
+2026-03-17 16:55:53,069 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:53,069 [INFO] [processor] main: [PERF] processor: frame=46, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,069 [INFO] [processor] main: [PERF] processor: frame=47, processing_time=5.1ms, detections=0
+2026-03-17 16:55:53,069 [INFO] [processor] main: [PERF] processor: frame=48, processing_time=6.0ms, detections=0
+2026-03-17 16:55:53,069 [INFO] [processor] main: [PERF] processor: frame=49, processing_time=5.0ms, detections=0
+2026-03-17 16:55:53,069 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=50
+2026-03-17 16:55:53,070 [INFO] [processor] main: [PERF] processor: frame=50, processing_time=6.0ms, detections=0
+2026-03-17 16:55:53,070 [INFO] [processor] main: [PERF] processor: frame=51, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,070 [INFO] [processor] main: [PERF] processor: frame=52, processing_time=5.6ms, detections=0
+2026-03-17 16:55:53,070 [INFO] [processor] main: [PERF] processor: frame=53, processing_time=6.0ms, detections=0
+2026-03-17 16:55:53,070 [INFO] [processor] main: [PERF] processor: frame=54, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,070 [INFO] [processor] main: [PERF] processor: frame=55, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,071 [INFO] [processor] main: [PERF] processor: frame=56, processing_time=5.1ms, detections=0
+2026-03-17 16:55:53,071 [INFO] [processor] main: [PERF] processor: frame=57, processing_time=6.1ms, detections=0
+2026-03-17 16:55:53,071 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 103, 255]
+2026-03-17 16:55:53,071 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:53,071 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 107, 255]
+2026-03-17 16:55:53,072 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:53,072 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 114, 255]
+2026-03-17 16:55:53,072 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,072 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 126, 255]
+2026-03-17 16:55:54,073 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,073 [INFO] [processor] main: [PERF] processor: frame=58, processing_time=6.0ms, detections=0
+2026-03-17 16:55:54,073 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 141, 255]
+2026-03-17 16:55:54,073 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,073 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 145, 255]
+2026-03-17 16:55:54,074 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,074 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 160, 255]
+2026-03-17 16:55:54,074 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,074 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 171, 255]
+2026-03-17 16:55:54,074 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,075 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 183, 255]
+2026-03-17 16:55:54,075 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,075 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 194, 255]
+2026-03-17 16:55:54,081 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.010s
+2026-03-17 16:55:54,081 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 206, 255]
+2026-03-17 16:55:54,081 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,081 [INFO] [processor] main: [PERF] processor: frame=59, processing_time=7.0ms, detections=0
+2026-03-17 16:55:53,253 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
+2026-03-17 16:55:54,765 [INFO] [robot] main: REJECT #1: frame=75, pos=(203, 239), area=14976
+2026-03-17 16:55:54,091 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 225, 255]
+2026-03-17 16:55:54,091 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,091 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 236, 255]
+2026-03-17 16:55:54,091 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,091 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 247, 255]
+2026-03-17 16:55:54,091 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,091 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[107, 255, 255]
+2026-03-17 16:55:54,091 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=60, processing_time=6.0ms, detections=0
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=61, processing_time=6.4ms, detections=0
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=62, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=63, processing_time=6.0ms, detections=0
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=64, processing_time=6.0ms, detections=0
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=65, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,091 [INFO] [processor] main: [PERF] processor: frame=66, processing_time=6.0ms, detections=0
+2026-03-17 16:55:54,092 [INFO] [processor] main: [PERF] processor: frame=67, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,092 [INFO] [processor] main: [PERF] processor: frame=68, processing_time=8.0ms, detections=0
+2026-03-17 16:55:54,092 [INFO] [processor] main: [PERF] processor: frame=69, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,092 [INFO] [processor] main: [PERF] processor: frame=70, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,093 [INFO] [processor] main: [PERF] processor: frame=71, processing_time=6.0ms, detections=0
+2026-03-17 16:55:54,093 [INFO] [processor] main: [PERF] processor: frame=72, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,093 [INFO] [processor] main: [PERF] processor: frame=73, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,093 [INFO] [processor] main: [PERF] processor: frame=74, processing_time=7.0ms, detections=0
+2026-03-17 16:55:54,093 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[114, 255, 255]
+2026-03-17 16:55:54,094 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,094 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[126, 255, 255]
+2026-03-17 16:55:54,094 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,094 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[141, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[148, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[156, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[164, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[171, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: [PERF] processor: frame=75, processing_time=9.0ms, detections=1
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[175, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[183, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,095 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[190, 255, 255]
+2026-03-17 16:55:54,095 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,096 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[198, 255, 255]
+2026-03-17 16:55:54,096 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,096 [INFO] [processor] main: [PERF] processor: frame=76, processing_time=9.0ms, detections=1
+2026-03-17 16:55:54,096 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[202, 255, 255]
+2026-03-17 16:55:54,096 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,096 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[209, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.010s
+2026-03-17 16:55:54,097 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[217, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,097 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[225, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,097 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,097 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[244, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,097 [INFO] [processor] main: [PERF] processor: frame=77, processing_time=6.8ms, detections=1
+2026-03-17 16:55:54,097 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[251, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,097 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[255, 255, 255]
+2026-03-17 16:55:54,097 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:54,097 [INFO] [processor] main: [PERF] processor: frame=78, processing_time=7.6ms, detections=1
+2026-03-17 16:55:54,097 [INFO] [processor] main: [PERF] processor: frame=79, processing_time=7.2ms, detections=1
+2026-03-17 16:55:54,097 [INFO] [processor] main: [PERF] processor: frame=80, processing_time=7.1ms, detections=1
+2026-03-17 16:55:55,098 [INFO] [processor] main: [PERF] processor: frame=81, processing_time=7.1ms, detections=1
+2026-03-17 16:55:55,098 [INFO] [processor] main: [PERF] processor: frame=82, processing_time=6.1ms, detections=1
+2026-03-17 16:55:55,387 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:55,387 [INFO] [robot] main: REJECT #2: frame=75, pos=(203, 239), area=14976
+2026-03-17 16:55:55,851 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=100
+2026-03-17 16:55:55,865 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:55,111 [INFO] [processor] main: [PERF] processor: frame=83, processing_time=7.0ms, detections=1
+2026-03-17 16:55:55,112 [INFO] [processor] main: [PERF] processor: frame=84, processing_time=7.0ms, detections=1
+2026-03-17 16:55:55,112 [INFO] [processor] main: [PERF] processor: frame=85, processing_time=7.2ms, detections=1
+2026-03-17 16:55:55,112 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[251, 255, 255]
+2026-03-17 16:55:55,112 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,112 [INFO] [processor] main: [PERF] processor: frame=86, processing_time=7.5ms, detections=1
+2026-03-17 16:55:55,112 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[247, 255, 255]
+2026-03-17 16:55:55,112 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,113 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[244, 255, 255]
+2026-03-17 16:55:55,113 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,113 [INFO] [processor] main: [PERF] processor: frame=87, processing_time=5.7ms, detections=1
+2026-03-17 16:55:55,113 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[240, 255, 255]
+2026-03-17 16:55:55,113 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,113 [INFO] [processor] main: [PERF] processor: frame=88, processing_time=6.1ms, detections=1
+2026-03-17 16:55:55,114 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[236, 255, 255]
+2026-03-17 16:55:55,114 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,114 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[232, 255, 255]
+2026-03-17 16:55:55,114 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,114 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[228, 255, 255]
+2026-03-17 16:55:55,114 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,114 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[225, 255, 255]
+2026-03-17 16:55:55,115 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,115 [INFO] [processor] main: [PERF] processor: frame=89, processing_time=7.5ms, detections=1
+2026-03-17 16:55:55,115 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[221, 255, 255]
+2026-03-17 16:55:55,115 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,115 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[217, 255, 255]
+2026-03-17 16:55:55,115 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,115 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[213, 255, 255]
+2026-03-17 16:55:55,115 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,115 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[209, 255, 255]
+2026-03-17 16:55:55,116 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,116 [INFO] [processor] main: [PERF] processor: frame=90, processing_time=7.7ms, detections=1
+2026-03-17 16:55:55,116 [INFO] [processor] main: [PERF] processor: frame=91, processing_time=8.4ms, detections=1
+2026-03-17 16:55:55,116 [INFO] [processor] main: [PERF] processor: frame=92, processing_time=8.0ms, detections=1
+2026-03-17 16:55:55,116 [INFO] [processor] main: [PERF] processor: frame=93, processing_time=7.6ms, detections=1
+2026-03-17 16:55:55,116 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[213, 255, 255]
+2026-03-17 16:55:55,116 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,116 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[217, 255, 255]
+2026-03-17 16:55:55,117 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=94, processing_time=7.7ms, detections=1
+2026-03-17 16:55:55,117 [INFO] [processor] main: Color range set: lower=[0, 0, 150], upper=[221, 255, 255]
+2026-03-17 16:55:55,117 [INFO] [processor] command_manager: Command 'set_color_range' executed successfully in 0.000s
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=95, processing_time=6.7ms, detections=1
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=96, processing_time=7.1ms, detections=1
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=97, processing_time=7.0ms, detections=1
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=98, processing_time=7.7ms, detections=1
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=99, processing_time=6.1ms, detections=1
+2026-03-17 16:55:55,117 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=100
+2026-03-17 16:55:55,117 [INFO] [processor] main: [PERF] processor: frame=100, processing_time=8.1ms, detections=1
+2026-03-17 16:55:55,118 [INFO] [processor] main: [PERF] processor: frame=101, processing_time=8.0ms, detections=1
+2026-03-17 16:55:55,118 [INFO] [processor] main: [PERF] processor: frame=102, processing_time=7.0ms, detections=1
+2026-03-17 16:55:55,118 [INFO] [processor] main: [PERF] processor: frame=103, processing_time=6.0ms, detections=1
+2026-03-17 16:55:56,118 [INFO] [processor] main: [PERF] processor: frame=104, processing_time=8.0ms, detections=1
+2026-03-17 16:55:56,118 [INFO] [processor] main: [PERF] processor: frame=105, processing_time=8.0ms, detections=1
+2026-03-17 16:55:56,118 [INFO] [processor] main: [PERF] processor: frame=106, processing_time=7.0ms, detections=1
+2026-03-17 16:55:55,264 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=100
+2026-03-17 16:55:55,389 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:55,389 [INFO] [robot] main: REJECT #3: frame=76, pos=(167, 239), area=35744
+2026-03-17 16:55:56,389 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:56,389 [INFO] [robot] main: REJECT #4: frame=76, pos=(167, 239), area=35744
+2026-03-17 16:55:56,889 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:56,889 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:56,889 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:56,122 [INFO] [processor] main: [PERF] processor: frame=107, processing_time=5.6ms, detections=1
+2026-03-17 16:55:56,122 [INFO] [processor] main: [PERF] processor: frame=108, processing_time=7.0ms, detections=1
+2026-03-17 16:55:56,122 [INFO] [processor] main: [PERF] processor: frame=109, processing_time=6.1ms, detections=1
+2026-03-17 16:55:56,122 [INFO] [processor] main: [PERF] processor: frame=110, processing_time=6.1ms, detections=1
+2026-03-17 16:55:56,122 [INFO] [processor] main: [PERF] processor: frame=111, processing_time=7.2ms, detections=1
+2026-03-17 16:55:56,122 [INFO] [processor] main: [PERF] processor: frame=112, processing_time=6.0ms, detections=1
+2026-03-17 16:55:56,123 [INFO] [processor] main: [PERF] processor: frame=113, processing_time=7.0ms, detections=1
+2026-03-17 16:55:56,123 [INFO] [processor] main: [PERF] processor: frame=114, processing_time=5.5ms, detections=1
+2026-03-17 16:55:56,123 [INFO] [processor] main: [PERF] processor: frame=115, processing_time=6.9ms, detections=1
+2026-03-17 16:55:56,123 [INFO] [processor] main: [PERF] processor: frame=116, processing_time=6.0ms, detections=1
+2026-03-17 16:55:56,123 [INFO] [processor] main: [PERF] processor: frame=117, processing_time=7.5ms, detections=1
+2026-03-17 16:55:56,123 [INFO] [processor] main: [PERF] processor: frame=118, processing_time=6.6ms, detections=1
+2026-03-17 16:55:56,124 [INFO] [processor] main: [PERF] processor: frame=119, processing_time=7.0ms, detections=1
+2026-03-17 16:55:56,124 [INFO] [processor] main: [PERF] processor: frame=120, processing_time=6.4ms, detections=1
+2026-03-17 16:55:56,124 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=0
+2026-03-17 16:55:56,124 [INFO] [processor] main: [PERF] processor: frame=0, processing_time=6.6ms, detections=1
+2026-03-17 16:55:56,124 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=1
+2026-03-17 16:55:56,124 [INFO] [processor] main: [PERF] processor: frame=1, processing_time=6.6ms, detections=1
+2026-03-17 16:55:56,124 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=2
+2026-03-17 16:55:56,125 [INFO] [processor] main: [PERF] processor: frame=2, processing_time=11.1ms, detections=1
+2026-03-17 16:55:56,125 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=3
+2026-03-17 16:55:56,125 [INFO] [processor] main: [PERF] processor: frame=3, processing_time=7.0ms, detections=1
+2026-03-17 16:55:56,125 [INFO] [processor] main: [PERF] processor: frame=4, processing_time=7.1ms, detections=1
+2026-03-17 16:55:56,125 [INFO] [processor] main: [PERF] processor: frame=5, processing_time=5.7ms, detections=1
+2026-03-17 16:55:57,125 [INFO] [processor] main: [PERF] processor: frame=6, processing_time=6.0ms, detections=1
+2026-03-17 16:55:57,125 [INFO] [processor] main: [PERF] processor: frame=7, processing_time=5.6ms, detections=1
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=0
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=0
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=2
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=2
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=3
+2026-03-17 16:55:56,279 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
+2026-03-17 16:55:56,404 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:56,404 [INFO] [robot] main: REJECT #5: frame=77, pos=(154, 239), area=53312
+2026-03-17 16:55:57,404 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:57,404 [INFO] [robot] main: REJECT #6: frame=77, pos=(154, 239), area=53312
+2026-03-17 16:55:56,449 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:55:57,134 [INFO] [processor] main: [PERF] processor: frame=8, processing_time=7.0ms, detections=1
+2026-03-17 16:55:57,134 [INFO] [processor] main: [PERF] processor: frame=9, processing_time=6.1ms, detections=1
+2026-03-17 16:55:57,134 [INFO] [processor] main: [PERF] processor: frame=10, processing_time=5.5ms, detections=1
+2026-03-17 16:55:57,134 [INFO] [processor] main: [PERF] processor: frame=11, processing_time=5.8ms, detections=1
+2026-03-17 16:55:57,134 [INFO] [processor] main: [PERF] processor: frame=12, processing_time=7.0ms, detections=1
+2026-03-17 16:55:57,134 [INFO] [processor] main: [PERF] processor: frame=13, processing_time=6.7ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=14, processing_time=5.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=15, processing_time=6.1ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=16, processing_time=7.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=17, processing_time=7.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=18, processing_time=5.9ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=19, processing_time=6.7ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=20, processing_time=6.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=21, processing_time=6.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=22, processing_time=7.1ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=23, processing_time=6.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=24, processing_time=6.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=25, processing_time=6.8ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=26, processing_time=6.0ms, detections=1
+2026-03-17 16:55:57,135 [INFO] [processor] main: [PERF] processor: frame=27, processing_time=6.0ms, detections=1
+2026-03-17 16:55:58,135 [INFO] [processor] main: [PERF] processor: frame=28, processing_time=6.0ms, detections=1
+2026-03-17 16:55:58,135 [INFO] [processor] main: [PERF] processor: frame=29, processing_time=7.0ms, detections=1
+2026-03-17 16:55:58,136 [INFO] [processor] main: [PERF] processor: frame=30, processing_time=7.0ms, detections=1
+2026-03-17 16:55:58,136 [INFO] [processor] main: [PERF] processor: frame=31, processing_time=7.0ms, detections=1
+2026-03-17 16:55:57,416 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:57,416 [INFO] [robot] main: REJECT #7: frame=96, pos=(152, 239), area=52240
+2026-03-17 16:55:58,416 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:58,416 [INFO] [robot] main: REJECT #8: frame=96, pos=(152, 239), area=52240
+2026-03-17 16:55:58,142 [INFO] [processor] main: [PERF] processor: frame=32, processing_time=7.1ms, detections=1
+2026-03-17 16:55:58,143 [INFO] [processor] main: [PERF] processor: frame=33, processing_time=6.1ms, detections=1
+2026-03-17 16:55:58,143 [INFO] [processor] main: [PERF] processor: frame=34, processing_time=6.0ms, detections=1
+2026-03-17 16:55:58,143 [INFO] [processor] main: [PERF] processor: frame=35, processing_time=7.1ms, detections=1
+2026-03-17 16:55:58,143 [INFO] [processor] main: [PERF] processor: frame=36, processing_time=6.1ms, detections=1
+2026-03-17 16:55:58,143 [INFO] [processor] main: [PERF] processor: frame=37, processing_time=6.0ms, detections=1
+2026-03-17 16:55:58,144 [INFO] [processor] main: [PERF] processor: frame=38, processing_time=6.0ms, detections=1
+2026-03-17 16:55:58,144 [INFO] [processor] main: [PERF] processor: frame=39, processing_time=7.0ms, detections=1
+2026-03-17 16:55:58,144 [INFO] [processor] main: [PERF] processor: frame=40, processing_time=8.0ms, detections=1
+2026-03-17 16:55:58,144 [INFO] [processor] main: [PERF] processor: frame=41, processing_time=7.1ms, detections=1
+2026-03-17 16:55:58,144 [INFO] [processor] main: [PERF] processor: frame=42, processing_time=7.0ms, detections=1
+2026-03-17 16:55:58,144 [INFO] [processor] main: [PERF] processor: frame=43, processing_time=7.0ms, detections=1
+2026-03-17 16:55:58,145 [INFO] [processor] main: [PERF] processor: frame=44, processing_time=6.8ms, detections=1
+2026-03-17 16:55:58,145 [INFO] [processor] main: [PERF] processor: frame=45, processing_time=6.1ms, detections=1
+2026-03-17 16:55:58,145 [INFO] [processor] main: [PERF] processor: frame=46, processing_time=6.1ms, detections=1
+2026-03-17 16:55:58,145 [INFO] [processor] main: [PERF] processor: frame=47, processing_time=7.2ms, detections=1
+2026-03-17 16:55:58,145 [INFO] [processor] main: [PERF] processor: frame=48, processing_time=6.7ms, detections=1
+2026-03-17 16:55:58,145 [INFO] [processor] main: [PERF] processor: frame=49, processing_time=6.1ms, detections=1
+2026-03-17 16:55:59,212 [INFO] [camera] command_manager: Command 'set_camera_type' executed successfully in 0.284s
+2026-03-17 16:55:58,418 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:58,418 [INFO] [robot] main: REJECT #9: frame=119, pos=(151, 239), area=51995
+2026-03-17 16:55:59,418 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:59,418 [INFO] [robot] main: REJECT #10: frame=119, pos=(151, 239), area=51995
+2026-03-17 16:55:59,426 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:55:59,426 [INFO] [robot] main: REJECT #11: frame=0, pos=(152, 239), area=52118
+2026-03-17 16:56:00,426 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:00,426 [INFO] [robot] main: REJECT #12: frame=0, pos=(152, 239), area=52118
+2026-03-17 16:56:00,438 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:00,438 [INFO] [robot] main: REJECT #13: frame=1, pos=(152, 239), area=52364
+2026-03-17 16:56:01,438 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:01,438 [INFO] [robot] main: REJECT #14: frame=1, pos=(152, 239), area=52364
+2026-03-17 16:56:01,454 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:01,454 [INFO] [robot] main: REJECT #15: frame=2, pos=(151, 239), area=52362
+2026-03-17 16:56:02,454 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:02,454 [INFO] [robot] main: REJECT #16: frame=2, pos=(151, 239), area=52362
+2026-03-17 16:56:03,060 [INFO] [camera] command_manager: Command 'enum_devices' executed successfully in 0.944s
+2026-03-17 16:56:02,469 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:02,469 [INFO] [robot] main: REJECT #17: frame=3, pos=(150, 239), area=52337
+2026-03-17 16:56:03,470 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:03,470 [INFO] [robot] main: REJECT #18: frame=3, pos=(150, 239), area=52337
+2026-03-17 16:56:03,473 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-17 16:56:03,473 [INFO] [robot] main: REJECT #19: frame=4, pos=(151, 239), area=52589
+2026-03-17 16:56:04,474 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-17 16:56:04,475 [INFO] [robot] main: REJECT #20: frame=4, pos=(151, 239), area=52589
+2026-03-17 16:56:04,490 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:04,491 [INFO] [robot] main: REJECT #21: frame=5, pos=(167, 239), area=52263
+2026-03-17 16:56:06,226 [INFO] [camera] command_manager: Command 'open' executed successfully in 1.085s
+2026-03-17 16:56:06,488 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=50
+2026-03-17 16:56:05,501 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:05,501 [INFO] [robot] main: REJECT #22: frame=5, pos=(167, 239), area=52263
+2026-03-17 16:56:05,501 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.502s
+2026-03-17 16:56:06,501 [INFO] [robot] main: REJECT #23: frame=6, pos=(167, 239), area=52357
+2026-03-17 16:56:06,501 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=50
+2026-03-17 16:56:06,521 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:06,845 [INFO] [camera] command_manager: Command 'open' executed successfully in 0.000s
+2026-03-17 16:56:06,845 [INFO] [camera] command_manager: Command 'start_grabbing' executed successfully in 0.081s
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=50, processing_time=10.0ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=51, processing_time=10.0ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=52, processing_time=9.6ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=53, processing_time=10.1ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=54, processing_time=6.1ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=55, processing_time=6.0ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=56, processing_time=5.0ms, detections=0
+2026-03-17 16:56:06,217 [INFO] [processor] main: [PERF] processor: frame=57, processing_time=6.0ms, detections=0
+2026-03-17 16:56:07,217 [INFO] [processor] main: [PERF] processor: frame=58, processing_time=6.1ms, detections=0
+2026-03-17 16:56:07,218 [INFO] [processor] main: [PERF] processor: frame=59, processing_time=5.0ms, detections=0
+2026-03-17 16:56:07,218 [INFO] [processor] main: [PERF] processor: frame=60, processing_time=6.0ms, detections=0
+2026-03-17 16:56:06,341 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
+2026-03-17 16:56:06,510 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:06,511 [INFO] [robot] main: REJECT #24: frame=6, pos=(167, 239), area=52357
+2026-03-17 16:56:07,511 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:07,511 [INFO] [robot] main: REJECT #25: frame=7, pos=(167, 239), area=52499
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=61, processing_time=5.0ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=62, processing_time=6.8ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=63, processing_time=5.0ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=64, processing_time=6.0ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=65, processing_time=5.5ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=66, processing_time=5.0ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=67, processing_time=6.6ms, detections=0
+2026-03-17 16:56:07,226 [INFO] [processor] main: [PERF] processor: frame=68, processing_time=5.0ms, detections=0
+2026-03-17 16:56:07,227 [INFO] [processor] main: [PERF] processor: frame=69, processing_time=6.1ms, detections=0
+2026-03-17 16:56:07,227 [INFO] [processor] main: [PERF] processor: frame=70, processing_time=5.6ms, detections=0
+2026-03-17 16:56:07,227 [INFO] [processor] main: [PERF] processor: frame=71, processing_time=5.0ms, detections=0
+2026-03-17 16:56:08,227 [INFO] [processor] main: [PERF] processor: frame=72, processing_time=6.1ms, detections=0
+2026-03-17 16:56:08,227 [INFO] [processor] main: [PERF] processor: frame=73, processing_time=6.0ms, detections=0
+2026-03-17 16:56:08,227 [INFO] [processor] main: [PERF] processor: frame=74, processing_time=6.0ms, detections=0
+2026-03-17 16:56:07,522 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:07,522 [INFO] [robot] main: REJECT #26: frame=7, pos=(167, 239), area=52499
+2026-03-17 16:56:08,522 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:08,522 [INFO] [robot] main: REJECT #27: frame=8, pos=(166, 239), area=52234
+2026-03-17 16:56:08,238 [INFO] [processor] main: [PERF] processor: frame=75, processing_time=5.0ms, detections=0
+2026-03-17 16:56:08,238 [INFO] [processor] main: [PERF] processor: frame=76, processing_time=5.0ms, detections=0
+2026-03-17 16:56:08,238 [INFO] [processor] main: [PERF] processor: frame=77, processing_time=5.0ms, detections=0
+2026-03-17 16:56:08,238 [INFO] [processor] main: [PERF] processor: frame=78, processing_time=5.0ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=79, processing_time=6.1ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=80, processing_time=5.0ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=81, processing_time=5.7ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=82, processing_time=7.0ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=83, processing_time=9.0ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=84, processing_time=6.0ms, detections=0
+2026-03-17 16:56:08,239 [INFO] [processor] main: [PERF] processor: frame=85, processing_time=5.0ms, detections=0
+2026-03-17 16:56:09,239 [INFO] [processor] main: [PERF] processor: frame=86, processing_time=8.5ms, detections=1
+2026-03-17 16:56:09,239 [INFO] [processor] main: [PERF] processor: frame=87, processing_time=7.0ms, detections=1
+2026-03-17 16:56:09,240 [INFO] [processor] main: [PERF] processor: frame=88, processing_time=7.4ms, detections=1
+2026-03-17 16:56:08,534 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:08,534 [INFO] [robot] main: REJECT #28: frame=8, pos=(166, 239), area=52234
+2026-03-17 16:56:09,534 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:09,534 [INFO] [robot] main: REJECT #29: frame=9, pos=(166, 239), area=52367
+2026-03-17 16:56:10,006 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=100
+2026-03-17 16:56:10,025 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:09,258 [INFO] [processor] main: [PERF] processor: frame=89, processing_time=8.0ms, detections=1
+2026-03-17 16:56:09,258 [INFO] [processor] main: [PERF] processor: frame=90, processing_time=7.0ms, detections=1
+2026-03-17 16:56:09,258 [INFO] [processor] main: [PERF] processor: frame=91, processing_time=7.0ms, detections=1
+2026-03-17 16:56:09,258 [INFO] [processor] main: [PERF] processor: frame=92, processing_time=7.0ms, detections=1
+2026-03-17 16:56:09,258 [INFO] [processor] main: [PERF] processor: frame=93, processing_time=6.0ms, detections=1
+2026-03-17 16:56:09,258 [INFO] [processor] main: [PERF] processor: frame=94, processing_time=6.1ms, detections=1
+2026-03-17 16:56:09,259 [INFO] [processor] main: [PERF] processor: frame=95, processing_time=6.0ms, detections=1
+2026-03-17 16:56:09,259 [INFO] [processor] main: [PERF] processor: frame=96, processing_time=5.4ms, detections=1
+2026-03-17 16:56:09,259 [INFO] [processor] main: [PERF] processor: frame=97, processing_time=7.0ms, detections=1
+2026-03-17 16:56:09,259 [INFO] [processor] main: [PERF] processor: frame=98, processing_time=13.6ms, detections=1
+2026-03-17 16:56:09,259 [INFO] [processor] main: [PERF] processor: frame=99, processing_time=9.1ms, detections=1
+2026-03-17 16:56:09,259 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=100
+2026-03-17 16:56:10,259 [INFO] [processor] main: [PERF] processor: frame=100, processing_time=6.0ms, detections=1
+2026-03-17 16:56:10,260 [INFO] [processor] main: [PERF] processor: frame=101, processing_time=6.0ms, detections=1
+2026-03-17 16:56:10,260 [INFO] [processor] main: [PERF] processor: frame=102, processing_time=9.0ms, detections=1
+2026-03-17 16:56:10,260 [INFO] [processor] main: [PERF] processor: frame=103, processing_time=10.0ms, detections=1
+2026-03-17 16:56:10,364 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=100
+2026-03-17 16:56:09,551 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:09,551 [INFO] [robot] main: REJECT #30: frame=9, pos=(166, 239), area=52367
+2026-03-17 16:56:10,551 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:10,551 [INFO] [robot] main: REJECT #31: frame=16, pos=(170, 239), area=52421
+2026-03-17 16:56:10,270 [INFO] [processor] main: [PERF] processor: frame=104, processing_time=7.0ms, detections=1
+2026-03-17 16:56:10,271 [INFO] [processor] main: [PERF] processor: frame=105, processing_time=6.5ms, detections=1
+2026-03-17 16:56:10,271 [INFO] [processor] main: [PERF] processor: frame=106, processing_time=6.0ms, detections=1
+2026-03-17 16:56:10,271 [INFO] [processor] main: [PERF] processor: frame=107, processing_time=6.0ms, detections=1
+2026-03-17 16:56:10,272 [INFO] [processor] main: [PERF] processor: frame=108, processing_time=9.1ms, detections=1
+2026-03-17 16:56:10,272 [INFO] [processor] main: [PERF] processor: frame=109, processing_time=7.9ms, detections=1
+2026-03-17 16:56:10,272 [INFO] [processor] main: [PERF] processor: frame=110, processing_time=6.8ms, detections=1
+2026-03-17 16:56:10,272 [INFO] [processor] main: [PERF] processor: frame=111, processing_time=10.0ms, detections=1
+2026-03-17 16:56:10,273 [INFO] [processor] main: [PERF] processor: frame=112, processing_time=7.4ms, detections=1
+2026-03-17 16:56:10,273 [INFO] [processor] main: [PERF] processor: frame=113, processing_time=7.3ms, detections=1
+2026-03-17 16:56:10,273 [INFO] [processor] main: [PERF] processor: frame=114, processing_time=7.0ms, detections=1
+2026-03-17 16:56:11,273 [INFO] [processor] main: [PERF] processor: frame=115, processing_time=7.7ms, detections=1
+2026-03-17 16:56:11,273 [INFO] [processor] main: [PERF] processor: frame=116, processing_time=7.1ms, detections=1
+2026-03-17 16:56:11,273 [INFO] [processor] main: [PERF] processor: frame=117, processing_time=7.1ms, detections=1
+2026-03-17 16:56:11,484 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=0
+2026-03-17 16:56:11,497 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:10,567 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:10,568 [INFO] [robot] main: REJECT #32: frame=16, pos=(170, 239), area=52421
+2026-03-17 16:56:11,568 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:11,568 [INFO] [robot] main: REJECT #33: frame=30, pos=(151, 239), area=52190
+2026-03-17 16:56:11,292 [INFO] [processor] main: [PERF] processor: frame=118, processing_time=7.6ms, detections=1
+2026-03-17 16:56:11,292 [INFO] [processor] main: [PERF] processor: frame=119, processing_time=7.2ms, detections=1
+2026-03-17 16:56:11,292 [INFO] [processor] main: [PERF] processor: frame=120, processing_time=6.0ms, detections=1
+2026-03-17 16:56:11,292 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=0
+2026-03-17 16:56:11,292 [INFO] [processor] main: [PERF] processor: frame=0, processing_time=5.0ms, detections=1
+2026-03-17 16:56:11,292 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=1
+2026-03-17 16:56:11,292 [INFO] [processor] main: [PERF] processor: frame=1, processing_time=5.5ms, detections=0
+2026-03-17 16:56:11,292 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=2
+2026-03-17 16:56:11,293 [INFO] [processor] main: [PERF] processor: frame=2, processing_time=6.1ms, detections=0
+2026-03-17 16:56:11,293 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=3
+2026-03-17 16:56:11,293 [INFO] [processor] main: [PERF] processor: frame=3, processing_time=5.6ms, detections=0
+2026-03-17 16:56:11,293 [INFO] [processor] main: [PERF] processor: frame=4, processing_time=5.5ms, detections=0
+2026-03-17 16:56:11,293 [INFO] [processor] main: [PERF] processor: frame=5, processing_time=4.7ms, detections=0
+2026-03-17 16:56:11,294 [INFO] [processor] main: [PERF] processor: frame=6, processing_time=5.0ms, detections=0
+2026-03-17 16:56:11,294 [INFO] [processor] main: [PERF] processor: frame=7, processing_time=5.7ms, detections=0
+2026-03-17 16:56:12,294 [INFO] [processor] main: [PERF] processor: frame=8, processing_time=10.5ms, detections=0
+2026-03-17 16:56:12,294 [INFO] [processor] main: [PERF] processor: frame=9, processing_time=6.0ms, detections=0
+2026-03-17 16:56:12,294 [INFO] [processor] main: [PERF] processor: frame=10, processing_time=9.1ms, detections=0
+2026-03-17 16:56:12,294 [INFO] [processor] main: [PERF] processor: frame=11, processing_time=9.5ms, detections=0
+2026-03-17 16:56:11,381 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=0
+2026-03-17 16:56:11,381 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-17 16:56:11,381 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1
+2026-03-17 16:56:11,382 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=2
+2026-03-17 16:56:11,382 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=2
+2026-03-17 16:56:11,382 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=3
+2026-03-17 16:56:11,382 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
+2026-03-17 16:56:11,458 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:11,458 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:11,459 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:11,582 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:11,582 [INFO] [robot] main: REJECT #34: frame=30, pos=(151, 239), area=52190
+2026-03-17 16:56:12,582 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:12,582 [INFO] [robot] main: REJECT #35: frame=36, pos=(153, 239), area=52408
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=12, processing_time=10.0ms, detections=0
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=13, processing_time=10.8ms, detections=0
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=14, processing_time=9.7ms, detections=0
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=15, processing_time=10.0ms, detections=0
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=16, processing_time=5.1ms, detections=0
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=17, processing_time=5.5ms, detections=0
+2026-03-17 16:56:12,303 [INFO] [processor] main: [PERF] processor: frame=18, processing_time=6.0ms, detections=0
+2026-03-17 16:56:12,304 [INFO] [processor] main: [PERF] processor: frame=19, processing_time=5.3ms, detections=0
+2026-03-17 16:56:12,304 [INFO] [processor] main: [PERF] processor: frame=20, processing_time=6.0ms, detections=0
+2026-03-17 16:56:12,304 [INFO] [processor] main: [PERF] processor: frame=21, processing_time=6.0ms, detections=0
+2026-03-17 16:56:13,304 [INFO] [processor] main: [PERF] processor: frame=22, processing_time=10.0ms, detections=0
+2026-03-17 16:56:13,304 [INFO] [processor] main: [PERF] processor: frame=23, processing_time=6.0ms, detections=0
+2026-03-17 16:56:13,304 [INFO] [processor] main: [PERF] processor: frame=24, processing_time=12.0ms, detections=0
+2026-03-17 16:56:13,304 [INFO] [processor] main: [PERF] processor: frame=25, processing_time=6.0ms, detections=0
+2026-03-17 16:56:12,596 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:12,596 [INFO] [robot] main: REJECT #36: frame=36, pos=(153, 239), area=52408
+2026-03-17 16:56:13,597 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:13,597 [INFO] [robot] main: REJECT #37: frame=37, pos=(152, 239), area=52171
+2026-03-17 16:56:13,317 [INFO] [processor] main: [PERF] processor: frame=26, processing_time=6.0ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=27, processing_time=6.7ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=28, processing_time=6.4ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=29, processing_time=7.1ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=30, processing_time=6.0ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=31, processing_time=5.5ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=32, processing_time=5.7ms, detections=0
+2026-03-17 16:56:13,318 [INFO] [processor] main: [PERF] processor: frame=33, processing_time=5.0ms, detections=0
+2026-03-17 16:56:13,319 [INFO] [processor] main: [PERF] processor: frame=34, processing_time=5.6ms, detections=0
+2026-03-17 16:56:13,319 [INFO] [processor] main: [PERF] processor: frame=35, processing_time=6.0ms, detections=0
+2026-03-17 16:56:14,319 [INFO] [processor] main: [PERF] processor: frame=36, processing_time=6.1ms, detections=0
+2026-03-17 16:56:14,320 [INFO] [processor] main: [PERF] processor: frame=37, processing_time=6.1ms, detections=0
+2026-03-17 16:56:14,320 [INFO] [processor] main: [PERF] processor: frame=38, processing_time=9.6ms, detections=0
+2026-03-17 16:56:14,320 [INFO] [processor] main: [PERF] processor: frame=39, processing_time=6.0ms, detections=0
+2026-03-17 16:56:14,320 [INFO] [processor] main: [PERF] processor: frame=40, processing_time=6.5ms, detections=0
+2026-03-17 16:56:13,612 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:13,612 [INFO] [robot] main: REJECT #38: frame=37, pos=(152, 239), area=52171
+2026-03-17 16:56:14,612 [INFO] [robot] command_manager: Command 'reject_item' executed successfully in 0.501s
+2026-03-17 16:56:14,612 [INFO] [robot] main: REJECT #39: frame=38, pos=(150, 239), area=52267
+2026-03-17 16:56:14,998 [INFO] [renderer] main: [DEBUG] renderer: detection_result received frame_id=50
+2026-03-17 16:56:15,017 [INFO] [gui] main: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-17 16:56:14,329 [INFO] [processor] main: [PERF] processor: frame=41, processing_time=7.0ms, detections=0
+2026-03-17 16:56:14,329 [INFO] [processor] main: [PERF] processor: frame=42, processing_time=6.5ms, detections=0
+2026-03-17 16:56:14,329 [INFO] [processor] main: [PERF] processor: frame=43, processing_time=5.7ms, detections=0
+2026-03-17 16:56:14,329 [INFO] [processor] main: [PERF] processor: frame=44, processing_time=5.0ms, detections=0
+2026-03-17 16:56:14,330 [INFO] [processor] main: [PERF] processor: frame=45, processing_time=6.6ms, detections=0
+2026-03-17 16:56:14,330 [INFO] [processor] main: [PERF] processor: frame=46, processing_time=5.0ms, detections=0
+2026-03-17 16:56:14,330 [INFO] [processor] main: [PERF] processor: frame=47, processing_time=6.0ms, detections=0
+2026-03-17 16:56:14,330 [INFO] [processor] main: [PERF] processor: frame=48, processing_time=5.1ms, detections=0
+2026-03-17 16:56:14,330 [INFO] [processor] main: [PERF] processor: frame=49, processing_time=6.3ms, detections=0
+2026-03-17 16:56:14,331 [INFO] [processor] main: [DEBUG] processor: frame_ready received frame_id=50
+2026-03-17 16:56:14,331 [INFO] [processor] main: [PERF] processor: frame=50, processing_time=7.0ms, detections=0
+2026-03-17 16:56:15,331 [INFO] [processor] main: [PERF] processor: frame=51, processing_time=6.7ms, detections=0
+2026-03-17 16:56:15,332 [INFO] [processor] main: [PERF] processor: frame=52, processing_time=5.5ms, detections=0
+2026-03-17 16:56:15,332 [INFO] [processor] main: [PERF] processor: frame=53, processing_time=10.0ms, detections=0
+2026-03-17 16:56:15,332 [INFO] [processor] main: [PERF] processor: frame=54, processing_time=12.0ms, detections=0
+2026-03-17 16:56:15,420 [INFO] [renderer] main: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
