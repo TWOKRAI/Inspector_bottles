@@ -113,6 +113,11 @@ class SystemLauncher:
     def run(self) -> None:
         """Запуск: launch_orchestrator + wait. Ctrl+C → stop."""
         processes_config = self._get_processes_config()
+        try:
+            from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
+            cleanup_known_shm_at_startup(processes_config)
+        except Exception:
+            pass
         self._spawner = self._create_spawner(processes_config)
         try:
             self._spawner.launch_orchestrator()
@@ -134,6 +139,11 @@ class SystemLauncher:
         processes_config = self._get_processes_config()
         if not processes_config:
             raise RuntimeError("No processes. Use add_process() or pass config.")
+        try:
+            from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
+            cleanup_known_shm_at_startup(processes_config)
+        except Exception:
+            pass
         self._spawner = self._create_spawner(processes_config)
         self._spawner.launch_orchestrator()
 

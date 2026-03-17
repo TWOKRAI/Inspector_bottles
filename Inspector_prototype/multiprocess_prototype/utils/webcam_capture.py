@@ -4,11 +4,48 @@
 
 Используется при use_simulator=False вместо FrameGenerator.
 Интерфейс совместим: generate_frame() -> np.ndarray (BGR uint8).
+
+Windows: CAP_DSHOW вместо MSMF (обход ошибки -1072875772).
 """
 
+import os
+import time
 from typing import Any, Optional
 
 import numpy as np
+
+# Windows: отключить HW transforms MSMF — устраняет grabFrame error -1072875772
+if os.name == "nt":
+    os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
+
+
+def reset_webcam(device_id: int = 0, delay_after_ms: int = 400) -> bool:
+    """
+    Отключить и заново освободить веб-камеру перед стартом.
+
+    Открывает VideoCapture, сразу release — сбрасывает состояние драйвера.
+    На Windows/Linux помогает при «залипшей» камере после предыдущего запуска.
+
+    Args:
+        device_id: индекс камеры (0 — первая).
+        delay_after_ms: пауза после release (мс) для освобождения устройства.
+
+    Returns:
+        True если операция выполнена, False при ошибке (cv2 недоступен и т.п.).
+    """
+    try:
+        import cv2
+    except ImportError:
+        return False
+    try:
+        cap = cv2.VideoCapture(device_id)
+        if cap.isOpened():
+            cap.release()
+        if delay_after_ms > 0:
+            time.sleep(delay_after_ms / 1000.0)
+        return True
+    except Exception:
+        return False
 
 
 class WebcamCapture:
@@ -42,7 +79,11 @@ class WebcamCapture:
                 "WebcamCapture требует opencv-python. Установите: pip install opencv-python"
             ) from e
 
-        self._capture = cv2.VideoCapture(self.device_id)
+        # Windows: CAP_DSHOW стабильнее MSMF (обход grabFrame error -1072875772)
+        if os.name == "nt":
+            self._capture = cv2.VideoCapture(self.device_id, cv2.CAP_DSHOW)
+        else:
+            self._capture = cv2.VideoCapture(self.device_id)
         if not self._capture.isOpened():
             raise RuntimeError(
                 f"Не удалось открыть камеру device_id={self.device_id}. "
@@ -51,6 +92,9 @@ class WebcamCapture:
 
         self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        # Прогрев: первый read после open может вернуть пустой кадр
+        self._capture.read()
+        time.sleep(0.05)
 
     def generate_frame(self) -> np.ndarray:
         """

@@ -19,8 +19,12 @@ add_process(name, proc_dict) — Dict at Boundary.
   через модуль с PYTHONPATH:
     PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.main
 """
-
+import os
 import sys
+
+# Windows: отключить MSMF HW transforms до загрузки OpenCV (обход grabFrame -1072875772)
+# if os.name == "nt":
+#     os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 from pathlib import Path
 
 # Пути: Inspector_prototype (содержит multiprocess_prototype, Services, multiprocess_framework)

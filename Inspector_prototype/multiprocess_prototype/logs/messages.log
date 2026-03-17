@@ -1,0 +1,155 @@
+2026-03-17 15:13:17,952 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 15:13:17,952 [INFO] [-] main: RouterManager 'router_camera' initialized (channels: [])
+2026-03-17 15:13:17,952 [INFO] [-] main: [stats_camera] initialized
+2026-03-17 15:13:17,952 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 15:13:17,952 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 15:13:17,952 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 15:13:17,952 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 15:13:17,952 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:17,953 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:17,953 [INFO] [-] main: Process state registered: camera
+2026-03-17 15:13:17,953 [INFO] [-] main: UnifiedCameraProcess initializing...
+2026-03-17 15:13:17,953 [INFO] [-] dispatcher: Handler 'set_camera_type' registered successfully
+2026-03-17 15:13:17,953 [INFO] [-] command_manager: Command 'set_camera_type' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'get_camera_type' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'get_camera_type' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'start_capture' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'start_capture' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'stop_capture' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'stop_capture' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'set_fps' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'set_fps' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'set_resolution' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'set_resolution' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'enum_devices' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'enum_devices' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'open' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] command_manager: Command 'open' registered successfully
+2026-03-17 15:13:17,954 [INFO] [-] dispatcher: Handler 'close' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] command_manager: Command 'close' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] dispatcher: Handler 'start_grabbing' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] command_manager: Command 'start_grabbing' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] dispatcher: Handler 'stop_grabbing' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] command_manager: Command 'stop_grabbing' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] dispatcher: Handler 'get_parameters' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] command_manager: Command 'get_parameters' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] dispatcher: Handler 'set_parameters' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] command_manager: Command 'set_parameters' registered successfully
+2026-03-17 15:13:17,955 [INFO] [-] main: UnifiedCameraProcess ready, camera_type=hikvision
+2026-03-17 15:13:17,956 [INFO] [-] main: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-03-17 15:13:17,956 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:17,956 [INFO] [camera] main: Process 'camera' initialized successfully
+2026-03-17 15:13:17,957 [INFO] [camera] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:17,957 [INFO] [camera] lifecycle: Process 'camera' started
+2026-03-17 15:13:18,150 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 15:13:18,150 [INFO] [-] main: RouterManager 'router_processor' initialized (channels: [])
+2026-03-17 15:13:18,151 [INFO] [-] main: [stats_processor] initialized
+2026-03-17 15:13:18,151 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 15:13:18,151 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 15:13:18,151 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 15:13:18,152 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 15:13:18,153 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,153 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,153 [INFO] [-] main: Process state registered: processor
+2026-03-17 15:13:18,153 [INFO] [-] main: ProcessorProcess initializing...
+2026-03-17 15:13:18,153 [INFO] [-] dispatcher: Handler 'set_color_range' registered successfully
+2026-03-17 15:13:18,153 [INFO] [-] command_manager: Command 'set_color_range' registered successfully
+2026-03-17 15:13:18,153 [INFO] [-] dispatcher: Handler 'set_min_area' registered successfully
+2026-03-17 15:13:18,153 [INFO] [-] command_manager: Command 'set_min_area' registered successfully
+2026-03-17 15:13:18,153 [INFO] [-] main: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500
+2026-03-17 15:13:18,153 [INFO] [-] main: Registered 7 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area']
+2026-03-17 15:13:18,153 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,154 [INFO] [processor] main: Process 'processor' initialized successfully
+2026-03-17 15:13:18,154 [INFO] [processor] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,154 [INFO] [processor] lifecycle: Process 'processor' started
+2026-03-17 15:13:18,410 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 15:13:18,410 [INFO] [-] main: RouterManager 'router_renderer' initialized (channels: [])
+2026-03-17 15:13:18,410 [INFO] [-] main: [stats_renderer] initialized
+2026-03-17 15:13:18,410 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 15:13:18,410 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 15:13:18,410 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 15:13:18,411 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,412 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,412 [INFO] [-] main: Process state registered: renderer
+2026-03-17 15:13:18,412 [INFO] [-] main: RendererProcess initializing...
+2026-03-17 15:13:18,412 [INFO] [-] dispatcher: Handler 'set_draw_contours' registered successfully
+2026-03-17 15:13:18,412 [INFO] [-] command_manager: Command 'set_draw_contours' registered successfully
+2026-03-17 15:13:18,412 [INFO] [-] dispatcher: Handler 'set_show_original' registered successfully
+2026-03-17 15:13:18,412 [INFO] [-] command_manager: Command 'set_show_original' registered successfully
+2026-03-17 15:13:18,412 [INFO] [-] dispatcher: Handler 'set_show_mask' registered successfully
+2026-03-17 15:13:18,412 [INFO] [-] command_manager: Command 'set_show_mask' registered successfully
+2026-03-17 15:13:18,412 [INFO] [-] main: RendererProcess ready
+2026-03-17 15:13:18,412 [INFO] [-] main: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask']
+2026-03-17 15:13:18,412 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,412 [INFO] [renderer] main: Process 'renderer' initialized successfully
+2026-03-17 15:13:18,413 [INFO] [renderer] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,413 [INFO] [renderer] lifecycle: Process 'renderer' started
+2026-03-17 15:13:18,608 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 15:13:18,608 [INFO] [-] main: RouterManager 'router_robot' initialized (channels: [])
+2026-03-17 15:13:18,608 [INFO] [-] main: [stats_robot] initialized
+2026-03-17 15:13:18,609 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,609 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,609 [INFO] [-] main: Process state registered: robot
+2026-03-17 15:13:18,609 [INFO] [-] main: RobotSimulatorProcess initializing...
+2026-03-17 15:13:18,609 [INFO] [-] dispatcher: Handler 'reject_item' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] command_manager: Command 'reject_item' registered successfully
+2026-03-17 15:13:18,609 [INFO] [-] main: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-17 15:13:18,609 [INFO] [-] main: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-17 15:13:18,610 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,610 [INFO] [robot] main: Process 'robot' initialized successfully
+2026-03-17 15:13:18,610 [INFO] [robot] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,610 [INFO] [robot] lifecycle: Process 'robot' started
+2026-03-17 15:13:18,746 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 15:13:18,746 [INFO] [-] main: RouterManager 'router_gui' initialized (channels: [])
+2026-03-17 15:13:18,746 [INFO] [-] main: [stats_gui] initialized
+2026-03-17 15:13:18,747 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 15:13:18,747 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 15:13:18,747 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 15:13:18,747 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 15:13:18,747 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 15:13:18,747 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 15:13:18,747 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,748 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 15:13:18,748 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 15:13:18,748 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 15:13:18,748 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,748 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 15:13:18,748 [INFO] [-] main: Process state registered: gui
+2026-03-17 15:13:18,748 [INFO] [-] main: GuiProcess initializing...
+2026-03-17 15:13:18,748 [INFO] [-] main: GuiProcess ready (no workers)
+2026-03-17 15:13:18,748 [INFO] [-] main: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-17 15:13:18,749 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 15:13:18,749 [INFO] [gui] main: Process 'gui' initialized successfully
+2026-03-17 15:48:38,858 [INFO] [gui] main: GUI: requesting system shutdown
+2026-03-17 15:48:38,813 [INFO] [gui] main: GUI: shutdown request sent, ok=True
+2026-03-17 15:48:38,813 [INFO] [gui] main: GUI: requesting system shutdown
+2026-03-17 15:48:38,813 [INFO] [gui] main: GUI: shutdown request sent, ok=True

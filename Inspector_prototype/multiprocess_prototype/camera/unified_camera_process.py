@@ -9,6 +9,7 @@ import time
 from typing import Optional
 
 import numpy as np
+import cv2
 
 from multiprocess_framework.refactored.modules.process_module import ProcessModule
 from multiprocess_framework.refactored.modules.message_module import MessageAdapter
@@ -65,6 +66,13 @@ class UnifiedCameraProcess(ProcessModule):
         # Начальный бэкенд из конфига
         initial_type = app_cfg.get("camera_type", "simulator")
         self._current_type = initial_type
+
+        # Сброс веб-камеры перед открытием (отключить/включить — чистое состояние)
+        if initial_type == "webcam":
+            from multiprocess_prototype.utils.webcam_capture import reset_webcam
+            reset_webcam(device_id=self._device_id)
+            time.sleep(0.2)  # Пауза после reset перед открытием (MSMF)
+
         self._backend = self._create_backend(initial_type)
 
         # Команды
@@ -154,14 +162,19 @@ class UnifiedCameraProcess(ProcessModule):
         return {"status": "error"}
 
     def _cmd_stop_capture(self, data: dict):
+        # Сначала приостановить воркер — иначе grabFrame во время close() даёт MSMF error
+        if self.worker_manager:
+            self.worker_manager.pause_worker("capture_worker")
+        time.sleep(0.05)  # Дать воркеру завершить текущий capture_frame
         with self._backend_lock:
             if self._current_type == "hikvision":
                 result = self._backend.handle_command("stop_grabbing", data)
             else:
                 self._backend.stop()
+                # Webcam: close() освобождает устройство (гаснет LED)
+                if self._current_type == "webcam":
+                    self._backend.close()
                 result = {"status": "ok"}
-        if self.worker_manager:
-            self.worker_manager.pause_worker("capture_worker")
         return result or {"status": "ok"}
 
     def _cmd_set_fps(self, data: dict):
@@ -230,6 +243,7 @@ class UnifiedCameraProcess(ProcessModule):
                 backend = self._backend
 
             frame = backend.capture_frame()
+
             if frame is None:
                 time.sleep(0.01)
                 continue
@@ -240,6 +254,8 @@ class UnifiedCameraProcess(ProcessModule):
 
             # Ресайз под память (1920x1080)
             frame = _resize_frame(frame, self.MEMORY_HEIGHT, self.MEMORY_WIDTH)
+                            
+            # cv2.imwrite(f"frame.png", frame)
 
             mm = self.memory_manager
             if mm:
@@ -275,8 +291,15 @@ class UnifiedCameraProcess(ProcessModule):
             self.worker_manager.pause_worker("capture_worker")
         with self._backend_lock:
             if self._backend:
-                self._backend.stop()
-                self._backend.close()
+                try:
+                    self._backend.stop()
+                    self._backend.close()
+                finally:
+                    self._backend = None
+            # Сброс веб-камеры при остановке — полное освобождение устройства
+            if self._current_type == "webcam":
+                from multiprocess_prototype.utils.webcam_capture import reset_webcam
+                reset_webcam(device_id=self._device_id)
         if self.memory_manager:
             self.memory_manager.close_all("camera")
         self.is_initialized = False

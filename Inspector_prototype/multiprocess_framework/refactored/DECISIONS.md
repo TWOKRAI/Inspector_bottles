@@ -405,3 +405,40 @@
   - Плоский формат: `{"camera_frame": (h,w,3)}` вместо `{"names": {...}, "coll": 2}`.
 - Причина: DRY, единая точка создания памяти, лаконичный конфиг.
 - Отклонённые альтернативы: Оставить fallback в процессах — отклонено как дублирование.
+
+---
+
+## ADR-029: hikvision_camera_module — вынос Hikvision в отдельный модуль
+- Дата: 2026-03-17
+- Статус: принято
+- Контекст: Логика Hikvision (enum, open, grab, parameters) была размазана по backends.py и hikvision_camera_process.py. Дублирование ~400 строк. Services/hikvision_camera — чистый SDK, оставляем без изменений.
+- Решение:
+  - Создан отдельный пакет `Inspector_prototype/hikvision_camera_module/` (сосед multiprocess_framework и multiprocess_prototype).
+  - `HikvisionCameraFacade` — простой синхронный фасад (enum_devices, open, close, start_grabbing, stop_grabbing, capture_frame, get/set_parameters).
+  - `HikvisionCameraProcessAdapter` — тонкий ProcessModule-адаптер, делегирует в фасад.
+  - `capture_frame()` возвращает сырой np.ndarray (2D/3D) без cv2. cv2-конвертация в прототипе (backends, adapter).
+  - HikvisionBackend в backends.py — обёртка над фасадом. HikvisionCameraProcess — алиас HikvisionCameraProcessAdapter (legacy).
+- Причина: Инкапсуляция сложной логики, единая точка изменений, Dict at Boundary, соответствие структуре refactored modules.
+- Отклонённые альтернативы: Оставить логику в prototype — отклонено как нарушение SRP.
+
+---
+
+## ADR-030: SharedMemory на Windows — уникальные имена с PID
+- Дата: 2026-03-17
+- Статус: принято
+- Контекст: На Windows `create=True` для SharedMemory даёт `FileExistsError: [WinError 183] File exists`, если блок с таким именем остался от предыдущего запуска. `unlink()` на Windows — no-op, cleanup_stale_shm не освобождает mapping.
+- Решение: В `create_shm_blocks` на Windows использовать `base_name_{pid}` вместо `base_name`. Фактические имена (shm.name) сохраняются в `memory_names` и передаются consumer-процессам через bundle.
+- Причина: Каждый запуск получает уникальные имена; конфликты с предыдущими сессиями исключены.
+- Отклонённые альтернативы: open+close перед create — не освобождает mapping, если другой процесс держит handle.
+
+---
+
+## ADR-031: SharedMemory — очистка перед стартом (все платформы)
+- Дата: 2026-03-17
+- Статус: принято
+- Контекст: Нужна единая стратегия очистки устаревших SharedMemory перед запуском на Windows, Linux, macOS.
+- Решение:
+  1. **cleanup_stale_shm** — на всех платформах: open+close (Windows: освобождает при последнем handle; POSIX: +unlink).
+  2. **cleanup_known_shm_at_startup(processes_config)** — вызывается в SystemLauncher.run()/start() перед launch_orchestrator. Извлекает имена из config["memory"] и очищает {name}_0..{name}_{coll-1}.
+  3. **create_shm_block** — всегда вызывает cleanup_stale_shm перед create.
+- Причина: Windows в приоритете; Linux и macOS получают ту же логику. Конфиг-драйвен, без дублирования имён.

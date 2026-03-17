@@ -1,6 +1,7 @@
 """Platform — платформенные операции SharedMemory."""
 
 from .shm import (
+    cleanup_known_shm_at_startup,
     cleanup_stale_shm,
     close_shm,
     create_shm_block,
@@ -11,6 +12,7 @@ from .shm import (
 )
 
 __all__ = [
+    "cleanup_known_shm_at_startup",
     "cleanup_stale_shm",
     "close_shm",
     "create_shm_block",
