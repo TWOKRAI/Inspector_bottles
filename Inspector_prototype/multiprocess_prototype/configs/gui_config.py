@@ -5,7 +5,7 @@
 ProcessConfigBase + FieldMeta. class_path_from_type.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
     FieldMeta,
@@ -22,6 +22,7 @@ class GuiConfig(ProcessConfigBase):
 
     process_name: str = "gui"
     class_path: str = class_path_from_type(GuiProcess)
+    camera_type: Literal["simulator", "webcam", "hikvision"] = "simulator"
     window_title: str = "Inspector Prototype"
     window_width: Annotated[
         int, FieldMeta("Ширина окна", min=400, max=1920)

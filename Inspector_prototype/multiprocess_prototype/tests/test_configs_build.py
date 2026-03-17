@@ -20,7 +20,7 @@ def test_camera_config_build():
     """CameraConfig.build() возвращает proc_dict с memory, class, managers."""
     name, proc_dict = process(CameraConfig(fps=10, resolution_width=320, resolution_height=240))
     assert name == "camera"
-    assert proc_dict["class"] == "multiprocess_prototype.processes.camera_process.CameraProcess"
+    assert proc_dict["class"] == "multiprocess_prototype.camera.unified_camera_process.UnifiedCameraProcess"
     assert "memory" in proc_dict
     assert "camera_frame" in proc_dict["memory"]
     assert "managers" in proc_dict

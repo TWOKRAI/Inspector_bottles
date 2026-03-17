@@ -23,7 +23,7 @@ add_process(name, proc_dict) — Dict at Boundary.
 import sys
 from pathlib import Path
 
-# Чтобы можно было запускать как python main.py (без run.sh)
+# Пути: Inspector_prototype (содержит multiprocess_prototype, Services, multiprocess_framework)
 _root = Path(__file__).resolve().parent.parent
 _modules = _root / "multiprocess_framework" / "refactored" / "modules"
 for _p in (_root, _modules):
@@ -46,12 +46,17 @@ def main() -> int:
 
     launcher = SystemLauncher(stop_timeout=5.0)
 
+    # Тип камеры: из prefs (сохранён в GUI) → env INSPECTOR_CAMERA_TYPE → default
+    from multiprocess_prototype.prefs import get_camera_type
+    camera_type = get_camera_type()
+    camera_config = CameraConfig(camera_type=camera_type)
+
     # Порядок: Camera создаёт shm первым, затем Processor, Renderer, Robot, GUI
-    launcher.add_process(*process(CameraConfig()))
+    launcher.add_process(*process(camera_config))
     launcher.add_process(*process(ProcessorConfig()))
     launcher.add_process(*process(RendererConfig()))
     launcher.add_process(*process(RobotConfig()))
-    launcher.add_process(*process(GuiConfig()))
+    launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
 
     launcher.run()
     return 0

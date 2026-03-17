@@ -29,10 +29,12 @@ class GuiProcess(ProcessModule):
 
         self._msg = MessageAdapter(sender=self.name)
 
-        self._poll_interval = self.get_config("poll_interval_ms", 16)
-        self._window_title = self.get_config("window_title", "Inspector Prototype")
-        self._window_width = self.get_config("window_width", 1024)
-        self._window_height = self.get_config("window_height", 768)
+        app_cfg = self.get_config("config") or {}
+        self._poll_interval = app_cfg.get("poll_interval_ms", 16)
+        self._window_title = app_cfg.get("window_title", "Inspector Prototype")
+        self._window_width = app_cfg.get("window_width", 1024)
+        self._window_height = app_cfg.get("window_height", 768)
+        self._camera_type = app_cfg.get("camera_type", "simulator")
         self._log_info("GuiProcess ready (no workers)")
 
     def _init_system_threads(self):
@@ -60,6 +62,7 @@ class GuiProcess(ProcessModule):
             width=self._window_width,
             height=self._window_height,
             process=self,
+            camera_type=self._camera_type,
         )
         self._window.show()
 
@@ -88,8 +91,48 @@ class GuiProcess(ProcessModule):
                 msg_dict = msg.to_dict()
             else:
                 continue
-            if msg_dict.get("data_type") == "rendered_frame_ready":
-                self._handle_new_frame(msg_dict.get("data", {}))
+            data_type = msg_dict.get("data_type")
+            data = msg_dict.get("data", {})
+            if data_type == "rendered_frame_ready":
+                self._handle_new_frame(data)
+            elif data_type == "status":
+                self._handle_camera_status(data.get("status", ""))
+            elif data_type == "error":
+                self._handle_camera_error(data.get("error", ""))
+            elif data_type == "parameters_response":
+                self._handle_parameters_response(data)
+            elif data_type == "enum_devices_response":
+                self._handle_enum_devices_response(data)
+            elif data_type == "camera_type_changed":
+                self._handle_camera_type_changed(data)
+
+    def _handle_camera_status(self, text: str):
+        """Сообщение status от камеры (Hikvision)."""
+        if self._window and hasattr(self._window, "update_camera_status"):
+            self._window.update_camera_status(text)
+        else:
+            self._log_info(f"Camera status: {text}")
+
+    def _handle_camera_error(self, text: str):
+        """Сообщение error от камеры (Hikvision)."""
+        self._log_error(f"Camera error: {text}")
+        if self._window and hasattr(self._window, "update_camera_error"):
+            self._window.update_camera_error(text)
+
+    def _handle_parameters_response(self, data: dict):
+        """Параметры камеры (Hikvision)."""
+        if self._window and hasattr(self._window, "update_camera_parameters"):
+            self._window.update_camera_parameters(data.get("parameters", {}))
+
+    def _handle_enum_devices_response(self, data: dict):
+        """Список устройств (Hikvision)."""
+        if self._window and hasattr(self._window, "update_camera_devices"):
+            self._window.update_camera_devices(data.get("devices", []))
+
+    def _handle_camera_type_changed(self, data: dict):
+        """Подтверждение переключения типа камеры — синхронизация UI."""
+        if self._window and hasattr(self._window, "sync_camera_type"):
+            self._window.sync_camera_type(data.get("camera_type", "simulator"))
 
     def _handle_new_frame(self, data: dict):
         """Получен новый отрендеренный кадр (оригинал + маска)."""
@@ -231,3 +274,75 @@ class GuiProcess(ProcessModule):
             data={"draw_contours": draw},
         )
         self.send_message("renderer", msg.to_dict())
+
+    # --- Hikvision camera commands ---
+
+    def gui_enum_devices(self):
+        msg = self._msg.command(
+            targets=["camera"], command="enum_devices", args={}, data={}
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_open_camera(self, camera_index: int = 0):
+        msg = self._msg.command(
+            targets=["camera"],
+            command="open",
+            args={"camera_index": camera_index},
+            data={"camera_index": camera_index},
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_close_camera(self):
+        msg = self._msg.command(
+            targets=["camera"], command="close", args={}, data={}
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_start_grabbing(self):
+        msg = self._msg.command(
+            targets=["camera"], command="start_grabbing", args={}, data={}
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_stop_grabbing(self):
+        msg = self._msg.command(
+            targets=["camera"], command="stop_grabbing", args={}, data={}
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_get_parameters(self):
+        msg = self._msg.command(
+            targets=["camera"], command="get_parameters", args={}, data={}
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_set_parameters(
+        self, frame_rate: float, exposure_time: float, gain: float
+    ):
+        msg = self._msg.command(
+            targets=["camera"],
+            command="set_parameters",
+            args={},
+            data={
+                "frame_rate": frame_rate,
+                "exposure_time": exposure_time,
+                "gain": gain,
+            },
+        )
+        self.send_message("camera", msg.to_dict())
+
+    def gui_camera_type_changed(self, camera_type: str) -> bool:
+        """
+        Переключить тип камеры без перезапуска + сохранить в prefs.
+        Отправляет set_camera_type в camera процесс.
+        """
+        from multiprocess_prototype.prefs import set_camera_type
+        msg = self._msg.command(
+            targets=["camera"],
+            command="set_camera_type",
+            args={"camera_type": camera_type},
+            data={"camera_type": camera_type},
+        )
+        ok = self.send_message("camera", msg.to_dict())
+        set_camera_type(camera_type)  # для следующего запуска
+        return ok

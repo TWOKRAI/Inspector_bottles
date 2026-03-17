@@ -125,6 +125,17 @@ class RendererProcess(ProcessModule):
             self._log_warning(f"[DEBUG] renderer: frame is None for frame_id={frame_id}")
             return None, None, {}
 
+        # Ресайз под Processor (Hikvision даёт 1920x1080, Processor/Renderer — 640x480)
+        if (
+            frame.shape[0] != height
+            or frame.shape[1] != width
+        ) and cv2 is not None:
+            frame = cv2.resize(
+                frame,
+                (width, height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+
         mask_frame = None
         if mm and mask_shm_actual_name:
             images = mm.read_images("processor", "processor_mask", mask_shm_index, n=1)

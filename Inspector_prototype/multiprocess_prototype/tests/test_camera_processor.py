@@ -19,30 +19,20 @@ def test_camera_processor_together():
 
     launcher = SystemLauncher(stop_timeout=5.0)
 
-    launcher.add_process("camera", {
-        "class": "multiprocess_prototype.processes.camera_process.CameraProcess",
-        "queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}},
-        "priority": "high",
-        "workers": {},
-        "config": {
-            "fps": 10,
-            "resolution_width": 320,
-            "resolution_height": 240,
-            "use_simulator": True,
-        },
-    })
+    from multiprocess_framework.refactored.modules.data_schema_module import process
+    from multiprocess_prototype.configs import CameraConfig
 
-    launcher.add_process("processor", {
-        "class": "multiprocess_prototype.processes.processor_process.ProcessorProcess",
-        "queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}},
-        "priority": "high",
-        "workers": {},
-        "config": {
-            "min_area": 500,
-            "color_lower": [0, 0, 150],
-            "color_upper": [100, 100, 255],
-        },
-    })
+    launcher.add_process(*process(CameraConfig(
+        camera_type="simulator",
+        fps=10,
+        resolution_width=320,
+        resolution_height=240,
+        use_simulator=True,
+    )))
+
+    from multiprocess_prototype.configs import ProcessorConfig
+
+    launcher.add_process(*process(ProcessorConfig()))
 
     # Запуск в фоне, остановка через 4 сек
     launcher.start()

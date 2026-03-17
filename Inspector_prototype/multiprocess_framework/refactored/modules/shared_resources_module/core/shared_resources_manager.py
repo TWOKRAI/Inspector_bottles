@@ -159,16 +159,46 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             # 5. SharedMemory
             memory_config = config.get("memory")
             if memory_config and isinstance(memory_config, dict):
-                memory_names = memory_config.get("names", {})
-                coll = memory_config.get("coll", 1)
+                memory_names = memory_config.get("names")
+                coll = memory_config.get("coll", 2)
+                if memory_names is None:
+                    # Плоский формат: {"camera_frame": (h,w,c), "coll": 2}
+                    memory_names = {
+                        k: v for k, v in memory_config.items()
+                        if k != "coll" and isinstance(v, tuple)
+                    }
                 if memory_names:
-                    self._memory_manager.create_memory_dict(name, memory_names, coll)
+                    names_normalized = self._normalize_memory_names(memory_names)
+                    if names_normalized:
+                        self._memory_manager.create_memory_dict(
+                            name, names_normalized, coll
+                        )
 
             self._log_info(f"Process '{name}' registered in SRM")
             return True
         except Exception as e:
             self._log_error(f"register_process('{name}') failed: {e}")
             return False
+
+    def _normalize_memory_names(
+        self, memory_names: Dict[str, Any]
+    ) -> Dict[str, tuple]:
+        """
+        Нормализовать memory names к (num_images, shape, dtype).
+        Короткий формат (h, w, c) → (1, (h,w,c), "uint8").
+        """
+        result: Dict[str, tuple] = {}
+        for name, spec in memory_names.items():
+            if not isinstance(spec, tuple):
+                continue
+            if len(spec) == 3:
+                if isinstance(spec[1], tuple):
+                    result[name] = spec
+                elif all(isinstance(x, (int, float)) for x in spec):
+                    result[name] = (1, spec, "uint8")
+            else:
+                result[name] = spec
+        return result
 
     def _create_standard_events(self, name: str, config: dict) -> None:
         """Создать стандартные события stop/pause для процесса."""

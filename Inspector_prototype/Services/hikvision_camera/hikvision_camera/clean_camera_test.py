@@ -583,7 +583,7 @@ class CleanCameraTest(QMainWindow):
         print("Application closed")
 
 
-def main(queue_manager):
+def main():
     """Главная функция"""
     app = QApplication(sys.argv)
     
@@ -594,7 +594,7 @@ def main(queue_manager):
     print("Features: Frame Rate, Exposure, Gain settings + Real-time FPS")
     print("="*60)
     
-    window = CleanCameraTest(queue_manager=queue_manager)
+    window = CleanCameraTest()
     window.show()
     
     sys.exit(app.exec_())

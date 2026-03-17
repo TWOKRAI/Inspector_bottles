@@ -36,12 +36,15 @@ class ProcessorProcess(ProcessModule):
         self._msg = MessageAdapter(sender=self.name)
 
         # Параметры из конфига (BGR для детекции цвета)
-        self._min_area = self.get_config("min_area", 500)
+        app_cfg = self.get_config("config") or {}
+        self._min_area = app_cfg.get("min_area", 500)
+        self._target_width = app_cfg.get("resolution_width", 640)
+        self._target_height = app_cfg.get("resolution_height", 480)
         self._color_lower = np.array(
-            self.get_config("color_lower", [0, 0, 150]), dtype=np.uint8
+            app_cfg.get("color_lower", [0, 0, 150]), dtype=np.uint8
         )
         self._color_upper = np.array(
-            self.get_config("color_upper", [100, 100, 255]), dtype=np.uint8
+            app_cfg.get("color_upper", [100, 100, 255]), dtype=np.uint8
         )
 
         # Регистрация команд
@@ -75,6 +78,20 @@ class ProcessorProcess(ProcessModule):
             if frame is None:
                 continue
 
+            # Ресайз под Processor/Renderer (Hikvision может давать 1920x1080)
+            if (
+                frame.shape[0] != self._target_height
+                or frame.shape[1] != self._target_width
+            ) and cv2 is not None:
+                frame = cv2.resize(
+                    frame,
+                    (self._target_width, self._target_height),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+                data = dict(data)
+                data["width"] = self._target_width
+                data["height"] = self._target_height
+
             t_start = time.time()
             detections, mask, contours = self._detect_color_blobs(frame)
             processing_time = time.time() - t_start
@@ -98,7 +115,8 @@ class ProcessorProcess(ProcessModule):
         if msg is None:
             return None, {}
         msg_dict = msg if isinstance(msg, dict) else (msg.to_dict() if hasattr(msg, "to_dict") else {})
-        if msg_dict.get("data_type") != "frame_ready":
+        data_type = msg_dict.get("data_type") or (msg_dict.get("data") or {}).get("data_type")
+        if data_type != "frame_ready":
             return None, {}
         data = msg_dict.get("data", {})
         frame_id_log = data.get("frame_id", 0)

@@ -1,0 +1,53 @@
+2026-03-17 14:30:04,321 [INFO] [-] logger_manager: LoggerManager initialized
+2026-03-17 14:30:04,322 [INFO] [-] main: RouterManager 'router_camera' initialized (channels: [])
+2026-03-17 14:30:04,322 [INFO] [-] main: [stats_camera] initialized
+2026-03-17 14:30:04,322 [INFO] [-] dispatcher: Handler 'get_metrics' registered successfully
+2026-03-17 14:30:04,322 [INFO] [-] command_manager: Command 'get_metrics' registered successfully
+2026-03-17 14:30:04,322 [INFO] [-] dispatcher: Handler 'get_metric' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] command_manager: Command 'get_metric' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] dispatcher: Handler 'reset_metrics' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] command_manager: Command 'reset_metrics' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] dispatcher: Handler 'stats_snapshot' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] command_manager: Command 'stats_snapshot' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] dispatcher: Handler 'flush_stats' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] command_manager: Command 'flush_stats' registered successfully
+2026-03-17 14:30:04,323 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 14:30:04,323 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+2026-03-17 14:30:04,324 [INFO] [-] main: Process state registered: camera
+2026-03-17 14:30:04,324 [INFO] [-] main: UnifiedCameraProcess initializing...
+2026-03-17 14:30:04,324 [INFO] [-] dispatcher: Handler 'set_camera_type' registered successfully
+2026-03-17 14:30:04,324 [INFO] [-] command_manager: Command 'set_camera_type' registered successfully
+2026-03-17 14:30:04,324 [INFO] [-] dispatcher: Handler 'get_camera_type' registered successfully
+2026-03-17 14:30:04,324 [INFO] [-] command_manager: Command 'get_camera_type' registered successfully
+2026-03-17 14:30:04,324 [INFO] [-] dispatcher: Handler 'start_capture' registered successfully
+2026-03-17 14:30:04,324 [INFO] [-] command_manager: Command 'start_capture' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'stop_capture' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'stop_capture' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'set_fps' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'set_fps' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'set_resolution' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'set_resolution' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'enum_devices' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'enum_devices' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'open' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'open' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'close' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'close' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] dispatcher: Handler 'start_grabbing' registered successfully
+2026-03-17 14:30:04,325 [INFO] [-] command_manager: Command 'start_grabbing' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] dispatcher: Handler 'stop_grabbing' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] command_manager: Command 'stop_grabbing' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] dispatcher: Handler 'get_parameters' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] command_manager: Command 'get_parameters' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] dispatcher: Handler 'set_parameters' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] command_manager: Command 'set_parameters' registered successfully
+2026-03-17 14:30:04,326 [INFO] [-] main: UnifiedCameraProcess ready, camera_type=simulator
+2026-03-17 14:30:04,326 [INFO] [-] main: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-03-17 14:30:04,326 [INFO] [-] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 14:30:04,326 [INFO] [camera] main: Process 'camera' initialized successfully
+2026-03-17 14:30:04,326 [INFO] [camera] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 14:30:04,326 [INFO] [camera] lifecycle: Process 'camera' started
+2026-03-17 14:30:06,283 [INFO] [camera] router_messages: system_event EventManager -> ['ProcessManager']  cmd=system_event
+2026-03-17 14:30:06,283 [INFO] [camera] lifecycle: Process 'camera' stopping
+2026-03-17 14:30:06,283 [INFO] [camera] main: UnifiedCameraProcess shutting down...
+2026-03-17 14:30:06,284 [INFO] [-] logger_manager: LoggerManager shutting down

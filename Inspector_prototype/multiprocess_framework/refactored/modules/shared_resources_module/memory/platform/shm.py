@@ -63,13 +63,21 @@ def open_shm_block(name: str) -> Optional[ShmType]:
     """
     Открыть (attach) существующий блок SharedMemory.
 
+    На Windows при spawn возможна гонка: повторная попытка через 50–100ms.
+
     Returns:
         SharedMemory или None при ошибке
     """
-    try:
-        return shared_memory.SharedMemory(name=name, create=False)
-    except Exception:
-        return None
+    import time
+    for attempt in range(3):
+        try:
+            return shared_memory.SharedMemory(name=name, create=False)
+        except Exception:
+            if attempt < 2 and is_windows():
+                time.sleep(0.05 * (attempt + 1))
+            else:
+                break
+    return None
 
 
 def close_shm(shm: Optional[ShmType], unlink: bool = False) -> None:
