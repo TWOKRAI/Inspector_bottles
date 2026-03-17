@@ -1,3 +1,4 @@
+# multiprocess_prototype\docs\PROCESS_MANAGER_ANALYSIS.md
 # Анализ process_manager_module и упрощение app.py
 
 ## Текущая архитектура process_manager_module

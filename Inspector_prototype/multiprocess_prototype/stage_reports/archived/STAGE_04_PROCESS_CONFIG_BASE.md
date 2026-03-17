@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_04_PROCESS_CONFIG_BASE.md
 # Stage 4: Упрощение конфигов — базовый ProcessConfigBase
 
 ## Цель

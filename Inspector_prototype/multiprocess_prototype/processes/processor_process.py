@@ -1,3 +1,4 @@
+# multiprocess_prototype\processes\processor_process.py
 """
 ProcessorProcess — обработка кадров, детекция пятен.
 

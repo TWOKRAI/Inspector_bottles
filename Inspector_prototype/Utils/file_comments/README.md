@@ -42,6 +42,7 @@ python -m file_comments comment <root_dir> [опции]
 | `--use-absolute` | `-a` | Использовать абсолютные пути |
 | `--ignore-dirs` | `-i` | Папки для игнорирования (например `.git __pycache__`) |
 | `--dry-run` | `-n` | Не изменять файлы, только показать план |
+| `--path-base` | `-b` | База для пути в комментарии (путь будет относительным к DIR, напр. `multiprocess_prototype\processes\file.py`) |
 
 ### `stats` — статистика
 
@@ -104,6 +105,7 @@ python -m file_comments both <root_dir> [опции]
 | `extensions` | `string[]` | Расширения обрабатываемых файлов |
 | `comment_symbols` | `object` | Словарь `{".py": "#", ".md": "<!--"}` |
 | `use_absolute_path` | `boolean` | Использовать абсолютные пути в комментариях |
+| `path_base` | `string` | Каталог, относительно которого строится путь в комментарии (напр. родитель `root_dir`) |
 | `ignore_dirs` | `string[]` | Папки, которые не обходим |
 
 ## Структура модуля

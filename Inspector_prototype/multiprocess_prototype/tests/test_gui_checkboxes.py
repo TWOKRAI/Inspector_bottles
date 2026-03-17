@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_gui_checkboxes.py
 """
 Тест InspectorWindow: чекбоксы вызывают process.gui_set_*.
 

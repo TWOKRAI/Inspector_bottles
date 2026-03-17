@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_00_INFRASTRUCTURE.md
 # Отчёт: Этап 0 — Подготовка инфраструктуры
 
 **Дата:** 2026-03-15  

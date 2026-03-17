@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_pipeline.py
 """
 Тест Camera + Processor + Renderer + Robot (пайплайн без GUI).
 

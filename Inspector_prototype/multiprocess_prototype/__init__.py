@@ -1,3 +1,4 @@
+# multiprocess_prototype\__init__.py
 """
 Multiprocess Prototype — демо-приложение на базе multiprocess_framework/refactored.
 

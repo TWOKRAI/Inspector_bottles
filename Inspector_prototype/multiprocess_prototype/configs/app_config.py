@@ -1,3 +1,4 @@
+# multiprocess_prototype\configs\app_config.py
 """
 Конфигурация приложения Inspector Prototype.
 

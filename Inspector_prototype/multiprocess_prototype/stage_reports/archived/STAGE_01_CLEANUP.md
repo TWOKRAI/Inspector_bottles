@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_01_CLEANUP.md
 # STAGE 01: Очистка тестового приложения
 
 **Дата:** 2026-03-15  

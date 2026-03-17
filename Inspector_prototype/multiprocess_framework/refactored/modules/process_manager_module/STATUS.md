@@ -69,6 +69,11 @@
 - Экспортируются: ISystemLauncher, IProcessManagerProcess, IProcessRegistry
 - Экспортируются: ProcessRegistry, ProcessPriority, ProcessStatus, ProcessMonitor, ProcessSchemaAdapter
 
+## Конфигурация (2026-03-17)
+
+- **ProcessSchemaAdapter** делегирует в `config_to_dict` (data_schema_module) при наличии `build()` — один источник правды
+- **CONFIG_CONTRACT.md** — документирован контракт proc_dict (обязательные/опциональные поля, потребители)
+
 ## Известные проблемы
 
 - Нет (все известные проблемы устранены)

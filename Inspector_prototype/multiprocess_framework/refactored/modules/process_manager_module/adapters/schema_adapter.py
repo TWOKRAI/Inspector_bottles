@@ -86,11 +86,11 @@ class ProcessSchemaAdapter:
         Returns:
             Tuple[str, Dict] — (process_name, config_dict).
         """
-        # HasBuild: использовать build() если доступен
+        # HasBuild: делегировать в data_schema_module.config_to_dict (один источник правды)
         if hasattr(schema_instance, "build") and callable(schema_instance.build):
             try:
-                name, config_dict = schema_instance.build()
-                return name, config_dict
+                from data_schema_module import config_to_dict
+                return config_to_dict(schema_instance)
             except Exception:
                 pass
 

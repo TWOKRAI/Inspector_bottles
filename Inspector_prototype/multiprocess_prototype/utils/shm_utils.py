@@ -1,3 +1,4 @@
+# multiprocess_prototype\utils\shm_utils.py
 """
 Утилиты для работы с SharedMemory (формат MemoryManager).
 """

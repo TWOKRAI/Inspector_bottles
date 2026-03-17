@@ -1,3 +1,4 @@
+# multiprocess_prototype\docs\ARCHITECTURE_RECOMMENDATIONS.md
 # Рекомендации по архитектуре multiprocess_prototype
 
 Документ с рекомендациями по развитию и улучшению архитектуры (Этап 7 плана Dual Image Display).

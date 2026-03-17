@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_processor_mask_contours.py
 """
 Тест ProcessorProcess: mask и contours в detection_result.
 

@@ -1,3 +1,4 @@
+# multiprocess_prototype\utils\__init__.py
 """
 Утилиты Inspector Prototype.
 

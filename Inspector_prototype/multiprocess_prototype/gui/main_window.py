@@ -1,3 +1,4 @@
+# multiprocess_prototype\gui\main_window.py
 """InspectorWindow — главное окно приложения."""
 
 import numpy as np

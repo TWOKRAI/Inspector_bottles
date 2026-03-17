@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_04_ROBOT_SIMULATOR.md
 # Отчёт: Этап 4 — RobotSimulatorProcess
 
 **Дата:** 2026-03-15  

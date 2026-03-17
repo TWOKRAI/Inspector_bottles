@@ -1,3 +1,4 @@
+# multiprocess_prototype\processes\renderer_process.py
 """
 RendererProcess — отрисовка bbox и контуров на кадрах.
 

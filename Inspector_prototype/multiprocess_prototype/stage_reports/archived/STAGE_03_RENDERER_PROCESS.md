@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_03_RENDERER_PROCESS.md
 # Отчёт: Этап 3 — RendererProcess
 
 **Дата:** 2026-03-15  

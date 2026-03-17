@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_07_RECOMMENDATIONS.md
 # Stage 7: Рекомендации и итоги
 
 ## Выполнено

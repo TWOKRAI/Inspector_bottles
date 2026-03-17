@@ -9,7 +9,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +44,26 @@ class Config:
         comment_symbols: Dict[str, str] | None = None,
         use_absolute_path: bool = False,
         ignore_dirs: List[str] | None = None,
+        path_base: Optional[Path] = None,
     ):
         self.extensions = extensions or [".py", ".md"]
         self.comment_symbols = comment_symbols or {}
         self.use_absolute_path = use_absolute_path or False
         self.ignore_dirs = ignore_dirs or []
+        self.path_base = path_base.resolve() if path_base else None
 
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
         """Создаёт экземпляр Config из словаря (результата загрузки JSON)."""
+        path_base = data.get("path_base")
+        if path_base is not None:
+            path_base = Path(path_base) if isinstance(path_base, str) else path_base
         return cls(
             extensions=data.get("extensions", [".py", ".md"]),
             comment_symbols=data.get("comment_symbols", {}),
             use_absolute_path=data.get("use_absolute_path", False),
             ignore_dirs=data.get("ignore_dirs", []),
+            path_base=path_base,
         )
 
     def merge(self, other: "Config") -> "Config":
@@ -68,12 +74,14 @@ class Config:
         new_comment_symbols = {**self.comment_symbols, **other.comment_symbols}
         new_use_absolute_path = other.use_absolute_path
         new_ignore_dirs = list(set(self.ignore_dirs + other.ignore_dirs))
+        new_path_base = other.path_base if other.path_base is not None else self.path_base
 
         return Config(
             extensions=new_extensions,
             comment_symbols=new_comment_symbols,
             use_absolute_path=new_use_absolute_path,
             ignore_dirs=new_ignore_dirs,
+            path_base=new_path_base,
         )
 
 

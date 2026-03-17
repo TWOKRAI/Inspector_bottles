@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_shared_memory.py
 """
 Тест SharedMemory изолированно (Этап 8.2).
 

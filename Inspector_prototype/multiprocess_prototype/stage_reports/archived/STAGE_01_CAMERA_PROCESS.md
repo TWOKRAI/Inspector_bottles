@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_01_CAMERA_PROCESS.md
 # Отчёт: Этап 1 — CameraProcess
 
 **Дата:** 2026-03-15  

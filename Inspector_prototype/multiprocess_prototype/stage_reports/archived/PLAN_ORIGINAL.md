@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\PLAN_ORIGINAL.md
 # План реализации тестового приложения Inspector Prototype
 
 **Версия:** 1.0  

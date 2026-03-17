@@ -1,3 +1,4 @@
+# multiprocess_prototype\processes\camera_process.py
 """
 CameraProcess — захват видеокадров (реальная камера или имитация).
 

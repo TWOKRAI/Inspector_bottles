@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_05_GUI_PROCESS.md
 # Отчёт: Этап 5 — GuiProcess
 
 **Дата:** 2026-03-15  

@@ -15,6 +15,7 @@ from .interfaces import IProcessModule, ISharedResources, IProcessCommunication
 
 # Типы
 from .types import (
+    ProcessPriorityLevel,
     ProcessStatus,
     ManagerType,
     QueueType,
@@ -36,6 +37,7 @@ __all__ = [
     "IProcessCommunication",
 
     # Типы
+    "ProcessPriorityLevel",
     "ProcessStatus",
     "ManagerType",
     "QueueType",

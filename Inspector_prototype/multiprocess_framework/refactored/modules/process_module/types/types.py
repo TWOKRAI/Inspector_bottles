@@ -8,6 +8,14 @@ from enum import Enum
 from typing import TypedDict, Dict, Any, Optional, List
 
 
+class ProcessPriorityLevel(str, Enum):
+    """Уровни приоритета процесса ОС (для proc_dict.priority)."""
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"  # для будущего расширения
+
+
 class ProcessStatus(str, Enum):
     """Статусы жизненного цикла процесса."""
     INITIALIZING = "initializing"

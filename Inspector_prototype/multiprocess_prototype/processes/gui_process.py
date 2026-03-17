@@ -1,3 +1,4 @@
+# multiprocess_prototype\processes\gui_process.py
 """
 GuiProcess — отображение видео и управление (PyQt5).
 

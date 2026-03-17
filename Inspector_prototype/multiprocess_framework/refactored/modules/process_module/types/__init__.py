@@ -3,6 +3,7 @@ process_module types — публичные типы и перечисления
 """
 
 from .types import (
+    ProcessPriorityLevel,
     ProcessStatus,
     ManagerType,
     QueueType,
@@ -12,6 +13,7 @@ from .types import (
 )
 
 __all__ = [
+    "ProcessPriorityLevel",
     "ProcessStatus",
     "ManagerType",
     "QueueType",

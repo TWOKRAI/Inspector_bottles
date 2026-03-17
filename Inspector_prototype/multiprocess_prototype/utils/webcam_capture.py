@@ -1,3 +1,4 @@
+# multiprocess_prototype\utils\webcam_capture.py
 """
 Захват кадров с веб-камеры через OpenCV.
 

@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_08_TESTING.md
 # Этап 8: Тестирование
 
 **Дата:** 2026-03-15  

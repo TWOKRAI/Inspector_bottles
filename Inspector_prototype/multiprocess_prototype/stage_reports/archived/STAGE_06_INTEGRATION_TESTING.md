@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_06_INTEGRATION_TESTING.md
 # Stage 6: Интеграционное тестирование
 
 ## Цель

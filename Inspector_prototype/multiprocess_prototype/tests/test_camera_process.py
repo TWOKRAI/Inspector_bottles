@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_camera_process.py
 """
 Тест CameraProcess в изоляции.
 

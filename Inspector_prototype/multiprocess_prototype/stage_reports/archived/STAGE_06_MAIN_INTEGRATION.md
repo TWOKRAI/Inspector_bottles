@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_06_MAIN_INTEGRATION.md
 # Отчёт: Этап 6 — main.py и интеграция
 
 **Дата:** 2026-03-15  

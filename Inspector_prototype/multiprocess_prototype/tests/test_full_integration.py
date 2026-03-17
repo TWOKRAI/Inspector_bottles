@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_full_integration.py
 """
 Полный тест 5 процессов + graceful shutdown (Этап 8.3).
 

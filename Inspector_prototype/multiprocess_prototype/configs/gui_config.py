@@ -1,8 +1,8 @@
+# multiprocess_prototype\configs\gui_config.py
 """
 Конфигурация GUI-процесса (GuiProcess).
 
-ProcessConfigBase + FieldMeta для валидации параметров.
-build() — HasBuild для process() / add_process().
+ProcessConfigBase + FieldMeta. class_path_from_type.
 """
 
 from typing import Annotated
@@ -12,7 +12,8 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
     register_schema,
 )
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase
+from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.processes.gui_process import GuiProcess
 
 
 @register_schema("GuiConfig")
@@ -20,6 +21,7 @@ class GuiConfig(ProcessConfigBase):
     """Конфигурация GUI-процесса."""
 
     process_name: str = "gui"
+    class_path: str = class_path_from_type(GuiProcess)
     window_title: str = "Inspector Prototype"
     window_width: Annotated[
         int, FieldMeta("Ширина окна", min=400, max=1920)
@@ -30,10 +32,3 @@ class GuiConfig(ProcessConfigBase):
     poll_interval_ms: Annotated[
         int, FieldMeta("Интервал опроса сообщений, мс", min=5, max=100)
     ] = 16
-
-    def build(self) -> tuple[str, dict]:
-        """HasBuild: (name, proc_dict) для launcher.add_process(*process(GuiConfig()))."""
-        proc_dict = self._build_proc_dict(
-            "multiprocess_prototype.processes.gui_process.GuiProcess",
-        )
-        return (self.process_name, proc_dict)

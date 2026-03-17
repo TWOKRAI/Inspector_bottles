@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_00_CRITICAL_FIX.md
 # STAGE 00: Исправление критического бага — гонка потоков
 
 **Дата:** 2026-03-15  

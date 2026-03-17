@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_stage0.py
 """
 Тесты для Этапа 0 — инфраструктура (FrameGenerator, configs).
 """
@@ -32,10 +33,10 @@ def test_configs():
     )
 
     c = CameraConfig()
-    assert c.fps == 30
+    assert c.fps == 25
     assert c.resolution_width == 640
     assert c.resolution_height == 480
-    assert c.use_simulator is True
+    assert c.use_simulator is False
 
     p = ProcessorConfig()
     assert p.min_area == 500

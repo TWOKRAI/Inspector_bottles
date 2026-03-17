@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_07_LOGGING_STATS.md
 # Этап 7: Обратная связь, статистика и логирование
 
 **Дата:** 2026-03-15  

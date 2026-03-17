@@ -1,3 +1,4 @@
+# multiprocess_prototype\docs\INSTRUCTION.md
 # Инструкция: multiprocess_prototype
 
 Пошаговое руководство по созданию и расширению демо-приложения на базе `multiprocess_framework/refactored`.

@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_03_SHM_CONFIG.md
 # Stage 3: Config-driven SharedMemory
 
 ## Цель

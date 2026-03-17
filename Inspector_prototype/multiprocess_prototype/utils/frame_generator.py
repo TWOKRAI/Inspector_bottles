@@ -1,3 +1,4 @@
+# multiprocess_prototype\utils\frame_generator.py
 """
 Генератор тестовых кадров для имитации камеры.
 

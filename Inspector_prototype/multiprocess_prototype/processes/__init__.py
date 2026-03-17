@@ -1,3 +1,4 @@
+# multiprocess_prototype\processes\__init__.py
 """Процессы приложения."""
 
 from .camera_process import CameraProcess

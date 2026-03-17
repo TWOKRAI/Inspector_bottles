@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_02_PROCESSOR_PROCESS.md
 # Отчёт: Этап 2 — ProcessorProcess
 
 **Дата:** 2026-03-15  

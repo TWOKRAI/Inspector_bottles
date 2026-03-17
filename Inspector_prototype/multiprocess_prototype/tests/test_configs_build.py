@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_configs_build.py
 """
 Тест build() конфигов — проверка без запуска процессов.
 

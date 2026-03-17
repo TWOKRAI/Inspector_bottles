@@ -4,6 +4,8 @@
 DEFAULT_PROCESS_SCHEMA — эталонная структура, с которой нормализуется
 входящий proc_dict через merge_with_defaults. Каждый consumer определяет
 свой формат; недостающие ключи заполняются из default.
+
+Полный контракт: docs/CONFIG_CONTRACT.md
 """
 
 from typing import Any, Dict

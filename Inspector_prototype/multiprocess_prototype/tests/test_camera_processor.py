@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_camera_processor.py
 """
 Тест CameraProcess + ProcessorProcess.
 

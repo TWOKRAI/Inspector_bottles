@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_02_MESSAGE_ADAPTER.md
 # STAGE 02: Внедрение MessageAdapter для создания сообщений
 
 **Дата:** 2026-03-15  

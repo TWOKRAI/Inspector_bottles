@@ -40,7 +40,9 @@ class PathCommenter:
         if self.config.use_absolute_path:
             path_to_insert = str(file_path.resolve())
         else:
-            path_to_insert = str(file_path.relative_to(self.root_dir))
+            base = self.config.path_base if self.config.path_base is not None else self.root_dir
+            base = base.resolve()
+            path_to_insert = str(file_path.resolve().relative_to(base))
 
         comment_symbol = self.config.comment_symbols.get(file_path.suffix, "#")
         comment_line = f"{comment_symbol} {path_to_insert}\n"
@@ -54,6 +56,12 @@ class PathCommenter:
         if content.startswith(comment_line):
             logger.info(f"Пропуск {file_path} (уже содержит комментарий)")
             return
+
+        # Убираем старую строку с путём в начале (комментарий вида "# путь"), чтобы заменить на новую
+        prefix = comment_symbol if comment_symbol.endswith(" ") else comment_symbol + " "
+        if content.startswith(prefix) and "\n" in content:
+            _, rest = content.split("\n", 1)
+            content = rest if rest else "\n"
 
         new_content = comment_line + content
 

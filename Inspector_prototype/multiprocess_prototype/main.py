@@ -1,3 +1,4 @@
+# multiprocess_prototype\main.py
 """
 Точка входа Inspector Prototype.
 

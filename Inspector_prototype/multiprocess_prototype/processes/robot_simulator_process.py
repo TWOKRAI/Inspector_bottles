@@ -1,3 +1,4 @@
+# multiprocess_prototype\processes\robot_simulator_process.py
 """
 RobotSimulatorProcess — имитация робота-отбраковщика.
 

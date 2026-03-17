@@ -1,3 +1,4 @@
+# multiprocess_prototype\tests\test_renderer_commands.py
 """
 Тест RendererProcess: команды set_draw_contours, set_show_original, set_show_mask.
 

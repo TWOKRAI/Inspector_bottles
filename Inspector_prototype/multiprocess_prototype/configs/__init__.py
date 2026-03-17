@@ -1,3 +1,4 @@
+# multiprocess_prototype\configs\__init__.py
 """
 Конфигурационные схемы Inspector Prototype.
 
@@ -6,6 +7,7 @@
 """
 
 from .app_config import get_log_dir, get_default_managers_config
+from .base_config import ProcessConfigBase, class_path_from_type
 from .camera_config import CameraConfig
 from .processor_config import ProcessorConfig
 from .renderer_config import RendererConfig
@@ -15,6 +17,8 @@ from .gui_config import GuiConfig
 __all__ = [
     "get_log_dir",
     "get_default_managers_config",
+    "ProcessConfigBase",
+    "class_path_from_type",
     "CameraConfig",
     "ProcessorConfig",
     "RendererConfig",

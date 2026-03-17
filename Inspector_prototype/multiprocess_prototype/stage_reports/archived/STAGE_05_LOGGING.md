@@ -1,3 +1,4 @@
+# multiprocess_prototype\stage_reports\archived\STAGE_05_LOGGING.md
 # Stage 5: Полноценное логирование
 
 ## Цель

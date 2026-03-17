@@ -64,6 +64,13 @@ def setup_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Не изменять файлы, только показать, что будет сделано",
     )
+    comment_parser.add_argument(
+        "--path-base",
+        "-b",
+        type=Path,
+        metavar="DIR",
+        help="База для пути в комментарии (путь будет относительным к DIR, напр. multiprocess_prototype\\processes\\file.py)",
+    )
 
     # Команда stats
     stats_parser = subparsers.add_parser("stats", help="Подсчитать статистику по файлам")
@@ -121,6 +128,13 @@ def setup_parser() -> argparse.ArgumentParser:
         help="Не изменять файлы (статистика будет по текущему состоянию)",
     )
     both_parser.add_argument(
+        "--path-base",
+        "-b",
+        type=Path,
+        metavar="DIR",
+        help="База для пути в комментарии (путь будет относительным к DIR)",
+    )
+    both_parser.add_argument(
         "--output",
         "-o",
         choices=["table", "json"],
@@ -158,6 +172,9 @@ def build_config_from_args(args: argparse.Namespace, base_config: Config) -> Con
 
     if hasattr(args, "ignore_dirs") and args.ignore_dirs:
         cli_config.ignore_dirs = args.ignore_dirs
+
+    if hasattr(args, "path_base") and args.path_base is not None:
+        cli_config.path_base = Path(args.path_base).resolve()
 
     return base_config.merge(cli_config)
 
