@@ -19,7 +19,7 @@ from .MvCameraControl_class import MV_GIGE_DEVICE, MV_USB_DEVICE
 from .MvErrorDefine_const import MV_OK, MV_E_CALLORDER, MV_E_PARAMETER
 from .CameraParams_header import *
 
-from Utils.frame_fps import FrameFPS
+from Utils.fps_module import FrameFPS
 
 
 class CameraManager:
