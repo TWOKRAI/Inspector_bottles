@@ -1,4 +1,4 @@
-# multiprocess_prototype/camera/backends.py
+# multiprocess_prototype/backend/backends.py
 """
 Бэкенды захвата кадров: Simulator, Webcam, Hikvision.
 
@@ -7,7 +7,7 @@ HikvisionBackend использует hikvision_camera_module.HikvisionCameraFac
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Optional
 
 import numpy as np
 

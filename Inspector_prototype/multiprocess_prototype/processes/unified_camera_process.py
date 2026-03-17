@@ -1,4 +1,4 @@
-# multiprocess_prototype/camera/unified_camera_process.py
+# multiprocess_prototype/processes/unified_camera_process.py
 """
 UnifiedCameraProcess — единый процесс камеры с переключением бэкендов без перезапуска.
 
@@ -18,7 +18,11 @@ from multiprocess_framework.refactored.modules.worker_module import (
     ExecutionMode,
 )
 
-from .backends import SimulatorBackend, WebcamBackend, HikvisionBackend
+from multiprocess_prototype.backend.backends import (
+    SimulatorBackend,
+    WebcamBackend,
+    HikvisionBackend,
+)
 
 
 def _resize_frame(frame: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
@@ -254,8 +258,6 @@ class UnifiedCameraProcess(ProcessModule):
 
             # Ресайз под память (1920x1080)
             frame = _resize_frame(frame, self.MEMORY_HEIGHT, self.MEMORY_WIDTH)
-                            
-            # cv2.imwrite(f"frame.png", frame)
 
             mm = self.memory_manager
             if mm:

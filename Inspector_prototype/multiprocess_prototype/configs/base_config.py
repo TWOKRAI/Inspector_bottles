@@ -19,7 +19,7 @@ def class_path_from_type(cls: Type) -> str:
     Получить class_path из типа (type safety, IDE отследит рефакторинг).
 
     Пример:
-        class_path: str = class_path_from_type(CameraProcess)
+        class_path: str = class_path_from_type(UnifiedCameraProcess)
     """
     return f"{cls.__module__}.{cls.__qualname__}"
 
