@@ -31,7 +31,9 @@ def read_frame_from_shm(shm_actual_name: str, width: int, height: int):
             arr = np.frombuffer(
                 buffer, dtype=dtype, count=h * w * c, offset=offset
             )
-            return arr.reshape((h, w, c)).copy()
+            result = arr.reshape((h, w, c)).copy()
+            del arr  # освободить view до close — иначе BufferError на Windows
+            return result
         finally:
             shm.close()
     except FileNotFoundError as e:

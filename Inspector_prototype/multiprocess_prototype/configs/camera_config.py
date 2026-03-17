@@ -24,21 +24,13 @@ class CameraConfig(ProcessConfigBase):
     resolution_width: Annotated[int, FieldMeta("Ширина кадра", min=320, max=1920)] = 640
     resolution_height: Annotated[int, FieldMeta("Высота кадра", min=240, max=1080)] = 480
     device_id: Annotated[int, FieldMeta("ID камеры", min=0, max=10)] = 0
-    use_simulator: bool = True  # True = FrameGenerator, False = cv2.VideoCapture
+    use_simulator: bool = False  # True = FrameGenerator, False = WebcamCapture (веб-камера)
     simulator_image_path: Optional[str] = None  # Путь к изображению для имитации; None = tests/test_image.png
 
     def build(self) -> tuple[str, dict]:
         """HasBuild: (name, proc_dict) для launcher.add_process(*process(CameraConfig()))."""
-        memory = {
-            "names": {
-                "camera_frame": (
-                    1,
-                    (self.resolution_height, self.resolution_width, 3),
-                    "uint8",
-                ),
-            },
-            "coll": 2,
-        }
+        # Короткий формат: (h, w, c) → фреймворк разворачивает в (1, (h,w,c), "uint8")
+        memory = {"camera_frame": (self.resolution_height, self.resolution_width, 3), "coll": 2}
         proc_dict = self._build_proc_dict(
             "multiprocess_prototype.processes.camera_process.CameraProcess",
             priority="high",

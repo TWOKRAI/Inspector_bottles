@@ -73,6 +73,47 @@ def _load_process_class(class_path: str, log: _ProcessLogger):
         return None
 
 
+def _normalize_memory_spec(spec: Any) -> Optional[tuple]:
+    """
+    Нормализует спецификацию памяти к формату (num_images, image_shape, dtype).
+
+    Короткий формат: (h, w, c) → (1, (h,w,c), "uint8")
+    Полный формат: (1, (h,w,c), "uint8") — без изменений
+    """
+    if not isinstance(spec, tuple):
+        return None
+    if len(spec) == 3:
+        if isinstance(spec[1], tuple):
+            return spec  # (num_images, (h,w,c), dtype)
+        if all(isinstance(x, (int, float)) for x in spec):
+            return (1, spec, "uint8")  # (h, w, c) short form
+    return spec
+
+
+def _normalize_memory_config(mem_cfg: Dict[str, Any]) -> tuple[Dict[str, tuple], int]:
+    """
+    Нормализует config["memory"] к (names, coll).
+
+    Поддерживает:
+    - Стандарт: {"names": {"x": (1,(h,w,c),"uint8")}, "coll": 2}
+    - Короткий: {"names": {"x": (h,w,c)}, "coll": 2}
+    - Плоский: {"x": (h,w,c)} — coll=2 по умолчанию
+    """
+    coll = mem_cfg.get("coll", 2)
+    names_raw = mem_cfg.get("names")
+    if names_raw is None:
+        names_raw = {
+            k: v for k, v in mem_cfg.items()
+            if k != "coll" and isinstance(v, tuple)
+        }
+    normalized: Dict[str, tuple] = {}
+    for name, spec in (names_raw or {}).items():
+        ns = _normalize_memory_spec(spec)
+        if ns:
+            normalized[name] = ns
+    return normalized, coll
+
+
 def _build_shared_resources_from_bundle(
     process_name: str,
     bundle: Dict[str, Any],
@@ -107,8 +148,7 @@ def _build_shared_resources_from_bundle(
     if not has_mem_names and has_mem_cfg:
         mem_cfg = process_config["memory"]
         if isinstance(mem_cfg, dict):
-            names = mem_cfg.get("names", {})
-            coll = mem_cfg.get("coll", 2)
+            names, coll = _normalize_memory_config(mem_cfg)
             if names:
                 ok = shared_resources.memory_manager.create_memory_dict(
                     process_name, names, coll

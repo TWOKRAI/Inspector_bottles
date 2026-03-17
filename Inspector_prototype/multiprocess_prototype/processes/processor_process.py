@@ -47,26 +47,8 @@ class ProcessorProcess(ProcessModule):
         self.command_manager.register_command("set_color_range", self._cmd_set_color_range)
         self.command_manager.register_command("set_min_area", self._cmd_set_min_area)
 
-        # Shared Memory: processor_mask (owner) — fallback если process_runner не создал
-        mm = self.memory_manager
-        if mm:
-            md = mm.get_memory_data(self.name, "processor_mask")
-            if not md or not md.get("handles"):
-                memory_cfg = self.get_config("memory")
-                if memory_cfg and isinstance(memory_cfg, dict):
-                    names = memory_cfg.get("names", {})
-                    coll = memory_cfg.get("coll", 2)
-                    if names:
-                        mm.create_memory_dict(self.name, names, coll)
-                else:
-                    h = self.get_config("resolution_height", 480)
-                    w = self.get_config("resolution_width", 640)
-                    mm.create_memory_dict(
-                        self.name,
-                        {"processor_mask": (1, (h, w, 3), "uint8")},
-                        coll=2,
-                    )
-        else:
+        # Shared Memory: создаётся фреймворком из config["memory"] в process_runner
+        if not self.memory_manager:
             self._log_warning("MemoryManager not available, processor_mask disabled")
 
         # Создание воркера

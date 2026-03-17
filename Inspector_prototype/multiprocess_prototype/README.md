@@ -10,11 +10,32 @@
 
 ## Запуск
 
+**Рекомендуемый способ** — скрипт `run.sh` (выставляет PYTHONPATH и при необходимости чистит SharedMemory):
+
 ```bash
-# Из Inspector_bottles
+# Из корня репозитория (Inspector_bottles)
 ./Inspector_prototype/multiprocess_prototype/run.sh
 
-# Или с PYTHONPATH
+# Или из каталога Inspector_prototype
+cd Inspector_prototype && ./multiprocess_prototype/run.sh
+```
+
+**Запуск через main.py** (удобно из IDE или когда не нужна очистка shm):
+
+```bash
+# Из любого места — указать путь к main.py
+python Inspector_prototype/multiprocess_prototype/main.py
+
+# Из каталога Inspector_prototype
+cd Inspector_prototype && python multiprocess_prototype/main.py
+
+# Из каталога multiprocess_prototype
+cd Inspector_prototype/multiprocess_prototype && python main.py
+```
+
+**Через модуль с явным PYTHONPATH** (для скриптов/CI):
+
+```bash
 PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.main
 ```
 

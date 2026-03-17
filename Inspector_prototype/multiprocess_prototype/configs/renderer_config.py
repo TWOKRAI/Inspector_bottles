@@ -28,21 +28,8 @@ class RendererConfig(ProcessConfigBase):
 
     def build(self) -> tuple[str, dict]:
         """HasBuild: (name, proc_dict) для launcher.add_process(*process(RendererConfig()))."""
-        memory = {
-            "names": {
-                "rendered_frame": (
-                    1,
-                    (self.resolution_height, self.resolution_width, 3),
-                    "uint8",
-                ),
-                "mask_frame": (
-                    1,
-                    (self.resolution_height, self.resolution_width, 3),
-                    "uint8",
-                ),
-            },
-            "coll": 2,
-        }
+        shape = (self.resolution_height, self.resolution_width, 3)
+        memory = {"rendered_frame": shape, "mask_frame": shape, "coll": 2}
         proc_dict = self._build_proc_dict(
             "multiprocess_prototype.processes.renderer_process.RendererProcess",
             memory=memory,

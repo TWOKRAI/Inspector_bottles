@@ -62,25 +62,8 @@ class RendererProcess(ProcessModule):
         self.command_manager.register_command("set_show_original", self._cmd_set_show_original)
         self.command_manager.register_command("set_show_mask", self._cmd_set_show_mask)
 
-        # Shared Memory: создаётся из config["memory"] (задаётся в RendererConfig.build())
-        mm = self.memory_manager
-        if mm:
-            memory_cfg = self.get_config("memory")
-            if memory_cfg and isinstance(memory_cfg, dict):
-                names = memory_cfg.get("names", {})
-                coll = memory_cfg.get("coll", 2)
-                if names:
-                    mm.create_memory_dict(self.name, names, coll)
-            else:
-                mm.create_memory_dict(
-                    self.name,
-                    {
-                        "rendered_frame": (1, (480, 640, 3), "uint8"),
-                        "mask_frame": (1, (480, 640, 3), "uint8"),
-                    },
-                    coll=2,
-                )
-        else:
+        # Shared Memory: создаётся фреймворком из config["memory"] в process_runner
+        if not self.memory_manager:
             self._log_warning("MemoryManager not available, shared memory disabled")
 
         config = ThreadConfig(execution_mode=ExecutionMode.LOOP)

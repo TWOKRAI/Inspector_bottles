@@ -390,3 +390,18 @@
   - Дополнительно: `show_original`, `show_mask`, `draw_contours` — состояние отображения
   - Processor owner `processor_mask`, Renderer owner `rendered_frame` и `mask_frame`
 - Причина: Явное разделение original/mask в одном сообщении. Dict at Boundary.
+
+---
+
+## ADR-028: Memory config — декларативно в конфиге, создание под капотом
+- Дата: 2026-03-16
+- Статус: принято
+- Контекст: Процессы (camera, renderer, processor) дублировали логику создания SharedMemory.
+  Требовалось объявлять память в конфиге и повторять create_memory_dict в коде процесса.
+- Решение:
+  - Создание SharedMemory из config["memory"] выполняется только в process_runner (под капотом).
+  - Процессы не вызывают create_memory_dict — только используют memory_manager.
+  - Поддержка короткого формата: `(h, w, c)` → `(1, (h,w,c), "uint8")`.
+  - Плоский формат: `{"camera_frame": (h,w,3)}` вместо `{"names": {...}, "coll": 2}`.
+- Причина: DRY, единая точка создания памяти, лаконичный конфиг.
+- Отклонённые альтернативы: Оставить fallback в процессах — отклонено как дублирование.

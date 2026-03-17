@@ -5,14 +5,29 @@ SystemLauncher — фасад process_manager_module.
 add_process(name, proc_dict) — Dict at Boundary.
 Конфиги с build() через process() из data_schema_module.
 
-Запуск (из Inspector_prototype или Inspector_bottles):
-  ./Inspector_prototype/multiprocess_prototype/run.sh
+Запуск:
+  run.sh (рекомендуется):
+    ./Inspector_prototype/multiprocess_prototype/run.sh
+  или из каталога Inspector_prototype:
+    ./multiprocess_prototype/run.sh
 
-Или с PYTHONPATH:
-  PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.main
+  python main.py (из каталога Inspector_prototype или multiprocess_prototype):
+    python Inspector_prototype/multiprocess_prototype/main.py
+    cd Inspector_prototype && python multiprocess_prototype/main.py
+
+  через модуль с PYTHONPATH:
+    PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.main
 """
 
 import sys
+from pathlib import Path
+
+# Чтобы можно было запускать как python main.py (без run.sh)
+_root = Path(__file__).resolve().parent.parent
+_modules = _root / "multiprocess_framework" / "refactored" / "modules"
+for _p in (_root, _modules):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 
 def main() -> int:

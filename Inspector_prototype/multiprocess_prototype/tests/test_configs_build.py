@@ -21,7 +21,7 @@ def test_camera_config_build():
     assert name == "camera"
     assert proc_dict["class"] == "multiprocess_prototype.processes.camera_process.CameraProcess"
     assert "memory" in proc_dict
-    assert "camera_frame" in proc_dict["memory"]["names"]
+    assert "camera_frame" in proc_dict["memory"]
     assert "managers" in proc_dict
     assert "logger" in proc_dict["managers"]
 
@@ -31,14 +31,15 @@ def test_renderer_config_build():
     name, proc_dict = process(RendererConfig())
     assert name == "renderer"
     assert "memory" in proc_dict
-    assert "rendered_frame" in proc_dict["memory"]["names"]
+    assert "rendered_frame" in proc_dict["memory"]
 
 
 def test_processor_config_build():
-    """ProcessorConfig.build() — без memory."""
+    """ProcessorConfig.build() — memory с processor_mask."""
     name, proc_dict = process(ProcessorConfig())
     assert name == "processor"
-    assert "memory" not in proc_dict
+    assert "memory" in proc_dict
+    assert "processor_mask" in proc_dict["memory"]
 
 
 def test_robot_config_build():

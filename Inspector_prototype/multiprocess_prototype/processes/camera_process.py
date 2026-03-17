@@ -24,49 +24,36 @@ class CameraProcess(ProcessModule):
 
         self._msg = MessageAdapter(sender=self.name)
 
-        # Параметры из конфига
-        self._fps = self.get_config("fps", 30)
-        self._width = self.get_config("resolution_width", 640)
-        self._height = self.get_config("resolution_height", 480)
-        self._use_simulator = self.get_config("use_simulator", True)
+        # Параметры из конфига (вложены в config при передаче через proc_dict)
+        app_cfg = self.get_config("config") or {}
+        self._fps = app_cfg.get("fps", 30)
+        self._width = app_cfg.get("resolution_width", 640)
+        self._height = app_cfg.get("resolution_height", 480)
+        self._use_simulator = app_cfg.get("use_simulator", True)
+        self._device_id = app_cfg.get("device_id", 0)
 
-        # Генератор кадров (имитация камеры: изображение → numpy BGR)
+        # Генератор кадров: имитация (FrameGenerator) или веб-камера (WebcamCapture)
         if self._use_simulator:
             from multiprocess_prototype.utils.frame_generator import FrameGenerator
 
-            image_path = self.get_config("simulator_image_path")
+            image_path = app_cfg.get("simulator_image_path")
             self._generator = FrameGenerator(
                 self._width, self._height, image_path=image_path
             )
         else:
-            self._generator = None
-            self._log_warning("Real camera (cv2) not implemented, use_simulator=True")
+            from multiprocess_prototype.utils.webcam_capture import WebcamCapture
 
-        # Shared Memory: создаётся из config["memory"] или fallback в process_runner
-        mm = self.memory_manager
-        if mm:
-            # Использовать память из fallback (process_runner), если уже есть
-            md = mm.get_memory_data(self.name, "camera_frame")
-            if not md or not md.get("handles"):
-                memory_cfg = self.get_config("memory")
-                if memory_cfg and isinstance(memory_cfg, dict):
-                    names = memory_cfg.get("names", {})
-                    coll = memory_cfg.get("coll", 2)
-                    if names:
-                        mm.create_memory_dict(self.name, names, coll)
-                    else:
-                        mm.create_memory_dict(
-                            self.name,
-                            {"camera_frame": (1, (self._height, self._width, 3), "uint8")},
-                            coll=2,
-                        )
-                else:
-                    mm.create_memory_dict(
-                        self.name,
-                        {"camera_frame": (1, (self._height, self._width, 3), "uint8")},
-                        coll=2,
-                    )
-        else:
+            try:
+                self._generator = WebcamCapture(
+                    self._width, self._height, device_id=self._device_id
+                )
+                self._log_info(f"WebcamCapture: device_id={self._device_id}")
+            except (ImportError, RuntimeError) as e:
+                self._generator = None
+                self._log_warning(f"WebcamCapture failed: {e}. Use use_simulator=True")
+
+        # Shared Memory: создаётся фреймворком из config["memory"] в process_runner
+        if not self.memory_manager:
             self._log_warning("MemoryManager not available, shared memory disabled")
 
         # Регистрация команд
@@ -183,18 +170,24 @@ class CameraProcess(ProcessModule):
     def _cmd_set_resolution(self, data):
         self._width = data.get("width", self._width)
         self._height = data.get("height", self._height)
-        if self._use_simulator and self._generator:
-            from multiprocess_prototype.utils.frame_generator import FrameGenerator
+        if self._generator:
+            if self._use_simulator:
+                from multiprocess_prototype.utils.frame_generator import FrameGenerator
 
-            image_path = self.get_config("simulator_image_path")
-            self._generator = FrameGenerator(
-                self._width, self._height, image_path=image_path
-            )
+                app_cfg = self.get_config("config") or {}
+                image_path = app_cfg.get("simulator_image_path")
+                self._generator = FrameGenerator(
+                    self._width, self._height, image_path=image_path
+                )
+            else:
+                self._generator.set_resolution(self._width, self._height)
         self._log_info(f"Resolution set to {self._width}x{self._height}")
         return {"status": "ok"}
 
     def shutdown(self) -> bool:
         self._log_info("CameraProcess shutting down...")
+        if self._generator and hasattr(self._generator, "close"):
+            self._generator.close()
         if self.memory_manager:
             self.memory_manager.close_all("camera")
         self.is_initialized = False

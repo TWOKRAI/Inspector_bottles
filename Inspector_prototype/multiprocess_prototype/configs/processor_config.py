@@ -30,16 +30,7 @@ class ProcessorConfig(ProcessConfigBase):
 
     def build(self) -> tuple[str, dict]:
         """HasBuild: (name, proc_dict) для launcher.add_process(*process(ProcessorConfig()))."""
-        memory = {
-            "names": {
-                "processor_mask": (
-                    1,
-                    (self.resolution_height, self.resolution_width, 3),
-                    "uint8",
-                ),
-            },
-            "coll": 2,
-        }
+        memory = {"processor_mask": (self.resolution_height, self.resolution_width, 3), "coll": 2}
         proc_dict = self._build_proc_dict(
             "multiprocess_prototype.processes.processor_process.ProcessorProcess",
             priority="high",
