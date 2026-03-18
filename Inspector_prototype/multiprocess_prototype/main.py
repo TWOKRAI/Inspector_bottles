@@ -42,6 +42,7 @@ def main() -> int:
     from multiprocess_framework.refactored.modules.data_schema_module import process
     from multiprocess_prototype.configs import (
         CameraConfig,
+        DatabaseConfig,
         ProcessorConfig,
         RendererConfig,
         RobotConfig,
@@ -54,16 +55,13 @@ def main() -> int:
     from multiprocess_prototype.prefs import get_camera_type
     camera_type = get_camera_type()
 
-    # Порядок: Camera создаёт shm первым, затем Processor, Renderer, Robot, GUI
+    # Порядок: Camera создаёт shm первым, затем Processor, Renderer, Robot, Database, GUI
     launcher.add_process(*process(CameraConfig(camera_type=camera_type)))
     launcher.add_process(*process(ProcessorConfig()))
     launcher.add_process(*process(RendererConfig()))
     launcher.add_process(*process(RobotConfig()))
+    launcher.add_process(*process(DatabaseConfig()))
     launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
-
-    # Опционально: процесс с БД (sql_module). Раскомментировать при необходимости:
-    # from multiprocess_prototype.configs import DatabaseConfig
-    # launcher.add_process(*process(DatabaseConfig()))
 
     launcher.run()
     return 0

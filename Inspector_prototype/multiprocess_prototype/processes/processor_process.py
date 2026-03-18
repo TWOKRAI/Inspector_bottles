@@ -23,6 +23,7 @@ from multiprocess_framework.refactored.modules.worker_module import (
     ThreadConfig,
     ExecutionMode,
 )
+from multiprocess_prototype.database.schema_1 import DetectionSchema
 from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
 
 
@@ -38,6 +39,7 @@ class ProcessorProcess(ProcessModule):
         # Параметры из конфига (BGR для детекции цвета)
         app_cfg = self.get_config("config") or {}
         self._min_area = app_cfg.get("min_area", 500)
+        self._max_area = app_cfg.get("max_area", 50000)  # 0 = без ограничения
         self._target_width = app_cfg.get("resolution_width", 640)
         self._target_height = app_cfg.get("resolution_height", 480)
         self._color_lower = np.array(
@@ -50,6 +52,7 @@ class ProcessorProcess(ProcessModule):
         # Регистрация команд
         self.command_manager.register_command("set_color_range", self._cmd_set_color_range)
         self.command_manager.register_command("set_min_area", self._cmd_set_min_area)
+        self.command_manager.register_command("set_max_area", self._cmd_set_max_area)
 
         # Shared Memory: создаётся фреймворком из config["memory"] в process_runner
         if not self.memory_manager:
@@ -63,7 +66,7 @@ class ProcessorProcess(ProcessModule):
 
         self._log_info(
             f"ProcessorProcess ready: color_lower={self._color_lower.tolist()}, "
-            f"color_upper={self._color_upper.tolist()}, min_area={self._min_area}"
+            f"color_upper={self._color_upper.tolist()}, min_area={self._min_area}, max_area={self._max_area}"
         )
 
     def _processing_worker(self, stop_event, pause_event):
@@ -107,7 +110,8 @@ class ProcessorProcess(ProcessModule):
             self._record_metric("processor.detections_count", value=len(detections))
             self._log_info(
                 f"[PERF] processor: frame={data.get('frame_id', 0)}, "
-                f"processing_time={processing_time*1000:.1f}ms, detections={len(detections)}"
+                f"processing_time={processing_time*1000:.1f}ms, detections={len(detections)}",
+                module="processor_frames",
             )
 
     def _read_frame_from_message(self, msg) -> tuple:
@@ -121,7 +125,10 @@ class ProcessorProcess(ProcessModule):
         data = msg_dict.get("data", {})
         frame_id_log = data.get("frame_id", 0)
         if frame_id_log <= 3 or frame_id_log % 50 == 0:
-            self._log_info(f"[DEBUG] processor: frame_ready received frame_id={frame_id_log}")
+            self._log_info(
+                f"[DEBUG] processor: frame_ready received frame_id={frame_id_log}",
+                module="processor_frames",
+            )
         shm_index = data.get("shm_index", 0)
         width = data.get("width", 640)
         height = data.get("height", 480)
@@ -136,7 +143,10 @@ class ProcessorProcess(ProcessModule):
         if frame is None and shm_actual_name:
             frame = read_frame_from_shm(shm_actual_name, width, height)
         if frame is None:
-            self._log_warning(f"[DEBUG] processor: frame is None for frame_id={frame_id_log}")
+            self._log_warning(
+                f"[DEBUG] processor: frame is None for frame_id={frame_id_log}",
+                module="processor_frames",
+            )
         return frame, data
 
     def _write_mask_to_shm(self, mask) -> tuple:
@@ -178,6 +188,31 @@ class ProcessorProcess(ProcessModule):
         )
         self.send_message("renderer", result_msg.to_dict())
 
+        # Отправка детекций в БД (payload по DetectionSchema)
+        if detections:
+            timestamp = data.get("timestamp", time.time())
+            frame_id = data.get("frame_id", 0)
+            frame_name = f"frame_{frame_id}"
+            detection_rows = []
+            for d in detections:
+                bbox, center, area = d["bbox"], d["center"], d["area"]
+                row = DetectionSchema(
+                    timestamp=timestamp,
+                    frame_name=frame_name,
+                    frame_id=frame_id,
+                    x1=bbox[0], y1=bbox[1], x2=bbox[2], y2=bbox[3],
+                    center_x=center[0], center_y=center[1],
+                    area=area,
+                ).model_dump(exclude_none=True, exclude={"id"})
+                detection_rows.append(row)
+            db_msg = self._msg.command(
+                targets=["database"],
+                command="db.save_detections",
+                args={"detections": detection_rows},
+                data={},
+            )
+            self.send_message("database", db_msg.to_dict())
+
     def _send_feedback_to_camera(self, frame_id: int, processing_time: float):
         """Обратная связь в Camera (frame_processed)."""
         feedback = self._msg.event(
@@ -205,18 +240,22 @@ class ProcessorProcess(ProcessModule):
         detections = []
         ys, xs = np.where(mask_binary > 0)
         if len(ys) >= self._min_area:
-            x_min, x_max = int(xs.min()), int(xs.max())
-            y_min, y_max = int(ys.min()), int(ys.max())
             area = int(len(ys))
-            cx = (x_min + x_max) // 2
-            cy = (y_min + y_max) // 2
-            detections.append(
-                {
-                    "bbox": [x_min, y_min, x_max, y_max],
-                    "center": [cx, cy],
-                    "area": area,
-                }
-            )
+            # Фильтр по max_area: 0 = без ограничения
+            if self._max_area > 0 and area > self._max_area:
+                pass  # не добавляем
+            else:
+                x_min, x_max = int(xs.min()), int(xs.max())
+                y_min, y_max = int(ys.min()), int(ys.max())
+                cx = (x_min + x_max) // 2
+                cy = (y_min + y_max) // 2
+                detections.append(
+                    {
+                        "bbox": [x_min, y_min, x_max, y_max],
+                        "center": [cx, cy],
+                        "area": area,
+                    }
+                )
 
         # Контуры через cv2.findContours
         contours = []
@@ -259,6 +298,12 @@ class ProcessorProcess(ProcessModule):
         self._min_area = max(10, min(10000, int(new_val)))
         self._log_info(f"Min area set to {self._min_area}")
         return {"status": "ok", "min_area": self._min_area}
+
+    def _cmd_set_max_area(self, data):
+        new_val = data.get("max_area", self._max_area)
+        self._max_area = max(0, min(500000, int(new_val)))
+        self._log_info(f"Max area set to {self._max_area} (0=no limit)")
+        return {"status": "ok", "max_area": self._max_area}
 
     def shutdown(self) -> bool:
         self._log_info("ProcessorProcess shutting down...")

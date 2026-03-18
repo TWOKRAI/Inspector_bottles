@@ -29,6 +29,9 @@ class ProcessorConfig(ProcessConfigBase):
     min_area: Annotated[
         int, FieldMeta("Мин. площадь пятна", min=10, max=10000)
     ] = 500
+    max_area: Annotated[
+        int, FieldMeta("Макс. площадь пятна (0=без ограничения)", min=0, max=500000)
+    ] = 50000
     color_lower: list = [0, 0, 150]  # нижняя граница BGR для красного
     color_upper: list = [100, 100, 255]  # верхняя граница BGR для красного
 

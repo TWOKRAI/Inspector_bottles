@@ -353,6 +353,34 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         return self.console_manager.get_adapter() if self.console_manager else None
 
     # ========================================================================
+    # ЛОГИРОВАНИЕ (модуль = имя процесса для маршрутизации в отдельные файлы)
+    # ========================================================================
+
+    def _log(self, level: str, message: str, **kwargs) -> None:
+        kwargs.setdefault('module', self.name)
+        super()._log(level, message, **kwargs)
+
+    def _log_debug(self, message: str, **kwargs) -> None:
+        kwargs.setdefault('module', self.name)
+        super()._log_debug(message, **kwargs)
+
+    def _log_info(self, message: str, **kwargs) -> None:
+        kwargs.setdefault('module', self.name)
+        super()._log_info(message, **kwargs)
+
+    def _log_warning(self, message: str, **kwargs) -> None:
+        kwargs.setdefault('module', self.name)
+        super()._log_warning(message, **kwargs)
+
+    def _log_error(self, message: str, **kwargs) -> None:
+        kwargs.setdefault('module', self.name)
+        super()._log_error(message, **kwargs)
+
+    def _log_critical(self, message: str, **kwargs) -> None:
+        kwargs.setdefault('module', self.name)
+        super()._log_critical(message, **kwargs)
+
+    # ========================================================================
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     # ========================================================================
     

@@ -179,17 +179,24 @@ class InspectorWindow(QMainWindow):
 
         control_panel.addWidget(color_group)
 
-        # Мин. площадь контура
-        area_group = QGroupBox("Мин. площадь")
+        # Мин. / макс. площадь контура
+        area_group = QGroupBox("Площадь пятна")
         area_layout = QVBoxLayout()
         area_group.setLayout(area_layout)
-        self._area_label = QLabel("500 px")
+        self._area_label = QLabel("Мин: 500 px")
         self._area_slider = QSlider(Qt.Horizontal)
         self._area_slider.setRange(10, 5000)
         self._area_slider.setValue(500)
         self._area_slider.valueChanged.connect(self._on_min_area_changed)
         area_layout.addWidget(self._area_label)
         area_layout.addWidget(self._area_slider)
+        self._max_area_label = QLabel("Макс: 50000 px (0=без огр.)")
+        self._max_area_slider = QSlider(Qt.Horizontal)
+        self._max_area_slider.setRange(0, 50000)
+        self._max_area_slider.setValue(50000)
+        self._max_area_slider.valueChanged.connect(self._on_max_area_changed)
+        area_layout.addWidget(self._max_area_label)
+        area_layout.addWidget(self._max_area_slider)
         control_panel.addWidget(area_group)
 
         # Чекбоксы отображения (отправляют команды в renderer)
@@ -452,8 +459,12 @@ class InspectorWindow(QMainWindow):
         )
 
     def _on_min_area_changed(self, value: int):
-        self._area_label.setText(f"{value} px")
+        self._area_label.setText(f"Мин: {value} px")
         self.process.gui_set_min_area(value)
+
+    def _on_max_area_changed(self, value: int):
+        self._max_area_label.setText(f"Макс: {value} px" + (" (без огр.)" if value == 0 else ""))
+        self.process.gui_set_max_area(value)
 
     def _on_show_original_changed(self, state):
         checked = state == Qt.Checked

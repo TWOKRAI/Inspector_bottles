@@ -176,10 +176,21 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         return LogConfig()
 
     def _setup_channels(self):
-        """Создать каналы из конфига и зарегистрировать в CRM registry."""
+        """Создать каналы из конфига и зарегистрировать в CRM registry.
+
+        - channels: основные каналы (system_file, messages_file, console)
+        - modules: отдельные файлы для модулей (database, processor, frames и т.д.)
+        """
         for channel_name, channel_config in self.config.channels.items():
             if channel_config.enabled:
                 self._setup_channel(channel_name, channel_config)
+
+        # Автосоздание каналов для модулей из config.modules
+        for module_name, module_config in self.config.modules.items():
+            if getattr(module_config, 'enabled', True) and getattr(
+                module_config, 'file_path', None
+            ):
+                self._setup_module_channel(module_name, module_config.file_path)
 
     def _setup_channel(self, channel_name: str, channel_config: ChannelConfig):
         try:

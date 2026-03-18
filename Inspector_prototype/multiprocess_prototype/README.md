@@ -126,7 +126,7 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 |------------|----------|
 | `INSPECTOR_CAMERA_TYPE` | Тип камеры: simulator, webcam, hikvision |
 | `INSPECTOR_LOG_LEVEL` | Уровень логов: INFO, DEBUG, WARNING, ERROR |
-| `INSPECTOR_LOG_DIR` | Каталог логов (по умолчанию `logs`) |
+| `INSPECTOR_LOG_DIR` | Каталог логов (по умолчанию `multiprocess_prototype/logs`) |
 | `DISPLAY` | Требуется для GUI (headless CI — тесты с GUI пропускаются) |
 
 ---

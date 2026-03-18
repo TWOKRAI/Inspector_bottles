@@ -255,6 +255,15 @@ class GuiProcess(ProcessModule):
         )
         self.send_message("processor", msg.to_dict())
 
+    def gui_set_max_area(self, max_area: int):
+        msg = self._msg.command(
+            targets=["processor"],
+            command="set_max_area",
+            args={"max_area": max_area},
+            data={"max_area": max_area},
+        )
+        self.send_message("processor", msg.to_dict())
+
     def gui_set_show_original(self, show: bool):
         msg = self._msg.command(
             targets=["renderer"],

@@ -5,15 +5,29 @@
 Централизованные пути для логов, ошибок и сообщений.
 Метрики → StatsManager, логи → LoggerManager, ошибки → ErrorManager.
 Сообщения дублируются в LoggerManager (messages.log) для отладки.
+
+Разделение логов по файлам (через config.modules):
+  - database.log   — записи в БД (процесс database, module="database")
+  - frames.log     — кадры (module="processor_frames")
+  - processor.log  — общие логи процессора
+  - messages.log   — сообщения роутера (module="router_messages")
+  - system.log     — системные события
 """
 
+from pathlib import Path
 from typing import Dict, Any
 import os
+
+# Путь к logs по умолчанию: multiprocess_prototype/logs
+_DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 
 
 def get_log_dir() -> str:
     """Путь к каталогу логов. Можно переопределить через INSPECTOR_LOG_DIR."""
-    return os.environ.get("INSPECTOR_LOG_DIR", "logs")
+    env_path = os.environ.get("INSPECTOR_LOG_DIR")
+    if env_path:
+        return env_path
+    return str(_DEFAULT_LOG_DIR)
 
 
 def get_default_managers_config(log_dir: str | None = None) -> Dict[str, Any]:
@@ -91,6 +105,41 @@ def get_default_managers_config(log_dir: str | None = None) -> Dict[str, Any]:
                     "enabled": True,
                     "file_path": os.path.join(base, "messages.log"),
                     "min_level": "DEBUG",
+                },
+                "database": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "database.log"),
+                    "min_level": "INFO",
+                },
+                "processor": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "processor.log"),
+                    "min_level": "INFO",
+                },
+                "processor_frames": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "frames.log"),
+                    "min_level": "DEBUG",
+                },
+                "camera": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "camera.log"),
+                    "min_level": "INFO",
+                },
+                "renderer": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "renderer.log"),
+                    "min_level": "INFO",
+                },
+                "robot": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "robot.log"),
+                    "min_level": "INFO",
+                },
+                "gui": {
+                    "enabled": True,
+                    "file_path": os.path.join(base, "gui.log"),
+                    "min_level": "INFO",
                 },
             },
         },
