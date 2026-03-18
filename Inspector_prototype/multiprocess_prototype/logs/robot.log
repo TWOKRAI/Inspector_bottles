@@ -201,3 +201,135 @@
 2026-03-18 13:13:39,875 [INFO] robot: REJECT #5: frame=91, pos=(568, 241), area=5191
 2026-03-18 13:13:40,898 [INFO] robot: REJECT #6: frame=91, pos=(568, 241), area=5191
 2026-03-18 13:13:40,898 [INFO] robot: REJECT #7: frame=115, pos=(319, 239), area=14626
+2026-03-18 14:53:03,799 [INFO] robot: Process state registered: robot
+2026-03-18 14:53:03,799 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-18 14:53:03,800 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-18 14:53:03,800 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-18 14:53:03,800 [INFO] robot: Process 'robot' initialized successfully
+2026-03-18 14:53:24,805 [INFO] robot: REJECT #1: frame=97, pos=(430, 219), area=4723
+2026-03-18 14:53:25,828 [INFO] robot: REJECT #2: frame=97, pos=(430, 219), area=4723
+2026-03-18 14:53:25,828 [INFO] robot: REJECT #3: frame=98, pos=(378, 239), area=35945
+2026-03-18 14:53:26,849 [INFO] robot: REJECT #4: frame=98, pos=(378, 239), area=35945
+2026-03-18 14:53:26,849 [INFO] robot: REJECT #5: frame=110, pos=(379, 239), area=41608
+2026-03-18 14:53:27,873 [INFO] robot: REJECT #6: frame=110, pos=(379, 239), area=41608
+2026-03-18 14:53:27,873 [INFO] robot: REJECT #7: frame=17, pos=(373, 239), area=9313
+2026-03-18 14:53:28,897 [INFO] robot: REJECT #8: frame=17, pos=(373, 239), area=9313
+2026-03-18 14:53:28,897 [INFO] robot: REJECT #9: frame=47, pos=(378, 239), area=31229
+2026-03-18 14:53:29,919 [INFO] robot: REJECT #10: frame=47, pos=(378, 239), area=31229
+2026-03-18 14:53:29,919 [INFO] robot: REJECT #11: frame=77, pos=(379, 239), area=33603
+2026-03-18 14:53:30,942 [INFO] robot: REJECT #12: frame=77, pos=(379, 239), area=33603
+2026-03-18 14:53:30,943 [INFO] robot: REJECT #13: frame=100, pos=(380, 239), area=30163
+2026-03-18 14:53:31,966 [INFO] robot: REJECT #14: frame=100, pos=(380, 239), area=30163
+2026-03-18 14:53:31,966 [INFO] robot: REJECT #15: frame=9, pos=(377, 239), area=30099
+2026-03-18 14:53:32,989 [INFO] robot: REJECT #16: frame=9, pos=(377, 239), area=30099
+2026-03-18 14:53:32,989 [INFO] robot: REJECT #17: frame=47, pos=(381, 239), area=28251
+2026-03-18 14:53:33,012 [INFO] robot: REJECT #18: frame=47, pos=(381, 239), area=28251
+2026-03-18 14:53:34,012 [INFO] robot: REJECT #19: frame=77, pos=(379, 239), area=30170
+2026-03-18 14:53:34,036 [INFO] robot: REJECT #20: frame=77, pos=(379, 239), area=30170
+2026-03-18 14:53:35,036 [INFO] robot: REJECT #21: frame=107, pos=(377, 239), area=30352
+2026-03-18 14:53:35,059 [INFO] robot: REJECT #22: frame=107, pos=(377, 239), area=30352
+2026-03-18 14:53:36,059 [INFO] robot: REJECT #23: frame=16, pos=(377, 239), area=30502
+2026-03-18 14:53:36,082 [INFO] robot: REJECT #24: frame=16, pos=(377, 239), area=30502
+2026-03-18 14:53:37,082 [INFO] robot: REJECT #25: frame=47, pos=(381, 239), area=31505
+2026-03-18 14:53:37,107 [INFO] robot: REJECT #26: frame=47, pos=(381, 239), area=31505
+2026-03-18 14:53:38,107 [INFO] robot: REJECT #27: frame=77, pos=(379, 239), area=31311
+2026-03-18 14:53:38,130 [INFO] robot: REJECT #28: frame=77, pos=(379, 239), area=31311
+2026-03-18 14:53:39,130 [INFO] robot: REJECT #29: frame=107, pos=(378, 239), area=30500
+2026-03-18 14:53:39,153 [INFO] robot: REJECT #30: frame=107, pos=(378, 239), area=30500
+2026-03-18 14:53:40,153 [INFO] robot: REJECT #31: frame=114, pos=(376, 239), area=30609
+2026-03-18 14:53:40,176 [INFO] robot: REJECT #32: frame=114, pos=(376, 239), area=30609
+2026-03-18 14:53:41,176 [INFO] robot: REJECT #33: frame=0, pos=(377, 239), area=30434
+2026-03-18 14:53:41,199 [INFO] robot: REJECT #34: frame=0, pos=(377, 239), area=30434
+2026-03-18 14:53:42,199 [INFO] robot: REJECT #35: frame=8, pos=(379, 239), area=30232
+2026-03-18 14:53:42,221 [INFO] robot: REJECT #36: frame=8, pos=(379, 239), area=30232
+2026-03-18 14:53:43,234 [INFO] robot: REJECT #37: frame=9, pos=(377, 239), area=30235
+2026-03-18 14:53:43,234 [INFO] robot: REJECT #38: frame=9, pos=(377, 239), area=30235
+2026-03-18 14:53:44,247 [INFO] robot: REJECT #39: frame=10, pos=(378, 239), area=30204
+2026-03-18 14:53:44,248 [INFO] robot: REJECT #40: frame=10, pos=(378, 239), area=30204
+2026-03-18 14:53:45,252 [INFO] robot: REJECT #41: frame=11, pos=(379, 239), area=30190
+2026-03-18 14:53:45,252 [INFO] robot: REJECT #42: frame=11, pos=(379, 239), area=30190
+2026-03-18 14:53:46,263 [INFO] robot: REJECT #43: frame=12, pos=(377, 239), area=30514
+2026-03-18 14:53:46,264 [INFO] robot: REJECT #44: frame=12, pos=(377, 239), area=30514
+2026-03-18 14:53:47,275 [INFO] robot: REJECT #45: frame=13, pos=(377, 239), area=30246
+2026-03-18 14:53:47,275 [INFO] robot: REJECT #46: frame=13, pos=(377, 239), area=30246
+2026-03-18 14:53:48,284 [INFO] robot: REJECT #47: frame=14, pos=(378, 239), area=30611
+2026-03-18 14:53:48,284 [INFO] robot: REJECT #48: frame=14, pos=(378, 239), area=30611
+2026-03-18 14:53:49,299 [INFO] robot: REJECT #49: frame=15, pos=(377, 239), area=30300
+2026-03-18 14:53:49,299 [INFO] robot: REJECT #50: frame=15, pos=(377, 239), area=30300
+2026-03-18 14:53:50,315 [INFO] robot: REJECT #51: frame=16, pos=(378, 239), area=30013
+2026-03-18 14:53:50,315 [INFO] robot: REJECT #52: frame=16, pos=(378, 239), area=30013
+2026-03-18 14:53:51,329 [INFO] robot: REJECT #53: frame=17, pos=(377, 239), area=30217
+2026-03-18 14:53:51,329 [INFO] robot: REJECT #54: frame=17, pos=(377, 239), area=30217
+2026-03-18 14:53:52,343 [INFO] robot: REJECT #55: frame=18, pos=(379, 239), area=30478
+2026-03-18 14:53:52,344 [INFO] robot: REJECT #56: frame=18, pos=(379, 239), area=30478
+2026-03-18 14:53:53,354 [INFO] robot: REJECT #57: frame=19, pos=(379, 239), area=29761
+2026-03-18 14:53:53,354 [INFO] robot: REJECT #58: frame=19, pos=(379, 239), area=29761
+2026-03-18 14:53:54,367 [INFO] robot: REJECT #59: frame=20, pos=(377, 239), area=30055
+2026-03-18 14:53:54,367 [INFO] robot: REJECT #60: frame=20, pos=(377, 239), area=30055
+2026-03-18 14:53:55,384 [INFO] robot: REJECT #61: frame=21, pos=(377, 239), area=29715
+2026-03-18 14:53:56,384 [INFO] robot: REJECT #62: frame=21, pos=(377, 239), area=29715
+2026-03-18 14:53:56,392 [INFO] robot: REJECT #63: frame=22, pos=(379, 239), area=29739
+2026-03-18 14:53:57,392 [INFO] robot: REJECT #64: frame=22, pos=(379, 239), area=29739
+2026-03-18 14:53:57,402 [INFO] robot: REJECT #65: frame=23, pos=(377, 239), area=29070
+2026-03-18 14:53:58,402 [INFO] robot: REJECT #66: frame=23, pos=(377, 239), area=29070
+2026-03-18 14:53:58,413 [INFO] robot: REJECT #67: frame=24, pos=(379, 239), area=28841
+2026-03-18 14:53:59,413 [INFO] robot: REJECT #68: frame=24, pos=(379, 239), area=28841
+2026-03-18 17:20:38,257 [INFO] robot: Process state registered: robot
+2026-03-18 17:20:38,257 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-18 17:20:38,257 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-18 17:20:38,257 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-18 17:20:38,257 [INFO] robot: Process 'robot' initialized successfully
+2026-03-18 17:20:44,006 [INFO] robot: REJECT #1: frame=67, pos=(330, 239), area=12929
+2026-03-18 17:20:44,028 [INFO] robot: REJECT #2: frame=67, pos=(330, 239), area=12929
+2026-03-18 17:20:45,028 [INFO] robot: REJECT #3: frame=68, pos=(364, 239), area=48369
+2026-03-18 17:20:45,052 [INFO] robot: REJECT #4: frame=68, pos=(364, 239), area=48369
+2026-03-18 17:20:46,052 [INFO] robot: REJECT #5: frame=77, pos=(359, 239), area=23265
+2026-03-18 17:20:46,076 [INFO] robot: REJECT #6: frame=77, pos=(359, 239), area=23265
+2026-03-18 17:20:47,076 [INFO] robot: REJECT #7: frame=94, pos=(371, 239), area=46746
+2026-03-18 17:20:47,099 [INFO] robot: REJECT #8: frame=94, pos=(371, 239), area=46746
+2026-03-18 17:20:48,099 [INFO] robot: REJECT #9: frame=3, pos=(379, 239), area=34416
+2026-03-18 17:20:48,122 [INFO] robot: REJECT #10: frame=3, pos=(379, 239), area=34416
+2026-03-18 17:20:49,123 [INFO] robot: REJECT #11: frame=33, pos=(389, 239), area=25814
+2026-03-18 17:20:49,146 [INFO] robot: REJECT #12: frame=33, pos=(389, 239), area=25814
+2026-03-18 17:20:50,146 [INFO] robot: REJECT #13: frame=64, pos=(414, 239), area=19911
+2026-03-18 17:20:50,169 [INFO] robot: REJECT #14: frame=64, pos=(414, 239), area=19911
+2026-03-18 17:20:51,169 [INFO] robot: REJECT #15: frame=95, pos=(440, 239), area=13190
+2026-03-18 17:20:51,192 [INFO] robot: REJECT #16: frame=95, pos=(440, 239), area=13190
+2026-03-18 17:20:52,192 [INFO] robot: REJECT #17: frame=4, pos=(393, 239), area=25248
+2026-03-18 17:20:52,215 [INFO] robot: REJECT #18: frame=4, pos=(393, 239), area=25248
+2026-03-18 17:20:53,215 [INFO] robot: REJECT #19: frame=35, pos=(375, 239), area=28915
+2026-03-18 17:20:53,237 [INFO] robot: REJECT #20: frame=35, pos=(375, 239), area=28915
+2026-03-18 17:20:54,237 [INFO] robot: REJECT #21: frame=66, pos=(375, 239), area=36628
+2026-03-18 17:20:54,261 [INFO] robot: REJECT #22: frame=66, pos=(375, 239), area=36628
+2026-03-18 17:20:55,261 [INFO] robot: REJECT #23: frame=94, pos=(407, 239), area=27176
+2026-03-18 17:20:55,284 [INFO] robot: REJECT #24: frame=94, pos=(407, 239), area=27176
+2026-03-18 17:20:56,284 [INFO] robot: REJECT #25: frame=4, pos=(400, 239), area=26954
+2026-03-18 17:20:56,308 [INFO] robot: REJECT #26: frame=4, pos=(400, 239), area=26954
+2026-03-18 17:20:57,308 [INFO] robot: REJECT #27: frame=20, pos=(385, 239), area=35455
+2026-03-18 17:20:57,331 [INFO] robot: REJECT #28: frame=20, pos=(385, 239), area=35455
+2026-03-18 17:20:58,331 [INFO] robot: REJECT #29: frame=54, pos=(388, 239), area=40887
+2026-03-18 17:20:58,354 [INFO] robot: REJECT #30: frame=54, pos=(388, 239), area=40887
+2026-03-18 17:20:59,354 [INFO] robot: REJECT #31: frame=99, pos=(399, 239), area=16737
+2026-03-18 17:20:59,377 [INFO] robot: REJECT #32: frame=99, pos=(399, 239), area=16737
+2026-03-18 17:21:00,377 [INFO] robot: REJECT #33: frame=9, pos=(403, 239), area=13510
+2026-03-18 17:21:00,400 [INFO] robot: REJECT #34: frame=9, pos=(403, 239), area=13510
+2026-03-18 17:21:01,400 [INFO] robot: REJECT #35: frame=40, pos=(396, 239), area=7441
+2026-03-18 17:21:01,423 [INFO] robot: REJECT #36: frame=40, pos=(396, 239), area=7441
+2026-03-18 17:21:02,423 [INFO] robot: REJECT #37: frame=70, pos=(396, 239), area=7393
+2026-03-18 17:21:02,446 [INFO] robot: REJECT #38: frame=70, pos=(396, 239), area=7393
+2026-03-18 17:21:03,446 [INFO] robot: REJECT #39: frame=101, pos=(397, 239), area=7269
+2026-03-18 17:21:03,470 [INFO] robot: REJECT #40: frame=101, pos=(397, 239), area=7269
+2026-03-18 17:21:04,470 [INFO] robot: REJECT #41: frame=11, pos=(395, 239), area=7684
+2026-03-18 17:21:04,492 [INFO] robot: REJECT #42: frame=11, pos=(395, 239), area=7684
+2026-03-18 17:21:05,492 [INFO] robot: REJECT #43: frame=42, pos=(397, 239), area=7132
+2026-03-18 17:21:05,515 [INFO] robot: REJECT #44: frame=42, pos=(397, 239), area=7132
+2026-03-18 17:21:06,515 [INFO] robot: REJECT #45: frame=73, pos=(416, 239), area=7221
+2026-03-18 17:21:07,539 [INFO] robot: REJECT #46: frame=73, pos=(416, 239), area=7221
+2026-03-18 17:21:07,539 [INFO] robot: REJECT #47: frame=104, pos=(395, 239), area=7304
+2026-03-18 17:21:08,561 [INFO] robot: REJECT #48: frame=104, pos=(395, 239), area=7304
+2026-03-18 17:21:08,561 [INFO] robot: REJECT #49: frame=13, pos=(400, 239), area=7273
+2026-03-18 17:23:37,207 [INFO] robot: Process state registered: robot
+2026-03-18 17:23:37,207 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-18 17:23:37,207 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-18 17:23:37,207 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-18 17:23:37,207 [INFO] robot: Process 'robot' initialized successfully

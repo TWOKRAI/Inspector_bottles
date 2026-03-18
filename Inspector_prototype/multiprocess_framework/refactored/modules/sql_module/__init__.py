@@ -13,6 +13,7 @@ Dual sync/async через адаптеры, Unit of Work, fork-safety, typed co
 from .config import SQLManagerConfig
 from .commands import DBExecuteCommand, DBInsertCommand, DBQueryCommand
 from .core import SQLManager, GenericRepository, SQLAlchemyUnitOfWork, AsyncSQLAlchemyUnitOfWork
+from .export import TableExporter, ExportFormat
 from .interfaces import (
     IAsyncEngineAdapter,
     IAsyncUnitOfWork,
@@ -28,6 +29,8 @@ from .interfaces import (
 __all__ = [
     "SQLManager",
     "GenericRepository",
+    "TableExporter",
+    "ExportFormat",
     "SQLAlchemyUnitOfWork",
     "AsyncSQLAlchemyUnitOfWork",
     "SQLManagerConfig",

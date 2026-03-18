@@ -1,6 +1,13 @@
 # multiprocess_prototype\database\utils.py
-"""Утилиты для работы с БД: создание таблиц из схемы."""
-from typing import Any, Dict, Type
+"""Утилиты для работы с БД: создание таблиц из схемы, экспорт."""
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Type
+
+from multiprocess_framework.refactored.modules.sql_module.export import (
+    TableExporter,
+    ExportFormat,
+)
 
 
 _SQLITE_TYPE_MAP = {
@@ -47,3 +54,58 @@ def build_create_table_sql(
 
     if_not_exists_clause = " IF NOT EXISTS" if if_not_exists else ""
     return f'CREATE TABLE{if_not_exists_clause} "{table_name}" (\n' + ",\n".join(parts) + "\n)"
+
+
+def _ts_fmt(v: Any) -> str:
+    if v is None:
+        return ""
+    try:
+        return datetime.fromtimestamp(float(v)).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    except (ValueError, OSError, TypeError):
+        return str(v)
+
+
+def create_detection_exporter() -> TableExporter:
+    """TableExporter, настроенный для схемы детекций (читаемый формат)."""
+    return TableExporter(
+        columns=["id", "timestamp", "frame_name", "frame_id", "x1", "y1", "x2", "y2", "center_x", "center_y", "area"],
+        readable_blocks=[
+            ("ID", lambda r: str(r.get("id", ""))),
+            ("Время", lambda r: _ts_fmt(r.get("timestamp"))),
+            ("Кадр", lambda r: f"{r.get('frame_name', '')} (id={r.get('frame_id', '')})"),
+            ("Bbox", lambda r: f"({r.get('x1')}, {r.get('y1')}) - ({r.get('x2')}, {r.get('y2')})"),
+            ("Центр", lambda r: f"({r.get('center_x')}, {r.get('center_y')})"),
+            ("Площадь", lambda r: f"{r.get('area', '')} px"),
+        ],
+    )
+
+
+def read_from_sqlite(
+    db_path: Path,
+    table: str = "detections",
+    order_by: str = "id",
+    offset: int = 0,
+    limit: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Прочитать строки из SQLite (для standalone-скриптов без SQLManager).
+
+    Returns:
+        List[Dict] — строки
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    sql = f'SELECT * FROM "{table}" ORDER BY "{order_by}"'
+    params = []
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    if offset > 0:
+        sql += " OFFSET ?"
+        params.append(offset)
+    cur = conn.execute(sql, params)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows

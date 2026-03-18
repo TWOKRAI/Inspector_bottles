@@ -4,6 +4,11 @@ GuiProcess — отображение видео и управление (PyQt5)
 
 Consumer rendered_frame. QTimer для опроса сообщений в главном потоке.
 Без воркеров — PyQt в главном потоке.
+
+Интеграция с frontend_module:
+- Создаёт FrontendManager с RegistersManager (DrawRegisters) и connection_map
+- process.frontend_manager — для доступа к регистрам и конфигу
+- Виджеты могут использовать registers для связи с backend (set_field_value → send)
 """
 
 import sys
@@ -13,6 +18,32 @@ import numpy as np
 from multiprocess_framework.refactored.modules.process_module import ProcessModule
 from multiprocess_framework.refactored.modules.message_module import MessageAdapter
 from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
+
+
+def _create_frontend_manager(process: "GuiProcess", app_cfg: dict):
+    """Создать FrontendManager с регистрами и connection_map для GuiProcess."""
+    try:
+        from shared_registers import DrawRegisters
+        from registers_module import RegistersManager
+        from frontend_module import FrontendManager
+
+        registers = RegistersManager({"draw": DrawRegisters()})
+        connection_map = {"draw": "renderer"}
+        config = {
+            "window": app_cfg,
+            **app_cfg,
+        }
+        fm = FrontendManager(
+            manager_name="GuiFrontend",
+            config=config,
+            registers=registers,
+            router=process,
+            connection_map=connection_map,
+        )
+        fm.initialize()
+        return fm
+    except ImportError:
+        return None
 
 
 class GuiProcess(ProcessModule):
@@ -54,7 +85,12 @@ class GuiProcess(ProcessModule):
 
         app = QApplication(sys.argv)
 
-        # При любом выходе (крестик, Cmd+Q и т.д.) — запрос на остановку всех процессов
+        app_cfg = self.get_config("config") or {}
+        try:
+            self._frontend_manager = _create_frontend_manager(self, app_cfg)
+        except Exception:
+            self._frontend_manager = None
+
         app.aboutToQuit.connect(self.gui_request_shutdown)
 
         self._window = InspectorWindow(
@@ -75,6 +111,9 @@ class GuiProcess(ProcessModule):
         self._stop_timer.start(100)
 
         app.exec_()
+
+        if self._frontend_manager:
+            self._frontend_manager.shutdown()
 
     def _poll_messages(self):
         """Вызывается QTimer. Читает rendered_frame_ready."""

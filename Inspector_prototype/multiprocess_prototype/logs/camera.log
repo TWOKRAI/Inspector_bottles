@@ -8,3 +8,18 @@
 2026-03-18 13:13:33,646 [INFO] camera: UnifiedCameraProcess ready, camera_type=webcam
 2026-03-18 13:13:33,609 [INFO] camera: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
 2026-03-18 13:13:33,609 [INFO] camera: Process 'camera' initialized successfully
+2026-03-18 14:53:03,169 [INFO] camera: Process state registered: camera
+2026-03-18 14:53:03,169 [INFO] camera: UnifiedCameraProcess initializing...
+2026-03-18 14:53:05,389 [INFO] camera: UnifiedCameraProcess ready, camera_type=webcam
+2026-03-18 14:53:05,190 [INFO] camera: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-03-18 14:53:05,190 [INFO] camera: Process 'camera' initialized successfully
+2026-03-18 17:20:37,665 [INFO] camera: Process state registered: camera
+2026-03-18 17:20:37,665 [INFO] camera: UnifiedCameraProcess initializing...
+2026-03-18 17:20:39,933 [INFO] camera: UnifiedCameraProcess ready, camera_type=webcam
+2026-03-18 17:20:39,679 [INFO] camera: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-03-18 17:20:39,679 [INFO] camera: Process 'camera' initialized successfully
+2026-03-18 17:23:36,627 [INFO] camera: Process state registered: camera
+2026-03-18 17:23:36,627 [INFO] camera: UnifiedCameraProcess initializing...
+2026-03-18 17:23:38,826 [INFO] camera: UnifiedCameraProcess ready, camera_type=webcam
+2026-03-18 17:23:38,644 [INFO] camera: Registered 18 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-03-18 17:23:38,644 [INFO] camera: Process 'camera' initialized successfully

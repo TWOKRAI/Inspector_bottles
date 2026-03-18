@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Где что находится
 
-- **Фреймворк**: `Inspector_prototype/multiprocess_framework/refactored/modules/` (15 модулей)
+- **Фреймворк**: `Inspector_prototype/multiprocess_framework/refactored/modules/` (16 модулей + shared_registers)
 - **Архив документации**: `refactored/docs/archived/` — исторические отчёты, **не использовать** при анализе фреймворка
 - **Тестовое приложение**: `Inspector_prototype/multiprocess_prototype/`
 - **Точка входа**: `Inspector_prototype/multiprocess_prototype/main.py`
@@ -31,7 +31,7 @@ alwaysApply: true
 - **Тесты**: pytest, файлы `test_*.py`
 - **Никаких `sys.path.insert`** в production-коде
 
-## 15 модулей и их слои
+## 16 модулей и их слои
 
 ```
 Foundation:    base_manager, data_schema_module, message_module
@@ -40,6 +40,8 @@ Infrastructure: logger_module, error_module, config_module, console_module,
 Communication: dispatch_module, router_module, command_module
 Process:       worker_module, process_module
 Orchestration: process_manager_module
+Frontend:      frontend_module
+Shared:        shared_registers (схемы регистров для backend и frontend)
 ```
 
 ## После каждого изменения

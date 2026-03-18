@@ -4,10 +4,12 @@
 
 Не зависит от конкретных классов регистров: принимает словарь имя -> экземпляр Pydantic-модели.
 Поддерживает get_register, get_field_metadata (включая routing), validate_field_value, model_dump_all/model_validate_all.
+Расширение для frontend: subscribe_all, set_field_value, connection_map для привязки к бэкенду.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .interfaces import IRegistersManager
 
@@ -16,21 +18,134 @@ class RegistersManager:
     """
     Менеджер регистров на основе словаря имя -> экземпляр модели.
     Каждый процесс создаёт свой экземпляр со своим набором регистров.
+    connection_map: привязка фронтенд-регистра к бэкенд-каналу (register_name -> channel_name).
+    send_callback: вызывается при изменении регистра с connection.
     """
 
     def __init__(
         self,
         registers: Optional[Dict[str, Any]] = None,
+        connection_map: Optional[Dict[str, str]] = None,
+        send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = None,
     ):
         """
         Args:
             registers: Словарь {имя_регистра: экземпляр_модели}. Если None — пустой менеджер.
+            connection_map: {register_name: backend_channel} — при изменении отправлять в control_{channel}.
+            send_callback: (channel, register_name, field_name, value, snapshot) — вызов при изменении.
         """
         self._registers: Dict[str, Any] = dict(registers) if registers else {}
+        self._connection_map: Dict[str, str] = dict(connection_map) if connection_map else {}
+        self._send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = send_callback
+        self._global_observers: List[Callable[[str, str, Any], None]] = []
+        self._field_observers: Dict[Tuple[str, str], List[Callable[[Any], None]]] = defaultdict(list)
 
     def get_register(self, name: str) -> Optional[Any]:
         """Получить экземпляр регистра по имени."""
         return self._registers.get(name)
+
+    def set_connection(self, register_name: str, backend_channel: str) -> None:
+        """Привязать регистр к бэкенд-каналу (connection)."""
+        self._connection_map[register_name] = backend_channel
+
+    def set_send_callback(self, callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]]) -> None:
+        """Установить callback для отправки изменений в бэкенд."""
+        self._send_callback = callback
+
+    def subscribe(
+        self,
+        register_name: str,
+        field_name: str,
+        callback: Callable[[Any], None],
+    ) -> None:
+        """Подписать callback(value) на изменение поля."""
+        key = (register_name, field_name)
+        if callback not in self._field_observers[key]:
+            self._field_observers[key].append(callback)
+
+    def unsubscribe(
+        self,
+        register_name: str,
+        field_name: str,
+        callback: Callable[[Any], None],
+    ) -> None:
+        """Отписать callback от поля."""
+        key = (register_name, field_name)
+        try:
+            self._field_observers[key].remove(callback)
+        except ValueError:
+            pass
+
+    def subscribe_all(
+        self,
+        callback: Callable[[str, str, Any], None],
+    ) -> None:
+        """Подписать callback(register_name, field_name, value) на любое изменение."""
+        if callback not in self._global_observers:
+            self._global_observers.append(callback)
+
+    def unsubscribe_all(self, callback: Callable[[str, str, Any], None]) -> None:
+        """Отписать глобальный observer."""
+        try:
+            self._global_observers.remove(callback)
+        except ValueError:
+            pass
+
+    def set_field_value(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        """Установить значение поля и уведомить подписчиков. При connection — вызвать send_callback."""
+        reg = self.get_register(register_name)
+        if reg is None:
+            return False, f"Регистр '{register_name}' не найден"
+        if not hasattr(reg, field_name):
+            return False, f"Поле '{field_name}' не найдено в регистре '{register_name}'"
+        is_valid, err = self.validate_field_value(register_name, field_name, value)
+        if not is_valid:
+            return False, err
+        try:
+            setattr(reg, field_name, value)
+        except Exception as exc:
+            return False, str(exc)
+        self._notify_observers(register_name, field_name, value)
+        if self._send_callback and register_name in self._connection_map:
+            channel = self._connection_map[register_name]
+            full_channel = f"control_{channel}" if not channel.startswith("control_") else channel
+            snapshot = reg.model_dump() if hasattr(reg, "model_dump") else {}
+            try:
+                self._send_callback(full_channel, register_name, field_name, value, snapshot)
+            except Exception:
+                pass
+        return True, None
+
+    def notify_field_changed(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> None:
+        """Уведомить только field-подписчиков (без глобальных и send_callback)."""
+        for cb in list(self._field_observers.get((register_name, field_name), [])):
+            try:
+                cb(value)
+            except Exception:
+                pass
+
+    def _notify_observers(self, register_name: str, field_name: str, value: Any) -> None:
+        """Уведомить field- и global-подписчиков."""
+        for cb in list(self._field_observers.get((register_name, field_name), [])):
+            try:
+                cb(value)
+            except Exception:
+                pass
+        for cb in list(self._global_observers):
+            try:
+                cb(register_name, field_name, value)
+            except Exception:
+                pass
 
     def register_names(self) -> List[str]:
         """Список имён зарегистрированных регистров."""
@@ -70,6 +185,8 @@ class RegistersManager:
             "default": getattr(field_info, "default", None),
             "readonly": extra.get("readonly", False),
             "hidden": extra.get("hidden", False),
+            "transfer_k": extra.get("transfer_k", 1.0),
+            "round_k": extra.get("round_k"),
         }
         if "routing" in extra:
             metadata["routing"] = dict(extra["routing"])

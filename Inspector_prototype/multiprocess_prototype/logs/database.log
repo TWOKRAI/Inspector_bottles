@@ -77,3 +77,18 @@
 2026-03-18 13:13:40,608 [INFO] database: DatabaseProcess: saved 1 detection(s)
 2026-03-18 13:13:40,608 [INFO] database: DatabaseProcess: saved 1 detection(s)
 2026-03-18 13:13:40,608 [INFO] database: DatabaseProcess: saved 1 detection(s)
+2026-03-18 14:53:04,120 [INFO] database: Process state registered: database
+2026-03-18 14:53:04,120 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-18 14:53:04,120 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-18 14:53:04,120 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-18 14:53:04,120 [INFO] database: Process 'database' initialized successfully
+2026-03-18 17:20:38,570 [INFO] database: Process state registered: database
+2026-03-18 17:20:38,570 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-18 17:20:38,570 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-18 17:20:38,570 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-18 17:20:38,571 [INFO] database: Process 'database' initialized successfully
+2026-03-18 17:23:37,521 [INFO] database: Process state registered: database
+2026-03-18 17:23:37,521 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-18 17:23:37,521 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-18 17:23:37,521 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-18 17:23:37,521 [INFO] database: Process 'database' initialized successfully

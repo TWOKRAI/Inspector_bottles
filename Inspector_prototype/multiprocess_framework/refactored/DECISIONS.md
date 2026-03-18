@@ -461,3 +461,55 @@
   - Интеграция через ObservableMixin: logger_module (_log_*), error_module (_track_error), statistics_module (_record_timing).
   - Схемы: data_schema_module.SchemaBase или pydantic.BaseModel.
 - Причина: Переиспользуемое ядро для DatabaseProcess; Clean Architecture; слабая связность через адаптеры.
+
+---
+
+## ADR-033: frontend_module и shared_registers — фундамент UI-фреймворка
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: Нужен UI-фреймворк как конструктор виджетов. ADR-009: gui_module пропускался; теперь этап фронтенда.
+- Решение:
+  - **frontend_module** — модуль в refactored/modules. Интерфейсы: IConfigurableWidget, IWidgetRegistry, IWindowRegistry, IRegistersManager. Структура: core/, schemas/, tests/. Паттерн «виджеты-конструктор».
+  - **shared_registers** — пакет в refactored/modules. Единый источник схем регистров для backend и frontend. DrawRegisters и др. наследуют SchemaBase из data_schema_module.
+  - Схемы и конфиги виджетов — через data_schema_module и config_module.
+  - Реализация компонентов (BaseConfigurableWidget, Slider, Checkbox) — на следующих этапах.
+- Причина: Фундамент без перегрузки. Единые регистры устраняют дублирование App vs backend. Интерфейсы задают контракт до реализации.
+- Отклонённые альтернативы: gui_module внутри framework — оставлено имя frontend_module как более общее.
+
+---
+
+## ADR-034: FrontendManager — единая точка входа (BaseManager)
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: frontend_module нуждался в единой точке входа для интеграции с фреймворком (logger, config, router).
+- Решение:
+  - **FrontendManager(BaseManager, ObservableMixin)** — координация регистров, конфига, окон, потоков
+  - Адаптеры: registers (FrontendRegistersBridge), window_manager, thread_manager
+  - ApplicationCoordinator делегирует в FrontendManager
+- Причина: Единообразие с другими менеджерами, ObservableMixin для _log_*, _record_*, интеграция с config_module.
+- Отклонённые альтернативы: Три отдельных BaseManager (Window, Thread, Config) — избыточно для скелета.
+
+---
+
+## ADR-035: FrontendRegistersBridge — связь frontend с backend
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: RegistersManager (registers_module) не BaseManager. Нужна обёртка для connection_map и send_callback.
+- Решение:
+  - **FrontendRegistersBridge** — реализует IRegistersManager, делегирует в RegistersManager
+  - connection_map: {register_name: channel} — при set_field_value → send через router
+  - send_callback: (channel, register_name, field_name, value, snapshot) → router.send_message(target, msg)
+- Причина: Гибкость: RegistersManager остаётся в registers_module, frontend получает связь с backend.
+- Отклонённые альтернативы: Расширить RegistersManager до BaseManager — нарушает ADR-002.
+
+---
+
+## ADR-036: Конфигурация frontend — hot-reload без перезапуска
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: Требование менять конфигурацию и обновлять UI без закрытия приложения.
+- Решение:
+  - FrontendManager подписывается на config_module.Config (key="*")
+  - При изменении → _on_config_changed → emit_event("config_changed") → WindowManager.update_config()
+  - Окна с методом apply_config(config) получают новый конфиг
+- Причина: Гибкость для масштабирования, единый источник конфига в ConfigManager.

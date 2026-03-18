@@ -130,6 +130,35 @@ class SQLManager(BaseManager, ObservableMixin):
             self.emit_event("db.query.failed", {"sql": sql, "error": str(e)})
             raise
 
+    def query_range(
+        self,
+        table: str,
+        order_by: str = "id",
+        offset: int = 0,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Выборка диапазона строк из таблицы.
+
+        Args:
+            table: Имя таблицы
+            order_by: Колонка для сортировки
+            offset: Смещение (начало диапазона)
+            limit: Макс. количество строк. None — все с offset до конца.
+
+        Returns:
+            List[Dict] — строки
+        """
+        sql = f'SELECT * FROM "{table}" ORDER BY "{order_by}"'
+        params: Dict[str, Any] = {}
+        if limit is not None:
+            sql += " LIMIT :limit"
+            params["limit"] = limit
+        if offset > 0:
+            sql += " OFFSET :offset"
+            params["offset"] = offset
+        return self.query(sql, params if params else None)
+
     def uow(self) -> IUnitOfWork:
         """Контекстный менеджер для транзакций (sync)."""
         from sql_module.core.unit_of_work import SQLAlchemyUnitOfWork

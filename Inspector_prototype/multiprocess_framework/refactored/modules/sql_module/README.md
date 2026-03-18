@@ -127,6 +127,23 @@ command_manager.register_command("db.execute", lambda msg: sql_manager.execute_c
 {"command": "db.insert", "table": "users", "data": {"name": "Alice"}}
 ```
 
+## Экспорт (sql_module.export)
+
+TableExporter — экспорт List[Dict] в файлы:
+
+```python
+from sql_module import SQLManager, TableExporter, ExportFormat
+
+rows = mgr.query_range("detections", offset=0, limit=100)
+exporter = TableExporter(columns=["id", "timestamp", "frame_name", ...])
+exporter.save(rows, "out.txt", format=ExportFormat.TXT_READABLE)   # читаемый формат
+exporter.save(rows, "out.txt", format=ExportFormat.TXT_TABLE)     # таблица с |
+exporter.save(rows, "out.csv", format=ExportFormat.CSV)
+exporter.save(rows, "out.xlsx", format=ExportFormat.XLSX)         # требует openpyxl
+```
+
+Форматы: TXT_READABLE (читаемый), TXT_TABLE (таблица), CSV, XLSX.
+
 ## Fork-safety
 
 При `INSPECTOR_MULTIPROCESS=1` или `config.fork_safe=True` используется NullPool. Рекомендуется создавать SQLManager и вызывать `initialize()` **внутри дочернего процесса** после fork.
@@ -153,6 +170,9 @@ sql_module/
 │   └── db_commands.py
 ├── config/
 │   └── sql_manager_config.py
+├── export/
+│   ├── __init__.py
+│   └── table_exporter.py   # TableExporter, ExportFormat
 └── tests/
 ```
 

@@ -46,22 +46,20 @@ def main() -> int:
         ProcessorConfig,
         RendererConfig,
         RobotConfig,
-        GuiConfig,
     )
+    from multiprocess_prototype.configs.gui_config_frontend import GuiConfigFrontend
 
     launcher = SystemLauncher(stop_timeout=5.0)
 
-    # Тип камеры: из prefs (сохранён в GUI) → env INSPECTOR_CAMERA_TYPE → default
     from multiprocess_prototype.prefs import get_camera_type
     camera_type = get_camera_type()
 
-    # Порядок: Camera создаёт shm первым, затем Processor, Renderer, Robot, Database, GUI
     launcher.add_process(*process(CameraConfig(camera_type=camera_type)))
     launcher.add_process(*process(ProcessorConfig()))
     launcher.add_process(*process(RendererConfig()))
     launcher.add_process(*process(RobotConfig()))
     launcher.add_process(*process(DatabaseConfig()))
-    launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
+    launcher.add_process(*process(GuiConfigFrontend(camera_type=camera_type)))
 
     launcher.run()
     return 0

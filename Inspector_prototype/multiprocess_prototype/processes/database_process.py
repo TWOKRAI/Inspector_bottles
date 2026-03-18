@@ -8,10 +8,18 @@ DatabaseProcess — процесс с SQLManager.
 import importlib
 
 from multiprocess_framework.refactored.modules.process_module import ProcessModule
-from multiprocess_framework.refactored.modules.sql_module import SQLManager, SQLManagerConfig
+from multiprocess_framework.refactored.modules.sql_module import (
+    SQLManager,
+    SQLManagerConfig,
+    TableExporter,
+    ExportFormat,
+)
 from multiprocess_framework.refactored.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 
-from multiprocess_prototype.database.utils import build_create_table_sql
+from multiprocess_prototype.database.utils import (
+    build_create_table_sql,
+    create_detection_exporter,
+)
 
 
 class DatabaseProcess(ProcessModule):
@@ -75,7 +83,10 @@ class DatabaseProcess(ProcessModule):
         self.command_manager.register_command(
             "db.save_detections",
             self._cmd_save_detections,
-            expects_full_message=True,  # детекции в args, не в data
+        )
+        self.command_manager.register_command(
+            "db.export_detections",
+            self._cmd_export_detections,
         )
 
         self._log_info(
@@ -105,6 +116,47 @@ class DatabaseProcess(ProcessModule):
             return {"status": "success", "rows": total}
         except Exception as e:
             self._log_error(f"db.save_detections failed: {e}")
+            return {"status": "error", "reason": str(e)}
+
+    def _cmd_export_detections(self, msg: dict) -> dict:
+        """Экспорт детекций в файл. args: path, format (txt|txt_table|csv|xlsx), offset, limit."""
+        try:
+            args = msg.get("args", {}) or msg.get("data", {})
+            path = args.get("path")
+            if not path:
+                return {"status": "error", "reason": "path required"}
+            fmt_str = args.get("format", "txt")
+            offset = int(args.get("offset", 0))
+            limit = args.get("limit")
+            if limit is not None:
+                limit = int(limit)
+
+            fmt_map = {
+                "txt": ExportFormat.TXT_READABLE,
+                "txt_table": ExportFormat.TXT_TABLE,
+                "csv": ExportFormat.CSV,
+                "xlsx": ExportFormat.XLSX,
+            }
+            fmt = fmt_map.get(fmt_str, ExportFormat.TXT_READABLE)
+
+            rows = self.sql_manager.query_range(
+                table="detections",
+                order_by="id",
+                offset=offset,
+                limit=limit,
+            )
+            exporter = create_detection_exporter()
+            count = exporter.save(
+                rows,
+                path,
+                format=fmt,
+                title="Детекции из inspector.db",
+                sheet_name="Detections",
+            )
+            self._log_info(f"DatabaseProcess: exported {count} detection(s) to {path}")
+            return {"status": "success", "rows": count, "path": str(path)}
+        except Exception as e:
+            self._log_error(f"db.export_detections failed: {e}")
             return {"status": "error", "reason": str(e)}
 
     def shutdown(self) -> bool:
