@@ -23,12 +23,10 @@ from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
 def _create_frontend_manager(process: "GuiProcess", app_cfg: dict):
     """Создать FrontendManager с регистрами и connection_map для GuiProcess."""
     try:
-        from shared_registers import DrawRegisters
-        from registers_module import RegistersManager
         from frontend_module import FrontendManager
+        from multiprocess_prototype.frontend.registers import create_frontend_registers
 
-        registers = RegistersManager({"draw": DrawRegisters()})
-        connection_map = {"draw": "renderer"}
+        registers, connection_map = create_frontend_registers()
         config = {
             "window": app_cfg,
             **app_cfg,

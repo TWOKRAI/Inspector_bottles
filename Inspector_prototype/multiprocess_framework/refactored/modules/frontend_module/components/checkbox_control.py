@@ -8,15 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-try:
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QFont
-    from PyQt5.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
-    _HAS_QT = True
-except ImportError:
-    _HAS_QT = False
-
 from frontend_module.core.base_configurable_widget import BaseConfigurableWidget
+from frontend_module.core.qt_imports import QCheckBox, QFont, QHBoxLayout, QLabel, QVBoxLayout, QWidget, Qt
 
 
 class CheckboxControl(BaseConfigurableWidget):
@@ -58,7 +51,7 @@ class CheckboxControl(BaseConfigurableWidget):
         )
 
     def _load_metadata(self) -> None:
-        if not _HAS_QT or not all([self._registers_manager, self._register_name, self._field_name]):
+        if not all([self._registers_manager, self._register_name, self._field_name]):
             return
 
         meta = self.get_metadata()
@@ -130,7 +123,7 @@ class CheckboxControl(BaseConfigurableWidget):
             self._registers_manager.notify_field_changed(
                 self._register_name, self._field_name, value
             )
-        parent = self.parent() if _HAS_QT else None
+        parent = self.parent()
         if parent and getattr(parent, "send_register_update", None):
             parent.send_register_update(self._register_name, self._field_name, value)
 

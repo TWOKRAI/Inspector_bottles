@@ -485,9 +485,46 @@
 - Решение:
   - **FrontendManager(BaseManager, ObservableMixin)** — координация регистров, конфига, окон, потоков
   - Адаптеры: registers (FrontendRegistersBridge), window_manager, thread_manager
-  - ApplicationCoordinator делегирует в FrontendManager
+  - Coordinator удалён (2026-03-18): логика перенесена в FrontendManager.run_app/shutdown_app
 - Причина: Единообразие с другими менеджерами, ObservableMixin для _log_*, _record_*, интеграция с config_module.
 - Отклонённые альтернативы: Три отдельных BaseManager (Window, Thread, Config) — избыточно для скелета.
+
+---
+
+## ADR-039: Рефакторинг multiprocess_prototype — документация и очистка (2026-03-18)
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: Приведение документации в соответствие с кодом, удаление устаревших скриптов.
+- Решение:
+  - **Скрипты _test_phase1/2/3 удалены** — использовали process_1/process_2 (удалены с processes/)
+  - **frontend/configs/ удалён** — дублировал configs/; GuiConfigFrontend — в frontend.config
+  - **Документация** — README, STATUS, GUI_PROCESS_COMPARISON обновлены (6 процессов, GuiConfigFrontend по умолчанию, Coordinator убран)
+- Причина: Актуальность документации, отсутствие мёртвого кода.
+
+---
+
+## ADR-038: Устранение дублирования processes и registers (2026-03-18)
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: processes/ и backend/processes/ содержали идентичные файлы; GuiProcess/GuiProcessFrontend дублировали создание RegistersManager.
+- Решение:
+  - **processes/ удалён** — все импорты через multiprocess_prototype.backend.processes; GuiProcessFrontend — через frontend.process
+  - **create_frontend_registers()** — GuiProcess и GuiProcessFrontend используют frontend.registers.create_frontend_registers()
+- Причина: Один источник правды, отсутствие дублирования структуры.
+
+---
+
+## ADR-037: Рефакторинг frontend_module и multiprocess_prototype (2026-03-18)
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: Упрощение frontend_module, разделение backend/frontend в multiprocess_prototype.
+- Решение:
+  - **Coordinator удалён**: логика run/shutdown перенесена в FrontendManager.run_app(), shutdown_app()
+  - **_HAS_QT устранён**: frontend_module требует PyQt5; единая точка импорта — core/qt_imports.py
+  - **_model_to_register_name удалён**: мёртвый код; _auto_detect_register использует register_names()
+  - **multiprocess_prototype**: backend/ (configs/, processes/, modules/), frontend/ (config, process, registers, windows/)
+  - **configs/** перенесены в backend/configs/; GuiConfigFrontend — в frontend/config.py
+- Причина: Чистота кода, чёткое разделение backend/frontend для последующей концентрации на UI.
 
 ---
 

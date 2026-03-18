@@ -10,7 +10,7 @@ import pytest
 
 def test_renderer_command_handlers():
     """Renderer обрабатывает set_draw_contours, set_show_original, set_show_mask."""
-    from multiprocess_prototype.processes.renderer_process import RendererProcess
+    from multiprocess_prototype.backend.processes import RendererProcess
 
     class MockSR:
         memory_manager = None

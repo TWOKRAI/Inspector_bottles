@@ -7,7 +7,7 @@
 сохранение через save().
 
 Использование:
-  python -m multiprocess_prototype.database.export_detections [--format FORMAT] [--output FILE] [--offset N] [--limit N]
+  python -m multiprocess_prototype.backend.database.export_detections [--format FORMAT] [--output FILE] [--offset N] [--limit N]
 
   Форматы:
     txt         — читаемый формат (ID, Время, Кадр, Bbox, Центр, Площадь)
@@ -16,14 +16,14 @@
     xlsx        — Excel (.xlsx, требует openpyxl)
 
   Примеры:
-    python -m multiprocess_prototype.database.export_detections --format txt -o detections.txt
-    python -m multiprocess_prototype.database.export_detections --format txt_table --limit 100
-    python -m multiprocess_prototype.database.export_detections --format csv --offset 10 --limit 50
+    python -m multiprocess_prototype.backend.database.export_detections --format txt -o detections.txt
+    python -m multiprocess_prototype.backend.database.export_detections --format txt_table --limit 100
+    python -m multiprocess_prototype.backend.database.export_detections --format csv --offset 10 --limit 50
 """
 import sys
 from pathlib import Path
 
-from multiprocess_prototype.database.utils import (
+from multiprocess_prototype.backend.database.utils import (
     create_detection_exporter,
     read_from_sqlite,
 )

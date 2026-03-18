@@ -12,8 +12,8 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
     register_schema,
 )
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.processes.gui_process import GuiProcess
+from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.backend.processes.gui_process import GuiProcess
 
 
 @register_schema("GuiConfig")

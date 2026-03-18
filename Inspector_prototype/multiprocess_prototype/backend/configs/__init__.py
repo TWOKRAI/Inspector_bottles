@@ -1,9 +1,8 @@
-# multiprocess_prototype\configs\__init__.py
+# multiprocess_prototype\backend\configs\__init__.py
 """
-Конфигурационные схемы Inspector Prototype.
+Конфигурационные схемы Inspector Prototype (backend).
 
 Все схемы наследуют SchemaBase из data_schema_module.
-Используются для валидации и передачи конфигов в main.py.
 """
 
 from .app_config import get_log_dir, get_default_managers_config

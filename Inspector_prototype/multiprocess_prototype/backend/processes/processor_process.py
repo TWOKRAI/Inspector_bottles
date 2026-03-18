@@ -23,7 +23,7 @@ from multiprocess_framework.refactored.modules.worker_module import (
     ThreadConfig,
     ExecutionMode,
 )
-from multiprocess_prototype.database.schema_1 import DetectionSchema
+from multiprocess_prototype.backend.database.schema_1 import DetectionSchema
 from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
 
 

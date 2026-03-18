@@ -19,7 +19,7 @@ from typing import Dict, Any
 import os
 
 # Путь к logs по умолчанию: multiprocess_prototype/logs
-_DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+_DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
 
 
 def get_log_dir() -> str:

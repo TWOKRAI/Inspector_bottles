@@ -1,19 +1,18 @@
-# multiprocess_prototype\processes\gui_process_frontend.py
+# multiprocess_prototype\frontend\process.py
 """
 GuiProcessFrontend — альтернатива GuiProcess на полном стеке frontend_module.
 
-Использует ApplicationCoordinator + FrontendManager вместо ручного создания окна.
+Использует FrontendManager (run_app, shutdown_app) вместо ручного создания окна.
 Функциональность идентична GuiProcess: InspectorWindow, QTimer, все gui_* методы.
 
 Переключение: в main.py или GuiConfig указать class_path GuiProcessFrontend.
 """
 
-import sys
-
 import numpy as np
 
-from multiprocess_framework.refactored.modules.process_module import ProcessModule
 from multiprocess_framework.refactored.modules.message_module import MessageAdapter
+from multiprocess_framework.refactored.modules.process_module import ProcessModule
+from multiprocess_prototype.frontend.windows.inspector_window import InspectorWindow
 from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
 
 
@@ -21,7 +20,7 @@ class GuiProcessFrontend(ProcessModule):
     """
     GUI-процесс на frontend_module.
 
-    run() использует ApplicationCoordinator → FrontendManager → WindowManager.
+    run() использует FrontendManager → WindowManager.
     Окно создаётся через фабрику, QTimer настраивается при создании окна.
     """
 
@@ -44,33 +43,32 @@ class GuiProcessFrontend(ProcessModule):
         pass
 
     def run(self):
-        """Основной цикл через ApplicationCoordinator."""
-        from PyQt5.QtWidgets import QApplication
+        """Основной цикл через FrontendManager."""
         from PyQt5.QtCore import QTimer
 
-        from shared_registers import DrawRegisters
-        from registers_module import RegistersManager
-        from frontend_module import ApplicationCoordinator
-        from multiprocess_prototype.gui.main_window import InspectorWindow
+        from frontend_module import FrontendManager
+        from multiprocess_prototype.frontend.registers import create_frontend_registers
 
         app_cfg = self.get_config("config") or {}
         config = {
             "window": app_cfg,
             **app_cfg,
         }
-        registers = RegistersManager({"draw": DrawRegisters()})
-        connection_map = {"draw": "renderer"}
+        registers, connection_map = create_frontend_registers()
 
-        coordinator = ApplicationCoordinator(config=config)
-        if not coordinator.initialize(
+        fm = FrontendManager(
+            config=config,
             registers=registers,
             router=self,
             connection_map=connection_map,
-        ):
-            self._log_error("GuiProcessFrontend: Coordinator initialization failed")
+        )
+        fm._queue_manager = getattr(self, "_queue_manager", None)
+        fm._stop_event = getattr(self, "_stop_event", None)
+        if not fm.initialize():
+            self._log_error("GuiProcessFrontend: FrontendManager initialization failed")
             return
 
-        app = coordinator._qt_app
+        app = fm.qt_app
         app.aboutToQuit.connect(self.gui_request_shutdown)
 
         def create_inspector_window(**kwargs):
@@ -93,11 +91,11 @@ class GuiProcessFrontend(ProcessModule):
 
             return win
 
-        wm = coordinator.window_manager
+        wm = fm.get_window_manager()
         wm.register("main", create_inspector_window)
 
-        coordinator.run(initial_window="main")
-        coordinator.shutdown()
+        fm.run_app(initial_window="main")
+        fm.shutdown_app()
 
     def _poll_messages(self):
         """Вызывается QTimer. Читает rendered_frame_ready."""

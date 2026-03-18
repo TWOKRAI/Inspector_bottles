@@ -9,7 +9,7 @@
 
 ## Что это
 
-Тестовый прототип системы инспекции бутылок на базе Multiprocess Framework. Запускает 5 процессов:
+Тестовый прототип системы инспекции бутылок на базе Multiprocess Framework. Запускает 6 процессов:
 
 | Процесс | Назначение |
 |---------|------------|
@@ -17,7 +17,8 @@
 | **Processor** | Обработка: маска, контуры, детекция пятен |
 | **Renderer** | Отрисовка: оригинал + маска + контуры |
 | **Robot** | Симуляция робота (приём/отправка команд) |
-| **GUI** | PyQt окно с чекбоксами Original, Mask, Contours |
+| **Database** | Сохранение детекций в SQLite |
+| **GUI** | PyQt окно (GuiProcessFrontend + frontend_module) |
 
 **Связь:** SharedMemory (camera_frame, processor_mask, rendered_frame, mask_frame) + очереди сообщений.
 
@@ -31,25 +32,21 @@ multiprocess_prototype/
 ├── prefs.py                # Сохранение camera_type (GUI → .inspector_prefs.json)
 ├── run.sh                  # Запуск с PYTHONPATH и очисткой SharedMemory
 │
-├── backend/                # Бэкенды захвата кадров
-│   ├── backends.py         # SimulatorBackend, WebcamBackend, HikvisionBackend
+├── backend/                # Конфиги, процессы, бэкенды камер
+│   ├── configs/           # Pydantic-конфиги (camera, processor, renderer, robot, database, gui)
+│   ├── processes/         # Реализации процессов (unified_camera, processor, renderer, robot, gui, database)
+│   ├── backends.py        # SimulatorBackend, WebcamBackend, HikvisionBackend
 │   └── __init__.py
 │
-├── configs/                # Pydantic-конфиги процессов
-│   ├── camera_config.py
-│   ├── processor_config.py
-│   ├── renderer_config.py
-│   ├── robot_config.py
-│   └── gui_config.py
+├── frontend/              # GUI на frontend_module
+│   ├── config.py          # GuiConfigFrontend
+│   ├── process.py         # GuiProcessFrontend
+│   ├── registers.py       # create_frontend_registers()
+│   └── windows/           # InspectorWindow
 │
-├── processes/              # Реализации процессов
-│   ├── unified_camera_process.py   # Единый процесс камеры (переключение без перезапуска)
-│   ├── processor_process.py
-│   ├── renderer_process.py
-│   ├── robot_simulator_process.py
-│   └── gui_process.py
+├── configs/                # Реэкспорт из backend.configs (совместимость)
 │
-├── gui/                    # GUI-компоненты
+├── gui/                    # GUI-компоненты (реэкспорт из frontend.windows)
 ├── utils/                  # FrameGenerator, WebcamCapture, shm_utils
 └── tests/                  # Unit- и интеграционные тесты
 ```
@@ -87,6 +84,14 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 В `main.py` процессы добавляются единообразно через `process()` из `data_schema_module`:
 
 ```python
+from multiprocess_framework.refactored.modules.process_manager_module import SystemLauncher
+from multiprocess_framework.refactored.modules.data_schema_module import process
+from multiprocess_prototype.backend.configs import (
+    CameraConfig, DatabaseConfig, ProcessorConfig, RendererConfig, RobotConfig,
+)
+from multiprocess_prototype.frontend.config import GuiConfigFrontend
+from multiprocess_prototype.prefs import get_camera_type
+
 launcher = SystemLauncher(stop_timeout=5.0)
 camera_type = get_camera_type()
 
@@ -94,7 +99,8 @@ launcher.add_process(*process(CameraConfig(camera_type=camera_type)))
 launcher.add_process(*process(ProcessorConfig()))
 launcher.add_process(*process(RendererConfig()))
 launcher.add_process(*process(RobotConfig()))
-launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
+launcher.add_process(*process(DatabaseConfig()))
+launcher.add_process(*process(GuiConfigFrontend(camera_type=camera_type)))
 
 launcher.run()
 ```

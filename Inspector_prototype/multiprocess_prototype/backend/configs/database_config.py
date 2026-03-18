@@ -9,8 +9,8 @@ from pathlib import Path
 from multiprocess_framework.refactored.modules.data_schema_module import register_schema
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.processes.database_process import DatabaseProcess
+from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.backend.processes.database_process import DatabaseProcess
 
 _db_dir = Path(__file__).resolve().parent.parent / "database"
 _db_dir.mkdir(parents=True, exist_ok=True)
@@ -25,5 +25,5 @@ class DatabaseConfig(ProcessConfigBase):
     priority: ProcessPriorityLevel = ProcessPriorityLevel.NORMAL
     db_url: str = f"sqlite:///{_db_dir / 'inspector.db'}"
     db_dialect: str = "sqlite"
-    schema_module_path: str = "multiprocess_prototype.database.schema_1"
+    schema_module_path: str = "multiprocess_prototype.backend.database.schema_1"
     schema_class_name: str = "DetectionSchema"

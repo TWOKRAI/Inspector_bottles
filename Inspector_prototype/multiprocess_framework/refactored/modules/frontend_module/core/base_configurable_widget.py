@@ -14,13 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-# Опциональный импорт PyQt5 — виджет создаётся только при наличии
-try:
-    from PyQt5.QtWidgets import QWidget
-    _HAS_QT = True
-except ImportError:
-    QWidget = object  # type: ignore
-    _HAS_QT = False
+from frontend_module.core.qt_imports import QWidget
 
 
 def _get_registers_from_parent(parent: Any, max_depth: int = 5) -> Optional[Any]:
@@ -61,24 +55,7 @@ def _parse_register_field(value: str) -> tuple[Optional[str], Optional[str]]:
     return None, value
 
 
-def _model_to_register_name(model_name: str) -> str:
-    """Нормализация имени модели к имени регистра."""
-    mapping = {
-        "DrawRegisters": "draw",
-        "CameraRegisters": "camera",
-        "ProcessingRegisters": "processing",
-        "PostProcessingRegisters": "post_processing",
-        "VisualRegisters": "visual",
-        "RobotRegisters": "robot",
-        "ConveyorRegisters": "conveyor",
-        "NeurounRegisters": "neuroun",
-        "HikvisionRegisters": "hikvision",
-        "FrameProcessRegisters": "frame_process",
-    }
-    return mapping.get(model_name, model_name.lower().replace("_registers", ""))
-
-
-class BaseConfigurableWidget(QWidget if _HAS_QT else object):  # type: ignore
+class BaseConfigurableWidget(QWidget):
     """
     Базовый виджет с привязкой к регистру.
 
@@ -94,8 +71,7 @@ class BaseConfigurableWidget(QWidget if _HAS_QT else object):  # type: ignore
         parent: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
-        if _HAS_QT:
-            super().__init__(parent)
+        super().__init__(parent)
 
         self._register_name: Optional[str] = None
         self._field_name: Optional[str] = None
@@ -271,5 +247,5 @@ class BaseConfigurableWidget(QWidget if _HAS_QT else object):  # type: ignore
     def closeEvent(self, event: Any) -> None:
         """Отписаться при закрытии."""
         self._unbind_from_manager()
-        if _HAS_QT and hasattr(super(), "closeEvent"):
+        if hasattr(super(), "closeEvent"):
             super().closeEvent(event)  # type: ignore

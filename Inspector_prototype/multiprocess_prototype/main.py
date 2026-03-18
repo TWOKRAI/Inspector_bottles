@@ -40,14 +40,14 @@ def main() -> int:
         SystemLauncher,
     )
     from multiprocess_framework.refactored.modules.data_schema_module import process
-    from multiprocess_prototype.configs import (
+    from multiprocess_prototype.backend.configs import (
         CameraConfig,
         DatabaseConfig,
         ProcessorConfig,
         RendererConfig,
         RobotConfig,
     )
-    from multiprocess_prototype.configs.gui_config_frontend import GuiConfigFrontend
+    from multiprocess_prototype.frontend.config import GuiConfigFrontend
 
     launcher = SystemLauncher(stop_timeout=5.0)
 

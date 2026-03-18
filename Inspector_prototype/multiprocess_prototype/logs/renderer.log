@@ -278,3 +278,22 @@
 2026-03-18 17:23:50,191 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
 2026-03-18 17:23:52,626 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=50
 2026-03-18 17:23:52,208 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
+2026-03-18 20:18:42,267 [INFO] renderer: Process state registered: renderer
+2026-03-18 20:18:42,267 [INFO] renderer: RendererProcess initializing...
+2026-03-18 20:18:42,267 [INFO] renderer: RendererProcess ready
+2026-03-18 20:18:42,267 [INFO] renderer: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask']
+2026-03-18 20:18:42,267 [INFO] renderer: Process 'renderer' initialized successfully
+2026-03-18 20:18:45,391 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-18 20:18:45,275 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1
+2026-03-18 20:18:45,275 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=2
+2026-03-18 20:18:45,275 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=2
+2026-03-18 20:18:45,275 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=3
+2026-03-18 20:18:45,275 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=3
+2026-03-18 20:18:48,350 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=50
+2026-03-18 20:18:48,283 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=50
+2026-03-18 20:18:51,390 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=100
+2026-03-18 20:18:51,288 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=100
+2026-03-18 20:18:52,294 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=0
+2026-03-18 20:18:52,294 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=0
+2026-03-18 20:18:52,294 [INFO] renderer: [DEBUG] renderer: detection_result received frame_id=1
+2026-03-18 20:18:52,294 [INFO] renderer: [DEBUG] renderer: sending rendered_frame_ready to gui frame_id=1

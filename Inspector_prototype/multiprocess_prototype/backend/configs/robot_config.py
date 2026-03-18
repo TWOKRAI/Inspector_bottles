@@ -14,8 +14,8 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
 from pydantic import Field
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.processes.robot_simulator_process import RobotSimulatorProcess
+from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.backend.processes.robot_simulator_process import RobotSimulatorProcess
 
 
 @register_schema("RobotConfig")

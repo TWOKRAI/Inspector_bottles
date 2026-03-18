@@ -34,15 +34,11 @@ __all__ = [
     "compose_layout",
 ]
 
-try:
-    from frontend_module.application import (
-        WindowManager,
-        ThreadManager,
-        ApplicationCoordinator,
-        FrontendManager,
-    )
-    __all__.extend(["WindowManager", "ThreadManager", "ApplicationCoordinator", "FrontendManager"])
-except ImportError:
-    pass
+from frontend_module.application import (
+    FrontendManager,
+    ThreadManager,
+    WindowManager,
+)
+__all__.extend(["FrontendManager", "ThreadManager", "WindowManager"])
 
 __version__ = "0.2.0"

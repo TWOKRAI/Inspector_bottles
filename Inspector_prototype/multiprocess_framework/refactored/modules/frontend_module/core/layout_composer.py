@@ -8,11 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-try:
-    from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout
-    _HAS_QT = True
-except ImportError:
-    _HAS_QT = False
+from frontend_module.core.qt_imports import QHBoxLayout, QVBoxLayout
 
 
 def compose_layout(
@@ -38,9 +34,6 @@ def compose_layout(
     Returns:
         Список созданных виджетов
     """
-    if not _HAS_QT:
-        return []
-
     layout_cls = QVBoxLayout if orientation == "vertical" else QHBoxLayout
     layout = layout_cls(parent)
     layout.setSpacing(spacing)

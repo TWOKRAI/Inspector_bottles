@@ -13,8 +13,8 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
 )
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.processes.processor_process import ProcessorProcess
+from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.backend.processes.processor_process import ProcessorProcess
 
 
 @register_schema("ProcessorConfig")

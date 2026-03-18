@@ -12,7 +12,7 @@ import pytest
 
 def test_detect_color_blobs_returns_mask_and_contours():
     """Processor._detect_color_blobs возвращает (detections, mask, contours)."""
-    from multiprocess_prototype.processes.processor_process import ProcessorProcess
+    from multiprocess_prototype.backend.processes import ProcessorProcess
 
     # Минимальный mock shared_resources (без memory_manager для unit-теста)
     class MockSR:

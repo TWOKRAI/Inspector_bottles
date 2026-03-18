@@ -74,7 +74,7 @@ class ProcessConfigBase(SchemaBase):
         Returns:
             proc_dict для launcher.add_process(name, proc_dict)
         """
-        from multiprocess_prototype.configs.app_config import get_default_managers_config
+        from multiprocess_prototype.backend.configs.app_config import get_default_managers_config
 
         default_queues = {"system": {"maxsize": 100}, "data": {"maxsize": 50}}
         proc_dict = {

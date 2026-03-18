@@ -16,7 +16,7 @@ from multiprocess_framework.refactored.modules.sql_module import (
 )
 from multiprocess_framework.refactored.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 
-from multiprocess_prototype.database.utils import (
+from multiprocess_prototype.backend.database.utils import (
     build_create_table_sql,
     create_detection_exporter,
 )
@@ -35,7 +35,7 @@ class DatabaseProcess(ProcessModule):
         app_cfg = self.get_config("config") or {}
         db_url = app_cfg.get("db_url", "sqlite:///./inspector.db")
         db_dialect = app_cfg.get("db_dialect", "sqlite")
-        schema_module_path = app_cfg.get("schema_module_path", "multiprocess_prototype.database.schema_1")
+        schema_module_path = app_cfg.get("schema_module_path", "multiprocess_prototype.backend.database.schema_1")
         schema_class_name = app_cfg.get("schema_class_name", "DetectionSchema")
 
         sql_config = SQLManagerConfig(

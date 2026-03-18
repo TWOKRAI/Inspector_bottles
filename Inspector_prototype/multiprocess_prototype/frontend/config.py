@@ -1,4 +1,4 @@
-# multiprocess_prototype\configs\gui_config_frontend.py
+# multiprocess_prototype\frontend\config.py
 """
 GuiConfigFrontend — конфиг для GuiProcessFrontend (стек frontend_module).
 
@@ -12,8 +12,8 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
     register_schema,
 )
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.processes.gui_process_frontend import GuiProcessFrontend
+from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.frontend.process import GuiProcessFrontend
 
 
 @register_schema("GuiConfigFrontend")

@@ -478,23 +478,23 @@ config = {
 
 ```python
 from multiprocess_framework.refactored.modules.process_manager_module import SystemLauncher
-from multiprocess_framework.refactored.modules.data_schema_module import build_process_with_workers
-from multiprocess_prototype.processes.process_1 import Process1Config
-from multiprocess_prototype.processes.process_1.worker_1 import Worker1Config
-from multiprocess_prototype.processes.process_2 import Process2Config
-from multiprocess_prototype.processes.process_2.worker_2 import Worker2_1Config, Worker2_2Config
+from multiprocess_framework.refactored.modules.data_schema_module import process
+from multiprocess_prototype.backend.configs import (
+    CameraConfig, ProcessorConfig, RendererConfig, RobotConfig,
+)
+from multiprocess_prototype.frontend.config import GuiConfigFrontend
+from multiprocess_prototype.prefs import get_camera_type
 
-launcher = SystemLauncher()
+launcher = SystemLauncher(stop_timeout=5.0)
+camera_type = get_camera_type()
 
-launcher.add_process(*build_process_with_workers(Process1Config(), Worker1Config()))
-launcher.add_process(*build_process_with_workers(
-    Process2Config(),
-    Worker2_1Config(),
-    Worker2_2Config(),
-))
+launcher.add_process(*process(CameraConfig(camera_type=camera_type)))
+launcher.add_process(*process(ProcessorConfig()))
+launcher.add_process(*process(RendererConfig()))
+launcher.add_process(*process(RobotConfig()))
+launcher.add_process(*process(GuiConfigFrontend(camera_type=camera_type)))
 
 launcher.run()
-launcher.shutdown()
 ```
 
 ### Через ProcessSpawner напрямую

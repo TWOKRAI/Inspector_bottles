@@ -185,3 +185,27 @@
 2026-03-18 17:23:51,452 [INFO] gui: GUI: shutdown request sent, ok=True
 2026-03-18 17:23:51,452 [INFO] gui: GUI: requesting system shutdown
 2026-03-18 17:23:51,452 [INFO] gui: GUI: shutdown request sent, ok=True
+2026-03-18 20:18:42,631 [INFO] gui: Process state registered: gui
+2026-03-18 20:18:42,631 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-18 20:18:42,631 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-18 20:18:42,631 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-18 20:18:42,631 [INFO] gui: Process 'gui' initialized successfully
+2026-03-18 20:18:45,363 [INFO] gui: [DEBUG] gui: gui_start_capture -> sending start_capture to camera
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:45,636 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-18 20:18:48,362 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:51,402 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:52,666 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:52,659 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-18 20:18:55,640 [INFO] gui: GUI: requesting system shutdown
+2026-03-18 20:18:55,666 [INFO] gui: GUI: shutdown request sent, ok=True
+2026-03-18 20:18:55,671 [INFO] gui: GUI: requesting system shutdown
+2026-03-18 20:18:55,671 [INFO] gui: GUI: shutdown request sent, ok=True
+2026-03-18 20:18:55,671 [INFO] gui: GUI: requesting system shutdown
+2026-03-18 20:18:55,671 [INFO] gui: GUI: shutdown request sent, ok=True

@@ -8,19 +8,16 @@ logger_module, router_module.
 """
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict, Optional
 
 from base_manager import BaseManager, ObservableMixin
 
+from frontend_module.core.qt_imports import QApplication
 from registers_module import RegistersManager as RegistersManagerClass
+from frontend_module.application.thread_manager import ThreadManager
+from frontend_module.application.window_manager import WindowManager
 from frontend_module.core.registers_bridge import FrontendRegistersBridge
-
-try:
-    from frontend_module.application.window_manager import WindowManager
-    from frontend_module.application.thread_manager import ThreadManager
-    _HAS_QT = True
-except ImportError:
-    _HAS_QT = False
 
 _CONFIG_CHANGED_EVENT = "config_changed"
 
@@ -59,6 +56,8 @@ class FrontendManager(BaseManager, ObservableMixin):
         self._router = router
         self._connection_map = dict(connection_map) if connection_map else {}
         self._config_obj: Optional[Any] = None
+        self._qt_app: Optional[Any] = None
+        self._is_running = False
 
     def initialize(self) -> bool:
         try:
@@ -86,18 +85,22 @@ class FrontendManager(BaseManager, ObservableMixin):
                     if hasattr(cfg, "subscribe"):
                         cfg.subscribe(callback=self._on_config_changed, key="*")
 
-            # 3. WindowManager и ThreadManager (только при PyQt)
-            if _HAS_QT:
-                self._window_manager = WindowManager(
-                    config=self._config,
-                    registers_manager=self._registers_bridge,
-                )
-                self._thread_manager = ThreadManager(
-                    queue_manager=getattr(self, "_queue_manager", None),
-                    stop_event=getattr(self, "_stop_event", None),
-                )
-                self.attach_adapter(self._window_manager, "window_manager")
-                self.attach_adapter(self._thread_manager, "thread_manager")
+            # 3. WindowManager и ThreadManager
+            self._window_manager = WindowManager(
+                config=self._config,
+                registers_manager=self._registers_bridge,
+            )
+            self._thread_manager = ThreadManager(
+                queue_manager=getattr(self, "_queue_manager", None),
+                stop_event=getattr(self, "_stop_event", None),
+            )
+            self.attach_adapter(self._window_manager, "window_manager")
+            self.attach_adapter(self._thread_manager, "thread_manager")
+
+            # QApplication для run_app
+            self._qt_app = QApplication.instance()
+            if self._qt_app is None:
+                self._qt_app = QApplication(sys.argv)
 
             self.is_initialized = True
             self._log_info(f"FrontendManager '{self.manager_name}' initialized", module="frontend_module")
@@ -184,3 +187,33 @@ class FrontendManager(BaseManager, ObservableMixin):
             else 0
         )
         return stats
+
+    @property
+    def qt_app(self) -> Optional[Any]:
+        """QApplication (создаётся в initialize)."""
+        return self._qt_app
+
+    def run_app(self, initial_window: str = "main") -> int:
+        """Запуск главного цикла. Блокирующий. Возвращает exit code."""
+        if not self.is_initialized:
+            if not self.initialize():
+                return 1
+        self._is_running = True
+        tm = self.get_thread_manager()
+        wm = self.get_window_manager()
+        if tm:
+            tm.create_all()
+            tm.start_all()
+        if wm:
+            wm.show_initial_window(initial_window)
+        return self._qt_app.exec_() if self._qt_app else 1
+
+    def shutdown_app(self) -> None:
+        """Остановка приложения: shutdown + stop_event."""
+        if not self._is_running:
+            return
+        self.shutdown()
+        stop_ev = getattr(self, "_stop_event", None)
+        if stop_ev and hasattr(stop_ev, "set"):
+            stop_ev.set()
+        self._is_running = False

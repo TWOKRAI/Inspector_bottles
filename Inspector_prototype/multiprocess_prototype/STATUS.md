@@ -9,20 +9,26 @@
 
 | Компонент | Описание |
 |-----------|----------|
-| **Процессы** | Camera, Processor, Renderer, Robot, GUI |
+| **Процессы** | Camera, Processor, Renderer, Robot, Database, GUI |
 | **Камера** | UnifiedCameraProcess — simulator / webcam / hikvision, переключение без перезапуска |
 | **SharedMemory** | camera_frame, processor_mask, rendered_frame, mask_frame |
-| **GUI** | PyQt, чекбоксы Original / Mask / Contours |
+| **GUI** | GuiProcessFrontend (frontend_module), PyQt, чекбоксы Original / Mask / Contours |
 
 ---
 
 ## Структура (после рефакторинга)
 
 ```
-processes/          — все процессы (в т.ч. unified_camera_process)
-backend/            — бэкенды камеры (Simulator, Webcam, Hikvision)
-configs/            — Pydantic-конфиги
-gui/, utils/        — GUI и утилиты
+backend/            — configs/, processes/, modules/
+  configs/          — CameraConfig, ProcessorConfig, RendererConfig, RobotConfig, DatabaseConfig, GuiConfig
+  processes/        — camera, processor, renderer, robot, database, gui (legacy)
+frontend/           — config, process, registers, windows/
+  config.py         — GuiConfigFrontend
+  process.py        — GuiProcessFrontend (FrontendManager)
+  registers.py      — create_frontend_registers()
+  windows/          — InspectorWindow
+configs/            — реэкспорт из backend.configs + frontend (совместимость)
+gui/, utils/        — GUI виджеты, утилиты
 ```
 
 ---

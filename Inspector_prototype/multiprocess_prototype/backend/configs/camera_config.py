@@ -13,8 +13,8 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
 )
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
 
-from multiprocess_prototype.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.processes.unified_camera_process import UnifiedCameraProcess
+from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
+from multiprocess_prototype.backend.processes.unified_camera_process import UnifiedCameraProcess
 
 
 @register_schema("CameraConfig")

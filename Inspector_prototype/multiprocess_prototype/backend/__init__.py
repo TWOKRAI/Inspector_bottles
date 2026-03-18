@@ -1,10 +1,11 @@
 # multiprocess_prototype/backend/__init__.py
-"""Бэкенды захвата кадров для UnifiedCameraProcess."""
+"""
+Backend Inspector Prototype.
 
-from .backends import SimulatorBackend, WebcamBackend, HikvisionBackend
+Конфиги и процессы: camera, processor, renderer, robot, database.
+"""
 
-__all__ = [
-    "SimulatorBackend",
-    "WebcamBackend",
-    "HikvisionBackend",
-]
+from . import configs
+from . import processes
+
+__all__ = ["configs", "processes"]
