@@ -1,4 +1,4 @@
-"""
+﻿"""
 Скрипт валидации фреймворка.
 
 Проверяет:
@@ -33,6 +33,7 @@ MODULES = [
     "registers_module",
     "router_module",
     "shared_resources_module",
+    "sql_module",
 ]
 
 # Модули, которые обязаны иметь interfaces.py
@@ -48,6 +49,7 @@ REQUIRED_INTERFACES = [
     "registers_module",
     "router_module",
     "shared_resources_module",
+    "sql_module",
 ]
 
 # Файлы production-кода (без тестов), где нельзя sys.path.insert

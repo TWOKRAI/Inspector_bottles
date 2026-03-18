@@ -61,6 +61,10 @@ def main() -> int:
     launcher.add_process(*process(RobotConfig()))
     launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
 
+    # Опционально: процесс с БД (sql_module). Раскомментировать при необходимости:
+    # from multiprocess_prototype.configs import DatabaseConfig
+    # launcher.add_process(*process(DatabaseConfig()))
+
     launcher.run()
     return 0
 

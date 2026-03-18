@@ -33,7 +33,7 @@
 
 Содержит:
 - ✅ Что это такое и зачем
-- ✅ Архитектурные слои (15 модулей, описание каждого)
+- ✅ Архитектурные слои (16 модулей, описание каждого)
 - ✅ Принципы архитектуры
 - ✅ Диаграмма зависимостей
 - ✅ Жизненный цикл приложения (4 фазы)
@@ -59,7 +59,7 @@
 - 📊 Layer Cake (слои архитектуры)
 - 📊 Message Flow (отправка/получение)
 - 📊 Process Lifecycle
-- 📊 Таблица модулей и их роли (15x6)
+- 📊 Таблица модулей и их роли (16x6)
 - 📊 Таблица типов сообщений (9x4)
 - 📊 Таблица приоритетов AsyncSender
 - 📊 Worker Modes, Process States
@@ -69,7 +69,7 @@
 - 📊 Initialization Order
 - 📊 Error Handling Strategy
 - 📊 Graceful Shutdown Cascade
-- 📊 Module Dependencies Matrix (15x15)
+- 📊 Module Dependencies Matrix (16x16)
 - 📊 Performance Characteristics
 - 📊 Memory и Resources
 
@@ -112,7 +112,7 @@
 **21 архитектурное решение (ADR) с обоснованием**
 
 Содержит:
-- 📋 ADR-001 до ADR-021
+- 📋 ADR-001 до ADR-032 (включая sql_module ADR-032)
 - 📋 Для каждого решения: дата, статус, контекст, решение, причина, альтернативы
 
 **Ключевые решения:**
@@ -129,7 +129,7 @@
 
 ---
 
-## 📖 Документация модулей (15 модулей)
+## 📖 Документация модулей (16 модулей)
 
 ### Foundation Layer
 
@@ -176,31 +176,36 @@
    - README.md — SharedResourcesManager, ProcessData, MemoryManager
    - docs/ARCHITECTURE.md — архитектура
 
+9. **sql_module**
+   - README.md — SQLManager, IRepository, Unit of Work, адаптеры (PostgreSQL, MySQL, SQLite)
+   - STATUS.md — этап 8/8, интеграция с router_module, message_module
+   - **Особенность:** Доступ к БД через канал `database` — msg.command(targets=["database"], command="db.query", args={...})
+
 ### Communication Layer
 
-9. **router_module**
+10. **router_module**
    - README.md — RouterManager, AsyncSender/AsyncReceiver
    - docs/COMMUNICATION.md — протокол
 
-10. **dispatch_module**
+11. **dispatch_module**
     - README.md — Dispatcher (4 стратегии)
 
-11. **command_module**
+12. **command_module**
     - README.md — CommandManager (обёртка над dispatch_module)
 
 ### Process Layer
 
-12. **worker_module**
+13. **worker_module**
     - README.md — WorkerManager (управление потоками)
     - docs/... — примеры
 
-13. **process_module**
+14. **process_module**
     - README.md — ProcessModule (базовый класс процесса)
     - docs/COMMUNICATION.md — как общаться между процессами
 
 ### Orchestration Layer
 
-14. **process_manager_module**
+15. **process_manager_module**
     - README.md — SystemLauncher, ProcessRegistry, ProcessManagerProcess
     - STATUS.md — этап 8/8, полностью готов
     - interfaces.py — публичные контракты
@@ -237,6 +242,9 @@
 
 **...понять ChannelRoutingManager**
 → [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 3) + [DECISIONS.md](./DECISIONS.md) (ADR-013)
+
+**...получить доступ к БД из процесса**
+→ [README.md](./README.md) (раздел 4. Database Access via Router) + sql_module README
 
 **...узнать про Dict at Boundary**
 → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Message Flow) + [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 2) + [DECISIONS.md](./DECISIONS.md) (ADR-008)
@@ -358,8 +366,9 @@
 | Дата | Версия | Статус | Примечание |
 |------|--------|--------|-----------|
 | 2026-03-13 | 1.0 | Complete | Первая версия документации, все 15 модулей |
+| 2026-03-18 | 1.1 | Complete | Добавлен sql_module (16 модулей), канал database, DOCUMENTATION_INDEX |
 
 ---
 
-**Последнее обновление:** March 14, 2026
+**Последнее обновление:** March 18, 2026
 

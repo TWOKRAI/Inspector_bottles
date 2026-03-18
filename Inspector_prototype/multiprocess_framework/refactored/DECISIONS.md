@@ -442,3 +442,22 @@
   2. **cleanup_known_shm_at_startup(processes_config)** — вызывается в SystemLauncher.run()/start() перед launch_orchestrator. Извлекает имена из config["memory"] и очищает {name}_0..{name}_{coll-1}.
   3. **create_shm_block** — всегда вызывает cleanup_stale_shm перед create.
 - Причина: Windows в приоритете; Linux и macOS получают ту же логику. Конфиг-драйвен, без дублирования имён.
+
+---
+
+## ADR-032: sql_module — универсальный SQL-менеджер
+- Дата: 2026-03-18
+- Статус: принято
+- Контекст: Нужен доступ к БД из процессов framework. ADR-006: DatabaseProcess — обычный ProcessModule, не часть фреймворка.
+- Решение:
+  - Отдельный модуль `sql_module` в refactored/modules.
+  - SQLManager(BaseManager, ObservableMixin) — единая точка входа.
+  - Dual sync/async через адаптеры (ISyncEngineAdapter, IAsyncEngineAdapter).
+  - Fork-safety: NullPool при INSPECTOR_MULTIPROCESS=1, создание engine после fork.
+  - Typed Commands: DBQueryCommand, DBExecuteCommand (Pydantic)
+  - Доступ через CommandManager: execute_command(cmd)
+  - IRepository[T, ID], IUnitOfWork, IAsyncUnitOfWork, ISchemaMapper
+  - uow() — sync, uow_async() — async (ленивое создание адаптера при первом вызове).
+  - Интеграция через ObservableMixin: logger_module (_log_*), error_module (_track_error), statistics_module (_record_timing).
+  - Схемы: data_schema_module.SchemaBase или pydantic.BaseModel.
+- Причина: Переиспользуемое ядро для DatabaseProcess; Clean Architecture; слабая связность через адаптеры.

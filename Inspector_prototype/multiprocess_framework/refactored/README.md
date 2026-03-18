@@ -44,7 +44,7 @@ launcher.run()  # blocks until Ctrl+C, graceful shutdown
 
 ## Core Features
 
-✅ **15 modular, independent components**  
+✅ **16 modular, independent components**  
 ✅ **Unified messaging protocol** (Message with 9 types)  
 ✅ **Type-safe data structures** (Pydantic v2 + SchemaBase)  
 ✅ **Centralized logging & error handling** (through ObservableMixin)  
@@ -53,7 +53,8 @@ launcher.run()  # blocks until Ctrl+C, graceful shutdown
 ✅ **Dict at Boundary** (process-safe serialization)  
 ✅ **Request-Response pattern** (correlation_id)  
 ✅ **Observable/Proxy pattern** (transparent logging)  
-✅ **Channel routing** (Router, Logger, Error managers)
+✅ **Channel routing** (Router, Logger, Error managers)  
+✅ **Database access via messages** (sql_module, channel `database`)
 
 ---
 
@@ -68,7 +69,8 @@ ProcessModule (base class for each process)
     ├─ WorkerManager (manage threads safely)
     ├─ LoggerManager (centralized logging through channels)
     ├─ ConfigManager (runtime config: get/set, subscriptions, env-fallback)
-    └─ ErrorManager (error handling through channels)
+    ├─ ErrorManager (error handling through channels)
+    └─ SQLManager (optional, in DatabaseProcess — access via channel `database`)
     ↓
 ProcessManagerProcess (orchestrator)
     ├─ ProcessRegistry (track all processes)
@@ -79,12 +81,12 @@ SystemLauncher (entry point)
     └─ Fork/spawn, signal handling, graceful shutdown
 ```
 
-**15 Modules Organized in 5 Layers:**
+**16 Modules Organized in 5 Layers:**
 
 | Layer | Modules | Purpose |
 |-------|---------|---------|
 | **Foundation** | base_manager, data_schema_module, message_module | Core abstractions, type safety |
-| **Infrastructure** | logger_module, error_module, config_module, console_module, shared_resources_module | Services & utilities |
+| **Infrastructure** | logger_module, error_module, config_module, console_module, shared_resources_module, **sql_module** | Services, utilities, database access |
 | **Communication** | router_module, dispatch_module, command_module | Inter-process messaging |
 | **Process** | worker_module, process_module | Process & thread management |
 | **Orchestration** | process_manager_module | System startup & lifecycle |
@@ -273,7 +275,82 @@ Flush logs, close connections
 Exit code 0
 ```
 
-### 4. Type-Safe Data Structures
+### 4. Database Access via Router (sql_module)
+
+БД доступна как **отдельный канал** в роутере. Процесс `DatabaseProcess` регистрирует команды `db.query`, `db.execute`, `db.insert` в CommandManager. Сообщения с этими командами маршрутизируются в процесс с БД через очередь (channel).
+
+```
+Процесс A (GUI, Processor, …)                DatabaseProcess
+    │                                              │
+    │  msg = {"command": "db.query",              │
+    │         "args": {"sql": "SELECT * FROM t"},  │
+    │         "targets": ["database"]}             │
+    │                                              │
+    ├── router.send(msg) ──────────────────────────────► QueueChannel (system)
+    │                                              │
+    │                                    Router.receive() → message_dispatcher
+    │                                    → command_manager.handle_command(msg)
+    │                                    → sql_manager.execute_command(msg)
+    │                                    → {"status": "success", "data": [...]}
+    │                                              │
+    │  ◄──────────────────────────── response (если request-response) ──────┤
+```
+
+**Использование из любого процесса:**
+
+```python
+# Отправить запрос к БД (MessageAdapter.command → args)
+msg = self.msg.command(
+    targets=["database"],
+    command="db.query",
+    args={"sql": "SELECT * FROM users", "params": {}},
+)
+self.router.send(msg)
+
+# db.insert
+msg = self.msg.command(
+    targets=["database"],
+    command="db.insert",
+    args={"table": "events", "data": {"type": "frame_ready", "ts": time.time()}},
+)
+self.router.send_async(msg, priority="normal")
+```
+
+**Формат сообщения (Dict at Boundary):** `command` — ключ маршрутизации, `args`/`data` — параметры для SQLManager.execute_command. ProcessLifecycle регистрирует команды в message_dispatcher, поэтому сообщения с `command="db.query"` автоматически попадают в handler → sql_manager.execute_command.
+
+**Request-response (когда нужен результат):** Для `db.query` с ожиданием ответа используйте `request()` вместо `command()`:
+
+```python
+# Отправитель — ждёт результат
+req = self.msg.request(
+    targets=["database"],
+    request_type="db.query",
+    query={"sql": "SELECT * FROM users", "params": {}},
+    timeout=5.0,
+)
+correlation_id = req.id
+self.router.send(req.to_dict())
+
+# В callback или цикле receive: искать msg с request_id == correlation_id
+def on_message(msg):
+    if msg.get("request_id") == correlation_id:
+        result = msg.get("result")  # {"status": "success", "data": [...]}
+```
+
+DatabaseProcess при обработке REQUEST должен вызвать `sql_manager.execute_command` и отправить `response(targets=[sender], request_id=req.id, result=result)`.
+
+**Подключение DatabaseProcess:** Добавить в `main.py`:
+
+```python
+from multiprocess_prototype.configs import DatabaseConfig
+launcher.add_process(*process(DatabaseConfig()))
+```
+
+См. [sql_module/README.md](./modules/sql_module/README.md) и [router_module/README.md](./modules/router_module/README.md).
+
+---
+
+### 5. Type-Safe Data Structures
 
 Define your process's data schema:
 
@@ -422,7 +499,7 @@ Inspector_prototype/multiprocess_framework/refactored/
 │   ├── ARCHITECTURE_ESSAY.md      # Design philosophy
 │   └── ARCHITECTURE_PHILOSOPHY.md # For AI agents
 │
-├── modules/                       # 15 modules
+├── modules/                       # 16 modules
 │   ├── base_manager/
 │   ├── data_schema_module/
 │   ├── message_module/
@@ -437,7 +514,8 @@ Inspector_prototype/multiprocess_framework/refactored/
 │   ├── process_manager_module/
 │   ├── console_module/
 │   ├── shared_resources_module/
-│   └── registers_module/
+│   ├── registers_module/
+│   └── sql_module/                # Database access via SQLAlchemy 2.0
 │
 └── multiprocess_prototype/        # Example application
     └── main.py                    # Full working example
@@ -468,13 +546,14 @@ MIT
 ## Changelog
 
 ### v2.0 (Phase 8/8 Complete) — March 2026
-- ✅ All 15 modules complete and production-ready
+- ✅ All 16 modules complete and production-ready
 - ✅ Comprehensive documentation (5000+ lines)
 - ✅ 21 architectural decisions documented
 - ✅ Full test coverage (100+ unit tests)
 - ✅ Graceful shutdown with signal handling
 - ✅ Error recovery with error_module
 - ✅ CommandManager with 6 built-in commands
+- ✅ sql_module — database access via Router, typed commands (db.query, db.execute, db.insert)
 
 ---
 
@@ -492,4 +571,4 @@ For questions or issues:
 
 **Built with ❤️ for reliable multiprocessing in Python**
 
-Last Updated: March 14, 2026
+Last Updated: March 18, 2026
