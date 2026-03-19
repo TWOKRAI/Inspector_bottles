@@ -85,9 +85,10 @@ class FrontendManager(BaseManager, ObservableMixin):
                     if hasattr(cfg, "subscribe"):
                         cfg.subscribe(callback=self._on_config_changed, key="*")
 
-            # 3. WindowManager и ThreadManager
+            # 3. WindowManager и ThreadManager (IConfig или dict)
+            wm_config = self._config_obj if self._config_obj is not None else self._config
             self._window_manager = WindowManager(
-                config=self._config,
+                config=wm_config,
                 registers_manager=self._registers_bridge,
             )
             self._thread_manager = ThreadManager(

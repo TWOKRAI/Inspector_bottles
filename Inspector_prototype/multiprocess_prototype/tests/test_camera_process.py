@@ -10,7 +10,7 @@
 import time
 
 from multiprocess_framework.refactored.modules.data_schema_module import process
-from multiprocess_prototype.configs import CameraConfig
+from multiprocess_prototype.backend.configs import CameraConfig
 
 
 def test_camera_process_isolated():

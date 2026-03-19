@@ -10,6 +10,19 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 
 @runtime_checkable
+class IRouterLike(Protocol):
+    """
+    Протокол объекта, способного отправлять сообщения в backend.
+
+    ProcessModule реализует этот контракт: send_message делегирует в
+    ProcessCommunication → RouterManager. FrontendManager принимает router: IRouterLike.
+    """
+
+    def send_message(self, target: str, msg: Dict[str, Any]) -> bool:
+        """Отправить сообщение целевому процессу. Возвращает True при успехе."""
+
+
+@runtime_checkable
 class IRegistersManager(Protocol):
     """
     Протокол менеджера регистров.
@@ -105,6 +118,19 @@ class IWidgetRegistry(Protocol):
 
     def list_types(self) -> List[str]:
         """Список зарегистрированных типов виджетов."""
+
+
+@runtime_checkable
+class ISignalProvider(Protocol):
+    """
+    Протокол виджета, предоставляющего каталог своих сигналов.
+
+    Виджет реализует get_signal_map() для подключения к backend/другим виджетам
+    по конфигу signal_bindings без необходимости знать внутреннюю структуру класса.
+    """
+
+    def get_signal_map(self) -> Dict[str, Any]:
+        """Возвращает {signal_name: signal_object} для подключения."""
 
 
 @runtime_checkable

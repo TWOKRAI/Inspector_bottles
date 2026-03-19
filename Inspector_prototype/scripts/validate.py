@@ -1,4 +1,4 @@
-﻿"""
+"""
 Скрипт валидации фреймворка.
 
 Проверяет:
@@ -95,6 +95,9 @@ def check_no_syspath() -> None:
             if py_file.name.startswith("test_") or py_file.name == "conftest.py":
                 continue
             text = py_file.read_text(encoding="utf-8", errors="ignore")
+            # main.py — единственное исключение: точка входа для прямого запуска
+            if py_file.name == "main.py" and "multiprocess_prototype" in str(py_file):
+                continue
             if "sys.path.insert" in text or "sys.path.append" in text:
                 rel = py_file.relative_to(BASE)
                 msg = f"  [WARN] sys.path hack найден: {rel}"

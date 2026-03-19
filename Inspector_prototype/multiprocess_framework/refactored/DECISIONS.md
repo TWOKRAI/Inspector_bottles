@@ -16,6 +16,36 @@
 
 ---
 
+## ADR-040: GuiProcessMixin
+- Дата: 2026-03-19
+- Статус: принято
+- Контекст: GuiProcess и GuiProcessFrontend дублировали ~25 методов gui_* и _handle_*.
+- Решение: Вынести в GuiProcessMixin (frontend/mixins/gui_process_mixin.py). GuiProcess и GuiProcessFrontend наследуют GuiProcessMixin.
+- Причина: Устранение дублирования, единый источник логики GUI-команд.
+- Отклонённые альтернативы: Оставить дублирование — нарушает DRY.
+
+---
+
+## ADR-041: Конфиг-драйвен window registry
+- Дата: 2026-03-19
+- Статус: принято
+- Контекст: FrontendLauncher.register_windows хардкодил main, inspector, loading.
+- Решение: window_registry в конфиге (frontend_config): {name: {factory_key: "main"}}. Launcher регистрирует окна по конфигу.
+- Причина: Добавление/удаление окон без переписывания launcher.
+- Отклонённые альтернативы: Динамическая загрузка по path.to:fn — требует рефакторинга фабрик (closures).
+
+---
+
+## ADR-042: ProcessModule как IRouterLike для FrontendManager
+- Дата: 2026-03-19
+- Статус: принято
+- Контекст: FrontendManager(router=process) — process не RouterManager, но имеет send_message.
+- Решение: Protocol IRouterLike в frontend_module/interfaces.py: send_message(target, msg) -> bool. ProcessModule реализует контракт.
+- Причина: Явная семантика: process делегирует в RouterManager через ProcessCommunication.
+- Отклонённые альтернативы: Передавать RouterManager напрямую — GUI-процесс не имеет прямого доступа.
+
+---
+
 ## ADR-001: ObservableMixin остаётся
 - Дата: 2026-03-11
 - Статус: принято

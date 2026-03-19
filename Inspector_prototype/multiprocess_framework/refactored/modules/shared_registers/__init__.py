@@ -8,7 +8,11 @@ Shared Registers — общие схемы регистров для backend и 
 """
 
 from .draw import DrawRegisters
+from .processor import ProcessorRegisters
+from .renderer import RendererRegisters
 
 __all__ = [
     "DrawRegisters",
+    "ProcessorRegisters",
+    "RendererRegisters",
 ]

@@ -266,3 +266,311 @@
 2026-03-18 20:18:50,177 [INFO] processor: Color range set: lower=[0, 0, 80], upper=[100, 100, 255]
 2026-03-18 20:18:50,177 [INFO] processor: Color range set: lower=[0, 0, 77], upper=[100, 100, 255]
 2026-03-18 20:18:50,177 [INFO] processor: Color range set: lower=[0, 0, 74], upper=[100, 100, 255]
+2026-03-19 08:37:08,328 [INFO] processor: Process state registered: processor
+2026-03-19 08:37:08,329 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 08:37:08,329 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 08:37:08,329 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 08:37:08,329 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 08:37:13,985 [INFO] processor: Color range set: lower=[0, 0, 140], upper=[100, 100, 255]
+2026-03-19 08:37:15,042 [INFO] processor: Color range set: lower=[0, 0, 135], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 131], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 128], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 120], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 116], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 113], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 101], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 94], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 79], upper=[100, 100, 255]
+2026-03-19 08:37:15,395 [INFO] processor: Color range set: lower=[0, 0, 71], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 68], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 64], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 56], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 49], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 45], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 38], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 34], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 26], upper=[100, 100, 255]
+2026-03-19 08:37:15,396 [INFO] processor: Color range set: lower=[0, 0, 23], upper=[100, 100, 255]
+2026-03-19 08:37:15,397 [INFO] processor: Color range set: lower=[0, 0, 19], upper=[100, 100, 255]
+2026-03-19 08:37:15,397 [INFO] processor: Color range set: lower=[0, 0, 15], upper=[100, 100, 255]
+2026-03-19 08:37:15,397 [INFO] processor: Color range set: lower=[0, 0, 11], upper=[100, 100, 255]
+2026-03-19 08:37:15,397 [INFO] processor: Color range set: lower=[0, 0, 8], upper=[100, 100, 255]
+2026-03-19 08:37:15,398 [INFO] processor: Color range set: lower=[0, 0, 0], upper=[100, 100, 255]
+2026-03-19 08:37:15,419 [INFO] processor: Color range set: lower=[0, 0, 4], upper=[100, 100, 255]
+2026-03-19 08:37:15,419 [INFO] processor: Color range set: lower=[0, 0, 8], upper=[100, 100, 255]
+2026-03-19 08:37:15,419 [INFO] processor: Color range set: lower=[0, 0, 11], upper=[100, 100, 255]
+2026-03-19 08:37:15,419 [INFO] processor: Color range set: lower=[0, 0, 15], upper=[100, 100, 255]
+2026-03-19 08:37:15,419 [INFO] processor: Color range set: lower=[0, 0, 19], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 23], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 26], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 30], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 34], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 38], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 41], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 45], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 49], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 53], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 56], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 60], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 64], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 68], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 71], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 75], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 79], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 83], upper=[100, 100, 255]
+2026-03-19 08:37:15,420 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 94], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 101], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 109], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 116], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 120], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 124], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 128], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 124], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 116], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 113], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 109], upper=[100, 100, 255]
+2026-03-19 08:37:15,421 [INFO] processor: Color range set: lower=[0, 0, 105], upper=[100, 100, 255]
+2026-03-19 08:37:16,421 [INFO] processor: Color range set: lower=[0, 0, 101], upper=[100, 100, 255]
+2026-03-19 08:37:16,421 [INFO] processor: Color range set: lower=[0, 0, 98], upper=[100, 100, 255]
+2026-03-19 08:37:16,421 [INFO] processor: Color range set: lower=[0, 0, 94], upper=[100, 100, 255]
+2026-03-19 08:37:16,421 [INFO] processor: Color range set: lower=[0, 0, 90], upper=[100, 100, 255]
+2026-03-19 08:37:16,422 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 08:37:16,422 [INFO] processor: Color range set: lower=[0, 0, 83], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 90], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 94], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 98], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 101], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 105], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 109], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 113], upper=[100, 100, 255]
+2026-03-19 08:37:16,436 [INFO] processor: Color range set: lower=[0, 0, 116], upper=[100, 100, 255]
+2026-03-19 08:37:16,437 [INFO] processor: Color range set: lower=[0, 0, 120], upper=[100, 100, 255]
+2026-03-19 08:37:17,437 [INFO] processor: Color range set: lower=[0, 0, 124], upper=[100, 100, 255]
+2026-03-19 08:48:47,436 [INFO] processor: Process state registered: processor
+2026-03-19 08:48:47,436 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 08:48:47,436 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 08:48:47,436 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 08:48:47,436 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 08:48:49,829 [INFO] processor: ProcessorProcess shutting down...
+2026-03-19 08:48:49,854 [INFO] processor: Process 'processor' shut down successfully
+2026-03-19 08:48:49,854 [INFO] processor: ProcessorProcess shutting down...
+2026-03-19 08:48:54,483 [INFO] processor: Process state registered: processor
+2026-03-19 08:48:54,483 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 08:48:54,483 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 08:48:54,483 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 08:48:54,483 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 08:48:56,984 [INFO] processor: ProcessorProcess shutting down...
+2026-03-19 08:48:56,989 [INFO] processor: Process 'processor' shut down successfully
+2026-03-19 08:48:56,989 [INFO] processor: ProcessorProcess shutting down...
+2026-03-19 08:49:30,691 [INFO] processor: Process state registered: processor
+2026-03-19 08:49:30,691 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 08:49:30,691 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 08:49:30,691 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 08:49:30,691 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 08:49:39,732 [INFO] processor: Color range set: lower=[0, 0, 140], upper=[100, 100, 255]
+2026-03-19 08:49:40,775 [INFO] processor: Color range set: lower=[0, 0, 116], upper=[100, 100, 255]
+2026-03-19 08:49:40,794 [INFO] processor: Color range set: lower=[0, 0, 113], upper=[100, 100, 255]
+2026-03-19 08:49:40,794 [INFO] processor: Color range set: lower=[0, 0, 109], upper=[100, 100, 255]
+2026-03-19 08:49:40,794 [INFO] processor: Color range set: lower=[0, 0, 105], upper=[100, 100, 255]
+2026-03-19 08:49:40,795 [INFO] processor: Color range set: lower=[0, 0, 101], upper=[100, 100, 255]
+2026-03-19 08:49:40,795 [INFO] processor: Color range set: lower=[0, 0, 98], upper=[100, 100, 255]
+2026-03-19 08:49:40,795 [INFO] processor: Color range set: lower=[0, 0, 94], upper=[100, 100, 255]
+2026-03-19 08:49:40,795 [INFO] processor: Color range set: lower=[0, 0, 90], upper=[100, 100, 255]
+2026-03-19 08:49:41,796 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 13:45:17,316 [INFO] processor: Process state registered: processor
+2026-03-19 13:45:17,316 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 13:45:17,316 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 13:45:17,316 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 13:45:17,316 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 13:47:44,376 [INFO] processor: Process state registered: processor
+2026-03-19 13:47:44,376 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 13:47:44,376 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 13:47:44,376 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 13:47:44,376 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 13:48:22,048 [INFO] processor: Process state registered: processor
+2026-03-19 13:48:22,048 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 13:48:22,048 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 13:48:22,049 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 13:48:22,049 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 13:50:58,811 [INFO] processor: Process state registered: processor
+2026-03-19 13:50:58,811 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 13:50:58,811 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 13:50:58,811 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 13:50:58,812 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 14:25:40,940 [INFO] processor: Process state registered: processor
+2026-03-19 14:25:40,940 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 14:25:40,940 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 14:25:40,940 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 14:25:40,940 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 14:38:21,807 [INFO] processor: Color range set: lower=[0, 0, 140], upper=[100, 100, 255]
+2026-03-19 14:38:22,721 [INFO] processor: Color range set: lower=[0, 0, 144], upper=[100, 100, 255]
+2026-03-19 14:38:23,731 [INFO] processor: Color range set: lower=[0, 0, 134], upper=[100, 100, 255]
+2026-03-19 14:38:24,752 [INFO] processor: Color range set: lower=[0, 0, 132], upper=[100, 100, 255]
+2026-03-19 14:38:24,752 [INFO] processor: Color range set: lower=[0, 0, 129], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 123], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 115], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 106], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 95], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 85], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 74], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 63], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 54], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 46], upper=[100, 100, 255]
+2026-03-19 14:38:24,753 [INFO] processor: Color range set: lower=[0, 0, 39], upper=[100, 100, 255]
+2026-03-19 14:38:24,754 [INFO] processor: Color range set: lower=[0, 0, 35], upper=[100, 100, 255]
+2026-03-19 14:38:24,754 [INFO] processor: Color range set: lower=[0, 0, 32], upper=[100, 100, 255]
+2026-03-19 14:38:24,754 [INFO] processor: Color range set: lower=[0, 0, 31], upper=[100, 100, 255]
+2026-03-19 14:38:24,754 [INFO] processor: Color range set: lower=[0, 0, 30], upper=[100, 100, 255]
+2026-03-19 14:38:24,754 [INFO] processor: Color range set: lower=[0, 0, 29], upper=[100, 100, 255]
+2026-03-19 14:38:24,754 [INFO] processor: Color range set: lower=[0, 0, 28], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 27], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 25], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 24], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 22], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 21], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 20], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 19], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 18], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 19], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 21], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 22], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 24], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 25], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 26], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 27], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 28], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 29], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 30], upper=[100, 100, 255]
+2026-03-19 14:38:24,755 [INFO] processor: Color range set: lower=[0, 0, 31], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 32], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 33], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 34], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 35], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 36], upper=[100, 100, 255]
+2026-03-19 14:38:24,756 [INFO] processor: Color range set: lower=[0, 0, 37], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 38], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 39], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 41], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 43], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 45], upper=[100, 100, 255]
+2026-03-19 14:38:24,757 [INFO] processor: Color range set: lower=[0, 0, 47], upper=[100, 100, 255]
+2026-03-19 14:38:24,758 [INFO] processor: Color range set: lower=[0, 0, 48], upper=[100, 100, 255]
+2026-03-19 14:38:24,758 [INFO] processor: Color range set: lower=[0, 0, 49], upper=[100, 100, 255]
+2026-03-19 14:38:24,758 [INFO] processor: Color range set: lower=[0, 0, 50], upper=[100, 100, 255]
+2026-03-19 14:38:25,758 [INFO] processor: Color range set: lower=[0, 0, 51], upper=[100, 100, 255]
+2026-03-19 14:38:25,758 [INFO] processor: Color range set: lower=[0, 0, 52], upper=[100, 100, 255]
+2026-03-19 14:38:25,758 [INFO] processor: Color range set: lower=[0, 0, 53], upper=[100, 100, 255]
+2026-03-19 14:38:25,758 [INFO] processor: Color range set: lower=[0, 0, 55], upper=[100, 100, 255]
+2026-03-19 14:38:25,758 [INFO] processor: Color range set: lower=[0, 0, 56], upper=[100, 100, 255]
+2026-03-19 14:38:25,758 [INFO] processor: Color range set: lower=[0, 0, 57], upper=[100, 100, 255]
+2026-03-19 14:38:25,759 [INFO] processor: Color range set: lower=[0, 0, 58], upper=[100, 100, 255]
+2026-03-19 14:38:25,759 [INFO] processor: Color range set: lower=[0, 0, 59], upper=[100, 100, 255]
+2026-03-19 14:38:25,759 [INFO] processor: Color range set: lower=[0, 0, 60], upper=[100, 100, 255]
+2026-03-19 14:38:25,759 [INFO] processor: Color range set: lower=[0, 0, 61], upper=[100, 100, 255]
+2026-03-19 14:38:25,760 [INFO] processor: Color range set: lower=[0, 0, 62], upper=[100, 100, 255]
+2026-03-19 14:38:25,761 [INFO] processor: Color range set: lower=[0, 0, 63], upper=[100, 100, 255]
+2026-03-19 14:38:25,761 [INFO] processor: Color range set: lower=[0, 0, 64], upper=[100, 100, 255]
+2026-03-19 14:38:25,761 [INFO] processor: Color range set: lower=[0, 0, 65], upper=[100, 100, 255]
+2026-03-19 14:38:25,761 [INFO] processor: Color range set: lower=[0, 0, 66], upper=[100, 100, 255]
+2026-03-19 14:38:25,761 [INFO] processor: Color range set: lower=[0, 0, 67], upper=[100, 100, 255]
+2026-03-19 14:38:25,761 [INFO] processor: Color range set: lower=[0, 0, 68], upper=[100, 100, 255]
+2026-03-19 14:38:25,762 [INFO] processor: Color range set: lower=[0, 0, 70], upper=[100, 100, 255]
+2026-03-19 14:38:25,762 [INFO] processor: Color range set: lower=[0, 0, 71], upper=[100, 100, 255]
+2026-03-19 14:38:25,762 [INFO] processor: Color range set: lower=[0, 0, 73], upper=[100, 100, 255]
+2026-03-19 14:38:25,762 [INFO] processor: Color range set: lower=[0, 0, 74], upper=[100, 100, 255]
+2026-03-19 14:38:25,762 [INFO] processor: Color range set: lower=[0, 0, 75], upper=[100, 100, 255]
+2026-03-19 14:38:25,763 [INFO] processor: Color range set: lower=[0, 0, 76], upper=[100, 100, 255]
+2026-03-19 14:38:25,763 [INFO] processor: Color range set: lower=[0, 0, 77], upper=[100, 100, 255]
+2026-03-19 14:38:25,763 [INFO] processor: Color range set: lower=[0, 0, 78], upper=[100, 100, 255]
+2026-03-19 14:38:25,763 [INFO] processor: Color range set: lower=[0, 0, 79], upper=[100, 100, 255]
+2026-03-19 14:38:25,763 [INFO] processor: Color range set: lower=[0, 0, 80], upper=[100, 100, 255]
+2026-03-19 14:38:25,764 [INFO] processor: Color range set: lower=[0, 0, 81], upper=[100, 100, 255]
+2026-03-19 14:38:25,764 [INFO] processor: Color range set: lower=[0, 0, 82], upper=[100, 100, 255]
+2026-03-19 14:38:25,764 [INFO] processor: Color range set: lower=[0, 0, 83], upper=[100, 100, 255]
+2026-03-19 14:38:25,764 [INFO] processor: Color range set: lower=[0, 0, 84], upper=[100, 100, 255]
+2026-03-19 14:38:25,765 [INFO] processor: Color range set: lower=[0, 0, 85], upper=[100, 100, 255]
+2026-03-19 14:38:25,765 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 14:38:25,765 [INFO] processor: Color range set: lower=[0, 0, 87], upper=[100, 100, 255]
+2026-03-19 14:38:25,765 [INFO] processor: Color range set: lower=[0, 0, 88], upper=[100, 100, 255]
+2026-03-19 14:38:25,765 [INFO] processor: Color range set: lower=[0, 0, 87], upper=[100, 100, 255]
+2026-03-19 14:38:25,781 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 14:38:25,786 [INFO] processor: Color range set: lower=[0, 0, 85], upper=[100, 100, 255]
+2026-03-19 14:38:25,786 [INFO] processor: Color range set: lower=[0, 0, 84], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 83], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 82], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 81], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 80], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 79], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 78], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 77], upper=[100, 100, 255]
+2026-03-19 14:38:26,803 [INFO] processor: Color range set: lower=[0, 0, 76], upper=[100, 100, 255]
+2026-03-19 14:38:27,803 [INFO] processor: Color range set: lower=[0, 0, 75], upper=[100, 100, 255]
+2026-03-19 14:38:27,803 [INFO] processor: Color range set: lower=[0, 0, 74], upper=[100, 100, 255]
+2026-03-19 14:38:27,803 [INFO] processor: Color range set: lower=[0, 0, 75], upper=[100, 100, 255]
+2026-03-19 15:00:57,631 [INFO] processor: Process state registered: processor
+2026-03-19 15:00:57,631 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 15:00:57,631 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 15:00:57,631 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 15:00:57,631 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 15:02:03,013 [INFO] processor: Process state registered: processor
+2026-03-19 15:02:03,013 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 15:02:03,013 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 15:02:03,013 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 15:02:03,013 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 15:02:17,087 [INFO] processor: Process state registered: processor
+2026-03-19 15:02:17,087 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 15:02:17,087 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 15:02:17,087 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 15:02:17,087 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 15:02:27,257 [INFO] processor: Color range set: lower=[0, 0, 149], upper=[100, 100, 255]
+2026-03-19 15:02:27,208 [INFO] processor: Color range set: lower=[0, 0, 147], upper=[100, 100, 255]
+2026-03-19 15:02:27,208 [INFO] processor: Color range set: lower=[0, 0, 145], upper=[100, 100, 255]
+2026-03-19 15:02:27,208 [INFO] processor: Color range set: lower=[0, 0, 142], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 138], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 132], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 128], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 120], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 114], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 109], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 104], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 102], upper=[100, 100, 255]
+2026-03-19 15:02:27,209 [INFO] processor: Color range set: lower=[0, 0, 98], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 97], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 95], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 94], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 92], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 91], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 89], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 88], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 86], upper=[100, 100, 255]
+2026-03-19 15:02:27,210 [INFO] processor: Color range set: lower=[0, 0, 83], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 82], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 80], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 79], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 77], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 76], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 75], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 74], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 73], upper=[100, 100, 255]
+2026-03-19 15:02:27,211 [INFO] processor: Color range set: lower=[0, 0, 72], upper=[100, 100, 255]
+2026-03-19 15:02:27,212 [INFO] processor: Color range set: lower=[0, 0, 71], upper=[100, 100, 255]
+2026-03-19 15:02:27,212 [INFO] processor: Color range set: lower=[0, 0, 70], upper=[100, 100, 255]
+2026-03-19 15:02:27,212 [INFO] processor: Color range set: lower=[0, 0, 69], upper=[100, 100, 255]
+2026-03-19 15:06:17,580 [INFO] processor: Process state registered: processor
+2026-03-19 15:06:17,580 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 15:06:17,580 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 15:06:17,580 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 15:06:17,580 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 15:17:51,843 [INFO] processor: Process state registered: processor
+2026-03-19 15:17:51,843 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 15:17:51,843 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 15:17:51,843 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 15:17:51,843 [INFO] processor: Process 'processor' initialized successfully
+2026-03-19 15:23:18,092 [INFO] processor: Process state registered: processor
+2026-03-19 15:23:18,092 [INFO] processor: ProcessorProcess initializing...
+2026-03-19 15:23:18,092 [INFO] processor: ProcessorProcess ready: color_lower=[0, 0, 150], color_upper=[100, 100, 255], min_area=500, max_area=50000
+2026-03-19 15:23:18,092 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-03-19 15:23:18,093 [INFO] processor: Process 'processor' initialized successfully

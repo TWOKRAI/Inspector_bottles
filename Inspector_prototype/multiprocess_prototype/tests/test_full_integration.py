@@ -25,7 +25,7 @@ def test_full_5_processes_graceful_shutdown():
         SystemLauncher,
     )
     from multiprocess_framework.refactored.modules.data_schema_module import process
-    from multiprocess_prototype.configs import (
+    from multiprocess_prototype.backend.configs import (
         CameraConfig,
         ProcessorConfig,
         RendererConfig,

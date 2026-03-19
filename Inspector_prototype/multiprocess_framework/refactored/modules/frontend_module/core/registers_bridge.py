@@ -3,8 +3,10 @@
 FrontendRegistersBridge — обёртка над RegistersManager для связи frontend с backend.
 
 Реализует IRegistersManager, делегируя в registers_module.RegistersManager.
-Настраивает connection_map и send_callback для отправки изменений через Router.
-Поддерживает notify_field_changed для обновления UI при получении данных с бэкенда.
+Настраивает connection_map и send_callback для отправки изменений через router.
+
+router: ProcessModule (GuiProcessFrontend, GuiProcess). Имеет send_message(target, msg),
+который делегирует в ProcessCommunication → RouterManager.queue_registry.send_to_queue.
 """
 from __future__ import annotations
 
@@ -62,7 +64,7 @@ class FrontendRegistersBridge:
         """
         Args:
             registers_manager: RegistersManager из registers_module
-            router: RouterManager или объект с send_message(channel, msg)
+            router: ProcessModule (send_message → RouterManager) или объект с send_message(target, msg)
             process_name: Имя процесса (для логов)
             connection_map: {register_name: channel} — при изменении отправлять в channel
             send_callback: Кастомный callback. Если None и router задан — создаётся автоматически.

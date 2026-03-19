@@ -20,7 +20,7 @@ def test_camera_processor_together():
     launcher = SystemLauncher(stop_timeout=5.0)
 
     from multiprocess_framework.refactored.modules.data_schema_module import process
-    from multiprocess_prototype.configs import CameraConfig
+    from multiprocess_prototype.backend.configs import CameraConfig
 
     launcher.add_process(*process(CameraConfig(
         camera_type="simulator",
@@ -30,7 +30,7 @@ def test_camera_processor_together():
         use_simulator=True,
     )))
 
-    from multiprocess_prototype.configs import ProcessorConfig
+    from multiprocess_prototype.backend.configs import ProcessorConfig
 
     launcher.add_process(*process(ProcessorConfig()))
 

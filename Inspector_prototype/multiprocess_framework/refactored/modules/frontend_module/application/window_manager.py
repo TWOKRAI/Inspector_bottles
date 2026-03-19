@@ -4,13 +4,34 @@ WindowManager — управление жизненным циклом окон.
 
 Реестр окон, показ/скрытие, fullscreen, cursor, access_level.
 Приложение регистрирует окна через register().
+Поддерживает IConfig (dot-notation) и Dict для обратной совместимости.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 from frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, pyqtSignal
 from frontend_module.core.window_registry import WindowEntry, WindowRegistry
+
+
+def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    """Получить значение по dot-notation. Поддерживает IConfig и Dict."""
+    if config is None:
+        return default
+    if hasattr(config, "get") and not isinstance(config, dict):
+        return config.get(key, default)
+    if isinstance(config, dict):
+        parts = key.split(".")
+        obj: Any = config
+        for p in parts:
+            if isinstance(obj, dict):
+                obj = obj.get(p)
+            else:
+                return default
+            if obj is None:
+                return default
+        return obj if obj is not None else default
+    return default
 
 
 class WindowManager(QObject):
@@ -23,13 +44,13 @@ class WindowManager(QObject):
 
     def __init__(
             self,
-            config: Dict[str, Any],
+            config: Union[Dict[str, Any], Any],
             registers_manager: Any,
             data_manager: Optional[Any] = None,
             parent=None,
     ):
         super().__init__(parent)
-        self._config = config
+        self._config = config  # IConfig или Dict
         self._registers = registers_manager
         self._data_manager = data_manager
         self._registry = WindowRegistry()
@@ -93,11 +114,11 @@ class WindowManager(QObject):
 
     def set_fullscreen(self, fullscreen: bool) -> None:
         """Установить fullscreen для окон с needs_fullscreen."""
-        limit = self._config.get("window", {}).get("limit_fullscreen_resolution", False)
-        max_w = self._config.get("window", {}).get("fullscreen_max_width", 1920)
-        max_h = self._config.get("window", {}).get("fullscreen_max_height", 1080)
-        min_w = self._config.get("window", {}).get("window_min_width", 800)
-        min_h = self._config.get("window", {}).get("window_min_height", 600)
+        limit = _config_get(self._config, "window.limit_fullscreen_resolution", False)
+        max_w = _config_get(self._config, "window.fullscreen_max_width", 1920)
+        max_h = _config_get(self._config, "window.fullscreen_max_height", 1080)
+        min_w = _config_get(self._config, "window.window_min_width", 800)
+        min_h = _config_get(self._config, "window.window_min_height", 600)
 
         def apply(window: QWidget):
             if fullscreen:
@@ -152,7 +173,10 @@ class WindowManager(QObject):
         Обновить конфиг (hot-reload).
         Окна с методом apply_config получат новый конфиг.
         """
-        self._config.update(config)
+        if hasattr(self._config, "update"):
+            self._config.update(config)
+        elif isinstance(self._config, dict):
+            self._config.update(config)
         names = self._registry.created_names()
         for name in names:
             w = self._registry.get(name)

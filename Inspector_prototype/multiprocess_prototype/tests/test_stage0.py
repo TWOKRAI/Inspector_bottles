@@ -24,7 +24,7 @@ def test_frame_generator():
 
 def test_configs():
     """Все конфиги создаются с дефолтными значениями."""
-    from multiprocess_prototype.configs import (
+    from multiprocess_prototype.backend.configs import (
         CameraConfig,
         ProcessorConfig,
         RendererConfig,

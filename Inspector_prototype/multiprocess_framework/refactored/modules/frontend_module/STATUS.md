@@ -36,6 +36,8 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-19 | LoadingWindow, ImagePanelWidget, HeaderWidget (windows из конфига), ISignalProvider | 6 |
+| 2026-03-19 | WindowManager: IConfig поддержка, _config_get для dot-notation | 6 |
 | 2026-03-18 | Создание фундамента: структура, interfaces, README, STATUS | 0 |
 | 2026-03-18 | BaseConfigurableWidget, WidgetDescriptor, WidgetRegistry, SliderControl, CheckboxControl | 4 |
 | 2026-03-18 | WindowRegistry, WindowConfig, LayoutComposer (compose_layout) | 5 |

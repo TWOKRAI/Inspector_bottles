@@ -32,22 +32,22 @@ multiprocess_prototype/
 ├── prefs.py                # Сохранение camera_type (GUI → .inspector_prefs.json)
 ├── run.sh                  # Запуск с PYTHONPATH и очисткой SharedMemory
 │
-├── backend/                # Конфиги, процессы, бэкенды камер
+├── backend/                # Бизнес-логика, процессы, БД
 │   ├── configs/           # Pydantic-конфиги (camera, processor, renderer, robot, database, gui)
 │   ├── processes/         # Реализации процессов (unified_camera, processor, renderer, robot, gui, database)
+│   ├── database/          # Схемы (DetectionSchema), utils, export_detections
 │   ├── backends.py        # SimulatorBackend, WebcamBackend, HikvisionBackend
 │   └── __init__.py
 │
 ├── frontend/              # GUI на frontend_module
-│   ├── config.py          # GuiConfigFrontend
+│   ├── configs/           # GuiConfigFrontend
 │   ├── process.py         # GuiProcessFrontend
 │   ├── registers.py       # create_frontend_registers()
 │   └── windows/           # InspectorWindow
 │
-├── configs/                # Реэкспорт из backend.configs (совместимость)
-│
-├── gui/                    # GUI-компоненты (реэкспорт из frontend.windows)
 ├── utils/                  # FrameGenerator, WebcamCapture, shm_utils
+├── logs/
+├── docs/
 └── tests/                  # Unit- и интеграционные тесты
 ```
 
@@ -89,7 +89,7 @@ from multiprocess_framework.refactored.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
     CameraConfig, DatabaseConfig, ProcessorConfig, RendererConfig, RobotConfig,
 )
-from multiprocess_prototype.frontend.config import GuiConfigFrontend
+from multiprocess_prototype.frontend import GuiConfigFrontend
 from multiprocess_prototype.prefs import get_camera_type
 
 launcher = SystemLauncher(stop_timeout=5.0)

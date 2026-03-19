@@ -16,20 +16,22 @@
 
 ---
 
-## Структура (после рефакторинга)
+## Структура (после рефакторинга 2026-03)
 
 ```
-backend/            — configs/, processes/, modules/
+backend/            — configs/, processes/, database/, backends.py
   configs/          — CameraConfig, ProcessorConfig, RendererConfig, RobotConfig, DatabaseConfig, GuiConfig
   processes/        — camera, processor, renderer, robot, database, gui (legacy)
-frontend/           — config, process, registers, windows/
-  config.py         — GuiConfigFrontend
+  database/         — DetectionSchema, utils, export_detections
+frontend/           — configs/, process, registers, windows/
+  configs/config.py — GuiConfigFrontend
   process.py        — GuiProcessFrontend (FrontendManager)
   registers.py      — create_frontend_registers()
   windows/          — InspectorWindow
-configs/            — реэкспорт из backend.configs + frontend (совместимость)
-gui/, utils/        — GUI виджеты, утилиты
+utils/              — FrameGenerator, WebcamCapture, shm_utils
 ```
+
+Удалены дубли: multiprocess_prototype/database/, Inspector_prototype/processes/
 
 ---
 

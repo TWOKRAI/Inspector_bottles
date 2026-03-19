@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(
 def test_gui_checkboxes_call_process_methods():
     """Чекбоксы при изменении вызывают process.gui_set_show_original, gui_set_show_mask, gui_set_draw_contours."""
     from PyQt5.QtCore import Qt
-    from multiprocess_prototype.gui.main_window import InspectorWindow
+    from multiprocess_prototype.frontend.windows.inspector_window import InspectorWindow
 
     mock_process = MagicMock()
     window = InspectorWindow("Test", 800, 600, mock_process)
@@ -43,7 +43,7 @@ def test_gui_checkboxes_call_process_methods():
 
 def test_update_frame_dual_images():
     """update_frame принимает original_frame и mask_frame."""
-    from multiprocess_prototype.gui.main_window import InspectorWindow
+    from multiprocess_prototype.frontend.windows.inspector_window import InspectorWindow
 
     mock_process = MagicMock()
     window = InspectorWindow("Test", 800, 600, mock_process)

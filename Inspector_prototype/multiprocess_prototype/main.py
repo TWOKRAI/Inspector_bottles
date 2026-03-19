@@ -1,4 +1,4 @@
-# multiprocess_prototype\main.py
+# multiprocess_prototype/main.py
 """
 Точка входа Inspector Prototype.
 
@@ -7,28 +7,17 @@ add_process(name, proc_dict) — Dict at Boundary.
 Конфиги с build() через process() из data_schema_module.
 
 Запуск:
-  run.sh (рекомендуется):
-    ./Inspector_prototype/multiprocess_prototype/run.sh
-  или из каталога Inspector_prototype:
-    ./multiprocess_prototype/run.sh
-
-  python main.py (из каталога Inspector_prototype или multiprocess_prototype):
+  Прямой запуск (рекомендуется):
     python Inspector_prototype/multiprocess_prototype/main.py
-    cd Inspector_prototype && python multiprocess_prototype/main.py
-
-  через модуль с PYTHONPATH:
-    PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.main
+  Или через run-скрипты (задают PYTHONPATH):
+    .\Inspector_prototype\multiprocess_prototype\run.ps1
+    ./Inspector_prototype/multiprocess_prototype/run.sh
 """
-import os
 import sys
-
-# Windows: отключить MSMF HW transforms до загрузки OpenCV (обход grabFrame -1072875772)
-# if os.name == "nt":
-#     os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 from pathlib import Path
 
-# Пути: Inspector_prototype (содержит multiprocess_prototype, Services, multiprocess_framework)
-_root = Path(__file__).resolve().parent.parent
+# Для прямого запуска main.py — настроить пути, если модули не в PYTHONPATH
+_root = Path(__file__).resolve().parent.parent  # Inspector_prototype
 _modules = _root / "multiprocess_framework" / "refactored" / "modules"
 for _p in (_root, _modules):
     if str(_p) not in sys.path:
@@ -47,7 +36,7 @@ def main() -> int:
         RendererConfig,
         RobotConfig,
     )
-    from multiprocess_prototype.frontend.config import GuiConfigFrontend
+    from multiprocess_prototype.frontend import GuiConfigFrontend
 
     launcher = SystemLauncher(stop_timeout=5.0)
 
