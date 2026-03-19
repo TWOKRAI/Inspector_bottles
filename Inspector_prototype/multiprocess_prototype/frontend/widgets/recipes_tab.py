@@ -7,7 +7,7 @@ RecipesTabWidget — вкладка рецептов.
 
 from typing import Any, Optional
 
-from frontend_module.components.tab_widget import BaseTab
+from frontend_module.components import BaseTab
 from frontend_module.core.qt_imports import QLabel, QVBoxLayout, QWidget, Qt
 
 

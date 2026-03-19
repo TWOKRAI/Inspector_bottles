@@ -19,7 +19,7 @@ def _create_slider(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика SliderControl."""
-    from frontend_module.components.slider_control import SliderControl
+    from frontend_module.components.controls import SliderControl
 
     return SliderControl(
         registers_manager=registers_manager,
@@ -35,7 +35,7 @@ def _create_checkbox(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика CheckboxControl."""
-    from frontend_module.components.checkbox_control import CheckboxControl
+    from frontend_module.components.controls import CheckboxControl
 
     return CheckboxControl(
         registers_manager=registers_manager,

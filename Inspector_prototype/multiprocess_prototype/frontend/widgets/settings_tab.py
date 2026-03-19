@@ -7,25 +7,25 @@ SliderControl, CheckboxControl по конфигу. Привязка к Register
 
 from typing import Any, List, Optional
 
-from frontend_module.components.tab_widget import BaseTab
-from frontend_module.components.slider_control import SliderControl
-from frontend_module.components.checkbox_control import CheckboxControl
+from frontend_module.components import BaseTab, SliderControl, CheckboxControl
 from frontend_module.core.qt_imports import QGroupBox, QVBoxLayout, QWidget
 
 
 class SettingsTabWidget(BaseTab):
-    """Вкладка настроек: слайдеры и чекбоксы из DrawRegisters."""
+    """Вкладка настроек: слайдеры и чекбоксы по конфигу. Привязка к RegistersManager."""
 
     def __init__(
         self,
         *,
         registers_manager: Optional[Any] = None,
         controls_config: Optional[List[dict]] = None,
+        group_title: str = "Параметры отображения",
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._registers_manager = registers_manager
         self._controls_config = controls_config or self._default_controls()
+        self._group_title = group_title
         self._init_ui()
 
     def _default_controls(self) -> List[dict]:
@@ -40,7 +40,7 @@ class SettingsTabWidget(BaseTab):
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        group = QGroupBox("Параметры отображения")
+        group = QGroupBox(self._group_title)
         group_layout = QVBoxLayout(group)
         for cfg in self._controls_config:
             w = self._create_control(cfg)

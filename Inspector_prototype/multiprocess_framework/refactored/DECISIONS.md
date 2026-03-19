@@ -16,6 +16,37 @@
 
 ---
 
+## ADR-044: Реорганизация frontend_module/components и паттерн «конфиг рядом с виджетом»
+- Дата: 2026-03-19
+- Статус: принято
+- Контекст: 16 файлов в одной папке components, дублирование конфигов (HeaderAdminButton, LogoConfig в prototype).
+- Решение:
+  - Структура: base/, header/, controls/, tabs/, tables/, keyboard/. performance_monitor в корне.
+  - Паттерн «конфиг рядом с виджетом»: AdminButtonConfig, LogoConfig, HeaderButtonsConfig в frontend_module рядом с виджетами.
+  - HeaderConfig в prototype импортирует AdminButtonConfig, LogoConfig из frontend_module для композиции.
+  - Init виджетов: config + parent. Конфиг принимает SchemaBase | dict.
+  - frontend_module зависит от data_schema_module (SchemaBase, register_schema).
+  - FieldMeta для всех конфигов (как в draw.py): info, info_i18n, access_level — консистентность и расширяемость.
+- Причина: Меньше параметров init, единый источник конфигов виджетов, логичная группировка.
+- Отклонённые альтернативы: Обратная совместимость — пользователь подстраивается под новую структуру.
+
+---
+
+## ADR-043: Унифицированные конфиги frontend на SchemaBase + FieldMeta
+- Дата: 2026-03-19
+- Статус: принято
+- Контекст: frontend_config использовал build_frontend_config() → plain dict без метаданных. Требовалась унификация с регистрами (FieldMeta, min/max, i18n) и декомпозиция по компонентам.
+- Решение:
+  - Конфиги как SchemaBase + FieldMeta: WindowConfig, HeaderConfig, ImagePanelConfig, TabsConfig, SettingsTabConfig, ControlBinding.
+  - Композиция: MainWindowConfig, FrontendConfig. Per-component: main_window/, tabs/.
+  - build_frontend_config() → FrontendConfig().build_dict(app_cfg). Dict at Boundary сохранён.
+  - Config-driven tabs: tab_widget_factory(widget_key, tab_config). SettingsTabConfig.controls — привязка к регистрам.
+  - to_json/from_json, to_yaml/from_yaml через DataConverter.
+- Причина: Единый формат для конфигов и регистров, расширяемость, отсутствие хардкода.
+- Отклонённые альтернативы: Оставить plain dict — теряем валидацию и метаданные.
+
+---
+
 ## ADR-040: GuiProcessMixin
 - Дата: 2026-03-19
 - Статус: принято

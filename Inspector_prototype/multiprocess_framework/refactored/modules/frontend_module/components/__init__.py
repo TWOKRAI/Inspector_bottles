@@ -2,11 +2,10 @@
 """
 Components — переиспользуемые UI-компоненты.
 
-SliderControl, CheckboxControl — привязка к RegistersManager через BaseConfigurableWidget.
-StructuredTableWidget, TableWithToolbar, TabWidget, HeaderWidget, VirtualKeyboard, VirtualKeyboardMini, PerformanceMonitor.
+Структура: base, header, controls, tabs, tables, keyboard.
+Реэкспорт для удобного импорта: from frontend_module.components import HeaderWidget, ...
 """
-from frontend_module.components.slider_control import SliderControl
-from frontend_module.components.checkbox_control import CheckboxControl
+from frontend_module.components.controls import SliderControl, CheckboxControl
 
 __all__ = [
     "SliderControl",
@@ -14,26 +13,22 @@ __all__ = [
 ]
 
 try:
-    from frontend_module.components.structured_table import StructuredTableWidget
-    __all__.append("StructuredTableWidget")
+    from frontend_module.components.tables import StructuredTableWidget, TableWithToolbar
+    __all__.extend(["StructuredTableWidget", "TableWithToolbar"])
 except ImportError:
     StructuredTableWidget = None
-
-try:
-    from frontend_module.components.table_with_toolbar import TableWithToolbar
-    __all__.append("TableWithToolbar")
-except ImportError:
     TableWithToolbar = None
 
 try:
-    from frontend_module.components.tab_widget import TabWidget, BaseTab
+    from frontend_module.components.tabs import TabWidget, BaseTab
     __all__.extend(["TabWidget", "BaseTab"])
 except ImportError:
     TabWidget = None
     BaseTab = None
 
 try:
-    from frontend_module.components.header import HeaderWidget, ButtonHeader
+    from frontend_module.components.header import HeaderWidget
+    from frontend_module.components.base import ButtonHeader
     __all__.extend(["HeaderWidget", "ButtonHeader"])
 except ImportError:
     HeaderWidget = None
@@ -46,7 +41,7 @@ except ImportError:
     VirtualKeyboard = None
 
 try:
-    from frontend_module.components.keyboard_mini import VirtualKeyboardMini
+    from frontend_module.components.keyboard import VirtualKeyboardMini
     __all__.append("VirtualKeyboardMini")
 except ImportError:
     VirtualKeyboardMini = None

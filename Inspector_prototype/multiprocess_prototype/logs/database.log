@@ -162,3 +162,23 @@
 2026-03-19 15:23:18,556 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
 2026-03-19 15:23:18,556 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
 2026-03-19 15:23:18,556 [INFO] database: Process 'database' initialized successfully
+2026-03-19 16:01:23,827 [INFO] database: Process state registered: database
+2026-03-19 16:01:23,827 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-19 16:01:23,828 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-19 16:01:23,828 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-19 16:01:23,828 [INFO] database: Process 'database' initialized successfully
+2026-03-19 16:02:25,603 [INFO] database: Process state registered: database
+2026-03-19 16:02:25,603 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-19 16:02:25,603 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-19 16:02:25,603 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-19 16:02:25,603 [INFO] database: Process 'database' initialized successfully
+2026-03-19 16:24:57,218 [INFO] database: Process state registered: database
+2026-03-19 16:24:57,218 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-19 16:24:57,218 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-19 16:24:57,218 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-19 16:24:57,218 [INFO] database: Process 'database' initialized successfully
+2026-03-19 16:52:11,257 [INFO] database: Process state registered: database
+2026-03-19 16:52:11,258 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-19 16:52:11,258 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-19 16:52:11,258 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-19 16:52:11,258 [INFO] database: Process 'database' initialized successfully

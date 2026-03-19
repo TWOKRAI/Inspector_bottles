@@ -7,7 +7,7 @@ CameraTabWidget — вкладка управления камерой.
 
 from typing import Any, Callable, Dict, Optional
 
-from frontend_module.components.tab_widget import BaseTab
+from frontend_module.components import BaseTab
 from frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,

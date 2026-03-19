@@ -34,11 +34,8 @@ class FrontendLauncher:
         self._app_config = app_config or {}
 
     def build_config(self) -> Dict[str, Any]:
-        """Конфиг для FrontendManager (merge app + frontend layout)."""
-        cfg = build_frontend_config(self._app_config)
-        cfg["window"] = cfg.get("window", {})
-        cfg["poll_interval_ms"] = self._app_config.get("poll_interval_ms", 16)
-        return cfg
+        """Конфиг для FrontendManager (schema-driven, Dict at Boundary)."""
+        return build_frontend_config(self._app_config)
 
     def build_registers(self):
         """(RegistersManager, connection_map)."""
@@ -95,6 +92,35 @@ class FrontendLauncher:
         width = window_cfg.get("width", window_cfg.get("min_width", 1024))
         height = window_cfg.get("height", window_cfg.get("min_height", 600))
 
+        def tab_widget_factory(widget_key: str, tab_config: dict):
+            from multiprocess_prototype.frontend.widgets import (
+                CameraTabWidget,
+                ProcessingTabWidget,
+                RecipesTabWidget,
+                SettingsTabWidget,
+            )
+
+            registers = fm.get_registers() if fm else None
+            if widget_key == "recipes":
+                return RecipesTabWidget(registers_manager=registers)
+            if widget_key == "settings":
+                st_cfg = config.get("settings_tab", {})
+                controls = st_cfg.get("controls", [])
+                group_title = st_cfg.get("group_title", "Параметры отображения")
+                return SettingsTabWidget(
+                    registers_manager=registers,
+                    controls_config=controls,
+                    group_title=group_title,
+                )
+            if widget_key == "processing":
+                return ProcessingTabWidget(callbacks=self._processing_callbacks(cmd))
+            if widget_key == "camera":
+                return CameraTabWidget(
+                    camera_type=camera_type,
+                    callbacks=self._camera_callbacks(cmd),
+                )
+            return None
+
         def create_main_window(**kwargs):
             from frontend_module.core.qt_imports import QTimer
 
@@ -105,6 +131,7 @@ class FrontendLauncher:
                 camera_callbacks=self._camera_callbacks(cmd),
                 processing_callbacks=self._processing_callbacks(cmd),
                 camera_type=camera_type,
+                tab_widget_factory=tab_widget_factory,
             )
             process._window = win
             process._timer = QTimer()

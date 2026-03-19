@@ -1,59 +1,104 @@
 # multiprocess_prototype/frontend/configs/frontend_config.py
 """
-FrontendConfig — layout MainWindow.
+FrontendConfig — корневая схема конфигурации frontend.
 
-Схема конфигурации окна, header, image_panel, tabs.
-Строится из GuiConfigFrontend (app_cfg).
+Композиция: MainWindowConfig, TabsConfig, SettingsTabConfig.
+Сборка из app_cfg (GuiConfigFrontend) + дефолты.
+Конвертация в dict/json/yaml через model_dump / DataConverter.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Literal
+
+from pydantic import Field
+
+from multiprocess_framework.refactored.modules.data_schema_module import (
+    DataConverter,
+    SchemaBase,
+    register_schema,
+)
+
+from .main_window import MainWindowConfig
+from .tabs import SettingsTabConfig, TabsConfig, _default_window_registry
 
 
-def build_frontend_config(app_cfg: Dict[str, Any]) -> Dict[str, Any]:
+@register_schema("FrontendConfig")
+class FrontendConfig(SchemaBase):
+    """Корневая конфигурация frontend: main_window + tabs + settings_tab + runtime."""
+
+    # MainWindow layout
+    main_window: MainWindowConfig = Field(default_factory=MainWindowConfig)
+
+    # Tabs
+    tabs: TabsConfig = Field(default_factory=TabsConfig)
+
+    # Settings tab — привязка контролов к регистрам
+    settings_tab: SettingsTabConfig = Field(default_factory=SettingsTabConfig)
+
+    # Runtime (из app_cfg)
+    camera_type: Literal["simulator", "webcam", "hikvision"] = "simulator"
+    poll_interval_ms: int = 16
+
+    def build_dict(self, app_cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """
+        Построить dict для FrontendManager и MainWindow.
+
+        Мержит app_cfg (GuiConfigFrontend) с дефолтами. Dict at Boundary.
+
+        Args:
+            app_cfg: dict из get_config("config") — GuiConfigFrontend.model_dump().
+
+        Returns:
+            dict с window, header, image_panel, tabs, window_registry,
+            camera_type, poll_interval_ms, settings_tab.
+        """
+        app_cfg = app_cfg or {}
+
+        # Переопределить main_window из app_cfg
+        mw_data = self.main_window.model_dump()
+        if app_cfg.get("window_title"):
+            mw_data["window"]["title"] = app_cfg["window_title"]
+        if app_cfg.get("window_width") is not None:
+            mw_data["window"]["min_width"] = app_cfg["window_width"]
+        if app_cfg.get("window_height") is not None:
+            mw_data["window"]["min_height"] = app_cfg["window_height"]
+
+        result = {
+            "window": mw_data["window"],
+            "header": mw_data["header"],
+            "image_panel": mw_data["image_panel"],
+            "tabs": self.tabs.to_tabs_dict_list(),
+            "window_registry": _default_window_registry(),
+            "camera_type": app_cfg.get("camera_type", self.camera_type),
+            "poll_interval_ms": app_cfg.get("poll_interval_ms", self.poll_interval_ms),
+            "settings_tab": self.settings_tab.model_dump(),
+        }
+        return result
+
+    def to_json(self, indent: int = 2) -> str:
+        """Сериализация в JSON."""
+        return DataConverter.model_to_json(self, indent=indent)
+
+    def to_yaml(self) -> str:
+        """Сериализация в YAML."""
+        return DataConverter.model_to_yaml(self)
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "FrontendConfig":
+        """Десериализация из JSON."""
+        data = DataConverter.json_to_dict(json_str)
+        return cls(**data)
+
+    @classmethod
+    def from_yaml(cls, yaml_str: str) -> "FrontendConfig":
+        """Десериализация из YAML."""
+        data = DataConverter.yaml_to_dict(yaml_str) or {}
+        return cls(**data)
+
+
+def build_frontend_config(app_cfg: dict | None) -> dict:
     """
-    Построить конфиг для MainWindow из app_cfg (GuiConfigFrontend).
+    Построить dict конфига для FrontendManager. Dict at Boundary.
 
-    Args:
-        app_cfg: dict из get_config("config") — GuiConfigFrontend.model_dump().
-
-    Returns:
-        dict с секциями window, header, image_panel, tabs, camera_type.
+    Обратная совместимость: launcher импортирует отсюда.
     """
-    window_title = app_cfg.get("window_title", "Inspector Prototype")
-    min_width = app_cfg.get("window_width", 1024)
-    min_height = app_cfg.get("window_height", 600)
-    camera_type = app_cfg.get("camera_type", "simulator")
-
-    return {
-        "window": {
-            "title": window_title,
-            "min_width": min_width,
-            "min_height": min_height,
-        },
-        "window_registry": {
-            "main": {"factory_key": "main"},
-            "inspector": {"factory_key": "inspector"},
-            "loading": {"factory_key": "loading"},
-        },
-        "header": {
-            "logo_path": None,
-            "show_admin": True,
-            "windows": [
-                {"id": "main", "label": "Домой", "callback_key": "on_main_show"},
-                {"id": "loading", "label": "Загрузка", "callback_key": "on_loading_show"},
-            ],
-        },
-        "image_panel": {
-            "slots": [
-                {"id": "original", "label": "Original", "visible_default": True},
-                {"id": "mask", "label": "Mask", "visible_default": True},
-            ],
-        },
-        "tabs": [
-            {"id": "recipes", "title": "Рецепты", "widget": "recipes"},
-            {"id": "settings", "title": "Настройки", "widget": "settings"},
-            {"id": "processing", "title": "Обработка", "widget": "processing"},
-            {"id": "camera", "title": "Камера", "widget": "camera"},
-        ],
-        "camera_type": camera_type,
-    }
+    return FrontendConfig().build_dict(app_cfg)

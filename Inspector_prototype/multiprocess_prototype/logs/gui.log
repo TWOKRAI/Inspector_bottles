@@ -484,3 +484,118 @@
 2026-03-19 15:23:18,663 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
 2026-03-19 15:23:18,663 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
 2026-03-19 15:23:18,663 [INFO] gui: Process 'gui' initialized successfully
+2026-03-19 16:01:23,976 [INFO] gui: Process state registered: gui
+2026-03-19 16:01:23,976 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-19 16:01:23,976 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-19 16:01:23,977 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-19 16:01:23,977 [INFO] gui: Process 'gui' initialized successfully
+2026-03-19 16:02:25,734 [INFO] gui: Process state registered: gui
+2026-03-19 16:02:25,734 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-19 16:02:25,734 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-19 16:02:25,735 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-19 16:02:25,735 [INFO] gui: Process 'gui' initialized successfully
+2026-03-19 16:24:57,335 [INFO] gui: Process state registered: gui
+2026-03-19 16:24:57,335 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-19 16:24:57,335 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-19 16:24:57,335 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-19 16:24:57,335 [INFO] gui: Process 'gui' initialized successfully
+2026-03-19 16:29:29,140 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:29,481 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-19 16:29:31,156 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:33,397 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:34,485 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:34,485 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:34,485 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:34,485 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:36,278 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:38,324 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:39,487 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:39,488 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:39,488 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:39,488 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:41,187 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:43,232 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:44,491 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:44,492 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:44,492 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:44,492 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:46,100 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:48,132 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:48,496 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:49,496 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:49,496 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:49,496 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:51,029 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:53,060 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:53,499 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:53,499 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:53,499 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:54,499 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:55,942 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:57,973 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:58,502 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:58,503 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:58,503 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:29:58,503 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:00,853 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:02,885 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:03,506 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:03,506 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:03,506 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:03,506 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:05,781 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:07,813 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:08,512 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:08,512 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:08,512 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:08,512 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:10,693 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:12,725 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:13,514 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:13,514 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:13,514 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:13,514 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:15,605 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:17,636 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:18,517 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:18,518 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:18,518 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:18,518 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:20,519 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:22,549 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:23,520 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:23,520 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:23,520 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:23,521 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:25,522 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:27,476 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:28,525 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:28,525 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:28,525 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:28,525 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:30,356 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:32,388 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:33,528 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:33,528 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:33,528 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:33,528 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:35,269 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:37,300 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:38,532 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:38,533 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:38,533 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:38,533 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:40,196 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-19 16:30:41,567 [INFO] gui: GUI: requesting system shutdown
+2026-03-19 16:30:41,535 [INFO] gui: GUI: shutdown request sent, ok=True
+2026-03-19 16:52:11,370 [INFO] gui: Process state registered: gui
+2026-03-19 16:52:11,370 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-19 16:52:11,370 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-19 16:52:11,370 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-19 16:52:11,370 [INFO] gui: Process 'gui' initialized successfully
