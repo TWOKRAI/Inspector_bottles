@@ -14,6 +14,8 @@
 | **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Справка, диаграммы, таблицы | 30 мин |
 | **[ARCHITECTURE_ESSAY.md](./ARCHITECTURE_ESSAY.md)** | Архитекторы, deep dive | 30 мин |
 | **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` | 5 мин |
+| **[FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md)** | Детальный план: sender, лаунчер, фазы M0–M3 vs L, анти-паттерны, чеклисты для агента | 25 мин |
+| **[ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md)** | Каталог модулей фреймворка + пакетов прототипа (для диаграмм и связей) | 15 мин |
 
 ---
 

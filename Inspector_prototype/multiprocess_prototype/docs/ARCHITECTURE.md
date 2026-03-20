@@ -2,7 +2,8 @@
 
 Тестовое приложение поверх **Multiprocess Framework** (`Inspector_prototype/multiprocess_framework/refactored/modules/`). Граница процессов: только **dict** (Dict at Boundary); схемы Pydantic живут внутри модулей и в `registers/schemas/`.
 
-**Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров).
+**Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров). Каталог модулей и связей (фреймворк + прототип): [ARCHITECTURE_MODULE_CATALOG.md](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md).  
+Дорожная карта GUI-команд и лаунчера (фазы M0–M3, ограничители сложности): [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md).
 
 ---
 
