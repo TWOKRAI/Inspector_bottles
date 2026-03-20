@@ -25,14 +25,14 @@ class RendererConfig(ProcessConfigBase):
     process_name: str = "renderer"
     class_path: str = _RENDERER_CLASS_PATH
     output_dir: str = "./output_frames"
-    save_frames: bool = False
-    draw_bboxes: bool = True
     resolution_width: int = 640
     resolution_height: int = 480
 
     show_original: bool = _RBOOT["show_original"]
     show_mask: bool = _RBOOT["show_mask"]
     draw_contours: bool = _RBOOT["draw_contours"]
+    draw_bboxes: bool = _RBOOT["draw_bboxes"]
+    save_frames: bool = _RBOOT["save_frames"]
 
     @property
     def memory(self) -> dict:

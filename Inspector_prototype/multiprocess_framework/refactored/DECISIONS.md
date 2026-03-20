@@ -16,6 +16,33 @@
 
 ---
 
+## ADR-057: Персистентность прототипа — пакет persistence и корень данных
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: `prefs.py` и `.inspector_prefs.json` в корне пакета смешивали исходники с пользовательскими данными; при росте прототипа нужен единый каталог для prefs, кэшей и экспортов.
+- Решение:
+  - Пакет **`multiprocess_prototype/persistence/`**: `paths.py` (`INSPECTOR_DATA_DIR` или `~/.inspector_prototype`), `user_prefs.py` (`user_prefs.json`), `README.md` для расширения.
+  - Однократная **миграция** из `multiprocess_prototype/.inspector_prefs.json` → `user_prefs.json` в корне данных; старый файл удаляется при успехе.
+  - Импорты **`multiprocess_prototype.persistence`** (`get_camera_type`, `set_camera_type`, `get_data_root`).
+- Причина: Масштабируемая структура, данные вне git по умолчанию, явный override для CI/установки.
+- Отклонённые альтернативы: Только перенос JSON в подпапку репозитория — снова риск коммита пользовательских файлов.
+
+---
+
+## ADR-056: Прототип — единый GuiConfig, без алиасов GUI и лишних реэкспортов
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Дублировались схема `GuiConfigFrontend` и `GuiConfig`; в `frontend/__init__.py` экспортировался алиас `GuiProcessFrontend`; `backend/backends.py` и `registers/connection_map.py` (`DEFAULT_CONNECTION_MAP`) дублировали каноничные точки входа без потребителей.
+- Решение:
+  - **Один процессный конфиг GUI** — `@register_schema("GuiConfig")` в `backend/processes/gui/gui_config.py`, импорт для `main.py` из `multiprocess_prototype.backend.configs`.
+  - **Класс процесса** — только `GuiProcess`; пакет `frontend` не реэкспортирует классы процесса.
+  - **Захват камеры** — импорт только из `backend.modules.camera.backends` (или через `backend.modules.camera`).
+  - **connection_map** — только через `factory.build_default_connection_map()` / `create_registers()`, без глобали `DEFAULT_CONNECTION_MAP`.
+- Причина: Один публичный путь к типам, меньше «совместимостных» веток и расхождений документации с кодом.
+- Отклонённые альтернативы: Оставить алиасы «на переходный период» — затягивает технический долг.
+
+---
+
 ## ADR-055: Backend — граф импортов без циклов (configs ↔ processes ↔ modules)
 - Дата: 2026-03-20
 - Статус: принято
@@ -51,11 +78,11 @@
 - Статус: принято
 - Контекст: Дублировались `GuiProcess` (InspectorWindow) и `GuiProcessFrontend` (FrontendLauncher); виджеты импортировали `registers.schemas` как top-level — ломало `pytest` без хака `sys.path`; прототип присваивал `fm._queue_manager` / `fm._stop_event` после конструктора.
 - Решение:
-  - **Один GUI-класс** — `backend/processes/gui_process.py` (`GuiProcess`) всегда через `FrontendLauncher`; `GuiProcessFrontend` остаётся только как алиас в `multiprocess_prototype.frontend` для обратной совместимости импорта.
+  - **Один GUI-класс** — `backend/processes/gui/gui_process.py` (`GuiProcess`) всегда через `FrontendLauncher` (см. ADR-056: без алиаса `GuiProcessFrontend`).
   - **Импорты схем** — только `multiprocess_prototype.registers.schemas…` в коде и тестах прототипа.
   - **`window_registry`** — `WindowRegistryEntry` и `default_window_registry()` в `frontend_config.py` (меньше файлов).
   - **FrontendManager** — параметры конструктора `queue_manager`, `stop_event` (публичный контракт вместо записи в приватные поля из лаунчера).
-  - **GuiProcessMixin** — файл `backend/gui_process_mixin.py`, чтобы `gui_process` не импортировал пакет `frontend` (цикл с `GuiConfigFrontend` / `class_path_from_type(GuiProcess)`).
+  - **GuiProcessMixin** — файл `backend/gui_process_mixin.py`, чтобы `gui_process` не импортировал пакет `frontend` (цикл с `GuiConfig` / `class_path_from_type(GuiProcess)`).
 - Причина: Меньше расхождения веток GUI, воспроизводимые тесты, явная граница фреймворка.
 - Отклонённые альтернативы: Оставить legacy InspectorWindow в прод-пути — дублирование таймеров и регистров.
 
@@ -196,8 +223,8 @@
 ## ADR-040: GuiProcessMixin
 - Дата: 2026-03-19
 - Статус: принято
-- Контекст: GuiProcess и GuiProcessFrontend дублировали ~25 методов gui_* и _handle_*.
-- Решение: Вынести в GuiProcessMixin (frontend/mixins/gui_process_mixin.py). GuiProcess и GuiProcessFrontend наследуют GuiProcessMixin.
+- Контекст: Два класса GUI-процесса дублировали ~25 методов gui_* и _handle_*.
+- Решение: Вынести в `GuiProcessMixin` (`backend/gui_process_mixin.py`). Наследует только `GuiProcess` (см. ADR-053 / ADR-056).
 - Причина: Устранение дублирования, единый источник логики GUI-команд.
 - Отклонённые альтернативы: Оставить дублирование — нарушает DRY.
 
@@ -704,8 +731,8 @@
 - Контекст: Приведение документации в соответствие с кодом, удаление устаревших скриптов.
 - Решение:
   - **Скрипты _test_phase1/2/3 удалены** — использовали process_1/process_2 (удалены с processes/)
-  - **frontend/configs/ удалён** — дублировал configs/; GuiConfigFrontend — в frontend.config
-  - **Документация** — README, STATUS, GUI_PROCESS_COMPARISON обновлены (6 процессов, GuiConfigFrontend по умолчанию, Coordinator убран)
+  - **frontend/configs/ удалён** — дублировал configs/; процессный конфиг GUI — `GuiConfig` в `backend/processes/gui/`
+  - **Документация** — README, STATUS обновлены (6 процессов, `GuiConfig` в `main.py`, Coordinator убран); каноничная архитектура — `multiprocess_prototype/docs/ARCHITECTURE.md`
 - Причина: Актуальность документации, отсутствие мёртвого кода.
 
 ---
@@ -715,8 +742,8 @@
 - Статус: принято
 - Контекст: processes/ и backend/processes/ содержали идентичные файлы; GuiProcess/GuiProcessFrontend дублировали создание RegistersManager.
 - Решение:
-  - **processes/ удалён** — все импорты через multiprocess_prototype.backend.processes; GuiProcessFrontend — через frontend.process
-  - **create_frontend_registers()** — GuiProcess и GuiProcessFrontend используют frontend.registers.create_frontend_registers()
+  - **processes/ удалён** — все импорты через multiprocess_prototype.backend.processes
+  - **Регистры** — `FrontendLauncher` вызывает `multiprocess_prototype.registers.create_registers()` (единая фабрика)
 - Причина: Один источник правды, отсутствие дублирования структуры.
 
 ---
@@ -730,7 +757,7 @@
   - **_HAS_QT устранён**: frontend_module требует PyQt5; единая точка импорта — core/qt_imports.py
   - **_model_to_register_name удалён**: мёртвый код; _auto_detect_register использует register_names()
   - **multiprocess_prototype**: backend/ (configs/, processes/, modules/), frontend/ (config, process, registers, windows/)
-  - **configs/** перенесены в backend/configs/; GuiConfigFrontend — в frontend/config.py
+  - **configs/** перенесены в backend/configs/; схема GUI-процесса — `GuiConfig` (`backend/processes/gui/gui_config.py`), композиция UI — `FrontendConfig` (`frontend/configs/frontend_config.py`)
 - Причина: Чистота кода, чёткое разделение backend/frontend для последующей концентрации на UI.
 
 ---

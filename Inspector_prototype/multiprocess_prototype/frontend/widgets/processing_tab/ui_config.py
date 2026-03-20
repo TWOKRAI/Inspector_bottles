@@ -57,3 +57,5 @@ class ProcessingTabUiConfig(SchemaBase):
     checkbox_original: Annotated[str, FieldMeta("Чекбокс Original")] = "Original"
     checkbox_mask: Annotated[str, FieldMeta("Чекбокс Mask")] = "Mask"
     checkbox_contours: Annotated[str, FieldMeta("Чекбокс Contours")] = "Contours"
+    checkbox_bbox: Annotated[str, FieldMeta("Чекбокс BBox")] = "BBox"
+    checkbox_save_frames: Annotated[str, FieldMeta("Чекбокс Save frames")] = "Save"

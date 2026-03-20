@@ -2,12 +2,13 @@
 """
 CameraTabWidget — вкладка управления камерой.
 
-Тип камеры, Start/Stop, параметры. Подписи — CameraTabUiConfig.
+При наличии registers_manager: camera_type и fps идут через set_field_value → register_update.
+Иначе callbacks (legacy).
 """
 
 from typing import Any, Callable, Dict, Optional, Union
 
-from frontend_module.components import BaseTab
+from frontend_module.components import BaseTab, SliderControl
 from frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,
@@ -21,6 +22,8 @@ from frontend_module.core.qt_imports import (
     QWidget,
     Qt,
 )
+
+from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER
 
 from .ui_config import CameraTabUiConfig
 
@@ -37,21 +40,23 @@ class CameraTabWidget(BaseTab):
     """
     Вкладка камеры: Simulator/Webcam/Hikvision, Start/Stop, FPS, Hikvision-панель.
 
-    Callbacks: on_start, on_stop, on_set_fps, on_enum_devices, on_open, on_close,
-    on_start_grabbing, on_stop_grabbing, on_get_parameters, on_set_parameters,
-    on_camera_type_changed.
+    При registers_manager: camera_type и fps через set_field_value.
+    Callbacks: on_start, on_stop, on_enum_devices, on_open, on_close,
+    on_start_grabbing, on_stop_grabbing, on_get_parameters, on_set_parameters.
     """
 
     def __init__(
         self,
         *,
         camera_type: str = "simulator",
+        registers_manager: Optional[Any] = None,
         callbacks: Optional[Dict[str, Callable]] = None,
         ui: Optional[Union[CameraTabUiConfig, dict]] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._camera_type = camera_type
+        self._registers_manager = registers_manager
         self._callbacks = dict(callbacks) if callbacks else {}
         self._hikvision_devices: list = []
         self._u = _coerce_camera_ui(ui)
@@ -95,13 +100,25 @@ class CameraTabWidget(BaseTab):
         layout.addWidget(btn_group)
         fps_group = QGroupBox(self._u.group_fps)
         fps_layout = QVBoxLayout(fps_group)
-        self._fps_label = QLabel(f"{self._u.initial_fps}{self._u.fps_suffix}")
-        self._fps_slider = QSlider(Qt.Horizontal)
-        self._fps_slider.setRange(1, 60)
-        self._fps_slider.setValue(self._u.initial_fps)
-        self._fps_slider.valueChanged.connect(self._on_fps_changed)
-        fps_layout.addWidget(self._fps_label)
-        fps_layout.addWidget(self._fps_slider)
+        rm = self._registers_manager
+        if rm and hasattr(rm, "set_field_value"):
+            fps_layout.addWidget(
+                SliderControl(
+                    register_name=CAMERA_REGISTER,
+                    field_name="fps",
+                    registers_manager=rm,
+                    parent=self,
+                    label="FPS",
+                )
+            )
+        else:
+            self._fps_label = QLabel(f"{self._u.initial_fps}{self._u.fps_suffix}")
+            self._fps_slider = QSlider(Qt.Horizontal)
+            self._fps_slider.setRange(1, 60)
+            self._fps_slider.setValue(self._u.initial_fps)
+            self._fps_slider.valueChanged.connect(self._on_fps_changed)
+            fps_layout.addWidget(self._fps_label)
+            fps_layout.addWidget(self._fps_slider)
         layout.addWidget(fps_group)
         return page
 
@@ -179,13 +196,24 @@ class CameraTabWidget(BaseTab):
     def _on_camera_type_changed(self, index: int) -> None:
         rev_map = {0: "simulator", 1: "webcam", 2: "hikvision"}
         self._camera_type = rev_map.get(index, "simulator")
-        fn = self._callbacks.get("on_camera_type_changed")
-        if fn:
-            fn(self._camera_type)
+        rm = self._registers_manager
+        if rm and hasattr(rm, "set_field_value"):
+            rm.set_field_value(CAMERA_REGISTER, "camera_type", self._camera_type)
+            try:
+                from multiprocess_prototype.persistence import set_camera_type
+
+                set_camera_type(self._camera_type)
+            except Exception:
+                pass
+        else:
+            fn = self._callbacks.get("on_camera_type_changed")
+            if fn:
+                fn(self._camera_type)
         self._stack.setCurrentIndex(1 if self._camera_type == "hikvision" else 0)
 
     def _on_fps_changed(self, value: int) -> None:
-        self._fps_label.setText(f"{value}{self._u.fps_suffix}")
+        if hasattr(self, "_fps_label"):
+            self._fps_label.setText(f"{value}{self._u.fps_suffix}")
         fn = self._callbacks.get("on_set_fps")
         if fn:
             fn(value)

@@ -1,6 +1,12 @@
 # multiprocess_prototype/registers/schemas/__init__.py
 """Схемы регистров приложения (канон для GUI и backend прототипа)."""
 
+from .camera_tab import (
+    CAMERA_REGISTER,
+    CAMERA_ROUTING,
+    CameraRegisters,
+    camera_process_boot_values,
+)
 from .processing_tab import (
     PROCESSOR_REGISTER,
     PROCESSOR_ROUTING,
@@ -14,6 +20,10 @@ from .processing_tab import (
 )
 
 __all__ = [
+    "CAMERA_REGISTER",
+    "CAMERA_ROUTING",
+    "CameraRegisters",
+    "camera_process_boot_values",
     "PROCESSOR_REGISTER",
     "PROCESSOR_ROUTING",
     "ProcessorRegisters",

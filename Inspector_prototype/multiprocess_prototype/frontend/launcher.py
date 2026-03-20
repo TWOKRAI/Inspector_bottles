@@ -174,6 +174,11 @@ class FrontendLauncher:
         registers, connection_map = self.build_registers()
         cmd = self.build_command_handler()
 
+        rm = registers
+        if rm and hasattr(rm, "set_field_value"):
+            ct = config.get("camera_type", "simulator")
+            rm.set_field_value("camera", "camera_type", ct)
+
         fm = FrontendManager(
             config=config,
             registers=registers,

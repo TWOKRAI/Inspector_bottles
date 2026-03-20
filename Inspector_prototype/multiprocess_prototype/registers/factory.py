@@ -8,6 +8,7 @@ from typing import Dict, Tuple
 
 from registers_module import RegistersManager, build_connection_map_from_registers
 
+from .schemas.camera_tab import CAMERA_REGISTER, CameraRegisters
 from .schemas.processing_tab import (
     PROCESSOR_REGISTER,
     RENDERER_REGISTER,
@@ -18,6 +19,7 @@ from .schemas.processing_tab import (
 
 def _default_register_instances() -> Dict[str, object]:
     return {
+        CAMERA_REGISTER: CameraRegisters(),
         PROCESSOR_REGISTER: ProcessorRegisters(),
         RENDERER_REGISTER: RendererRegisters(),
     }

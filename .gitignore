@@ -22,3 +22,10 @@ venv.bak/
 BASKET/
 
 /dataset
+
+# Runtime logs (multiprocess prototype)
+Inspector_prototype/multiprocess_prototype/logs/*
+!Inspector_prototype/multiprocess_prototype/logs/.gitkeep
+
+# Legacy user prefs (migrated to ~/.inspector_prototype/user_prefs.json or INSPECTOR_DATA_DIR)
+Inspector_prototype/multiprocess_prototype/.inspector_prefs.json

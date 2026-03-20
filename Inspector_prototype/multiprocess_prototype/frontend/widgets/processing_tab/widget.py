@@ -174,6 +174,24 @@ class ProcessingTabWidget(BaseTab):
                     label=u.checkbox_contours,
                 )
             )
+            display_layout.addWidget(
+                CheckboxControl(
+                    register_name=RENDERER_REGISTER,
+                    field_name="draw_bboxes",
+                    registers_manager=rm,
+                    parent=self,
+                    label=u.checkbox_bbox,
+                )
+            )
+            display_layout.addWidget(
+                CheckboxControl(
+                    register_name=RENDERER_REGISTER,
+                    field_name="save_frames",
+                    registers_manager=rm,
+                    parent=self,
+                    label=u.checkbox_save_frames,
+                )
+            )
         else:
             self._cb_original = QCheckBox(u.checkbox_original)
             self._cb_original.setChecked(True)
@@ -187,6 +205,14 @@ class ProcessingTabWidget(BaseTab):
             self._cb_contours.setChecked(True)
             self._cb_contours.stateChanged.connect(self._on_draw_contours_changed)
             display_layout.addWidget(self._cb_contours)
+            self._cb_bbox = QCheckBox(u.checkbox_bbox)
+            self._cb_bbox.setChecked(True)
+            self._cb_bbox.stateChanged.connect(self._on_draw_bboxes_changed)
+            display_layout.addWidget(self._cb_bbox)
+            self._cb_save_frames = QCheckBox(u.checkbox_save_frames)
+            self._cb_save_frames.setChecked(False)
+            self._cb_save_frames.stateChanged.connect(self._on_save_frames_changed)
+            display_layout.addWidget(self._cb_save_frames)
         layout.addWidget(display_group)
 
         layout.addStretch()
@@ -335,5 +361,15 @@ class ProcessingTabWidget(BaseTab):
 
     def _on_draw_contours_changed(self, state) -> None:
         fn = self._callbacks.get("on_set_draw_contours")
+        if fn:
+            fn(state == Qt.Checked)
+
+    def _on_draw_bboxes_changed(self, state) -> None:
+        fn = self._callbacks.get("on_set_draw_bboxes")
+        if fn:
+            fn(state == Qt.Checked)
+
+    def _on_save_frames_changed(self, state) -> None:
+        fn = self._callbacks.get("on_set_save_frames")
         if fn:
             fn(state == Qt.Checked)

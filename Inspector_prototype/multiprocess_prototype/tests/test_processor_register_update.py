@@ -71,7 +71,13 @@ def test_processor_apply_register_update_ignores_foreign_register():
 
 
 def test_renderer_apply_register_update_show_mask():
-    state = {"show_original": True, "show_mask": True, "draw_contours": True}
+    state = {
+        "show_original": True,
+        "show_mask": True,
+        "draw_contours": True,
+        "draw_bboxes": True,
+        "save_frames": False,
+    }
 
     def set_draw_contours(d):
         state["draw_contours"] = bool(d.get("draw_contours", state["draw_contours"]))
@@ -82,11 +88,19 @@ def test_renderer_apply_register_update_show_mask():
     def set_show_mask(d):
         state["show_mask"] = bool(d.get("show_mask", state["show_mask"]))
 
+    def set_draw_bboxes(d):
+        state["draw_bboxes"] = bool(d.get("draw_bboxes", state["draw_bboxes"]))
+
+    def set_save_frames(d):
+        state["save_frames"] = bool(d.get("save_frames", state["save_frames"]))
+
     apply_renderer_register_update(
         {"register_name": "renderer", "field_name": "show_mask", "value": False},
         set_draw_contours=set_draw_contours,
         set_show_original=set_show_original,
         set_show_mask=set_show_mask,
+        set_draw_bboxes=set_draw_bboxes,
+        set_save_frames=set_save_frames,
     )
     assert state["show_mask"] is False
     assert state["show_original"] is True

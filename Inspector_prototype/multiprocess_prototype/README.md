@@ -22,37 +22,20 @@
 
 **Связь:** SharedMemory (camera_frame, processor_mask, rendered_frame, mask_frame) + очереди сообщений.
 
+**Архитектура (процессы, SHM, регистры, диаграммы):** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ---
 
-## Структура проекта
+## Структура проекта (кратко)
 
-```
-multiprocess_prototype/
-├── main.py                 # Точка входа
-├── prefs.py                # Сохранение camera_type (GUI → .inspector_prefs.json)
-├── run.sh                  # Запуск с PYTHONPATH и очисткой SharedMemory
-│
-├── backend/                # Бизнес-логика, процессы, БД
-│   ├── configs/           # Общие конфиги (base, app, robot, database, gui) + реэкспорт camera/processor/renderer из modules
-│   ├── modules/           # camera/, processor/, renderer/ — у каждого process.py + config.py + домен
-│   ├── gui_process_mixin.py  # gui_* / _handle_* (без импорта пакета frontend)
-│   ├── processes/         # gui, robot, database + реэкспорт UnifiedCamera/Processor/Renderer из modules
-│   ├── database/          # Схемы (DetectionSchema), utils, export_detections
-│   ├── backends.py        # SimulatorBackend, WebcamBackend, HikvisionBackend
-│   └── __init__.py
-│
-├── frontend/              # GUI на frontend_module
-│   ├── configs/           # GuiConfigFrontend, FrontendConfig
-│   ├── launcher.py        # FrontendLauncher
-│   ├── mixins/            # реэкспорт GuiProcessMixin из backend
-│   └── windows/           # MainWindow, Loading, InspectorWindow (юнит-тесты)
-├── registers/             # create_registers(), schemas/
-│
-├── utils/                  # FrameGenerator, WebcamCapture, shm_utils
-├── logs/
-├── docs/
-└── tests/                  # Unit- и интеграционные тесты
-```
+- `main.py` — вход; prefs камеры — `persistence/` (см. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
+- `backend/` — конфиги (в т.ч. `GuiConfig`), `processes/*`, `modules/` (camera с `backends.py`, processor_frame, renderer), `gui_process_mixin.py`, `database/`
+- `frontend/` — `FrontendLauncher`, окна, виджеты, `FrontendConfig`
+- `registers/` — схемы, factory, command routing
+- `persistence/` — корень данных (`INSPECTOR_DATA_DIR` или `~/.inspector_prototype`), `user_prefs.json`, миграция со старого `.inspector_prefs.json`
+- `utils/`, `docs/`, `tests/`, `logs/` (рантайм; в git не коммитить `*.log`, см. `.gitignore`)
+
+Полная таблица каталогов — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -90,10 +73,14 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 from multiprocess_framework.refactored.modules.process_manager_module import SystemLauncher
 from multiprocess_framework.refactored.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
-    CameraConfig, DatabaseConfig, ProcessorConfig, RendererConfig, RobotConfig,
+    CameraConfig,
+    DatabaseConfig,
+    GuiConfig,
+    ProcessorConfig,
+    RendererConfig,
+    RobotConfig,
 )
-from multiprocess_prototype.frontend import GuiConfigFrontend
-from multiprocess_prototype.prefs import get_camera_type
+from multiprocess_prototype.persistence import get_camera_type
 
 launcher = SystemLauncher(stop_timeout=5.0)
 camera_type = get_camera_type()
@@ -103,7 +90,7 @@ launcher.add_process(*process(ProcessorConfig()))
 launcher.add_process(*process(RendererConfig()))
 launcher.add_process(*process(RobotConfig()))
 launcher.add_process(*process(DatabaseConfig()))
-launcher.add_process(*process(GuiConfigFrontend(camera_type=camera_type)))
+launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
 
 launcher.run()
 ```
@@ -134,6 +121,7 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 | Переменная | Описание |
 |------------|----------|
 | `INSPECTOR_CAMERA_TYPE` | Тип камеры: simulator, webcam, hikvision |
+| `INSPECTOR_DATA_DIR` | Каталог данных приложения (prefs, будущие кэши/экспорты). По умолчанию: `~/.inspector_prototype` |
 | `INSPECTOR_LOG_LEVEL` | Уровень логов: INFO, DEBUG, WARNING, ERROR |
 | `INSPECTOR_LOG_DIR` | Каталог логов (по умолчанию `multiprocess_prototype/logs`) |
 | `DISPLAY` | Требуется для GUI (headless CI — тесты с GUI пропускаются) |

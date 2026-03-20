@@ -60,10 +60,10 @@ class FrontendConfig(SchemaBase):
         """
         Построить dict для FrontendManager и MainWindow.
 
-        Мержит app_cfg (GuiConfigFrontend) с дефолтами. Dict at Boundary.
+        Мержит app_cfg (GuiConfig) с дефолтами. Dict at Boundary.
 
         Args:
-            app_cfg: dict из get_config("config") — GuiConfigFrontend.model_dump().
+            app_cfg: dict из get_config("config") — GuiConfig.model_dump().
 
         Returns:
             dict с window, header, image_panel, tabs, window_registry,

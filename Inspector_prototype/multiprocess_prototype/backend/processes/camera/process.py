@@ -26,7 +26,11 @@ from multiprocess_prototype.backend.modules.camera.constants import (
     CAMERA_SHM_HEIGHT,
     CAMERA_SHM_WIDTH,
 )
+from multiprocess_prototype.backend.modules.camera.register_sync import (
+    apply_camera_register_update,
+)
 from multiprocess_prototype.backend.modules.camera.resize import resize_frame_for_shm
+from multiprocess_prototype.backend.shared import message_as_dict
 
 
 class UnifiedCameraProcess(ProcessModule):
@@ -75,6 +79,11 @@ class UnifiedCameraProcess(ProcessModule):
         self.command_manager.register_command("stop_grabbing", self._cmd_stop_grabbing)
         self.command_manager.register_command("get_parameters", self._cmd_get_parameters)
         self.command_manager.register_command("set_parameters", self._cmd_set_parameters)
+        self.command_manager.register_command("set_device_id", self._cmd_set_device_id)
+        self.command_manager.register_command("set_camera_index", self._cmd_set_camera_index)
+        self.command_manager.register_command(
+            "set_hikvision_resolution", self._cmd_set_hikvision_resolution
+        )
 
         config = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         self.worker_manager.create_worker(
@@ -179,6 +188,19 @@ class UnifiedCameraProcess(ProcessModule):
                 self._backend = self._create_backend(self._current_type)
         return {"status": "ok"}
 
+    def _cmd_set_device_id(self, data: dict):
+        self._device_id = data.get("device_id", self._device_id)
+        return {"status": "ok", "device_id": self._device_id}
+
+    def _cmd_set_camera_index(self, data: dict):
+        self._camera_index = data.get("camera_index", self._camera_index)
+        return {"status": "ok", "camera_index": self._camera_index}
+
+    def _cmd_set_hikvision_resolution(self, data: dict):
+        self._hikvision_width = data.get("width", self._hikvision_width)
+        self._hikvision_height = data.get("height", self._hikvision_height)
+        return {"status": "ok"}
+
     def _cmd_enum_devices(self, data: dict):
         with self._backend_lock:
             if self._current_type == "hikvision":
@@ -220,6 +242,21 @@ class UnifiedCameraProcess(ProcessModule):
             if pause_event.is_set():
                 time.sleep(0.05)
                 continue
+
+            msg = self.receive_message(timeout=0, channel_types=["data"])
+            if msg:
+                msg_dict = message_as_dict(msg)
+                if msg_dict.get("data_type") == "register_update":
+                    apply_camera_register_update(
+                        msg_dict.get("data") or {},
+                        set_camera_type=self._cmd_set_camera_type,
+                        set_fps=self._cmd_set_fps,
+                        set_resolution=self._cmd_set_resolution,
+                        set_device_id=self._cmd_set_device_id,
+                        set_camera_index=self._cmd_set_camera_index,
+                        set_hikvision_resolution=self._cmd_set_hikvision_resolution,
+                    )
+                    continue
 
             frame_start = time.perf_counter()
 

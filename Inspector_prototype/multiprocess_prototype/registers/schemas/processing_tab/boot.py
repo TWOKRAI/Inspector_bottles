@@ -32,6 +32,8 @@ def renderer_process_boot_values() -> dict[str, Any]:
         "show_original": r.show_original,
         "show_mask": r.show_mask,
         "draw_contours": r.draw_contours,
+        "draw_bboxes": r.draw_bboxes,
+        "save_frames": r.save_frames,
     }
 
 

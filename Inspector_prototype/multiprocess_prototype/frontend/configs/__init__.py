@@ -1,11 +1,6 @@
 # multiprocess_prototype/frontend/configs/__init__.py
-"""Корневая конфигурация frontend-процесса (композиция); секции UI — в widgets/ и windows/."""
+"""Композиция UI (FrontendConfig). Конфиг процесса gui — ``GuiConfig`` в ``backend.processes.gui.gui_config``."""
 
-from .config import GuiConfigFrontend
 from .frontend_config import FrontendConfig, build_frontend_config
 
-__all__ = [
-    "GuiConfigFrontend",
-    "FrontendConfig",
-    "build_frontend_config",
-]
+__all__ = ["FrontendConfig", "build_frontend_config"]

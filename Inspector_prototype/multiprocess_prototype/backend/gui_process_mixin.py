@@ -2,13 +2,18 @@
 """
 GuiProcessMixin — gui_* и _handle_* для GUI-процесса.
 
-Живёт в backend/, чтобы ``gui_process`` не импортировал пакет ``frontend`` (цикл с GuiConfig).
+Живёт в backend/, чтобы ``gui_process`` не импортировал пакет ``frontend`` (цикл импорта с ``GuiConfig`` / ``class_path_from_type(GuiProcess)``).
 
 Требует: self._msg (MessageAdapter), self.send_message, self.memory_manager, self._window.
+
+Команды camera/processor/renderer: targets из ``registers.command_routing`` (RegisterDispatchMeta).
 """
+
+from typing import Any, Dict, Optional
 
 import numpy as np
 
+from multiprocess_prototype.registers.command_routing import resolve_command_targets
 from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
 
 
@@ -18,6 +23,28 @@ class GuiProcessMixin:
 
     Ожидает атрибуты: _msg, _window, memory_manager, send_message, _log_info, _log_error.
     """
+
+    def _send_command(
+        self,
+        command_id: str,
+        args: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Сформировать command-сообщение и отправить первому получателю из targets.
+
+        ``targets`` берутся из схем регистров (или EXPLICIT_COMMAND_TARGETS).
+        """
+        args = args if args is not None else {}
+        targets = resolve_command_targets(command_id)
+        payload = data if data is not None else args
+        msg = self._msg.command(
+            targets=targets,
+            command=command_id,
+            args=args,
+            data=payload,
+        )
+        return self.send_message(targets[0], msg.to_dict())
 
     def _poll_messages(self):
         """Вызывается QTimer. Читает rendered_frame_ready и другие data-сообщения."""
@@ -143,34 +170,20 @@ class GuiProcessMixin:
         """Запрос на остановку всей системы (при закрытии окна или Cmd+Q)."""
         try:
             self._log_info("GUI: requesting system shutdown")
-            msg = self._msg.command(
-                targets=["ProcessManager"],
-                command="system.shutdown",
-                args={},
-                data={},
-            )
-            ok = self.send_message("ProcessManager", msg.to_dict())
+            ok = self._send_command("system.shutdown", {}, {})
             self._log_info(f"GUI: shutdown request sent, ok={ok}")
         except Exception as e:
             self._log_error(f"GUI: failed to send shutdown: {e}")
 
     def gui_start_capture(self):
         self._log_info("[DEBUG] gui: gui_start_capture -> sending start_capture to camera")
-        msg = self._msg.command(targets=["camera"], command="start_capture", args={}, data={})
-        self.send_message("camera", msg.to_dict())
+        self._send_command("start_capture", {}, {})
 
     def gui_stop_capture(self):
-        msg = self._msg.command(targets=["camera"], command="stop_capture", args={}, data={})
-        self.send_message("camera", msg.to_dict())
+        self._send_command("stop_capture", {}, {})
 
     def gui_set_fps(self, fps: int):
-        msg = self._msg.command(
-            targets=["camera"],
-            command="set_fps",
-            args={"fps": fps},
-            data={"fps": fps},
-        )
-        self.send_message("camera", msg.to_dict())
+        self._send_command("set_fps", {"fps": fps}, {"fps": fps})
 
     def gui_set_color_range(
         self,
@@ -182,129 +195,82 @@ class GuiProcessMixin:
         r_upper: int,
     ):
         """Отправка BGR-диапазона в processor для детекции цвета."""
-        msg = self._msg.command(
-            targets=["processor"],
-            command="set_color_range",
-            args={},
-            data={
-                "color_lower": [b_lower, g_lower, r_lower],
-                "color_upper": [b_upper, g_upper, r_upper],
-            },
-        )
-        self.send_message("processor", msg.to_dict())
+        data = {
+            "color_lower": [b_lower, g_lower, r_lower],
+            "color_upper": [b_upper, g_upper, r_upper],
+        }
+        self._send_command("set_color_range", {}, data)
 
     def gui_set_min_area(self, min_area: int):
-        msg = self._msg.command(
-            targets=["processor"],
-            command="set_min_area",
-            args={"min_area": min_area},
-            data={"min_area": min_area},
-        )
-        self.send_message("processor", msg.to_dict())
+        self._send_command("set_min_area", {"min_area": min_area}, {"min_area": min_area})
 
     def gui_set_max_area(self, max_area: int):
-        msg = self._msg.command(
-            targets=["processor"],
-            command="set_max_area",
-            args={"max_area": max_area},
-            data={"max_area": max_area},
-        )
-        self.send_message("processor", msg.to_dict())
+        self._send_command("set_max_area", {"max_area": max_area}, {"max_area": max_area})
 
     def gui_set_show_original(self, show: bool):
-        msg = self._msg.command(
-            targets=["renderer"],
-            command="set_show_original",
-            args={"show_original": show},
-            data={"show_original": show},
+        self._send_command(
+            "set_show_original",
+            {"show_original": show},
+            {"show_original": show},
         )
-        self.send_message("renderer", msg.to_dict())
 
     def gui_set_show_mask(self, show: bool):
-        msg = self._msg.command(
-            targets=["renderer"],
-            command="set_show_mask",
-            args={"show_mask": show},
-            data={"show_mask": show},
+        self._send_command(
+            "set_show_mask",
+            {"show_mask": show},
+            {"show_mask": show},
         )
-        self.send_message("renderer", msg.to_dict())
 
     def gui_set_draw_contours(self, draw: bool):
-        msg = self._msg.command(
-            targets=["renderer"],
-            command="set_draw_contours",
-            args={"draw_contours": draw},
-            data={"draw_contours": draw},
+        self._send_command(
+            "set_draw_contours",
+            {"draw_contours": draw},
+            {"draw_contours": draw},
         )
-        self.send_message("renderer", msg.to_dict())
 
     def gui_enum_devices(self):
-        msg = self._msg.command(
-            targets=["camera"], command="enum_devices", args={}, data={}
-        )
-        self.send_message("camera", msg.to_dict())
+        self._send_command("enum_devices", {}, {})
 
     def gui_open_camera(self, camera_index: int = 0):
-        msg = self._msg.command(
-            targets=["camera"],
-            command="open",
-            args={"camera_index": camera_index},
-            data={"camera_index": camera_index},
+        self._send_command(
+            "open",
+            {"camera_index": camera_index},
+            {"camera_index": camera_index},
         )
-        self.send_message("camera", msg.to_dict())
 
     def gui_close_camera(self):
-        msg = self._msg.command(
-            targets=["camera"], command="close", args={}, data={}
-        )
-        self.send_message("camera", msg.to_dict())
+        self._send_command("close", {}, {})
 
     def gui_start_grabbing(self):
-        msg = self._msg.command(
-            targets=["camera"], command="start_grabbing", args={}, data={}
-        )
-        self.send_message("camera", msg.to_dict())
+        self._send_command("start_grabbing", {}, {})
 
     def gui_stop_grabbing(self):
-        msg = self._msg.command(
-            targets=["camera"], command="stop_grabbing", args={}, data={}
-        )
-        self.send_message("camera", msg.to_dict())
+        self._send_command("stop_grabbing", {}, {})
 
     def gui_get_parameters(self):
-        msg = self._msg.command(
-            targets=["camera"], command="get_parameters", args={}, data={}
-        )
-        self.send_message("camera", msg.to_dict())
+        self._send_command("get_parameters", {}, {})
 
     def gui_set_parameters(
         self, frame_rate: float, exposure_time: float, gain: float
     ):
-        msg = self._msg.command(
-            targets=["camera"],
-            command="set_parameters",
-            args={},
-            data={
-                "frame_rate": frame_rate,
-                "exposure_time": exposure_time,
-                "gain": gain,
-            },
-        )
-        self.send_message("camera", msg.to_dict())
+        data = {
+            "frame_rate": frame_rate,
+            "exposure_time": exposure_time,
+            "gain": gain,
+        }
+        self._send_command("set_parameters", {}, data)
 
     def gui_camera_type_changed(self, camera_type: str) -> bool:
         """
         Переключить тип камеры без перезапуска + сохранить в prefs.
         Отправляет set_camera_type в camera процесс.
         """
-        from multiprocess_prototype.prefs import set_camera_type
+        from multiprocess_prototype.persistence import set_camera_type
 
-        msg = self._msg.command(
-            targets=["camera"],
-            command="set_camera_type",
-            args={"camera_type": camera_type},
-            data={"camera_type": camera_type},
+        ok = self._send_command(
+            "set_camera_type",
+            {"camera_type": camera_type},
+            {"camera_type": camera_type},
         )
-        ok = self.send_message("camera", msg.to_dict())
         set_camera_type(camera_type)
         return ok

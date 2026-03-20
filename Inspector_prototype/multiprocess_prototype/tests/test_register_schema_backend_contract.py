@@ -22,15 +22,35 @@ def _paths() -> None:
 
 _paths()
 
+from multiprocess_prototype.registers.schemas.camera_tab import CameraRegisters
 from multiprocess_prototype.registers.schemas.processing_tab import (
     ProcessorRegisters,
     RendererRegisters,
 )
 
+# Должно совпадать с modules/camera/register_sync.py
+_CAMERA_FIELDS = frozenset(
+    {
+        "camera_type",
+        "fps",
+        "resolution_width",
+        "resolution_height",
+        "device_id",
+        "camera_index",
+        "hikvision_resolution_width",
+        "hikvision_resolution_height",
+    }
+)
 # Должно совпадать с modules/processor_frame/register_sync.py
 _PROCESSOR_FIELDS = frozenset({"color_lower", "color_upper", "min_area", "max_area"})
 # Должно совпадать с modules/renderer/register_sync.py
-_RENDERER_FIELDS = frozenset({"show_original", "show_mask", "draw_contours"})
+_RENDERER_FIELDS = frozenset(
+    {"show_original", "show_mask", "draw_contours", "draw_bboxes", "save_frames"}
+)
+
+
+def test_camera_registers_fields_match_backend_handler():
+    assert set(CameraRegisters.model_fields) == _CAMERA_FIELDS
 
 
 def test_processor_registers_fields_match_backend_handler():

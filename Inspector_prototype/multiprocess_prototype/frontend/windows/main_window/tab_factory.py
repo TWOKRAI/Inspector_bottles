@@ -41,6 +41,7 @@ def create_tab_widget_factory(
         if widget_key == "camera":
             return CameraTabWidget(
                 camera_type=camera_type,
+                registers_manager=registers_manager,
                 callbacks=camera_callbacks,
             )
         return None

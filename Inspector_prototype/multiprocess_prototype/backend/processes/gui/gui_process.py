@@ -1,4 +1,4 @@
-# multiprocess_prototype/backend/processes/gui_process.py
+# multiprocess_prototype/backend/processes/gui/gui_process.py
 """
 GuiProcess — единственный GUI-процесс прототипа (PyQt5 + frontend_module).
 

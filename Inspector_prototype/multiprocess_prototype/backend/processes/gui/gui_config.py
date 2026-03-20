@@ -1,8 +1,8 @@
-# multiprocess_prototype\configs\gui_config.py
+# multiprocess_prototype/backend/processes/gui/gui_config.py
 """
-Конфигурация GUI-процесса (GuiProcess).
+Конфигурация GUI-процесса (GuiProcess): frontend_module + FrontendLauncher.
 
-ProcessConfigBase + FieldMeta. class_path_from_type.
+Единственная схема процесса gui — импорт из ``multiprocess_prototype.backend.configs``.
 """
 
 from typing import Annotated, Literal
@@ -19,7 +19,7 @@ from .gui_process import GuiProcess
 
 @register_schema("GuiConfig")
 class GuiConfig(ProcessConfigBase):
-    """Конфигурация GUI-процесса."""
+    """Конфигурация GUI-процесса. Layout UI — ``FrontendConfig``, мерж в ``FrontendLauncher`` из app_cfg."""
 
     process_name: str = "gui"
     class_path: str = class_path_from_type(GuiProcess)

@@ -1,12 +1,12 @@
 # multiprocess_prototype/backend/processes/camera/config.py
-"""Конфигурация процесса захвата видео (UnifiedCameraProcess)."""
+"""Конфигурация процесса захвата видео (UnifiedCameraProcess).
 
-from typing import Annotated, Literal, Optional
+Изменяемые параметры — в registers/schemas/camera_tab; boot-значения оттуда.
+"""
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
-    FieldMeta,
-    register_schema,
-)
+from typing import Literal, Optional
+
+from multiprocess_framework.refactored.modules.data_schema_module import register_schema
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
 
 from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
@@ -14,8 +14,11 @@ from multiprocess_prototype.backend.modules.camera.constants import (
     CAMERA_SHM_HEIGHT,
     CAMERA_SHM_WIDTH,
 )
+from multiprocess_prototype.registers.schemas.camera_tab import camera_process_boot_values
 
 from .process import UnifiedCameraProcess
+
+_BOOT = camera_process_boot_values()
 
 
 @register_schema("CameraConfig")
@@ -25,14 +28,14 @@ class CameraConfig(ProcessConfigBase):
     process_name: str = "camera"
     class_path: str = class_path_from_type(UnifiedCameraProcess)
     priority: ProcessPriorityLevel = ProcessPriorityLevel.HIGH
-    camera_type: Literal["simulator", "webcam", "hikvision"] = "simulator"
-    fps: Annotated[int, FieldMeta("Частота кадров", min=1, max=120)] = 25
-    resolution_width: Annotated[int, FieldMeta("Ширина кадра", min=320, max=1920)] = 640
-    resolution_height: Annotated[int, FieldMeta("Высота кадра", min=240, max=1080)] = 480
-    device_id: Annotated[int, FieldMeta("ID камеры", min=0, max=10)] = 0
-    camera_index: Annotated[int, FieldMeta("Индекс Hikvision камеры", min=0, max=10)] = 0
-    hikvision_resolution_width: Annotated[int, FieldMeta("Ширина Hikvision", min=320, max=4096)] = 1920
-    hikvision_resolution_height: Annotated[int, FieldMeta("Высота Hikvision", min=240, max=4096)] = 1080
+    camera_type: Literal["simulator", "webcam", "hikvision"] = _BOOT["camera_type"]
+    fps: int = _BOOT["fps"]
+    resolution_width: int = _BOOT["resolution_width"]
+    resolution_height: int = _BOOT["resolution_height"]
+    device_id: int = _BOOT["device_id"]
+    camera_index: int = _BOOT["camera_index"]
+    hikvision_resolution_width: int = _BOOT["hikvision_resolution_width"]
+    hikvision_resolution_height: int = _BOOT["hikvision_resolution_height"]
     use_simulator: bool = False
     simulator_image_path: Optional[str] = None
 

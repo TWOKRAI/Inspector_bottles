@@ -480,10 +480,14 @@ config = {
 from multiprocess_framework.refactored.modules.process_manager_module import SystemLauncher
 from multiprocess_framework.refactored.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
-    CameraConfig, ProcessorConfig, RendererConfig, RobotConfig,
+    CameraConfig,
+    DatabaseConfig,
+    GuiConfig,
+    ProcessorConfig,
+    RendererConfig,
+    RobotConfig,
 )
-from multiprocess_prototype.frontend.config import GuiConfigFrontend
-from multiprocess_prototype.prefs import get_camera_type
+from multiprocess_prototype.persistence import get_camera_type
 
 launcher = SystemLauncher(stop_timeout=5.0)
 camera_type = get_camera_type()
@@ -492,7 +496,8 @@ launcher.add_process(*process(CameraConfig(camera_type=camera_type)))
 launcher.add_process(*process(ProcessorConfig()))
 launcher.add_process(*process(RendererConfig()))
 launcher.add_process(*process(RobotConfig()))
-launcher.add_process(*process(GuiConfigFrontend(camera_type=camera_type)))
+launcher.add_process(*process(DatabaseConfig()))
+launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
 
 launcher.run()
 ```

@@ -49,3 +49,21 @@ class RendererRegisters(SchemaBase):
             routing=RENDERER_ROUTING,
         ),
     ] = True
+
+    draw_bboxes: Annotated[
+        bool,
+        FieldMeta(
+            "BBox",
+            info="Рисовать bbox вокруг детекций.",
+            routing=RENDERER_ROUTING,
+        ),
+    ] = True
+
+    save_frames: Annotated[
+        bool,
+        FieldMeta(
+            "Save frames",
+            info="Сохранять кадры в output_dir.",
+            routing=RENDERER_ROUTING,
+        ),
+    ] = False

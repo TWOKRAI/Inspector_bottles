@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from multiprocess_prototype.backend.backends import (
+from multiprocess_prototype.backend.modules.camera.backends import (
     BaseCaptureBackend,
     HikvisionBackend,
     SimulatorBackend,

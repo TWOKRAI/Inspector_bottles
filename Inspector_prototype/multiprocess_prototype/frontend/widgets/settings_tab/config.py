@@ -36,12 +36,13 @@ class ControlBinding(SchemaBase):
 
 
 def _default_draw_controls() -> List[ControlBinding]:
+    """Контролы по умолчанию — привязаны к processor/renderer."""
     return [
-        ControlBinding(type="slider", register_name="draw", field_name="dp"),
-        ControlBinding(type="slider", register_name="draw", field_name="minDist"),
-        ControlBinding(type="checkbox", register_name="draw", field_name="circles"),
-        ControlBinding(type="checkbox", register_name="draw", field_name="rectangles"),
-        ControlBinding(type="checkbox", register_name="draw", field_name="draw"),
+        ControlBinding(type="slider", register_name="processor", field_name="min_area"),
+        ControlBinding(type="slider", register_name="processor", field_name="max_area"),
+        ControlBinding(type="checkbox", register_name="renderer", field_name="show_original"),
+        ControlBinding(type="checkbox", register_name="renderer", field_name="show_mask"),
+        ControlBinding(type="checkbox", register_name="renderer", field_name="draw_contours"),
     ]
 
 

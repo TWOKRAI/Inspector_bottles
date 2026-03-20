@@ -46,6 +46,8 @@ class RendererProcess(ProcessModule):
         self.command_manager.register_command("set_draw_contours", self._cmd_set_draw_contours)
         self.command_manager.register_command("set_show_original", self._cmd_set_show_original)
         self.command_manager.register_command("set_show_mask", self._cmd_set_show_mask)
+        self.command_manager.register_command("set_draw_bboxes", self._cmd_set_draw_bboxes)
+        self.command_manager.register_command("set_save_frames", self._cmd_set_save_frames)
 
         if not self.memory_manager:
             self._log_warning("MemoryManager not available, shared memory disabled")
@@ -71,6 +73,8 @@ class RendererProcess(ProcessModule):
                     set_draw_contours=self._cmd_set_draw_contours,
                     set_show_original=self._cmd_set_show_original,
                     set_show_mask=self._cmd_set_show_mask,
+                    set_draw_bboxes=self._cmd_set_draw_bboxes,
+                    set_save_frames=self._cmd_set_save_frames,
                 )
                 continue
 
@@ -179,6 +183,16 @@ class RendererProcess(ProcessModule):
         self._show_mask = bool(val)
         self._log_info(f"Show mask set to {self._show_mask}")
         return {"status": "ok", "show_mask": self._show_mask}
+
+    def _cmd_set_draw_bboxes(self, data):
+        val = data.get("draw_bboxes", self._draw_bboxes)
+        self._draw_bboxes = bool(val)
+        return {"status": "ok", "draw_bboxes": self._draw_bboxes}
+
+    def _cmd_set_save_frames(self, data):
+        val = data.get("save_frames", self._save_frames)
+        self._save_frames = bool(val)
+        return {"status": "ok", "save_frames": self._save_frames}
 
     def shutdown(self) -> bool:
         self._log_info("RendererProcess shutting down...")

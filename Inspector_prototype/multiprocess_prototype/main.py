@@ -32,15 +32,15 @@ def main() -> int:
     from multiprocess_prototype.backend.configs import (
         CameraConfig,
         DatabaseConfig,
+        GuiConfig,
         ProcessorConfig,
         RendererConfig,
         RobotConfig,
     )
-    from multiprocess_prototype.frontend import GuiConfigFrontend
 
     launcher = SystemLauncher(stop_timeout=5.0)
 
-    from multiprocess_prototype.prefs import get_camera_type
+    from multiprocess_prototype.persistence import get_camera_type
     camera_type = get_camera_type()
 
     launcher.add_process(*process(CameraConfig(camera_type=camera_type)))
@@ -48,7 +48,7 @@ def main() -> int:
     launcher.add_process(*process(RendererConfig()))
     launcher.add_process(*process(RobotConfig()))
     launcher.add_process(*process(DatabaseConfig()))
-    launcher.add_process(*process(GuiConfigFrontend(camera_type=camera_type)))
+    launcher.add_process(*process(GuiConfig(camera_type=camera_type)))
 
     launcher.run()
     return 0
