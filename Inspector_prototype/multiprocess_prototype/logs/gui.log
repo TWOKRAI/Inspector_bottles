@@ -599,3 +599,181 @@
 2026-03-19 16:52:11,370 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
 2026-03-19 16:52:11,370 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
 2026-03-19 16:52:11,370 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 09:24:17,997 [INFO] gui: Process state registered: gui
+2026-03-20 09:24:17,997 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 09:24:17,997 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 09:24:17,997 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 09:24:17,997 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 11:02:05,370 [INFO] gui: Process state registered: gui
+2026-03-20 11:02:05,370 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 11:02:05,371 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 11:02:05,371 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 11:02:05,371 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 11:12:35,398 [INFO] gui: Process state registered: gui
+2026-03-20 11:12:35,398 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 11:12:35,398 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 11:12:35,398 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 11:12:35,398 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:00:56,045 [INFO] gui: Process state registered: gui
+2026-03-20 13:00:56,045 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:00:56,046 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:00:56,046 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:00:56,046 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:01:16,303 [INFO] gui: Process state registered: gui
+2026-03-20 13:01:16,303 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:01:16,303 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:01:16,303 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:01:16,303 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:01:57,297 [INFO] gui: Process state registered: gui
+2026-03-20 13:01:57,297 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:01:57,298 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:01:57,298 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:01:57,298 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:15:05,739 [INFO] gui: Process state registered: gui
+2026-03-20 13:15:05,740 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:15:05,740 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:15:05,740 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:15:05,740 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:15:15,504 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:15:15,768 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:15:15,768 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:15,768 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:15:15,768 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:15,768 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:15:15,769 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:15,769 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:15:17,489 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:19,521 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:20,774 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:20,774 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:20,774 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:20,774 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:22,401 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:24,432 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:25,777 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:25,777 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:25,777 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:25,777 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:15:27,314 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:16:26,908 [INFO] gui: Process state registered: gui
+2026-03-20 13:16:26,908 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:16:26,908 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:16:26,908 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:16:26,908 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:16:32,100 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:16:32,922 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:16:34,101 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:17:51,348 [INFO] gui: Process state registered: gui
+2026-03-20 13:17:51,348 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:17:51,348 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:17:51,348 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:17:51,348 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:17:56,810 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:17:56,387 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:17:56,387 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:17:56,387 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:17:56,387 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:17:56,387 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:17:56,387 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:17:56,389 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:20:21,956 [INFO] gui: Process state registered: gui
+2026-03-20 13:20:21,956 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:20:21,956 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:20:21,956 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:20:21,956 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:20:26,776 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:20:26,981 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:20:26,981 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:20:26,981 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:20:26,981 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:20:26,982 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:20:26,982 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:20:26,982 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:20:28,761 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:57:15,653 [INFO] gui: Process state registered: gui
+2026-03-20 13:57:15,653 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 13:57:15,653 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 13:57:15,653 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 13:57:15,654 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 13:57:21,454 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 13:57:21,673 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 13:57:23,455 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:00:58,544 [INFO] gui: Process state registered: gui
+2026-03-20 14:00:58,544 [INFO] gui: GuiProcessFrontend initializing...
+2026-03-20 14:00:58,544 [INFO] gui: GuiProcessFrontend ready (frontend_module stack)
+2026-03-20 14:00:58,544 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 14:00:58,544 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 14:01:17,659 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:01:17,572 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:01:25,323 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:01:27,355 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:13:58,309 [INFO] gui: Process state registered: gui
+2026-03-20 14:13:58,310 [INFO] gui: GuiProcess initializing...
+2026-03-20 14:13:58,310 [INFO] gui: GuiProcess ready (frontend_module stack)
+2026-03-20 14:13:58,310 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 14:13:58,310 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 14:14:03,950 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:14:03,334 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:14:03,334 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:03,334 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:14:03,334 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:04,334 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:14:04,334 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:04,334 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 14:14:05,951 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:07,968 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:08,336 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:08,336 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:08,336 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:08,336 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:10,864 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:12,895 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:13,340 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:13,340 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:13,340 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:13,340 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:15,776 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:17,808 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:18,344 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:18,344 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:18,344 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:18,344 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:20,687 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:22,703 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:23,347 [INFO] gui: [DEBUG] gui: update_frame frame_id=0 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:23,347 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:23,348 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 14:14:23,348 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 15:20:15,187 [INFO] gui: Process state registered: gui
+2026-03-20 15:20:15,187 [INFO] gui: GuiProcess initializing...
+2026-03-20 15:20:15,187 [INFO] gui: GuiProcess ready (frontend_module stack)
+2026-03-20 15:20:15,187 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-20 15:20:15,187 [INFO] gui: Process 'gui' initialized successfully
+2026-03-20 15:20:21,541 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: update_frame frame_id=1 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: update_frame frame_id=2 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: update_frame frame_id=3 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 15:20:21,215 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-03-20 15:20:23,525 [INFO] gui: [DEBUG] gui: update_frame frame_id=50 original=(480, 640, 3) mask=(480, 640, 3)
+2026-03-20 15:20:25,558 [INFO] gui: [DEBUG] gui: update_frame frame_id=100 original=(480, 640, 3) mask=(480, 640, 3)

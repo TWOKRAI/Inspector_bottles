@@ -2,6 +2,8 @@
 """
 Тесты для LoggerManager.
 """
+import logging
+import logging.handlers
 import pytest
 import tempfile
 import os
@@ -77,6 +79,29 @@ class TestLoggerManager:
         manager.shutdown()
         assert manager.is_initialized is False
     
+    def test_module_rotate_false_uses_file_handler(self, tmp_path):
+        """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов)."""
+        log_file = tmp_path / "frames.log"
+        cfg = LogConfig.from_dict(
+            {
+                "enable_batching": False,
+                "modules": {
+                    "processor_frames": {
+                        "enabled": True,
+                        "file_path": str(log_file),
+                        "min_level": "DEBUG",
+                        "rotate": False,
+                    }
+                },
+            }
+        )
+        manager = LoggerManager(manager_name="TestLogger", config=cfg)
+        manager.initialize()
+        ch = manager._module_channels["processor_frames"]
+        assert ch.handler.__class__ is logging.FileHandler
+        assert not isinstance(ch.handler, logging.handlers.RotatingFileHandler)
+        manager.shutdown()
+
     def test_module_channel(self):
         """Тест создания канала для модуля."""
         manager = LoggerManager(manager_name="TestLogger")

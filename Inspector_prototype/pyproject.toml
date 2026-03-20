@@ -21,7 +21,7 @@ where = ["."]
 include = ["multiprocess_framework*", "multiprocess_prototype*"]
 
 [tool.pytest.ini_options]
-testpaths = ["multiprocess_framework/refactored"]
+testpaths = ["multiprocess_framework/refactored", "multiprocess_prototype/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

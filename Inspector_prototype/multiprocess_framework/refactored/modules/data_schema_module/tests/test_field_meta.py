@@ -537,6 +537,11 @@ class TestFieldRouting:
         assert d["priority"] == 2
         assert d["transform"] == "scale"
 
+    def test_to_dict_process_targets(self):
+        fr = FieldRouting(channel="ctrl", process_targets=("a", "b"))
+        d = fr.to_dict()
+        assert d["process_targets"] == ["a", "b"]
+
     def test_immutable(self):
         fr = FieldRouting(channel="ctrl")
         with pytest.raises((AttributeError, TypeError)):

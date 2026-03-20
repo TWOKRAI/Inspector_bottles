@@ -1,12 +1,9 @@
 # multiprocess_prototype/registers/connection_map.py
 """
-Connection map: register_name -> backend channel.
+Совместимость: DEFAULT_CONNECTION_MAP собирается из тех же схем, что и factory.
 
-При изменении регистра через RegistersManager отправка идёт в control_{channel}.
+Предпочтительно вызывать create_registers() или build_default_connection_map() из factory.
 """
+from .factory import build_default_connection_map
 
-DEFAULT_CONNECTION_MAP = {
-    "draw": "renderer",
-    "processor": "processor",
-    "renderer": "renderer",
-}
+DEFAULT_CONNECTION_MAP = build_default_connection_map()

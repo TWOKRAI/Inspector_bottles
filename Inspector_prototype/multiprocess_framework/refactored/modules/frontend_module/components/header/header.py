@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget
+from frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget, pyqtSignal
 
-from .admin_button_widget import AdminButtonWidget
+from .admin_button_widget import AdminButtonConfig, AdminButtonWidget
 from .header_buttons_widget import HeaderButtonsWidget
 from .logo_widget import LogoWidget
 from ..base.button_style import create_header_button
@@ -27,9 +27,15 @@ class HeaderWidget(QWidget):
       logo: LogoWidget
       admin_button: AdminButtonWidget
       buttons_widget: HeaderButtonsWidget (button_clicked = pyqtSignal(str))
+      action_triggered: pyqtSignal(str) — единый канал: id кнопок навигации + admin (action_id)
+
+    Привязка: connect_action_handlers(action_triggered, handlers=..., on_unmatched=...)
+    или get_signal_map() для интроспекции (ISignalProvider).
 
     Конфиг: {logo: {...}, admin_button: {...}, windows: [...]}
     """
+
+    action_triggered = pyqtSignal(str)
 
     def __init__(
         self,
@@ -45,14 +51,30 @@ class HeaderWidget(QWidget):
         admin_cfg = dict(cfg.get("admin_button", {}))
         windows_list = cfg.get("windows", [])
 
+        admin_model = (
+            AdminButtonConfig(**admin_cfg) if isinstance(admin_cfg, dict) else (admin_cfg or AdminButtonConfig())
+        )
+        self._admin_action_id = admin_model.action_id
+
         self._logo_pixmap = cfg.get("logo_pixmap") or cfg.get("pixmap")
         self.logo = LogoWidget(config=logo_cfg, pixmap=self._logo_pixmap)
-        self.admin_button = AdminButtonWidget(config=admin_cfg)
+        self.admin_button = AdminButtonWidget(config=admin_model)
         self.buttons_widget = HeaderButtonsWidget(config=windows_list)
+
+        self.buttons_widget.button_clicked.connect(self.action_triggered.emit)
+        self.admin_button.clicked.connect(lambda: self.action_triggered.emit(self._admin_action_id))
 
         self._on_fullscreen_toggle = on_fullscreen_toggle
         self._on_close = on_close
         self._init_ui()
+
+    def get_signal_map(self) -> Dict[str, Any]:
+        """Каталог сигналов для подключения по конфигу (ISignalProvider)."""
+        return {
+            "action_triggered": self.action_triggered,
+            "header_button_clicked": self.buttons_widget.button_clicked,
+            "admin_clicked": self.admin_button.clicked,
+        }
 
     def _init_ui(self) -> None:
         self.all_layout = QVBoxLayout()

@@ -2,10 +2,10 @@
 """
 Backend Inspector Prototype.
 
-Конфиги и процессы: camera, processor, renderer, robot, database.
+Пакет `processes` не импортируется здесь намеренно — избегаем циклов при `import backend`.
+Используйте: `from multiprocess_prototype.backend.processes import …`
 """
 
 from . import configs
-from . import processes
 
-__all__ = ["configs", "processes"]
+__all__ = ["configs"]

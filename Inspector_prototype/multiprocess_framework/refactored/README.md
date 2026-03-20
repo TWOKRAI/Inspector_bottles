@@ -12,6 +12,7 @@
 1. **Новичок?** Прочитай этот README (10 мин) → [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) → выбери путь.
 2. **AI-агент?** [docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md) → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md).
 3. **Разработчик?** Quick Start ниже → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) → `modules/*/README.md`.
+4. **Маршрутизация сообщений и регистров?** [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) (процесс vs канал Router, `connection_map`, `FieldRouting`).
 
 ---
 
@@ -495,12 +496,14 @@ Inspector_prototype/multiprocess_framework/refactored/
 │
 ├── docs/                           # Detailed documentation
 │   ├── FRAMEWORK_OVERVIEW.md      # Complete overview
+│   ├── ROUTING_GLOSSARY.md        # Routing terms (process vs Router channel)
 │   ├── ARCHITECTURE_REFERENCE.md  # Diagrams & tables
 │   ├── ARCHITECTURE_ESSAY.md      # Design philosophy
 │   └── ARCHITECTURE_PHILOSOPHY.md # For AI agents
 │
-├── modules/                       # 16 modules
+├── modules/                       # Core packages (см. также channel_routing, statistics)
 │   ├── base_manager/
+│   ├── channel_routing_module/
 │   ├── data_schema_module/
 │   ├── message_module/
 │   ├── logger_module/
@@ -515,10 +518,11 @@ Inspector_prototype/multiprocess_framework/refactored/
 │   ├── console_module/
 │   ├── shared_resources_module/
 │   ├── registers_module/
-│   └── sql_module/                # Database access via SQLAlchemy 2.0
+│   ├── frontend_module/
+│   ├── sql_module/                # Database access via SQLAlchemy 2.0
+│   └── statistics_module/
 │
-└── multiprocess_prototype/        # Example application
-    └── main.py                    # Full working example
+└── (пример приложения)             # Inspector_prototype/multiprocess_prototype/main.py
 ```
 
 ---

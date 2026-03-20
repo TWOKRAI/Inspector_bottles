@@ -7,7 +7,8 @@ alwaysApply: true
 
 ## Где что находится
 
-- **Фреймворк**: `Inspector_prototype/multiprocess_framework/refactored/modules/` (16 модулей + shared_registers)
+- **Фреймворк**: `Inspector_prototype/multiprocess_framework/refactored/modules/` (16 модулей)
+- **Схемы регистров приложения**: `Inspector_prototype/multiprocess_prototype/registers/schemas/` (не часть фреймворка)
 - **Архив документации**: `refactored/docs/archived/` — исторические отчёты, **не использовать** при анализе фреймворка
 - **Тестовое приложение**: `Inspector_prototype/multiprocess_prototype/`
 - **Точка входа**: `Inspector_prototype/multiprocess_prototype/main.py`
@@ -41,8 +42,9 @@ Communication: dispatch_module, router_module, command_module
 Process:       worker_module, process_module
 Orchestration: process_manager_module
 Frontend:      frontend_module
-Shared:        shared_registers (схемы регистров для backend и frontend)
 ```
+
+Схемы регистров (поля алгоритма, `FieldMeta`, `register_dispatch`) задаёт **приложение** — классы на базе `data_schema_module.SchemaBase`, без отдельного пакета во фреймворке.
 
 ## После каждого изменения
 

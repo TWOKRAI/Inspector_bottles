@@ -2,8 +2,8 @@
 """
 HeaderButtonsWidget — список кнопок из конфига.
 
-Конфиг: HeaderButtonsConfig (List[ButtonItem]). При клике эмитит button_clicked(id).
-Привязка при компоновке: widget.button_clicked.connect(show_window).
+Конфиг: HeaderButtonsConfig (List[ButtonItem]). При клике эмитит button_clicked(action_id),
+где action_id = item.action_id или item.id. См. HeaderWidget.action_triggered.
 FieldMeta — для консистентности с регистрами, tooltips, access_level.
 """
 from __future__ import annotations
@@ -28,6 +28,13 @@ class HeaderButtonItem(SchemaBase):
         str,
         FieldMeta("Подпись кнопки", info="Текст на кнопке."),
     ] = "Домой"
+    action_id: Annotated[
+        Optional[str],
+        FieldMeta(
+            "ID действия",
+            info="Ключ для connect_action_handlers; если не задан — используется id.",
+        ),
+    ] = None
 
 
 @register_schema("HeaderButtonsConfig")
@@ -73,13 +80,14 @@ class HeaderButtonsWidget(QWidget):
         for item in self._config:
             btn_id = item.get("id", "main")
             label = item.get("label", btn_id)
+            action_key = item.get("action_id") or btn_id
 
-            def make_handler(wid: str):
+            def make_handler(akey: str):
                 def _on_click():
-                    self.button_clicked.emit(wid)
+                    self.button_clicked.emit(akey)
                 return _on_click
 
-            btn = create_header_button(label=label, on_click=make_handler(btn_id))
+            btn = create_header_button(label=label, on_click=make_handler(action_key))
             layout.addWidget(btn)
             layout.addSpacing(30)
         layout.addStretch()

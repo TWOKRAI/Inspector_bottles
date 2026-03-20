@@ -90,7 +90,7 @@ class GuiCommandHandler:
     def __init__(self, process: Any):
         """
         Args:
-            process: GuiProcessFrontend (или ProcessModule с send_message, _msg).
+            process: GuiProcess / ProcessModule с send_message, _msg.
         """
         self._process = process
 

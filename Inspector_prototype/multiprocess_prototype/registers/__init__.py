@@ -6,12 +6,11 @@
 """
 from .factory import create_registers
 from .connection_map import DEFAULT_CONNECTION_MAP
-from .schemas import DrawRegisters, ProcessorRegisters, RendererRegisters
+from .schemas import ProcessorRegisters, RendererRegisters
 
 __all__ = [
     "create_registers",
     "DEFAULT_CONNECTION_MAP",
-    "DrawRegisters",
     "ProcessorRegisters",
     "RendererRegisters",
 ]

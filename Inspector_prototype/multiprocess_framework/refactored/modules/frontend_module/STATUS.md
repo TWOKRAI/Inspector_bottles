@@ -9,13 +9,13 @@
 | Код (читаемость, стандарты) | 8 | FrontendManager, FrontendRegistersBridge; Coordinator удалён |
 | Тесты (покрытие) | 2 | Ручная проверка, unit-тесты планируются |
 | Документация (README, interfaces) | 7 | README, interfaces, STATUS, ADR |
-| Связанность (меньше = лучше) | 8 | data_schema, registers, shared_registers |
+| Связанность (меньше = лучше) | 8 | data_schema, registers_module; схемы регистров — в приложении |
 | Работоспособность | 9 | FrontendManager.run_app/shutdown_app, GuiProcess интеграция |
 
 ## Чеклист рефакторинга
 
 - [x] Этап 0: Фундамент — структура, interfaces.py, README, STATUS
-- [x] Этап 1: shared_registers — DrawRegisters, интеграция
+- [x] Этап 1: интеграция с RegistersManager и схемами приложения (прототип: registers/schemas)
 - [x] Этап 2: BaseConfigurableWidget — портирование из App
 - [x] Этап 3: WidgetRegistry, WidgetDescriptor
 - [x] Этап 4: Базовые компоненты (SliderControl, CheckboxControl)
@@ -36,6 +36,11 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-20 | README: примеры — `multiprocess_prototype.registers.schemas.processing_tab` | 6 |
+| 2026-03-20 | FrontendManager: `queue_manager`, `stop_event` в `__init__` (без присвоения `_…` из приложения) | 6 |
+| 2026-03-20 | FrontendRegistersBridge: в сообщение register_update добавлено `type: data` (согласованность с Message / Router) | 6 |
+| 2026-03-20 | Документация registers_bridge: connection_map как fallback к register_dispatch (ADR-048) | 6 |
+| 2026-03-20 | action_binding.connect_action_handlers, HeaderWidget.action_triggered, get_signal_map, AdminButtonConfig.action_id, HeaderButtonItem.action_id | 6 |
 | 2026-03-19 | LoadingWindow, ImagePanelWidget, HeaderWidget (windows из конфига), ISignalProvider | 6 |
 | 2026-03-19 | WindowManager: IConfig поддержка, _config_get для dot-notation | 6 |
 | 2026-03-18 | Создание фундамента: структура, interfaces, README, STATUS | 0 |

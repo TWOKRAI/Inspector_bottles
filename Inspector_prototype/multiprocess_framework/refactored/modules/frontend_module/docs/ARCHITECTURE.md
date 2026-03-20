@@ -45,7 +45,7 @@ frontend_module/
 
 ## Регистры и connection
 
-- Frontend и backend используют **одни схемы** (shared_registers).
+- Frontend и backend приложения используют **одни схемы регистров** (классы в коде приложения, напр. `multiprocess_prototype/registers/schemas`).
 - `connection_map`: {register_name: backend_channel} — при изменении → send_callback.
 - RegistersManager (registers_module): subscribe_all, set_field_value, connection_map, send_callback.
 

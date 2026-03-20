@@ -1,10 +1,9 @@
 # multiprocess_prototype/frontend/configs/frontend_config.py
 """
-FrontendConfig — корневая схема конфигурации frontend.
+FrontendConfig — корневая схема всего frontend-процесса.
 
-Композиция: MainWindowConfig, TabsConfig, SettingsTabConfig.
-Сборка из app_cfg (GuiConfigFrontend) + дефолты.
-Конвертация в dict/json/yaml через model_dump / DataConverter.
+Композиция только из дочерних пакетов (main_window, loading, tabs, settings_tab).
+Секции UI живут рядом с виджетами; здесь — склейка и build_dict.
 """
 
 from typing import Any, Dict, Literal
@@ -17,8 +16,25 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
     register_schema,
 )
 
-from .main_window import MainWindowConfig
-from .tabs import SettingsTabConfig, TabsConfig, _default_window_registry
+from multiprocess_prototype.frontend.windows.loading import LoadingWindowConfig
+from multiprocess_prototype.frontend.windows.main_window import MainWindowConfig
+from multiprocess_prototype.frontend.widgets.settings_tab import SettingsTabConfig
+from multiprocess_prototype.frontend.widgets.tabs import TabsConfig
+
+
+@register_schema("WindowRegistryEntry")
+class WindowRegistryEntry(SchemaBase):
+    """Запись реестра окон (factory_key сопоставляется в FrontendLauncher)."""
+
+    factory_key: str = "main"
+
+
+def default_window_registry() -> Dict[str, Dict[str, Any]]:
+    return {
+        "main": {"factory_key": "main"},
+        "inspector": {"factory_key": "inspector"},
+        "loading": {"factory_key": "loading"},
+    }
 
 
 @register_schema("FrontendConfig")
@@ -27,6 +43,8 @@ class FrontendConfig(SchemaBase):
 
     # MainWindow layout
     main_window: MainWindowConfig = Field(default_factory=MainWindowConfig)
+
+    loading_window: LoadingWindowConfig = Field(default_factory=LoadingWindowConfig)
 
     # Tabs
     tabs: TabsConfig = Field(default_factory=TabsConfig)
@@ -67,10 +85,11 @@ class FrontendConfig(SchemaBase):
             "header": mw_data["header"],
             "image_panel": mw_data["image_panel"],
             "tabs": self.tabs.to_tabs_dict_list(),
-            "window_registry": _default_window_registry(),
+            "window_registry": default_window_registry(),
             "camera_type": app_cfg.get("camera_type", self.camera_type),
             "poll_interval_ms": app_cfg.get("poll_interval_ms", self.poll_interval_ms),
             "settings_tab": self.settings_tab.model_dump(),
+            "loading_window": self.loading_window.model_dump(),
         }
         return result
 

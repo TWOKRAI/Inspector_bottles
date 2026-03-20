@@ -20,7 +20,14 @@ if TYPE_CHECKING:
 from ...channel_routing_module import ChannelRoutingManager
 from ...channel_routing_module.buffers.batch_buffer import BatchBuffer, BatchConfig as CRMBatchConfig
 from ..interfaces import ILoggerManager
-from .log_config import LogConfig, LogLevel, LogScope, ScopeConfig, ChannelConfig
+from .log_config import (
+    LogConfig,
+    LogLevel,
+    LogScope,
+    ScopeConfig,
+    ChannelConfig,
+    ModuleConfig,
+)
 from .log_dispatcher import LogDispatcher, LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 
@@ -190,7 +197,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             if getattr(module_config, 'enabled', True) and getattr(
                 module_config, 'file_path', None
             ):
-                self._setup_module_channel(module_name, module_config.file_path)
+                self._setup_module_channel(module_name, module_config)
 
     def _setup_channel(self, channel_name: str, channel_config: ChannelConfig):
         try:
@@ -200,18 +207,30 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
 
-    def _setup_module_channel(self, module_name: str, file_path: Optional[str] = None):
-        if not file_path:
-            file_path = f"logs/{module_name}.log"
+    def _setup_module_channel(self, module_name: str, module_config: ModuleConfig):
+        """Создать файловый канал для module_* (из LogConfig.modules или enable_module_logging)."""
+        path = module_config.file_path or f"logs/{module_name}.log"
+        max_size = (
+            module_config.max_size
+            if module_config.max_size is not None
+            else 10 * 1024 * 1024
+        )
+        backup_count = (
+            module_config.backup_count
+            if module_config.backup_count is not None
+            else 5
+        )
+        rotate = module_config.rotate
         try:
             channel_config = ChannelConfig(
                 name=f"module_{module_name}",
                 type="file",
                 enabled=True,
-                file_path=file_path,
+                file_path=path,
                 format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                max_size=10 * 1024 * 1024,
-                backup_count=5,
+                max_size=max_size,
+                backup_count=backup_count,
+                rotate=rotate,
             )
             channel = create_channel(channel_config)
             self._module_channels[module_name] = channel
@@ -221,7 +240,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             )
             self.stats['module_files_created'] += 1
             self.debug(
-                f"Module channel created: {module_name} -> {file_path}",
+                f"Module channel created: {module_name} -> {path}",
                 module="logger_manager",
             )
         except Exception as e:
@@ -425,7 +444,9 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
     # =========================================================================
 
     def enable_module_logging(self, module_name: str, file_path: Optional[str] = None):
-        self._setup_module_channel(module_name, file_path)
+        self._setup_module_channel(
+            module_name, ModuleConfig(enabled=True, file_path=file_path)
+        )
 
     def disable_module_logging(self, module_name: str):
         if module_name in self._module_channels:

@@ -29,14 +29,17 @@ class FieldRouting:
     Типизированная маршрутизация поля к Router-каналу.
 
     Атрибуты:
-        channel     — имя канала в Router (обязательный)
-        priority    — приоритет обработки (по умолч. 0)
-        transform   — имя функции трансформации значения перед отправкой
+        channel          — имя канала в Router (обязательный)
+        priority         — приоритет обработки (по умолч. 0)
+        transform        — имя функции трансформации значения перед отправкой
+        process_targets  — опционально: имена процессов для register_update с GUI
+                          (перекрывает register_dispatch класса для этого поля)
     """
 
     channel: str
     priority: int = 0
     transform: str | None = None
+    process_targets: tuple[str, ...] | None = None
 
     def to_dict(self) -> dict:
         """Конвертировать в dict для хранения в FieldMeta.routing."""
@@ -45,6 +48,8 @@ class FieldRouting:
             d["priority"] = self.priority
         if self.transform:
             d["transform"] = self.transform
+        if self.process_targets:
+            d["process_targets"] = list(self.process_targets)
         return d
 
     def __repr__(self) -> str:
@@ -53,4 +58,6 @@ class FieldRouting:
             parts.append(f"priority={self.priority}")
         if self.transform:
             parts.append(f"transform={self.transform!r}")
+        if self.process_targets:
+            parts.append(f"process_targets={self.process_targets!r}")
         return f"FieldRouting({', '.join(parts)})"

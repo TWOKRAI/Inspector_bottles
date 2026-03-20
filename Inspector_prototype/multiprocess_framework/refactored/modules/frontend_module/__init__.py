@@ -9,7 +9,7 @@ Frontend Module — модуль UI-фреймворка.
 - Реестры виджетов и окон
 
 Использует data_schema_module и config_module для схем и конфигов.
-Регистры — из shared_registers (общие для backend и frontend).
+Конкретные классы регистров задаёт приложение (наследники SchemaBase); см. multiprocess_prototype/registers/schemas.
 """
 
 from frontend_module.core.base_configurable_widget import BaseConfigurableWidget

@@ -46,6 +46,7 @@ from .exceptions import (
 # Ядро схем
 from .field_meta import FieldMeta
 from .field_routing import FieldRouting
+from .register_dispatch import RegisterDispatchMeta
 from .field_types import (
     Percent,
     NormalizedFloat,
@@ -105,6 +106,7 @@ __all__ = [
     # Ядро схем
     "FieldMeta",
     "FieldRouting",
+    "RegisterDispatchMeta",
     "Percent",
     "NormalizedFloat",
     "Scale",

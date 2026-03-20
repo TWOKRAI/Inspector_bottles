@@ -16,6 +16,152 @@
 
 ---
 
+## ADR-055: Backend — граф импортов без циклов (configs ↔ processes ↔ modules)
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: После разнесения `backend/processes/*`, `backend/modules/*` и `backend/configs` при `import backend` / `pytest` возникали циклы: `configs` → `ProcessorConfig` → `ProcessorProcess` → пакет `processes` (агрегирующий `__init__`) → `RendererProcess` → `modules.renderer` → `RendererConfig` → снова `RendererProcess` (частично инициализированный модуль). Аналогично `modules/__init__.py` и реэкспорт `CameraConfig` из `modules.camera` провоцировал цикл с `camera.process`.
+- Решение:
+  - **`backend/__init__.py`** — только `configs`, без eager-импорта `processes`.
+  - **`processes/__init__.py`** — ленивый `__getattr__` для имён из `__all__` (без загрузки всех процессов при импорте пакета).
+  - **`modules/__init__.py`** и **`modules/camera/__init__.py`** — без реэкспорта процессов/конфигов; только доменные хелперы камеры.
+  - **`ProcessorConfig` / `RendererConfig`:** поле `class_path` — строковая константа (модуль процесса не импортируется из config-модуля); дефолты регистров по-прежнему из `registers/schemas/processing_tab/boot.py`.
+- Причина: Сохранить единый источник параметров регистров и при этом допустимый порядок загрузки при сборке `proc_dict` и тестах.
+- Отклонённые альтернативы: Только `TYPE_CHECKING` для импорта классов — не снимает цикл при выполнении `class_path_from_type` в рантайме.
+
+---
+
+## ADR-054: Backend прототипа — домен вне ProcessModule, merge managers
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Процессы `processor` / `renderer` / `camera` смешивали алгоритмы, SHM и `register_update` с обвязкой `ProcessModule`; дефолты `ProcessorConfig` расходились с `ProcessorRegisters`; полный `get_default_managers_config()` дублировался в каждом `proc_dict` без возможности точечного overlay.
+- Решение:
+  - **`backend/modules/<name>/`** — процесс camera / processor / renderer: `process.py` (`ProcessModule`), `config.py` (Pydantic для `proc_dict`), доменные модули рядом. **`backend/configs/`** — общие вещи (`ProcessConfigBase`, `app_config`, robot, database, gui); три конфига камеры/процессора/рендерера реэкспортируются из `configs/__init__.py` для `main.py`. **`backend/processes/`** реэкспортирует классы процессов из `modules` + локальные gui/robot/database.
+  - **Подклассы `ProcessModule`** в `modules/*/process.py`; `backend/shared/` для общих утилит.
+  - **Регистры:** `apply_processor_register_update` / `apply_renderer_register_update` + константы `PROCESSOR_REGISTER` / `RENDERER_REGISTER` из `registers/schemas/processing_tab/names.py`.
+  - **`ProcessorConfig`:** числовые/list-дефолты из экземпляра `ProcessorRegisters()`.
+  - **`merge_managers` + `ProcessConfigBase.managers_overlay()`** — сливают overlay поверх `get_default_managers_config()` (по умолчанию overlay пустой, поведение как раньше).
+  - **Камера:** `CAMERA_SHM_HEIGHT` / `WIDTH` в `modules/camera/constants.py`, те же значения в `modules/camera/config.py` (`CameraConfig.memory`).
+- Причина: Явная граница фреймворк / приложение, тестируемый домен, один источник дефолтов UI↔boot, задел на урезание `managers` по процессу.
+- Отклонённые альтернативы: Вынести `WorkerManager` в доменные пакеты — ломает контракт фреймворка.
+
+---
+
+## ADR-053: Прототип — один GuiProcess, импорты регистров, FrontendManager runtime
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Дублировались `GuiProcess` (InspectorWindow) и `GuiProcessFrontend` (FrontendLauncher); виджеты импортировали `registers.schemas` как top-level — ломало `pytest` без хака `sys.path`; прототип присваивал `fm._queue_manager` / `fm._stop_event` после конструктора.
+- Решение:
+  - **Один GUI-класс** — `backend/processes/gui_process.py` (`GuiProcess`) всегда через `FrontendLauncher`; `GuiProcessFrontend` остаётся только как алиас в `multiprocess_prototype.frontend` для обратной совместимости импорта.
+  - **Импорты схем** — только `multiprocess_prototype.registers.schemas…` в коде и тестах прототипа.
+  - **`window_registry`** — `WindowRegistryEntry` и `default_window_registry()` в `frontend_config.py` (меньше файлов).
+  - **FrontendManager** — параметры конструктора `queue_manager`, `stop_event` (публичный контракт вместо записи в приватные поля из лаунчера).
+  - **GuiProcessMixin** — файл `backend/gui_process_mixin.py`, чтобы `gui_process` не импортировал пакет `frontend` (цикл с `GuiConfigFrontend` / `class_path_from_type(GuiProcess)`).
+- Причина: Меньше расхождения веток GUI, воспроизводимые тесты, явная граница фреймворка.
+- Отклонённые альтернативы: Оставить legacy InspectorWindow в прод-пути — дублирование таймеров и регистров.
+
+---
+
+## ADR-051: Модульные логи — опция `rotate` (Windows / общий файл)
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: `RotatingFileHandler` при достижении `maxBytes` вызывает `os.rename` текущего файла. На Windows это даёт `PermissionError` (WinError 32), если тот же путь открыт в другом процессе или внешней программе, либо при нескольких writer на один файл. Высокочастотный perf-лог `frames.log` провоцировал ротацию и лавину ошибок из фонового flush BatchBuffer.
+- Решение: В `ChannelConfig` / `ModuleConfig` добавлен флаг `rotate` (по умолчанию `true`). При `rotate: false` файловый канал использует `logging.FileHandler` в режиме append без rename. В прототипе для `logger.modules.processor_frames` задано `"rotate": false`.
+- Причина: Минимальное изменение без отдельного процесса-писателя или `concurrent-log-handler`; для кадрового лога ротация редко нужна относительно стабильности.
+- Отклонённые альтернативы: Только увеличить `max_size` — рано или поздно ротация снова сорвётся; отдельный файл на PID — усложняет анализ логов.
+
+---
+
+## ADR-052: Регистры по фичам — `schemas/processing_tab/`, UI-строки у виджета
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Плоские `registers/schemas/processor.py|renderer.py|processing_tab_ui.py` не отражали принадлежность к одной фиче; `ProcessingTabUiConfig` не участвует в `register_update`, но лежал рядом с синхронными схемами.
+- Решение:
+  - Синхронизируемые классы вкладки «Обработка» — пакет `multiprocess_prototype/registers/schemas/processing_tab/` (`processor.py`, `renderer.py`, `__init__.py` barrel, `names.py` с ключами `PROCESSOR_REGISTER` / `RENDERER_REGISTER`).
+  - `ProcessingTabUiConfig` — `multiprocess_prototype/frontend/widgets/processing_tab/ui_config.py`. Пакет `registers` **не** импортирует `frontend`.
+  - Корневой `multiprocess_prototype/registers/schemas/__init__.py` реэкспортирует символы фичи; импорт приложения: `from multiprocess_prototype.registers.schemas import …` (не короткий `registers` — пакет не на PYTHONPATH как top-level).
+  - Контракт: `tests/test_register_schema_backend_contract.py` — множество полей `ProcessorRegisters` / `RendererRegisters` совпадает с ветками `_apply_register_update` в соответствующих процессах.
+- Причина: Навигация «одна фича — одна папка регистров»; отделение UI-текстов от шины; задел под рецепты (один источник значений в регистрах).
+- Отклонённые альтернативы: Один файл `processing_tab_ui.py`, реэкспортирующий и регистры — смешение ответственности и путаница имён.
+
+---
+
+## ADR-050: Схемы регистров — в приложении, не во фреймворке
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Пакет `shared_registers` во фреймворке содержал доменные классы (`DrawRegisters`, `ProcessorRegisters`, `RendererRegisters`) — хардкод прототипа внутри универсального слоя.
+- Решение: Удалить `refactored/modules/shared_registers` с конкретными схемами. Канон для Inspector prototype — `multiprocess_prototype/registers/schemas/` (подпакеты по фичам, наследники `SchemaBase` из `data_schema_module`). Фреймворк остаётся с `data_schema_module`, `registers_module`, `frontend_module` без привязки к полям приложения.
+- Причина: Граница «универсальный фреймворк / приложение»; новые проекты подставляют свои Register-классы в `RegistersManager`.
+- Отклонённые альтернативы: Оставить `shared_registers` как «пример» — провоцирует импорт домена из фреймворка.
+
+---
+
+## ADR-049: StateRegister vs UiSchema (главное окно и вкладки)
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: На `MainWindow` смешивались строки UI, алгоритмические поля и пути доставки (`register_update` vs команды); дублировалась схема `DrawRegisters` в прототипе.
+- Решение:
+  - **StateRegister** (`ProcessorRegisters`, `RendererRegisters`, и др. в `multiprocess_prototype/registers/schemas/<feature>/`) — канон имён полей, `FieldMeta`, маршрутизация `register_update` через `register_dispatch` / `FieldRouting` (см. ADR-050, ADR-052).
+  - **UiSchema** (`ProcessingTabUiConfig` и аналоги) — только тексты и группировка для Qt; без маршрутизации на процессы; не дублирует алгоритмические значения; для вкладки «Обработка» — `frontend/widgets/processing_tab/ui_config.py`.
+  - Вкладка «Обработка»: контролы `frontend_module` + `RegistersManager`; BGR как шесть слайдеров ↔ `color_lower` / `color_upper`; бэкенд принимает `register_update` в цикле data-воркера (`ProcessorProcess` / `RendererProcess`).
+  - Прототип: обработка — `registers/schemas/processing_tab/`; другие фичи — отдельные подпакеты при появлении синхронных регистров.
+- Причина: Один источник истины для имён полей GUI и процессов; UI-строки отделены от шины; см. `docs/ROUTING_GLOSSARY.md`, чеклист `multiprocess_prototype/registers/CHECKLIST.md`.
+- Отклонённые альтернативы: Оставить только GUI-команды без регистров — расходится с `RegistersManager` и диспетчеризацией ADR-048.
+
+---
+
+## ADR-048: Доставка register_update — RegisterDispatchMeta, FieldRouting.process_targets, fan-out
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: `RegistersManager` использовал только `connection_map`; дублировались цели доставки в прототипе; `FieldRouting.channel` описывает канал Router, а не обязательно имя процесса для `send_message`.
+- Решение:
+  - `RegisterDispatchMeta(process_targets=...)` — атрибут класса регистра (`register_dispatch`), единый источник для GUI → backend по имени регистра.
+  - Опционально `FieldRouting(..., process_targets=...)` — override на уровне поля.
+  - Приоритет разрешения целей: `routing.process_targets` поля → `register_dispatch` класса → `connection_map` (ручной override / обратная совместимость).
+  - Fan-out: несколько имён в `process_targets` → несколько вызовов `send_callback` по порядку; ошибки по-прежнему подавляются в callback.
+  - `build_connection_map_from_registers()` в `registers_module` строит `Dict[str, str]` (первый target) для API, ожидающего одну строку на регистр.
+- Причина: Один паттерн без дублирования dict в приложении; явное разделение канала Router и процесса для `register_update` (см. `docs/ROUTING_GLOSSARY.md`).
+- Отклонённые альтернативы: Только расширение `FieldRouting` списком процессов на каждое поле — избыточно для типичного регистра.
+
+---
+
+## ADR-047: Прототип — матрёшка widgets: вкладка + конфиг рядом
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: `configs/tabs/` отрывал схемы от `widgets/*`; неочевидно, где править вкладку.
+- Решение:
+  - `widgets/<имя>_tab/`: `widget.py` + `config.py` (вкладка как компонент) + при необходимости `ui_config.py` для строк UI (`processing_tab`, `camera_tab`); settings_tab: ControlBinding, SettingsTabConfig.
+  - Общий слой полосы вкладок: `widgets/tabs/` — `TabItemConfig`, `TabsConfig`; дефолтный список вкладок собирается из `default_tab_item()` каждого feature-пакета.
+  - `configs/` — только корень приложения: `frontend_config.py`, `window_registry.py`, `config.py` (GuiConfig).
+  - `windows/loading/` — `LoadingWindowConfig` рядом с использованием во фреймворке `LoadingWindow`.
+- Причина: Навигация «открыл папку вкладки — всё рядом»; корневая композиция не раздувается чужими схемами.
+- Отклонённые альтернативы: Плоский `widgets/*.py` без пакетов — хуже при росте числа файлов на вкладку.
+
+---
+
+## ADR-046: Прототип — feature-папка windows/main_window
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Конфиги главного окна жили в `configs/main_window/`, UI — в `windows/main_window.py`; сложнее сопоставлять части одной feature.
+- Решение: Пакет `multiprocess_prototype/frontend/windows/main_window/`: `window.py`, `config.py`, `tab_factory.py`. `FrontendConfig` импортирует `MainWindowConfig` оттуда. `LoadingWindowConfig` — в `windows/loading/config.py`.
+- Причина: Один каталог на «главное окно» — проще масштабировать тот же паттерн на другие окна.
+- Отклонённые альтернативы: Всё в `configs/` — расхождение с UI-файлами.
+
+---
+
+## ADR-045: action_triggered + connect_action_handlers + optional action_id
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: Нужна единообразная привязка обработчиков к динамическому числу кнопок из конфига без N отдельных pyqtSignal на классе.
+- Решение:
+  - Виджеты эмитят **один** сигнал с идентификатором действия (`pyqtSignal(str)`), например `HeaderWidget.action_triggered`.
+  - В конфиге элемента кнопки: опциональный `action_id`; если не задан — используется `id`. У `AdminButtonConfig` поле `action_id` (по умолчанию `"admin"`).
+  - Утилита `frontend_module.core.action_binding.connect_action_handlers(signal, handlers={...}, on_unmatched=...)` маршрутизирует вызовы.
+  - `HeaderWidget.get_signal_map()` дополняет контракт `ISignalProvider` для интроспекции.
+- Причина: В Qt динамически создавать отдельный сигнал на каждую кнопку неудобно; строковый канал + словарь обработчиков масштабируется и сериализуемо из конфига.
+- Отклонённые альтернативы: только `button_clicked` без admin в том же канале — дублирование подключений у приложения.
+
+---
+
 ## ADR-044: Реорганизация frontend_module/components и паттерн «конфиг рядом с виджетом»
 - Дата: 2026-03-19
 - Статус: принято
@@ -527,11 +673,11 @@
 
 ## ADR-033: frontend_module и shared_registers — фундамент UI-фреймворка
 - Дата: 2026-03-18
-- Статус: принято
+- Статус: принято (частично устарело по схемам регистров — см. ADR-050)
 - Контекст: Нужен UI-фреймворк как конструктор виджетов. ADR-009: gui_module пропускался; теперь этап фронтенда.
 - Решение:
   - **frontend_module** — модуль в refactored/modules. Интерфейсы: IConfigurableWidget, IWidgetRegistry, IWindowRegistry, IRegistersManager. Структура: core/, schemas/, tests/. Паттерн «виджеты-конструктор».
-  - **shared_registers** — пакет в refactored/modules. Единый источник схем регистров для backend и frontend. DrawRegisters и др. наследуют SchemaBase из data_schema_module.
+  - ~~**shared_registers** — пакет в refactored/modules~~ **Удалено (ADR-050).** Конкретные классы регистров задаёт приложение (наследники `SchemaBase`); прототип — `multiprocess_prototype/registers/schemas`.
   - Схемы и конфиги виджетов — через data_schema_module и config_module.
   - Реализация компонентов (BaseConfigurableWidget, Slider, Checkbox) — на следующих этапах.
 - Причина: Фундамент без перегрузки. Единые регистры устраняют дублирование App vs backend. Интерфейсы задают контракт до реализации.

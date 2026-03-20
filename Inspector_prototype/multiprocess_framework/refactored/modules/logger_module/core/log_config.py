@@ -38,7 +38,9 @@ class ChannelConfig:
     format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     max_size: int = 10 * 1024 * 1024  # 10MB
     backup_count: int = 5
-    
+    # False → logging.FileHandler (без rename при ротации; нужно на Windows при общем файле / нескольких writer)
+    rotate: bool = True
+
     # Специфичные настройки для разных типов
     file_path: Optional[str] = None
     url: Optional[str] = None
@@ -78,6 +80,9 @@ class ModuleConfig:
     enabled: bool = True
     file_path: Optional[str] = None
     min_level: LogLevel = LogLevel.DEBUG
+    max_size: Optional[int] = None  # None → 10MB в LoggerManager
+    backup_count: Optional[int] = None  # None → 5
+    rotate: bool = True
 
 
 @dataclass
@@ -162,7 +167,10 @@ class LogConfig:
                 config.modules[module_name] = ModuleConfig(
                     enabled=module_data.get('enabled', True),
                     file_path=module_data.get('file_path'),
-                    min_level=min_level
+                    min_level=min_level,
+                    max_size=module_data.get('max_size'),
+                    backup_count=module_data.get('backup_count'),
+                    rotate=module_data.get('rotate', True),
                 )
             except (KeyError, ValueError):
                 continue

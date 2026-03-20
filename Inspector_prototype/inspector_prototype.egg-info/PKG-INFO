@@ -4,3 +4,8 @@ Version: 0.1.0
 Summary: Multiprocess Framework — распределённое приложение на одной машине
 Requires-Python: >=3.9
 Requires-Dist: pydantic>=2.0
+Requires-Dist: sqlalchemy>=2.0
+Requires-Dist: numpy>=1.20
+Requires-Dist: PyQt5>=5.15.0
+Requires-Dist: opencv-python>=4.5.0
+Requires-Dist: Pillow>=9.0.0

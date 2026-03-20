@@ -48,16 +48,19 @@ class FileChannel(LogChannel):
         super().__init__(config)
         self.file_path = Path(config.file_path or f"logs/{config.name}.log")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Используем стандартный rotating file handler
-        self.handler = logging.handlers.RotatingFileHandler(
-            filename=self.file_path,
-            maxBytes=config.max_size,
-            backupCount=config.backup_count,
-            encoding='utf-8'
-        )
-        
+
         formatter = logging.Formatter(config.format)
+        if getattr(config, "rotate", True):
+            self.handler = logging.handlers.RotatingFileHandler(
+                filename=self.file_path,
+                maxBytes=config.max_size,
+                backupCount=config.backup_count,
+                encoding="utf-8",
+            )
+        else:
+            self.handler = logging.FileHandler(
+                self.file_path, encoding="utf-8", mode="a"
+            )
         self.handler.setFormatter(formatter)
     
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:

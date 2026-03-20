@@ -1,5 +1,5 @@
 # multiprocess_prototype/frontend/configs/__init__.py
-"""Конфигурация frontend — схемы на базе data_schema_module."""
+"""Корневая конфигурация frontend-процесса (композиция); секции UI — в widgets/ и windows/."""
 
 from .config import GuiConfigFrontend
 from .frontend_config import FrontendConfig, build_frontend_config

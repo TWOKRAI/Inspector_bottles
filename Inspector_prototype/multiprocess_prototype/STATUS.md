@@ -12,22 +12,26 @@
 | **Процессы** | Camera, Processor, Renderer, Robot, Database, GUI |
 | **Камера** | UnifiedCameraProcess — simulator / webcam / hikvision, переключение без перезапуска |
 | **SharedMemory** | camera_frame, processor_mask, rendered_frame, mask_frame |
-| **GUI** | GuiProcessFrontend (frontend_module), PyQt, чекбоксы Original / Mask / Contours |
+| **GUI** | GuiProcess в `backend/processes/gui_process.py` (frontend_module + FrontendLauncher), PyQt |
 
 ---
 
 ## Структура (после рефакторинга 2026-03)
 
 ```
-backend/            — configs/, processes/, database/, backends.py
-  configs/          — CameraConfig, ProcessorConfig, RendererConfig, RobotConfig, DatabaseConfig, GuiConfig
-  processes/        — camera, processor, renderer, robot, database, gui (legacy)
+backend/            — configs/, modules/, processes/, shared/, database/, backends.py
+  configs/          — ProcessConfigBase, app_config, Robot/Database/Gui; camera/processor/renderer реэкспорт из modules
+  modules/          — camera/, processor/, renderer/ (у каждого: process.py, config.py, домен)
+  processes/        — gui, database, robot + реэкспорт UnifiedCamera/Processor/Renderer из modules
+  shared/           — message_as_dict и др.
   database/         — DetectionSchema, utils, export_detections
-frontend/           — configs/, process, registers, windows/
-  configs/config.py — GuiConfigFrontend
-  process.py        — GuiProcessFrontend (FrontendManager)
-  registers.py      — create_frontend_registers()
-  windows/          — InspectorWindow
+backend/gui_process_mixin.py — GuiProcessMixin (избегает цикла import с frontend)
+backend/README.md   — структура backend
+frontend/           — configs/, launcher.py, mixins/ (реэкспорт), windows/, widgets/
+  configs/          — GuiConfigFrontend, FrontendConfig (реестр окон в frontend_config)
+  launcher.py       — FrontendLauncher (окна, регистры)
+  windows/          — MainWindow, Loading, InspectorWindow (тесты)
+registers/          — create_registers() (фабрика для GUI и backend)
 utils/              — FrameGenerator, WebcamCapture, shm_utils
 ```
 

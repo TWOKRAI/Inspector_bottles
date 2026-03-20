@@ -44,6 +44,7 @@ from .core.schema_base import SchemaBase, RegisterBase
 from .core.schema_mixin import SchemaMixin, RegisterMixin
 from .core.field_meta import FieldMeta
 from .core.field_routing import FieldRouting
+from .core.register_dispatch import RegisterDispatchMeta
 from .core.field_types import (
     Percent,
     NormalizedFloat,
@@ -153,6 +154,7 @@ __all__ = [
     "RegisterMixin",
     "FieldMeta",
     "FieldRouting",
+    "RegisterDispatchMeta",
     "Percent",
     "NormalizedFloat",
     "Scale",

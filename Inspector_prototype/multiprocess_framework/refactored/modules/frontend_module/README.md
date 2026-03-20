@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Модуль предоставляет систему виджетов-конструктор для сборки UI из переиспользуемых компонентов. Использует `data_schema_module` и `config_module` для схем и конфигов. Регистры — из `shared_registers` (общие для backend и frontend).
+Модуль предоставляет систему виджетов-конструктор для сборки UI из переиспользуемых компонентов. Использует `data_schema_module` и `config_module` для схем и конфигов. **Конкретные классы регистров** (поля, `FieldMeta`, `register_dispatch`) задаёт приложение как наследники `SchemaBase`; фреймворк их не поставляет. В прототипе Inspector — `multiprocess_prototype/registers/schemas`.
 
 **Ключевые сущности:**
 - **FrontendManager** (BaseManager) — единая точка входа: регистры, конфиг, окна, потоки
@@ -29,11 +29,14 @@ from frontend_module.interfaces import IFrontendManager, IRegistersManager
 
 ```python
 from frontend_module import ApplicationCoordinator, create_default_registry, compose_layout
-from shared_registers import DrawRegisters
 from registers_module import RegistersManager
+from multiprocess_prototype.registers.schemas.processing_tab import (
+    PROCESSOR_REGISTER,
+    ProcessorRegisters,
+)
 
-registers = RegistersManager({"draw": DrawRegisters()})
-connection_map = {"draw": "renderer"}  # при изменении → send в renderer
+registers = RegistersManager({PROCESSOR_REGISTER: ProcessorRegisters()})
+connection_map = {PROCESSOR_REGISTER: "processor"}
 
 coordinator = ApplicationCoordinator(config={})
 coordinator.initialize(registers=registers, connection_map=connection_map)
@@ -48,34 +51,39 @@ coordinator.run(initial_window="main")
 ```python
 from frontend_module import FrontendRegistersBridge
 from registers_module import RegistersManager
-from shared_registers import DrawRegisters
+from multiprocess_prototype.registers.schemas.processing_tab import (
+    PROCESSOR_REGISTER,
+    ProcessorRegisters,
+)
 
-rm = RegistersManager({"draw": DrawRegisters()})
-bridge = FrontendRegistersBridge(rm, router=process, connection_map={"draw": "renderer"})
+rm = RegistersManager({PROCESSOR_REGISTER: ProcessorRegisters()})
+bridge = FrontendRegistersBridge(rm, router=process, connection_map={PROCESSOR_REGISTER: "processor"})
 
-# Виджет вызывает set_field_value → bridge → send_callback → process.send_message("renderer", msg)
-bridge.set_field_value("draw", "dp", 1.5)
+# Виджет вызывает set_field_value → bridge → send_callback → process.send_message("processor", msg)
+bridge.set_field_value(PROCESSOR_REGISTER, "min_area", 600)
 ```
 
 ## Пример: Простые виджеты
 
 ```python
 from frontend_module import create_default_registry, compose_layout
-from shared_registers import DrawRegisters
 from registers_module import RegistersManager
+from multiprocess_prototype.registers.schemas.processing_tab import (
+    PROCESSOR_REGISTER,
+    ProcessorRegisters,
+)
 
-rm = RegistersManager({"draw": DrawRegisters()})
+rm = RegistersManager({PROCESSOR_REGISTER: ProcessorRegisters()})
 registry = create_default_registry()
 descriptors = [
-    {"widget_type": "checkbox", "register_name": "draw", "field_name": "circles"},
-    {"widget_type": "slider", "register_name": "draw", "field_name": "dp"},
+    {"widget_type": "slider", "register_name": PROCESSOR_REGISTER, "field_name": "min_area"},
 ]
 compose_layout(parent, descriptors, registry, rm, orientation="vertical")
 ```
 
 ## Зависимости
 
-- **Зависит от:** `data_schema_module`, `config_module`, `registers_module`, `shared_registers`
+- **Зависит от:** `data_schema_module`, `config_module`, `registers_module` (конкретные схемы регистров — в приложении)
 - **Используется в:** `multiprocess_prototype` (GuiProcess), `App` (при миграции)
 
 ## Структура модуля
@@ -98,7 +106,7 @@ frontend_module
     ├── использует → data_schema_module (схемы виджетов, WindowConfig)
     ├── использует → config_module (runtime-конфиг UI)
     ├── использует → registers_module (RegistersManager)
-    ├── использует → shared_registers (схемы регистров)
+    ├── (приложение подставляет классы регистров в RegistersManager)
     │
     └── используется в → multiprocess_prototype (GuiProcess)
     └── используется в → App (при миграции)

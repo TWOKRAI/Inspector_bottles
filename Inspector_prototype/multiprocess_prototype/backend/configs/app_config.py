@@ -15,8 +15,33 @@
 """
 
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Optional
+import copy
 import os
+
+
+def merge_managers(
+    base: Dict[str, Any], overlay: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Глубокий merge конфигов managers для proc_dict.
+
+    Подклассы ProcessConfigBase могут вернуть managers_overlay() — переопределения
+    сливаются поверх get_default_managers_config() (например свои logger.modules).
+    """
+    if not overlay:
+        return copy.deepcopy(base)
+
+    def _deep(a: dict, b: dict) -> dict:
+        out = copy.deepcopy(a)
+        for k, v in b.items():
+            if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+                out[k] = _deep(out[k], v)
+            else:
+                out[k] = copy.deepcopy(v)
+        return out
+
+    return _deep(base, overlay)
 
 # Путь к logs по умолчанию: multiprocess_prototype/logs
 _DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
@@ -120,6 +145,9 @@ def get_default_managers_config(log_dir: str | None = None) -> Dict[str, Any]:
                     "enabled": True,
                     "file_path": os.path.join(base, "frames.log"),
                     "min_level": "DEBUG",
+                    # RotatingFileHandler на Windows даёт WinError 32 при rename, если файл
+                    # открыт другим процессом / хвостом; perf-лог пишется часто — без ротации.
+                    "rotate": False,
                 },
                 "camera": {
                     "enabled": True,

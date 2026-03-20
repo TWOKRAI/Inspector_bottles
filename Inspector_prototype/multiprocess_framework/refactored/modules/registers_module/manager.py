@@ -4,7 +4,8 @@
 
 Не зависит от конкретных классов регистров: принимает словарь имя -> экземпляр Pydantic-модели.
 Поддерживает get_register, get_field_metadata (включая routing), validate_field_value, model_dump_all/model_validate_all.
-Расширение для frontend: subscribe_all, set_field_value, connection_map для привязки к бэкенду.
+Расширение для frontend: subscribe_all, set_field_value, доставка register_update
+    (register_dispatch / routing.process_targets / connection_map).
 """
 from __future__ import annotations
 
@@ -18,8 +19,9 @@ class RegistersManager:
     """
     Менеджер регистров на основе словаря имя -> экземпляр модели.
     Каждый процесс создаёт свой экземпляр со своим набором регистров.
-    connection_map: привязка фронтенд-регистра к бэкенд-каналу (register_name -> channel_name).
-    send_callback: вызывается при изменении регистра с connection.
+    connection_map: опциональный override — register_name -> имя процесса для register_update
+        (если нет process_targets в routing поля и нет register_dispatch на классе).
+    send_callback: вызывается при изменении регистра, если есть хотя бы одна цель доставки.
     """
 
     def __init__(
@@ -31,7 +33,7 @@ class RegistersManager:
         """
         Args:
             registers: Словарь {имя_регистра: экземпляр_модели}. Если None — пустой менеджер.
-            connection_map: {register_name: backend_channel} — при изменении отправлять в control_{channel}.
+            connection_map: {register_name: process_name} — fallback для send_callback (см. ROUTING_GLOSSARY.md).
             send_callback: (channel, register_name, field_name, value, snapshot) — вызов при изменении.
         """
         self._registers: Dict[str, Any] = dict(registers) if registers else {}
@@ -111,15 +113,63 @@ class RegistersManager:
         except Exception as exc:
             return False, str(exc)
         self._notify_observers(register_name, field_name, value)
-        if self._send_callback and register_name in self._connection_map:
-            channel = self._connection_map[register_name]
-            full_channel = f"control_{channel}" if not channel.startswith("control_") else channel
-            snapshot = reg.model_dump() if hasattr(reg, "model_dump") else {}
-            try:
-                self._send_callback(full_channel, register_name, field_name, value, snapshot)
-            except Exception:
-                pass
+        if self._send_callback:
+            targets = self._resolve_dispatch_targets(register_name, field_name, reg)
+            if targets:
+                snapshot = reg.model_dump() if hasattr(reg, "model_dump") else {}
+                for channel in targets:
+                    full_channel = (
+                        f"control_{channel}" if not channel.startswith("control_") else channel
+                    )
+                    try:
+                        self._send_callback(
+                            full_channel, register_name, field_name, value, snapshot
+                        )
+                    except Exception:
+                        pass
         return True, None
+
+    def _resolve_dispatch_targets(
+        self,
+        register_name: str,
+        field_name: str,
+        reg: Any,
+    ) -> List[str]:
+        """
+        Имена процессов для register_update.
+
+        Приоритет: process_targets в FieldMeta.routing (Annotated) → в dict из get_field_metadata
+        → register_dispatch класса → connection_map.
+        """
+        get_fm = getattr(type(reg), "get_field_meta", None)
+        if callable(get_fm):
+            fm = get_fm(field_name)
+            if fm is not None and getattr(fm, "routing", None):
+                raw_pt = (fm.routing or {}).get("process_targets")
+                if raw_pt:
+                    if isinstance(raw_pt, (list, tuple)):
+                        return [str(x) for x in raw_pt if x is not None and str(x)]
+                    return [str(raw_pt)]
+
+        meta = self.get_field_metadata(register_name, field_name)
+        routing = meta.get("routing") or {}
+        raw_pt = routing.get("process_targets")
+        if raw_pt:
+            if isinstance(raw_pt, (list, tuple)):
+                return [str(x) for x in raw_pt if x is not None and str(x)]
+            return [str(raw_pt)]
+
+        cls = type(reg)
+        dispatch = getattr(cls, "register_dispatch", None)
+        if dispatch is not None:
+            targets = getattr(dispatch, "process_targets", None) or ()
+            if targets:
+                return [str(t) for t in targets]
+
+        if register_name in self._connection_map:
+            return [self._connection_map[register_name]]
+
+        return []
 
     def notify_field_changed(
         self,

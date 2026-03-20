@@ -3265,3 +3265,148 @@
 2026-03-19 16:52:11,024 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
 2026-03-19 16:52:11,024 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
 2026-03-19 16:52:11,024 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 09:24:17,703 [INFO] robot: Process state registered: robot
+2026-03-20 09:24:17,703 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 09:24:17,703 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 09:24:17,703 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 09:24:17,703 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 11:02:05,141 [INFO] robot: Process state registered: robot
+2026-03-20 11:02:05,141 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 11:02:05,142 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 11:02:05,142 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 11:02:05,142 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 11:12:35,184 [INFO] robot: Process state registered: robot
+2026-03-20 11:12:35,184 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 11:12:35,185 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 11:12:35,185 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 11:12:35,185 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:00:55,796 [INFO] robot: Process state registered: robot
+2026-03-20 13:00:55,796 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:00:55,796 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:00:55,796 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:00:55,797 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:01:00,557 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 13:01:16,081 [INFO] robot: Process state registered: robot
+2026-03-20 13:01:16,081 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:01:16,081 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:01:16,081 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:01:16,081 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:01:57,052 [INFO] robot: Process state registered: robot
+2026-03-20 13:01:57,052 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:01:57,052 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:01:57,053 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:01:57,053 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:15:05,560 [INFO] robot: Process state registered: robot
+2026-03-20 13:15:05,560 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:15:05,560 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:15:05,560 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:15:05,560 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:16:26,660 [INFO] robot: Process state registered: robot
+2026-03-20 13:16:26,660 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:16:26,660 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:16:26,660 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:16:26,660 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:17:51,076 [INFO] robot: Process state registered: robot
+2026-03-20 13:17:51,076 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:17:51,077 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:17:51,077 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:17:51,077 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:20:21,724 [INFO] robot: Process state registered: robot
+2026-03-20 13:20:21,724 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:20:21,724 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:20:21,724 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:20:21,724 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:55:39,000 [INFO] robot: Process state registered: robot
+2026-03-20 13:55:39,000 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:55:39,000 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:55:39,000 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:55:39,000 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 13:55:41,624 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 13:55:41,635 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 13:55:41,635 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 13:57:15,408 [INFO] robot: Process state registered: robot
+2026-03-20 13:57:15,408 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 13:57:15,408 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 13:57:15,409 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 13:57:15,409 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:00:58,352 [INFO] robot: Process state registered: robot
+2026-03-20 14:00:58,352 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:00:58,353 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:00:58,353 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:00:58,353 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:12:32,503 [INFO] robot: Process state registered: robot
+2026-03-20 14:12:32,503 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:12:32,504 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:12:32,504 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:12:32,504 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:12:34,371 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:12:34,444 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 14:12:34,444 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:13:13,012 [INFO] robot: Process state registered: robot
+2026-03-20 14:13:13,012 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:13:13,012 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:13:13,012 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:13:13,012 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:13:15,124 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:13:15,198 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 14:13:15,198 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:13:58,067 [INFO] robot: Process state registered: robot
+2026-03-20 14:13:58,067 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:13:58,067 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:13:58,067 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:13:58,067 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:14:16,626 [INFO] robot: REJECT #1: frame=71, pos=(597, 329), area=1043
+2026-03-20 14:14:17,242 [INFO] robot: REJECT #2: frame=71, pos=(597, 329), area=1043
+2026-03-20 14:14:17,258 [INFO] robot: REJECT #3: frame=72, pos=(527, 332), area=16026
+2026-03-20 14:14:18,258 [INFO] robot: REJECT #4: frame=72, pos=(527, 332), area=16026
+2026-03-20 14:14:18,271 [INFO] robot: REJECT #5: frame=73, pos=(527, 333), area=16490
+2026-03-20 14:14:19,271 [INFO] robot: REJECT #6: frame=73, pos=(527, 333), area=16490
+2026-03-20 14:14:19,284 [INFO] robot: REJECT #7: frame=97, pos=(517, 345), area=17405
+2026-03-20 14:14:20,284 [INFO] robot: REJECT #8: frame=97, pos=(517, 345), area=17405
+2026-03-20 14:14:20,299 [INFO] robot: REJECT #9: frame=2, pos=(525, 365), area=16770
+2026-03-20 14:14:21,299 [INFO] robot: REJECT #10: frame=2, pos=(525, 365), area=16770
+2026-03-20 14:14:21,314 [INFO] robot: REJECT #11: frame=27, pos=(527, 380), area=17718
+2026-03-20 14:14:22,314 [INFO] robot: REJECT #12: frame=27, pos=(527, 380), area=17718
+2026-03-20 14:14:22,330 [INFO] robot: REJECT #13: frame=52, pos=(524, 368), area=17601
+2026-03-20 14:14:23,330 [INFO] robot: REJECT #14: frame=52, pos=(524, 368), area=17601
+2026-03-20 14:14:23,347 [INFO] robot: REJECT #15: frame=77, pos=(514, 372), area=17063
+2026-03-20 14:14:24,348 [INFO] robot: REJECT #16: frame=77, pos=(514, 372), area=17063
+2026-03-20 14:14:24,351 [INFO] robot: REJECT #17: frame=103, pos=(524, 377), area=17793
+2026-03-20 14:14:25,351 [INFO] robot: REJECT #18: frame=103, pos=(524, 377), area=17793
+2026-03-20 14:50:33,002 [INFO] robot: Process state registered: robot
+2026-03-20 14:50:33,002 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:50:33,002 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:50:33,002 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:50:33,002 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:50:36,108 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:50:36,164 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 14:50:36,164 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:51:17,991 [INFO] robot: Process state registered: robot
+2026-03-20 14:51:17,991 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:51:17,991 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:51:17,992 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:51:17,992 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:51:20,108 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:51:20,181 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 14:51:20,182 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:55:10,136 [INFO] robot: Process state registered: robot
+2026-03-20 14:55:10,136 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 14:55:10,136 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 14:55:10,136 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 14:55:10,136 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 14:55:12,255 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 14:55:12,298 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 14:55:12,298 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 15:17:33,740 [INFO] robot: Process state registered: robot
+2026-03-20 15:17:33,745 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 15:17:33,745 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 15:17:33,746 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 15:17:33,746 [INFO] robot: Process 'robot' initialized successfully
+2026-03-20 15:17:35,617 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 15:17:35,707 [INFO] robot: Process 'robot' shut down successfully
+2026-03-20 15:17:35,707 [INFO] robot: RobotSimulatorProcess shutting down. Total actions: 0
+2026-03-20 15:20:14,760 [INFO] robot: Process state registered: robot
+2026-03-20 15:20:14,760 [INFO] robot: RobotSimulatorProcess initializing...
+2026-03-20 15:20:14,760 [INFO] robot: RobotSimulatorProcess ready: log_file=./robot_actions.log
+2026-03-20 15:20:14,760 [INFO] robot: Registered 6 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'reject_item']
+2026-03-20 15:20:14,760 [INFO] robot: Process 'robot' initialized successfully

@@ -29,6 +29,7 @@ class LoadingWindow(QMainWindow):
     Параметры:
         logo_path: путь к изображению логотипа
         min_width, min_height: минимальный размер окна
+        title: заголовок окна
     """
 
     def __init__(
@@ -37,12 +38,13 @@ class LoadingWindow(QMainWindow):
         logo_path: Optional[str] = None,
         min_width: int = 400,
         min_height: int = 300,
+        title: str = "Загрузка...",
         parent=None,
     ):
         super().__init__(parent)
         self._logo_path = logo_path
         self.setMinimumSize(min_width, min_height)
-        self.setWindowTitle("Загрузка...")
+        self.setWindowTitle(title)
         self._init_ui()
 
     def _init_ui(self) -> None:

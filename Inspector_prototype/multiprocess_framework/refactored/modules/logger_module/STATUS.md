@@ -39,6 +39,7 @@
 
 ## Известные проблемы
 
+- На Windows `RotatingFileHandler` может падать при ротации общего файла (WinError 32). Для таких случаев в `ModuleConfig` / `ChannelConfig` есть `rotate: false` → `FileHandler` (см. ADR-051, `app_config.processor_frames`).
 - `LoggerManager.log()` использует scope-based routing (список каналов из ScopeConfig).
   `route_by_level()` из LogDispatcher доступен, но не задействован как основной путь.
 - `LogDispatcher` сохранён для backward compatibility и для ErrorManager.

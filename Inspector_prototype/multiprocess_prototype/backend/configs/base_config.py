@@ -8,7 +8,7 @@ build() реализован в базе; подклассы задают пол
 Контракт proc_dict: process_manager_module/docs/CONFIG_CONTRACT.md
 """
 
-from typing import Dict, Any, Optional, Type, Union
+from typing import Any, Dict, Optional, Type, Union
 
 from multiprocess_framework.refactored.modules.data_schema_module import SchemaBase
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
@@ -39,6 +39,14 @@ class ProcessConfigBase(SchemaBase):
     @property
     def memory(self) -> Optional[Dict[str, Any]]:
         """Memory для SharedMemory. Переопределить в CameraConfig, ProcessorConfig, RendererConfig."""
+        return None
+
+    def managers_overlay(self) -> Optional[Dict[str, Any]]:
+        """
+        Фрагмент managers для merge с get_default_managers_config().
+
+        По умолчанию None — полный общий конфиг логов/ошибок как раньше.
+        """
         return None
 
     def build(self) -> tuple[str, dict]:
@@ -74,16 +82,21 @@ class ProcessConfigBase(SchemaBase):
         Returns:
             proc_dict для launcher.add_process(name, proc_dict)
         """
-        from multiprocess_prototype.backend.configs.app_config import get_default_managers_config
+        from multiprocess_prototype.backend.configs.app_config import (
+            get_default_managers_config,
+            merge_managers,
+        )
 
         default_queues = {"system": {"maxsize": 100}, "data": {"maxsize": 50}}
+        base_m = get_default_managers_config()
+        overlay = self.managers_overlay()
         proc_dict = {
             "class": class_path,
             "queues": queues if queues is not None else default_queues,
             "priority": priority,
             "workers": {},
             "config": self.model_dump(),
-            "managers": get_default_managers_config(),
+            "managers": merge_managers(base_m, overlay),
         }
         if memory is not None:
             proc_dict["memory"] = memory

@@ -12,7 +12,7 @@
 - **Компоненты** — SliderControl, CheckboxControl, StructuredTableWidget, TableWithToolbar, TabWidget, HeaderWidget, VirtualKeyboard, VirtualKeyboardMini, PerformanceMonitor
 - **Application** — WindowManager, ThreadManager, ApplicationCoordinator (скелет)
 - **Папки** — windows/, widgets/ (пустые, для приложения)
-- **Регистры** — shared схемы (shared_registers), connection для привязки к бэкенду
+- **Регистры** — схемы приложения (SchemaBase), connection_map / register_dispatch для привязки к бэкенду
 
 ### Не реализовано
 - Интеграция с GuiProcess (multiprocess_prototype)
@@ -188,7 +188,7 @@ frontend_module/
   widgets/                       # пусто, для приложения
 
 registers_module/manager.py      # connection_map, send_callback, set_field_value
-shared_registers/draw.py         # DrawRegisters (shared схемы)
+registers/schemas/draw.py         # DrawRegisters (прототип)
 ```
 
 ---

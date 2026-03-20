@@ -34,7 +34,7 @@ from hikvision_camera_module import (
 ## Зависимости
 
 - **Зависит от:** `Services.hikvision_camera` (SDK), `multiprocess_framework` (для адаптера)
-- **Используется в:** `multiprocess_prototype` (backends, unified_camera_process)
+- **Используется в:** `multiprocess_prototype` (backends, `backend.modules.camera`)
 
 ## Пример
 

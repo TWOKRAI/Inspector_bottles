@@ -3,6 +3,7 @@
 
 from .interfaces import IRegistersManager, IRegistersConverter
 from .manager import RegistersManager
+from .connection_map_builder import build_connection_map_from_registers
 from .routing_map import (
     ROUTING_NOT_FOUND,
     PROCESS_UNREACHABLE,
@@ -16,6 +17,7 @@ __all__ = [
     "IRegistersManager",
     "IRegistersConverter",
     "RegistersManager",
+    "build_connection_map_from_registers",
     "ROUTING_NOT_FOUND",
     "PROCESS_UNREACHABLE",
     "MESSAGE_LOST",

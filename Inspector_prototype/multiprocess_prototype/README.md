@@ -18,7 +18,7 @@
 | **Renderer** | Отрисовка: оригинал + маска + контуры |
 | **Robot** | Симуляция робота (приём/отправка команд) |
 | **Database** | Сохранение детекций в SQLite |
-| **GUI** | PyQt окно (GuiProcessFrontend + frontend_module) |
+| **GUI** | PyQt (GuiProcess + frontend_module + FrontendLauncher) |
 
 **Связь:** SharedMemory (camera_frame, processor_mask, rendered_frame, mask_frame) + очереди сообщений.
 
@@ -33,17 +33,20 @@ multiprocess_prototype/
 ├── run.sh                  # Запуск с PYTHONPATH и очисткой SharedMemory
 │
 ├── backend/                # Бизнес-логика, процессы, БД
-│   ├── configs/           # Pydantic-конфиги (camera, processor, renderer, robot, database, gui)
-│   ├── processes/         # Реализации процессов (unified_camera, processor, renderer, robot, gui, database)
+│   ├── configs/           # Общие конфиги (base, app, robot, database, gui) + реэкспорт camera/processor/renderer из modules
+│   ├── modules/           # camera/, processor/, renderer/ — у каждого process.py + config.py + домен
+│   ├── gui_process_mixin.py  # gui_* / _handle_* (без импорта пакета frontend)
+│   ├── processes/         # gui, robot, database + реэкспорт UnifiedCamera/Processor/Renderer из modules
 │   ├── database/          # Схемы (DetectionSchema), utils, export_detections
 │   ├── backends.py        # SimulatorBackend, WebcamBackend, HikvisionBackend
 │   └── __init__.py
 │
 ├── frontend/              # GUI на frontend_module
-│   ├── configs/           # GuiConfigFrontend
-│   ├── process.py         # GuiProcessFrontend
-│   ├── registers.py       # create_frontend_registers()
-│   └── windows/           # InspectorWindow
+│   ├── configs/           # GuiConfigFrontend, FrontendConfig
+│   ├── launcher.py        # FrontendLauncher
+│   ├── mixins/            # реэкспорт GuiProcessMixin из backend
+│   └── windows/           # MainWindow, Loading, InspectorWindow (юнит-тесты)
+├── registers/             # create_registers(), schemas/
 │
 ├── utils/                  # FrameGenerator, WebcamCapture, shm_utils
 ├── logs/

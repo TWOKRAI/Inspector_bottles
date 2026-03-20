@@ -1,8 +1,6 @@
 # multiprocess_prototype\frontend\config.py
 """
-GuiConfigFrontend — конфиг для GuiProcessFrontend (стек frontend_module).
-
-Использование: в main.py заменить GuiConfig на GuiConfigFrontend.
+GuiConfigFrontend — конфиг GUI-процесса (frontend_module, класс GuiProcess в backend).
 """
 
 from typing import Annotated, Literal
@@ -13,7 +11,7 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
 )
 
 from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
-from multiprocess_prototype.frontend.process import GuiProcessFrontend
+from multiprocess_prototype.backend.processes.gui.gui_process import GuiProcess
 
 
 @register_schema("GuiConfigFrontend")
@@ -21,7 +19,7 @@ class GuiConfigFrontend(ProcessConfigBase):
     """Конфигурация GUI-процесса на frontend_module."""
 
     process_name: str = "gui"
-    class_path: str = class_path_from_type(GuiProcessFrontend)
+    class_path: str = class_path_from_type(GuiProcess)
     camera_type: Literal["simulator", "webcam", "hikvision"] = "simulator"
     window_title: str = "Inspector Prototype (Frontend)"
     window_width: Annotated[int, FieldMeta("Ширина окна", min=400, max=1920)] = 1024

@@ -54,7 +54,7 @@ class FieldMeta:
         min / max       — допустимый диапазон для числовых полей
         transfer_k      — шаг UI-слайдера = 1/transfer_k (по умолч. 1.0)
         round_k         — знаков после запятой при round_value()
-        routing         — маршрутизация в Router: {"channel": "control_draw"}
+        routing         — маршрутизация: channel для Router; опционально process_targets для register_update (FieldRouting)
         access_level    — минимальный уровень доступа для изменения
         readonly        — запретить изменение через update_field()
         hidden          — скрыть в UI (can_modify() → False при hidden UI)

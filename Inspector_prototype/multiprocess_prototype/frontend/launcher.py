@@ -3,7 +3,7 @@
 FrontendLauncher — конструктор frontend.
 
 Собирает конфиги, регистры, окна по аналогии с SystemLauncher.
-GuiProcessFrontend делегирует run() в launcher.
+GuiProcess делегирует run() в launcher.
 """
 
 from typing import Any, Dict, Optional
@@ -14,7 +14,7 @@ from frontend_module.windows import LoadingWindow
 from multiprocess_prototype.registers import create_registers
 from multiprocess_prototype.frontend.configs.frontend_config import build_frontend_config
 from multiprocess_prototype.frontend.commands import GuiCommandHandler
-from multiprocess_prototype.frontend.windows.main_window import MainWindow
+from multiprocess_prototype.frontend.windows.main_window import MainWindow, create_tab_widget_factory
 
 
 class FrontendLauncher:
@@ -27,7 +27,7 @@ class FrontendLauncher:
     def __init__(self, process_ref: Any, app_config: Dict[str, Any]):
         """
         Args:
-            process_ref: GuiProcessFrontend (process с _msg, send_message, get_config).
+            process_ref: GuiProcess (ProcessModule: _msg, send_message, get_config).
             app_config: dict из get_config("config").
         """
         self._process = process_ref
@@ -62,7 +62,11 @@ class FrontendLauncher:
         }
 
     def _processing_callbacks(self, cmd: GuiCommandHandler) -> Dict[str, Any]:
-        """Callbacks для ProcessingTabWidget."""
+        """
+        Callbacks для ProcessingTabWidget (legacy, если вкладка без RegistersManager).
+
+        При работе через FrontendManager поля идут через register_update (см. ADR-049).
+        """
         return {
             "on_set_color_range": lambda b_l, g_l, r_l, b_u, g_u, r_u: cmd.send_set_color_range(
                 b_l, g_l, r_l, b_u, g_u, r_u
@@ -92,46 +96,32 @@ class FrontendLauncher:
         width = window_cfg.get("width", window_cfg.get("min_width", 1024))
         height = window_cfg.get("height", window_cfg.get("min_height", 600))
 
-        def tab_widget_factory(widget_key: str, tab_config: dict):
-            from multiprocess_prototype.frontend.widgets import (
-                CameraTabWidget,
-                ProcessingTabWidget,
-                RecipesTabWidget,
-                SettingsTabWidget,
-            )
+        tab_widget_factory = create_tab_widget_factory(
+            config=config,
+            registers_manager=fm.get_registers() if fm else None,
+            camera_callbacks=self._camera_callbacks(cmd),
+            processing_callbacks=self._processing_callbacks(cmd),
+            camera_type=camera_type,
+        )
 
-            registers = fm.get_registers() if fm else None
-            if widget_key == "recipes":
-                return RecipesTabWidget(registers_manager=registers)
-            if widget_key == "settings":
-                st_cfg = config.get("settings_tab", {})
-                controls = st_cfg.get("controls", [])
-                group_title = st_cfg.get("group_title", "Параметры отображения")
-                return SettingsTabWidget(
-                    registers_manager=registers,
-                    controls_config=controls,
-                    group_title=group_title,
-                )
-            if widget_key == "processing":
-                return ProcessingTabWidget(callbacks=self._processing_callbacks(cmd))
-            if widget_key == "camera":
-                return CameraTabWidget(
-                    camera_type=camera_type,
-                    callbacks=self._camera_callbacks(cmd),
-                )
-            return None
+        window_names = set((config.get("window_registry") or {}).keys())
+
+        def header_on_unmatched(action_id: str) -> None:
+            if wm and action_id in window_names:
+                wm.show_window(action_id)
 
         def create_main_window(**kwargs):
             from frontend_module.core.qt_imports import QTimer
 
             win = MainWindow(
                 config=config,
-                show_window_callback=wm.show_window if wm else None,
                 registers_manager=fm.get_registers() if fm else None,
                 camera_callbacks=self._camera_callbacks(cmd),
                 processing_callbacks=self._processing_callbacks(cmd),
                 camera_type=camera_type,
                 tab_widget_factory=tab_widget_factory,
+                header_action_handlers={},
+                header_on_unmatched=header_on_unmatched if wm else None,
             )
             process._window = win
             process._timer = QTimer()
@@ -143,10 +133,12 @@ class FrontendLauncher:
             return win
 
         def create_loading_window(**kwargs):
+            lw = config.get("loading_window") or {}
             return LoadingWindow(
-                logo_path=None,
-                min_width=400,
-                min_height=300,
+                logo_path=lw.get("logo_path"),
+                min_width=lw.get("min_width", 400),
+                min_height=lw.get("min_height", 300),
+                title=lw.get("title", "Загрузка..."),
             )
 
         # Регистрация окон из конфига (config-driven)
@@ -187,9 +179,9 @@ class FrontendLauncher:
             registers=registers,
             router=self._process,
             connection_map=connection_map,
+            queue_manager=getattr(self._process, "_queue_manager", None),
+            stop_event=getattr(self._process, "_stop_event", None),
         )
-        fm._queue_manager = getattr(self._process, "_queue_manager", None)
-        fm._stop_event = getattr(self._process, "_stop_event", None)
 
         if not fm.initialize():
             self._process._log_error("FrontendManager initialization failed")
@@ -200,12 +192,6 @@ class FrontendLauncher:
 
         wm = fm.get_window_manager()
         self.register_windows(wm, fm, config, cmd, app)
-
-        # Установить registers_manager в MainWindow после создания
-        def _patch_main_registers(win):
-            if hasattr(win, "_registers_manager") and win._registers_manager is None:
-                win._registers_manager = fm.get_registers()
-        # MainWindow создаётся при show_initial_window — registers уже есть в fm
 
         def _switch_to_main():
             wm.hide_window("loading")

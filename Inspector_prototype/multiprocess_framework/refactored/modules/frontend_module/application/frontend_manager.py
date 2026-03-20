@@ -43,6 +43,8 @@ class FrontendManager(BaseManager, ObservableMixin):
         registers: Optional[Any] = None,
         router: Optional[Any] = None,
         connection_map: Optional[Dict[str, str]] = None,
+        queue_manager: Optional[Any] = None,
+        stop_event: Optional[Any] = None,
         **kwargs: Any,
     ):
         BaseManager.__init__(self, manager_name=manager_name, process=process)
@@ -55,6 +57,8 @@ class FrontendManager(BaseManager, ObservableMixin):
         self._thread_manager: Optional[Any] = None
         self._router = router
         self._connection_map = dict(connection_map) if connection_map else {}
+        self._queue_manager = queue_manager
+        self._stop_event = stop_event
         self._config_obj: Optional[Any] = None
         self._qt_app: Optional[Any] = None
         self._is_running = False
@@ -92,8 +96,8 @@ class FrontendManager(BaseManager, ObservableMixin):
                 registers_manager=self._registers_bridge,
             )
             self._thread_manager = ThreadManager(
-                queue_manager=getattr(self, "_queue_manager", None),
-                stop_event=getattr(self, "_stop_event", None),
+                queue_manager=self._queue_manager,
+                stop_event=self._stop_event,
             )
             self.attach_adapter(self._window_manager, "window_manager")
             self.attach_adapter(self._thread_manager, "thread_manager")

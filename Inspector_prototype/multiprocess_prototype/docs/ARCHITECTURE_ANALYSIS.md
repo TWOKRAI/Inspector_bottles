@@ -83,7 +83,7 @@ flowchart LR
     FM --> RT
 ```
 
-### 1.1 Общая архитектура фреймворка (16 модулей + shared_registers)
+### 1.1 Общая архитектура фреймворка (16 модулей; схемы регистров — в приложении)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -121,7 +121,7 @@ flowchart LR
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                         SHARED (cross-cutting)                                     │
-│  shared_registers (DrawRegisters и др. — единый источник схем для backend/frontend)│
+│  registers/schemas (прототип: DrawRegisters, ProcessorRegisters, RendererRegisters)│
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -248,12 +248,12 @@ multiprocess_prototype/
 |----------|--------|-------------|
 | **Модульность** | 7 | Чёткое разделение backend/frontend/registers. Но дублирование: gui_* в process и GuiCommandHandler. |
 | **Использование фреймворка** | 8 | FrontendManager, RegistersManager, connection_map, MessageAdapter — по контракту. |
-| **Отсутствие дублирования** | 5 | 1) gui_* методы в GuiProcessFrontend и GuiProcess; 2) InspectorWindow vs MainWindow; 3) shared_registers vs registers/schemas; 4) create_frontend_registers vs create_registers. |
+| **Отсутствие дублирования** | 5 | 1) gui_* методы в GuiProcessFrontend и GuiProcess; 2) InspectorWindow vs MainWindow; 3) дубли фабрик регистров; 4) create_frontend_registers vs create_registers. |
 | **Связность** | 6 | FrontendLauncher знает слишком много: фабрики окон, callbacks, конфиг. GuiProcessFrontend — 270+ строк с gui_* и _handle_*. |
 | **Расширяемость** | 7 | Добавление окон/виджетов через регистрацию. Но добавление команды = правка в 3 местах (catalog, handler, process). |
 | **Тестируемость** | 5 | GuiProcessFrontend жёстко связан с process. Нет unit-тестов frontend. |
 | **Документация** | 6 | STATUS.md, GUI_PROCESS_COMPARISON, README. Нет явной архитектурной диаграммы до этого анализа. |
-| **Соответствие ADR** | 8 | Dict at Boundary, connection_map, shared_registers — соблюдаются. |
+| **Соответствие ADR** | 8 | Dict at Boundary, connection_map, registers/schemas — соблюдаются. |
 
 **Итоговая оценка: 6.5 / 10**
 
@@ -285,9 +285,7 @@ multiprocess_prototype/
    - **Решение:** вынести в `GuiProcessMixin` (как в GUI_PROCESS_COMPARISON.md)
 
 5. **Схемы регистров**
-   - `shared_registers` содержит только `DrawRegisters`
-   - `multiprocess_prototype.registers.schemas` содержит `ProcessorRegisters`, `RendererRegisters` и re-export `DrawRegisters`
-   - **Решение:** перенести `ProcessorRegisters`, `RendererRegisters` в `shared_registers` (если они общие для backend и frontend), либо оставить в prototype, если они специфичны приложению
+   - Канон для прототипа — `multiprocess_prototype/registers/schemas` (`DrawRegisters`, `ProcessorRegisters`, `RendererRegisters`); пакета `shared_registers` во фреймворке нет (ADR-050).
 
 ### 3.3 Архитектурные
 
@@ -327,7 +325,7 @@ multiprocess_prototype/
 | # | Задача | Подход |
 |---|--------|--------|
 | 6 | Вынести регистрацию окон из FrontendLauncher в конфиг | `window_registry` в конфиге: `{name: {factory: "path.to.module:create_fn", ...}}` |
-| 7 | Перенести ProcessorRegisters, RendererRegisters в shared_registers (если применимо) | `shared_registers/processor.py`, `renderer.py`; prototype переходит на импорт оттуда |
+| 7 | ~~Перенос в shared_registers~~ | Выполнено иначе: все схемы в `registers/schemas` (фреймворк без доменных регистров) |
 | 8 | Убрать sys.path.insert из main.py | `run.sh` с `PYTHONPATH`, или `pip install -e .` |
 
 ### Фаза 4: Улучшение frontend_module (по мере доработки)
@@ -342,7 +340,7 @@ multiprocess_prototype/
 
 ## 5. Рекомендации по best practices
 
-- **Один источник истины для схем:** shared_registers для backend+frontend; prototype-specifc — в `registers/schemas` с явным указанием, что это приложение-специфично.
+- **Один источник истины для схем:** `multiprocess_prototype/registers/schemas` для backend+frontend прототипа; фреймворк поставляет только `SchemaBase` / `RegistersManager`.
 - **Command vs Register:** Register — для полей с валидацией и метаданными; Command — для действий без состояния (кнопка «Start»).
 - **Конфиг-драйвен UI:** Окна и виджеты — по конфигу. FrontendLauncher не должен знать о MainWindow, InspectorWindow по имени класса.
 - **Фреймворк как конструктор:** Не добавлять новые модули; расширять существующие (frontend_module, registers_module) через интерфейсы и адаптеры.

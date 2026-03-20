@@ -13,6 +13,7 @@
 | **[FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)** | Разработчики, полный обзор | 45 мин |
 | **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Справка, диаграммы, таблицы | 30 мин |
 | **[ARCHITECTURE_ESSAY.md](./ARCHITECTURE_ESSAY.md)** | Архитекторы, deep dive | 30 мин |
+| **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` | 5 мин |
 
 ---
 

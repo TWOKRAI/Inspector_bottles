@@ -28,6 +28,13 @@ class AdminButtonConfig(SchemaBase):
         bool,
         FieldMeta("Показывать", info="Отображать кнопку админ-панели."),
     ] = True
+    action_id: Annotated[
+        str,
+        FieldMeta(
+            "ID действия",
+            info="Ключ для HeaderWidget.action_triggered при нажатии Admin.",
+        ),
+    ] = "admin"
 
 
 class AdminButtonWidget(QWidget):

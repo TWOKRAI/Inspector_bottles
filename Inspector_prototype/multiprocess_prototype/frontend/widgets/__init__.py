@@ -1,14 +1,28 @@
-# multiprocess_prototype/frontend/widgets/__init__.py
-"""Виджеты вкладок MainWindow."""
+# multiprocess_prototype/frontend/widgets/
+"""
+Виджеты вкладок — пакеты «виджет + свой конфиг» рядом.
 
-from .recipes_tab import RecipesTabWidget
-from .settings_tab import SettingsTabWidget
-from .processing_tab import ProcessingTabWidget
-from .camera_tab import CameraTabWidget
+Общий слой списка вкладок: widgets.tabs (TabItemConfig, TabsConfig).
+"""
+
+from .camera_tab import CameraTabConfig, CameraTabUiConfig, CameraTabWidget
+from .processing_tab import ProcessingTabConfig, ProcessingTabUiConfig, ProcessingTabWidget
+from .recipes_tab import RecipesTabConfig, RecipesTabWidget
+from .settings_tab import ControlBinding, SettingsTabConfig, SettingsTabWidget
+from .tabs import TabItemConfig, TabsConfig
 
 __all__ = [
     "RecipesTabWidget",
+    "RecipesTabConfig",
     "SettingsTabWidget",
+    "SettingsTabConfig",
+    "ControlBinding",
     "ProcessingTabWidget",
+    "ProcessingTabConfig",
+    "ProcessingTabUiConfig",
     "CameraTabWidget",
+    "CameraTabConfig",
+    "CameraTabUiConfig",
+    "TabItemConfig",
+    "TabsConfig",
 ]
