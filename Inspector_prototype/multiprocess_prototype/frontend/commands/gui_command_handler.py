@@ -10,7 +10,6 @@ GuiCommandHandler — единый слой отправки GUI-команд.
 
 from typing import Any, Dict, Optional
 
-from multiprocess_prototype.registers.command_routing import resolve_command_targets
 from multiprocess_prototype.registers.gui_command_catalog import GUI_COMMAND_CATALOG
 
 
@@ -24,9 +23,10 @@ class GuiCommandHandler:
     def __init__(self, process: Any):
         """
         Args:
-            process: GuiProcess / ProcessModule с send_message, _msg.
+            process: GuiProcess с ``_routed_command_sender`` (см. RoutedCommandSender).
         """
         self._process = process
+        self._sender = process._routed_command_sender
 
     def _send(
         self,
@@ -34,16 +34,8 @@ class GuiCommandHandler:
         args: Dict[str, Any],
         data: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Отправить команду через process (targets из command_routing)."""
-        targets = resolve_command_targets(command)
-        payload = data if data is not None else args
-        msg = self._process._msg.command(
-            targets=targets,
-            command=command,
-            args=args,
-            data=payload,
-        )
-        return self._process.send_message(targets[0], msg.to_dict())
+        """Отправить команду (делегирование в RoutedCommandSender)."""
+        return self._sender.send(command, args=args, data=data)
 
     def execute(self, command_id: str, **kwargs: Any) -> bool:
         """
@@ -56,11 +48,9 @@ class GuiCommandHandler:
         Returns:
             True если отправка успешна.
         """
-        args_builder = GUI_COMMAND_CATALOG.get(command_id)
-        if not args_builder:
+        if not GUI_COMMAND_CATALOG.get(command_id):
             return False
-        args = args_builder(**kwargs)
-        return self._send(command_id, args)
+        return self._sender.send(command_id, **kwargs)
 
     # --- Удобные методы для callbacks ---
 

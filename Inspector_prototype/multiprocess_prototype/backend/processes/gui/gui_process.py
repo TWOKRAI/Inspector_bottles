@@ -9,6 +9,10 @@ run() делегирует в FrontendLauncher (MainWindow, WindowManager, ре�
 from multiprocess_framework.refactored.modules.message_module import MessageAdapter
 from multiprocess_framework.refactored.modules.process_module import ProcessModule
 from multiprocess_prototype.backend.gui_process_mixin import GuiProcessMixin
+from multiprocess_prototype.registers.command_routing import resolve_command_targets
+from multiprocess_prototype.registers.gui_command_catalog import GUI_COMMAND_CATALOG
+
+from frontend_module.core.routed_command import RoutedCommandSender
 
 
 class GuiProcess(GuiProcessMixin, ProcessModule):
@@ -21,6 +25,12 @@ class GuiProcess(GuiProcessMixin, ProcessModule):
     def _init_application_threads(self):
         self._log_info("GuiProcess initializing...")
         self._msg = MessageAdapter(sender=self.name)
+        self._routed_command_sender = RoutedCommandSender(
+            router=self,
+            message_factory=self._msg,
+            resolve_targets=resolve_command_targets,
+            get_args_builder=lambda cid: GUI_COMMAND_CATALOG.get(cid),
+        )
         app_cfg = self.get_config("config") or {}
         self._poll_interval = app_cfg.get("poll_interval_ms", 16)
         self._window_title = app_cfg.get("window_title", "Inspector Prototype")

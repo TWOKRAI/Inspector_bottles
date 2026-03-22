@@ -12,7 +12,20 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from frontend_module.components import BaseTab, CheckboxControl, SliderControl
+from frontend_module.components import BaseTab
+from frontend_module.components.controls import (
+    BindingConfig,
+    CheckboxConfig,
+    CheckboxControl,
+    CheckboxControlV1,
+    CheckboxViewConfig,
+    CompoundNumericControl,
+    CompoundNumericConfig,
+    NumericControl,
+    NumericViewConfig,
+    SliderConfig,
+    SliderControl,
+)
 from frontend_module.core.qt_imports import (
     QCheckBox,
     QGroupBox,
@@ -85,46 +98,88 @@ class ProcessingTabWidget(BaseTab):
         color_group = QGroupBox(u.group_color)
         color_layout = QVBoxLayout(color_group)
 
-        self._sl_b_lo, self._sl_b_hi, _ = self._make_bgr_row(u.channel_b, color_layout)
-        self._sl_g_lo, self._sl_g_hi, _ = self._make_bgr_row(u.channel_g, color_layout)
-        self._sl_r_lo, self._sl_r_hi, _ = self._make_bgr_row(u.channel_r, color_layout)
+        rm = self._rm()
+        bgr_v2 = rm and hasattr(rm, "set_field_value") and CompoundNumericControl is not None
+
+        if bgr_v2:
+            self._compound_lower = None
+            self._compound_upper = None
+            bgr_view = NumericViewConfig(min_val=0.0, max_val=255.0)
+            labels = [u.channel_b, u.channel_g, u.channel_r]
+            lower_cfg = CompoundNumericConfig(
+                binding=BindingConfig(PROCESSOR_REGISTER, "color_lower"),
+                labels=labels,
+                view_config=bgr_view,
+            )
+            upper_cfg = CompoundNumericConfig(
+                binding=BindingConfig(PROCESSOR_REGISTER, "color_upper"),
+                labels=labels,
+                view_config=bgr_view,
+            )
+            lower_result = CompoundNumericControl.create(rm, lower_cfg)
+            upper_result = CompoundNumericControl.create(rm, upper_cfg)
+            self._compound_lower = lower_result
+            self._compound_upper = upper_result
+            color_layout.addWidget(lower_result.widget)
+            color_layout.addWidget(upper_result.widget)
+        else:
+            self._sl_b_lo, self._sl_b_hi, _ = self._make_bgr_row(u.channel_b, color_layout)
+            self._sl_g_lo, self._sl_g_hi, _ = self._make_bgr_row(u.channel_g, color_layout)
+            self._sl_r_lo, self._sl_r_hi, _ = self._make_bgr_row(u.channel_r, color_layout)
+            for sl in (
+                self._sl_b_lo,
+                self._sl_b_hi,
+                self._sl_g_lo,
+                self._sl_g_hi,
+                self._sl_r_lo,
+                self._sl_r_hi,
+            ):
+                sl.valueChanged.connect(self._on_color_range_changed)
 
         self._color_label = QLabel(u.color_hint)
         self._color_label.setStyleSheet("font-size: 10px; color: gray;")
         color_layout.addWidget(self._color_label)
-
-        for sl in (
-            self._sl_b_lo,
-            self._sl_b_hi,
-            self._sl_g_lo,
-            self._sl_g_hi,
-            self._sl_r_lo,
-            self._sl_r_hi,
-        ):
-            sl.valueChanged.connect(self._on_color_range_changed)
+        self._bgr_v2 = bgr_v2
 
         layout.addWidget(color_group)
 
         area_group = QGroupBox(u.group_area)
         area_layout = QVBoxLayout(area_group)
-        rm = self._rm()
         if rm and hasattr(rm, "set_field_value"):
-            self._area_slider = SliderControl(
-                register_name=PROCESSOR_REGISTER,
-                field_name="min_area",
-                registers_manager=rm,
-                parent=self,
-                label=f"{u.label_min_area_prefix} ({u.label_px})",
-            )
-            self._max_area_slider = SliderControl(
-                register_name=PROCESSOR_REGISTER,
-                field_name="max_area",
-                registers_manager=rm,
-                parent=self,
-                label=f"{u.label_max_area_prefix} ({u.label_px})",
-            )
-            area_layout.addWidget(self._area_slider)
-            area_layout.addWidget(self._max_area_slider)
+            if NumericControl is not None:
+                min_r = NumericControl.create(
+                    rm,
+                    BindingConfig(PROCESSOR_REGISTER, "min_area"),
+                    NumericViewConfig(label=f"{u.label_min_area_prefix} ({u.label_px})"),
+                )
+                max_r = NumericControl.create(
+                    rm,
+                    BindingConfig(PROCESSOR_REGISTER, "max_area"),
+                    NumericViewConfig(label=f"{u.label_max_area_prefix} ({u.label_px})"),
+                )
+                area_layout.addWidget(min_r.widget)
+                area_layout.addWidget(max_r.widget)
+            else:
+                self._area_slider = SliderControl(
+                    config=SliderConfig(
+                        register_name=PROCESSOR_REGISTER,
+                        field_name="min_area",
+                        label=f"{u.label_min_area_prefix} ({u.label_px})",
+                    ),
+                    registers_manager=rm,
+                    parent=self,
+                )
+                self._max_area_slider = SliderControl(
+                    config=SliderConfig(
+                        register_name=PROCESSOR_REGISTER,
+                        field_name="max_area",
+                        label=f"{u.label_max_area_prefix} ({u.label_px})",
+                    ),
+                    registers_manager=rm,
+                    parent=self,
+                )
+                area_layout.addWidget(self._area_slider)
+                area_layout.addWidget(self._max_area_slider)
         else:
             self._area_label = QLabel(f"{u.label_min_area_prefix} 500 {u.label_px}")
             self._area_slider = QSlider(Qt.Horizontal)
@@ -147,51 +202,41 @@ class ProcessingTabWidget(BaseTab):
         display_group = QGroupBox(u.group_display)
         display_layout = QVBoxLayout(display_group)
         if rm and hasattr(rm, "set_field_value"):
-            display_layout.addWidget(
-                CheckboxControl(
-                    register_name=RENDERER_REGISTER,
-                    field_name="show_original",
-                    registers_manager=rm,
-                    parent=self,
-                    label=u.checkbox_original,
-                )
-            )
-            display_layout.addWidget(
-                CheckboxControl(
-                    register_name=RENDERER_REGISTER,
-                    field_name="show_mask",
-                    registers_manager=rm,
-                    parent=self,
-                    label=u.checkbox_mask,
-                )
-            )
-            display_layout.addWidget(
-                CheckboxControl(
-                    register_name=RENDERER_REGISTER,
-                    field_name="draw_contours",
-                    registers_manager=rm,
-                    parent=self,
-                    label=u.checkbox_contours,
-                )
-            )
-            display_layout.addWidget(
-                CheckboxControl(
-                    register_name=RENDERER_REGISTER,
-                    field_name="draw_bboxes",
-                    registers_manager=rm,
-                    parent=self,
-                    label=u.checkbox_bbox,
-                )
-            )
-            display_layout.addWidget(
-                CheckboxControl(
-                    register_name=RENDERER_REGISTER,
-                    field_name="save_frames",
-                    registers_manager=rm,
-                    parent=self,
-                    label=u.checkbox_save_frames,
-                )
-            )
+            if CheckboxControl is not None:
+                for cfg in [
+                    (RENDERER_REGISTER, "show_original", u.checkbox_original),
+                    (RENDERER_REGISTER, "show_mask", u.checkbox_mask),
+                    (RENDERER_REGISTER, "draw_contours", u.checkbox_contours),
+                    (RENDERER_REGISTER, "draw_bboxes", u.checkbox_bbox),
+                    (RENDERER_REGISTER, "save_frames", u.checkbox_save_frames),
+                ]:
+                    reg_name, field_name, label = cfg
+                    r = CheckboxControl.create(
+                        rm,
+                        BindingConfig(reg_name, field_name),
+                        CheckboxViewConfig(label=label),
+                    )
+                    display_layout.addWidget(r.widget)
+            else:
+                for cfg in [
+                    (RENDERER_REGISTER, "show_original", u.checkbox_original),
+                    (RENDERER_REGISTER, "show_mask", u.checkbox_mask),
+                    (RENDERER_REGISTER, "draw_contours", u.checkbox_contours),
+                    (RENDERER_REGISTER, "draw_bboxes", u.checkbox_bbox),
+                    (RENDERER_REGISTER, "save_frames", u.checkbox_save_frames),
+                ]:
+                    reg_name, field_name, label = cfg
+                    display_layout.addWidget(
+                        CheckboxControlV1(
+                            config=CheckboxConfig(
+                                register_name=reg_name,
+                                field_name=field_name,
+                                label=label,
+                            ),
+                            registers_manager=rm,
+                            parent=self,
+                        )
+                    )
         else:
             self._cb_original = QCheckBox(u.checkbox_original)
             self._cb_original.setChecked(True)
@@ -252,6 +297,8 @@ class ProcessingTabWidget(BaseTab):
         return lo[:3], hi[:3]
 
     def _sync_color_sliders_from_register(self) -> None:
+        if getattr(self, "_bgr_v2", False):
+            return
         lo, hi = self._read_colors()
         pairs = (
             (self._sl_b_lo, lo[0]),
@@ -276,6 +323,9 @@ class ProcessingTabWidget(BaseTab):
     def _on_register_color_lower(self, value: Any) -> None:
         if self._mute_register_subscriptions:
             return
+        if getattr(self, "_bgr_v2", False):
+            self._update_color_hint()
+            return
         if not isinstance(value, (list, tuple)) or len(value) < 3:
             return
         for sl, v in zip(
@@ -290,6 +340,9 @@ class ProcessingTabWidget(BaseTab):
     def _on_register_color_upper(self, value: Any) -> None:
         if self._mute_register_subscriptions:
             return
+        if getattr(self, "_bgr_v2", False):
+            self._update_color_hint()
+            return
         if not isinstance(value, (list, tuple)) or len(value) < 3:
             return
         for sl, v in zip(
@@ -302,13 +355,21 @@ class ProcessingTabWidget(BaseTab):
         self._update_color_hint()
 
     def _update_color_hint(self) -> None:
-        self._color_label.setText(
-            f"B[{self._sl_b_lo.value()}-{self._sl_b_hi.value()}] "
-            f"G[{self._sl_g_lo.value()}-{self._sl_g_hi.value()}] "
-            f"R[{self._sl_r_lo.value()}-{self._sl_r_hi.value()}]"
-        )
+        if getattr(self, "_bgr_v2", False):
+            lo, hi = self._read_colors()
+            self._color_label.setText(
+                f"B[{lo[0]}-{hi[0]}] G[{lo[1]}-{hi[1]}] R[{lo[2]}-{hi[2]}]"
+            )
+        else:
+            self._color_label.setText(
+                f"B[{self._sl_b_lo.value()}-{self._sl_b_hi.value()}] "
+                f"G[{self._sl_g_lo.value()}-{self._sl_g_hi.value()}] "
+                f"R[{self._sl_r_lo.value()}-{self._sl_r_hi.value()}]"
+            )
 
     def _on_color_range_changed(self, _value: Optional[int] = None) -> None:
+        if getattr(self, "_bgr_v2", False):
+            return
         self._update_color_hint()
         rm = self._rm()
         if rm and hasattr(rm, "set_field_value"):

@@ -45,19 +45,19 @@ class SettingsTabWidget(BaseTab):
         ctype = cfg.get("type", "slider")
         reg = cfg.get("register_name")
         field = cfg.get("field_name")
+        component_config = dict(cfg.get("component_config") or {})
         if not reg or not field:
             return None
+        config_dict = {"register_name": reg, "field_name": field, **component_config}
         if ctype == "slider":
             return SliderControl(
-                register_name=reg,
-                field_name=field,
+                config=config_dict,
                 registers_manager=self._registers_manager,
                 parent=self,
             )
         if ctype == "checkbox":
             return CheckboxControl(
-                register_name=reg,
-                field_name=field,
+                config=config_dict,
                 registers_manager=self._registers_manager,
                 parent=self,
             )

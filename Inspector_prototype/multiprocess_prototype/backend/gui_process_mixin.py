@@ -13,7 +13,6 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from multiprocess_prototype.registers.command_routing import resolve_command_targets
 from multiprocess_prototype.utils.shm_utils import read_frame_from_shm
 
 
@@ -33,18 +32,11 @@ class GuiProcessMixin:
         """
         Сформировать command-сообщение и отправить первому получателю из targets.
 
-        ``targets`` берутся из схем регистров (или EXPLICIT_COMMAND_TARGETS).
+        ``targets`` берутся из схем регистров (или EXPLICIT_COMMAND_TARGETS)
+        через ``RoutedCommandSender`` на процессе.
         """
         args = args if args is not None else {}
-        targets = resolve_command_targets(command_id)
-        payload = data if data is not None else args
-        msg = self._msg.command(
-            targets=targets,
-            command=command_id,
-            args=args,
-            data=payload,
-        )
-        return self.send_message(targets[0], msg.to_dict())
+        return self._routed_command_sender.send(command_id, args=args, data=data)
 
     def _poll_messages(self):
         """Вызывается QTimer. Читает rendered_frame_ready и другие data-сообщения."""

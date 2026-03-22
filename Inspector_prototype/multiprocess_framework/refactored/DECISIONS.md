@@ -16,6 +16,96 @@
 
 ---
 
+## ADR-063: Controls v2 — доработки по ревью (9/10)
+- Дата: 2026-03-22
+- Статус: принято
+- Контекст: Ревью v2 выявило нарушения OCP, hasattr в Presenter, отсутствие legacy, setattr, dict в SchemaTrait.
+- Решение:
+  - **INumericView(IControlView[float])** — явный протокол с set_range, set_validator_int/float, get_legacy_element; Presenter без hasattr.
+  - **Фасад OCP**: _create_numeric_view(view_type) — выбор SliderView/SpinBoxView по view_config.view_type.
+  - **LegacySyncTrait** + **LegacySyncContext** — опциональная интеграция с ui_elements/controls/callback.
+  - **Facade** возвращает **NumericControlResult(widget, presenter)** вместо setattr на view.
+  - **LabelOverride** — типизированный config_override вместо dict в SchemaTrait.
+  - **DebounceTrait** — один QTimer в __init__, schedule() перезапускает.
+  - **CheckboxView.on_finished** — no-op (не дублировать on_changed).
+  - **show_error** в IControlView — отображение ошибок валидации.
+- Причина: Соответствие Open/Closed, явные контракты, совместимость с v1.
+- Отклонённые альтернативы: BindingConfig на SchemaBase — оставлен dataclass для минимальной зависимости.
+
+---
+
+## ADR-062: Controls v2 — Traits + Presenter + View + Facade, принцип конструктора
+- Дата: 2026-03-22
+- Статус: принято
+- Контекст: BaseConfigurableWidget «божественный», View/Presenter смешаны; нужна архитектура, позволяющая собирать новые контролы из переиспользуемых «кубиков».
+- Решение:
+  - **controls/v2/** — новая архитектура: **Traits** (SchemaTrait, SyncTrait, DebounceTrait, AccessTrait), **Presenters** (NumericPresenter, BooleanPresenter), **Views** (SliderView, CheckboxView), **Facade** (NumericControl.create(), BooleanControl.create()), **infrastructure** (RegisterAdapter, ValueTransformer, block_signals).
+  - **Принцип конструктора**: все компоненты максимально универсальны; новый контрол = композиция traits + новый View при необходимости.
+  - **BindingConfig** + **NumericViewConfig** / **CheckboxViewConfig** — разделение привязки и UI-опций.
+  - v2 сосуществует с v1; постепенная миграция.
+- Причина: Тестируемость (MockAdapter, MockView), расширяемость (SpinboxView — один файл), чёткое разделение ответственностей.
+- Отклонённые альтернативы: рефакторинг v1 на месте — риск регрессий; единый миграционный путь — v2 в отдельной папке безопаснее.
+
+---
+
+## ADR-061: Controls — common/field_sync, common/sizes, legacy_sync, Base без exclude
+- Дата: 2026-03-21
+- Статус: принято
+- Контекст: Дублирование field_sync в checkbox/slider; primitives зависят от slider/styles; BaseConfigurableWidget хардкодит exclude для SliderConfig; SliderControl перегружен legacy-логикой.
+- Решение:
+  - **`common/field_sync.py`** — единая `publish_control_value_to_observers` с опциональными ui_elements, controls, callback. Checkbox и Slider вызывают её; старые field_sync.py удалены.
+  - **`common/sizes.py`** — VALUE_INPUT_WIDTH_PX, VALUE_INPUT_HEIGHT_PX. `numeric_line_edit` импортирует из common, не из slider.
+  - **`slider/legacy_sync.py`** — `publish_legacy_ui_refs` вынесена из SliderControl; обновление ui_elements/controls при сборке UI.
+  - **BaseConfigurableWidget._config_to_dict** — `model_dump()` без exclude; base не знает о полях конкретных конфигов.
+  - Баг: `Tuple` → `tuple` в layout_builder; унификация импортов из primitives.
+- Причина: Меньше дублирования, слабее coupling, primitives независимы от slider; схемы CheckboxConfig/SliderConfig остаются развёрнутыми для квартирования в приложении.
+- Отклонённые альтернативы: BaseControlConfig для объединения полей схем — отложено, т.к. схемы будут расширяться в приложении.
+
+---
+
+## ADR-060: Controls — примитивы UI, стили, coerce_schema_config, узкий конструктор
+- Дата: 2026-03-21
+- Статус: принято
+- Контекст: Дублирование `_coerce_config` между контролами; повтор полей схемы в `__init__` виджетов; монолитная сборка слайдера; инлайн QSS и «магические» шрифты/размеры.
+- Решение:
+  - **`coerce_schema_config`** в `frontend_module/core/schema_config.py` — нормализация `None` / `dict` / экземпляра для любого `SchemaBase`-конфига контрола.
+  - **Конструктор** `SliderControl` / `CheckboxControl`: только `config`, `registers_manager`, `parent`; `register_name`, `field_name`, `access_level` задаются через `SliderConfig` / `CheckboxConfig` (без дублирования в подклассе).
+  - **`components/controls/common/typography.py`** — шрифты метки и поля ввода; **`slider/styles.py`**, **`checkbox/styles.py`** — QSS и метрики layout.
+  - **`components/controls/primitives/`** — `create_control_label`, `create_numeric_line_edit`, `create_styled_horizontal_slider` (без знания о регистре); **`value_bridge.py`** — документированная семантика и `schedule_slider_value_commit` (debounce записи после движения слайдера).
+  - Уточнение (последующий рефакторинг): конфиги и примеры регистра — в подпакете **`slider/schema/`**, **`checkbox/schema/`**; у слайдера вынесены **`value_mapping.py`**, **`field_sync.py`**; у чекбокса — **`layout_builder.py`**, **`field_sync.py`**; документация — `controls/README.md`, `slider/README.md`, `checkbox/README.md`.
+- Причина: Единообразие внешнего вида, проще добавлять новые контролы из тех же кирпичей; примитивы тестируются и читаются отдельно от привязки к регистру.
+- Отклонённые альтернативы: второй слой произвольных `**kwargs` в конструктор виджета; публичные `pyqtSignal` на каждый шаг — отложено, пока нет внешних подписчиков.
+
+## ADR-059: Рефакторинг SliderControl и CheckboxControl — config-based API, инкапсуляция операций со схемами
+- Дата: 2026-03-21
+- Статус: принято
+- Контекст: SliderControl и CheckboxControl имели 12+ параметров в `__init__`; логика работы с регистрами и метаданными размазана по компонентам; неочевидный API для потомков.
+- Решение:
+  - **RegisterBinding**, **RegisterFieldMeta**, **ResolvedMeta** в `frontend_module/schemas/register_binding.py` — явная привязка к регистру и слияние метаданных.
+  - **BaseConfigurableWidget** принимает `config`, инкапсулирует `_get_register_meta()`, `_read_value()`, `_write_value()`, `_resolve_meta()`; подклассы используют `self._resolved_meta`.
+  - **SliderConfig**, **CheckboxConfig** (SchemaBase) в `components/controls/slider/`, `checkbox/` — UI-настройки (label, transfer_k, position и т.д.).
+  - Папка-на-компонент: `slider/` (`widget.py`, `schema/`, `value_mapping.py`, …); `checkbox/` аналогично.
+  - Конструктор контролов: `config`, `registers_manager`, `parent` (поля привязки — внутри config; уточнено в ADR-060).
+  - Схема регистра (ProcessorRegisters, RendererRegisters) остаётся в прототипе; min/max/unit — из FieldMeta.
+- Причина: Упрощение входа, единый слой для всех компонентов, расширяемость, соответствие Dict at Boundary (config как dict при границах).
+- Отклонённые альтернативы: Обратная совместимость через **kwargs — отказались в пользу единовременного перехода.
+
+---
+
+## ADR-058: Outbound GUI-команда — IRouterLike + MessageAdapter + RoutedCommandSender
+- Дата: 2026-03-20
+- Статус: принято
+- Контекст: В прототипе дублировалась цепочка `resolve_command_targets` → `MessageAdapter.command` → `send_message` в `GuiCommandHandler` и `GuiProcessMixin`; новым приложениям нужен один переиспользуемый отправитель без копипасты.
+- Решение:
+  - Класс **`RoutedCommandSender`** в `frontend_module/core/routed_command.py`: инъекция `router: IRouterLike`, `message_factory: SupportsCommandMessage`, `resolve_targets`, опционально `get_args_builder` (в `core/`, чтобы не подтягивать Qt через `application/`).
+  - Протокол **`SupportsCommandMessage`** в `frontend_module/interfaces.py` — контракт фабрики COMMAND (например `MessageAdapter`), без импорта `message_module` в публичные реэкспорты.
+  - Домен (`command_routing`, `GUI_COMMAND_CATALOG`) остаётся в приложении; на GUI-процессе один экземпляр sender (`GuiProcess._routed_command_sender`); handler и mixin только делегируют в него.
+  - Каркас запуска UI: **`run_process_attached_frontend`** + **`FrontendLaunchHooks`** в `frontend_module/application/process_attached_frontend.py`; прототип заполняет хуки в `FrontendLauncher`.
+- Причина: Один канонический путь «кнопка → очередь» (см. FRONTEND_COMMAND_LAUNCHER_ROADMAP.md §0.3), меньше расхождений handler/mixin, фреймворк остаётся без доменных команд.
+- Отклонённые альтернативы: Второй путь через `command_module`/`dispatch_module` из GUI — только для сообщений уже внутри процесса (путь B); отдельный модуль ради sender — избыточно.
+
+---
+
 ## ADR-057: Персистентность прототипа — пакет persistence и корень данных
 - Дата: 2026-03-20
 - Статус: принято

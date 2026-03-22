@@ -693,7 +693,6 @@ multiprocess_prototype/frontend/__init__.py
 multiprocess_prototype/frontend/launcher.py
 multiprocess_prototype/frontend/commands/__init__.py
 multiprocess_prototype/frontend/commands/gui_command_handler.py
-multiprocess_prototype/frontend/commands/message_manager_adapter.py
 multiprocess_prototype/frontend/configs/__init__.py
 multiprocess_prototype/frontend/configs/config.py
 multiprocess_prototype/frontend/configs/frontend_config.py

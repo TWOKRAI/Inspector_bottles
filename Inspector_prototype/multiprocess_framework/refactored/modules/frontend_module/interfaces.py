@@ -6,7 +6,27 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Union, runtime_checkable
+
+
+@runtime_checkable
+class SupportsCommandMessage(Protocol):
+    """
+    Фабрика outbound COMMAND (например MessageAdapter).
+
+    Возвращаемый объект должен иметь to_dict() для передачи в send_message (Dict at Boundary).
+    """
+
+    def command(
+        self,
+        targets: Union[List[str], str],
+        command: str,
+        args: Optional[Dict[str, Any]] = None,
+        need_ack: bool = False,
+        priority: Any = "normal",
+        **kwargs: Any,
+    ) -> Any:
+        """Собрать сообщение типа command; результат — объект с методом to_dict()."""
 
 
 @runtime_checkable

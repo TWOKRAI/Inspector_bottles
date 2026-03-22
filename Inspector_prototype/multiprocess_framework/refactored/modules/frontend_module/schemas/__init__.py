@@ -5,5 +5,17 @@ Schemas — схемы виджетов и окон (data_schema_module.SchemaBa
 
 from frontend_module.schemas.widget_descriptor import WidgetDescriptor, widget_descriptor_from_dict
 from frontend_module.schemas.window_config import WindowConfig
+from frontend_module.schemas.register_binding import (
+    RegisterBinding,
+    RegisterFieldMeta,
+    ResolvedMeta,
+)
 
-__all__ = ["WidgetDescriptor", "widget_descriptor_from_dict", "WindowConfig"]
+__all__ = [
+    "WidgetDescriptor",
+    "widget_descriptor_from_dict",
+    "WindowConfig",
+    "RegisterBinding",
+    "RegisterFieldMeta",
+    "ResolvedMeta",
+]

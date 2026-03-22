@@ -5,6 +5,8 @@
 **Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров). Каталог модулей и связей (фреймворк + прототип): [ARCHITECTURE_MODULE_CATALOG.md](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md).  
 Дорожная карта GUI-команд и лаунчера (фазы M0–M3, ограничители сложности): [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md).
 
+**Запуск GUI:** `GuiProcess.run()` создаёт `FrontendLauncher`, который заполняет **`FrontendLaunchHooks`** и вызывает **`run_process_attached_frontend`** из `frontend_module` — одна каноническая последовательность: конфиг UI, регистры, опциональный boot регистров, `FrontendManager.initialize`, регистрация окон, цикл Qt. Исходящие команды кнопок/миксина идут через один **`RoutedCommandSender`** на процессе (`GuiProcess._routed_command_sender`, ADR-058); маршрутизация и каталог args остаются в `registers/command_routing.py` и `gui_command_catalog.py`.
+
 ---
 
 ## Процессы, SharedMemory и сообщения

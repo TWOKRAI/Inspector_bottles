@@ -6,8 +6,8 @@
 
 | Критерий | Оценка | Комментарий |
 |----------|--------|-------------|
-| Код (читаемость, стандарты) | 8 | FrontendManager, FrontendRegistersBridge; Coordinator удалён |
-| Тесты (покрытие) | 2 | Ручная проверка, unit-тесты планируются |
+| Код (читаемость, стандарты) | 9 | Controls: primitives, typography/styles, `coerce_schema_config`, узкий конструктор |
+| Тесты (покрытие) | 5 | + `test_schema_config.py`; `multiprocess_prototype/tests/test_frontend_routed_command_sender.py`, window_registry, widget_descriptor |
 | Документация (README, interfaces) | 7 | README, interfaces, STATUS, ADR |
 | Связанность (меньше = лучше) | 8 | data_schema, registers_module; схемы регистров — в приложении |
 | Работоспособность | 9 | FrontendManager.run_app/shutdown_app, GuiProcess интеграция |
@@ -36,6 +36,11 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-21 | Controls refactor: `common/field_sync.py` (единая publish_control_value_to_observers), `common/sizes.py` (VALUE_INPUT_*), `slider/legacy_sync.py` (publish_legacy_ui_refs); BaseConfigurableWidget без exclude; primitives→common; баг Tuple в layout_builder | 6 |
+| 2026-03-21 | Controls: пакеты `slider/schema`, `checkbox/schema`; `value_mapping`, `field_sync`, `layout_builder`; README по компонентам; докстринги методов | 6 |
+| 2026-03-21 | Controls: `coerce_schema_config`, primitives (label, numeric line edit, styled slider), `value_bridge`, typography/styles; конструктор только config+rm+parent; ADR-060 | 6 |
+| 2026-03-21 | Рефакторинг SliderControl, CheckboxControl: RegisterBinding, ResolvedMeta, SliderConfig, CheckboxConfig; папка-на-компонент; BaseConfigurableWidget: config, _resolve_meta; ADR-059 | 6 |
+| 2026-03-20 | `RoutedCommandSender` (`core/routed_command.py`), `SupportsCommandMessage` (interfaces), `run_process_attached_frontend` + `FrontendLaunchHooks`; ADR-058 | 6 |
 | 2026-03-20 | README: примеры — `multiprocess_prototype.registers.schemas.processing_tab` | 6 |
 | 2026-03-20 | FrontendManager: `queue_manager`, `stop_event` в `__init__` (без присвоения `_…` из приложения) | 6 |
 | 2026-03-20 | FrontendRegistersBridge: в сообщение register_update добавлено `type: data` (согласованность с Message / Router) | 6 |

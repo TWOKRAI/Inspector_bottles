@@ -12,6 +12,58 @@ from frontend_module.core.widget_registry import WidgetRegistry
 from frontend_module.interfaces import IRegistersManager
 
 
+def _slider_config_from_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Извлечь SliderConfig-поля из kwargs."""
+    config: Dict[str, Any] = {}
+    for key in (
+        "register_name",
+        "field_name",
+        "access_level",
+        "label",
+        "transfer_k",
+        "round_k",
+        "ui_elements",
+        "controls",
+        "callback",
+        "touch_keyboard_factory",
+    ):
+        if key in kwargs and kwargs[key] is not None:
+            config[key] = kwargs.pop(key, None)
+    if "extra" in kwargs:
+        extra = kwargs.pop("extra")
+        if isinstance(extra, dict):
+            for k in (
+                "register_name",
+                "field_name",
+                "access_level",
+                "label",
+                "transfer_k",
+                "round_k",
+                "ui_elements",
+                "controls",
+                "callback",
+                "touch_keyboard_factory",
+            ):
+                if k in extra and k not in config:
+                    config[k] = extra[k]
+    return config if config else None
+
+
+def _checkbox_config_from_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Извлечь CheckboxConfig-поля из kwargs."""
+    config: Dict[str, Any] = {}
+    for key in ("register_name", "field_name", "access_level", "label", "position"):
+        if key in kwargs and kwargs[key] is not None:
+            config[key] = kwargs.pop(key, None)
+    if "extra" in kwargs:
+        extra = kwargs.pop("extra")
+        if isinstance(extra, dict):
+            for k in ("register_name", "field_name", "access_level", "label", "position"):
+                if k in extra and k not in config:
+                    config[k] = extra[k]
+    return config if config else None
+
+
 def _create_slider(
     widget_type: str,
     kwargs: Dict[str, Any],
@@ -21,10 +73,12 @@ def _create_slider(
     """Фабрика SliderControl."""
     from frontend_module.components.controls import SliderControl
 
+    kwargs = dict(kwargs)
+    config = _slider_config_from_kwargs(kwargs)
     return SliderControl(
+        config=config,
         registers_manager=registers_manager,
         parent=parent,
-        **kwargs,
     )
 
 
@@ -37,10 +91,12 @@ def _create_checkbox(
     """Фабрика CheckboxControl."""
     from frontend_module.components.controls import CheckboxControl
 
+    kwargs = dict(kwargs)
+    config = _checkbox_config_from_kwargs(kwargs)
     return CheckboxControl(
+        config=config,
         registers_manager=registers_manager,
         parent=parent,
-        **kwargs,
     )
 
 

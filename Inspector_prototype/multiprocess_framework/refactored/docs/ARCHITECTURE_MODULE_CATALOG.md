@@ -29,7 +29,7 @@
 | **worker_module** | Process | Воркеры, жизненный цикл задач | README | process_module |
 | **process_module** | Process | ProcessModule, интеграция менеджеров | README, `core/process_module.py` | приложения, launcher |
 | **process_manager_module** | Orchestration | SystemLauncher, оркестрация процессов | README | main.py приложений |
-| **frontend_module** | Frontend | FrontendManager, WindowManager, мост регистров, UI-компоненты | `interfaces.py`, README | GUI-процесс |
+| **frontend_module** | Frontend | FrontendManager, WindowManager, **RoutedCommandSender** (outbound COMMAND), мост регистров, UI | `interfaces.py` (`IRouterLike`, `SupportsCommandMessage`), README | GUI-процесс |
 
 ### A.2 Рёбра «кто кого трогает» (для диаграмм)
 

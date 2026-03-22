@@ -8,7 +8,7 @@ GuiProcess делегирует run() в launcher.
 
 from typing import Any, Dict, Optional
 
-from frontend_module import FrontendManager
+from frontend_module import FrontendLaunchHooks, run_process_attached_frontend
 from frontend_module.windows import LoadingWindow
 
 from multiprocess_prototype.registers import create_registers
@@ -40,10 +40,6 @@ class FrontendLauncher:
     def build_registers(self):
         """(RegistersManager, connection_map)."""
         return create_registers()
-
-    def build_command_handler(self) -> GuiCommandHandler:
-        """GuiCommandHandler для callbacks виджетов."""
-        return GuiCommandHandler(self._process)
 
     def _camera_callbacks(self, cmd: GuiCommandHandler) -> Dict[str, Any]:
         """Callbacks для CameraTabWidget."""
@@ -83,13 +79,16 @@ class FrontendLauncher:
         window_manager: Any,
         frontend_manager: Any,
         config: Dict[str, Any],
-        cmd: GuiCommandHandler,
+        sender: Any,
         app: Any,
+        process_ref: Any,
     ) -> None:
         """Регистрация фабрик окон в WindowManager."""
         wm = window_manager
         fm = frontend_manager
-        process = self._process
+        process = process_ref
+        cmd = GuiCommandHandler(process_ref)
+        assert sender is process_ref._routed_command_sender
         camera_type = config.get("camera_type", "simulator")
         window_cfg = config.get("window", {})
         title = window_cfg.get("title", "Inspector")
@@ -157,53 +156,34 @@ class FrontendLauncher:
             if key in factories:
                 wm.register(name, factories[key])
 
+    def _on_registers_boot(self, rm: Any, config: Dict[str, Any]) -> None:
+        if rm and hasattr(rm, "set_field_value"):
+            ct = config.get("camera_type", "simulator")
+            rm.set_field_value("camera", "camera_type", ct)
+
+    def _launch_hooks(self) -> FrontendLaunchHooks:
+        return FrontendLaunchHooks(
+            build_ui_config=lambda p: build_frontend_config(p.get_config("config") or {}),
+            build_registers=lambda: create_registers(),
+            create_command_sender=lambda p: p._routed_command_sender,
+            register_windows=self.register_windows,
+            on_registers_boot=self._on_registers_boot,
+        )
+
     def run(
         self,
         initial_window: str = "loading",
         loading_delay_ms: int = 2000,
     ) -> int:
         """
-        Создать FrontendManager, инициализировать, запустить приложение.
+        Делегирует в ``run_process_attached_frontend`` (единая последовательность в фреймворке).
 
         Returns:
             exit code приложения.
         """
-        from frontend_module.core.qt_imports import QTimer
-
-        config = self.build_config()
-        registers, connection_map = self.build_registers()
-        cmd = self.build_command_handler()
-
-        rm = registers
-        if rm and hasattr(rm, "set_field_value"):
-            ct = config.get("camera_type", "simulator")
-            rm.set_field_value("camera", "camera_type", ct)
-
-        fm = FrontendManager(
-            config=config,
-            registers=registers,
-            router=self._process,
-            connection_map=connection_map,
-            queue_manager=getattr(self._process, "_queue_manager", None),
-            stop_event=getattr(self._process, "_stop_event", None),
+        return run_process_attached_frontend(
+            self._process,
+            hooks=self._launch_hooks(),
+            initial_window=initial_window,
+            loading_delay_ms=loading_delay_ms,
         )
-
-        if not fm.initialize():
-            self._process._log_error("FrontendManager initialization failed")
-            return 1
-
-        app = fm.qt_app
-        app.aboutToQuit.connect(self._process.gui_request_shutdown)
-
-        wm = fm.get_window_manager()
-        self.register_windows(wm, fm, config, cmd, app)
-
-        def _switch_to_main():
-            wm.hide_window("loading")
-            wm.show_window("main")
-
-        QTimer.singleShot(loading_delay_ms, _switch_to_main)
-
-        fm.run_app(initial_window=initial_window)
-        fm.shutdown_app()
-        return 0

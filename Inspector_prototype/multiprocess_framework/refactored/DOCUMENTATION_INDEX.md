@@ -249,6 +249,12 @@
 **...узнать про Dict at Boundary**
 → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Message Flow) + [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 2) + [DECISIONS.md](./DECISIONS.md) (ADR-008)
 
+**...сравнить «идеальное» видение с текущим фреймворком и набросать пожелания**
+→ [docs/FRAMEWORK_VISION_AND_WISHLIST.md](./docs/FRAMEWORK_VISION_AND_WISHLIST.md)
+
+**...увидеть глобальный план волн и критериев приближения к идеалу**
+→ [docs/FRAMEWORK_IDEAL_GLOBAL_PLAN.md](./docs/FRAMEWORK_IDEAL_GLOBAL_PLAN.md)
+
 ---
 
 ## 📊 Statistics

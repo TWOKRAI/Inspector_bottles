@@ -7,7 +7,8 @@
 **Ключевые сущности:**
 - **FrontendManager** (BaseManager) — единая точка входа: регистры, конфиг, окна, потоки
 - **FrontendRegistersBridge** — связь frontend с backend (connection_map, send_callback)
-- **ApplicationCoordinator** — фасад приложения, делегирует в FrontendManager
+- **RoutedCommandSender** (`core/routed_command.py`) — единая отправка outbound COMMAND: `resolve_targets` → `SupportsCommandMessage.command` → `IRouterLike.send_message` (домен снаружи, см. ADR-058)
+- **run_process_attached_frontend** + **FrontendLaunchHooks** — каркас запуска UI, привязанного к процессу
 - **Config hot-reload** — подписка на config_module, обновление UI без перезапуска
 
 ## Импорты

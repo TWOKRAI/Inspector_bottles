@@ -8,7 +8,7 @@ CameraTabWidget — вкладка управления камерой.
 
 from typing import Any, Callable, Dict, Optional, Union
 
-from frontend_module.components import BaseTab, SliderControl
+from frontend_module.components import BaseTab, SliderConfig, SliderControl
 from frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,
@@ -104,11 +104,13 @@ class CameraTabWidget(BaseTab):
         if rm and hasattr(rm, "set_field_value"):
             fps_layout.addWidget(
                 SliderControl(
-                    register_name=CAMERA_REGISTER,
-                    field_name="fps",
+                    config=SliderConfig(
+                        register_name=CAMERA_REGISTER,
+                        field_name="fps",
+                        label="FPS",
+                    ),
                     registers_manager=rm,
                     parent=self,
-                    label="FPS",
                 )
             )
         else:

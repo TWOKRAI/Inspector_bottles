@@ -3,7 +3,7 @@
 Конфиг вкладки «Настройки»: привязки контролов к регистрам.
 """
 
-from typing import Annotated, List, Literal
+from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import Field
 
@@ -26,13 +26,20 @@ class ControlBinding(SchemaBase):
         str,
         FieldMeta("Имя поля", info="Поле в схеме регистра."),
     ] = "dp"
+    component_config: Annotated[
+        Optional[Dict[str, object]],
+        FieldMeta("Конфиг компонента", info="Label, transfer_k, position и др."),
+    ] = None
 
     def to_control_dict(self) -> dict:
-        return {
+        d: dict = {
             "type": self.type,
             "register_name": self.register_name,
             "field_name": self.field_name,
         }
+        if self.component_config is not None:
+            d["component_config"] = self.component_config
+        return d
 
 
 def _default_draw_controls() -> List[ControlBinding]:

@@ -2,19 +2,23 @@
 """
 BaseConfigurableWidget — базовый виджет с привязкой к RegistersManager.
 
-Гибкая конфигурация:
-- register_name + field_name (явно или через "register.field")
-- Опционально: field (model_class, field_name) для автоопределения
-- RegistersManager и access_level — из parent при отсутствии
+Инкапсулирует операции со схемами:
+- _get_register_meta() — метаданные поля из регистра
+- _read_value() / _write_value() — чтение/запись значения
+- _resolve_meta() — слияние метаданных регистра с ComponentConfig
 
-Совместим с минимальным IRegistersManager (get_register, get_field_metadata,
-validate_field_value). Опционально: subscribe, set_field_value, can_modify_field.
+Конструктор: config, register_name, field_name, registers_manager, access_level, parent.
+Подклассы переопределяют _load_metadata() и используют self._resolved_meta.
 """
 from __future__ import annotations
 
 from typing import Any, Optional
 
 from frontend_module.core.qt_imports import QWidget
+from frontend_module.schemas.register_binding import (
+    RegisterFieldMeta,
+    ResolvedMeta,
+)
 
 
 def _get_registers_from_parent(parent: Any, max_depth: int = 5) -> Optional[Any]:
@@ -60,24 +64,43 @@ class BaseConfigurableWidget(QWidget):
     Базовый виджет с привязкой к регистру.
 
     Подклассы переопределяют _load_metadata(), _update_value_silent(), _update_access_level().
+    Используют self._resolved_meta для построения UI.
     """
 
     def __init__(
         self,
+        config: Any = None,
         register_name: Optional[str] = None,
         field_name: Optional[str] = None,
         registers_manager: Optional[Any] = None,
-        access_level: int = 0,
+        access_level: Optional[int] = None,
         parent: Optional[Any] = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__(parent)
 
+        self._config: Any = config
         self._register_name: Optional[str] = None
         self._field_name: Optional[str] = None
         self._registers_manager: Optional[Any] = registers_manager
-        self._access_level: int = access_level
+        self._access_level: int = 0
+        self._resolved_meta: Optional[ResolvedMeta] = None
         self._is_initialized: bool = False
+
+        _reg = register_name
+        _field = field_name
+        _access = access_level if access_level is not None else 0
+        if config is not None:
+            cfg_dict = self._config_to_dict(config)
+            if cfg_dict.get("register_name"):
+                _reg = cfg_dict["register_name"]
+            if cfg_dict.get("field_name"):
+                _field = cfg_dict["field_name"]
+            if cfg_dict.get("access_level") is not None:
+                _access = int(cfg_dict["access_level"])
+        register_name = _reg
+        field_name = _field
+        access_level = _access
+        self._access_level = access_level
 
         if parent and not registers_manager:
             self._registers_manager = _get_registers_from_parent(parent)
@@ -97,6 +120,18 @@ class BaseConfigurableWidget(QWidget):
         if self._register_name and self._field_name and self._registers_manager:
             self._apply_configuration()
 
+    @staticmethod
+    def _config_to_dict(config: Any) -> dict:
+        """Извлечь dict из config (model_dump или dict)."""
+        if config is None:
+            return {}
+        if hasattr(config, "model_dump"):
+            try:
+                return config.model_dump()
+            except Exception:
+                return {}
+        return dict(config) if isinstance(config, dict) else {}
+
     def _auto_detect_register(self) -> None:
         """Найти register_name по field_name среди зарегистрированных регистров."""
         if not self._registers_manager or not self._field_name:
@@ -110,8 +145,29 @@ class BaseConfigurableWidget(QWidget):
                         self._register_name = reg_name
                         return
 
+    def _get_register_meta(self) -> RegisterFieldMeta:
+        """Метаданные поля из схемы регистра."""
+        meta_dict = self.get_metadata()
+        return RegisterFieldMeta.from_dict(meta_dict)
+
+    def _read_value(self) -> Any:
+        """Текущее значение поля из регистра."""
+        return self.get_field_value()
+
+    def _write_value(self, value: Any) -> tuple[bool, Optional[str]]:
+        """Записать значение с валидацией. Возвращает (success, error_message)."""
+        return self.set_field_value(value)
+
+    def _resolve_meta(self) -> Optional[ResolvedMeta]:
+        """Слияние метаданных регистра с переопределениями из config."""
+        meta = self._get_register_meta()
+        if not meta.raw and not self._register_name:
+            return None
+        config = self._config if self._config is not None else {}
+        return ResolvedMeta.merge(meta, config, self._field_name or "")
+
     def _apply_configuration(self) -> None:
-        """Применить конфигурацию: загрузить метаданные и привязать observer."""
+        """Применить конфигурацию: resolve meta, загрузить UI, привязать observer."""
         if not all([self._registers_manager, self._register_name, self._field_name]):
             return
         meta = self._registers_manager.get_field_metadata(
@@ -126,6 +182,7 @@ class BaseConfigurableWidget(QWidget):
         if not meta:
             return
 
+        self._resolved_meta = self._resolve_meta()
         if not self._is_initialized:
             self._load_metadata()
             self._is_initialized = True

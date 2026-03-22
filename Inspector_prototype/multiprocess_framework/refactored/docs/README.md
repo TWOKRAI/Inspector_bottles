@@ -16,6 +16,8 @@
 | **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` | 5 мин |
 | **[FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md)** | Детальный план: sender, лаунчер, фазы M0–M3 vs L, анти-паттерны, чеклисты для агента | 25 мин |
 | **[ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md)** | Каталог модулей фреймворка + пакетов прототипа (для диаграмм и связей) | 15 мин |
+| **[FRAMEWORK_VISION_AND_WISHLIST.md](./FRAMEWORK_VISION_AND_WISHLIST.md)** | Видение «идеального» каркаса, сравнение с текущим кодом, черновик пожеланий | 20 мин |
+| **[FRAMEWORK_IDEAL_GLOBAL_PLAN.md](./FRAMEWORK_IDEAL_GLOBAL_PLAN.md)** | Глобальный план: волны работ, критерии готовности, карта тем к модулям | 15 мин |
 
 ---
 

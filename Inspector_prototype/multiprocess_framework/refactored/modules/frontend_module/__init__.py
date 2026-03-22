@@ -36,9 +36,21 @@ __all__ = [
 
 from frontend_module.application import (
     FrontendManager,
+    FrontendLaunchHooks,
+    RoutedCommandSender,
     ThreadManager,
     WindowManager,
+    run_process_attached_frontend,
 )
-__all__.extend(["FrontendManager", "ThreadManager", "WindowManager"])
+__all__.extend(
+    [
+        "FrontendManager",
+        "FrontendLaunchHooks",
+        "RoutedCommandSender",
+        "ThreadManager",
+        "WindowManager",
+        "run_process_attached_frontend",
+    ]
+)
 
 __version__ = "0.2.0"

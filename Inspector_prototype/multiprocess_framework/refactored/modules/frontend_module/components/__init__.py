@@ -5,11 +5,18 @@ Components — переиспользуемые UI-компоненты.
 Структура: base, header, controls, tabs, tables, keyboard.
 Реэкспорт для удобного импорта: from frontend_module.components import HeaderWidget, ...
 """
-from frontend_module.components.controls import SliderControl, CheckboxControl
+from frontend_module.components.controls import (
+    SliderControl,
+    SliderConfig,
+    CheckboxControl,
+    CheckboxConfig,
+)
 
 __all__ = [
     "SliderControl",
+    "SliderConfig",
     "CheckboxControl",
+    "CheckboxConfig",
 ]
 
 try:
