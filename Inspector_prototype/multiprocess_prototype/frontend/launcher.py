@@ -14,6 +14,7 @@ from frontend_module.windows import LoadingWindow
 from multiprocess_prototype.registers import create_registers
 from multiprocess_prototype.frontend.configs.frontend_config import build_frontend_config
 from multiprocess_prototype.frontend.commands import GuiCommandHandler
+from multiprocess_prototype.frontend.widgets import build_camera_tab_callbacks
 from multiprocess_prototype.frontend.windows.main_window import MainWindow, create_tab_widget_factory
 
 
@@ -41,22 +42,6 @@ class FrontendLauncher:
         """(RegistersManager, connection_map)."""
         return create_registers()
 
-    def _camera_callbacks(self, cmd: GuiCommandHandler) -> Dict[str, Any]:
-        """Callbacks для CameraTabWidget."""
-        return {
-            "on_start": cmd.send_start_capture,
-            "on_stop": cmd.send_stop_capture,
-            "on_set_fps": cmd.send_set_fps,
-            "on_enum_devices": cmd.send_enum_devices,
-            "on_open": lambda camera_index=0: cmd.send_open_camera(camera_index=camera_index),
-            "on_close": cmd.send_close_camera,
-            "on_start_grabbing": cmd.send_start_grabbing,
-            "on_stop_grabbing": cmd.send_stop_grabbing,
-            "on_get_parameters": cmd.send_get_parameters,
-            "on_set_parameters": lambda fr, exp, gain: cmd.send_set_parameters(fr, exp, gain),
-            "on_camera_type_changed": cmd.send_camera_type_changed,
-        }
-
     def register_windows(
         self,
         window_manager: Any,
@@ -81,7 +66,7 @@ class FrontendLauncher:
         tab_widget_factory = create_tab_widget_factory(
             config=config,
             registers_manager=fm.get_registers() if fm else None,
-            camera_callbacks=self._camera_callbacks(cmd),
+            camera_callbacks_map=build_camera_tab_callbacks(cmd),
             camera_type=camera_type,
         )
 
@@ -97,7 +82,7 @@ class FrontendLauncher:
             win = MainWindow(
                 config=config,
                 registers_manager=fm.get_registers() if fm else None,
-                camera_callbacks=self._camera_callbacks(cmd),
+                camera_callbacks_map=build_camera_tab_callbacks(cmd),
                 camera_type=camera_type,
                 tab_widget_factory=tab_widget_factory,
                 header_action_handlers={},

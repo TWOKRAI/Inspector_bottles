@@ -20,4 +20,4 @@
 
 См. **[TAB_STRUCTURE.md](TAB_STRUCTURE.md)** — рекомендации по организации вкладок.  
 **[MVP_TEMPLATE.md](MVP_TEMPLATE.md)** — копировать для новой MVP-вкладки.  
-Эталон — `multiprocess_prototype/frontend/widgets/camera_tab`.
+Эталон — `multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab`.

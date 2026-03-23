@@ -11,7 +11,7 @@
 | Тема | Выбор |
 |------|--------|
 | Группировка processor + renderer | Подпакет приложения **`registers/schemas/processing_tab/`** с **`__init__.py` как единственной точкой импорта** синхронных схем (`ProcessorRegisters`, `RendererRegisters`, константы маршрутизации). |
-| UI-строки (`ProcessingTabUiConfig`) | **Рядом с виджетом** (`frontend/widgets/processing_tab/schemas.py`). Не участвуют в `register_update` и не должны попадать в снимок рецепта как источник истины значений. |
+| UI-строки (`ProcessingTabUiConfig`) | **Рядом с виджетом** (`frontend/widgets/tabs_setting/processing_tab/schemas.py`). Не участвуют в `register_update` и не должны попадать в снимок рецепта как источник истины значений. |
 | Слой `registers` → `frontend` | **Запрет** обратного импорта: `registers` не импортирует `frontend`. |
 | Миграция | По желанию: тонкие **compat-реэкспорты** из старых путей на один переходный период. |
 
@@ -155,7 +155,7 @@ flowchart LR
 
 1. Создать `registers/schemas/processing_tab/` (`processor.py`, `renderer.py`, `__init__.py`).
 2. Обновить [`factory.py`](../registers/factory.py), [`schemas/__init__.py`](../registers/schemas/__init__.py), импорты в тестах/доках.
-3. Перенести `ProcessingTabUiConfig` в `frontend/widgets/processing_tab/`; обновить [`widget.py`](../frontend/widgets/processing_tab/widget.py), реэкспорты в [`widgets/__init__.py`](../frontend/widgets/__init__.py).
+3. Перенести `ProcessingTabUiConfig` в `frontend/widgets/tabs_setting/processing_tab/`; обновить `widget.py`, реэкспорты в [`widgets/__init__.py`](../frontend/widgets/__init__.py).
 4. Контрактный тест схема ↔ `_apply_register_update`; починить рассинхрон вроде `DrawRegisters` / `settings_tab` при необходимости.
 5. `python scripts/validate.py`, pytest; `DECISIONS.md`, `registers/README.md`, `CHECKLIST.md`.
 

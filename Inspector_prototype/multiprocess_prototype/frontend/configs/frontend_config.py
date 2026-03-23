@@ -2,7 +2,7 @@
 """
 FrontendConfig — корневая схема всего frontend-процесса.
 
-Композиция только из дочерних пакетов (main_window, loading, tabs, settings_tab).
+Композиция только из дочерних пакетов (main_window, loading, tabs_setting).
 Секции UI живут рядом с виджетами; здесь — склейка и build_dict.
 """
 
@@ -18,8 +18,7 @@ from multiprocess_framework.refactored.modules.data_schema_module import (
 
 from multiprocess_prototype.frontend.windows.loading import LoadingWindowConfig
 from multiprocess_prototype.frontend.windows.main_window import MainWindowConfig
-from multiprocess_prototype.frontend.widgets.settings_tab import SettingsTabConfig
-from multiprocess_prototype.frontend.widgets.tabs import TabsConfig
+from multiprocess_prototype.frontend.widgets.tabs_setting import SettingsTabConfig, TabsConfig
 
 
 @register_schema("WindowRegistryEntry")

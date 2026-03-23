@@ -365,7 +365,7 @@
 - Контекст: Плоские `registers/schemas/processor.py|renderer.py|processing_tab_ui.py` не отражали принадлежность к одной фиче; `ProcessingTabUiConfig` не участвует в `register_update`, но лежал рядом с синхронными схемами.
 - Решение:
   - Синхронизируемые классы вкладки «Обработка» — пакет `multiprocess_prototype/registers/schemas/processing_tab/` (`processor.py`, `renderer.py`, `__init__.py` barrel, `names.py` с ключами `PROCESSOR_REGISTER` / `RENDERER_REGISTER`).
-  - `ProcessingTabUiConfig` — `multiprocess_prototype/frontend/widgets/processing_tab/ui_config.py`. Пакет `registers` **не** импортирует `frontend`.
+  - `ProcessingTabUiConfig` — `multiprocess_prototype/frontend/widgets/tabs_setting/processing_tab/schemas.py`. Пакет `registers` **не** импортирует `frontend`.
   - Корневой `multiprocess_prototype/registers/schemas/__init__.py` реэкспортирует символы фичи; импорт приложения: `from multiprocess_prototype.registers.schemas import …` (не короткий `registers` — пакет не на PYTHONPATH как top-level).
   - Контракт: `tests/test_register_schema_backend_contract.py` — множество полей `ProcessorRegisters` / `RendererRegisters` совпадает с ветками `_apply_register_update` в соответствующих процессах.
 - Причина: Навигация «одна фича — одна папка регистров»; отделение UI-текстов от шины; задел под рецепты (один источник значений в регистрах).
@@ -389,7 +389,7 @@
 - Контекст: На `MainWindow` смешивались строки UI, алгоритмические поля и пути доставки (`register_update` vs команды); дублировалась схема `DrawRegisters` в прототипе.
 - Решение:
   - **StateRegister** (`ProcessorRegisters`, `RendererRegisters`, и др. в `multiprocess_prototype/registers/schemas/<feature>/`) — канон имён полей, `FieldMeta`, маршрутизация `register_update` через `register_dispatch` / `FieldRouting` (см. ADR-050, ADR-052).
-  - **UiSchema** (`ProcessingTabUiConfig` и аналоги) — только тексты и группировка для Qt; без маршрутизации на процессы; не дублирует алгоритмические значения; для вкладки «Обработка» — `frontend/widgets/processing_tab/ui_config.py`.
+  - **UiSchema** (`ProcessingTabUiConfig` и аналоги) — только тексты и группировка для Qt; без маршрутизации на процессы; не дублирует алгоритмические значения; для вкладки «Обработка» — `frontend/widgets/tabs_setting/processing_tab/schemas.py`.
   - Вкладка «Обработка»: контролы `frontend_module` + `RegistersManager`; BGR как шесть слайдеров ↔ `color_lower` / `color_upper`; бэкенд принимает `register_update` в цикле data-воркера (`ProcessorProcess` / `RendererProcess`).
   - Прототип: обработка — `registers/schemas/processing_tab/`; другие фичи — отдельные подпакеты при появлении синхронных регистров.
 - Причина: Один источник истины для имён полей GUI и процессов; UI-строки отделены от шины; см. `docs/ROUTING_GLOSSARY.md`, чеклист `multiprocess_prototype/registers/CHECKLIST.md`.
@@ -417,8 +417,8 @@
 - Статус: принято
 - Контекст: `configs/tabs/` отрывал схемы от `widgets/*`; неочевидно, где править вкладку.
 - Решение:
-  - `widgets/<имя>_tab/`: `widget.py` + `config.py` (вкладка как компонент) + при необходимости `ui_config.py` для строк UI (`processing_tab`, `camera_tab`); settings_tab: ControlBinding, SettingsTabConfig.
-  - Общий слой полосы вкладок: `widgets/tabs/` — `TabItemConfig`, `TabsConfig`; дефолтный список вкладок собирается из `default_tab_item()` каждого feature-пакета.
+  - `widgets/tabs_setting/<имя>_tab/`: `widget.py` + `schemas.py` (вкладка как компонент) для строк UI (`processing_tab`, `camera_tab`); `settings_tab`: ControlBinding, SettingsTabConfig.
+  - Общий слой полосы вкладок: `widgets/tabs_setting/` — `TabItemConfig`, `TabsConfig`; дефолтный список вкладок собирается из `default_tab_item()` каждого feature-пакета.
   - `configs/` — только корень приложения: `frontend_config.py`, `window_registry.py`, `config.py` (GuiConfig).
   - `windows/loading/` — `LoadingWindowConfig` рядом с использованием во фреймворке `LoadingWindow`.
 - Причина: Навигация «открыл папку вкладки — всё рядом»; корневая композиция не раздувается чужими схемами.

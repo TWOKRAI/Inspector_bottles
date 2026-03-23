@@ -1,15 +1,25 @@
 # multiprocess_prototype/frontend/widgets/
 """
-Виджеты вкладок — пакеты «виджет + свой конфиг» рядом.
+Виджеты вкладок и прочие UI-пакеты.
 
-Общий слой списка вкладок: widgets.tabs (TabItemConfig, TabsConfig).
+Вкладки главного окна и полоса табов: widgets.tabs_setting (TabItemConfig, TabsConfig,
+CameraTabWidget, …).
 """
 
-from .camera_tab import CameraTabCallbacks, CameraTabUiConfig, CameraTabWidget
-from .processing_tab import ProcessingTabUiConfig, ProcessingTabWidget
-from .recipes_tab import RecipesTabConfig, RecipesTabWidget
-from .settings_tab import ControlBinding, SettingsTabConfig, SettingsTabWidget
-from .tabs import TabItemConfig, TabsConfig
+from .tabs_setting import (
+    CameraTabUiConfig,
+    CameraTabWidget,
+    ControlBinding,
+    ProcessingTabUiConfig,
+    ProcessingTabWidget,
+    RecipesTabConfig,
+    RecipesTabWidget,
+    SettingsTabConfig,
+    SettingsTabWidget,
+    TabItemConfig,
+    TabsConfig,
+    build_camera_tab_callbacks,
+)
 
 __all__ = [
     "RecipesTabWidget",
@@ -19,8 +29,8 @@ __all__ = [
     "ControlBinding",
     "ProcessingTabWidget",
     "ProcessingTabUiConfig",
-    "CameraTabCallbacks",
     "CameraTabWidget",
+    "build_camera_tab_callbacks",
     "CameraTabUiConfig",
     "TabItemConfig",
     "TabsConfig",

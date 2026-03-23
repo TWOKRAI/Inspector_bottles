@@ -10,7 +10,7 @@ def create_tab_widget_factory(
     *,
     config: Dict[str, Any],
     registers_manager: Optional[Any] = None,
-    camera_callbacks: Dict[str, Any],
+    camera_callbacks_map: Dict[str, Any],
     camera_type: str,
 ) -> TabWidgetFactory:
     from multiprocess_prototype.frontend.widgets import (
@@ -34,7 +34,7 @@ def create_tab_widget_factory(
             return CameraTabWidget(
                 camera_type=camera_type,
                 registers_manager=registers_manager,
-                callbacks=camera_callbacks,
+                callbacks_map=camera_callbacks_map,
             )
         return None
 

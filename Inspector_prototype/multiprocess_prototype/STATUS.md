@@ -29,6 +29,8 @@
 
 ## Последние изменения (2026-03-23)
 
+- `sim_webcam_widget` влит в `frontend/widgets/camera_common/` (`SimWebcamWidget`, presenter, binder, callbacks).
+- Вкладки и `TabItemConfig`/`TabsConfig` перенесены в `frontend/widgets/tabs_setting/` (подпакеты `camera_tab`, `processing_tab`, `recipes_tab`, `settings_tab`).
 - `camera_tab`: презентер (Phase 2): `IRegistersManagerGui`, `RegisterBindingContext`, `CameraTabPresenter`/`CameraTabView`/`CameraTabCallbacks`; валидатор `label_attribute`
 - Миграция на control_v2: `ui_config.py` → `schemas.py` (camera_tab, processing_tab, settings_tab)
 - Все контролы через `frontend_module.components.control_v2`

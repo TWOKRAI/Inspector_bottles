@@ -36,6 +36,7 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-23 | Эталон вкладки в доках: `multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab` (перенос из `widgets/camera_tab`) | 6 |
 | 2026-03-23 | **ADR-073**: `TabPresenterBase` / `TabViewProtocol` (`tabs/mvp_pattern.py`); `CameraTabPresenter` на базовом классе; `processing_tab` — `IRegistersManagerGui` + `RegisterBindingContext`; реэкспорт tabs из `components`; `test_tabs_callbacks.py` | 6 |
 | 2026-03-23 | **tabs**: `callback_utils` влит в `callbacks_base.py`; `tab_callbacks_*` без ручного списка полей для `@dataclass`; `TabWidget` — тип `Dict[int, BaseTab]`; тесты переименованы в `test_tabs_callbacks.py` | 6 |
 | 2026-03-23 | **ADR-072**: `callback_no_args`, `TAB_STRUCTURE.md`, `tabs/README.md`; camera_tab на `coerce_schema_config` | 6 |

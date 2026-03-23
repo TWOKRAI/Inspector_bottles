@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         config: Optional[Dict[str, Any]] = None,
         show_window_callback: Optional[Callable[[str], None]] = None,
         registers_manager: Optional[Any] = None,
-        camera_callbacks: Optional[Dict[str, Callable]] = None,
+        camera_callbacks_map: Optional[Dict[str, Any]] = None,
         camera_type: str = "simulator",
         tab_widget_factory: Optional[TabWidgetFactory] = None,
         header_action_handlers: Optional[Dict[str, Callable[[], None]]] = None,
@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self._config = config or {}
         self._registers_manager = registers_manager
-        self._camera_callbacks = camera_callbacks or {}
+        self._camera_callbacks_map = camera_callbacks_map or {}
         self._camera_type = camera_type
         self._tab_widget_factory = tab_widget_factory
         self._header_action_handlers = header_action_handlers or {}
@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         return create_tab_widget_factory(
             config=self._config,
             registers_manager=self._registers_manager,
-            camera_callbacks=self._camera_callbacks,
+            camera_callbacks_map=self._camera_callbacks_map,
             camera_type=self._camera_type,
         )
 

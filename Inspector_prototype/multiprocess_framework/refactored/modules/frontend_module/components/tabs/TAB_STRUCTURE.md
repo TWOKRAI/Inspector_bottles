@@ -1,6 +1,6 @@
 # Структура вкладки — шаблон и рекомендации
 
-Документ описывает рекомендованный подход к созданию вкладок приложения: когда использовать MVP, как организовывать файлы, какие утилиты применять. Эталонная реализация — `multiprocess_prototype/frontend/widgets/camera_tab`.
+Документ описывает рекомендованный подход к созданию вкладок приложения: когда использовать MVP, как организовывать файлы, какие утилиты применять. Эталонная реализация — `multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab`.
 
 **Фреймворк:** `MvpTabBase` (фасад), `create_registers_placeholder`, `tab_callbacks_from_dict`/`to_dict`, шаблон — `MVP_TEMPLATE.md`.
 
