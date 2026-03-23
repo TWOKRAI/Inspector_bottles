@@ -6,7 +6,7 @@ BaseTab — абстрактный базовый класс для вкладо
 from __future__ import annotations
 
 import abc
-from typing import Optional
+from typing import Dict, Optional
 
 from frontend_module.core.qt_imports import (
     QHBoxLayout,
@@ -72,7 +72,7 @@ class TabWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tab_widget)
         self._tab_widget.currentChanged.connect(self._on_current_changed)
-        self._tab_index_to_widget: dict = {}
+        self._tab_index_to_widget: Dict[int, BaseTab] = {}
         self._last_index = -1
 
     def add_tab(self, widget: QWidget, title: str, wrap_scroll: bool = True) -> None:

@@ -27,6 +27,14 @@
 
 ---
 
+## Последние изменения (2026-03-23)
+
+- `camera_tab`: презентер (Phase 2): `IRegistersManagerGui`, `RegisterBindingContext`, `CameraTabPresenter`/`CameraTabView`/`CameraTabCallbacks`; валидатор `label_attribute`
+- Миграция на control_v2: `ui_config.py` → `schemas.py` (camera_tab, processing_tab, settings_tab)
+- Все контролы через `frontend_module.components.control_v2`
+- `CameraRegisters`: добавлены `hikvision_frame_rate`, `hikvision_exposure_time`, `hikvision_gain`
+- Processing tab: legacy fallback удалён, при отсутствии RegistersManager — заглушка
+
 ## Известные ограничения
 
 - Hikvision требует модуль `hikvision_camera_module` (вне репозитория)

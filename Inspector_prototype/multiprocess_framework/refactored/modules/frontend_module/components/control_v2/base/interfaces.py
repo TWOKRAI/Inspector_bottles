@@ -68,17 +68,10 @@ class IRegisterPort(Protocol):
 
 # --- Минимум RegistersManager для адаптера регистра ---
 
+from frontend_module.interfaces import IRegistersManagerGui
 
-class RegistersManagerLike(Protocol):
-    """Минимум для `RegisterAdapter` (остальное — `hasattr`: `set_field_value`, `subscribe`)."""
-
-    def get_register(self, register_name: str) -> Any:
-        ...
-
-    def get_field_metadata(
-        self, register_name: str, field_name: str
-    ) -> Optional[dict]:
-        ...
+# Алиас для обратной совместимости; единый контракт для GUI (ADR-071).
+RegistersManagerLike = IRegistersManagerGui
 
 
 # --- Виджет: только UI, без знания о traits ---
@@ -148,5 +141,6 @@ __all__ = [
     "INumericView",
     "IFieldBinding",
     "IRegisterPort",
+    "IRegistersManagerGui",
     "RegistersManagerLike",
 ]

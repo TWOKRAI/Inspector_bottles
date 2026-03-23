@@ -2,9 +2,11 @@
 """
 TabsConfig — список вкладок главного окна (композиция TabItemConfig).
 
-Собирает вкладки прототипа; отдельные вкладки настраиваются в своих пакетах
-(e.g. settings_tab/config.py для содержимого Settings).
+Собирает вкладки из default_tab_item() каждой фичи. Порядок _default_tabs:
+Рецепты → Настройки → Обработка → Камера (можно менять).
 """
+
+from __future__ import annotations
 
 from typing import List
 
@@ -16,11 +18,11 @@ from .tab_item_config import TabItemConfig
 
 
 def _default_tabs() -> List[TabItemConfig]:
-    """Собирает вкладки из feature-пакетов (один источник заголовков/id)."""
-    from ..camera_tab.config import default_tab_item as _cam
-    from ..processing_tab.config import default_tab_item as _proc
-    from ..recipes_tab.config import default_tab_item as _rec
-    from ..settings_tab.config import default_tab_item as _set
+    """Вкладки из feature-пакетов: recipes, settings, processing, camera."""
+    from ..camera_tab.schemas import default_tab_item as _cam
+    from ..processing_tab.schemas import default_tab_item as _proc
+    from ..recipes_tab.schemas import default_tab_item as _rec
+    from ..settings_tab.schemas import default_tab_item as _set
 
     return [_rec(), _set(), _proc(), _cam()]
 

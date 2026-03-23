@@ -1,7 +1,12 @@
 # multiprocess_prototype/frontend/widgets/tabs/tab_item_config.py
 """
-TabItemConfig — описание одной вкладки в TabWidget (общий слой для полосы вкладок).
+TabItemConfig — описание одной вкладки в TabWidget.
+
+id — уникальный ключ (callback_key, routing). title — текст на табе.
+widget — ключ фабрики (tab_factory): recipes, settings, processing, camera.
 """
+
+from __future__ import annotations
 
 from typing import Annotated
 

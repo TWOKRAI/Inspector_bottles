@@ -113,3 +113,39 @@ class CameraRegisters(SchemaBase):
             routing=CAMERA_ROUTING,
         ),
     ] = 1080
+
+    hikvision_frame_rate: Annotated[
+        float,
+        FieldMeta(
+            "Frame Rate Hikvision",
+            info="Частота кадров Hikvision (Get/Set Parameters).",
+            min=0.1,
+            max=120.0,
+            unit="fps",
+            routing=CAMERA_ROUTING,
+        ),
+    ] = 25.0
+
+    hikvision_exposure_time: Annotated[
+        float,
+        FieldMeta(
+            "Exposure Hikvision",
+            info="Время экспозиции Hikvision (μs).",
+            min=0.0,
+            max=1000000.0,
+            unit="μs",
+            routing=CAMERA_ROUTING,
+        ),
+    ] = 10000.0
+
+    hikvision_gain: Annotated[
+        float,
+        FieldMeta(
+            "Gain Hikvision",
+            info="Усиление Hikvision (dB).",
+            min=0.0,
+            max=24.0,
+            unit="dB",
+            routing=CAMERA_ROUTING,
+        ),
+    ] = 0.0

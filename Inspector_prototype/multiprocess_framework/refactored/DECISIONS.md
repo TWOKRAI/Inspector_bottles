@@ -16,6 +16,81 @@
 
 ---
 
+## ADR-075: MvpTabBase, create_registers_placeholder, callbacks_base, recipes schemas
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: Упрощение реализации MVP-вкладок; дублирование placeholder и callbacks from_dict/to_dict; неконсистентное именование config vs schemas в recipes_tab.
+- Решение:
+  - **`tabs/mvp_facade.py`**: **MvpTabBase** — фасад для MVP-вкладок; дочерний класс реализует `_coerce_callbacks`, `_coerce_ui`, `_init_ui`, `_create_presenter`, `_on_presenter_ready`; убирает дублирование flow в camera_tab.
+  - **`tabs/placeholder_utils.py`**: **create_registers_placeholder(tab_name)** — единая заглушка для вкладок без RegistersManager.
+  - **`tabs/callbacks_base.py`**: **tab_callbacks_from_dict** / **tab_callbacks_to_dict** (опционально без списка полей для `@dataclass`), **callback_no_args** — единый модуль колбэков вкладок.
+  - **`tabs/MVP_TEMPLATE.md`**: шаблон MVP-вкладки (копировать и заполнять).
+  - **camera_tab**: наследует MvpTabBase; callbacks используют callbacks_base.
+  - **processing_tab, settings_tab**: используют create_registers_placeholder.
+  - **recipes_tab**: config.py → schemas.py (единообразие с другими вкладками).
+  - **processing_tab**: удалён неиспользуемый параметр callbacks; _processing_callbacks удалён из launcher.
+- Причина: Легче добавлять новые MVP-вкладки; меньше копипаста; единый стиль.
+- Отклонённые альтернативы: оставить camera_tab на BaseTab — MvpTabBase даёт явный контракт и сокращает boilerplate.
+
+---
+
+## ADR-071: IRegistersManagerGui — единый протокол регистров для GUI
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: В camera_tab, control_v2, register_ops использовались `Any` и `hasattr` для менеджера регистров. План рефакторинга вкладок (PLAN_TABS_PRESENTERS_REGISTERS.md) требовал явного контракта до внедрения презентера.
+- Решение:
+  - **`frontend_module/interfaces.py`**: введён **`IRegistersManagerGui`** с методами `set_field_value`, `get_register`, `get_field_metadata`.
+  - **`control_v2/base/interfaces.py`**: **`RegistersManagerLike`** = алиас `IRegistersManagerGui`; единый тип для RegisterAdapter и NumericControl.
+  - Приложение (register_ops, фабрики вкладок) типизирует `registers_manager: Optional[IRegistersManagerGui]`.
+- Причина: Убрать `Any`/`hasattr`; улучшить статическую проверку и автодополнение.
+- Отклонённые альтернативы: оставить RegistersManagerLike отдельно — дублирование контракта; добавить set_field_value в IRegistersManager — registers_module IRegistersManager не включает запись, разделение чтение/запись оправдано.
+
+---
+
+## ADR-072: Паттерн вкладок — MVP, coerce_schema_config, callback_no_args, TAB_STRUCTURE
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: camera_tab реализовал MVP (View + Presenter + Callbacks), секции с RegisterBindingContext, локальные ui_coerce и _invoke. Требовался генеральный рефакторинг: вынос универсальных паттернов во фреймворк, единая структура для всех вкладок.
+- Решение:
+  - **`tabs/callbacks_base.py`**: `callback_no_args(fn)` — обёртка для Qt clicked(bool); вместе с `tab_callbacks_*` в одном модуле, экспорт в `tabs/__init__.py`.
+  - **`tabs/TAB_STRUCTURE.md`**: шаблон структуры вкладки; когда MVP vs простой виджет; паттерн Callbacks dataclass; RegisterBindingContext, coerce_schema_config, callback_no_args; ссылка на camera_tab как эталон.
+  - **camera_tab**: `coerce_camera_ui` → `coerce_schema_config(ui, CameraTabUiConfig)`; `_invoke(fn, no_args=True)` → `callback_no_args`; docstrings.
+  - **processing_tab**: `_coerce_processing_ui` удалён, используется `coerce_schema_config(ui, ProcessingTabUiConfig)`.
+  - **tabs/README.md**: создан, ссылка на TAB_STRUCTURE.
+- Причина: DRY; единые рекомендации для новых вкладок; camera_tab остаётся эталоном без дублирования логики.
+- Отклонённые альтернативы: отдельный coerce_ui_config в tabs — достаточно coerce_schema_config из core. TabPresenterBase — реализовано в ADR-073.
+
+---
+
+## ADR-073: TabPresenterBase, TabViewProtocol; processing_tab и RegisterBindingContext
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: После ADR-072 оставались рекомендации: выровнять processing_tab с `IRegistersManagerGui` / `RegisterBindingContext` вместо `hasattr(rm, "set_field_value")`; ввести лёгкий каркас MVP во фреймворке; тесты и реэкспорт из `components`.
+- Решение:
+  - **`tabs/mvp_pattern.py`**: `TabViewProtocol` (маркер), `TabPresenterBase[TView, TUi]` с `_view`, `_rm`, `_ui`.
+  - **`CameraTabPresenter`**: наследует `TabPresenterBase`; `CameraTabView` наследует `TabViewProtocol, Protocol`.
+  - **`ProcessingTabWidget`**: `registers_manager: Optional[IRegistersManagerGui]`; в `_init_ui` — `RegisterBindingContext`, ветка заглушки при `not binding.can_bind`.
+  - **`frontend_module.components`**: реэкспорт `RegisterBindingContext`, `TabPresenterBase`, `TabViewProtocol`, `callback_no_args` вместе с `BaseTab` / `TabWidget`.
+  - **`tests/test_tabs_callbacks.py`**: `callback_no_args`, dataclass ↔ dict, явный `field_names`.
+- Причина: Единый язык вкладок с регистрами; явный каркас для новых MVP-вкладок без дублирования полей презентера.
+- Отклонённые альтернативы: только документация без кода — слабее для статической типизации и онбординга.
+
+---
+
+## ADR-074: Единый стиль всех вкладок — IRegistersManagerGui, RegisterBindingContext, coerce
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: settings_tab и recipes_tab использовали `Any` для rm, `hasattr` или inline `model_validate`; API отличались от camera_tab и processing_tab.
+- Решение:
+  - **settings_tab**: `registers_manager: Optional[IRegistersManagerGui]`; `ui: Optional[Union[SettingsTabConfig, dict]]` вместо `controls_config` + `group_title`; `RegisterBindingContext`; заглушка при `not binding.can_bind`; `coerce_schema_config`.
+  - **recipes_tab**: `registers_manager: Optional[IRegistersManagerGui]`; `ui` через `coerce_schema_config`; docstrings.
+  - **tab_factory**: settings — `ui=config.get("settings_tab")`.
+  - Все вкладки: единые docstrings в `__init__.py`, `registers_manager` property.
+- Причина: Один контракт для всех вкладок; удобство фреймворка (TAB_STRUCTURE) для новых фич.
+- Отклонённые альтернативы: оставить раздельные API — усложняет онбординг.
+
+---
+
 ## ADR-070: primitives и common в control_v2, удаление controls v1
 - Дата: 2026-03-23
 - Статус: принято

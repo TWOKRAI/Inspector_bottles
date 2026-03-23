@@ -5,8 +5,8 @@
 Общий слой списка вкладок: widgets.tabs (TabItemConfig, TabsConfig).
 """
 
-from .camera_tab import CameraTabConfig, CameraTabUiConfig, CameraTabWidget
-from .processing_tab import ProcessingTabConfig, ProcessingTabUiConfig, ProcessingTabWidget
+from .camera_tab import CameraTabCallbacks, CameraTabUiConfig, CameraTabWidget
+from .processing_tab import ProcessingTabUiConfig, ProcessingTabWidget
 from .recipes_tab import RecipesTabConfig, RecipesTabWidget
 from .settings_tab import ControlBinding, SettingsTabConfig, SettingsTabWidget
 from .tabs import TabItemConfig, TabsConfig
@@ -18,10 +18,9 @@ __all__ = [
     "SettingsTabConfig",
     "ControlBinding",
     "ProcessingTabWidget",
-    "ProcessingTabConfig",
     "ProcessingTabUiConfig",
+    "CameraTabCallbacks",
     "CameraTabWidget",
-    "CameraTabConfig",
     "CameraTabUiConfig",
     "TabItemConfig",
     "TabsConfig",

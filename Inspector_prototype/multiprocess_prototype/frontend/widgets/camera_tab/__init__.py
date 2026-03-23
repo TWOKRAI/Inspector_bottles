@@ -1,8 +1,19 @@
 # multiprocess_prototype/frontend/widgets/camera_tab/
+"""
+Вкладка управления камерой: Simulator / Webcam / Hikvision.
 
-from .ui_config import CameraTabUiConfig
+Эталонная реализация MVP (View + Presenter + Callbacks). Использует
+RegisterBindingContext, coerce_schema_config, callback_no_args.
+См. frontend_module/components/tabs/TAB_STRUCTURE.md.
 
-from .config import CameraTabConfig
+Экспорты:
+- CameraTabWidget — виджет вкладки
+- CameraTabUiConfig — конфиг подписей и пределов UI
+- CameraTabCallbacks — колбэки команд в backend
+"""
+
+from .callbacks import CameraTabCallbacks
+from .schemas import CameraTabUiConfig
 from .widget import CameraTabWidget
 
-__all__ = ["CameraTabConfig", "CameraTabUiConfig", "CameraTabWidget"]
+__all__ = ["CameraTabCallbacks", "CameraTabUiConfig", "CameraTabWidget"]

@@ -1,5 +1,11 @@
-# multiprocess_prototype/frontend/widgets/recipes_tab/config.py
-"""Конфиг вкладки «Рецепты» (заглушка); default_tab_item — строка в TabWidget."""
+# multiprocess_prototype/frontend/widgets/recipes_tab/schemas.py
+"""
+Конфиг вкладки «Рецепты» (заглушка).
+
+stub_caption, stub_label_style — текст и стиль QLabel. default_tab_item — для TabsConfig.
+"""
+
+from __future__ import annotations
 
 from multiprocess_framework.refactored.modules.data_schema_module import SchemaBase, register_schema
 

@@ -31,11 +31,35 @@ except ImportError:
     TableWithToolbar = None
 
 try:
-    from frontend_module.components.tabs import TabWidget, BaseTab
-    __all__.extend(["TabWidget", "BaseTab"])
+    from frontend_module.components.tabs import (
+        BaseTab,
+        MvpTabBase,
+        RegisterBindingContext,
+        TabPresenterBase,
+        TabViewProtocol,
+        TabWidget,
+        callback_no_args,
+        create_registers_placeholder,
+    )
+    __all__.extend(
+        [
+            "BaseTab",
+            "MvpTabBase",
+            "RegisterBindingContext",
+            "TabPresenterBase",
+            "TabViewProtocol",
+            "TabWidget",
+            "callback_no_args",
+            "create_registers_placeholder",
+        ]
+    )
 except ImportError:
     TabWidget = None
     BaseTab = None
+    RegisterBindingContext = None
+    TabPresenterBase = None
+    TabViewProtocol = None
+    callback_no_args = None
 
 try:
     from frontend_module.components.header import HeaderWidget

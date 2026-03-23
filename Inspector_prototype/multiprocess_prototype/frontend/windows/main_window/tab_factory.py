@@ -11,7 +11,6 @@ def create_tab_widget_factory(
     config: Dict[str, Any],
     registers_manager: Optional[Any] = None,
     camera_callbacks: Dict[str, Any],
-    processing_callbacks: Dict[str, Any],
     camera_type: str,
 ) -> TabWidgetFactory:
     from multiprocess_prototype.frontend.widgets import (
@@ -25,19 +24,12 @@ def create_tab_widget_factory(
         if widget_key == "recipes":
             return RecipesTabWidget(registers_manager=registers_manager)
         if widget_key == "settings":
-            st_cfg = config.get("settings_tab", {})
-            controls = st_cfg.get("controls", [])
-            group_title = st_cfg.get("group_title", "Параметры отображения")
             return SettingsTabWidget(
                 registers_manager=registers_manager,
-                controls_config=controls,
-                group_title=group_title,
+                ui=config.get("settings_tab"),
             )
         if widget_key == "processing":
-            return ProcessingTabWidget(
-                registers_manager=registers_manager,
-                callbacks=processing_callbacks,
-            )
+            return ProcessingTabWidget(registers_manager=registers_manager)
         if widget_key == "camera":
             return CameraTabWidget(
                 camera_type=camera_type,

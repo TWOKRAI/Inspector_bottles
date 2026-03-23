@@ -20,4 +20,7 @@ def camera_process_boot_values() -> dict[str, Any]:
         "camera_index": r.camera_index,
         "hikvision_resolution_width": r.hikvision_resolution_width,
         "hikvision_resolution_height": r.hikvision_resolution_height,
+        "hikvision_frame_rate": r.hikvision_frame_rate,
+        "hikvision_exposure_time": r.hikvision_exposure_time,
+        "hikvision_gain": r.hikvision_gain,
     }

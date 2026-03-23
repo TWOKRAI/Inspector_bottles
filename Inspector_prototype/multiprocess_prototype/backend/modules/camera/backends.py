@@ -63,6 +63,21 @@ class SimulatorBackend(BaseCaptureBackend):
             self._generator.close()
 
 
+def _enum_webcam_devices(max_index: int = 10) -> dict:
+    """Перечислить доступные веб-камеры (OpenCV VideoCapture)."""
+    try:
+        import cv2
+    except ImportError:
+        return {"status": "error", "error": "opencv-python not installed", "devices": []}
+    devices = []
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            devices.append({"index": i, "display_name": f"Webcam {i}"})
+            cap.release()
+    return {"status": "ok", "devices": devices}
+
+
 class WebcamBackend(BaseCaptureBackend):
     """Веб-камера: WebcamCapture."""
 
@@ -106,6 +121,11 @@ class WebcamBackend(BaseCaptureBackend):
         if self._generator and hasattr(self._generator, "close"):
             self._generator.close()
         self._generator = None
+
+    def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
+        if cmd == "enum_devices":
+            return _enum_webcam_devices()
+        return super().handle_command(cmd, data)
 
 
 class HikvisionBackend(BaseCaptureBackend):
@@ -196,10 +216,7 @@ class HikvisionBackend(BaseCaptureBackend):
 
     def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
         if cmd == "enum_devices":
-            r = self._facade.enum_devices()
-            if r.get("status") == "ok" and "devices" in r:
-                self._send_to_gui("enum_devices_response", {"devices": r["devices"]})
-            return r
+            return self._facade.enum_devices()
         if cmd == "open":
             idx = data.get("camera_index", self._camera_index)
             self._camera_index = idx

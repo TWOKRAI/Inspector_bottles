@@ -11,7 +11,7 @@
 | Тема | Выбор |
 |------|--------|
 | Группировка processor + renderer | Подпакет приложения **`registers/schemas/processing_tab/`** с **`__init__.py` как единственной точкой импорта** синхронных схем (`ProcessorRegisters`, `RendererRegisters`, константы маршрутизации). |
-| UI-строки (`ProcessingTabUiConfig`) | **Рядом с виджетом** (`frontend/widgets/processing_tab/`, например `ui_config.py`). Не участвуют в `register_update` и не должны попадать в снимок рецепта как источник истины значений. |
+| UI-строки (`ProcessingTabUiConfig`) | **Рядом с виджетом** (`frontend/widgets/processing_tab/schemas.py`). Не участвуют в `register_update` и не должны попадать в снимок рецепта как источник истины значений. |
 | Слой `registers` → `frontend` | **Запрет** обратного импорта: `registers` не импортирует `frontend`. |
 | Миграция | По желанию: тонкие **compat-реэкспорты** из старых путей на один переходный период. |
 

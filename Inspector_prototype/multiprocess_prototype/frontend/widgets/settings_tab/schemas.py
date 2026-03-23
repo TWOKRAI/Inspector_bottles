@@ -1,13 +1,23 @@
-# multiprocess_prototype/frontend/widgets/settings_tab/config.py
+# multiprocess_prototype/frontend/widgets/settings_tab/schemas.py
 """
 Конфиг вкладки «Настройки»: привязки контролов к регистрам.
+
+UI-схема рядом с виджетом. Register keys — PROCESSOR_REGISTER / RENDERER_REGISTER
+из registers.schemas.processing_tab (единый источник имён).
 """
+
+from __future__ import annotations
 
 from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import Field
 
 from multiprocess_framework.refactored.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
+
+from multiprocess_prototype.registers.schemas.processing_tab import (
+    PROCESSOR_REGISTER,
+    RENDERER_REGISTER,
+)
 
 
 @register_schema("ControlBinding")
@@ -32,6 +42,7 @@ class ControlBinding(SchemaBase):
     ] = None
 
     def to_control_dict(self) -> dict:
+        """Словарь для _create_control (type, register_name, field_name, component_config)."""
         d: dict = {
             "type": self.type,
             "register_name": self.register_name,
@@ -43,13 +54,13 @@ class ControlBinding(SchemaBase):
 
 
 def _default_draw_controls() -> List[ControlBinding]:
-    """Контролы по умолчанию — привязаны к processor/renderer."""
+    """Контролы по умолчанию — processor (min/max area), renderer (отображение)."""
     return [
-        ControlBinding(type="slider", register_name="processor", field_name="min_area"),
-        ControlBinding(type="slider", register_name="processor", field_name="max_area"),
-        ControlBinding(type="checkbox", register_name="renderer", field_name="show_original"),
-        ControlBinding(type="checkbox", register_name="renderer", field_name="show_mask"),
-        ControlBinding(type="checkbox", register_name="renderer", field_name="draw_contours"),
+        ControlBinding(type="slider", register_name=PROCESSOR_REGISTER, field_name="min_area"),
+        ControlBinding(type="slider", register_name=PROCESSOR_REGISTER, field_name="max_area"),
+        ControlBinding(type="checkbox", register_name=RENDERER_REGISTER, field_name="show_original"),
+        ControlBinding(type="checkbox", register_name=RENDERER_REGISTER, field_name="show_mask"),
+        ControlBinding(type="checkbox", register_name=RENDERER_REGISTER, field_name="draw_contours"),
     ]
 
 

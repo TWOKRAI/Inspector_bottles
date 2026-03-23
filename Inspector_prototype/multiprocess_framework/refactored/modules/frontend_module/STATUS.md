@@ -7,8 +7,8 @@
 | Критерий | Оценка | Комментарий |
 |----------|--------|-------------|
 | Код (читаемость, стандарты) | 9 | Controls: primitives, typography/styles, `coerce_schema_config`, узкий конструктор |
-| Тесты (покрытие) | 6 | + `test_controls_v2_base.py` (base слой v2); `test_schema_config.py`; routed_command_sender, window_registry |
-| Документация (README, interfaces) | 8 | `control_v2/README.md`, `ARCHITECTURE.md`, `base/README.md`, examples README, STATUS, ADR |
+| Тесты (покрытие) | 6–7 | `test_tabs_callbacks.py` (tabs: Qt-обёртка + dataclass dict); `test_controls_v2_base.py`; `test_schema_config.py`; window_registry |
+| Документация (README, interfaces) | 8 | `tabs/TAB_STRUCTURE.md`, `tabs/README.md`, `control_v2/*`, STATUS, ADR |
 | Связанность (меньше = лучше) | 9 | v1 удалён; controls — тонкий реэкспорт; primitives/common в control_v2 |
 | Работоспособность | 9 | FrontendManager.run_app/shutdown_app, GuiProcess интеграция |
 
@@ -36,6 +36,9 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-23 | **ADR-073**: `TabPresenterBase` / `TabViewProtocol` (`tabs/mvp_pattern.py`); `CameraTabPresenter` на базовом классе; `processing_tab` — `IRegistersManagerGui` + `RegisterBindingContext`; реэкспорт tabs из `components`; `test_tabs_callbacks.py` | 6 |
+| 2026-03-23 | **tabs**: `callback_utils` влит в `callbacks_base.py`; `tab_callbacks_*` без ручного списка полей для `@dataclass`; `TabWidget` — тип `Dict[int, BaseTab]`; тесты переименованы в `test_tabs_callbacks.py` | 6 |
+| 2026-03-23 | **ADR-072**: `callback_no_args`, `TAB_STRUCTURE.md`, `tabs/README.md`; camera_tab на `coerce_schema_config` | 6 |
 | 2026-03-23 | **ADR-070**: primitives и common в `control_v2/`; v1 (slider, checkbox, primitives, common) удалены; controls — реэкспорт; settings_tab, camera_tab, processing_tab, default_factories на v2 API | 6 |
 | 2026-03-23 | `control_v2/examples`: убран `adapter_common` (inline `coerce_ui` + `BindingConfig`); примеры **numeric**, **group**; покрытие компонентов | 6 |
 | 2026-03-23 | Пакет **`control_v2`** вне `controls/`, примеры → `control_v2/examples/`, shims `controls.v2` / `example_with_data_schema`; ADR-069; документация ARCHITECTURE | 6 |

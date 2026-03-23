@@ -203,9 +203,12 @@ class UnifiedCameraProcess(ProcessModule):
 
     def _cmd_enum_devices(self, data: dict):
         with self._backend_lock:
-            if self._current_type == "hikvision":
-                return self._backend.handle_command("enum_devices", data) or {}
-        return {"status": "error", "error": "Only for Hikvision"}
+            if self._current_type in ("webcam", "hikvision"):
+                result = self._backend.handle_command("enum_devices", data) or {}
+                if isinstance(result, dict) and result.get("status") == "ok" and "devices" in result:
+                    self._send_to_gui("enum_devices_response", {"devices": result["devices"]})
+                return result
+        return {"status": "error", "reason": "Only for Webcam/Hikvision"}
 
     def _cmd_open(self, data: dict):
         with self._backend_lock:

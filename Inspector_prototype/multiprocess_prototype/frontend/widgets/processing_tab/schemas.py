@@ -4,6 +4,7 @@
 
 Только фронт: не участвует в register_update. Значения параметров — в
 `registers.schemas.processing_tab` (ProcessorRegisters, RendererRegisters).
+default_tab_item — для TabsConfig.
 """
 from __future__ import annotations
 
@@ -59,3 +60,9 @@ class ProcessingTabUiConfig(SchemaBase):
     checkbox_contours: Annotated[str, FieldMeta("Чекбокс Contours")] = "Contours"
     checkbox_bbox: Annotated[str, FieldMeta("Чекбокс BBox")] = "BBox"
     checkbox_save_frames: Annotated[str, FieldMeta("Чекбокс Save frames")] = "Save"
+
+
+def default_tab_item():
+    from ..tabs.tab_item_config import TabItemConfig
+
+    return TabItemConfig(id="processing", title="Обработка", widget="processing")

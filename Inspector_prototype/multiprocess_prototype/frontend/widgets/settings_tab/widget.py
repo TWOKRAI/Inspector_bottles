@@ -3,12 +3,18 @@
 SettingsTabWidget — вкладка настроек.
 
 NumericControl, CheckboxControl по конфигу (control_v2 API).
+
+Доступность контролов: RegisterBindingContext + IRegistersManagerGui; при
+отсутствии rm — заглушка (см. TAB_STRUCTURE.md).
 """
 
-from typing import Any, List, Optional
+from __future__ import annotations
+
+from typing import Any, Optional, Union
 
 from frontend_module.components import BaseTab
-from frontend_module.components.controls import (
+from frontend_module.components.tabs import RegisterBindingContext, create_registers_placeholder
+from frontend_module.components.control_v2 import (
     BindingConfig,
     CheckboxControl,
     CheckboxViewConfig,
@@ -16,8 +22,10 @@ from frontend_module.components.controls import (
     NumericViewConfig,
 )
 from frontend_module.core.qt_imports import QGroupBox, QVBoxLayout, QWidget
+from frontend_module.core.schema_config import coerce_schema_config
+from frontend_module.interfaces import IRegistersManagerGui
 
-from .config import SettingsTabConfig
+from .schemas import SettingsTabConfig
 
 
 class SettingsTabWidget(BaseTab):
@@ -26,36 +34,52 @@ class SettingsTabWidget(BaseTab):
     def __init__(
         self,
         *,
-        registers_manager: Optional[Any] = None,
-        controls_config: Optional[List[dict]] = None,
-        group_title: str = "Параметры отображения",
+        registers_manager: Optional[IRegistersManagerGui] = None,
+        ui: Optional[Union[SettingsTabConfig, dict]] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._registers_manager = registers_manager
-        self._controls_config = controls_config or SettingsTabConfig().to_controls_dict_list()
-        self._group_title = group_title
+        self._config = coerce_schema_config(ui, SettingsTabConfig)
         self._init_ui()
+
+    @property
+    def registers_manager(self) -> Optional[IRegistersManagerGui]:
+        return self._registers_manager
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        group = QGroupBox(self._group_title)
+        binding = RegisterBindingContext(rm=self._registers_manager)
+
+        if not binding.can_bind:
+            layout.addWidget(create_registers_placeholder("Настройки"))
+            layout.addStretch()
+            return
+
+        rm = binding.rm
+        assert rm is not None
+
+        group = QGroupBox(self._config.group_title)
         group_layout = QVBoxLayout(group)
-        for cfg in self._controls_config:
-            w = self._create_control(cfg)
+        for ctrl in self._config.controls:
+            w = self._create_control(rm, ctrl.to_control_dict())
             if w:
                 group_layout.addWidget(w)
         layout.addWidget(group)
         layout.addStretch()
 
-    def _create_control(self, cfg: dict) -> Optional[Any]:
+    def _create_control(self, rm: IRegistersManagerGui, cfg: dict) -> Optional[Any]:
+        """
+        Создаёт NumericControl (slider) или CheckboxControl по cfg.
+
+        cfg: type, register_name, field_name, component_config (label, position).
+        """
         ctype = cfg.get("type", "slider")
         reg = cfg.get("register_name")
         field = cfg.get("field_name")
         component_config = dict(cfg.get("component_config") or {})
         if not reg or not field:
             return None
-        rm = self._registers_manager
         binding = BindingConfig(reg, field)
         if ctype == "slider":
             view_cfg = NumericViewConfig(

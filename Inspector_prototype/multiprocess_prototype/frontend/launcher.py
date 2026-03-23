@@ -57,23 +57,6 @@ class FrontendLauncher:
             "on_camera_type_changed": cmd.send_camera_type_changed,
         }
 
-    def _processing_callbacks(self, cmd: GuiCommandHandler) -> Dict[str, Any]:
-        """
-        Callbacks для ProcessingTabWidget (legacy, если вкладка без RegistersManager).
-
-        При работе через FrontendManager поля идут через register_update (см. ADR-049).
-        """
-        return {
-            "on_set_color_range": lambda b_l, g_l, r_l, b_u, g_u, r_u: cmd.send_set_color_range(
-                b_l, g_l, r_l, b_u, g_u, r_u
-            ),
-            "on_set_min_area": cmd.send_set_min_area,
-            "on_set_max_area": cmd.send_set_max_area,
-            "on_set_show_original": cmd.send_set_show_original,
-            "on_set_show_mask": cmd.send_set_show_mask,
-            "on_set_draw_contours": cmd.send_set_draw_contours,
-        }
-
     def register_windows(
         self,
         window_manager: Any,
@@ -99,7 +82,6 @@ class FrontendLauncher:
             config=config,
             registers_manager=fm.get_registers() if fm else None,
             camera_callbacks=self._camera_callbacks(cmd),
-            processing_callbacks=self._processing_callbacks(cmd),
             camera_type=camera_type,
         )
 
@@ -116,7 +98,6 @@ class FrontendLauncher:
                 config=config,
                 registers_manager=fm.get_registers() if fm else None,
                 camera_callbacks=self._camera_callbacks(cmd),
-                processing_callbacks=self._processing_callbacks(cmd),
                 camera_type=camera_type,
                 tab_widget_factory=tab_widget_factory,
                 header_action_handlers={},

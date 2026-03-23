@@ -70,6 +70,29 @@ class IRegistersManager(Protocol):
 
 
 @runtime_checkable
+class IRegistersManagerGui(Protocol):
+    """
+    Минимальный интерфейс для GUI (control_v2, вкладки, register_ops).
+
+    Расширяет чтение (`get_register`, `get_field_metadata`) записью `set_field_value`.
+    Реализации: registers_module.RegistersManager, FrontendRegistersBridge.
+    """
+
+    def set_field_value(
+        self, register_name: str, field_name: str, value: Any
+    ) -> tuple[bool, Optional[str]]:
+        """Записать значение поля; (success, error_message)."""
+
+    def get_register(self, register_name: str) -> Optional[Any]:
+        """Получить экземпляр регистра по имени."""
+
+    def get_field_metadata(
+        self, register_name: str, field_name: str, **kwargs: Any
+    ) -> Dict[str, Any]:
+        """Метаданные поля (min, max, unit и т.д.)."""
+
+
+@runtime_checkable
 class IConfigurableWidget(Protocol):
     """
     Протокол виджета, привязанного к регистру.

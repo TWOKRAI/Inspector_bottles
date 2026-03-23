@@ -37,7 +37,6 @@ class MainWindow(QMainWindow):
         show_window_callback: Optional[Callable[[str], None]] = None,
         registers_manager: Optional[Any] = None,
         camera_callbacks: Optional[Dict[str, Callable]] = None,
-        processing_callbacks: Optional[Dict[str, Callable]] = None,
         camera_type: str = "simulator",
         tab_widget_factory: Optional[TabWidgetFactory] = None,
         header_action_handlers: Optional[Dict[str, Callable[[], None]]] = None,
@@ -48,7 +47,6 @@ class MainWindow(QMainWindow):
         self._config = config or {}
         self._registers_manager = registers_manager
         self._camera_callbacks = camera_callbacks or {}
-        self._processing_callbacks = processing_callbacks or {}
         self._camera_type = camera_type
         self._tab_widget_factory = tab_widget_factory
         self._header_action_handlers = header_action_handlers or {}
@@ -62,7 +60,6 @@ class MainWindow(QMainWindow):
             config=self._config,
             registers_manager=self._registers_manager,
             camera_callbacks=self._camera_callbacks,
-            processing_callbacks=self._processing_callbacks,
             camera_type=self._camera_type,
         )
 
