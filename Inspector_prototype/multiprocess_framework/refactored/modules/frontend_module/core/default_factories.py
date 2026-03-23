@@ -70,16 +70,27 @@ def _create_slider(
     registers_manager: Optional[IRegistersManager],
     parent: Optional[Any],
 ) -> Optional[Any]:
-    """Фабрика SliderControl."""
-    from frontend_module.components.controls import SliderControl
+    """Фабрика NumericControl (slider)."""
+    from frontend_module.components.controls import (
+        BindingConfig,
+        NumericControl,
+        NumericViewConfig,
+    )
 
     kwargs = dict(kwargs)
     config = _slider_config_from_kwargs(kwargs)
-    return SliderControl(
-        config=config,
-        registers_manager=registers_manager,
-        parent=parent,
+    if not config or not config.get("register_name") or not config.get("field_name"):
+        return None
+    binding = BindingConfig(
+        register_name=config["register_name"],
+        field_name=config["field_name"],
     )
+    view_config = NumericViewConfig(
+        view_type="slider",
+        label=config.get("label"),
+    )
+    result = NumericControl.create(registers_manager, binding, view_config)
+    return result.widget
 
 
 def _create_checkbox(
@@ -89,15 +100,26 @@ def _create_checkbox(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика CheckboxControl."""
-    from frontend_module.components.controls import CheckboxControl
+    from frontend_module.components.controls import (
+        BindingConfig,
+        CheckboxControl,
+        CheckboxViewConfig,
+    )
 
     kwargs = dict(kwargs)
     config = _checkbox_config_from_kwargs(kwargs)
-    return CheckboxControl(
-        config=config,
-        registers_manager=registers_manager,
-        parent=parent,
+    if not config or not config.get("register_name") or not config.get("field_name"):
+        return None
+    binding = BindingConfig(
+        register_name=config["register_name"],
+        field_name=config["field_name"],
     )
+    view_config = CheckboxViewConfig(
+        position=config.get("position", "left"),
+        label=config.get("label"),
+    )
+    result = CheckboxControl.create(registers_manager, binding, view_config)
+    return result.widget
 
 
 def create_default_registry() -> WidgetRegistry:

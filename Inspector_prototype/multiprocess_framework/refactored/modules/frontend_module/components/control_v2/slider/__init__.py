@@ -1,0 +1,27 @@
+# -*- coding: utf-8 -*-
+"""
+Slider v2: SliderValueView (value), SliderControl.create (фасад).
+
+По аналогии с checkbox: SliderControl.create возвращает SliderControlResult(widget, presenter).
+"""
+from frontend_module.components.control_v2.slider.config import SliderConfig
+from frontend_module.components.control_v2.slider.defaults import (
+    bgr_slider_default,
+    slider_default,
+)
+from frontend_module.components.control_v2.slider.facade import (
+    SliderControl,
+    SliderControlResult,
+)
+from frontend_module.components.control_v2.slider.presenter import SliderPresenter
+from frontend_module.components.control_v2.slider.view import SliderValueView
+
+__all__ = [
+    "SliderConfig",
+    "SliderPresenter",
+    "SliderValueView",
+    "SliderControl",
+    "SliderControlResult",
+    "slider_default",
+    "bgr_slider_default",
+]

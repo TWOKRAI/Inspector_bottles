@@ -1,70 +1,54 @@
 # -*- coding: utf-8 -*-
-"""Тесты SliderConfig, CheckboxConfig."""
-import pytest
+"""Тесты BindingConfig, SliderConfig, CheckboxViewConfig (control_v2)."""
+from frontend_module.components.control_v2 import (
+    BindingConfig,
+    CheckboxViewConfig,
+    SliderConfig,
+)
+from frontend_module.components.control_v2.base.config import merge_config
 
-from frontend_module.components.controls.slider import SliderConfig
-from frontend_module.components.controls.checkbox import CheckboxConfig
+
+class TestBindingConfig:
+    def test_create(self) -> None:
+        b = BindingConfig("processor", "min_area")
+        assert b.register_name == "processor"
+        assert b.field_name == "min_area"
+        assert b.access_level == 0
+
+    def test_with_index(self) -> None:
+        b = BindingConfig("proc", "arr", index=1)
+        assert b.index == 1
 
 
 class TestSliderConfig:
     def test_defaults(self) -> None:
         cfg = SliderConfig()
-        assert cfg.register_name is None
-        assert cfg.field_name is None
-        assert cfg.access_level == 0
-        assert cfg.label is None
-        assert cfg.transfer_k is None
-        assert cfg.round_k is None
+        assert cfg.show_ticks is False
+        assert cfg.label_position == "left"
 
-    def test_model_validate_dict(self) -> None:
-        cfg = SliderConfig.model_validate({
-            "register_name": "processor",
-            "field_name": "min_area",
-            "label": "Параметр",
-            "transfer_k": 0.1,
-        })
-        assert cfg.register_name == "processor"
-        assert cfg.field_name == "min_area"
-        assert cfg.label == "Параметр"
-        assert cfg.transfer_k == 0.1
-        assert cfg.round_k is None
-
-    def test_model_dump(self) -> None:
-        cfg = SliderConfig(
-            register_name="draw",
-            field_name="dp",
-            label="Test",
-            transfer_k=2.0,
-        )
-        d = cfg.model_dump()
-        assert d["register_name"] == "draw"
-        assert d["field_name"] == "dp"
-        assert d["label"] == "Test"
-        assert d["transfer_k"] == 2.0
+    def test_label_override(self) -> None:
+        cfg = SliderConfig(label="Test", min_val=0, max_val=100)
+        lo = cfg.to_label_override()
+        assert lo.label == "Test"
+        assert lo.min_val == 0
+        assert lo.max_val == 100
 
 
-class TestCheckboxConfig:
+class TestCheckboxViewConfig:
     def test_defaults(self) -> None:
-        cfg = CheckboxConfig()
-        assert cfg.register_name is None
-        assert cfg.field_name is None
-        assert cfg.access_level == 0
-        assert cfg.label is None
+        cfg = CheckboxViewConfig()
         assert cfg.position == "left"
-
-    def test_model_validate_dict(self) -> None:
-        cfg = CheckboxConfig.model_validate({
-            "register_name": "renderer",
-            "field_name": "show_mask",
-            "label": "Mask",
-            "position": "right",
-        })
-        assert cfg.register_name == "renderer"
-        assert cfg.field_name == "show_mask"
-        assert cfg.label == "Mask"
-        assert cfg.position == "right"
 
     def test_position_values(self) -> None:
         for pos in ("left", "right", "top", "bottom"):
-            cfg = CheckboxConfig(position=pos)
+            cfg = CheckboxViewConfig(position=pos)
             assert cfg.position == pos
+
+
+class TestMergeConfig:
+    def test_merge_overrides(self) -> None:
+        base = SliderConfig(min_val=10.0, label="Base")
+        over = SliderConfig(label="X")
+        merged = merge_config(base, over)
+        assert merged.label == "X"
+        assert merged.min_val == 10.0

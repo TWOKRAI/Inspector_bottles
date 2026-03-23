@@ -15,16 +15,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from frontend_module.components import BaseTab
 from frontend_module.components.controls import (
     BindingConfig,
-    CheckboxConfig,
     CheckboxControl,
-    CheckboxControlV1,
     CheckboxViewConfig,
     CompoundNumericControl,
     CompoundNumericConfig,
     NumericControl,
     NumericViewConfig,
-    SliderConfig,
-    SliderControl,
 )
 from frontend_module.core.qt_imports import (
     QCheckBox,
@@ -160,26 +156,20 @@ class ProcessingTabWidget(BaseTab):
                 area_layout.addWidget(min_r.widget)
                 area_layout.addWidget(max_r.widget)
             else:
-                self._area_slider = SliderControl(
-                    config=SliderConfig(
-                        register_name=PROCESSOR_REGISTER,
-                        field_name="min_area",
-                        label=f"{u.label_min_area_prefix} ({u.label_px})",
-                    ),
-                    registers_manager=rm,
-                    parent=self,
+                min_r = NumericControl.create(
+                    rm,
+                    BindingConfig(PROCESSOR_REGISTER, "min_area"),
+                    NumericViewConfig(label=f"{u.label_min_area_prefix} ({u.label_px})"),
                 )
-                self._max_area_slider = SliderControl(
-                    config=SliderConfig(
-                        register_name=PROCESSOR_REGISTER,
-                        field_name="max_area",
-                        label=f"{u.label_max_area_prefix} ({u.label_px})",
-                    ),
-                    registers_manager=rm,
-                    parent=self,
+                max_r = NumericControl.create(
+                    rm,
+                    BindingConfig(PROCESSOR_REGISTER, "max_area"),
+                    NumericViewConfig(label=f"{u.label_max_area_prefix} ({u.label_px})"),
                 )
-                area_layout.addWidget(self._area_slider)
-                area_layout.addWidget(self._max_area_slider)
+                self._area_slider = min_r.widget
+                self._max_area_slider = max_r.widget
+                area_layout.addWidget(min_r.widget)
+                area_layout.addWidget(max_r.widget)
         else:
             self._area_label = QLabel(f"{u.label_min_area_prefix} 500 {u.label_px}")
             self._area_slider = QSlider(Qt.Horizontal)
@@ -202,41 +192,20 @@ class ProcessingTabWidget(BaseTab):
         display_group = QGroupBox(u.group_display)
         display_layout = QVBoxLayout(display_group)
         if rm and hasattr(rm, "set_field_value"):
-            if CheckboxControl is not None:
-                for cfg in [
-                    (RENDERER_REGISTER, "show_original", u.checkbox_original),
-                    (RENDERER_REGISTER, "show_mask", u.checkbox_mask),
-                    (RENDERER_REGISTER, "draw_contours", u.checkbox_contours),
-                    (RENDERER_REGISTER, "draw_bboxes", u.checkbox_bbox),
-                    (RENDERER_REGISTER, "save_frames", u.checkbox_save_frames),
-                ]:
-                    reg_name, field_name, label = cfg
-                    r = CheckboxControl.create(
-                        rm,
-                        BindingConfig(reg_name, field_name),
-                        CheckboxViewConfig(label=label),
-                    )
-                    display_layout.addWidget(r.widget)
-            else:
-                for cfg in [
-                    (RENDERER_REGISTER, "show_original", u.checkbox_original),
-                    (RENDERER_REGISTER, "show_mask", u.checkbox_mask),
-                    (RENDERER_REGISTER, "draw_contours", u.checkbox_contours),
-                    (RENDERER_REGISTER, "draw_bboxes", u.checkbox_bbox),
-                    (RENDERER_REGISTER, "save_frames", u.checkbox_save_frames),
-                ]:
-                    reg_name, field_name, label = cfg
-                    display_layout.addWidget(
-                        CheckboxControlV1(
-                            config=CheckboxConfig(
-                                register_name=reg_name,
-                                field_name=field_name,
-                                label=label,
-                            ),
-                            registers_manager=rm,
-                            parent=self,
-                        )
-                    )
+            for cfg in [
+                (RENDERER_REGISTER, "show_original", u.checkbox_original),
+                (RENDERER_REGISTER, "show_mask", u.checkbox_mask),
+                (RENDERER_REGISTER, "draw_contours", u.checkbox_contours),
+                (RENDERER_REGISTER, "draw_bboxes", u.checkbox_bbox),
+                (RENDERER_REGISTER, "save_frames", u.checkbox_save_frames),
+            ]:
+                reg_name, field_name, label = cfg
+                r = CheckboxControl.create(
+                    rm,
+                    BindingConfig(reg_name, field_name),
+                    CheckboxViewConfig(label=label),
+                )
+                display_layout.addWidget(r.widget)
         else:
             self._cb_original = QCheckBox(u.checkbox_original)
             self._cb_original.setChecked(True)

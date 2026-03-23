@@ -6,17 +6,21 @@ Components — переиспользуемые UI-компоненты.
 Реэкспорт для удобного импорта: from frontend_module.components import HeaderWidget, ...
 """
 from frontend_module.components.controls import (
-    SliderControl,
-    SliderConfig,
-    CheckboxControl,
+    BindingConfig,
     CheckboxConfig,
+    CheckboxControl,
+    NumericControl,
+    NumericViewConfig,
+    SliderConfig,
 )
 
 __all__ = [
-    "SliderControl",
-    "SliderConfig",
-    "CheckboxControl",
+    "BindingConfig",
     "CheckboxConfig",
+    "CheckboxControl",
+    "NumericControl",
+    "NumericViewConfig",
+    "SliderConfig",
 ]
 
 try:

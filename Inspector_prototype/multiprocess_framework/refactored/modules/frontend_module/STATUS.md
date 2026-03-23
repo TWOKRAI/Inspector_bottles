@@ -7,9 +7,9 @@
 | Критерий | Оценка | Комментарий |
 |----------|--------|-------------|
 | Код (читаемость, стандарты) | 9 | Controls: primitives, typography/styles, `coerce_schema_config`, узкий конструктор |
-| Тесты (покрытие) | 5 | + `test_schema_config.py`; `multiprocess_prototype/tests/test_frontend_routed_command_sender.py`, window_registry, widget_descriptor |
-| Документация (README, interfaces) | 7 | README, interfaces, STATUS, ADR |
-| Связанность (меньше = лучше) | 8 | data_schema, registers_module; схемы регистров — в приложении |
+| Тесты (покрытие) | 6 | + `test_controls_v2_base.py` (base слой v2); `test_schema_config.py`; routed_command_sender, window_registry |
+| Документация (README, interfaces) | 8 | `control_v2/README.md`, `ARCHITECTURE.md`, `base/README.md`, examples README, STATUS, ADR |
+| Связанность (меньше = лучше) | 9 | v1 удалён; controls — тонкий реэкспорт; primitives/common в control_v2 |
 | Работоспособность | 9 | FrontendManager.run_app/shutdown_app, GuiProcess интеграция |
 
 ## Чеклист рефакторинга
@@ -36,6 +36,18 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-23 | **ADR-070**: primitives и common в `control_v2/`; v1 (slider, checkbox, primitives, common) удалены; controls — реэкспорт; settings_tab, camera_tab, processing_tab, default_factories на v2 API | 6 |
+| 2026-03-23 | `control_v2/examples`: убран `adapter_common` (inline `coerce_ui` + `BindingConfig`); примеры **numeric**, **group**; покрытие компонентов | 6 |
+| 2026-03-23 | Пакет **`control_v2`** вне `controls/`, примеры → `control_v2/examples/`, shims `controls.v2` / `example_with_data_schema`; ADR-069; документация ARCHITECTURE | 6 |
+| 2026-03-23 | Controls v2: `group/labeled_numeric_factory.py` (ADR-068); фасады slider/spinbox — импорт фабрики без lazy | 6 |
+| 2026-03-23 | Controls v2: `on_access_denied` / `ControlAccessDeniedEvent`; докстринги `hooks` у фасадов; ADR-067 доп. про фабрику групп | 6 |
+| 2026-03-23 | Controls v2: `ControlHooks` + события записи; `SliderPresenter`/`SpinBoxPresenter`; фасады без прокси `NumericControl`; `test_controls_v2_hooks`; ADR-067; slider/base README | 6 |
+| 2026-03-23 | `example_with_data_schema`: spinbox, compound_numeric (BGR), compound_mixed, label; v2 `SpinBoxControl` + lazy import в `spinbox/facade` | 6 |
+| 2026-03-23 | Controls v2: `SchemaTrait.refresh()` / `_refresh_meta`, `AccessTrait.set_required_level`, `refresh_metadata` в Checkbox/Numeric presenter; тесты | 6 |
+| 2026-03-23 | `example_with_data_schema`: `adapter_common`, исправлен циклический импорт slider, README | 6 |
+| 2026-03-23 | `example_with_data_schema`: `BINDING_*` на `ExampleCheckboxValueRegister`; адаптер без модульных ключей | 6 |
+| 2026-03-23 | Controls v2 `checkbox`: `IControlView[bool]` + порты в presenter, `RegistersManagerLike` в фасаде, README+Mermaid, экспорт View/Presenter, `test_checkbox_v2.py` | 6 |
+| 2026-03-23 | Controls v2 `base`: порты `IFieldBinding` / `IRegisterPort` / `RegistersManagerLike`, README+Mermaid, ADR-064; `RegisterAdapter` ключ подписки с `index`; `test_controls_v2_base.py` | 6 |
 | 2026-03-21 | Controls refactor: `common/field_sync.py` (единая publish_control_value_to_observers), `common/sizes.py` (VALUE_INPUT_*), `slider/legacy_sync.py` (publish_legacy_ui_refs); BaseConfigurableWidget без exclude; primitives→common; баг Tuple в layout_builder | 6 |
 | 2026-03-21 | Controls: пакеты `slider/schema`, `checkbox/schema`; `value_mapping`, `field_sync`, `layout_builder`; README по компонентам; докстринги методов | 6 |
 | 2026-03-21 | Controls: `coerce_schema_config`, primitives (label, numeric line edit, styled slider), `value_bridge`, typography/styles; конструктор только config+rm+parent; ADR-060 | 6 |

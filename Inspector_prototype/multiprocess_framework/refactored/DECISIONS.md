@@ -16,6 +16,102 @@
 
 ---
 
+## ADR-070: primitives и common в control_v2, удаление controls v1
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: В `components/controls/` были legacy v1 (slider, checkbox на BaseConfigurableWidget), primitives и common. Архитектура v2 выиграла; требуется консолидация в control_v2.
+- Решение:
+  - **`control_v2/common/`**: typography, sizes, field_sync, legacy_sync, slider_styles — перенесены из `controls/common/` и `controls/slider/styles.py`.
+  - **`control_v2/primitives/`**: control_label, numeric_line_edit, styled_slider, value_bridge — переписаны по образцу v2 с импортом из `control_v2.common`.
+  - **`LegacySyncTrait`**: импортирует из `control_v2.common.legacy_sync` и `control_v2.common.field_sync`.
+  - **`SliderValueView`**: использует `common/slider_styles` вместо локальных констант.
+  - **`components/controls/`**: только реэкспорт из control_v2; v1 (slider, checkbox, primitives, common) удалены.
+  - **Миграция**: settings_tab, camera_tab, processing_tab, default_factories переведены на v2 API (NumericControl.create, CheckboxControl.create, BindingConfig).
+- Причина: Единая точка для примитивов и общих утилит; устранение legacy-кода.
+- Отклонённые альтернативы: оставить primitives/common в controls — смешение с удаляемым v1.
+
+---
+
+## ADR-067: Controls v2 — `ControlHooks`, отдельные `SliderPresenter` / `SpinBoxPresenter`
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: Ошибки записи показывались только во view; не было единой точки для логов/ErrorManager/статистики. Фасады слайдера/спинбокса проксировали `NumericControl`, смешивая API с «общим числом».
+- Решение:
+  - **`base/control_hooks.py`**: `ControlHooks` (`on_write_rejected`, `on_write_committed`, `on_access_denied`), события записи и **`ControlAccessDeniedEvent`** при попытке изменить значение без `can_modify()`, хелперы `emit_*`. Фреймворк не импортирует `logger_module` / `error_module`; приложение передаёт колбэки в `*.create(..., hooks=...)` или пробрасывает в `pyqtSignal`.
+  - **`CheckboxPresenter` / `NumericPresenter`**: вызов хуков при неуспехе/успехе записи и при отказе по правам (в дополнение к `show_error` при ошибке регистра).
+  - **`SliderPresenter` / `SpinBoxPresenter`**: наследники `NumericPresenter` с `control_kind` `slider` / `spinbox`; **`SliderControl` / `SpinBoxControl`** собирают presenter + `create_labeled_numeric_view` без прокси через `NumericControl` (импорт `create_labeled_numeric_view` — внутри `create()`, чтобы не зациклить `group.view` ↔ `spinbox` пакет).
+  - Составные фасады и **`ControlFactory`** принимают `hooks` и пробрасывают в дочерние `create`.
+- Причина: Слабая связность с инфраструктурой логов; явный тип presenter для слайдера/спинбокса и события с `control_kind` упрощают подписку внешних менеджеров.
+- Отклонённые альтернативы: прямой импорт `LoggerManager` из `frontend_module` — нарушение границ и усложнение тестов.
+- Последующая работа (выполнено, см. **ADR-068**): фабрика вынесена из `group/view.py`.
+
+---
+
+## ADR-068: Controls v2 — фабрика `create_labeled_numeric_view` в `group/labeled_numeric_factory.py`
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: `group/view.py` импортировал `SpinBoxValueView` на уровне модуля; граф `group` ↔ `spinbox` требовал отложенных импортов в фасадах (ADR-067).
+- Решение: модуль **`group/labeled_numeric_factory.py`** — единственное место, где собираются `LabelView` + `SliderValueView` / `SpinBoxValueView` (ленивый импорт value-виджетов внутри фабрики). **`LabeledNumericGroupView`** остаётся в `view.py` без импортов `slider`/`spinbox`. Фасады `slider`/`spinbox`/`numeric` импортируют фабрику на уровне модуля.
+- Причина: Однонаправленный граф: примитивы → `view` → `factory` → `slider.view` / `spinbox.view` только при вызове фабрики.
+- Отклонённые альтернативы: оставить фабрику в `view.py` с ленивым импортом спинбокса — уже лучше прежнего top-level, но смешение виджета и сборки в одном файле.
+
+---
+
+## ADR-069: Пакет `control_v2` вне `components/controls`, примеры в `control_v2/examples`
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: Код v2 жил в `components/controls/v2`, а учебные схемы — в `components/controls/example_with_data_schema`; пути длинные, смешение с legacy `controls` (v1) и дублирование «v2» в URL импорта.
+- Решение:
+  - Канонический пакет: **`frontend_module/components/control_v2/`** (импорт `frontend_module.components.control_v2`).
+  - Учебный код перенесён в **`control_v2/examples/`** с прежней структурой «папка на сценарий» (`checkbox/`, `slider/`, …).
+  - **`components/controls/v2`** и **`components/controls/example_with_data_schema`** оставлены как **тонкие shims** (`from …control_v2… import *`) для обратной совместимости.
+  - Документация: `control_v2/README.md`, `control_v2/ARCHITECTURE.md`; `controls/__init__.py` тянет v2 API из `control_v2`.
+- Причина: Явная граница между legacy-контролами и слоистой архитектурой; проще масштабировать новые компоненты и находить примеры рядом с кодом.
+- Отклонённые альтернативы: только смена импортов без физического переноса — не улучшает навигацию в репозитории.
+
+---
+
+## ADR-066: `example_with_data_schema` — учебный checkbox с двумя SchemaBase
+- Дата: 2026-03-23
+- Статус: принято (пакет перенесён: см. **ADR-069** → `control_v2/examples`)
+- Контекст: Нужен наглядный пример рядом с контролами: отдельные схемы для UI-строк и для полей регистра без дублирования смысла в dataclass-конфиге v2.
+- Решение:
+  - Пакет из **трёх модулей**: `schemas.py` (две SchemaBase; `BINDING_REGISTER` / `BINDING_FIELD` как `ClassVar` на классе регистра), `adapter.py` (импорт только схем), `__init__.py`.
+  - **CheckboxPresenter**: непустой `CheckboxViewConfig.tooltip` перекрывает описание из метаданных регистра.
+  - Шаблон для slider/spinbox: тот же каркас `schemas` + короткий `adapter` к соответствующему фасаду v2.
+- Причина: Документированный эталон для прототипа; v2 остаётся на dataclass-границе; кодовая база не раздувается.
+- Отклонённые альтернативы: один объединённый SchemaBase для UI и значений — смешение ответственностей.
+
+---
+
+## ADR-065: Controls v2 `checkbox` — выравнивание с base
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: Checkbox presenter использовал `Any` для view и адаптера; не было README/тестов на уровне пакета.
+- Решение:
+  - **`CheckboxPresenter`**: `IControlView[bool]`, `IFieldBinding`, `IRegisterPort`; `set_access_level` безопасен до `attach_view`.
+  - **`CheckboxControl.create`**: `Optional[RegistersManagerLike]` вместо `Any`.
+  - **`checkbox/README.md`** (Mermaid + отличия от numeric), ссылка из `v2/README.md`; публичный экспорт **`CheckboxView`**, **`CheckboxPresenter`**.
+  - Тесты **`test_checkbox_v2.py`** (presenter + fake view, фасад smoke с QApplication).
+- Причина: Единый стиль с `base` и numeric-веткой без дублирования новых протоколов (`IControlView[bool]` достаточно).
+- Отклонённые альтернативы: отдельный `IBooleanView` — избыточно.
+
+---
+
+## ADR-064: Controls v2 `base` — порты presenter и документация со схемами
+- Дата: 2026-03-23
+- Статус: принято
+- Контекст: Масштабирование на новые компоненты требует явных контрактов без раздувания кода; traits опирались на `Any`.
+- Решение:
+  - В `components/controls/v2/base/interfaces.py`: **`IFieldBinding`**, **`IRegisterPort`**, **`RegistersManagerLike`** (structural typing); эталонные реализации — `BindingConfig`, `RegisterAdapter`.
+  - **`SyncTrait` / `SchemaTrait`** принимают эти порты вместо `Any`.
+  - **`RegisterAdapter.__init__`**: `Optional[RegistersManagerLike]` (совместимость с Python 3.9 — `Optional`, не `X | Y` в сигнатурах адаптера).
+  - **`base/README.md`**: принципы лаконичности, Mermaid (слои, sequence, композиция traits), таблица портов; в `v2/README.md` — ссылка на base.
+- Причина: Одна точка расширения для новых контролов; статическая проверка и понятные диаграммы без новых пакетов.
+- Отклонённые альтернативы: отдельный `ports.py` — дублировал бы роль `interfaces.py`; ABC вместо Protocol — лишнее наследование.
+
+---
+
 ## ADR-063: Controls v2 — доработки по ревью (9/10)
 - Дата: 2026-03-22
 - Статус: принято

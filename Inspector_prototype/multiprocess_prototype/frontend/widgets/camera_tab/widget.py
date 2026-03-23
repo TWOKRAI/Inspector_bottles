@@ -8,7 +8,12 @@ CameraTabWidget — вкладка управления камерой.
 
 from typing import Any, Callable, Dict, Optional, Union
 
-from frontend_module.components import BaseTab, SliderConfig, SliderControl
+from frontend_module.components import BaseTab
+from frontend_module.components.controls import (
+    BindingConfig,
+    NumericControl,
+    NumericViewConfig,
+)
 from frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,
@@ -102,17 +107,12 @@ class CameraTabWidget(BaseTab):
         fps_layout = QVBoxLayout(fps_group)
         rm = self._registers_manager
         if rm and hasattr(rm, "set_field_value"):
-            fps_layout.addWidget(
-                SliderControl(
-                    config=SliderConfig(
-                        register_name=CAMERA_REGISTER,
-                        field_name="fps",
-                        label="FPS",
-                    ),
-                    registers_manager=rm,
-                    parent=self,
-                )
+            result = NumericControl.create(
+                rm,
+                BindingConfig(CAMERA_REGISTER, "fps"),
+                NumericViewConfig(view_type="slider", label="FPS"),
             )
+            fps_layout.addWidget(result.widget)
         else:
             self._fps_label = QLabel(f"{self._u.initial_fps}{self._u.fps_suffix}")
             self._fps_slider = QSlider(Qt.Horizontal)

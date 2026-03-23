@@ -2,12 +2,19 @@
 """
 SettingsTabWidget — вкладка настроек.
 
-SliderControl, CheckboxControl по конфигу. Дефолты контролов — SettingsTabConfig.
+NumericControl, CheckboxControl по конфигу (control_v2 API).
 """
 
 from typing import Any, List, Optional
 
-from frontend_module.components import BaseTab, SliderControl, CheckboxControl
+from frontend_module.components import BaseTab
+from frontend_module.components.controls import (
+    BindingConfig,
+    CheckboxControl,
+    CheckboxViewConfig,
+    NumericControl,
+    NumericViewConfig,
+)
 from frontend_module.core.qt_imports import QGroupBox, QVBoxLayout, QWidget
 
 from .config import SettingsTabConfig
@@ -48,17 +55,20 @@ class SettingsTabWidget(BaseTab):
         component_config = dict(cfg.get("component_config") or {})
         if not reg or not field:
             return None
-        config_dict = {"register_name": reg, "field_name": field, **component_config}
+        rm = self._registers_manager
+        binding = BindingConfig(reg, field)
         if ctype == "slider":
-            return SliderControl(
-                config=config_dict,
-                registers_manager=self._registers_manager,
-                parent=self,
+            view_cfg = NumericViewConfig(
+                view_type="slider",
+                label=component_config.get("label"),
             )
+            result = NumericControl.create(rm, binding, view_cfg)
+            return result.widget
         if ctype == "checkbox":
-            return CheckboxControl(
-                config=config_dict,
-                registers_manager=self._registers_manager,
-                parent=self,
+            view_cfg = CheckboxViewConfig(
+                position=component_config.get("position", "left"),
+                label=component_config.get("label"),
             )
+            result = CheckboxControl.create(rm, binding, view_cfg)
+            return result.widget
         return None
