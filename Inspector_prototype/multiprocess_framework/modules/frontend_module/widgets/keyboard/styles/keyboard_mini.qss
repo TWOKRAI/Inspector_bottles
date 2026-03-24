@@ -1,0 +1,16 @@
+/* keyboard_mini — QSS рядом с виджетом */
+QPushButton {
+    background-color: {kb_bg};
+    border: 1px solid {kb_border};
+    border-radius: {kb_radius}px;
+    padding: {kb_padding}px;
+    font-size: {kb_font_size}px;
+    min-width: {kb_min_w}px;
+    min-height: {kb_min_h}px;
+}
+QPushButton:hover {
+    background-color: {kb_hover};
+}
+QPushButton:pressed {
+    background-color: {kb_pressed};
+}

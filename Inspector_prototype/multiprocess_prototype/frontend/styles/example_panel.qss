@@ -1,0 +1,11 @@
+/* Пример: токены подставляет StyleSession.render_qss */
+QFrame#themedPanel {
+    background-color: {panel_bg};
+    border: {border_width}px solid {border_color};
+    border-radius: {radius}px;
+}
+
+QLabel {
+    color: {text_color};
+    font-size: {font_size}px;
+}

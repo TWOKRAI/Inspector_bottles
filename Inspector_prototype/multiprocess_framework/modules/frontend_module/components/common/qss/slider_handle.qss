@@ -1,0 +1,9 @@
+/* Ручка горизонтального слайдера */
+QSlider::handle:horizontal {
+    height: {sl_handle_h}px;
+    width: {sl_handle_w}px;
+    margin: {sl_handle_margin_v}px 0;
+    border: {sl_border_w}px solid {sl_border_color};
+    border-radius: {sl_radius}px;
+    background: {sl_bg};
+}

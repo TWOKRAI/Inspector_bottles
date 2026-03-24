@@ -43,9 +43,11 @@ class MainWindow(QMainWindow):
         tab_widget_factory: Optional[TabWidgetFactory] = None,
         header_action_handlers: Optional[Dict[str, Callable[[], None]]] = None,
         header_on_unmatched: Optional[Callable[[str], None]] = None,
+        style_session: Optional[Any] = None,
         parent=None,
     ):
         super().__init__(parent)
+        self.style_session = style_session
         self._config = config or {}
         self._registers_manager = registers_manager
         self._camera_callbacks_map = camera_callbacks_map or {}
@@ -65,6 +67,7 @@ class MainWindow(QMainWindow):
                 camera_callbacks_map=self._camera_callbacks_map,
                 camera_type=self._camera_type,
                 recipe_manager=None,
+                style_session=getattr(self, "style_session", None),
             )
         )
 
@@ -112,7 +115,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._image_panel, 1)
 
         tab_factory = self._resolve_tab_factory()
-        self._tab_widget = TabWidget()
+        self._tab_widget = TabWidget(parent=central, style_session=self.style_session)
         for tab in tabs_cfg:
             widget_key = tab.get("widget", tab.get("id", "recipes"))
             title = tab.get("title", widget_key)

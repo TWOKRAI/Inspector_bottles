@@ -7,8 +7,10 @@ BaseConfigurableWidget — базовый виджет с привязкой к 
 - _read_value() / _write_value() — чтение/запись значения
 - _resolve_meta() — слияние метаданных регистра с ComponentConfig
 
-Конструктор: config, register_name, field_name, registers_manager, access_level, parent.
+Конструктор: config, register_name, field_name, registers_manager, access_level, parent, style_session.
+Опционально style_session или атрибут style_session у предка — для каскада QSS (см. frontend_module.styling).
 Подклассы переопределяют _load_metadata() и используют self._resolved_meta.
+Без регистра: после построения UI вызовите _apply_styling_from_config(), если в config есть style_id.
 """
 from __future__ import annotations
 
@@ -59,6 +61,22 @@ def _parse_register_field(value: str) -> tuple[Optional[str], Optional[str]]:
     return None, value
 
 
+def _get_style_session_from_parent(parent: Any, max_depth: int = 5) -> Optional[Any]:
+    """Найти StyleSession у предка (`style_session` на виджете/окне)."""
+    current = parent
+    for _ in range(max_depth):
+        if current is None:
+            break
+        if hasattr(current, "style_session"):
+            ss = getattr(current, "style_session", None)
+            if ss is not None:
+                return ss
+        current = getattr(current, "parent", lambda: None)()
+        if callable(current):
+            current = current()
+    return None
+
+
 class BaseConfigurableWidget(QWidget):
     """
     Базовый виджет с привязкой к регистру.
@@ -75,6 +93,7 @@ class BaseConfigurableWidget(QWidget):
         registers_manager: Optional[Any] = None,
         access_level: Optional[int] = None,
         parent: Optional[Any] = None,
+        style_session: Optional[Any] = None,
     ) -> None:
         super().__init__(parent)
 
@@ -85,6 +104,8 @@ class BaseConfigurableWidget(QWidget):
         self._access_level: int = 0
         self._resolved_meta: Optional[ResolvedMeta] = None
         self._is_initialized: bool = False
+        self._style_session: Optional[Any] = style_session
+        self._style_reg_id: Optional[int] = None
 
         _reg = register_name
         _field = field_name
@@ -119,6 +140,9 @@ class BaseConfigurableWidget(QWidget):
 
         if self._register_name and self._field_name and self._registers_manager:
             self._apply_configuration()
+
+        if self._style_session is None and parent:
+            self._style_session = _get_style_session_from_parent(parent)
 
     @staticmethod
     def _config_to_dict(config: Any) -> dict:
@@ -191,6 +215,40 @@ class BaseConfigurableWidget(QWidget):
             self._unbind_from_manager()
             self._load_metadata()
             self._bind_to_manager()
+        self._apply_styling_from_config()
+
+    def _apply_styling_from_config(self) -> None:
+        """
+        Применить QSS по полям style_* из config через StyleSession (каскад токенов).
+
+        Нужен style_id и объект сессии (аргумент конструктора или style_session у предка).
+        """
+        cfg = self._config_to_dict(self._config)
+        style_id = cfg.get("style_id")
+        if not style_id:
+            return
+        session = self._style_session or _get_style_session_from_parent(self.parent())
+        if session is None or not hasattr(session, "register"):
+            return
+        if self._style_reg_id is not None:
+            session.remove_registration(self._style_reg_id)
+            self._style_reg_id = None
+        wl = cfg.get("style_widget_tokens")
+        cl = cfg.get("style_tokens")
+        if not isinstance(wl, dict):
+            wl = {}
+        if not isinstance(cl, dict):
+            cl = {}
+        tpl = cfg.get("style_qss_template")
+        path = cfg.get("style_qss_path")
+        self._style_reg_id = session.register(
+            self,
+            style_id=str(style_id),
+            template=tpl,
+            template_path=path,
+            widget_layer=wl,
+            component_layer=cl,
+        )
 
     def _load_metadata(self) -> None:
         """Загрузить метаданные и построить UI. Переопределить в подклассе."""
@@ -255,6 +313,13 @@ class BaseConfigurableWidget(QWidget):
     @property
     def access_level(self) -> int:
         return self._access_level
+
+    @property
+    def style_session(self) -> Optional[Any]:
+        """Сессия стилей: из конструктора или первого предка с style_session."""
+        if self._style_session is not None:
+            return self._style_session
+        return _get_style_session_from_parent(self.parent())
 
     def get_metadata(self) -> dict:
         """Метаданные текущего поля."""

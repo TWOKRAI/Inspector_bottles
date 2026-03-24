@@ -13,6 +13,7 @@ from frontend_module.components.common.slider_styles import (
     apply_slider_handle_style,
 )
 from frontend_module.core.qt_imports import QSlider, Qt
+from frontend_module.styling.context import get_style_session_from_parent
 
 
 def create_styled_horizontal_slider(parent: Optional[Any]) -> QSlider:
@@ -20,5 +21,6 @@ def create_styled_horizontal_slider(parent: Optional[Any]) -> QSlider:
     slider = QSlider(Qt.Horizontal, parent)
     slider.setMinimumHeight(SLIDER_MIN_HEIGHT_PX)
     slider.wheelEvent = lambda e: None  # type: ignore[assignment]
-    apply_slider_handle_style(slider)
+    ss = get_style_session_from_parent(parent) if parent is not None else None
+    apply_slider_handle_style(slider, style_session=ss)
     return slider

@@ -1,0 +1,3 @@
+/* TabWidget — QTabWidget */
+QTabBar::tab { height: {tab_h}px; width: {tab_w}px; }
+QTabWidget::pane { border: 1px solid {pane_border}; }

@@ -33,4 +33,5 @@ class FrontendAppContext:
     camera_type: str
     recipe_manager: Optional[Any] = None
     command_handler: Optional[Any] = None
+    style_session: Optional[Any] = None
     extras: Dict[str, Any] = field(default_factory=dict)

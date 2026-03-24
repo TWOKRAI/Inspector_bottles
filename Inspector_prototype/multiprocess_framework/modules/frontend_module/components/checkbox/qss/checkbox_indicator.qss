@@ -1,0 +1,2 @@
+/* Размер индикатора QCheckBox */
+QCheckBox::indicator { width: {cb_ind_w}px; height: {cb_ind_h}px; }

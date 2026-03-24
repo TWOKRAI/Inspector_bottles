@@ -28,6 +28,7 @@ from multiprocess_prototype.frontend.windows.loading import LoadingWindowConfig
 from multiprocess_prototype.frontend.windows.main_window import MainWindowConfig
 from multiprocess_prototype.frontend.widgets.tabs_setting import SettingsTabConfig, TabsConfig
 from multiprocess_prototype.frontend.widgets.tabs_setting.recipes_tab.schemas import RecipesTabConfig
+from multiprocess_prototype.frontend.styles.schemas.ui_theme import UiThemeConfig
 
 
 @register_schema("WindowRegistryEntry")
@@ -35,6 +36,21 @@ class WindowRegistryEntry(SchemaBase):
     """Запись реестра окон (factory_key сопоставляется в FrontendLauncher)."""
 
     factory_key: str = "main"
+
+
+def _merge_ui_theme_dict(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    """Слияние UiThemeConfig с переопределениями из app_cfg."""
+    out = dict(base)
+    out["global_tokens"] = {
+        **(out.get("global_tokens") or {}),
+        **(extra.get("global_tokens") or {}),
+    }
+    bo = dict(out.get("bundle_overrides") or {})
+    for sid, part in (extra.get("bundle_overrides") or {}).items():
+        if isinstance(part, dict):
+            bo[sid] = {**(bo.get(sid) or {}), **part}
+    out["bundle_overrides"] = bo
+    return out
 
 
 def default_window_registry() -> Dict[str, Dict[str, Any]]:
@@ -66,6 +82,9 @@ class FrontendConfig(SchemaBase):
     settings_tab: SettingsTabConfig = Field(default_factory=SettingsTabConfig)
 
     recipes_tab: RecipesTabConfig = Field(default_factory=RecipesTabConfig)
+
+    # Тема UI (токены QSS); дефолты — встроенные QSS `frontend_module.styling.default_bundles`
+    ui_theme: UiThemeConfig = Field(default_factory=UiThemeConfig)
 
     # Путь к YAML рецептов (опционально; по умолчанию multiprocess_prototype/data/recipes.yaml)
     recipes_path: Optional[str] = None
@@ -116,6 +135,10 @@ class FrontendConfig(SchemaBase):
         if env_on and not ui_diag.get("enabled"):
             ui_diag["enabled"] = True
 
+        ui_theme_dump = self.ui_theme.model_dump()
+        if isinstance(app_cfg.get("ui_theme"), dict):
+            ui_theme_dump = _merge_ui_theme_dict(ui_theme_dump, app_cfg["ui_theme"])
+
         result = {
             "window": mw_data["window"],
             "header": mw_data["header"],
@@ -131,6 +154,7 @@ class FrontendConfig(SchemaBase):
             "loading_window": self.loading_window.model_dump(),
             "camera_tab": camera_tab,
             "ui_diagnostics": ui_diag,
+            "ui_theme": ui_theme_dump,
         }
         return result
 

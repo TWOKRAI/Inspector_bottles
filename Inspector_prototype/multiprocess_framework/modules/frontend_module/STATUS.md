@@ -36,6 +36,9 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-24 | **ADR-089**: цепочка конфига UI — `SchemaBase` в прототипе, dataclass во фреймворке, адаптер на границе; merge/replace стилей; см. `multiprocess_framework/DECISIONS.md` | 6 |
+| 2026-03-24 | **`styling/`**: встроенные QSS рядом с виджетами (`default_bundles`, `create_app_style_session`); прототип без дублирующих `qss/`/`token_bundles/`; ADR-088 | 6 |
+| 2026-03-24 | **`styling/`**: QSS-слой (`StyleSession`, `NamedStyleRegistry`, каскад токенов), поля в `BaseControlConfig`, хук в `BaseConfigurableWidget`; пример `frontend/styles/`; ADR-086 | 6 |
 | 2026-03-24 | **`TAB_STRUCTURE.md`** / **`mvp_pattern.py`**: ссылки на актуальные ADR и `multiprocess_prototype/docs/FRONTEND_MAP.md` (удалён устаревший план из `docs/` прототипа) | 6 |
 | 2026-03-24 | **`StructuredTableWidget`**: при наличии **`_value_editable`** в строке данных — переопределение `editable` для текстовой ячейки (таблица рецептов в прототипе, ADR-080) | 6 |
 | 2026-03-24 | **ADR-079**: `WidgetSignalBus` → `widgets/widget_signal_bus.py`; `TabWidget` + клавиатуры — шина событий; граница widgets vs components (tabs/tables не в components) | 6 |

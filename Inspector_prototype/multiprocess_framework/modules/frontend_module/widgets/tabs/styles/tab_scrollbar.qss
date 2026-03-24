@@ -1,0 +1,2 @@
+/* Вертикальный скролл во вкладке */
+QScrollBar:vertical { width: {sb_w}px; }

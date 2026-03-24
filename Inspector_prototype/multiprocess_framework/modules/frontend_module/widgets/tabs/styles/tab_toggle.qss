@@ -1,0 +1,11 @@
+/* Кнопка «Скрыть» у TabWidget */
+QPushButton {
+    background-color: {tg_bg};
+    border: none;
+    border-top-left-radius: {tg_radius}px;
+    border-top-right-radius: {tg_radius}px;
+    padding: 0px;
+    font-size: {tg_font}px;
+}
+QPushButton:hover { background-color: {tg_hover}; }
+QPushButton:pressed { background-color: {tg_pressed}; }

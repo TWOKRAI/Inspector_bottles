@@ -14,6 +14,7 @@ from frontend_module.components.common.slider_styles import (
     SLIDER_MIN_HEIGHT_PX,
     apply_slider_handle_style,
 )
+from frontend_module.styling.context import get_style_session_from_parent
 from frontend_module.core.qt_imports import (
     QDoubleValidator,
     QHBoxLayout,
@@ -43,7 +44,9 @@ class SliderValueView(QWidget):
         self._line_edit.setAlignment(Qt.AlignCenter)
         self._slider = QSlider(Qt.Horizontal)
         self._slider.setMinimumHeight(SLIDER_MIN_HEIGHT_PX)
-        apply_slider_handle_style(self._slider)
+        apply_slider_handle_style(
+            self._slider, style_session=get_style_session_from_parent(self)
+        )
         self._slider.wheelEvent = lambda e: None  # type: ignore[assignment]
         self._step = 1.0
 

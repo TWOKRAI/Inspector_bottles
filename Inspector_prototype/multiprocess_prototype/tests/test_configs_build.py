@@ -117,9 +117,11 @@ def test_frontend_config_build_dict():
         "camera_type",
         "poll_interval_ms",
         "ui_diagnostics",
+        "ui_theme",
     ):
         assert key in d
     assert d["ui_diagnostics"] == {}
+    assert d["ui_theme"] == {"global_tokens": {}, "bundle_overrides": {}}
     assert len(d["tabs"]) == 4
     assert [t["widget"] for t in d["tabs"]] == ["recipes", "settings", "processing", "camera"]
     assert d["tabs"][1]["title"] == "Настройки"

@@ -9,6 +9,7 @@ GuiProcess делегирует run() в launcher.
 from typing import Any, Dict, Optional
 
 from frontend_module import FrontendLaunchHooks, run_process_attached_frontend
+from frontend_module.styling import create_app_style_session
 from frontend_module.windows import LoadingWindow
 
 from frontend_module.core.schema_config import coerce_schema_config
@@ -87,6 +88,7 @@ class FrontendLauncher:
         )
 
         camera_type = config.get("camera_type", "simulator")
+        style_session = create_app_style_session(ui_theme=config.get("ui_theme"))
         app_ctx = FrontendAppContext(
             config=config,
             registers_manager=regs,
@@ -94,6 +96,7 @@ class FrontendLauncher:
             camera_type=camera_type,
             recipe_manager=recipe_manager,
             command_handler=cmd,
+            style_session=style_session,
         )
         tab_widget_factory = create_tab_widget_factory(app_ctx)
 
@@ -114,6 +117,7 @@ class FrontendLauncher:
                 tab_widget_factory=tab_widget_factory,
                 header_action_handlers={},
                 header_on_unmatched=header_on_unmatched if wm else None,
+                style_session=style_session,
             )
             process._ui_diagnostics = attach_ui_diagnostics(win, config)
             process._window = win

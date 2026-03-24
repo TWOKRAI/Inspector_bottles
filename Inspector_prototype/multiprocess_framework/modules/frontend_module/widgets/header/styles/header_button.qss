@@ -1,0 +1,9 @@
+/* Кнопки шапки (альтернатива инлайн-QSS в button_style) */
+QPushButton {
+    background-color: {hdr_bg};
+    border: {hdr_border};
+    font-size: {hdr_font}px;
+}
+QPushButton:pressed {
+    font-size: {hdr_font_pressed}px;
+}

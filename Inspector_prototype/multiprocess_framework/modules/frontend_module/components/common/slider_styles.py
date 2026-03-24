@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-Стили горизонтального слайдера: QSS ручки, высота трека.
+Стили горизонтального слайдера: реэкспорт из `styles` + отступ для layout.
 
-Используется примитивом styled_slider и SliderValueView.
+Используется SliderValueView и styled_slider.
 """
-SLIDER_MIN_HEIGHT_PX = 45
+from __future__ import annotations
+
+from frontend_module.components.common.styles import (
+    SLIDER_MIN_HEIGHT_PX,
+    apply_slider_handle_style,
+)
+
 LAYOUT_SPACING_AFTER_LABEL_PX = 5
 LAYOUT_SPACING_BEFORE_SLIDER_PX = 20
 LAYOUT_SPACING_AFTER_SLIDER_PX = 25
 LAYOUT_SPACING_PX = 5
 
-SLIDER_HANDLE_STYLESHEET = """
-    QSlider::handle:horizontal {
-        height: 50px; width: 25px; margin: -15px 0;
-        border: 2px solid #4682B4; border-radius: 7px; background: gray;
-    }
-"""
-
-
-def apply_slider_handle_style(slider: object) -> None:
-    """Применить QSS ручки горизонтального слайдера."""
-    slider.setStyleSheet(SLIDER_HANDLE_STYLESHEET)
+__all__ = [
+    "LAYOUT_SPACING_PX",
+    "LAYOUT_SPACING_AFTER_LABEL_PX",
+    "LAYOUT_SPACING_BEFORE_SLIDER_PX",
+    "LAYOUT_SPACING_AFTER_SLIDER_PX",
+    "SLIDER_MIN_HEIGHT_PX",
+    "apply_slider_handle_style",
+]

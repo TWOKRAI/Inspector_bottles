@@ -18,6 +18,12 @@ class BaseControlConfig:
     tooltip: Optional[str] = None
     enabled: bool = True
     access_level: int = 0
+    # --- Стиль (каскад: глобальная сессия → style_id → виджет → компонент) ---
+    style_id: Optional[str] = None
+    style_qss_template: Optional[str] = None
+    style_qss_path: Optional[str] = None
+    style_widget_tokens: Optional[dict] = None
+    style_tokens: Optional[dict] = None
 
 
 @dataclass

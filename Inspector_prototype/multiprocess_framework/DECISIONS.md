@@ -16,6 +16,82 @@
 
 ---
 
+## ADR-089: Цепочка UI-конфига — `SchemaBase` в прототипе, dataclass во `frontend_module`, адаптер на границе
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Нужен единый стиль работы с конфигами в прототипе (рецепты, YAML, `data_schema_module`), при этом `frontend_module` не должен зависеть от Pydantic/`SchemaBase`. Параллельно нужны явные пути к QSS и токены на уровне компонента, переопределение из схемы и два режима: **слияние** с дефолтным стилем и **полная замена** шаблона.
+- Решение:
+  - **Фреймворк (`frontend_module`)**: рантайм-контракт — dataclass / dict (`BaseControlConfig`, конфиги вида `CheckboxViewConfig` и т.д.), поля стиля: `style_id`, `style_qss_path`, `style_qss_template`, `style_widget_tokens`, `style_tokens`; дефолтные QSS — `styling/default_bundles` и co-located `.qss`. Здесь **нет** обязательного импорта `data_schema_module`.
+  - **Приложение (прототип)**: описание для сериализации и единообразия — **`SchemaBase`** + `@register_schema`, секции в `FrontendConfig` / схемах вкладок / вложенные модели стиля (например индикатор чекбокса). Вход с границы процесса — **dict** (Dict at Boundary), затем `coerce_schema_config(dict, SomeSchema)`.
+  - **Адаптер (прототип, отдельный модуль/пакет, например рядом со `schemas/` или `frontend/adapters/`)**: чистые функции `SchemaModel → dataclass конфига компонента`: заполнение токенов, при необходимости выставление `style_qss_path` для replace, иначе только `style_tokens` / слои для merge поверх `style_id` из бандла.
+  - **Merge**: в схеме задаются частичные переопределения → адаптер передаёт их в `style_tokens` / `component_layer`; базовый `.qss` из бандла сохраняется.
+  - **Replace**: в схеме явно (режим или полный путь к своему QSS + полный набор токенов) → адаптер выставляет `style_qss_path` (и при необходимости не опирается на дефолтный шаблон бандла для этого экземпляра).
+  - **Глобальная тема**: по-прежнему `UiThemeConfig` → `apply_ui_theme_dict` / `create_app_style_session`; пер-компонентные схемы дополняют или переопределяют через те же поля `BaseControlConfig`.
+- Поток данных (ориентир для реализации):
+
+```mermaid
+flowchart LR
+  subgraph proto [Прототип]
+    D[dict из YAML / app_cfg]
+    S[SchemaBase]
+    A[Адаптер schema to dataclass]
+  end
+  subgraph fw [frontend_module]
+    C[Dataclass конфиг контрола]
+    ST[StyleSession]
+  end
+  D --> S
+  S --> A
+  A --> C
+  C --> ST
+```
+
+- Причина: Один стиль описания данных в приложении; фреймворк остаётся переносимым и тестируемым без схем; граница явная и тонкая.
+- Отклонённые альтернативы: объявлять `SchemaBase` внутри каждого пакета `frontend_module` — жёсткая зависимость и циклы; хранить только dict без схем в прототипе — слабее валидация и дискавери для рецептов.
+
+---
+
+## ADR-088: Встроенные QSS во `frontend_module` — `default_bundles` вместо `token_bundles` в прототипе
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Дублирование `qss/` + `token_bundles/` в прототипе при том, что `style_id` уже зашиты во фреймворке; сложнее сопровождать и неочевидно, где «источник правды».
+- Решение:
+  - Файлы `.qss` рядом с соответствующими пакетами: `widgets/keyboard/styles/`, `widgets/tabs/styles/`, `widgets/header/styles/`, `components/common/qss/`, `components/checkbox/qss/`.
+  - **`frontend_module/styling/default_bundles.py`**: `StyleBundleSpec`, `iter_bundle_specs()`, `register_default_bundles`, `style_ids_legacy_map()`.
+  - **`frontend_module/styling/app_style_session.py`**: `create_app_style_session`, `apply_ui_theme_dict` (прототип: `create_legacy_app_style_session` — тонкий алиас).
+  - Прототип: удалены `frontend/styles/qss/*.qss` (перенесённые) и пакет `token_bundles/`; `UiThemeConfig` и мерж в конфиге без изменений по смыслу.
+- Причина: Одна точка регистрации; co-location шаблонов с виджетами; прототип работает только с dict темы.
+- Отклонённые альтернативы: оставить QSS только в прототипе — фреймворк остаётся без самодостаточных дефолтов для своих `app_*` стилей.
+
+---
+
+## ADR-087: Тема UI — `token_bundles` + `UiThemeConfig` (SchemaBase)
+- Дата: 2026-03-24
+- Статус: устарело (см. ADR-088: `token_bundles` перенесены во фреймворк как `default_bundles`)
+- Контекст: Токены для QSS должны быть рядом с шаблонами; тема должна сериализоваться как остальные конфиги и опционально жить в рецептах/версиях отдельно от регистров алгоритма.
+- Решение:
+  - `multiprocess_prototype/frontend/styles/token_bundles/`: один модуль на файл `qss/*.qss` (`STYLE_ID`, `QSS_FILE`, `DEFAULT_TOKENS`).
+  - `UiThemeConfig` (SchemaBase): `global_tokens`, `bundle_overrides`; поле `ui_theme` в `FrontendConfig`, ключ `ui_theme` в `build_dict`, мерж из `app_cfg` через `_merge_ui_theme_dict`.
+  - `NamedStyleRegistry.merge_default_tokens` для применения переопределений; `create_legacy_app_style_session(ui_theme=...)`, `apply_ui_theme_dict`.
+- Причина: Единый формат с `data_schema_module`; граница процесса — dict; регистры алгоритма и тема UI разделены по смыслу.
+- Отклонённые альтернативы: хранить токены только в YAML без схемы — хуже валидация и дискавери.
+
+---
+
+## ADR-086: Пакет `frontend_module/styling` — каскад QSS без зависимости от config_module
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Нужна гибкая настройка UI: глобальная палитра, затем виджеты (оболочки), затем компоненты; live-обновление через пересборку QSS; без привязки утилит к `ConfigManager` (Dict at Boundary).
+- Решение:
+  - Пакет **`frontend_module/styling/`**: `render_qss`, `load_qss_file`, `merge_token_layers`, `NamedStyleRegistry`, `StyleSession` (регистрация виджетов, `refresh(style_id)`, `remove_registration`, weakref на `destroyed`), опционально `set_global_qss` на `QApplication`.
+  - **Порядок merge токенов (слабее → сильнее):** дефолты `style_id` → `global_tokens` → `widget_layer` → `component_layer` — чтобы палитра приложения перекрывала дефолты именованного стиля, а переопределения виджета/компонента — палитру.
+  - **`BaseControlConfig`**: опциональные поля `style_id`, `style_qss_template`, `style_qss_path`, `style_widget_tokens`, `style_tokens`.
+  - **`BaseConfigurableWidget`**: опциональный аргумент `style_session`, поиск `style_session` у предка; `_apply_styling_from_config()` после `_load_metadata` в `_apply_configuration`.
+- Причина: Один механизм для статики и live; тестируемые чистые функции; Qt только в `StyleSession` / `apply_qss`.
+- Отклонённые альтернативы: перенос `App/StyleManager` с жёсткими ключами `default_style` во фреймворк — нарушает границу модулей.
+
+---
+
 ## ADR-085: Сжатие документации refactored — один актуальный контур
 - Дата: 2026-03-24
 - Статус: принято

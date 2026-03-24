@@ -4,14 +4,18 @@ VirtualKeyboardMini — компактная цифровая клавиатур
 """
 from __future__ import annotations
 
-from frontend_module.core.qt_imports import QFont, QGridLayout, QPushButton, QVBoxLayout, QWidget, Qt
+from typing import Any, Optional
+
+from frontend_module.core.qt_imports import QGridLayout, QPushButton, QVBoxLayout, QWidget, Qt
+from frontend_module.styling.context import get_style_session_from_parent
 from frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
 class VirtualKeyboardMini(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, style_session: Optional[Any] = None):
         super().__init__(parent)
         self._signal_bus = WidgetSignalBus(parent=self)
+        self._style_session_override = style_session
         self.input = None
         self.enter = None
         self.init_ui()
@@ -53,6 +57,12 @@ class VirtualKeyboardMini(QWidget):
         layout.addLayout(grid)
         self.setLayout(layout)
         self.resize(300, 250)
+        self._apply_style_session_if_available()
+
+    def _apply_style_session_if_available(self) -> None:
+        session = self._style_session_override or get_style_session_from_parent(self)
+        if session is not None and hasattr(session, "register"):
+            session.register(self, style_id="app_keyboard_mini", apply_now=True)
 
     @property
     def signal_bus(self) -> WidgetSignalBus:

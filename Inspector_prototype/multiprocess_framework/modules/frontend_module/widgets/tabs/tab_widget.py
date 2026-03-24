@@ -6,7 +6,7 @@ BaseTab — абстрактный базовый класс для вкладо
 from __future__ import annotations
 
 import abc
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from frontend_module.core.qt_imports import (
     QHBoxLayout,
@@ -17,6 +17,7 @@ from frontend_module.core.qt_imports import (
     QWidget,
     Qt,
 )
+from frontend_module.styling.context import get_style_session_from_parent
 from frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
@@ -48,8 +49,13 @@ class TabWidget(QWidget):
     `emit_widget_event`, как у MVP-виджетов (см. ADR-079).
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        style_session: Optional[Any] = None,
+    ) -> None:
         super().__init__(parent)
+        self._style_session_override = style_session
         self._signal_bus = WidgetSignalBus(parent=self)
         self._tabs_visible = True
         self._tab_widget = QTabWidget()
@@ -81,6 +87,15 @@ class TabWidget(QWidget):
         self._tab_widget.currentChanged.connect(self._on_current_changed)
         self._tab_index_to_widget: Dict[int, BaseTab] = {}
         self._last_index = -1
+        self._apply_style_session_if_available()
+
+    def _apply_style_session_if_available(self) -> None:
+        """Если передан `style_session` или у предка/окна есть сессия — QSS из реестра."""
+        session = self._style_session_override or get_style_session_from_parent(self)
+        if session is None or not hasattr(session, "register"):
+            return
+        session.register(self._tab_widget, style_id="app_tab_main", apply_now=True)
+        session.register(self._toggle_btn, style_id="app_tab_toggle", apply_now=True)
 
     @property
     def signal_bus(self) -> WidgetSignalBus:
@@ -95,7 +110,11 @@ class TabWidget(QWidget):
         if wrap_scroll:
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
-            scroll.setStyleSheet("QScrollBar:vertical { width: 40px; }")
+            session = self._style_session_override or get_style_session_from_parent(self)
+            if session is not None and hasattr(session, "register"):
+                session.register(scroll, style_id="app_tab_scrollbar", apply_now=True)
+            else:
+                scroll.setStyleSheet("QScrollBar:vertical { width: 40px; }")
             scroll.setWidget(widget)
             content_widget = scroll
         else:
