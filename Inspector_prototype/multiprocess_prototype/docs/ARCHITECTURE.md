@@ -2,8 +2,8 @@
 
 Тестовое приложение поверх **Multiprocess Framework** (`Inspector_prototype/multiprocess_framework/refactored/modules/`). Граница процессов: только **dict** (Dict at Boundary); схемы Pydantic живут внутри модулей и в `registers/schemas/`.
 
-**Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров). Каталог модулей и связей (фреймворк + прототип): [ARCHITECTURE_MODULE_CATALOG.md](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md).  
-Дорожная карта GUI-команд и лаунчера (фазы M0–M3, ограничители сложности): [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md).
+**Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров), [RECIPES_SYSTEM.md](RECIPES_SYSTEM.md) (двойные рецепты: регистры + app), **[FRONTEND_MAP.md](FRONTEND_MAP.md)** (цепочка UI, мост регистров, команды, контекст вкладок). Каталог модулей фреймворка: [ARCHITECTURE_MODULE_CATALOG.md](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md).  
+Дорожная карта GUI-команд и лаунчера: [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md). Журнал решений (фреймворк + прототип): [DECISIONS.md](../../multiprocess_framework/refactored/DECISIONS.md).
 
 **Запуск GUI:** `GuiProcess.run()` создаёт `FrontendLauncher`, который заполняет **`FrontendLaunchHooks`** и вызывает **`run_process_attached_frontend`** из `frontend_module` — одна каноническая последовательность: конфиг UI, регистры, опциональный boot регистров, `FrontendManager.initialize`, регистрация окон, цикл Qt. Исходящие команды кнопок/миксина идут через один **`RoutedCommandSender`** на процессе (`GuiProcess._routed_command_sender`, ADR-058); маршрутизация и каталог args остаются в `registers/command_routing.py` и `gui_command_catalog.py`.
 
@@ -95,6 +95,23 @@ flowchart LR
 
 ---
 
+## Карта: от `main.py` до пикселя
+
+Ниже — порядок, в котором стоит читать код при онбординге (не все шаги выполняются в одном потоке, но **зависимости** такие).
+
+1. **`main.py`** — `SystemLauncher`, `add_process(*process(Config))`, `get_camera_type()` из `persistence`.
+2. **Конфиги процессов** — `backend/configs/` и `backend/processes/*/config*.py`; Pydantic внутри, наружу — `dict` через `process()` / `model_dump()`.
+3. **Жизненный цикл процесса** — `process_module.ProcessModule` + воркеры `worker_module`; обмен — `message_module`, буферы — `shared_resources_module`.
+4. **Camera → Processor → Renderer** — `backend/processes/*` и `backend/modules/*` (фабрика камеры, детекция, отрисовка); SHM с именами из диаграммы выше.
+5. **GUI** — `GuiProcess.run()` → **`FrontendLauncher`** (`frontend/launcher.py`): `build_frontend_config`, `create_registers()`, `RecipeManager`, регистрация `MainWindow` / `LoadingWindow` через `frontend_module`.
+6. **Регистры приложения** — `registers/factory.py`, схемы в `registers/schemas/`; мост UI ↔ регистры — `FrontendRegistersBridge` (фреймворк) + колбэки вкладок.
+7. **Команды к процессам** — `GuiCommandHandler` + `registers/command_routing.py` + `gui_command_catalog.py`; на стороне процесса — `GuiProcessMixin._send_command` и маршрутизация фреймворка.
+8. **Рецепты** — один файл YAML, два пространства имён: `register_recipes` / `app_recipes` ([RECIPES_SYSTEM.md](RECIPES_SYSTEM.md)); UI: вкладка «Рецепты» (`RegisterRecipePanel`) и «Настройки» (`AppRecipePanel`), общая база `RecipeSlotTablePanel`.
+
+**Граница «фреймворк / приложение»:** в репозитории модульный код фреймворка лежит в `multiprocess_framework/refactored/modules/`; всё под `multiprocess_prototype/` — демо-приложение (схемы регистров, вкладки, бэкенд-пайплайн, YAML рецептов).
+
+---
+
 ## Персистентность (данные вне репозитория)
 
 Пакет **`persistence/`** задаёт корень данных: `INSPECTOR_DATA_DIR` или **`~/.inspector_prototype`**. Там же создаётся **`user_prefs.json`** (сейчас `camera_type`). Новые файлы состояния (кэши, экспорты, расширенные настройки) логично класть под тот же корень отдельными модулями в `persistence/`.
@@ -108,6 +125,7 @@ flowchart LR
 - **Класс процесса:** `GuiProcess` в `backend/processes/gui/gui_process.py`. `run()` делегирует в `FrontendLauncher` (`frontend/launcher.py`). Обработчики `gui_*` / `_handle_*` — в **`backend/gui_process_mixin.py`** (избегание цикла импорта с пакетом `frontend` при сборке `GuiConfig`).
 - **Процессный конфиг (`proc_dict`):** **`GuiConfig`** в `backend/processes/gui/gui_config.py`, регистрация `@register_schema("GuiConfig")`. Импорт для `main.py` и тестов: **`multiprocess_prototype.backend.configs.GuiConfig`**.
 - **Композиция UI (окна, вкладки):** **`FrontendConfig`** в `frontend/configs/frontend_config.py` — не отдельный процесс; мержится в лаунчере из `app_cfg` (`GuiConfig.model_dump()`).
+- **Телеметрия UI (опционально):** `GuiConfig.ui_diagnostics` или env **`INSPECTOR_UI_DIAGNOSTICS`**. Реализация: **`frontend/diagnostics.py`** — одна подписка на `WidgetSignalBus` вкладок и сигнал шапки; логирование через `logging`, при `buffer_max` — буфер для отладки (ADR-083).
 
 ---
 
@@ -164,17 +182,33 @@ flowchart TB
 
 ---
 
+## Менеджеры и доступ (прикладной слой)
+
+Пакет **`managers/`** — не часть фреймворка; живёт только в прототипе.
+
+| Модуль | Назначение |
+|--------|------------|
+| `recipe_manager.py` | YAML: слоты `register_recipes` / `app_recipes`, загрузка/сохранение снимков, миграция со старого формата |
+| `access_context.py` | `AccessContext` — уровень доступа, обход readonly, скрытые поля; прокидывается в UI рецептов |
+| `app_recipe_aggregate.py` | Сборка снимка app-рецепта из `SchemaBase` (вкладки настроек без тяжёлых импортов в тестах) |
+
+Импорт для кода приложения: `from multiprocess_prototype.managers import RecipeManager, AccessContext`.
+
+---
+
 ## Каталог кода (кратко)
 
 | Путь | Назначение |
 |------|------------|
 | `main.py` | `SystemLauncher`, `add_process(*process(Config))` |
+| `camera_policy.py` | Константы и типы режима камеры (единая политика для схем, GUI, persistence) |
 | `backend/configs/` | Базовые и процессные конфиги, реэкспорт из `modules` где нужно |
 | `backend/processes/` | `camera/`, `processor/`, `render/`, `gui/`, `database/`, `robot_simulator/` |
 | `backend/modules/` | Доменная логика без обязательного `ProcessModule`: camera (factory, backends), `processor_frame`, `renderer` |
 | `backend/gui_process_mixin.py` | Миксин GUI-процесса |
 | `backend/database/` | SQLite / схемы детекций |
-| `frontend/` | `FrontendLauncher`, окна, виджеты, `FrontendConfig` |
+| `frontend/` | `FrontendLauncher`, окна, виджеты, `FrontendConfig`, `GuiCommandHandler` |
+| `managers/` | `RecipeManager`, `AccessContext`, агрегат app-рецепта |
 | `registers/` | `factory`, `create_registers`, routing, каталог команд |
 | `persistence/` | `get_data_root()`, `user_prefs.json`, API `get_camera_type` / `set_camera_type` |
 | `utils/` | Генератор кадров, webcam, утилиты SHM |
@@ -183,28 +217,52 @@ flowchart TB
 
 ---
 
-## Оценка зрелости (тимлид)
+## Оценка зрелости и рекомендации
 
-Оценка относится к **прототипу как демо фреймворка**, не к продукту в эксплуатации.
+Оценки ниже — **субъективный ориентир** для команды (демо-код и учебный фреймворк, не сертифицированный продукт).
+
+### Прототип (`multiprocess_prototype`)
 
 | Критерий | Балл | Комментарий |
 |----------|------|-------------|
-| Архитектура и границы | 8 | Чёткое разделение фреймворк / приложение; Dict at Boundary; регистры в приложении |
-| Согласованность документации и кода | 8 | После выравнивания docs — одна каноничная страница (этот файл) |
-| Поддерживаемость | 8 | Boot, routing, mixin; единый `GuiConfig` + отдельный `FrontendConfig` для UI |
-| Тестируемость | 7 | Много unit-тестов; GUI и полный e2e завязаны на DISPLAY |
-| Операционная гигиена | 6 | Логи не должны коммититься в репозиторий (см. `.gitignore`) |
+| Архитектура и границы | 8/10 | Фреймворк отделён; регистры и схемы — в приложении; Dict at Boundary соблюдается в типичных путях |
+| Документация и навигируемость | 8/10 | Один «якорный» документ (этот файл) + предметные (`RECIPES_SYSTEM`, `registers/README`) |
+| Поддерживаемость | 7.5/10 | Boot-файлы, routing, mixin; дублирования сняты рефакторингом вкладок/рецептов |
+| Тестируемость | 7/10 | Хороший слой unit-тестов; GUI/e2e зависят от DISPLAY и Qt |
+| Операционка | 7/10 | Логи в `.gitignore`; `sys.path` в `main.py` для прямого запуска — компромисс удобства |
 
-**Итог: ориентир 7.5–8 / 10** для учебного/демонстрационного прототипа.
+**Итог по прототипу: ~7.5–8 / 10** как демонстрационного приложения к фреймворку.
 
-### Советы по улучшению
+### Фреймворк (`multiprocess_framework/refactored/modules`)
 
-1. Сохранять **одну** актуальную архитектурную страницу; устаревшие разборы — только в `docs/archived/` с пометкой даты.
-2. Не коммитить рантайм-логи; для CI прикладывать логи как артефакты job.
-3. Расширять контрактные тесты `schema ↔ register_sync` при новых полях (см. [registers/CHECKLIST.md](../registers/CHECKLIST.md)).
+| Критерий | Балл | Комментарий |
+|----------|------|-------------|
+| Модульность и контракты | 8/10 | 16 модулей, `interfaces.py`, STATUS, явные слои (foundation → orchestration) |
+| Согласованность | 7.5/10 | ADR в `DECISIONS.md`; периодические миграции (frontend components/widgets) требуют дисциплины |
+| Зрелость IPC/процессов | 8/10 | Launcher, сообщения, SHM — связка осмысленная для прототипа машинного зрения |
+| Документация фреймворка | 7/10 | Каталог модулей и дорожные карты есть; объём большой — важно держать индекс актуальным |
 
----
+**Итог по фреймворку: ~7.5–8 / 10** как внутренней платформы; до «продакшн-платформы» не хватает жёстких SLO, наблюдаемости и политики версионирования публичного API.
 
-## Архив
+### Что получилось удачно
 
-Исторический разбор от 2026-03-19 (не руководство к действию): [archived/ARCHITECTURE_ANALYSIS_2026-03-19.md](archived/ARCHITECTURE_ANALYSIS_2026-03-19.md).
+- **Регистры в приложении** — фреймворк не зашивает поля алгоритма; прототип показывает полный цикл `SchemaBase` → GUI → процессы.
+- **Разделение `GuiConfig` / `FrontendConfig`** — процессный dict отделён от композиции вкладок и окон.
+- **Один маршрут команд** — `command_routing` + каталог + mixin снижают хаос «магических строк».
+- **Двойные рецепты** (регистры vs UI) — один файл, два домена, переиспользуемая панель таблицы.
+- **Boot-значения** рядом со схемами регистров — меньше рассинхрона с конфигами процессов.
+
+### Где слабые места / технический долг
+
+- **`sys.path` в `main.py`** — удобно для разработчика, но не идеал для установки пакетом; для масштаба лучше единая точка входа (`pip install -e` / `pyproject` с путями).
+- **Сложность фронтенд-слоя** — много слоёв (launcher, bridge, MVP-виджеты, components); новым людям нужна именно эта «карта».
+- **GUI-тесты** — зависимость от дисплея; рост покрытия без headless-стратегии будет болезненным.
+- **Внешние опции** (Hikvision) — осознанное ограничение, но усложняет CI и онбординг.
+
+### Советы при дальнейшем масштабировании
+
+1. Держать **один канонический** архитектурный документ прототипа (этот файл); выполненные задачи фиксировать в **`DECISIONS.md`**, а не отдельными планами в `docs/`.
+2. При новых полях регистров — сразу **boot + register_sync + тест контракта** ([registers/CHECKLIST.md](../registers/CHECKLIST.md)).
+3. Вынести в правила репозитория: после значимых изменений — `python scripts/validate.py` и pytest по затронутым пакетам.
+4. Для продукта в перспективе: явный **versioning** сообщений/схем конфигов и минимальный **health-check** процессов из лаунчера.
+

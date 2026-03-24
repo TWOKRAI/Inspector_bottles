@@ -54,6 +54,9 @@ class UnifiedCameraProcess(ProcessModule):
         self._camera_index = app_cfg.get("camera_index", 0)
         self._hikvision_width = app_cfg.get("hikvision_resolution_width", 1920)
         self._hikvision_height = app_cfg.get("hikvision_resolution_height", 1080)
+        self._hikvision_frame_rate = float(app_cfg.get("hikvision_frame_rate", 25.0))
+        self._hikvision_exposure_time = float(app_cfg.get("hikvision_exposure_time", 10000.0))
+        self._hikvision_gain = float(app_cfg.get("hikvision_gain", 0.0))
         self._simulator_image_path = app_cfg.get("simulator_image_path")
 
         self._backend_lock = threading.Lock()
@@ -220,6 +223,25 @@ class UnifiedCameraProcess(ProcessModule):
         self._camera_index = data.get("camera_index", self._camera_index)
         return {"status": "ok", "camera_index": self._camera_index}
 
+    def _patch_hikvision_register_params(self, partial: dict) -> None:
+        """Обновить кэш параметров Hikvision из register_update; при активном SDK — set_parameters."""
+        if "frame_rate" in partial:
+            self._hikvision_frame_rate = float(partial["frame_rate"])
+        if "exposure_time" in partial:
+            self._hikvision_exposure_time = float(partial["exposure_time"])
+        if "gain" in partial:
+            self._hikvision_gain = float(partial["gain"])
+        with self._backend_lock:
+            if self._current_type == "hikvision":
+                self._backend.handle_command(
+                    "set_parameters",
+                    {
+                        "frame_rate": self._hikvision_frame_rate,
+                        "exposure_time": self._hikvision_exposure_time,
+                        "gain": self._hikvision_gain,
+                    },
+                )
+
     def _cmd_set_hikvision_resolution(self, data: dict):
         self._hikvision_width = data.get("width", self._hikvision_width)
         self._hikvision_height = data.get("height", self._hikvision_height)
@@ -327,6 +349,7 @@ class UnifiedCameraProcess(ProcessModule):
                         set_device_id=self._cmd_set_device_id,
                         set_camera_index=self._cmd_set_camera_index,
                         set_hikvision_resolution=self._cmd_set_hikvision_resolution,
+                        patch_hikvision_params=self._patch_hikvision_register_params,
                     )
                     continue
 

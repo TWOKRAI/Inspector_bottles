@@ -10,7 +10,7 @@
 ## Start Here
 
 1. **Новичок?** Прочитай этот README (10 мин) → [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) → выбери путь.
-2. **AI-агент?** [docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md) → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md).
+2. **AI-агент?** [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (разделы 1–7) → [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md).
 3. **Разработчик?** Quick Start ниже → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) → `modules/*/README.md`.
 4. **Маршрутизация сообщений и регистров?** [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) (процесс vs канал Router, `connection_map`, `FieldRouting`).
 
@@ -386,11 +386,9 @@ config.update_field("confidence", 1.5)  # ✗ Error
 | **[DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md)** | Navigation & quick links | 5 min |
 | **[docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md)** | Complete overview | 45 min |
 | **[docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md)** | Diagrams & tables | 30 min |
-| **[docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md)** | Design philosophy | 30 min |
-| **[docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md)** | For AI agents — philosophy | 15 min |
-| **[DECISIONS.md](./DECISIONS.md)** | 21 architectural decisions (ADRs) | 20 min |
+| **[docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md)** | Routing & registers glossary | 5 min |
+| **[DECISIONS.md](./DECISIONS.md)** | Architectural decisions (ADRs) | 20 min |
 | **[MODULES_STATUS.md](./MODULES_STATUS.md)** | Module status & scores | 2 min |
-| **[DOCUMENTATION_SCORE.md](./DOCUMENTATION_SCORE.md)** | Team lead evaluation (8.2/10) | 3 min |
 
 **Each module also has:**
 - `README.md` — module documentation
@@ -498,8 +496,9 @@ Inspector_prototype/multiprocess_framework/refactored/
 │   ├── FRAMEWORK_OVERVIEW.md      # Complete overview
 │   ├── ROUTING_GLOSSARY.md        # Routing terms (process vs Router channel)
 │   ├── ARCHITECTURE_REFERENCE.md  # Diagrams & tables
-│   ├── ARCHITECTURE_ESSAY.md      # Design philosophy
-│   └── ARCHITECTURE_PHILOSOPHY.md # For AI agents
+│   ├── ARCHITECTURE_MODULE_CATALOG.md
+│   ├── FRONTEND_COMMAND_LAUNCHER_ROADMAP.md
+│   └── MODULE_README_TEMPLATE.md
 │
 ├── modules/                       # Core packages (см. также channel_routing, statistics)
 │   ├── base_manager/

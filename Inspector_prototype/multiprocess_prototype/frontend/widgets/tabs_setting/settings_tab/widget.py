@@ -2,45 +2,57 @@
 """
 SettingsTabWidget — вкладка настроек.
 
-NumericControl, CheckboxControl по конфигу (control_v2 API).
+Редактирование параметров UI (схемы app-рецепта) только через таблицу
+AppRecipePanel; отдельные слайдеры/чекбоксы к регистрам не используются.
 
-Доступность контролов: RegisterBindingContext + IRegistersManagerGui; при
-отсутствии rm — заглушка (см. TAB_STRUCTURE.md).
+Доступность: RegisterBindingContext + IRegistersManagerGui; при отсутствии rm —
+заглушка (см. TAB_STRUCTURE.md).
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
-from frontend_module.components import BaseTab
-from frontend_module.components.tabs import RegisterBindingContext, create_registers_placeholder
-from frontend_module.components.control_v2 import (
-    BindingConfig,
-    CheckboxControl,
-    CheckboxViewConfig,
-    NumericControl,
-    NumericViewConfig,
-)
-from frontend_module.core.qt_imports import QGroupBox, QVBoxLayout, QWidget
+from frontend_module.widgets.tabs import BaseTab
+from frontend_module.widgets.tabs import RegisterBindingContext, create_registers_placeholder
+from frontend_module.core.qt_imports import QVBoxLayout, QWidget
 from frontend_module.core.schema_config import coerce_schema_config
 from frontend_module.interfaces import IRegistersManagerGui
+
+from multiprocess_prototype.managers.access_context import AccessContext
+
+from ..recipes_tab.recipe_slot_table_panel import AppRecipePanel
+from ..recipes_tab.schemas import RecipesTabConfig
 
 from .schemas import SettingsTabConfig
 
 
 class SettingsTabWidget(BaseTab):
-    """Вкладка настроек: слайдеры и чекбоксы по конфигу."""
+    """Вкладка настроек: пресеты UI (app-рецепты), редактирование в таблице."""
 
     def __init__(
         self,
         *,
         registers_manager: Optional[IRegistersManagerGui] = None,
         ui: Optional[Union[SettingsTabConfig, dict]] = None,
+        recipe_manager: Optional[Any] = None,
+        recipe_access: Optional[Union[AccessContext, dict]] = None,
+        recipes_tab: Optional[Dict[str, Any]] = None,
+        processing_tab_ui: Optional[Dict[str, Any]] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._registers_manager = registers_manager
         self._config = coerce_schema_config(ui, SettingsTabConfig)
+        self._recipe_manager = recipe_manager
+        self._access_ctx = (
+            recipe_access
+            if isinstance(recipe_access, AccessContext)
+            else AccessContext.from_dict(recipe_access if isinstance(recipe_access, dict) else None)
+        )
+        self._recipes_tab_dict = dict(recipes_tab or {})
+        self._processing_tab_ui_dict = dict(processing_tab_ui or {})
+        self._app_recipe_panel: Optional[AppRecipePanel] = None
         self._init_ui()
 
     @property
@@ -56,43 +68,15 @@ class SettingsTabWidget(BaseTab):
             layout.addStretch()
             return
 
-        rm = binding.rm
-        assert rm is not None
+        assert binding.rm is not None
 
-        group = QGroupBox(self._config.group_title)
-        group_layout = QVBoxLayout(group)
-        for ctrl in self._config.controls:
-            w = self._create_control(rm, ctrl.to_control_dict())
-            if w:
-                group_layout.addWidget(w)
-        layout.addWidget(group)
+        rtab = coerce_schema_config(self._recipes_tab_dict, RecipesTabConfig)
+        self._app_recipe_panel = AppRecipePanel(
+            ui=rtab,
+            recipes_tab_dict=self._recipes_tab_dict,
+            processing_tab_ui_dict=self._processing_tab_ui_dict,
+            recipe_manager=self._recipe_manager,
+            recipe_access=self._access_ctx,
+        )
+        layout.addWidget(self._app_recipe_panel, 1)
         layout.addStretch()
-
-    def _create_control(self, rm: IRegistersManagerGui, cfg: dict) -> Optional[Any]:
-        """
-        Создаёт NumericControl (slider) или CheckboxControl по cfg.
-
-        cfg: type, register_name, field_name, component_config (label, position).
-        """
-        ctype = cfg.get("type", "slider")
-        reg = cfg.get("register_name")
-        field = cfg.get("field_name")
-        component_config = dict(cfg.get("component_config") or {})
-        if not reg or not field:
-            return None
-        binding = BindingConfig(reg, field)
-        if ctype == "slider":
-            view_cfg = NumericViewConfig(
-                view_type="slider",
-                label=component_config.get("label"),
-            )
-            result = NumericControl.create(rm, binding, view_cfg)
-            return result.widget
-        if ctype == "checkbox":
-            view_cfg = CheckboxViewConfig(
-                position=component_config.get("position", "left"),
-                label=component_config.get("label"),
-            )
-            result = CheckboxControl.create(rm, binding, view_cfg)
-            return result.widget
-        return None

@@ -1,14 +1,21 @@
 # Документация multiprocess_prototype
 
-| Документ | Назначение |
-|----------|------------|
-| **[../README.md](../README.md)** | Запуск, тесты, переменные окружения, пример `main.py` |
-| **[../STATUS.md](../STATUS.md)** | Карточка здоровья, ограничения |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Процессы, SHM, сообщения, регистры, диаграммы Mermaid, оценка зрелости |
-| **[../registers/README.md](../registers/README.md)** | Схемы регистров, factory, routing, boot |
-| **[../persistence/README.md](../persistence/README.md)** | Корень данных, user_prefs, расширение персистентности |
-| **[archived/ARCHITECTURE_ANALYSIS_2026-03-19.md](archived/ARCHITECTURE_ANALYSIS_2026-03-19.md)** | Исторический разбор (не использовать как актуальное руководство) |
+Здесь только **актуальные** описания, совпадающие с текущим кодом. История решений — в [`DECISIONS.md`](../../multiprocess_framework/refactored/DECISIONS.md); черновики планов в этом каталоге не хранятся.
 
-Фреймворк (каталог модулей и связей для диаграмм): [`multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md`](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md).  
-Дорожная карта GUI-команд / лаунчера: [`.../FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md).  
-Корневой README фреймворка: `Inspector_prototype/multiprocess_framework/refactored/README.md`, решения: `.../DECISIONS.md`.
+| Документ | Содержание |
+|----------|------------|
+| **[../README.md](../README.md)** | Запуск, тесты, переменные окружения |
+| **[../STATUS.md](../STATUS.md)** | Состояние прототипа, ограничения |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Процессы, SHM, регистры, GUI, оценки; ссылки на фреймворк |
+| **[FRONTEND_MAP.md](FRONTEND_MAP.md)** | Цепочка UI: лаунчер → FrontendManager → окно → вкладки; `FrontendAppContext`; команды |
+| **[RECIPES_SYSTEM.md](RECIPES_SYSTEM.md)** | Два вида рецептов в одном YAML, `RecipeManager`, вкладки, конфиг |
+
+**Рядом с кодом (не в `docs/`):**
+
+| Путь | Назначение |
+|------|------------|
+| [../registers/README.md](../registers/README.md) | Схемы регистров, factory, routing |
+| [../persistence/README.md](../persistence/README.md) | Данные приложения, user_prefs |
+| [../managers/README.md](../managers/README.md) | RecipeManager, AccessContext, app-агрегат |
+
+**Фреймворк:** [`ARCHITECTURE_MODULE_CATALOG.md`](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md) · [`FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) · [`refactored/README.md`](../../multiprocess_framework/refactored/README.md)

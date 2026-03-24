@@ -12,6 +12,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# OS / IDE junk
+.DS_Store
+**/.DS_Store
+
 # IDE
 .idea/
 .vscode/

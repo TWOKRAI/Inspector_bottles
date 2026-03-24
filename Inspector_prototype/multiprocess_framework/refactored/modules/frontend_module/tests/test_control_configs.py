@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """Тесты BindingConfig, SliderConfig, CheckboxViewConfig (control_v2)."""
-from frontend_module.components.control_v2 import (
+from frontend_module.components import (
     BindingConfig,
     CheckboxViewConfig,
     SliderConfig,
 )
-from frontend_module.components.control_v2.base.config import merge_config
+from frontend_module.components.base.config import merge_config
 
 
 class TestBindingConfig:

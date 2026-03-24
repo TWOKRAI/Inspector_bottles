@@ -8,16 +8,16 @@ from typing import Any, Callable, Dict, List, Optional
 import pytest
 from unittest.mock import patch
 
-from frontend_module.components.control_v2.base.config import BindingConfig
-from frontend_module.components.control_v2.base.control_hooks import (
+from frontend_module.components.base.config import BindingConfig
+from frontend_module.components.base.control_hooks import (
     ControlAccessDeniedEvent,
     ControlHooks,
     ControlWriteCommittedEvent,
     ControlWriteRejectedEvent,
 )
-from frontend_module.components.control_v2.checkbox import CheckboxControl
-from frontend_module.components.control_v2.slider import SliderControl, SliderConfig
-from frontend_module.components.control_v2.spinbox import SpinBoxControl, SpinBoxConfig
+from frontend_module.components.checkbox import CheckboxControl
+from frontend_module.components.slider import SliderControl, SliderConfig
+from frontend_module.components.spinbox import SpinBoxControl, SpinBoxConfig
 
 
 @dataclass
@@ -152,11 +152,11 @@ class TestCheckboxHooks:
             BindingConfig("processor", "flag"),
             hooks=ControlHooks(on_write_rejected=on_rejected),
         )
-        from frontend_module.components.control_v2.checkbox.view import CheckboxView
+        from frontend_module.components.checkbox.view import CheckboxView
 
         assert isinstance(r.widget, CheckboxView)
         with patch(
-            "frontend_module.components.control_v2.checkbox.view.QMessageBox.warning"
+            "frontend_module.components.checkbox.view.QMessageBox.warning"
         ):
             r.widget._checkbox.setChecked(True)
         assert len(rejected) >= 1
@@ -187,7 +187,7 @@ class TestAccessDeniedHook:
             hooks=ControlHooks(on_access_denied=denied.append),
             current_access_level=0,
         )
-        from frontend_module.components.control_v2.checkbox.view import CheckboxView
+        from frontend_module.components.checkbox.view import CheckboxView
 
         assert isinstance(r.widget, CheckboxView)
         r.widget._checkbox.setChecked(True)
@@ -221,11 +221,11 @@ class TestSliderSpinboxHooksAndTypes:
             SliderConfig(),
             hooks=ControlHooks(on_write_rejected=rejected.append),
         )
-        from frontend_module.components.control_v2.slider.presenter import SliderPresenter
+        from frontend_module.components.slider.presenter import SliderPresenter
 
         assert isinstance(r.presenter, SliderPresenter)
         with patch(
-            "frontend_module.components.control_v2.group.view.QMessageBox.warning"
+            "frontend_module.components.group.view.QMessageBox.warning"
         ):
             r.presenter._on_finished(5.0)
         assert len(rejected) >= 1
@@ -238,6 +238,6 @@ class TestSliderSpinboxHooksAndTypes:
             BindingConfig("processor", "min_area"),
             SpinBoxConfig(),
         )
-        from frontend_module.components.control_v2.spinbox.presenter import SpinBoxPresenter
+        from frontend_module.components.spinbox.presenter import SpinBoxPresenter
 
         assert isinstance(r.presenter, SpinBoxPresenter)

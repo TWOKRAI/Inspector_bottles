@@ -1,0 +1,48 @@
+# multiprocess_prototype/frontend/widgets/camera_common/model.py
+"""SimWebcamModel — данные вкладки Simulator/Webcam (регистры, колбэки, конфиг)."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal, Optional
+
+from frontend_module.interfaces import IRegistersManagerGui
+
+from .schemas import SimWebcamUiConfig
+
+if TYPE_CHECKING:
+    from .callbacks import SimWebcamWidgetCallbacks
+
+CameraTypeId = Literal["simulator", "webcam"]
+
+
+class SimWebcamModel:
+    """Слой данных: тип камеры, rm, колбэки, UI-конфиг."""
+
+    def __init__(
+        self,
+        *,
+        camera_type_id: CameraTypeId,
+        rm: Optional[IRegistersManagerGui],
+        callbacks: "SimWebcamWidgetCallbacks",
+        ui: SimWebcamUiConfig,
+    ) -> None:
+        self._camera_type_id = camera_type_id
+        self._rm = rm
+        self._callbacks = callbacks
+        self._ui = ui
+
+    @property
+    def camera_type_id(self) -> CameraTypeId:
+        return self._camera_type_id
+
+    @property
+    def registers_manager(self) -> Optional[IRegistersManagerGui]:
+        return self._rm
+
+    @property
+    def callbacks(self) -> "SimWebcamWidgetCallbacks":
+        return self._callbacks
+
+    @property
+    def ui(self) -> SimWebcamUiConfig:
+        return self._ui

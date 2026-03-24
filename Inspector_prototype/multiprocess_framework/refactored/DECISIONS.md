@@ -16,6 +16,138 @@
 
 ---
 
+## ADR-085: Сжатие документации refactored — один актуальный контур
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Накопились дубли (эссе, философия, overview), черновики wishlist/глобального плана, папка `docs/archived/` с разовыми отчётами и мета-файл оценки документации; поддерживать синхронно было дорого.
+- Решение: Оставить операционный набор: `docs/FRAMEWORK_OVERVIEW.md`, `docs/ARCHITECTURE_REFERENCE.md`, `docs/ROUTING_GLOSSARY.md`, `docs/ARCHITECTURE_MODULE_CATALOG.md`, `docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`, `docs/MODULE_README_TEMPLATE.md`, плюс `README.md`, `DOCUMENTATION_INDEX.md`, `DECISIONS.md`, `PROBLEMS.md`, `MODULES_STATUS.md` и README/STATUS/docs внутри модулей. Удалены: `docs/archived/`, `docs/archive/CLEANUP_SUMMARY.md`, `DOCUMENTATION_SCORE.md`, `docs/ARCHITECTURE_ESSAY.md`, `docs/ARCHITECTURE_PHILOSOPHY.md`, `docs/FRAMEWORK_VISION_AND_WISHLIST.md`, `docs/FRAMEWORK_IDEAL_GLOBAL_PLAN.md`.
+- Причина: Один источник правды для онбординга и агентов; меньше расхождений; архивные отчёты не нужны для работы с кодом.
+- Отклонённые альтернативы: «оставить всё, пометить устаревшим» — шум; перенос архива в git без удаления — дубликаты в истории git сохраняются при необходимости.
+
+---
+
+## ADR-084: `FrontendAppContext` — явный контекст вкладок без слияния слоёв
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Много аргументов у `create_tab_widget_factory`; нужна навигация для новых разработчиков и точка расширения без рефакторинга launcher/MainWindow в один класс.
+- Решение:
+  - **`multiprocess_prototype/frontend/app_context.py`**: dataclass **`FrontendAppContext`** (`config`, `registers_manager`, `camera_callbacks_map`, `camera_type`, `recipe_manager`, опционально `command_handler`, `extras`).
+  - **`create_tab_widget_factory(ctx)`** принимает только контекст; **`FrontendLauncher`** собирает контекст после `RecipeManager` / `get_registers()` / колбэков камеры.
+  - **`MainWindow`** без переданной фабрики строит контекст локально с `recipe_manager=None`.
+  - Карта документации: **`docs/FRONTEND_MAP.md`** (поток `run_process_attached_frontend`, мост, команды, стратегия тестов).
+- Причина: Меньше прокидывания параметров; слои (лаунчер, `FrontendManager`, MVP) сохраняются.
+- Отклонённые альтернативы: объединить launcher и фабрику вкладок в один модуль — хуже читаемость границ с фреймворком.
+
+---
+
+## ADR-083: Опциональная телеметрия UI — `ui_diagnostics`, одна подписка на шины
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Нужна наблюдаемость кликов/событий виджетов и основа для headless-проверок без дублирования бизнес-связей; уже есть `WidgetSignalBus` / `emit_widget_event` (frontend_module).
+- Решение:
+  - **`multiprocess_prototype/frontend/diagnostics.py`**: `attach_ui_diagnostics(main_window, config)` — при `ui_diagnostics.enabled` подписывается на `tab_widget.signal_bus`, на все вложенные `signal_bus` у `QWidget` внутри вкладок (дедуп по `id(bus)`), на `header.action_triggered` как `header.action_triggered`.
+  - **Конфиг:** поле **`GuiConfig.ui_diagnostics`** (dict) → `FrontendConfig.build_dict` → ключ **`ui_diagnostics`**; опционально **`INSPECTOR_UI_DIAGNOSTICS=1|true|yes`** включает телеметрию с дефолтными параметрами, если в конфиге не задано `enabled: True`.
+  - **Параметры:** `log_level`, `logger_name`, `include_prefixes`, `buffer_max` (кольцевой буфер в `UiDiagnosticsSession.recent_events` для отладки/тестов).
+  - **`FrontendLauncher`**: после создания `MainWindow` вызывает `attach_ui_diagnostics`, сохраняет сессию в `process._ui_diagnostics`.
+- Причина: один канал событий, без параллельных «трасс»; выключается по умолчанию; тесты: `tests/support/gui_env.py` (`gui_display_available`), `tests/test_ui_diagnostics.py`.
+- Отклонённые альтернативы: отдельная параллельная шина событий — дублирование; обязательная телеметрия в проде — шум и накладные расходы.
+
+---
+
+## ADR-082: Вкладки «Рецепты» и «Настройки» — разделение register vs app-рецепт, общая панель
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Две таблицы на одной вкладке «Рецепты» смешивали параметры алгоритма (регистры) и пресеты UI (`SchemaBase`); нужен единый код слота/`RecipeManager`/таблицы без дублирования.
+- Решение:
+  - Базовый виджет **`RecipeSlotTablePanel`** и наследники **`RegisterRecipePanel`**, **`AppRecipePanel`** ([`recipe_slot_table_panel.py`](../../multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/recipe_slot_table_panel.py)).
+  - **`RecipesTabWidget`** содержит только **`RegisterRecipePanel`**.
+  - **`SettingsTabWidget`** — существующие контролы + **`AppRecipePanel`**; в **`create_tab_widget_factory`** в настройки передаются **`recipe_manager`**, **`recipe_access`**, **`recipes_tab`**, опционально **`processing_tab_ui`** (как для дефолтов агрегата app).
+  - Один **`RecipeManager`** на сессию (лаунчер), без второго экземпляра.
+- Причина: UX: алгоритм отдельно от пресетов интерфейса; DRY для логики YAML/слота/таблицы.
+- Отклонённые альтернативы: два полностью независимых копипаста виджета — отклонено в пользу наследования от общей панели.
+
+---
+
+## ADR-081: Двойные рецепты — register_recipes + app_recipes, AccessContext
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Нужны независимые слоты для параметров алгоритма (регистры) и для схем приложения (UI / ProcessingTabUiConfig и т.д.); гибкий доступ (в т.ч. обход readonly для dev).
+- Решение:
+  - **YAML** (`RecipeManager`): ключи `version`, `current_register_recipe`, `current_app_recipe`, `register_recipes`, `app_recipes`; при загрузке старый формат `current_recipe` + `recipes` маппится в новые поля.
+  - **Регистры**: по-прежнему снимок `model_dump_all()` (ADR-080).
+  - **App**: снимок `{ "RecipesTabConfig": {...}, "ProcessingTabUiConfig": {...} }`; хелперы в `managers/app_recipe_aggregate.py` (ленивые импорты схем, чтобы не тянуть `widgets/__init__` при тестах менеджера).
+  - **UI**: таблица регистров — `RecipesTabWidget` (`RegisterRecipePanel`); таблица app — `SettingsTabWidget` (`AppRecipePanel`); см. **ADR-082**. **`AccessContext`** (`level`, `bypass_readonly`, `show_hidden`) и ключ **`recipe_access`** в `FrontendConfig.build_dict`.
+  - **`FrontendLauncher`**: `ensure_app_slot_from_snapshot("default_value", …)` рядом с `ensure_slot_from_registers`.
+  - **`GuiConfig`**: поля **`recipes_path`**, **`recipe_access`** — в `proc_dict["config"]` → `GuiProcess.get_config("config")` → `FrontendLauncher` / `build_frontend_config` (Dict at Boundary).
+- Причина: два домена данных без смешения в одном слоте; единый файл рецептов; согласованность с FieldMeta и табличным редактированием.
+- Отклонённые альтернативы: один стол с колонкой «тип» — хуже UX; отдельные файлы без запроса — отложено.
+
+---
+
+## ADR-080: Рецепты в multiprocess_prototype — снимок = model_dump_all
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Нужна вкладка «Рецепты» и хранение сортов без дублирования полей вне регистров.
+- Решение:
+  - **`RecipeManager`** (`multiprocess_prototype/managers/recipe_manager.py`): YAML со словарём `recipes[slot_id]`, значение — **структурированный снимок как `RegistersManager.model_dump_all()`**; загрузка через `model_validate_all`, сохранение через `model_dump_all`.
+  - **`RecipesTabWidget`**: таблица строк строится обходом регистров (`build_recipe_rows`); **`StructuredTableWidget`** поддерживает переопределение редактируемости строки через **`_value_editable`** в данных строки.
+  - **Конфиг**: `recipes_tab` + опциональный **`recipes_path`** в `FrontendConfig.build_dict`; фабрика вкладок получает **`RecipeManager`** из `FrontendLauncher`.
+- Причина: Один источник истины — схемы регистров; снимок совместим с валидацией и маршрутизацией `set_field_value`.
+- Отклонённые альтернативы: плоский YAML с `ConverterManager` как в legacy App — отложено до необходимости импорта старых файлов.
+
+---
+
+## ADR-076: BaseWidget — MVP-виджет с опциональным Model
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: MvpTabBase не имел слоя Model; HikvisionWidget имел размытые границы View/Presenter, binder+params разбросан. Нужен единый шаблон для виджетов (в т.ч. контент вкладок) с Model + пассивным View.
+- Решение:
+  - **`widgets/base_widget/`**: **BaseWidget(BaseTab)** — жизненный цикл: `_coerce_callbacks`, `_coerce_ui` → `_create_model()` → `_init_ui()` → `_create_presenter(model)` → `_connect_signals()` → `_on_presenter_ready()`. Model опциональна (`_create_model` возвращает None по умолчанию).
+  - **HikvisionWidget**: переведён на BaseWidget; HikvisionModel (регистры, колбэки); пассивный View (Presenter не вызывает get_* у View, данные передаются через слоты при клике); binder/params_section влиты в `_init_ui`; `register_ops` удалён, логика в model.
+- Причина: Чёткое разделение Model/View/Presenter; переиспользуемый шаблон; пассивный View упрощает тестирование.
+- Отклонённые альтернативы: расширить MvpTabBase опциональным _create_model — BaseWidget отдельно, чтобы не трогать MvpTabBase; позже можно слить.
+
+---
+
+## ADR-077: components vs widgets, flatten контролов, MvpTabBase = BaseWidget
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Папка `components/` смешивала примитивы (`control_v2`) и составной UI (вкладки, шапка); shim `controls/` и сегмент `control_v2` в пути импорта лишние; `MvpTabBase` и `BaseWidget` дублировали жизненный цикл.
+- Решение:
+  - **`frontend_module.components`**: только контролы; содержимое бывшего `control_v2/` поднято на уровень `components/` (`base`, `checkbox`, `examples`, …); каталог `control_v2/` и пакет `controls/` удалены.
+  - **`frontend_module.widgets`**: `tabs`, `base_widget`, `header` (в т.ч. стили кнопок шапки — `header/button_style.py`), `keyboard`, `tables`, `performance_monitor`, `image_panel`; реэкспорт из `widgets/__init__.py`.
+  - **`MvpTabBase`**: наследует **`BaseWidget[Any]`**; по умолчанию `_connect_signals` — no-op (как раньше вкладки без отдельного шага connect). Подклассы реализуют `_create_presenter(model)`; `BaseWidget` импортирует `BaseTab` из `tabs.tab_widget`, чтобы избежать циклического импорта с `tabs/__init__.py`.
+  - **SimWebcamWidget**: переведён на `BaseWidget` + `SimWebcamModel`; binder принимает `fps_changed`, а не `presenter`.
+- Причина: Ясная граница примитив/состав; короткие импорты; единая точка расширения MVP.
+- Отклонённые альтернативы: оставить `control_v2` в пути — лишний уровень; deprecated-реэкспорт из старых путей — отказ в пользу массового обновления импортов.
+
+---
+
+## ADR-078: Стили кнопок шапки — `widgets/header/button_style`, удалён пакет `widgets/base`
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Пакет `widgets/base` содержал только `button_style.py` (фабрика кнопок header) и путался с `widgets/base_widget` (MVP-база).
+- Решение: **`button_style.py`** перенесён в **`widgets/header/`**; пакет **`widgets/base`** удалён. **`ButtonHeader`** / **`create_header_button`** реэкспортируются из **`widgets/header/__init__.py`** и по-прежнему из **`frontend_module.widgets`** (`ButtonHeader`).
+- Причина: Один смысловой домен (шапка) — один пакет; имя `base` освобождено от коллизии с `base_widget`.
+- Отклонённые альтернативы: оставить `widgets/base` с переименованием только файла — лишний уровень вложенности.
+
+---
+
+## ADR-079: Граница `components` / `widgets`; `WidgetSignalBus`; TabWidget и клавиатуры без BaseWidget
+- Дата: 2026-03-24
+- Статус: принято
+- Контекст: Обсуждался перенос `tabs` и `tables` в `components` и унификация с `BaseWidget`. `components` по ADR-077 — контролы полей; `tabs` — инфраструктура главного окна и MVP-мосты; `BaseWidget` импортирует `BaseTab` из `tabs`. Таблица `StructuredTableWidget` наследует `QTableWidget` — не стыкуется с наследованием от `BaseWidget` без композиции.
+- Решение:
+  - **`tabs` и `tables` остаются в `frontend_module.widgets`**; не смешивать с примитивами `components` без отдельного ADR и миграции импортов.
+  - **`WidgetSignalBus`** вынесен в **`widgets/widget_signal_bus.py`**, чтобы **`TabWidget`** и виджеты без `BaseWidget` подключали ту же шину без циклического импорта с `base_widget.py`.
+  - **`TabWidget`**: не наследует `BaseWidget`; добавлены `signal_bus` и `emit_widget_event`; события `tab_widget.current_changed`, `tab_widget.panel_visibility_changed`.
+  - **`VirtualKeyboard` / `VirtualKeyboardMini`**: `signal_bus` + `emit_widget_event`; события `keyboard.full.shown` / `keyboard.full.closed`, `keyboard.mini.enter` / `keyboard.mini.closed`.
+  - **`HeaderWidget` → BaseWidget** и **`TableWithToolbar` → BaseWidget** — отложены до отдельной задачи с регрессионными тестами UI.
+- Причина: Единый канал телеметрии без навязывания MVP всем виджетам; ясная граница каталогов; отсутствие циклов импорта.
+- Отклонённые альтернативы: перенос `tabs` в `components` — ломает смысл ADR-077; наследование `TabWidget(BaseWidget)` — смешение ролей хоста и контента.
+
+---
+
 ## ADR-075: MvpTabBase, create_registers_placeholder, callbacks_base, recipes schemas
 - Дата: 2026-03-23
 - Статус: принято
@@ -37,10 +169,10 @@
 ## ADR-071: IRegistersManagerGui — единый протокол регистров для GUI
 - Дата: 2026-03-23
 - Статус: принято
-- Контекст: В camera_tab, control_v2, register_ops использовались `Any` и `hasattr` для менеджера регистров. План рефакторинга вкладок (PLAN_TABS_PRESENTERS_REGISTERS.md) требовал явного контракта до внедрения презентера.
+- Контекст: В camera_tab, контролах (исторически `control_v2`), register_ops использовались `Any` и `hasattr` для менеджера регистров. Нужен был явный контракт регистров для GUI до внедрения презентера (см. ADR-072, `frontend_module/widgets/tabs/TAB_STRUCTURE.md`).
 - Решение:
   - **`frontend_module/interfaces.py`**: введён **`IRegistersManagerGui`** с методами `set_field_value`, `get_register`, `get_field_metadata`.
-  - **`control_v2/base/interfaces.py`**: **`RegistersManagerLike`** = алиас `IRegistersManagerGui`; единый тип для RegisterAdapter и NumericControl.
+  - **`components/base/interfaces.py`** (путь см. **ADR-077**): **`RegistersManagerLike`** = алиас `IRegistersManagerGui`; единый тип для RegisterAdapter и NumericControl.
   - Приложение (register_ops, фабрики вкладок) типизирует `registers_manager: Optional[IRegistersManagerGui]`.
 - Причина: Убрать `Any`/`hasattr`; улучшить статическую проверку и автодополнение.
 - Отклонённые альтернативы: оставить RegistersManagerLike отдельно — дублирование контракта; добавить set_field_value в IRegistersManager — registers_module IRegistersManager не включает запись, разделение чтение/запись оправдано.
@@ -70,7 +202,7 @@
   - **`tabs/mvp_pattern.py`**: `TabViewProtocol` (маркер), `TabPresenterBase[TView, TUi]` с `_view`, `_rm`, `_ui`.
   - **`CameraTabPresenter`**: наследует `TabPresenterBase`; `CameraTabView` наследует `TabViewProtocol, Protocol`.
   - **`ProcessingTabWidget`**: `registers_manager: Optional[IRegistersManagerGui]`; в `_init_ui` — `RegisterBindingContext`, ветка заглушки при `not binding.can_bind`.
-  - **`frontend_module.components`**: реэкспорт `RegisterBindingContext`, `TabPresenterBase`, `TabViewProtocol`, `callback_no_args` вместе с `BaseTab` / `TabWidget`.
+  - **`frontend_module.widgets`** (с ADR-077; ранее barrel в `components`): реэкспорт `RegisterBindingContext`, `TabPresenterBase`, `TabViewProtocol`, `callback_no_args` вместе с `BaseTab` / `TabWidget`.
   - **`tests/test_tabs_callbacks.py`**: `callback_no_args`, dataclass ↔ dict, явный `field_names`.
 - Причина: Единый язык вкладок с регистрами; явный каркас для новых MVP-вкладок без дублирования полей презентера.
 - Отклонённые альтернативы: только документация без кода — слабее для статической типизации и онбординга.
@@ -92,6 +224,7 @@
 ---
 
 ## ADR-070: primitives и common в control_v2, удаление controls v1
+- *Примечание (2026-03-24): пути `control_v2/` в тексте ниже — исторические; актуально — flatten в `frontend_module.components` (**ADR-077**).*
 - Дата: 2026-03-23
 - Статус: принято
 - Контекст: В `components/controls/` были legacy v1 (slider, checkbox на BaseConfigurableWidget), primitives и common. Архитектура v2 выиграла; требуется консолидация в control_v2.
@@ -133,6 +266,7 @@
 ---
 
 ## ADR-069: Пакет `control_v2` вне `components/controls`, примеры в `control_v2/examples`
+- *Примечание (2026-03-24): канонические пути без `control_v2/` и без shims `controls/` — **ADR-077**; текст ниже сохранён как история.*
 - Дата: 2026-03-23
 - Статус: принято
 - Контекст: Код v2 жил в `components/controls/v2`, а учебные схемы — в `components/controls/example_with_data_schema`; пути длинные, смешение с legacy `controls` (v1) и дублирование «v2» в URL импорта.
@@ -148,7 +282,7 @@
 
 ## ADR-066: `example_with_data_schema` — учебный checkbox с двумя SchemaBase
 - Дата: 2026-03-23
-- Статус: принято (пакет перенесён: см. **ADR-069** → `control_v2/examples`)
+- Статус: принято (пакет перенесён: см. **ADR-069**; примеры сейчас в `components/examples/`, **ADR-077**)
 - Контекст: Нужен наглядный пример рядом с контролами: отдельные схемы для UI-строк и для полей регистра без дублирования смысла в dataclass-конфиге v2.
 - Решение:
   - Пакет из **трёх модулей**: `schemas.py` (две SchemaBase; `BINDING_REGISTER` / `BINDING_FIELD` как `ClassVar` на классе регистра), `adapter.py` (импорт только схем), `__init__.py`.

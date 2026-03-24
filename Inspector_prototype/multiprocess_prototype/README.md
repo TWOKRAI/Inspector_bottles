@@ -22,15 +22,17 @@
 
 **Связь:** SharedMemory (camera_frame, processor_mask, rendered_frame, mask_frame) + очереди сообщений.
 
-**Архитектура (процессы, SHM, регистры, диаграммы):** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Документация:** [docs/README.md](docs/README.md) (индекс). **Архитектура:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). **Фронт:** [docs/FRONTEND_MAP.md](docs/FRONTEND_MAP.md). **Рецепты:** [docs/RECIPES_SYSTEM.md](docs/RECIPES_SYSTEM.md).
 
 ---
 
 ## Структура проекта (кратко)
 
 - `main.py` — вход; prefs камеры — `persistence/` (см. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
+- `camera_policy.py` — строковые типы и лимиты камеры (схемы, GUI, persistence)
 - `backend/` — конфиги (в т.ч. `GuiConfig`), `processes/*`, `modules/` (camera с `backends.py`, processor_frame, renderer), `gui_process_mixin.py`, `database/`
 - `frontend/` — `FrontendLauncher`, окна, виджеты, `FrontendConfig`
+- `managers/` — `RecipeManager`, `AccessContext`, агрегат app-рецепта (YAML слоты)
 - `registers/` — схемы, factory, command routing
 - `persistence/` — корень данных (`INSPECTOR_DATA_DIR` или `~/.inspector_prototype`), `user_prefs.json`, миграция со старого `.inspector_prefs.json`
 - `utils/`, `docs/`, `tests/`, `logs/` (рантайм; в git не коммитить `*.log`, см. `.gitignore`)
@@ -124,7 +126,8 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 | `INSPECTOR_DATA_DIR` | Каталог данных приложения (prefs, будущие кэши/экспорты). По умолчанию: `~/.inspector_prototype` |
 | `INSPECTOR_LOG_LEVEL` | Уровень логов: INFO, DEBUG, WARNING, ERROR |
 | `INSPECTOR_LOG_DIR` | Каталог логов (по умолчанию `multiprocess_prototype/logs`) |
-| `DISPLAY` | Требуется для GUI (headless CI — тесты с GUI пропускаются) |
+| `INSPECTOR_UI_DIAGNOSTICS` | Если `1` / `true` / `yes` — включает опциональную телеметрию UI (`WidgetSignalBus` + шапка), см. `GuiConfig.ui_diagnostics` и `frontend/diagnostics.py` |
+| `DISPLAY` | Для GUI на Unix; в CI можно `QT_QPA_PLATFORM=offscreen` (см. `tests/support/gui_env.py`) |
 
 ---
 

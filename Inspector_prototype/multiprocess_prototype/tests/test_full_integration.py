@@ -7,15 +7,16 @@
 Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.tests.test_full_integration
 """
 
-import os
 import time
 
 import pytest
 
-# GUI требует дисплей; на CI без DISPLAY — пропуск
+from multiprocess_prototype.tests.support.gui_env import gui_display_available
+
+# GUI: Windows / DISPLAY / QT_QPA_PLATFORM=offscreen
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("DISPLAY"),
-    reason="GUI requires DISPLAY",
+    not gui_display_available(),
+    reason="GUI requires display or QT_QPA_PLATFORM=offscreen",
 )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from frontend_module.components.control_v2.examples.checkbox import (
+from frontend_module.components.examples.checkbox import (
     ExampleCheckboxUiConfig,
     ExampleCheckboxValueRegister,
     checkbox_binding,
@@ -12,37 +12,37 @@ from frontend_module.components.control_v2.examples.checkbox import (
     coerce_ui as checkbox_coerce_ui,
     create_example_checkbox,
 )
-from frontend_module.components.control_v2.examples.compound_mixed import (
+from frontend_module.components.examples.compound_mixed import (
     ExampleCompoundMixedUiConfig,
     ExampleMixedBoolRegister,
     ExampleMixedFloatRegister,
     create_example_compound_mixed,
 )
-from frontend_module.components.control_v2.examples.compound_numeric import (
+from frontend_module.components.examples.compound_numeric import (
     ExampleBgrTripletRegister,
     ExampleCompoundNumericUiConfig,
     compound_numeric_binding,
     compound_numeric_view_config_from_ui,
     create_example_compound_numeric,
 )
-from frontend_module.components.control_v2.examples.group import (
+from frontend_module.components.examples.group import (
     ExampleGroupRowUiConfig,
     create_example_group_row,
     coerce_ui as group_row_coerce_ui,
 )
-from frontend_module.components.control_v2.examples.label import (
+from frontend_module.components.examples.label import (
     ExampleLabelUiConfig,
     create_example_label,
     label_config_from_ui,
 )
-from frontend_module.components.control_v2.examples.numeric import (
+from frontend_module.components.examples.numeric import (
     ExampleNumericUiConfig,
     ExampleNumericValueRegister,
     create_example_numeric,
     numeric_binding,
     numeric_view_config_from_ui,
 )
-from frontend_module.components.control_v2.examples.slider import (
+from frontend_module.components.examples.slider import (
     ExampleSliderUiConfig,
     ExampleSliderValueRegister,
     coerce_ui as slider_coerce_ui,
@@ -50,7 +50,7 @@ from frontend_module.components.control_v2.examples.slider import (
     slider_binding,
     slider_view_config_from_ui,
 )
-from frontend_module.components.control_v2.examples.spinbox import (
+from frontend_module.components.examples.spinbox import (
     ExampleSpinboxUiConfig,
     ExampleSpinboxValueRegister,
     create_example_spinbox,

@@ -72,7 +72,7 @@ class IRegistersManager(Protocol):
 @runtime_checkable
 class IRegistersManagerGui(Protocol):
     """
-    Минимальный интерфейс для GUI (control_v2, вкладки, register_ops).
+    Минимальный интерфейс для GUI (компоненты контролов, вкладки, register_ops).
 
     Расширяет чтение (`get_register`, `get_field_metadata`) записью `set_field_value`.
     Реализации: registers_module.RegistersManager, FrontendRegistersBridge.

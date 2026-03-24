@@ -1,9 +1,10 @@
 # multiprocess_prototype/frontend/widgets/tabs_setting/settings_tab/schemas.py
 """
-Конфиг вкладки «Настройки»: привязки контролов к регистрам.
+Конфиг вкладки «Настройки».
 
-UI-схема рядом с виджетом. Register keys — PROCESSOR_REGISTER / RENDERER_REGISTER
-из registers.schemas.processing_tab (единый источник имён).
+Виджет редактирует только app-рецепт (таблица: RecipesTabConfig + ProcessingTabUiConfig).
+Поля **controls** / **group_title** в схеме сохранены для совместимости дампов конфигов;
+**SettingsTabWidget** их не отображает.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ class ControlBinding(SchemaBase):
     ] = None
 
     def to_control_dict(self) -> dict:
-        """Словарь для _create_control (type, register_name, field_name, component_config)."""
+        """Словарь привязки (type, register_name, field_name, component_config)."""
         d: dict = {
             "type": self.type,
             "register_name": self.register_name,
@@ -66,7 +67,12 @@ def _default_draw_controls() -> List[ControlBinding]:
 
 @register_schema("SettingsTabConfig")
 class SettingsTabConfig(SchemaBase):
-    """Конфигурация SettingsTabWidget."""
+    """
+    Секция конфига для вкладки «Настройки».
+
+    В UI не используется: параметры меняются через таблицу app-рецепта
+    (см. RecipesTabConfig / ProcessingTabUiConfig в `recipes_tab` и агрегат в `AppRecipePanel`).
+    """
 
     controls: List[ControlBinding] = Field(default_factory=_default_draw_controls)
     group_title: str = "Параметры отображения"

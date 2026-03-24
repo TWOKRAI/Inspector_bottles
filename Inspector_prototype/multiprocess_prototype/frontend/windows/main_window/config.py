@@ -10,7 +10,7 @@ from typing import Annotated, List
 from pydantic import Field
 
 from multiprocess_framework.refactored.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
-from multiprocess_framework.refactored.modules.frontend_module.components.header import (
+from multiprocess_framework.refactored.modules.frontend_module.widgets.header import (
     AdminButtonConfig,
     HeaderButtonItem,
     HeaderConfig,

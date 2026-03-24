@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
-from frontend_module.components.tabs import RegisterBindingContext, callback_no_args
+from frontend_module.widgets.tabs import RegisterBindingContext, callback_no_args
 from frontend_module.core.qt_imports import QGroupBox, QPushButton, QVBoxLayout, QWidget
 
 from .callbacks import SimWebcamWidgetCallbacks
 from .fps_section import add_fps_section_to_layout
-from .presenter import SimWebcamPresenter
 from .schemas import SimWebcamUiConfig
 
 
@@ -18,7 +17,7 @@ def bind_sim_webcam_ui(
     u: SimWebcamUiConfig,
     binding: RegisterBindingContext,
     callbacks: SimWebcamWidgetCallbacks,
-    presenter: SimWebcamPresenter,
+    fps_changed: Callable[[int], None],
 ) -> tuple[QWidget, Optional[object]]:
     """
     Собрать UI и привязать сигналы.
@@ -46,7 +45,7 @@ def bind_sim_webcam_ui(
         fps_layout,
         binding=binding,
         u=u,
-        on_slider_changed=presenter.on_fps_changed,
+        on_slider_changed=fps_changed,
     )
     layout.addWidget(fps_group)
 

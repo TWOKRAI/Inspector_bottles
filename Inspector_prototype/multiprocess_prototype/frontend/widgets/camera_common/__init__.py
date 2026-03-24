@@ -9,7 +9,8 @@ Simulator / Webcam: схема UI, секция FPS, виджет SimWebcamWidge
 from .callbacks import SimWebcamWidgetCallbacks, build_sim_webcam_callbacks
 from .fps_section import FpsFallbackWidgets, add_fps_section_to_layout
 from .schemas import SimWebcamUiConfig
-from .widget import CameraTypeId, SimWebcamWidget
+from .model import CameraTypeId
+from .widget import SimWebcamWidget
 
 __all__ = [
     "CameraTypeId",

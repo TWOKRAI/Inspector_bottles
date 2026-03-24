@@ -103,8 +103,8 @@ class HikvisionUiConfig(SchemaBase):
     btn_close: str = "Close"
 
     group_grabbing: str = "Grabbing"
-    btn_start_grabbing: str = "▶ Start Grabbing"
-    btn_stop_grabbing: str = "■ Stop Grabbing"
+    btn_start_grabbing: str = "Start Grabbing"
+    btn_stop_grabbing: str = "Stop Grabbing"
 
     group_params: str = "Параметры камеры"
     label_frame_rate: str = "Frame Rate:"

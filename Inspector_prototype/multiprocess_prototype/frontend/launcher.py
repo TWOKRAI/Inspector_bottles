@@ -14,10 +14,17 @@ from frontend_module.windows import LoadingWindow
 from frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype.registers import create_registers
+from multiprocess_prototype.managers import RecipeManager
+from multiprocess_prototype.managers.app_recipe_aggregate import (
+    aggregate_to_snapshot,
+    build_default_app_aggregate,
+)
 from multiprocess_prototype.frontend.configs.frontend_config import build_frontend_config
+from multiprocess_prototype.frontend.diagnostics import attach_ui_diagnostics
 from multiprocess_prototype.frontend.commands import GuiCommandHandler
 from multiprocess_prototype.frontend.widgets import build_camera_tab_callbacks
 from multiprocess_prototype.frontend.widgets.tabs_setting.camera_tab.schemas import CameraTabUiConfig
+from multiprocess_prototype.frontend.app_context import FrontendAppContext
 from multiprocess_prototype.frontend.windows.main_window import MainWindow, create_tab_widget_factory
 
 
@@ -60,7 +67,6 @@ class FrontendLauncher:
         process = process_ref
         cmd = GuiCommandHandler(process_ref)
         assert sender is process_ref._routed_command_sender
-        camera_type = config.get("camera_type", "simulator")
         cam_tab_ui = coerce_schema_config(config.get("camera_tab") or {}, CameraTabUiConfig)
         camera_callbacks_map = build_camera_tab_callbacks(
             cmd,
@@ -71,12 +77,25 @@ class FrontendLauncher:
         width = window_cfg.get("width", window_cfg.get("min_width", 1024))
         height = window_cfg.get("height", window_cfg.get("min_height", 600))
 
-        tab_widget_factory = create_tab_widget_factory(
+        recipe_manager = RecipeManager(data_path=config.get("recipes_path"))
+        regs = fm.get_registers() if fm else None
+        if regs is not None:
+            recipe_manager.ensure_slot_from_registers(regs, "default_value")
+        recipe_manager.ensure_app_slot_from_snapshot(
+            "default_value",
+            aggregate_to_snapshot(build_default_app_aggregate()),
+        )
+
+        camera_type = config.get("camera_type", "simulator")
+        app_ctx = FrontendAppContext(
             config=config,
-            registers_manager=fm.get_registers() if fm else None,
+            registers_manager=regs,
             camera_callbacks_map=camera_callbacks_map,
             camera_type=camera_type,
+            recipe_manager=recipe_manager,
+            command_handler=cmd,
         )
+        tab_widget_factory = create_tab_widget_factory(app_ctx)
 
         window_names = set((config.get("window_registry") or {}).keys())
 
@@ -96,6 +115,7 @@ class FrontendLauncher:
                 header_action_handlers={},
                 header_on_unmatched=header_on_unmatched if wm else None,
             )
+            process._ui_diagnostics = attach_ui_diagnostics(win, config)
             process._window = win
             process._timer = QTimer()
             process._timer.timeout.connect(process._poll_messages)

@@ -1,0 +1,69 @@
+version: 1
+current_register_recipe: 0
+current_app_recipe: 0
+register_recipes:
+  default_value:
+    camera:
+      camera_type: webcam
+      fps: 25
+      resolution_width: 640
+      resolution_height: 480
+      device_id: 0
+      camera_index: 0
+      hikvision_resolution_width: 1920
+      hikvision_resolution_height: 1080
+      hikvision_frame_rate: 25.0
+      hikvision_exposure_time: 10000.0
+      hikvision_gain: 0.0
+    processor:
+      color_lower:
+      - 0
+      - 0
+      - 150
+      color_upper:
+      - 100
+      - 100
+      - 255
+      min_area: 500
+      max_area: 50000
+    renderer:
+      show_original: true
+      show_mask: true
+      draw_contours: true
+      draw_bboxes: true
+      save_frames: false
+app_recipes:
+  default_value:
+    RecipesTabConfig:
+      group_title: Рецепт
+      btn_load: Загрузить
+      btn_save: Сохранить
+      btn_default: По умолчанию
+      label_slot: Слот
+      recipe_index_min: 0
+      recipe_index_max: 21
+      table_group_title: Параметры (регистры)
+      group_register_box: 'Рецепт: параметры алгоритма'
+      group_app_box: 'Рецепт: интерфейс и приложение'
+      table_app_group_title: Параметры интерфейса (RecipesTab + Processing UI)
+      col_param: Параметр
+      col_value: Значение
+      col_info: Информация
+    ProcessingTabUiConfig:
+      group_color: Цветовая детекция (BGR)
+      group_area: Площадь пятна
+      group_display: Отображение
+      channel_b: B
+      channel_g: G
+      channel_r: R
+      color_hint: Lower | Upper
+      label_min_area_prefix: 'Мин:'
+      label_max_area_prefix: 'Макс:'
+      label_max_area_unlimited: ' (без огр.)'
+      label_max_area_initial_suffix: ' (0=без огр.)'
+      label_px: px
+      checkbox_original: Original
+      checkbox_mask: Mask
+      checkbox_contours: Contours
+      checkbox_bbox: BBox
+      checkbox_save_frames: Save

@@ -1,14 +1,13 @@
 # multiprocess_prototype/frontend/widgets/tabs_setting/settings_tab/
 """
-Вкладка настроек: контролы по конфигу (control_v2).
+Вкладка настроек: таблица app-рецепта (AppRecipePanel), без отдельных слайдеров.
 
-Простой виджет: RegisterBindingContext, coerce_schema_config, IRegistersManagerGui.
-При отсутствии rm — заглушка. См. TAB_STRUCTURE.md.
+RegisterBindingContext, IRegistersManagerGui; при отсутствии rm — заглушка.
 
 Экспорты:
 - SettingsTabWidget — виджет вкладки
-- SettingsTabConfig — конфиг (controls, group_title)
-- ControlBinding — привязка контрола к регистру
+- SettingsTabConfig — секция конфига (legacy-поля controls/group_title не рендерятся)
+- ControlBinding — схема для совместимости с дампами
 """
 
 from .schemas import ControlBinding, SettingsTabConfig

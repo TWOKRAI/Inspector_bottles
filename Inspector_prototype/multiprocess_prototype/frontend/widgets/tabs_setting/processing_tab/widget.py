@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from frontend_module.components import BaseTab
-from frontend_module.components.tabs import RegisterBindingContext, create_registers_placeholder
-from frontend_module.components.control_v2 import (
+from frontend_module.widgets.tabs import BaseTab
+from frontend_module.widgets.tabs import RegisterBindingContext, create_registers_placeholder
+from frontend_module.components import (
     BindingConfig,
     CheckboxControl,
     CheckboxViewConfig,

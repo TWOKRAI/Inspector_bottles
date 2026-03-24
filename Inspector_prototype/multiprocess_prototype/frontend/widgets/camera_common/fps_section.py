@@ -8,12 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from frontend_module.components.control_v2 import (
+from frontend_module.components import (
     BindingConfig,
     NumericControl,
     NumericViewConfig,
 )
-from frontend_module.components.tabs import RegisterBindingContext
+from frontend_module.widgets.tabs import RegisterBindingContext
 from frontend_module.core.qt_imports import QLabel, QSlider, Qt
 
 from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER

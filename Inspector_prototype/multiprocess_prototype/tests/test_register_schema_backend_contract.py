@@ -39,6 +39,9 @@ _CAMERA_FIELDS = frozenset(
         "camera_index",
         "hikvision_resolution_width",
         "hikvision_resolution_height",
+        "hikvision_frame_rate",
+        "hikvision_exposure_time",
+        "hikvision_gain",
     }
 )
 # Должно совпадать с modules/processor_frame/register_sync.py

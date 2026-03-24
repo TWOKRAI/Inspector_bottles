@@ -1,88 +1,118 @@
 # -*- coding: utf-8 -*-
 """
-Components — переиспользуемые UI-компоненты.
+Примитивы контролов — Traits + Presenter + View + Facade.
 
-Структура: base, header, controls, tabs, tables, keyboard.
-Реэкспорт для удобного импорта: from frontend_module.components import HeaderWidget, ...
+Учебные схемы и адаптеры: подпакет ``examples``. Составной UI (вкладки, BaseWidget) —
+``frontend_module.widgets``.
+
+Принцип масштабирования: новый тип контрола = **View** (протокол ``IControlView``) +
+**Presenter** (traits + порты ``IFieldBinding`` / ``IRegisterPort``) + **Facade** (``*.create``).
+См. ``ARCHITECTURE.md`` и ``base/README.md``.
 """
-from frontend_module.components.controls import (
+from frontend_module.components.base.config import (
+    BaseControlConfig,
     BindingConfig,
-    CheckboxConfig,
+    merge_config,
+)
+from frontend_module.components.base.control_hooks import (
+    ControlAccessDeniedEvent,
+    ControlHooks,
+    ControlWriteCommittedEvent,
+    ControlWriteRejectedEvent,
+    emit_access_denied,
+)
+from frontend_module.components.base.traits import LegacySyncContext
+from frontend_module.components.checkbox import (
     CheckboxControl,
-    NumericControl,
-    NumericViewConfig,
+    CheckboxControlResult,
+    CheckboxPresenter,
+    CheckboxView,
+    CheckboxViewConfig,
+    checkbox_left,
+    checkbox_right,
+)
+from frontend_module.components.compound import (
+    CompoundControl,
+    CompoundControlConfig,
+    CompoundControlResult,
+    CompoundNumericConfig,
+    CompoundNumericControl,
+    CompoundNumericControlResult,
+    ControlFactory,
+)
+from frontend_module.components.group import (
+    GroupConfig,
+    LabeledNumericGroupConfig,
+    label_bgr_slider_default,
+    label_slider_default,
+    label_spinbox_default,
+)
+from frontend_module.components.label import LabelConfig
+from frontend_module.components.slider import (
     SliderConfig,
+    SliderControl,
+    SliderControlResult,
+    SliderPresenter,
+)
+from frontend_module.components.spinbox import (
+    SpinBoxConfig,
+    SpinBoxControl,
+    SpinBoxControlResult,
+    SpinBoxPresenter,
+)
+from frontend_module.components.numeric import (
+    NumericControl,
+    NumericControlResult,
+    NumericPresenter,
+    NumericViewConfig,
+    bgr_slider_default,
+    slider_default,
+    spinbox_default,
 )
 
 __all__ = [
-    "BindingConfig",
-    "CheckboxConfig",
-    "CheckboxControl",
+    "ControlAccessDeniedEvent",
+    "ControlHooks",
+    "ControlWriteCommittedEvent",
+    "ControlWriteRejectedEvent",
+    "emit_access_denied",
     "NumericControl",
+    "NumericControlResult",
+    "NumericPresenter",
+    "CheckboxView",
+    "CheckboxPresenter",
+    "CheckboxControl",
+    "CheckboxControlResult",
+    "CompoundNumericControl",
+    "CompoundNumericControlResult",
+    "CompoundControl",
+    "CompoundControlResult",
+    "ControlFactory",
+    "LegacySyncContext",
+    "BindingConfig",
     "NumericViewConfig",
+    "CheckboxViewConfig",
+    "CompoundNumericConfig",
+    "CompoundControlConfig",
+    "BaseControlConfig",
+    "merge_config",
+    "slider_default",
+    "spinbox_default",
+    "bgr_slider_default",
+    "checkbox_left",
+    "checkbox_right",
+    "LabelConfig",
     "SliderConfig",
+    "SliderControl",
+    "SliderControlResult",
+    "SliderPresenter",
+    "SpinBoxConfig",
+    "SpinBoxControl",
+    "SpinBoxControlResult",
+    "SpinBoxPresenter",
+    "GroupConfig",
+    "LabeledNumericGroupConfig",
+    "label_slider_default",
+    "label_spinbox_default",
+    "label_bgr_slider_default",
 ]
-
-try:
-    from frontend_module.components.tables import StructuredTableWidget, TableWithToolbar
-    __all__.extend(["StructuredTableWidget", "TableWithToolbar"])
-except ImportError:
-    StructuredTableWidget = None
-    TableWithToolbar = None
-
-try:
-    from frontend_module.components.tabs import (
-        BaseTab,
-        MvpTabBase,
-        RegisterBindingContext,
-        TabPresenterBase,
-        TabViewProtocol,
-        TabWidget,
-        callback_no_args,
-        create_registers_placeholder,
-    )
-    __all__.extend(
-        [
-            "BaseTab",
-            "MvpTabBase",
-            "RegisterBindingContext",
-            "TabPresenterBase",
-            "TabViewProtocol",
-            "TabWidget",
-            "callback_no_args",
-            "create_registers_placeholder",
-        ]
-    )
-except ImportError:
-    TabWidget = None
-    BaseTab = None
-    RegisterBindingContext = None
-    TabPresenterBase = None
-    TabViewProtocol = None
-    callback_no_args = None
-
-try:
-    from frontend_module.components.header import HeaderWidget
-    from frontend_module.components.base import ButtonHeader
-    __all__.extend(["HeaderWidget", "ButtonHeader"])
-except ImportError:
-    HeaderWidget = None
-    ButtonHeader = None
-
-try:
-    from frontend_module.components.keyboard import VirtualKeyboard
-    __all__.append("VirtualKeyboard")
-except ImportError:
-    VirtualKeyboard = None
-
-try:
-    from frontend_module.components.keyboard import VirtualKeyboardMini
-    __all__.append("VirtualKeyboardMini")
-except ImportError:
-    VirtualKeyboardMini = None
-
-try:
-    from frontend_module.components.performance_monitor import PerformanceMonitor
-    __all__.append("PerformanceMonitor")
-except ImportError:
-    PerformanceMonitor = None

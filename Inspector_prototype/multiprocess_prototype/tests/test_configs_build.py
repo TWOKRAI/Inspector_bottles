@@ -26,10 +26,10 @@ _ensure_inspector_paths()
 from multiprocess_framework.refactored.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
     CameraConfig,
+    GuiConfig,
     ProcessorConfig,
     RendererConfig,
     RobotConfig,
-    GuiConfig,
 )
 
 
@@ -83,6 +83,21 @@ def test_gui_config_build():
     assert proc_dict["queues"]["system"]["maxsize"] == 100
 
 
+def test_gui_config_recipes_in_process_config():
+    """GuiConfig: recipes_path и recipe_access попадают в config процесса (для FrontendLauncher)."""
+    name, proc_dict = process(
+        GuiConfig(
+            recipes_path="C:/tmp/recipes.yaml",
+            recipe_access={"level": 10, "bypass_readonly": True},
+        )
+    )
+    assert name == "gui"
+    cfg = proc_dict["config"]
+    assert cfg["recipes_path"] == "C:/tmp/recipes.yaml"
+    assert cfg["recipe_access"]["level"] == 10
+    assert cfg["recipe_access"]["bypass_readonly"] is True
+
+
 def test_frontend_config_build_dict():
     """FrontendConfig.build_dict — ключи для FrontendManager/MainWindow, вкладки из feature default_tab_item."""
     from multiprocess_prototype.frontend.configs.frontend_config import FrontendConfig
@@ -95,11 +110,59 @@ def test_frontend_config_build_dict():
         "tabs",
         "window_registry",
         "settings_tab",
+        "recipes_tab",
+        "recipes_path",
+        "recipe_access",
         "loading_window",
         "camera_type",
         "poll_interval_ms",
+        "ui_diagnostics",
     ):
         assert key in d
+    assert d["ui_diagnostics"] == {}
     assert len(d["tabs"]) == 4
     assert [t["widget"] for t in d["tabs"]] == ["recipes", "settings", "processing", "camera"]
     assert d["tabs"][1]["title"] == "Настройки"
+
+
+def test_frontend_build_dict_merges_gui_recipe_fields():
+    """То, что приходит из GuiConfig.model_dump(), мержится в build_dict (пути и recipe_access)."""
+    from multiprocess_prototype.frontend.configs.frontend_config import FrontendConfig
+
+    app_cfg = GuiConfig(
+        recipes_path="D:/data/recipes.yaml",
+        recipe_access={"level": 5, "show_hidden": False},
+    ).model_dump()
+    d = FrontendConfig().build_dict(app_cfg)
+    assert d["recipes_path"] == "D:/data/recipes.yaml"
+    assert d["recipe_access"]["level"] == 5
+
+
+def test_frontend_build_dict_ui_diagnostics_from_gui(monkeypatch):
+    """ui_diagnostics из GuiConfig и опционально env INSPECTOR_UI_DIAGNOSTICS."""
+    from multiprocess_prototype.frontend.configs.frontend_config import FrontendConfig
+
+    monkeypatch.delenv("INSPECTOR_UI_DIAGNOSTICS", raising=False)
+    app_cfg = GuiConfig(
+        ui_diagnostics={"enabled": True, "buffer_max": 0, "log_level": "DEBUG"},
+    ).model_dump()
+    d = FrontendConfig().build_dict(app_cfg)
+    assert d["ui_diagnostics"]["enabled"] is True
+    assert d["ui_diagnostics"]["log_level"] == "DEBUG"
+
+    monkeypatch.setenv("INSPECTOR_UI_DIAGNOSTICS", "1")
+    d2 = FrontendConfig().build_dict({})
+    assert d2["ui_diagnostics"].get("enabled") is True
+
+
+def test_settings_tab_widget_accepts_recipe_bindings():
+    """Контракт: SettingsTabWidget принимает recipe_manager, recipe_access и recipes_tab (фабрика передаёт их из config)."""
+    import inspect
+
+    from multiprocess_prototype.frontend.widgets.tabs_setting.settings_tab.widget import SettingsTabWidget
+
+    sig = inspect.signature(SettingsTabWidget.__init__)
+    names = set(sig.parameters.keys())
+    assert "recipe_manager" in names
+    assert "recipe_access" in names
+    assert "recipes_tab" in names

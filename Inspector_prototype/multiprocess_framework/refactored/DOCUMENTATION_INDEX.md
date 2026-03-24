@@ -1,380 +1,58 @@
-# Multiprocess Framework — Documentation Index
+# Multiprocess Framework — индекс документации
 
-**Полная документация фреймворка в одном месте.**
-
-**Структура:** В корне — [README.md](./README.md), [DECISIONS.md](./DECISIONS.md), [MODULES_STATUS.md](./MODULES_STATUS.md). В [docs/](./docs/) — детальные документы. [DOCUMENTATION_SCORE.md](./DOCUMENTATION_SCORE.md) — оценка тимлида (8.2/10).
-
----
-
-## 📚 Структура документации
-
-### 0. **[docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md)** ← FOR NEURAL AGENTS
-**Философская архитектура для нейросетевых агентов (5000+ слов)**
-
-Содержит:
-- ✅ Основная проблема (почему Python multiprocessing сложен)
-- ✅ Два взаимодополняющих взгляда (иерархия + биология)
-- ✅ Тройца создания циклов (ProcessManagerCore, ProcessModule, WorkerManager)
-- ✅ Аналогия с живым организмом
-- ✅ Архитектурные слои
-- ✅ Фундаментальные принципы (6 принципов)
-- ✅ Жизненный цикл системы
-
-**Используй когда:**
-- Первый раз анализируешь архитектуру (лучше всего начать отсюда!)
-- Нужно понять глубокую философию системы
-- Хочешь объяснить архитектуру нейросети
-- Планируешь расширение фреймворка
+**Корень:** [README.md](./README.md) · [DECISIONS.md](./DECISIONS.md) · [MODULES_STATUS.md](./MODULES_STATUS.md) · [PROBLEMS.md](./PROBLEMS.md)  
+**Папка docs:** [docs/README.md](./docs/README.md)
 
 ---
 
-### 1. **[docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md)** ← START HERE (AFTER PHILOSOPHY)
-**Comprehensive overview всего фреймворка (8000+ строк)**
+## Главные документы
 
-Содержит:
-- ✅ Что это такое и зачем
-- ✅ Архитектурные слои (16 модулей, описание каждого)
-- ✅ Принципы архитектуры
-- ✅ Диаграмма зависимостей
-- ✅ Жизненный цикл приложения (4 фазы)
-- ✅ Паттерны и принципы
-- ✅ Ключевые архитектурные решения (из DECISIONS.md)
-- ✅ Как всё работает вместе (сценарий обработки видео)
-- ✅ Быстрый старт
-- ✅ FAQ и anti-patterns
-
-**Используй когда:**
-- Первый раз изучаешь фреймворк
-- Нужен полный overview
-- Ищешь ответ на общий вопрос
-- Нужно показать архитектуру коллеге
+| Документ | Для чего |
+|----------|----------|
+| [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) | Обзор архитектуры, модули, принципы, сценарии |
+| [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) | Таблицы, диаграммы, матрицы зависимостей |
+| [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) | Термины маршрутизации и регистров |
+| [docs/ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md) | Каталог модулей и пакетов прототипа |
+| [docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) | Дорожная карта команд UI / лаунчера |
+| [DECISIONS.md](./DECISIONS.md) | ADR — принятые архитектурные решения |
+| [docs/MODULE_README_TEMPLATE.md](./docs/MODULE_README_TEMPLATE.md) | Шаблон README нового модуля |
 
 ---
 
-### 2. **[docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md)** ← VISUAL GUIDE
-**Диаграммы, таблицы, матрицы (для быстрого понимания)**
+## Быстрая навигация
 
-Содержит:
-- 📊 Иерархия классов (наследование)
-- 📊 Layer Cake (слои архитектуры)
-- 📊 Message Flow (отправка/получение)
-- 📊 Process Lifecycle
-- 📊 Таблица модулей и их роли (16x6)
-- 📊 Таблица типов сообщений (9x4)
-- 📊 Таблица приоритетов AsyncSender
-- 📊 Worker Modes, Process States
-- 📊 Scope-based Logging Levels
-- 📊 Dict at Boundary (преобразования)
-- 📊 Channel Resolution Flow
-- 📊 Initialization Order
-- 📊 Error Handling Strategy
-- 📊 Graceful Shutdown Cascade
-- 📊 Module Dependencies Matrix (16x16)
-- 📊 Performance Characteristics
-- 📊 Memory и Resources
-
-**Используй когда:**
-- Нужна быстрая справка
-- Ищешь специфичную информацию
-- Нужно показать соотношение компонентов
-- Анализируешь производительность
+| Задача | Куда смотреть |
+|--------|----------------|
+| Понять систему целиком | [FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) |
+| Найти таблицу / схему | [ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) |
+| Понять «почему так» | [DECISIONS.md](./DECISIONS.md) |
+| Сообщения, Dict at Boundary | Overview + ADR-008 |
+| ChannelRoutingManager | Overview + ADR-013 |
+| Остановка процессов | Overview (Graceful Shutdown) + `process_manager_module` |
+| Новый модуль | Шаблон + `base_manager` README + тесты |
 
 ---
 
-### 3. **[docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md)** ← DEEP DIVE
-**Развёрнутое эссе о том, почему архитектура работает (5000+ слов)**
+## Документация по модулям
 
-Содержит:
-- 💭 Введение (проблема многопроцессных приложений)
-- 💭 BaseManager и ObservableMixin
-- 💭 Message и Dict at Boundary
-- 💭 Request-Response паттерн
-- 💭 ChannelRoutingManager (DRY для Router/Logger/Error)
-- 💭 SchemaBase и типизация данных
-- 💭 ProcessModule и Graceful Shutdown
-- 💭 Signal Handling
-- 💭 Явные зависимости и OCP
-- 💭 Pickle-Safe и reinitialize_in_child()
-- 💭 8 паттернов проектирования
-- 💭 9 преимуществ архитектуры
-- 💭 Когда использовать / НЕ использовать
-- 💭 Фундаментальные принципы
+В каждом пакете под [modules/](./modules/):
 
-**Используй когда:**
-- Хочешь понять философию проектирования
-- Нужно обосновать архитектурное решение
-- Учишь коллегу архитектуре
-- Планируешь расширение фреймворка
+- `README.md` — назначение и API
+- `STATUS.md` — этап и известные ограничения
+- `interfaces.py` — публичный контракт
+- `tests/` — pytest
+
+Слои (16 модулей): Foundation (`base_manager`, `data_schema_module`, `message_module`), Infrastructure (`logger_module`, `error_module`, `config_module`, `console_module`, `shared_resources_module`, `registers_module`), Communication (`dispatch_module`, `router_module`, `command_module`), Process (`worker_module`, `process_module`), Orchestration (`process_manager_module`), Frontend (`frontend_module`). Дополнительно в дереве: `channel_routing_module`, `statistics_module` — см. [ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md).
+
+Углублённые гайды внутри модулей (например `data_schema_module/docs/`, `config_module/docs/`) остаются частью актуального набора.
 
 ---
 
-### 4. **[DECISIONS.md](./DECISIONS.md)** ← DECISION LOG
-**21 архитектурное решение (ADR) с обоснованием**
+## Отладка и проблемы
 
-Содержит:
-- 📋 ADR-001 до ADR-032 (включая sql_module ADR-032)
-- 📋 Для каждого решения: дата, статус, контекст, решение, причина, альтернативы
-
-**Ключевые решения:**
-- ADR-001: ObservableMixin остаётся
-- ADR-008: Dict at Boundary
-- ADR-013: ChannelRoutingManager (база для трёх менеджеров)
-- ADR-018: SRM.register_process() — единая точка регистрации
-- ADR-021: Прямой pickle SRM
-
-**Используй когда:**
-- Хочешь понять, почему сделано так, а не иначе
-- Закрыл issue и не хочешь открыть его заново
-- Планируешь большое изменение в архитектуре
-
----
-
-## 📖 Документация модулей (16 модулей)
-
-### Foundation Layer
-
-1. **base_manager**
-   - README.md — BaseManager, ObservableMixin, BaseAdapter
-   - STATUS.md — этап рефакторинга
-   - tests/ — примеры использования
-
-2. **data_schema_module**
-   - README.md — SchemaBase, FieldMeta, SchemaRegistry, RegistersContainer
-   - STATUS.md — оценки критериев
-   - docs/QUICK_REFERENCE.md — краткая справка
-   - docs/USER_GUIDE.md — полное руководство
-
-3. **message_module**
-   - README.md — Message (9 типов), MessageAdapter
-   - tests/ — примеры
-
-### Infrastructure Layer
-
-4. **logger_module**
-   - README.md — LoggerManager, LogConfig, BatchBuffer
-   - docs/USAGE_GUIDE.md — как использовать
-
-5. **error_module**
-   - README.md — ErrorManager (extends LoggerManager)
-   - config/error_config.py — конфигурация
-
-6. **config_module** ✅ PRODUCTION READY (8/8)
-   - README.md — Config, ConfigManager, ConfigSection (runtime API для конфигов)
-   - docs/ARCHITECTURE.md — три слоя конфигурации, компоненты, интеграция
-   - docs/USAGE_GUIDE.md — подробное руководство с 20+ примерами кода
-   - STATUS.md — этап 8/8, оценки 9-9
-   - 49 unit-тестов ✅
-   - **Особенность:** Тонкая обёртка над data_schema_module. Dot-notation доступ, подписки, env-fallback, Dict at Boundary
-
-7. **console_module**
-   - README.md — ConsoleManager, три уровня (пассивный/активный/God Mode), кроссплатформенность (Windows/Linux/macOS)
-   - STATUS.md — этап 8/8
-   - interfaces.py — IConsoleManager, IPlatformConsole
-   - tests/ — 5 файлов (manager, adapter, redirector, log_channel, platforms)
-
-8. **shared_resources_module**
-   - README.md — SharedResourcesManager, ProcessData, MemoryManager
-   - docs/ARCHITECTURE.md — архитектура
-
-9. **sql_module**
-   - README.md — SQLManager, IRepository, Unit of Work, адаптеры (PostgreSQL, MySQL, SQLite)
-   - STATUS.md — этап 8/8, интеграция с router_module, message_module
-   - **Особенность:** Доступ к БД через канал `database` — msg.command(targets=["database"], command="db.query", args={...})
-
-### Communication Layer
-
-10. **router_module**
-   - README.md — RouterManager, AsyncSender/AsyncReceiver
-   - docs/COMMUNICATION.md — протокол
-
-11. **dispatch_module**
-    - README.md — Dispatcher (4 стратегии)
-
-12. **command_module**
-    - README.md — CommandManager (обёртка над dispatch_module)
-
-### Process Layer
-
-13. **worker_module**
-    - README.md — WorkerManager (управление потоками)
-    - docs/... — примеры
-
-14. **process_module**
-    - README.md — ProcessModule (базовый класс процесса)
-    - docs/COMMUNICATION.md — как общаться между процессами
-
-### Orchestration Layer
-
-15. **process_manager_module**
-    - README.md — SystemLauncher, ProcessRegistry, ProcessManagerProcess
-    - STATUS.md — этап 8/8, полностью готов
-    - interfaces.py — публичные контракты
-
----
-
-## 🚀 Quick Navigation
-
-### Я хочу...
-
-**...понять архитектуру сразу**
-→ [docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md), потом [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Part 1-7)
-
-**...быстро найти информацию**
-→ [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) + `Ctrl+F`
-
-**...понять, почему сделано так**
-→ [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) + [DECISIONS.md](./DECISIONS.md)
-
-**...создать новый процесс**
-→ [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Quick Start) + process_module README
-
-**...добавить новый менеджер**
-→ base_manager README + [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Dependency Injection)
-
-**...разобраться с конфигурацией процесса**
-→ config_module README + docs/USAGE_GUIDE.md (20+ примеров) + [DECISIONS.md](./DECISIONS.md) (ADR-023)
-
-**...правильно остановить приложение**
-→ [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Graceful Shutdown) + process_manager_module STATUS.md
-
-**...выбрать тип сообщения**
-→ [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) (Message Types Table) + message_module README
-
-**...понять ChannelRoutingManager**
-→ [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 3) + [DECISIONS.md](./DECISIONS.md) (ADR-013)
-
-**...получить доступ к БД из процесса**
-→ [README.md](./README.md) (раздел 4. Database Access via Router) + sql_module README
-
-**...узнать про Dict at Boundary**
-→ [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Message Flow) + [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 2) + [DECISIONS.md](./DECISIONS.md) (ADR-008)
-
-**...сравнить «идеальное» видение с текущим фреймворком и набросать пожелания**
-→ [docs/FRAMEWORK_VISION_AND_WISHLIST.md](./docs/FRAMEWORK_VISION_AND_WISHLIST.md)
-
-**...увидеть глобальный план волн и критериев приближения к идеалу**
-→ [docs/FRAMEWORK_IDEAL_GLOBAL_PLAN.md](./docs/FRAMEWORK_IDEAL_GLOBAL_PLAN.md)
-
----
-
-## 📊 Statistics
-
-| Документ | Строк | Время чтения | Сложность |
-|----------|--------|-----------|----------|
-| FRAMEWORK_OVERVIEW.md | ~1500 | 45 мин | Средняя |
-| ARCHITECTURE_REFERENCE.md | ~1000 | 30 мин | Низкая (таблицы) |
-| ARCHITECTURE_ESSAY.md | ~800 | 30 мин | Высокая |
-| DECISIONS.md | ~280 | 20 мин | Средняя |
-| **ИТОГО** | **~3500** | **125 мин** | - |
-
-**Минимум для начала:** [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) Part 1-7 (45 мин)
-
----
-
-## 🎯 Learning Path
-
-### День 1: Основы
-1. [docs/ARCHITECTURE_PHILOSOPHY.md](./docs/ARCHITECTURE_PHILOSOPHY.md) (введение в философию)
-2. [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Part 1-7)
-3. [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) (иерархия классов, слои)
-
-### День 2: Детали
-1. [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 1-7)
-2. [DECISIONS.md](./DECISIONS.md) (ADR-001, 008, 013, 018, 021)
-
-### День 3: Практика
-1. Создать простой процесс (Process1, Process2)
-2. Добавить обмен сообщениями между ними
-3. Запустить через SystemLauncher
-4. Дебажить через логирование
-
-### День 4+: Углубление
-1. Добавить новый менеджер
-2. Создать кастомный канал (для БД, HTTP, etc)
-3. Добавить кастомные стратегии диспетчеризации
-
----
-
-## 🔗 Cross-References
-
-### Если читаешь про Message
-- Сначала: message_module README
-- Потом: [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Message & Dict at Boundary)
-- Углубление: [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 2)
-- Decision: [DECISIONS.md](./DECISIONS.md) (ADR-008)
-
-### Если читаешь про ChannelRoutingManager
-- Сначала: [docs/ARCHITECTURE_ESSAY.md](./docs/ARCHITECTURE_ESSAY.md) (Part 3)
-- Потом: [DECISIONS.md](./DECISIONS.md) (ADR-013)
-- Реализация: router_module + logger_module README
-
-### Если читаешь про ProcessModule
-- Сначала: process_module README
-- Потом: [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Lifecycle)
-- Примеры: multiprocess_prototype/main.py
-- Graceful: process_manager_module STATUS.md
-
----
-
-## 📝 Notes for Developers
-
-### Adding New Module
-1. Наследуй `BaseManager + ObservableMixin`
-2. Реализуй `initialize()` и `shutdown()`
-3. Создай `interfaces.py` с публичным контрактом
-4. Напиши `README.md` по шаблону
-5. Добавь unit-тесты в `tests/`
-6. Обнови DECISIONS.md если нужно
-
-### Adding New Manager Type
-1. Реши: нужны ли каналы? → наследуй `ChannelRoutingManager`
-2. Реши: нужна логирование? → добавь `ObservableMixin`
-3. Реализуй специфичные методы
-4. Добавь в таблицу [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md)
-
-### Modifying Architecture
-1. Прочитай [DECISIONS.md](./DECISIONS.md)
-2. Запиши новое решение в DECISIONS.md
-3. Запусти `python scripts/validate.py`
-4. Обнови [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md)
-5. Обнови [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md)
-
----
-
-## 🐛 Debugging Tips
-
-### Сообщения не идут между процессами
-- Проверь: правильно ли указаны `targets` в сообщении?
-- Проверь: инициализирован ли RouterManager в обоих процессах?
-- Включи логирование: `LoggerManager(...)` с level=DEBUG
-- Дебажь через: [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) (Message Flow)
-
-### Процесс не завершается на Ctrl+C
-- Проверь: проверяет ли worker `stop_event.is_set()`?
-- Проверь: не заблокирован ли в `queue.get()` без timeout?
-- Проверь: timeout в ProcessRegistry.stop_all()
-- Дебажь через: [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (Graceful Shutdown)
-
-### Pickle ошибка на Windows
-- Помни: Dict at Boundary! Используй `msg.to_dict()` перед `queue.put()`
-- Проверь: не передаёшь ли Pydantic модели через очередь?
-- Помни: после unpickle нужен `srm.reinitialize_in_child()`
-- Дебажь через: [DECISIONS.md](./DECISIONS.md) (ADR-021)
-
-### Известные проблемы
-- [PROBLEMS.md](./PROBLEMS.md) — падающие unit-тесты, валидация документации, Pydantic warnings
+- [PROBLEMS.md](./PROBLEMS.md) — известные ограничения unit-тестов
 - [tests/integration/TEST_ISSUES.md](./tests/integration/TEST_ISSUES.md) — интеграционные тесты
 
 ---
 
-## 📄 Version History
-
-| Дата | Версия | Статус | Примечание |
-|------|--------|--------|-----------|
-| 2026-03-13 | 1.0 | Complete | Первая версия документации, все 15 модулей |
-| 2026-03-18 | 1.1 | Complete | Добавлен sql_module (16 модулей), канал database, DOCUMENTATION_INDEX |
-
----
-
-**Последнее обновление:** March 18, 2026
-
+*Обновлено: 2026-03-24 — сжатие документации: удалены архивы, дублирующие эссе/философия и черновики wishlist; единая канва — Overview + Reference + DECISIONS.*

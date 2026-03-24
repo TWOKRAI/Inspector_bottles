@@ -1,18 +1,15 @@
 # multiprocess_prototype/frontend/windows/main_window/tab_factory.py
 """Единая фабрика вкладок TabWidget для MainWindow и FrontendLauncher."""
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
+
+from multiprocess_prototype.frontend.app_context import FrontendAppContext
 
 TabWidgetFactory = Callable[[str, dict], Any]
 
 
-def create_tab_widget_factory(
-    *,
-    config: Dict[str, Any],
-    registers_manager: Optional[Any] = None,
-    camera_callbacks_map: Dict[str, Any],
-    camera_type: str,
-) -> TabWidgetFactory:
+def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
+    """Собрать фабрику вкладок из явного контекста (config + регистры + рецепты + камера)."""
     from multiprocess_prototype.frontend.widgets import (
         CameraTabWidget,
         ProcessingTabWidget,
@@ -20,13 +17,28 @@ def create_tab_widget_factory(
         SettingsTabWidget,
     )
 
+    config = ctx.config
+    registers_manager = ctx.registers_manager
+    recipe_manager = ctx.recipe_manager
+    camera_type = ctx.camera_type
+    camera_callbacks_map = ctx.camera_callbacks_map
+
     def factory(widget_key: str, tab_config: dict) -> Any:
         if widget_key == "recipes":
-            return RecipesTabWidget(registers_manager=registers_manager)
+            return RecipesTabWidget(
+                registers_manager=registers_manager,
+                ui=config.get("recipes_tab"),
+                recipe_manager=recipe_manager,
+                recipe_access=config.get("recipe_access"),
+            )
         if widget_key == "settings":
             return SettingsTabWidget(
                 registers_manager=registers_manager,
                 ui=config.get("settings_tab"),
+                recipe_manager=recipe_manager,
+                recipe_access=config.get("recipe_access"),
+                recipes_tab=config.get("recipes_tab"),
+                processing_tab_ui=config.get("processing_tab_ui"),
             )
         if widget_key == "processing":
             return ProcessingTabWidget(registers_manager=registers_manager)

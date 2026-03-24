@@ -1,16 +1,20 @@
 # multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/
 """
-Вкладка рецептов. Заглушка (QLabel), далее — таблица.
-
-Простой виджет: coerce_schema_config, IRegistersManagerGui (пока rm не используется).
-См. TAB_STRUCTURE.md.
+Вкладка рецептов: слот, загрузка/сохранение снимка, таблица полей регистров.
 
 Экспорты:
 - RecipesTabWidget — виджет вкладки
-- RecipesTabConfig — конфиг заглушки (stub_caption, stub_label_style)
+- RecipesTabConfig — подписи и параметры UI
 """
 
 from .schemas import RecipesTabConfig
+from .recipe_slot_table_panel import AppRecipePanel, RecipeSlotTablePanel, RegisterRecipePanel
 from .widget import RecipesTabWidget
 
-__all__ = ["RecipesTabConfig", "RecipesTabWidget"]
+__all__ = [
+    "AppRecipePanel",
+    "RecipeSlotTablePanel",
+    "RecipesTabConfig",
+    "RecipesTabWidget",
+    "RegisterRecipePanel",
+]

@@ -38,6 +38,9 @@ class CameraConfig(ProcessConfigBase):
     camera_index: int = _BOOT["camera_index"]
     hikvision_resolution_width: int = _BOOT["hikvision_resolution_width"]
     hikvision_resolution_height: int = _BOOT["hikvision_resolution_height"]
+    hikvision_frame_rate: float = _BOOT["hikvision_frame_rate"]
+    hikvision_exposure_time: float = _BOOT["hikvision_exposure_time"]
+    hikvision_gain: float = _BOOT["hikvision_gain"]
     use_simulator: bool = False
     simulator_image_path: Optional[str] = None
 

@@ -16,6 +16,7 @@ def apply_camera_register_update(
     set_device_id: Callable[[dict], Any],
     set_camera_index: Callable[[dict], Any],
     set_hikvision_resolution: Callable[[dict], Any],
+    patch_hikvision_params: Callable[[dict], Any],
 ) -> None:
     """Применить register_update к состоянию процесса камеры."""
     if data.get("register_name") != CAMERA_REGISTER:
@@ -38,3 +39,9 @@ def apply_camera_register_update(
         set_hikvision_resolution({"width": value})
     elif field == "hikvision_resolution_height":
         set_hikvision_resolution({"height": value})
+    elif field == "hikvision_frame_rate":
+        patch_hikvision_params({"frame_rate": value})
+    elif field == "hikvision_exposure_time":
+        patch_hikvision_params({"exposure_time": value})
+    elif field == "hikvision_gain":
+        patch_hikvision_params({"gain": value})

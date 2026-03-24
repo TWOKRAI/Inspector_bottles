@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Union
 
-from frontend_module.components import BaseTab
+from frontend_module.widgets.tabs import BaseTab
 from frontend_module.core.qt_imports import QComboBox, QGroupBox, QStackedWidget, QVBoxLayout
 from frontend_module.core.schema_config import coerce_schema_config
 

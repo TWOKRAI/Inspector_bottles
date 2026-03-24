@@ -7,16 +7,10 @@ from typing import Any, Protocol
 
 
 class HikvisionView(Protocol):
-    """Методы, которыми презентер обновляет UI."""
-
-    def get_selected_camera_index(self) -> int:
-        ...
+    """Методы, которыми презентер обновляет UI. Пассивный View — только set_*."""
 
     def set_devices_list(self, devices: list) -> None:
         ...
 
     def set_hikvision_params_lines(self, params: dict[str, Any]) -> None:
-        ...
-
-    def get_hikvision_params_from_lines(self) -> tuple[float, float, float]:
         ...

@@ -5,7 +5,7 @@
 Единственная схема процесса gui — импорт из ``multiprocess_prototype.backend.configs``.
 """
 
-from typing import Annotated
+from typing import Annotated, Any, Dict, Optional
 
 from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
@@ -36,3 +36,30 @@ class GuiConfig(ProcessConfigBase):
     poll_interval_ms: Annotated[
         int, FieldMeta("Интервал опроса сообщений, мс", min=5, max=100)
     ] = 16
+
+    recipes_path: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Путь к YAML рецептов",
+            info="По умолчанию — multiprocess_prototype/data/recipes.yaml внутри RecipeManager.",
+        ),
+    ] = None
+
+    recipe_access: Annotated[
+        Optional[Dict[str, Any]],
+        FieldMeta(
+            "Доступ к редактированию рецептов",
+            info="Словарь для AccessContext: level, bypass_readonly, show_hidden.",
+        ),
+    ] = None
+
+    ui_diagnostics: Annotated[
+        Optional[Dict[str, Any]],
+        FieldMeta(
+            "Телеметрия UI (опционально)",
+            info=(
+                "enabled, log_level, logger_name, include_prefixes, buffer_max. "
+                "Либо env INSPECTOR_UI_DIAGNOSTICS=1 (включает с дефолтами в build_dict)."
+            ),
+        ),
+    ] = None

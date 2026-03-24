@@ -71,7 +71,7 @@ def _create_slider(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика NumericControl (slider)."""
-    from frontend_module.components.controls import (
+    from frontend_module.components import (
         BindingConfig,
         NumericControl,
         NumericViewConfig,
@@ -100,7 +100,7 @@ def _create_checkbox(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика CheckboxControl."""
-    from frontend_module.components.controls import (
+    from frontend_module.components import (
         BindingConfig,
         CheckboxControl,
         CheckboxViewConfig,

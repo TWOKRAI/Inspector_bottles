@@ -1,4 +1,4 @@
-# multiprocess_prototype\configs\app_config.py
+# multiprocess_prototype/backend/configs/app_config.py
 """
 Конфигурация приложения Inspector Prototype.
 

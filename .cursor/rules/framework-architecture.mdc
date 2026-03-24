@@ -9,7 +9,7 @@ alwaysApply: true
 
 - **Фреймворк**: `Inspector_prototype/multiprocess_framework/refactored/modules/` (16 модулей)
 - **Схемы регистров приложения**: `Inspector_prototype/multiprocess_prototype/registers/schemas/` (не часть фреймворка)
-- **Архив документации**: `refactored/docs/archived/` — исторические отчёты, **не использовать** при анализе фреймворка
+- **Документация фреймворка**: `Inspector_prototype/multiprocess_framework/refactored/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`, глоссарий, каталог модулей), журнал решений — `refactored/DECISIONS.md`; отдельного архива отчётов нет
 - **Тестовое приложение**: `Inspector_prototype/multiprocess_prototype/`
 - **Точка входа**: `Inspector_prototype/multiprocess_prototype/main.py`
 - **Оркестратор**: `process_manager_module/launcher/system_launcher.py`

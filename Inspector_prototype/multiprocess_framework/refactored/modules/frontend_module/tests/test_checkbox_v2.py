@@ -7,11 +7,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 import pytest
 
-from frontend_module.components.control_v2.base.config import BindingConfig
-from frontend_module.components.control_v2.base.infrastructure.register_adapter import (
+from frontend_module.components.base.config import BindingConfig
+from frontend_module.components.base.infrastructure.register_adapter import (
     RegisterAdapter,
 )
-from frontend_module.components.control_v2.checkbox import (
+from frontend_module.components.checkbox import (
     CheckboxControl,
     CheckboxPresenter,
     CheckboxViewConfig,

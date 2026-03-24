@@ -6,15 +6,11 @@ Unit-тест с mock process.
 Требует DISPLAY для PyQt5.
 """
 
-import os
 import numpy as np
 import pytest
 from unittest.mock import MagicMock
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("DISPLAY"),
-    reason="GUI requires DISPLAY",
-)
+pytestmark = pytest.mark.skip(reason="Legacy InspectorWindow removed; use MainWindow/ProcessingTabWidget tests")
 
 
 def test_gui_checkboxes_call_process_methods():

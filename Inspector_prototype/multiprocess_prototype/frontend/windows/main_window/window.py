@@ -8,11 +8,13 @@ Layout: Header + ImagePanel + TabWidget.
 
 from typing import Any, Callable, Dict, Optional, Union
 
-from frontend_module.components import HeaderWidget, TabWidget
-from frontend_module.components.header import HeaderConfig
+from frontend_module.widgets import HeaderWidget, TabWidget
+from frontend_module.widgets.header import HeaderConfig
 from frontend_module.core.action_binding import connect_action_handlers
 from frontend_module.core.qt_imports import QMainWindow, QVBoxLayout, QWidget
 from frontend_module.widgets.image_panel import ImagePanelWidget
+
+from multiprocess_prototype.frontend.app_context import FrontendAppContext
 
 from .config import ImagePanelConfig
 from .tab_factory import TabWidgetFactory, create_tab_widget_factory
@@ -57,10 +59,13 @@ class MainWindow(QMainWindow):
         if self._tab_widget_factory is not None:
             return self._tab_widget_factory
         return create_tab_widget_factory(
-            config=self._config,
-            registers_manager=self._registers_manager,
-            camera_callbacks_map=self._camera_callbacks_map,
-            camera_type=self._camera_type,
+            FrontendAppContext(
+                config=self._config,
+                registers_manager=self._registers_manager,
+                camera_callbacks_map=self._camera_callbacks_map,
+                camera_type=self._camera_type,
+                recipe_manager=None,
+            )
         )
 
     def _build_header_config(self, header_cfg: Union[HeaderConfig, Dict[str, Any], None]) -> Dict[str, Any]:

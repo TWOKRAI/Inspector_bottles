@@ -1,34 +1,27 @@
-# docs/ — Детальная документация фреймворка
+# docs/ — Документация фреймворка
 
-**Корневой README:** [../README.md](../README.md)  
-**Навигация:** [../DOCUMENTATION_INDEX.md](../DOCUMENTATION_INDEX.md)
-
----
-
-## Быстрая ориентация
-
-| Файл | Для кого | Время |
-|------|----------|-------|
-| **[ARCHITECTURE_PHILOSOPHY.md](./ARCHITECTURE_PHILOSOPHY.md)** | 🤖 AI-агенты, первый анализ | 15 мин |
-| **[FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)** | Разработчики, полный обзор | 45 мин |
-| **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Справка, диаграммы, таблицы | 30 мин |
-| **[ARCHITECTURE_ESSAY.md](./ARCHITECTURE_ESSAY.md)** | Архитекторы, deep dive | 30 мин |
-| **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` | 5 мин |
-| **[FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md)** | Детальный план: sender, лаунчер, фазы M0–M3 vs L, анти-паттерны, чеклисты для агента | 25 мин |
-| **[ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md)** | Каталог модулей фреймворка + пакетов прототипа (для диаграмм и связей) | 15 мин |
-| **[FRAMEWORK_VISION_AND_WISHLIST.md](./FRAMEWORK_VISION_AND_WISHLIST.md)** | Видение «идеального» каркаса, сравнение с текущим кодом, черновик пожеланий | 20 мин |
-| **[FRAMEWORK_IDEAL_GLOBAL_PLAN.md](./FRAMEWORK_IDEAL_GLOBAL_PLAN.md)** | Глобальный план: волны работ, критерии готовности, карта тем к модулям | 15 мин |
+**Корень:** [../README.md](../README.md)  
+**Индекс:** [../DOCUMENTATION_INDEX.md](../DOCUMENTATION_INDEX.md)  
+**Решения:** [../DECISIONS.md](../DECISIONS.md)
 
 ---
 
-## Рекомендуемый порядок чтения
+## Актуальные документы
 
-1. **AI-агенты:** ARCHITECTURE_PHILOSOPHY → FRAMEWORK_OVERVIEW → ARCHITECTURE_REFERENCE
-2. **Разработчики:** FRAMEWORK_OVERVIEW → ARCHITECTURE_REFERENCE → модули `*/README.md`
-3. **Архитекторы:** ARCHITECTURE_PHILOSOPHY → ARCHITECTURE_ESSAY → [../DECISIONS.md](../DECISIONS.md)
+| Файл | Назначение |
+|------|------------|
+| **[FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)** | Полный обзор: слои, принципы, жизненный цикл, quick start |
+| **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Диаграммы и таблицы (быстрая справка) |
+| **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` |
+| **[ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md)** | Каталог модулей и связей с прототипом |
+| **[FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md)** | План: sender, лаунчер, фазы UI-команд |
+| **[MODULE_README_TEMPLATE.md](./MODULE_README_TEMPLATE.md)** | Шаблон `README.md` для нового модуля |
 
 ---
 
-## archived/
+## Порядок чтения
 
-Исторические и разовые отчёты (интеграция, рефакторинг, исправления). **Не нужны для повседневной работы.** Правило в `.cursor/rules`: AI не использует при анализе фреймворка.
+1. **Первый контакт:** [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) (разделы 1–7).
+2. **Справка и схемы:** [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md).
+3. **Почему так устроено:** [../DECISIONS.md](../DECISIONS.md) (ADR).
+4. **Конкретный модуль:** `modules/<name>/README.md` и `STATUS.md`.
