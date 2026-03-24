@@ -4,7 +4,9 @@
 Изменяемые параметры — в registers/schemas/camera_tab; boot-значения оттуда.
 """
 
-from typing import Literal, Optional
+from typing import Optional
+
+from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
 from multiprocess_framework.refactored.modules.data_schema_module import register_schema
 from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
@@ -28,7 +30,7 @@ class CameraConfig(ProcessConfigBase):
     process_name: str = "camera"
     class_path: str = class_path_from_type(UnifiedCameraProcess)
     priority: ProcessPriorityLevel = ProcessPriorityLevel.HIGH
-    camera_type: Literal["simulator", "webcam", "hikvision"] = _BOOT["camera_type"]
+    camera_type: CameraTypeStr = _BOOT.get("camera_type", DEFAULT_CAMERA_TYPE)
     fps: int = _BOOT["fps"]
     resolution_width: int = _BOOT["resolution_width"]
     resolution_height: int = _BOOT["resolution_height"]
@@ -43,7 +45,7 @@ class CameraConfig(ProcessConfigBase):
         priority_val = (
             self.priority.value if hasattr(self.priority, "value") else self.priority
         )
-        use_sim = self.use_simulator or (self.camera_type == "simulator")
+        use_sim = self.use_simulator or (self.camera_type == DEFAULT_CAMERA_TYPE)
         proc_dict = self._build_proc_dict(
             self.class_path,
             queues=self.queues,

@@ -11,10 +11,11 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+from multiprocess_prototype.camera_policy import DEFAULT_CAMERA_TYPE, is_valid_camera_type
+
 from .paths import ensure_data_root, get_data_root, legacy_prefs_path
 
 _PREFS_FILENAME = "user_prefs.json"
-_VALID_CAMERA = frozenset(("simulator", "webcam", "hikvision"))
 
 
 def _prefs_file() -> Path:
@@ -81,21 +82,21 @@ def get_camera_type() -> str:
 
     prefs = _load_prefs()
     ct = prefs.get("camera_type")
-    if ct in _VALID_CAMERA:
+    if is_valid_camera_type(ct):
         if ct == "hikvision" and sys.platform != "win32":
-            return "simulator"
+            return DEFAULT_CAMERA_TYPE
         return ct
     env_ct = os.environ.get("INSPECTOR_CAMERA_TYPE")
-    if env_ct in _VALID_CAMERA:
+    if is_valid_camera_type(env_ct):
         if env_ct == "hikvision" and sys.platform != "win32":
-            return "simulator"
+            return DEFAULT_CAMERA_TYPE
         return env_ct
-    return "simulator" if sys.platform != "win32" else "hikvision"
+    return DEFAULT_CAMERA_TYPE if sys.platform != "win32" else "hikvision"
 
 
 def set_camera_type(camera_type: str) -> bool:
     """Сохранить тип камеры в user_prefs.json."""
-    if camera_type not in _VALID_CAMERA:
+    if not is_valid_camera_type(camera_type):
         return False
     prefs = _load_prefs()
     prefs["camera_type"] = camera_type

@@ -5,7 +5,9 @@
 Единственная схема процесса gui — импорт из ``multiprocess_prototype.backend.configs``.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated
+
+from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
     FieldMeta,
@@ -23,7 +25,7 @@ class GuiConfig(ProcessConfigBase):
 
     process_name: str = "gui"
     class_path: str = class_path_from_type(GuiProcess)
-    camera_type: Literal["simulator", "webcam", "hikvision"] = "simulator"
+    camera_type: CameraTypeStr = DEFAULT_CAMERA_TYPE
     window_title: str = "Inspector Prototype"
     window_width: Annotated[
         int, FieldMeta("Ширина окна", min=400, max=1920)

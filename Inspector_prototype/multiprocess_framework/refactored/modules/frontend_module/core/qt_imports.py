@@ -16,6 +16,7 @@ from PyQt5.QtGui import (
     QPixmap,
 )
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -27,6 +28,7 @@ from PyQt5.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -43,6 +45,7 @@ from PyQt5.QtWidgets import (
 )
 
 __all__ = [
+    "QAbstractItemView",
     "QApplication",
     "QCloseEvent",
     "QCheckBox",
@@ -59,6 +62,7 @@ __all__ = [
     "QIntValidator",
     "QLabel",
     "QLineEdit",
+    "QListWidget",
     "QMainWindow",
     "QMessageBox",
     "QObject",

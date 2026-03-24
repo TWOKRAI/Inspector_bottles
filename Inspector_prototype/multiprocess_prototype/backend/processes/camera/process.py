@@ -18,6 +18,11 @@ from multiprocess_framework.refactored.modules.worker_module import (
 
 from Utils.fps_module import FrameFPS
 
+from multiprocess_prototype.camera_policy import (
+    DEFAULT_CAMERA_TYPE,
+    is_valid_camera_type,
+    supports_enum,
+)
 from multiprocess_prototype.backend.modules.camera.backend_factory import (
     CameraBackendParams,
     create_camera_backend,
@@ -55,14 +60,12 @@ class UnifiedCameraProcess(ProcessModule):
         self._frame_id = 0
         self._fps_counter = FrameFPS(interval=1.0)
 
-        initial_type = app_cfg.get("camera_type", "simulator")
+        initial_type = app_cfg.get("camera_type", DEFAULT_CAMERA_TYPE)
+        if not is_valid_camera_type(initial_type):
+            initial_type = DEFAULT_CAMERA_TYPE
         self._current_type = initial_type
 
-        if initial_type == "webcam":
-            from multiprocess_prototype.utils.webcam_capture import reset_webcam
-
-            reset_webcam(device_id=self._device_id)
-            time.sleep(0.2)
+        self._handoff_camera_backend(DEFAULT_CAMERA_TYPE, initial_type)
 
         self._backend = self._create_backend(initial_type)
 
@@ -112,9 +115,28 @@ class UnifiedCameraProcess(ProcessModule):
     def _create_backend(self, camera_type: str):
         return create_camera_backend(camera_type, self._backend_params())
 
+    def _handoff_camera_backend(self, old_type: str, new_type: str) -> None:
+        """
+        После stop/close старого бэкенда: отвязать устройство/стек от прежнего режима.
+        Перед созданием нового (особенно webcam): тот же прогон, что при первом старте.
+        """
+        if old_type == "webcam":
+            from multiprocess_prototype.utils.webcam_capture import reset_webcam
+
+            reset_webcam(device_id=self._device_id, delay_after_ms=450)
+        elif old_type == "hikvision":
+            # SDK отпускает USB не мгновенно — иначе DirectShow/U3V следующего бэкенда ловят гонку.
+            time.sleep(0.28)
+
+        if new_type == "webcam":
+            from multiprocess_prototype.utils.webcam_capture import reset_webcam
+
+            reset_webcam(device_id=self._device_id, delay_after_ms=300)
+            time.sleep(0.1)
+
     def _cmd_set_camera_type(self, data: dict):
-        new_type = data.get("camera_type", "simulator")
-        if new_type not in ("simulator", "webcam", "hikvision"):
+        new_type = data.get("camera_type", DEFAULT_CAMERA_TYPE)
+        if not is_valid_camera_type(new_type):
             return {"status": "error", "error": f"Unknown camera_type: {new_type}"}
         if new_type == "hikvision" and sys.platform != "win32":
             new_type = "simulator"
@@ -127,9 +149,11 @@ class UnifiedCameraProcess(ProcessModule):
                 self._send_to_gui("status", {"status": f"Already {new_type}"})
                 return {"status": "ok"}
 
+            old_type = self._current_type
             self.worker_manager.pause_worker("capture_worker")
             self._backend.stop()
             self._backend.close()
+            self._handoff_camera_backend(old_type, new_type)
 
             self._current_type = new_type
             self._backend = self._create_backend(new_type)
@@ -182,7 +206,7 @@ class UnifiedCameraProcess(ProcessModule):
     def _cmd_set_resolution(self, data: dict):
         self._width = data.get("width", self._width)
         self._height = data.get("height", self._height)
-        if self._current_type in ("simulator", "webcam"):
+        if self._current_type in ("simulator", "webcam"):  # типы с resolution_width/height
             with self._backend_lock:
                 self._backend.close()
                 self._backend = self._create_backend(self._current_type)
@@ -202,13 +226,58 @@ class UnifiedCameraProcess(ProcessModule):
         return {"status": "ok"}
 
     def _cmd_enum_devices(self, data: dict):
+        payload = dict(data or {})
+        backend_hint = payload.get("backend")
+        use_backend = backend_hint if backend_hint in ("webcam", "hikvision") else None
+
         with self._backend_lock:
-            if self._current_type in ("webcam", "hikvision"):
-                result = self._backend.handle_command("enum_devices", data) or {}
-                if isinstance(result, dict) and result.get("status") == "ok" and "devices" in result:
-                    self._send_to_gui("enum_devices_response", {"devices": result["devices"]})
-                return result
-        return {"status": "error", "reason": "Only for Webcam/Hikvision"}
+            effective_type = use_backend if use_backend else self._current_type
+            if not supports_enum(effective_type):
+                self._send_to_gui("enum_devices_response", {"devices": []})
+                return {"status": "ok", "devices": []}
+
+            # backend_hint: enum для вкладки даже при другом current_type
+            if use_backend and use_backend != self._current_type:
+                result = self._enum_devices_for_backend(use_backend, payload)
+            else:
+                result = self._backend.handle_command("enum_devices", payload) or {}
+
+            if isinstance(result, dict) and result.get("status") == "ok" and "devices" in result:
+                self._send_to_gui("enum_devices_response", {"devices": result["devices"]})
+            return result
+
+    def _enum_devices_for_backend(self, backend: str, payload: dict) -> dict:
+        """Enum для backend без переключения current_type (напр. Hikvision с вкладки при current=webcam)."""
+        if backend == "hikvision":
+            if self._current_type == "webcam":
+                self.worker_manager.pause_worker("capture_worker")
+                try:
+                    self._backend.stop()
+                    self._backend.close()
+                except Exception:
+                    pass
+                self._handoff_camera_backend("webcam", "hikvision")
+
+            from hikvision_camera_module.core.capture import enum_devices
+
+            result = enum_devices() or {}
+            if isinstance(result, dict) and result.get("status") == "ok":
+                for dev in result.get("devices") or []:
+                    if isinstance(dev, dict):
+                        dev.setdefault("source", "hikvision")
+
+            if self._current_type == "webcam":
+                self._handoff_camera_backend("hikvision", "webcam")
+                self._backend = self._create_backend("webcam")
+                self.worker_manager.resume_worker("capture_worker")
+            return result
+        if backend == "webcam":
+            from multiprocess_prototype.backend.modules.camera.backends import (
+                _enum_webcam_devices,
+            )
+
+            return _enum_webcam_devices(payload.get("max_index"))
+        return {"status": "error", "devices": []}
 
     def _cmd_open(self, data: dict):
         with self._backend_lock:
@@ -321,7 +390,7 @@ class UnifiedCameraProcess(ProcessModule):
                     self._backend.close()
                 finally:
                     self._backend = None
-            if self._current_type == "webcam":
+            if self._current_type == "webcam":  # handoff для release USB
                 from multiprocess_prototype.utils.webcam_capture import reset_webcam
 
                 reset_webcam(device_id=self._device_id)

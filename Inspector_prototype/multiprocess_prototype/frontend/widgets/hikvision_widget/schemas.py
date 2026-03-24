@@ -90,6 +90,14 @@ class HikvisionUiConfig(SchemaBase):
 
     group_device: str = "Устройство"
     device_combo_placeholder: str = "— выберите устройство —"
+    device_list_hint: Annotated[
+        str,
+        FieldMeta("Подсказка", info="Текст над списком устройств."),
+    ] = "Список камер (кнопка Enum). При большом числе устройств используйте прокрутку."
+    device_list_min_height: Annotated[
+        int,
+        FieldMeta("Высота списка", info="Минимальная высота списка устройств, px."),
+    ] = 120
     btn_enum_devices: str = "Enum Devices"
     btn_open: str = "Open"
     btn_close: str = "Close"

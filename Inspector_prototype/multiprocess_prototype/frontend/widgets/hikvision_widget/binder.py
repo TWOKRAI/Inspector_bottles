@@ -6,7 +6,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from frontend_module.components.tabs import RegisterBindingContext, callback_no_args
-from frontend_module.core.qt_imports import QComboBox, QGroupBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from frontend_module.core.qt_imports import (
+    QAbstractItemView,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .params_section import build_params_group
 from .schemas import HikvisionUiConfig
@@ -22,16 +31,20 @@ def bind_hikvision_ui(
     callbacks: "HikvisionWidgetCallbacks",
     presenter: "HikvisionPresenter",
 ) -> tuple[QWidget, object]:
-    """Собрать UI и привязать сигналы. Returns (page, refs с combo_devices, hik_params)."""
+    """Собрать UI и привязать сигналы. Returns (page, refs с list_devices, hik_params)."""
     _btn = callback_no_args
     page = QWidget()
     layout = QVBoxLayout(page)
 
     dev_group = QGroupBox(u.group_device)
     dev_layout = QVBoxLayout(dev_group)
-    combo_devices = QComboBox()
-    combo_devices.addItem(u.device_combo_placeholder)
-    dev_layout.addWidget(combo_devices)
+    hint = QLabel(u.device_list_hint)
+    hint.setWordWrap(True)
+    dev_layout.addWidget(hint)
+    list_devices = QListWidget()
+    list_devices.setMinimumHeight(u.device_list_min_height)
+    list_devices.setSelectionMode(QAbstractItemView.SingleSelection)
+    dev_layout.addWidget(list_devices)
     btn_enum = QPushButton(u.btn_enum_devices)
     btn_enum.clicked.connect(_btn(callbacks.on_enum_devices))
     dev_layout.addWidget(btn_enum)
@@ -63,5 +76,5 @@ def bind_hikvision_ui(
     )
     layout.addWidget(params_group)
 
-    refs = type("Refs", (), {"combo_devices": combo_devices, "hik_params": hik_params})()
+    refs = type("Refs", (), {"list_devices": list_devices, "hik_params": hik_params})()
     return page, refs

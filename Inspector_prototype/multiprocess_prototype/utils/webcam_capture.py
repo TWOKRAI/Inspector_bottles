@@ -38,7 +38,12 @@ def reset_webcam(device_id: int = 0, delay_after_ms: int = 400) -> bool:
     except ImportError:
         return False
     try:
-        cap = cv2.VideoCapture(device_id)
+        # Тот же бэкенд, что и в WebcamCapture (DSHOW на Windows), иначе MSMF
+        # может конкурировать с уже отпущенным DirectShow и мешать U3V/Hikvision.
+        if os.name == "nt":
+            cap = cv2.VideoCapture(device_id, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(device_id)
         if cap.isOpened():
             cap.release()
         if delay_after_ms > 0:

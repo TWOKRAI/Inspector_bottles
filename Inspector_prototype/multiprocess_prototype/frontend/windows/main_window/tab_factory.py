@@ -35,6 +35,7 @@ def create_tab_widget_factory(
                 camera_type=camera_type,
                 registers_manager=registers_manager,
                 callbacks_map=camera_callbacks_map,
+                ui=config.get("camera_tab"),
             )
         return None
 

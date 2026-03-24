@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from multiprocess_prototype.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
+
 
 @dataclass(frozen=True)
 class HikvisionWidgetCallbacks:
@@ -20,10 +22,16 @@ class HikvisionWidgetCallbacks:
     on_set_parameters: Optional[Callable[[float, float, float], None]] = None
 
 
-def build_hikvision_callbacks(cmd) -> HikvisionWidgetCallbacks:
+def build_hikvision_callbacks(
+    cmd,
+    *,
+    webcam_enum_max_index: int = WEBCAM_ENUM_DEFAULT_MAX_INDEX,
+) -> HikvisionWidgetCallbacks:
     """Собрать колбэки из GuiCommandHandler для Hikvision."""
     return HikvisionWidgetCallbacks(
-        on_enum_devices=cmd.send_enum_devices,
+        on_enum_devices=lambda: cmd.send_enum_devices(
+            max_index=webcam_enum_max_index, backend="hikvision"
+        ),
         on_open=lambda camera_index=0: cmd.send_open_camera(camera_index=camera_index),
         on_close=cmd.send_close_camera,
         on_start_grabbing=cmd.send_start_grabbing,

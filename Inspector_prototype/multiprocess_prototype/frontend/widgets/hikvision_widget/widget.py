@@ -48,23 +48,24 @@ class HikvisionWidget(BaseTab):
         root.addWidget(self._page)
 
     def get_selected_camera_index(self) -> int:
-        if not self._refs:
+        if not self._refs or not self._devices:
             return 0
-        idx = self._refs.combo_devices.currentIndex()
-        if idx <= 0 or idx > len(self._devices):
-            return 0
-        return self._devices[idx - 1].get("index", 0)
+        row = self._refs.list_devices.currentRow()
+        if row < 0 or row >= len(self._devices):
+            return int(self._devices[0].get("index", 0))
+        return int(self._devices[row].get("index", 0))
 
     def set_devices_list(self, devices: list) -> None:
         self._devices = devices or []
         if not self._refs:
             return
-        combo = self._refs.combo_devices
-        combo.clear()
-        combo.addItem(self._ui.device_combo_placeholder)
+        lst = self._refs.list_devices
+        lst.clear()
         for dev in self._devices:
             display = dev.get("display_name", f"[{dev.get('index', '?')}]")
-            combo.addItem(display)
+            lst.addItem(display)
+        if self._devices:
+            lst.setCurrentRow(0)
 
     def set_hikvision_params_lines(self, params: dict) -> None:
         if not self._refs:

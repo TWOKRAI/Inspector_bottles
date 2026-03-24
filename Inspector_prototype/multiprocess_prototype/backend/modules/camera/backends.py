@@ -4,12 +4,22 @@
 
 Единый интерфейс: capture_frame() -> np.ndarray | None, start(), stop(), close().
 HikvisionBackend использует hikvision_camera_module.HikvisionCameraFacade.
+
+Словарь устройства (enum_devices): index, display_name, source ("webcam"|"hikvision"), опционально type/model (Hikvision).
 """
 
+from __future__ import annotations
+
+import os
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
+
+from multiprocess_prototype.camera_policy import (
+    WEBCAM_ENUM_DEFAULT_MAX_INDEX,
+    WEBCAM_ENUM_HARD_CAP,
+)
 
 
 class BaseCaptureBackend(ABC):
@@ -63,17 +73,35 @@ class SimulatorBackend(BaseCaptureBackend):
             self._generator.close()
 
 
-def _enum_webcam_devices(max_index: int = 10) -> dict:
-    """Перечислить доступные веб-камеры (OpenCV VideoCapture)."""
+def _coerce_webcam_enum_max(max_index: Any) -> int:
+    try:
+        n = int(max_index)
+    except (TypeError, ValueError):
+        n = WEBCAM_ENUM_DEFAULT_MAX_INDEX
+    return max(1, min(n, WEBCAM_ENUM_HARD_CAP))
+
+
+def _enum_webcam_devices(max_index: int = WEBCAM_ENUM_DEFAULT_MAX_INDEX) -> dict:
+    """Перечислить веб-камеры (OpenCV). На Windows — CAP_DSHOW, как в WebcamCapture."""
+    max_index = _coerce_webcam_enum_max(max_index)
     try:
         import cv2
     except ImportError:
         return {"status": "error", "error": "opencv-python not installed", "devices": []}
     devices = []
     for i in range(max_index):
-        cap = cv2.VideoCapture(i)
+        if os.name == "nt":
+            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(i)
         if cap.isOpened():
-            devices.append({"index": i, "display_name": f"Webcam {i}"})
+            devices.append(
+                {
+                    "index": i,
+                    "display_name": f"[OpenCV {i}] Webcam",
+                    "source": "webcam",
+                }
+            )
             cap.release()
     return {"status": "ok", "devices": devices}
 
@@ -124,7 +152,7 @@ class WebcamBackend(BaseCaptureBackend):
 
     def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
         if cmd == "enum_devices":
-            return _enum_webcam_devices()
+            return _enum_webcam_devices(data.get("max_index"))
         return super().handle_command(cmd, data)
 
 
@@ -216,7 +244,12 @@ class HikvisionBackend(BaseCaptureBackend):
 
     def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
         if cmd == "enum_devices":
-            return self._facade.enum_devices()
+            result = self._facade.enum_devices() or {}
+            if isinstance(result, dict) and result.get("status") == "ok":
+                for dev in result.get("devices") or []:
+                    if isinstance(dev, dict):
+                        dev.setdefault("source", "hikvision")
+            return result
         if cmd == "open":
             idx = data.get("camera_index", self._camera_index)
             self._camera_index = idx

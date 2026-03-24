@@ -11,10 +11,13 @@ from typing import Any, Dict, Optional
 from frontend_module import FrontendLaunchHooks, run_process_attached_frontend
 from frontend_module.windows import LoadingWindow
 
+from frontend_module.core.schema_config import coerce_schema_config
+
 from multiprocess_prototype.registers import create_registers
 from multiprocess_prototype.frontend.configs.frontend_config import build_frontend_config
 from multiprocess_prototype.frontend.commands import GuiCommandHandler
 from multiprocess_prototype.frontend.widgets import build_camera_tab_callbacks
+from multiprocess_prototype.frontend.widgets.tabs_setting.camera_tab.schemas import CameraTabUiConfig
 from multiprocess_prototype.frontend.windows.main_window import MainWindow, create_tab_widget_factory
 
 
@@ -58,6 +61,11 @@ class FrontendLauncher:
         cmd = GuiCommandHandler(process_ref)
         assert sender is process_ref._routed_command_sender
         camera_type = config.get("camera_type", "simulator")
+        cam_tab_ui = coerce_schema_config(config.get("camera_tab") or {}, CameraTabUiConfig)
+        camera_callbacks_map = build_camera_tab_callbacks(
+            cmd,
+            webcam_enum_max_index=cam_tab_ui.webcam_enum_max_index,
+        )
         window_cfg = config.get("window", {})
         title = window_cfg.get("title", "Inspector")
         width = window_cfg.get("width", window_cfg.get("min_width", 1024))
@@ -66,7 +74,7 @@ class FrontendLauncher:
         tab_widget_factory = create_tab_widget_factory(
             config=config,
             registers_manager=fm.get_registers() if fm else None,
-            camera_callbacks_map=build_camera_tab_callbacks(cmd),
+            camera_callbacks_map=camera_callbacks_map,
             camera_type=camera_type,
         )
 
@@ -82,7 +90,7 @@ class FrontendLauncher:
             win = MainWindow(
                 config=config,
                 registers_manager=fm.get_registers() if fm else None,
-                camera_callbacks_map=build_camera_tab_callbacks(cmd),
+                camera_callbacks_map=camera_callbacks_map,
                 camera_type=camera_type,
                 tab_widget_factory=tab_widget_factory,
                 header_action_handlers={},

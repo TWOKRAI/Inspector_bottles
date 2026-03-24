@@ -74,6 +74,7 @@ class CameraTabWidget(BaseTab):
         hik = HikvisionWidget(
             registers_manager=self._registers_manager,
             callbacks=self._callbacks_map.get("hikvision"),
+            ui=self._ui.hikvision,
         )
         self._stack.addWidget(sim)
         self._stack.addWidget(web)
@@ -85,12 +86,12 @@ class CameraTabWidget(BaseTab):
     def _on_camera_type_changed(self, index: int) -> None:
         camera_type = self._ui.camera_type_for_combo_index(index)
         set_camera_type_field(self._registers_manager, camera_type)
-        if self._registers_manager:
-            persist_camera_type(camera_type)
-        else:
-            cb = self._callbacks_map.get("on_camera_type_changed")
-            if cb:
-                cb(camera_type)
+        persist_camera_type(camera_type)
+        # Явная команда — register_update обрабатывается только в capture_worker,
+        # который при остановленном захвате не читает очередь.
+        cb = self._callbacks_map.get("on_camera_type_changed")
+        if cb:
+            cb(camera_type)
         self._stack.setCurrentIndex(index)
 
     def sync_camera_type(self, camera_type: str) -> None:

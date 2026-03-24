@@ -6,7 +6,12 @@ Targets процессов — в ``command_routing.resolve_command_targets``; �
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
+
+from multiprocess_prototype.camera_policy import (
+    WEBCAM_ENUM_DEFAULT_MAX_INDEX,
+    WEBCAM_ENUM_HARD_CAP,
+)
 
 # command_id -> функция, возвращающая dict для args и data (кроме случаев с раздельным data в mixin)
 
@@ -58,6 +63,22 @@ def _args_camera_type(camera_type: str) -> Dict[str, Any]:
     return {"camera_type": camera_type}
 
 
+def _args_enum_devices(
+    max_index: int = WEBCAM_ENUM_DEFAULT_MAX_INDEX,
+    backend: Optional[str] = None,
+) -> Dict[str, Any]:
+    """backend: 'webcam'|'hikvision' — enum для вкладки; иначе current_type."""
+    try:
+        n = int(max_index)
+    except (TypeError, ValueError):
+        n = WEBCAM_ENUM_DEFAULT_MAX_INDEX
+    n = max(1, min(n, WEBCAM_ENUM_HARD_CAP))
+    out: Dict[str, Any] = {"max_index": n}
+    if backend in ("webcam", "hikvision"):
+        out["backend"] = backend
+    return out
+
+
 GUI_COMMAND_CATALOG: Dict[str, Callable[..., Dict[str, Any]]] = {
     "start_capture": _args_empty,
     "stop_capture": _args_empty,
@@ -68,7 +89,7 @@ GUI_COMMAND_CATALOG: Dict[str, Callable[..., Dict[str, Any]]] = {
     "set_show_original": _args_show_original,
     "set_show_mask": _args_show_mask,
     "set_draw_contours": _args_draw_contours,
-    "enum_devices": _args_empty,
+    "enum_devices": _args_enum_devices,
     "open": _args_camera_index,
     "close": _args_empty,
     "start_grabbing": _args_empty,

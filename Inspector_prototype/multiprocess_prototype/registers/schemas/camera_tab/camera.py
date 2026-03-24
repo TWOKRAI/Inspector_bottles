@@ -4,7 +4,9 @@ CameraRegisters — параметры камеры (тип, FPS, разреше
 
 Маршрутизация: camera.
 """
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
+
+from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
 from multiprocess_framework.refactored.modules.data_schema_module import (
     FieldMeta,
@@ -24,13 +26,13 @@ class CameraRegisters(SchemaBase):
     )
 
     camera_type: Annotated[
-        Literal["simulator", "webcam", "hikvision"],
+        CameraTypeStr,
         FieldMeta(
             "Тип камеры",
             info="Simulator, Webcam или Hikvision.",
             routing=CAMERA_ROUTING,
         ),
-    ] = "simulator"
+    ] = DEFAULT_CAMERA_TYPE
 
     fps: Annotated[
         int,
@@ -72,9 +74,9 @@ class CameraRegisters(SchemaBase):
         int,
         FieldMeta(
             "ID устройства",
-            info="Индекс устройства Webcam (0–10).",
+            info="Индекс устройства Webcam / OpenCV (0…63, см. enum_devices).",
             min=0,
-            max=10,
+            max=63,
             routing=CAMERA_ROUTING,
         ),
     ] = 0
@@ -83,9 +85,9 @@ class CameraRegisters(SchemaBase):
         int,
         FieldMeta(
             "Индекс Hikvision",
-            info="Индекс камеры Hikvision.",
+            info="Индекс в списке MV_CC_EnumDevices (0…63).",
             min=0,
-            max=10,
+            max=63,
             routing=CAMERA_ROUTING,
         ),
     ] = 0

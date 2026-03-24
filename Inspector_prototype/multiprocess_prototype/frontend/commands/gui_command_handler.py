@@ -10,6 +10,7 @@ GuiCommandHandler — единый слой отправки GUI-команд.
 
 from typing import Any, Dict, Optional
 
+from multiprocess_prototype.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
 from multiprocess_prototype.registers.gui_command_catalog import GUI_COMMAND_CATALOG
 
 
@@ -87,8 +88,12 @@ class GuiCommandHandler:
     def send_set_draw_contours(self, draw: bool) -> bool:
         return self.execute("set_draw_contours", draw=draw)
 
-    def send_enum_devices(self) -> bool:
-        return self.execute("enum_devices")
+    def send_enum_devices(
+        self,
+        max_index: int = WEBCAM_ENUM_DEFAULT_MAX_INDEX,
+        backend: Optional[str] = None,
+    ) -> bool:
+        return self.execute("enum_devices", max_index=max_index, backend=backend)
 
     def send_open_camera(self, camera_index: int = 0) -> bool:
         return self.execute("open", camera_index=camera_index)
