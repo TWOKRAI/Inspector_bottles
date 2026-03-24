@@ -4,7 +4,7 @@
 
 Запускает main.py через process() конфиги, ждёт 3 сек, останавливает через stop().
 Требует DISPLAY для GUI (на headless CI — пропустить).
-Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.tests.test_full_integration
+Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/modules" python -m multiprocess_prototype.tests.test_full_integration
 """
 
 import time
@@ -22,10 +22,10 @@ pytestmark = pytest.mark.skipif(
 
 def test_full_5_processes_graceful_shutdown():
     """5 процессов (camera, processor, renderer, robot, gui) — запуск и graceful stop."""
-    from multiprocess_framework.refactored.modules.process_manager_module import (
+    from multiprocess_framework.modules.process_manager_module import (
         SystemLauncher,
     )
-    from multiprocess_framework.refactored.modules.data_schema_module import process
+    from multiprocess_framework.modules.data_schema_module import process
     from multiprocess_prototype.backend.configs import (
         CameraConfig,
         ProcessorConfig,

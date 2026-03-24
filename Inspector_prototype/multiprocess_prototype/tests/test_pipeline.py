@@ -3,13 +3,13 @@
 Тест Camera + Processor + Renderer + Robot (пайплайн без GUI).
 
 Использует process() конфиги — полный config с managers, memory.
-Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.tests.test_pipeline
+Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/modules" python -m multiprocess_prototype.tests.test_pipeline
 """
 
 import os
 import time
 
-from multiprocess_framework.refactored.modules.data_schema_module import process
+from multiprocess_framework.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
     CameraConfig,
     ProcessorConfig,
@@ -20,7 +20,7 @@ from multiprocess_prototype.backend.configs import (
 
 def test_camera_processor_renderer_robot():
     """Camera + Processor + Renderer + Robot — полный пайплайн через process() конфиги."""
-    from multiprocess_framework.refactored.modules.process_manager_module import (
+    from multiprocess_framework.modules.process_manager_module import (
         SystemLauncher,
     )
 

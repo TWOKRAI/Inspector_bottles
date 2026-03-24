@@ -315,7 +315,7 @@ BaseManager (абстрактный)
 
 Inspector_prototype\multiprocess_framework\README.md
 Inspector_prototype\multiprocess_framework\STRUCTURE.md
-Inspector_prototype\multiprocess_framework\refactored\docs\ARCHITECTURE.md
+Inspector_prototype\multiprocess_framework\docs\ARCHITECTURE.md
 
 ---
 

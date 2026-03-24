@@ -2,7 +2,7 @@
 
 **Назначение:** Тестовое приложение для проверки и демонстрации работы **Multiprocess Framework**. Используется для отладки пайплайна обработки изображений, интеграции камер и GUI.
 
-**Зависимости:** `multiprocess_framework/refactored/modules`  
+**Зависимости:** `multiprocess_framework/modules`  
 **Python:** 3.8+
 
 ---
@@ -64,7 +64,7 @@ python Inspector_prototype/multiprocess_prototype/main.py
 **С явным PYTHONPATH (CI, скрипты):**
 
 ```bash
-PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.main
+PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/modules" python -m multiprocess_prototype.main
 ```
 
 ### 2. Регистрация процессов
@@ -72,8 +72,8 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 В `main.py` процессы добавляются единообразно через `process()` из `data_schema_module`:
 
 ```python
-from multiprocess_framework.refactored.modules.process_manager_module import SystemLauncher
-from multiprocess_framework.refactored.modules.data_schema_module import process
+from multiprocess_framework.modules.process_manager_module import SystemLauncher
+from multiprocess_framework.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
     CameraConfig,
     DatabaseConfig,
@@ -107,7 +107,7 @@ launcher.run()
 ### 4. Тесты
 
 ```bash
-PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" pytest Inspector_prototype/multiprocess_prototype/tests/ -v
+PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/modules" pytest Inspector_prototype/multiprocess_prototype/tests/ -v
 ```
 
 - `test_configs_build.py` — конфиги и `process()`
@@ -133,6 +133,6 @@ PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refac
 
 ## Связь с фреймворком
 
-- **Фреймворк:** `Inspector_prototype/multiprocess_framework/refactored/modules/`
+- **Фреймворк:** `Inspector_prototype/multiprocess_framework/modules/`
 - **Прототип** использует: `process_manager_module`, `data_schema_module`, `process_module`, `message_module`, `worker_module`, `shared_resources_module` и др.
 - **Контракт:** Dict at Boundary — `launcher.add_process(name, proc_dict)` принимает только `dict`.

@@ -13,7 +13,7 @@ from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import Field
 
-from multiprocess_framework.refactored.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
 from multiprocess_prototype.registers.schemas.processing_tab import (
     PROCESSOR_REGISTER,

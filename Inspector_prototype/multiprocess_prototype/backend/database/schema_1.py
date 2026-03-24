@@ -9,7 +9,7 @@ DetectionSchema — единственный источник полей для 
 """
 from typing import Optional
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     register_schema,
     SchemaBase,
 )

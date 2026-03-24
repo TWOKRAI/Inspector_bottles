@@ -27,7 +27,7 @@ from multiprocess_prototype.backend.database.utils import (
     create_detection_exporter,
     read_from_sqlite,
 )
-from multiprocess_framework.refactored.modules.sql_module.export import ExportFormat
+from multiprocess_framework.modules.sql_module.export import ExportFormat
 
 _DB_PATH = Path(__file__).resolve().parent / "inspector.db"
 _FORMAT_MAP = {

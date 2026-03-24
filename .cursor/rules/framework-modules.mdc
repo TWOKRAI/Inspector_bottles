@@ -24,8 +24,8 @@ ChannelRoutingManager  ← БАЗОВЫЙ КЛАСС для менеджеров
 
 ## Золотой образец
 
-`Inspector_prototype\multiprocess_framework\refactored\modules\channel_routing_module` — эталон для базового класса менеджера.
-`Inspector_prototype\multiprocess_framework\refactored\modules\router_module` — эталон для специализированного менеджера.
+`Inspector_prototype\multiprocess_framework\modules\channel_routing_module` — эталон для базового класса менеджера.
+`Inspector_prototype\multiprocess_framework\modules\router_module` — эталон для специализированного менеджера.
 
 ## Запрещено
 

@@ -10,8 +10,8 @@ build() реализован в базе; подклассы задают пол
 
 from typing import Any, Dict, Optional, Type, Union
 
-from multiprocess_framework.refactored.modules.data_schema_module import SchemaBase
-from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
+from multiprocess_framework.modules.data_schema_module import SchemaBase
+from multiprocess_framework.modules.process_module import ProcessPriorityLevel
 
 
 def class_path_from_type(cls: Type) -> str:

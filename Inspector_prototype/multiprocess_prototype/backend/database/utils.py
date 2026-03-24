@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
-from multiprocess_framework.refactored.modules.sql_module.export import (
+from multiprocess_framework.modules.sql_module.export import (
     TableExporter,
     ExportFormat,
 )

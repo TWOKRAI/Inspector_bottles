@@ -3,7 +3,7 @@
 
 from typing import Optional
 
-from multiprocess_framework.refactored.modules.data_schema_module import SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import SchemaBase, register_schema
 
 
 @register_schema("LoadingWindowConfig")

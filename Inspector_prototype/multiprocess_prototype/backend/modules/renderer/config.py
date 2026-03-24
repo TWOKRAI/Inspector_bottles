@@ -6,7 +6,7 @@
 (тот же источник, что и GUI-регистры).
 """
 
-from multiprocess_framework.refactored.modules.data_schema_module import register_schema
+from multiprocess_framework.modules.data_schema_module import register_schema
 
 from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase
 from multiprocess_prototype.registers.schemas.processing_tab import renderer_process_boot_values

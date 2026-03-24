@@ -37,11 +37,11 @@ from App.Core.Threads.thread_bot_message import BotThread
 
 # Фреймворк: роутер + сообщения (мягкий fallback если модули не установлены)
 try:
-    from multiprocess_framework.refactored.modules.router_module import (
+    from multiprocess_framework.modules.router_module import (
         RouterManager,
         QueueChannel,
     )
-    from multiprocess_framework.refactored.modules.message_module import (
+    from multiprocess_framework.modules.message_module import (
         Message,
         MessageType,
     )

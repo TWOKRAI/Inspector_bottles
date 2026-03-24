@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
-MODULES_ROOT = BASE / "multiprocess_framework" / "refactored" / "modules"
+MODULES_ROOT = BASE / "multiprocess_framework" / "modules"
 
 MODULES = [
     "base_manager",
@@ -54,7 +54,7 @@ REQUIRED_INTERFACES = [
 
 # Файлы production-кода (без тестов), где нельзя sys.path.insert
 PRODUCTION_DIRS = [
-    BASE / "multiprocess_framework" / "refactored" / "modules",
+    BASE / "multiprocess_framework" / "modules",
     BASE / "multiprocess_prototype",
 ]
 
@@ -70,7 +70,7 @@ def check_header(text: str) -> None:
 
 def check_imports() -> None:
     check_header("1. Проверка импортов модулей")
-    prefix = "multiprocess_framework.refactored.modules"
+    prefix = "multiprocess_framework.modules"
     for module_name in MODULES:
         full_name = f"{prefix}.{module_name}"
         try:

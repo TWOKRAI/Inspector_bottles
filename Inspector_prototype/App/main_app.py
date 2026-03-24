@@ -23,7 +23,7 @@ from pathlib import Path
 
 # Multiprocessing infrastructure (создаётся здесь, передаётся в Coordinator)
 try:
-    from multiprocess_framework.refactored.modules.queue_manager import QueueManager
+    from multiprocess_framework.modules.queue_manager import QueueManager
     _HAS_FRAMEWORK = True
 except ImportError:
     _HAS_FRAMEWORK = False

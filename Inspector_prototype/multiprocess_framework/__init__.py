@@ -1,186 +1,155 @@
 """
-Multiprocess Framework - Многопроцессный фреймворк для создания распределенных приложений.
+Multiprocess Framework — многопроцессный фреймворк (v2).
 
-Основные компоненты:
-- ProcessManager: Управление процессами и их жизненным циклом
-- ProcessModule: Базовый класс для всех процессов
-- SharedResources: Управление общими ресурсами между процессами
-- Message: Система сообщений между процессами
-- Router: Маршрутизация сообщений
-- Logger: Система логирования
-- Config: Управление конфигурацией
-- Console: Консольный интерфейс
-- Command: Система команд
-- Worker: Управление потоками
-- Dispatch: Диспетчеризация событий
-- GUI: GUI компоненты
+Рефакторинг: чёткое разделение ответственности, Router как транспорт сообщений,
+Dict at Boundary для IPC. Публичный код модулей: ``multiprocess_framework.modules``.
 
-Использование:
-    from multiprocess_framework import SystemLauncher, ProcessConfig
-    from multiprocess_framework import ProcessModule, process, worker
-    from multiprocess_framework import SharedResourcesManager, ProcessDataKeys
+Основные направления:
+- process_manager_module — SystemLauncher, ProcessManagerProcess, реестр процессов
+- process_module, message_module, router_module, worker_module
+- data_schema_module — SchemaBase, ``process()`` для сборки конфигов процессов
+
+Пример импорта (рекомендуется явный путь к модулю):
+
+    from multiprocess_framework.modules.process_manager_module import SystemLauncher
+    from multiprocess_framework.modules.data_schema_module import process
 """
 
-# Версия пакета
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
-# Импорт основных компонентов для удобного доступа
-# Опциональные импорты: если модули не доступны (например, в тестовом окружении), пропускаем
+# Реэкспорты с корня пакета (опционально; тяжёлые цепочки импорта — через try)
 try:
-    from .modules.Process_manager_module import (
-        SystemLauncher,
-        ProcessManager,
-        ProcessManagerCore,
-        ProcessConfig,
-        ProcessLifecycle,
+    from .modules.process_manager_module import (
+        ISystemLauncher,
+        IProcessManagerProcess,
+        IProcessRegistry,
+        ProcessManagerProcess,
+        ProcessMonitor,
         ProcessPriority,
-        ProcessStatus,
-        process,
-        worker,
         ProcessRegistry,
+        ProcessSchemaAdapter,
+        ProcessSpawner,
+        ProcessStatus,
+        SystemLauncher,
     )
 except (ImportError, ModuleNotFoundError):
-    # Модули не доступны (например, в тестовом окружении или при рефакторинге)
+    ISystemLauncher = IProcessManagerProcess = IProcessRegistry = None
+    ProcessManagerProcess = ProcessMonitor = ProcessPriority = None
+    ProcessRegistry = ProcessSchemaAdapter = ProcessSpawner = ProcessStatus = None
     SystemLauncher = None
-    ProcessManager = None
-    ProcessManagerCore = None
-    ProcessConfig = None
-    ProcessLifecycle = None
-    ProcessPriority = None
-    ProcessStatus = None
-    process = None
-    worker = None
-    ProcessRegistry = None
 
 try:
-    from .modules.Process_module import ProcessModule
+    from .modules.data_schema_module import process
+except (ImportError, ModuleNotFoundError):
+    process = None
+
+try:
+    from .modules.process_module import ProcessModule
 except (ImportError, ModuleNotFoundError):
     ProcessModule = None
 
 try:
-    from .modules.Shared_resources_module import (
-        SharedResourcesManager,
+    from .modules.shared_resources_module import (
+        EventManager,
+        EventType,
         ProcessData,
         ProcessDataKeys,
         QueueRegistry,
-        EventManager,
-        EventType,
+        SharedResourcesManager,
     )
 except (ImportError, ModuleNotFoundError):
-    SharedResourcesManager = None
-    ProcessData = None
-    ProcessDataKeys = None
-    QueueRegistry = None
-    EventManager = None
-    EventType = None
+    EventManager = EventType = ProcessData = ProcessDataKeys = None
+    QueueRegistry = SharedResourcesManager = None
 
 try:
-    from .modules.Message_module import Message, MessageType
+    from .modules.message_module import Message, MessageAdapter, MessageType
 except (ImportError, ModuleNotFoundError):
-    Message = None
-    MessageType = None
+    Message = MessageAdapter = MessageType = None
 
 try:
-    from .modules.Router_module import RouterManager
+    from .modules.router_module import RouterManager
 except (ImportError, ModuleNotFoundError):
     RouterManager = None
 
 try:
-    from .modules.Logger_module import LoggerManager, LogConfig, get_logger
+    from .modules.logger_module import LogConfig, LoggerManager, get_logger
 except (ImportError, ModuleNotFoundError):
-    LoggerManager = None
-    LogConfig = None
-    get_logger = None
+    LogConfig = LoggerManager = get_logger = None
 
 try:
-    from .modules.Config_module import ConfigManager
+    from .modules.config_module import ConfigManager
 except (ImportError, ModuleNotFoundError):
     ConfigManager = None
 
 try:
-    from .modules.Console_module import ConsoleManager
+    from .modules.console_module import ConsoleManager
 except (ImportError, ModuleNotFoundError):
     ConsoleManager = None
 
 try:
-    from .modules.Command_module import CommandManager
+    from .modules.command_module import CommandManager
 except (ImportError, ModuleNotFoundError):
     CommandManager = None
 
 try:
-    from .modules.Worker_module import WorkerManager, ThreadConfig, ThreadPriority, WorkerStatus
+    from .modules.worker_module import (
+        ThreadConfig,
+        ThreadPriority,
+        WorkerManager,
+        WorkerStatus,
+    )
 except (ImportError, ModuleNotFoundError):
-    WorkerManager = None
-    ThreadConfig = None
-    ThreadPriority = None
-    WorkerStatus = None
+    ThreadConfig = ThreadPriority = WorkerManager = WorkerStatus = None
 
 try:
-    from .modules.Dispatch_module import Dispatcher, DispatchStrategy, HandlerInfo, Scenario
+    from .modules.dispatch_module import (
+        DispatchStrategy,
+        Dispatcher,
+        HandlerInfo,
+        Scenario,
+        ScenarioBuilder,
+    )
 except (ImportError, ModuleNotFoundError):
-    Dispatcher = None
-    DispatchStrategy = None
-    HandlerInfo = None
-    Scenario = None
-
-try:
-    from .modules.GUI_module import GUIProcessModule, BaseWindowManager, WindowConfig
-except (ImportError, ModuleNotFoundError):
-    GUIProcessModule = None
-    BaseWindowManager = None
-    WindowConfig = None
+    DispatchStrategy = Dispatcher = HandlerInfo = Scenario = ScenarioBuilder = None
 
 __all__ = [
-    # Версия
     "__version__",
-    # Process Manager
+    "ISystemLauncher",
+    "IProcessManagerProcess",
+    "IProcessRegistry",
     "SystemLauncher",
-    "ProcessManager",
-    "ProcessManagerCore",
-    "ProcessConfig",
-    "ProcessLifecycle",
+    "ProcessSpawner",
+    "ProcessManagerProcess",
+    "ProcessRegistry",
     "ProcessPriority",
     "ProcessStatus",
+    "ProcessMonitor",
+    "ProcessSchemaAdapter",
     "process",
-    "worker",
-    "ProcessRegistry",
-    # Process Module
     "ProcessModule",
-    # Shared Resources
     "SharedResourcesManager",
     "ProcessData",
     "ProcessDataKeys",
     "QueueRegistry",
     "EventManager",
     "EventType",
-    # Message
     "Message",
     "MessageType",
-    # Router
+    "MessageAdapter",
     "RouterManager",
-    # Logger
     "LoggerManager",
     "LogConfig",
     "get_logger",
-    # Config
     "ConfigManager",
-    # Console
     "ConsoleManager",
-    # Command
     "CommandManager",
-    # Worker
     "WorkerManager",
     "ThreadConfig",
     "ThreadPriority",
     "WorkerStatus",
-    # Dispatch
     "Dispatcher",
     "DispatchStrategy",
     "HandlerInfo",
     "Scenario",
-    # GUI
-    "GUIProcessModule",
-    "BaseWindowManager",
-    "WindowConfig",
+    "ScenarioBuilder",
 ]
-

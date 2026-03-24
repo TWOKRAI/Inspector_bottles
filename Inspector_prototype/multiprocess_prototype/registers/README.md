@@ -18,7 +18,7 @@
   - `schemas/processing_tab/boot.py` — processor_process_boot_values, renderer_process_boot_values
   - `schemas/camera_tab/boot.py` — camera_process_boot_values
 
-См. **ADR-050** в `multiprocess_framework/refactored/DECISIONS.md`.
+См. **ADR-050** в `multiprocess_framework/DECISIONS.md`.
 
 ---
 

@@ -220,7 +220,7 @@ class TestFileStorage:
 
     def test_save_and_load(self, rm, tmp_path):
         """Сохранение и загрузка через FileStorage сохраняют значения."""
-        from multiprocess_framework.refactored.modules.data_schema_module import FileStorage
+        from multiprocess_framework.modules.data_schema_module import FileStorage
 
         storage = FileStorage(tmp_path / "registers")
         rm.draw.update_field("dp", 7.7)
@@ -233,7 +233,7 @@ class TestFileStorage:
 
     def test_load_missing_returns_false(self, tmp_path):
         """Загрузка несуществующего контейнера возвращает False."""
-        from multiprocess_framework.refactored.modules.data_schema_module import FileStorage
+        from multiprocess_framework.modules.data_schema_module import FileStorage
 
         rm = RegistersManager()
         storage = FileStorage(tmp_path / "registers")

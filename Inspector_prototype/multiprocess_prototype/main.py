@@ -18,17 +18,17 @@ from pathlib import Path
 
 # Для прямого запуска main.py — настроить пути, если модули не в PYTHONPATH
 _root = Path(__file__).resolve().parent.parent  # Inspector_prototype
-_modules = _root / "multiprocess_framework" / "refactored" / "modules"
+_modules = _root / "multiprocess_framework" / "modules"
 for _p in (_root, _modules):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
 
 def main() -> int:
-    from multiprocess_framework.refactored.modules.process_manager_module import (
+    from multiprocess_framework.modules.process_manager_module import (
         SystemLauncher,
     )
-    from multiprocess_framework.refactored.modules.data_schema_module import process
+    from multiprocess_framework.modules.data_schema_module import process
     from multiprocess_prototype.backend.configs import (
         CameraConfig,
         DatabaseConfig,

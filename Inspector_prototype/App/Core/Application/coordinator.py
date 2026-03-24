@@ -46,7 +46,7 @@ from App.Core.Managers.converter_manager import ConverterManager
 
 # Infrastructure (IPC уже есть во фреймворке, импортируем)
 try:
-    from multiprocess_framework.refactored.modules.router_module import (
+    from multiprocess_framework.modules.router_module import (
         RouterManager, QueueChannel, Message, MessageType
     )
     

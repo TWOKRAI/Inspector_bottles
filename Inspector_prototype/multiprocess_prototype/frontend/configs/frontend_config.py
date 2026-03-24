@@ -18,7 +18,7 @@ from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_T
 
 from pydantic import Field
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     DataConverter,
     SchemaBase,
     register_schema,

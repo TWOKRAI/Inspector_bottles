@@ -1,9 +1,9 @@
 # Архитектура multiprocess_prototype
 
-Тестовое приложение поверх **Multiprocess Framework** (`Inspector_prototype/multiprocess_framework/refactored/modules/`). Граница процессов: только **dict** (Dict at Boundary); схемы Pydantic живут внутри модулей и в `registers/schemas/`.
+Тестовое приложение поверх **Multiprocess Framework** (`Inspector_prototype/multiprocess_framework/modules/`). Граница процессов: только **dict** (Dict at Boundary); схемы Pydantic живут внутри модулей и в `registers/schemas/`.
 
-**Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров), [RECIPES_SYSTEM.md](RECIPES_SYSTEM.md) (двойные рецепты: регистры + app), **[FRONTEND_MAP.md](FRONTEND_MAP.md)** (цепочка UI, мост регистров, команды, контекст вкладок). Каталог модулей фреймворка: [ARCHITECTURE_MODULE_CATALOG.md](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md).  
-Дорожная карта GUI-команд и лаунчера: [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md). Журнал решений (фреймворк + прототип): [DECISIONS.md](../../multiprocess_framework/refactored/DECISIONS.md).
+**Связанные документы:** [README.md](../README.md) (запуск), [STATUS.md](../STATUS.md) (ограничения), [registers/README.md](../registers/README.md) (схемы регистров), [RECIPES_SYSTEM.md](RECIPES_SYSTEM.md) (двойные рецепты: регистры + app), **[FRONTEND_MAP.md](FRONTEND_MAP.md)** (цепочка UI, мост регистров, команды, контекст вкладок). Каталог модулей фреймворка: [ARCHITECTURE_MODULE_CATALOG.md](../../multiprocess_framework/docs/ARCHITECTURE_MODULE_CATALOG.md).  
+Дорожная карта GUI-команд и лаунчера: [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](../../multiprocess_framework/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md). Журнал решений (фреймворк + прототип): [DECISIONS.md](../../multiprocess_framework/DECISIONS.md).
 
 **Запуск GUI:** `GuiProcess.run()` создаёт `FrontendLauncher`, который заполняет **`FrontendLaunchHooks`** и вызывает **`run_process_attached_frontend`** из `frontend_module` — одна каноническая последовательность: конфиг UI, регистры, опциональный boot регистров, `FrontendManager.initialize`, регистрация окон, цикл Qt. Исходящие команды кнопок/миксина идут через один **`RoutedCommandSender`** на процессе (`GuiProcess._routed_command_sender`, ADR-058); маршрутизация и каталог args остаются в `registers/command_routing.py` и `gui_command_catalog.py`.
 
@@ -108,7 +108,7 @@ flowchart LR
 7. **Команды к процессам** — `GuiCommandHandler` + `registers/command_routing.py` + `gui_command_catalog.py`; на стороне процесса — `GuiProcessMixin._send_command` и маршрутизация фреймворка.
 8. **Рецепты** — один файл YAML, два пространства имён: `register_recipes` / `app_recipes` ([RECIPES_SYSTEM.md](RECIPES_SYSTEM.md)); UI: вкладка «Рецепты» (`RegisterRecipePanel`) и «Настройки» (`AppRecipePanel`), общая база `RecipeSlotTablePanel`.
 
-**Граница «фреймворк / приложение»:** в репозитории модульный код фреймворка лежит в `multiprocess_framework/refactored/modules/`; всё под `multiprocess_prototype/` — демо-приложение (схемы регистров, вкладки, бэкенд-пайплайн, YAML рецептов).
+**Граница «фреймворк / приложение»:** в репозитории модульный код фреймворка лежит в `multiprocess_framework/modules/`; всё под `multiprocess_prototype/` — демо-приложение (схемы регистров, вкладки, бэкенд-пайплайн, YAML рецептов).
 
 ---
 
@@ -233,7 +233,7 @@ flowchart TB
 
 **Итог по прототипу: ~7.5–8 / 10** как демонстрационного приложения к фреймворку.
 
-### Фреймворк (`multiprocess_framework/refactored/modules`)
+### Фреймворк (`multiprocess_framework/modules`)
 
 | Критерий | Балл | Комментарий |
 |----------|------|-------------|

@@ -8,8 +8,8 @@ from typing import Optional
 
 from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
-from multiprocess_framework.refactored.modules.data_schema_module import register_schema
-from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
+from multiprocess_framework.modules.data_schema_module import register_schema
+from multiprocess_framework.modules.process_module import ProcessPriorityLevel
 
 from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type
 from multiprocess_prototype.backend.modules.camera.constants import (

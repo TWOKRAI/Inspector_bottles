@@ -8,11 +8,11 @@
 
 from typing import Annotated, List
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     register_schema,
 )
-from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
+from multiprocess_framework.modules.process_module import ProcessPriorityLevel
 
 from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase
 from multiprocess_prototype.registers.schemas.processing_tab import (

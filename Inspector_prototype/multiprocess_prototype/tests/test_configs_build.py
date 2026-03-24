@@ -23,7 +23,7 @@ def _ensure_inspector_paths() -> None:
 
 _ensure_inspector_paths()
 
-from multiprocess_framework.refactored.modules.data_schema_module import process
+from multiprocess_framework.modules.data_schema_module import process
 from multiprocess_prototype.backend.configs import (
     CameraConfig,
     GuiConfig,

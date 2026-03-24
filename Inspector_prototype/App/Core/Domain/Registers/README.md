@@ -1,6 +1,6 @@
 # Модуль регистров App Inspector
 
-**Использование библиотеки фреймворка** `data_schema_module`: конфигурация пакетов и тонкий фасад. Вся логика discovery и регистрации схем, тесты, документация и примеры — в **multiprocess_framework/refactored/modules/data_schema_module**.
+**Использование библиотеки фреймворка** `data_schema_module`: конфигурация пакетов и тонкий фасад. Вся логика discovery и регистрации схем, тесты, документация и примеры — в **multiprocess_framework/modules/data_schema_module**.
 
 ## Структура
 
@@ -53,7 +53,7 @@ manager = RegistersManager(
 
 См. основной README фреймворка и примеры:
 
-- **Фреймворк:** `multiprocess_framework/refactored/modules/data_schema_module/README.md`
+- **Фреймворк:** `multiprocess_framework/modules/data_schema_module/README.md`
 - **Discovery и пакеты:** `data_schema_module/docs/DISCOVERY_AND_PACKAGES.md`
 - **Пример discovery по суффиксу:** `data_schema_module/docs/examples/03_registers_and_data_packages.py`
 - **Оценка в баллах (фреймворк + Registers):** `data_schema_module/docs/EVALUATION_FRAMEWORK_AND_REGISTERS.md`

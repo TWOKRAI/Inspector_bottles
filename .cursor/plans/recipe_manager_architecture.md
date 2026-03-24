@@ -87,10 +87,10 @@ app_recipes:
 
 | Задача | Модуль / API |
 |--------|----------------|
-| Вложенный снимок регистров, JSON/YAML строки | [`data_schema_module/serialization/io.py`](Inspector_prototype/multiprocess_framework/refactored/modules/data_schema_module/serialization/io.py): `registers_to_dict`, `registers_to_yaml`, … |
+| Вложенный снимок регистров, JSON/YAML строки | [`data_schema_module/serialization/io.py`](Inspector_prototype/multiprocess_framework/modules/data_schema_module/serialization/io.py): `registers_to_dict`, `registers_to_yaml`, … |
 | Плоский вид `register.field → value` | Там же: `registers_to_flat_dict`, `registers_from_flat_dict` (legacy, Excel) |
 | Pydantic-модели ↔ файлы | `DataConverter` из `data_schema_module` |
-| Контракт конвертера | [`IRegistersConverter`](Inspector_prototype/multiprocess_framework/refactored/modules/registers_module/interfaces.py) — реализация по сути в функциях `serialization/io`, а не обязательно отдельный класс |
+| Контракт конвертера | [`IRegistersConverter`](Inspector_prototype/multiprocess_framework/modules/registers_module/interfaces.py) — реализация по сути в функциях `serialization/io`, а не обязательно отдельный класс |
 
 Вложенный формат для рецептов регистров — **по умолчанию** (ADR-080). Плоский — только там, где нужна совместимость или экспорт.
 
@@ -99,14 +99,14 @@ app_recipes:
 ## 7. Доступ: роли и личный режим
 
 - Обычные пользователи: **`access_level`** сессии vs **`FieldMeta.access_level`**, плюс **`readonly`** / **`hidden`**.
-- Важно: [`FieldMeta.can_modify`](Inspector_prototype/multiprocess_framework/refactored/modules/data_schema_module/core/field_meta.py) сейчас требует `not self.readonly` — **высокий числовой уровень не открывает `readonly`**.
+- Важно: [`FieldMeta.can_modify`](Inspector_prototype/multiprocess_framework/modules/data_schema_module/core/field_meta.py) сейчас требует `not self.readonly` — **высокий числовой уровень не открывает `readonly`**.
 - **Личный / dev-режим:** отдельный контекст, например **`AccessContext`**: `level`, **`bypass_readonly`**, опционально **`show_hidden`**. Редактируемость и запись согласовать с этим флагом (только доверенная локальная сессия).
 
 ---
 
 ## 8. Документация решений
 
-После утверждения формата файла и границ менеджеров — запись **ADR** в [`DECISIONS.md`](Inspector_prototype/multiprocess_framework/refactored/DECISIONS.md): `app_recipes`, два `current_*`, политика доступа, связь с ADR-080.
+После утверждения формата файла и границ менеджеров — запись **ADR** в [`DECISIONS.md`](Inspector_prototype/multiprocess_framework/DECISIONS.md): `app_recipes`, два `current_*`, политика доступа, связь с ADR-080.
 
 ---
 

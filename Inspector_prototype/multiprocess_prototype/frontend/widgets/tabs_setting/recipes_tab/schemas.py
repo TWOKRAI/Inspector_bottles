@@ -11,7 +11,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from multiprocess_framework.refactored.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
 
 @register_schema("RecipesTabConfig")

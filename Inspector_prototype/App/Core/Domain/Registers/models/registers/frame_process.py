@@ -4,7 +4,7 @@
 """
 from typing import Annotated
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     RegisterBase,
 )

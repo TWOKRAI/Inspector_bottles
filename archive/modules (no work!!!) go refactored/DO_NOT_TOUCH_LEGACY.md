@@ -5,12 +5,12 @@
 ## 📋 Статус
 
 - ❌ **УСТАРЕВШИЙ** - не использовать в новых проектах
-- ✅ **REFACTORED** - используйте модули из `src/multiprocess_framework/refactored/`
+- ✅ **REFACTORED** - используйте модули из `src/multiprocess_framework/`
 
 ## 🔄 Миграция
 
 Все функциональность из этого модуля перенесена в:
-- `src/multiprocess_framework/refactored/modules/`
+- `src/multiprocess_framework/modules/`
 
 ## ⚠️ Правила
 

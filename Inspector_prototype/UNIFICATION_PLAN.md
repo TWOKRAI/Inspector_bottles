@@ -45,7 +45,7 @@
 
 | Проблема | Описание |
 |----------|----------|
-| **queue_manager отсутствует** | `main_app` импортирует `multiprocess_framework.refactored.modules.queue_manager`, но модуля нет. Реализация в `Multiproccesing/Queue_Manager.py`. |
+| **queue_manager отсутствует** | `main_app` импортирует `multiprocess_framework.modules.queue_manager`, но модуля нет. Реализация в `Multiproccesing/Queue_Manager.py`. |
 | **Два WorkerManager** | `worker_module` — `threading.Thread`, `App/thread_manager` — `QThread`. Нет интеграции. |
 | **Два WindowManager** | `Core/Application/window_manager` (новый) vs `Core/Managers/window_manager` (legacy). |
 | **Разрозненная документация** | 70+ .md в framework, но нет единого шаблона для модулей. |
@@ -61,8 +61,8 @@
 
 | Шаг | Действие | Результат |
 |-----|----------|-----------|
-| 0.1 | Создать `multiprocess_framework/refactored/docs/MODULE_README_TEMPLATE.md` | Шаблон |
-| 0.2 | Создать `multiprocess_framework/refactored/docs/MODULES_INDEX.md` | Таблица: модуль → импорты, точки входа, зависимости |
+| 0.1 | Создать `multiprocess_framework/docs/MODULE_README_TEMPLATE.md` | Шаблон |
+| 0.2 | Создать `multiprocess_framework/docs/MODULES_INDEX.md` | Таблица: модуль → импорты, точки входа, зависимости |
 | 0.3 | Добавить README в каждый модуль по шаблону | Понимание: кто что делает, как связывать |
 
 **Шаблон README модуля:**
@@ -75,7 +75,7 @@
 
 ## Импорты
 ```python
-from multiprocess_framework.refactored.modules.{name} import X, Y
+from multiprocess_framework.modules.{name} import X, Y
 ```
 
 ## Точки входа
@@ -102,10 +102,10 @@ from multiprocess_framework.refactored.modules.{name} import X, Y
 
 | Шаг | Действие | Результат |
 |-----|----------|-----------|
-| 1.1 | Создать `multiprocess_framework/refactored/modules/queue_module/` | Новый модуль |
+| 1.1 | Создать `multiprocess_framework/modules/queue_module/` | Новый модуль |
 | 1.2 | Перенести/адаптировать `Queue_Manager` из `Multiproccesing/` | `QueueManager` в framework |
 | 1.3 | `QueueManager` наследует `BaseManager` (опционально) | Единообразие |
-| 1.4 | `multiprocess_framework.refactored.modules.queue_manager` → `queue_module` | main_app импортирует из framework |
+| 1.4 | `multiprocess_framework.modules.queue_manager` → `queue_module` | main_app импортирует из framework |
 | 1.5 | README для queue_module | Документация |
 
 **Или:** `shared_resources_module` уже содержит `QueueRegistry`. Добавить `QueueManager` как фасад/адаптер над `QueueRegistry` + legacy-совместимость.
@@ -225,7 +225,7 @@ from multiprocess_framework.refactored.modules.{name} import X, Y
 
 ## 5. Структура документации модуля (шаблон)
 
-Каждый модуль в `multiprocess_framework/refactored/modules/{name}/`:
+Каждый модуль в `multiprocess_framework/modules/{name}/`:
 
 ```
 {name}/
@@ -269,9 +269,9 @@ from multiprocess_framework.refactored.modules.{name} import X, Y
 ## 7. Связанные документы
 
 - `App/NEW_ARCHITECTURE.md` — архитектура App  
-- `multiprocess_framework/refactored/docs/MODULES_STATUS.md` — статус модулей  
-- `multiprocess_framework/refactored/modules/base_manager/README.md` — пример  
-- `multiprocess_framework/refactored/modules/router_module/README.md` — пример  
+- `multiprocess_framework/docs/MODULES_STATUS.md` — статус модулей  
+- `multiprocess_framework/modules/base_manager/README.md` — пример  
+- `multiprocess_framework/modules/router_module/README.md` — пример  
 
 ---
 

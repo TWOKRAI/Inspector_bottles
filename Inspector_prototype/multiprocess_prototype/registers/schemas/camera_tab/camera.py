@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 
 from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     FieldRouting,
     RegisterDispatchMeta,

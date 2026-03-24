@@ -9,4 +9,4 @@
 5. **Backend** — процесс-получатель обрабатывает `register_update` для этого поля (см. ADR-048, `ROUTING_GLOSSARY.md`) или явный мост на существующую команду.
 6. **Проверка** — `python scripts/validate.py`, pytest для затронутых модулей.
 
-См. **ADR-049** в `multiprocess_framework/refactored/DECISIONS.md` (StateRegister vs UiSchema).
+См. **ADR-049** в `multiprocess_framework/DECISIONS.md` (StateRegister vs UiSchema).

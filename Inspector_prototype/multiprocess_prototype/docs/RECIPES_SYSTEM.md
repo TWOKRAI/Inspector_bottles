@@ -1,7 +1,7 @@
 # Система рецептов (multiprocess_prototype)
 
 Документ описывает **текущее** поведение: два независимых вида рецептов, один YAML-файл, связь с фреймворком и с процессом GUI.  
-Архитектурные решения зафиксированы в [DECISIONS.md — ADR-080 … ADR-082](../../multiprocess_framework/refactored/DECISIONS.md) (снимки, два вида рецептов, разделение вкладок).
+Архитектурные решения зафиксированы в [DECISIONS.md — ADR-080 … ADR-082](../../multiprocess_framework/DECISIONS.md) (снимки, два вида рецептов, разделение вкладок).
 
 ---
 
@@ -107,7 +107,7 @@ app_recipes:
 
 | Модуль | Участие |
 |--------|---------|
-| **`data_schema_module`** | Схемы регистров и UI (`SchemaBase`, `FieldMeta`, `can_modify`, `readonly`, `hidden`); сериализация [`serialization/io.py`](../../multiprocess_framework/refactored/modules/data_schema_module/serialization/io.py) (`registers_to_dict`, `registers_to_yaml`, плоский формат для legacy/экспорта). |
+| **`data_schema_module`** | Схемы регистров и UI (`SchemaBase`, `FieldMeta`, `can_modify`, `readonly`, `hidden`); сериализация [`serialization/io.py`](../../multiprocess_framework/modules/data_schema_module/serialization/io.py) (`registers_to_dict`, `registers_to_yaml`, плоский формат для legacy/экспорта). |
 | **`registers_module`** | Контракт **`IRegistersManager`**: `model_dump_all` / `model_validate_all`, `set_field_value`, метаданные полей. |
 | **`frontend_module`** | **`IRegistersManagerGui`**, `StructuredTableWidget`, `RegisterBindingContext`, базовые контракты вкладок. |
 
@@ -152,5 +152,5 @@ GuiConfig(
 
 - [README.md](README.md) — индекс документации прототипа.  
 - [../registers/README.md](../registers/README.md) — схемы регистров.  
-- [DECISIONS.md — ADR-080 … ADR-082](../../multiprocess_framework/refactored/DECISIONS.md) — журнал решений.  
+- [DECISIONS.md — ADR-080 … ADR-082](../../multiprocess_framework/DECISIONS.md) — журнал решений.  
 - [FRONTEND_MAP.md](FRONTEND_MAP.md) — цепочка лаунчера и фабрики вкладок.

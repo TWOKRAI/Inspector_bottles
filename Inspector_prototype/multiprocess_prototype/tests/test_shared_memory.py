@@ -3,7 +3,7 @@
 Тест SharedMemory изолированно (Этап 8.2).
 
 Проверяет write/read кадров через SharedResourcesManager.
-Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/refactored/modules" python -m multiprocess_prototype.tests.test_shared_memory
+Запуск: PYTHONPATH="Inspector_prototype:Inspector_prototype/multiprocess_framework/modules" python -m multiprocess_prototype.tests.test_shared_memory
 """
 
 import numpy as np
@@ -12,7 +12,7 @@ import pytest
 
 def test_shared_memory_write_read():
     """SharedMemory: запись и чтение кадра через SRM."""
-    from multiprocess_framework.refactored.modules.shared_resources_module import (
+    from multiprocess_framework.modules.shared_resources_module import (
         SharedResourcesManager,
     )
     from multiprocess_prototype.utils.frame_generator import FrameGenerator

@@ -43,7 +43,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     RegistersContainer,
     RegistersScanner,
     ProcessRegistersRegistry,

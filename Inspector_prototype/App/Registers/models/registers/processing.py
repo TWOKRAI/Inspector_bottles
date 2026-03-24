@@ -7,7 +7,7 @@
 """
 from typing import Annotated, Any, Dict, Optional
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     RegisterBase,
     HsvHue,

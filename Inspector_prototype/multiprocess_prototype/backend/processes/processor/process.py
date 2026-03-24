@@ -12,9 +12,9 @@ try:
 except ImportError:
     cv2 = None
 
-from multiprocess_framework.refactored.modules.process_module import ProcessModule
-from multiprocess_framework.refactored.modules.message_module import MessageAdapter
-from multiprocess_framework.refactored.modules.worker_module import (
+from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.message_module import MessageAdapter
+from multiprocess_framework.modules.worker_module import (
     ThreadConfig,
     ExecutionMode,
 )

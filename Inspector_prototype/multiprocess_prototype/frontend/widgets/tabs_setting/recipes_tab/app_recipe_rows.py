@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from multiprocess_framework.refactored.modules.data_schema_module import SchemaBase
+from multiprocess_framework.modules.data_schema_module import SchemaBase
 
 from multiprocess_prototype.managers.access_context import AccessContext
 

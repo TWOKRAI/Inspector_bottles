@@ -7,11 +7,11 @@ ProcessConfigBase + FieldMeta. class_path_from_type, ProcessPriorityLevel, queue
 
 from typing import Annotated
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     register_schema,
 )
-from multiprocess_framework.refactored.modules.process_module import ProcessPriorityLevel
+from multiprocess_framework.modules.process_module import ProcessPriorityLevel
 from pydantic import Field
 
 from multiprocess_prototype.backend.configs.base_config import ProcessConfigBase, class_path_from_type

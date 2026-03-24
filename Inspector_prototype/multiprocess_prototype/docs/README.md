@@ -1,6 +1,6 @@
 # Документация multiprocess_prototype
 
-Здесь только **актуальные** описания, совпадающие с текущим кодом. История решений — в [`DECISIONS.md`](../../multiprocess_framework/refactored/DECISIONS.md); черновики планов в этом каталоге не хранятся.
+Здесь только **актуальные** описания, совпадающие с текущим кодом. История решений — в [`DECISIONS.md`](../../multiprocess_framework/DECISIONS.md); черновики планов в этом каталоге не хранятся.
 
 | Документ | Содержание |
 |----------|------------|
@@ -18,4 +18,4 @@
 | [../persistence/README.md](../persistence/README.md) | Данные приложения, user_prefs |
 | [../managers/README.md](../managers/README.md) | RecipeManager, AccessContext, app-агрегат |
 
-**Фреймворк:** [`ARCHITECTURE_MODULE_CATALOG.md`](../../multiprocess_framework/refactored/docs/ARCHITECTURE_MODULE_CATALOG.md) · [`FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`](../../multiprocess_framework/refactored/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) · [`refactored/README.md`](../../multiprocess_framework/refactored/README.md)
+**Фреймворк:** [`ARCHITECTURE_MODULE_CATALOG.md`](../../multiprocess_framework/docs/ARCHITECTURE_MODULE_CATALOG.md) · [`FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`](../../multiprocess_framework/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) · [`refactored/README.md`](../../multiprocess_framework/README.md)

@@ -72,4 +72,4 @@ App
 
 - `App/NEW_ARCHITECTURE.md` — архитектура App
 - `UNIFICATION_PLAN.md` — план унификации
-- `multiprocess_framework/refactored/docs/MODULES_INDEX.md` — индекс модулей framework
+- `multiprocess_framework/docs/MODULES_INDEX.md` — индекс модулей framework

@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, List, Type
 
-from multiprocess_framework.refactored.modules.data_schema_module import SchemaBase, get_default_registry
+from multiprocess_framework.modules.data_schema_module import SchemaBase, get_default_registry
 
 
 def _recipe_and_processing_schema_classes() -> tuple[Type[SchemaBase], Type[SchemaBase]]:

@@ -17,7 +17,7 @@ from multiprocess_prototype.camera_policy import (
     WEBCAM_ENUM_HARD_CAP,
 )
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,
     register_schema,
 )

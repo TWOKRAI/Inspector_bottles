@@ -7,14 +7,14 @@ DatabaseProcess — процесс с SQLManager.
 """
 import importlib
 
-from multiprocess_framework.refactored.modules.process_module import ProcessModule
-from multiprocess_framework.refactored.modules.sql_module import (
+from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.sql_module import (
     SQLManager,
     SQLManagerConfig,
     TableExporter,
     ExportFormat,
 )
-from multiprocess_framework.refactored.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
+from multiprocess_framework.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 
 from multiprocess_prototype.backend.database.utils import (
     build_create_table_sql,

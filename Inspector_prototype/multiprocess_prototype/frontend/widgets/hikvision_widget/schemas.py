@@ -7,7 +7,7 @@ from typing import Annotated, List, Tuple
 
 from pydantic import Field, model_validator
 
-from multiprocess_framework.refactored.modules.data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     SchemaBase,
     register_schema,
