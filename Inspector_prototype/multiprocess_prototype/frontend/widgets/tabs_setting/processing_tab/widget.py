@@ -1,66 +1,49 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/processing_tab/widget.py
-"""
-ProcessingTabWidget — вкладка регуляторов обработки.
-
-Использует control_v2: NumericControl, CompoundNumericControl, CheckboxControl.
-Поля ProcessorRegisters / RendererRegisters. Подписи — ProcessingTabUiConfig.
-
-Доступность контролов: RegisterBindingContext + IRegistersManagerGui; при
-отсутствии rm — заглушка (см. TAB_STRUCTURE.md).
-"""
+# multiprocess_prototype/frontend/widgets/processing_tab/widget.py
+"""Вкладка обработки: оболочка — placeholder или ProcessingPanelWidget."""
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
-from frontend_module.widgets.tabs import BaseTab
-from frontend_module.widgets.tabs import RegisterBindingContext, create_registers_placeholder
-from frontend_module.components import (
-    BindingConfig,
-    CheckboxControl,
-    CheckboxViewConfig,
-    CompoundNumericControl,
-    CompoundNumericConfig,
-    NumericControl,
-    NumericViewConfig,
-)
-from frontend_module.core.qt_imports import QGroupBox, QLabel, QVBoxLayout, QWidget
+from frontend_module.core.qt_imports import QVBoxLayout, QWidget
 from frontend_module.core.schema_config import coerce_schema_config
 from frontend_module.interfaces import IRegistersManagerGui
+from frontend_module.widgets.tabs import BaseTab, RegisterBindingContext, create_registers_placeholder
 
-from multiprocess_prototype.registers.schemas.processing_tab import (
-    PROCESSOR_REGISTER,
-    RENDERER_REGISTER,
-)
+from multiprocess_prototype.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from .schemas import ProcessingTabUiConfig
+from ...processing_panel_widget import ProcessingPanelWidget
+from ...processing_panel_widget.schemas import ProcessingTabUiConfig
 
 
 class ProcessingTabWidget(BaseTab):
-    """
-    Вкладка обработки: BGR, min/max area, Original/Mask/Contours.
-
-    Все контролы — control_v2. Изменения через set_field_value → register_update.
-    """
+    """Тонкая вкладка: RegisterBindingContext + фиче-виджет BaseWidget."""
 
     def __init__(
         self,
         *,
         registers_manager: Optional[IRegistersManagerGui] = None,
         ui: Optional[Union[ProcessingTabUiConfig, dict]] = None,
+        touch_keyboard: Any | None = None,
         parent: Optional[QWidget] = None,
-    ):
+    ) -> None:
+        """ProcessingPanelWidget или заглушка при отсутствии rm."""
         super().__init__(parent)
         self._registers_manager = registers_manager
         self._u = coerce_schema_config(ui, ProcessingTabUiConfig)
+        self._touch_keyboard = merge_touch_keyboard_dicts(
+            touch_keyboard, getattr(self._u, "touch_keyboard", None)
+        )
+        self._panel: Optional[ProcessingPanelWidget] = None
         self._init_ui()
 
     @property
     def registers_manager(self) -> Optional[IRegistersManagerGui]:
+        """Rm вкладки."""
         return self._registers_manager
 
     def _init_ui(self) -> None:
-        u = self._u
+        """Вертикальный layout: placeholder или панель обработки на всю высоту."""
         layout = QVBoxLayout(self)
         binding = RegisterBindingContext(rm=self._registers_manager)
 
@@ -70,65 +53,13 @@ class ProcessingTabWidget(BaseTab):
             return
 
         rm = binding.rm
-        assert rm is not None  # согласовано с can_bind
+        assert rm is not None
 
-        # Цветовая детекция: BGR lower/upper
-        color_group = QGroupBox(u.group_color)
-        color_layout = QVBoxLayout(color_group)
-        bgr_view = NumericViewConfig(min_val=0.0, max_val=255.0)
-        labels = [u.channel_b, u.channel_g, u.channel_r]
-        lower_cfg = CompoundNumericConfig(
-            binding=BindingConfig(PROCESSOR_REGISTER, "color_lower"),
-            labels=labels,
-            view_config=bgr_view,
+        # --- Фиче-виджет BGR / площадь / чекбоксы renderer ---
+        self._panel = ProcessingPanelWidget(
+            registers_manager=rm,
+            ui=self._u,
+            touch_keyboard=self._touch_keyboard,
+            parent=self,
         )
-        upper_cfg = CompoundNumericConfig(
-            binding=BindingConfig(PROCESSOR_REGISTER, "color_upper"),
-            labels=labels,
-            view_config=bgr_view,
-        )
-        lower_result = CompoundNumericControl.create(rm, lower_cfg)
-        upper_result = CompoundNumericControl.create(rm, upper_cfg)
-        color_layout.addWidget(lower_result.widget)
-        color_layout.addWidget(upper_result.widget)
-        self._color_label = QLabel(u.color_hint)
-        self._color_label.setStyleSheet("font-size: 10px; color: gray;")
-        color_layout.addWidget(self._color_label)
-        layout.addWidget(color_group)
-
-        # Площадь пятна: min_area, max_area
-        area_group = QGroupBox(u.group_area)
-        area_layout = QVBoxLayout(area_group)
-        min_r = NumericControl.create(
-            rm,
-            BindingConfig(PROCESSOR_REGISTER, "min_area"),
-            NumericViewConfig(label=f"{u.label_min_area_prefix} ({u.label_px})"),
-        )
-        max_r = NumericControl.create(
-            rm,
-            BindingConfig(PROCESSOR_REGISTER, "max_area"),
-            NumericViewConfig(label=f"{u.label_max_area_prefix} ({u.label_px})"),
-        )
-        area_layout.addWidget(min_r.widget)
-        area_layout.addWidget(max_r.widget)
-        layout.addWidget(area_group)
-
-        # Отображение: show_original, show_mask, draw_contours, draw_bboxes, save_frames
-        display_group = QGroupBox(u.group_display)
-        display_layout = QVBoxLayout(display_group)
-        for reg_name, field_name, label in [
-            (RENDERER_REGISTER, "show_original", u.checkbox_original),
-            (RENDERER_REGISTER, "show_mask", u.checkbox_mask),
-            (RENDERER_REGISTER, "draw_contours", u.checkbox_contours),
-            (RENDERER_REGISTER, "draw_bboxes", u.checkbox_bbox),
-            (RENDERER_REGISTER, "save_frames", u.checkbox_save_frames),
-        ]:
-            r = CheckboxControl.create(
-                rm,
-                BindingConfig(reg_name, field_name),
-                CheckboxViewConfig(label=label),
-            )
-            display_layout.addWidget(r.widget)
-        layout.addWidget(display_group)
-
-        layout.addStretch()
+        layout.addWidget(self._panel, 1)

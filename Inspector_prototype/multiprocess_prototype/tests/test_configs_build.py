@@ -111,6 +111,8 @@ def test_frontend_config_build_dict():
         "window_registry",
         "settings_tab",
         "recipes_tab",
+        "cropped_regions_tab",
+        "post_processing_tab",
         "recipes_path",
         "recipe_access",
         "loading_window",
@@ -120,8 +122,15 @@ def test_frontend_config_build_dict():
     ):
         assert key in d
     assert d["ui_diagnostics"] == {}
-    assert len(d["tabs"]) == 4
-    assert [t["widget"] for t in d["tabs"]] == ["recipes", "settings", "processing", "camera"]
+    assert len(d["tabs"]) == 6
+    assert [t["widget"] for t in d["tabs"]] == [
+        "recipes",
+        "settings",
+        "processing",
+        "post_processing",
+        "cropped_regions",
+        "camera",
+    ]
     assert d["tabs"][1]["title"] == "Настройки"
 
 
@@ -159,7 +168,9 @@ def test_settings_tab_widget_accepts_recipe_bindings():
     """Контракт: SettingsTabWidget принимает recipe_manager, recipe_access и recipes_tab (фабрика передаёт их из config)."""
     import inspect
 
-    from multiprocess_prototype.frontend.widgets.tabs_setting.settings_tab.widget import SettingsTabWidget
+    from multiprocess_prototype.frontend.widgets.tabs_setting.recipes_settings_tab.widget import (
+        SettingsTabWidget,
+    )
 
     sig = inspect.signature(SettingsTabWidget.__init__)
     names = set(sig.parameters.keys())

@@ -2,7 +2,48 @@
 
 MVP-виджет на базе BaseWidget (frontend_module.components.base_widget): Model + View + Presenter, пассивный View.
 
-## Структура
+## Диаграмма классов
+
+```mermaid
+classDiagram
+    direction TB
+    class HikvisionWidget {
+        +BaseWidget
+        set_devices_list()
+        set_hikvision_params_lines()
+    }
+    class HikvisionPresenter
+    class HikvisionModel
+    class HikvisionView {
+        <<Protocol>>
+    }
+    class HikvisionWidgetCallbacks
+    class HikvisionParamsRefs
+
+    HikvisionWidget --|> BaseWidget
+    HikvisionWidget ..|> HikvisionView
+    HikvisionPresenter --> HikvisionView : view
+    HikvisionPresenter --> HikvisionModel
+    HikvisionModel --> HikvisionWidgetCallbacks
+    HikvisionWidget --> HikvisionParamsRefs : _hik_params
+```
+
+## Поток: клик → колбэк / регистр
+
+```mermaid
+sequenceDiagram
+    participant V as HikvisionWidget
+    participant Pr as HikvisionPresenter
+    participant M as HikvisionModel
+    participant C as HikvisionWidgetCallbacks
+
+    V->>Pr: on_open_clicked(index)
+    Pr->>M: open_camera(index)
+    M->>C: on_open(camera_index)
+    Note over V,C: Enum/Close/Grabbing — напрямую Model<br/>Open/Start/Set — через Presenter
+```
+
+## Структура каталога
 
 ```
 hikvision_widget/
@@ -16,6 +57,18 @@ hikvision_widget/
 ├── line_params.py   # parse_triple_from_line_edits, apply_params_to_line_edits
 └── README.md
 ```
+
+## Таблица файлов
+
+| Файл | Ответственность |
+|------|-----------------|
+| `widget.py` | Qt-дерево: устройства, Grabbing, параметры; слоты → Presenter |
+| `presenter.py` | Open/Start/Set, `update_camera_devices/parameters` |
+| `model.py` | Колбэки команд; чтение/запись `CAMERA_REGISTER`; `get_params_for_set` |
+| `view.py` | Protocol методов `set_*` для пассивного View |
+| `schemas.py` | Подписи, `HikvisionSpinboxRow`, валидатор длин списков |
+| `callbacks.py` | Сборка из `GuiCommandHandler` |
+| `line_params.py` | Fallback QLineEdit ↔ тройка fps/exposure/gain |
 
 ## Использование
 

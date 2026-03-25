@@ -4,8 +4,11 @@ TableWithToolbar — таблица + панель кнопок (Добавит�
 """
 from __future__ import annotations
 
-from frontend_module.widgets.tables.structured_table import StructuredTableWidget
+from typing import Any, Callable, Optional
+
+from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
 from frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, pyqtSignal
+from frontend_module.widgets.tables.structured_table import StructuredTableWidget
 
 
 class TableWithToolbar(QWidget):
@@ -24,13 +27,20 @@ class TableWithToolbar(QWidget):
         show_add_delete=True,
         show_move=True,
         show_copy_paste=True,
+        touch_keyboard: TouchKeyboardConfig | dict | None = None,
+        touch_keyboard_factory: Optional[Callable[[], Any]] = None,
     ):
         super().__init__(parent)
         self._columns = columns
         self._show_add_delete = show_add_delete
         self._show_move = show_move
         self._show_copy_paste = show_copy_paste
-        self.table = StructuredTableWidget(columns=columns, parent=self)
+        self.table = StructuredTableWidget(
+            columns=columns,
+            parent=self,
+            touch_keyboard=touch_keyboard,
+            touch_keyboard_factory=touch_keyboard_factory,
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         toolbar = QHBoxLayout()
@@ -80,6 +90,13 @@ class TableWithToolbar(QWidget):
 
     def set_columns(self, columns):
         self.table.set_columns(columns)
+
+    def set_touch_keyboard(
+        self,
+        touch_keyboard: TouchKeyboardConfig | dict | None = None,
+        touch_keyboard_factory: Optional[Callable[[], Any]] = None,
+    ) -> None:
+        self.table.set_touch_keyboard(touch_keyboard, touch_keyboard_factory)
 
     def currentRow(self):
         return self.table.currentRow()

@@ -15,15 +15,13 @@ HikvisionWidget — виджет управления камерой Hikvision (
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 
 from frontend_module.widgets.base_widget import BaseWidget
-from frontend_module.components import (
-    BindingConfig,
-    NumericControl,
-    NumericViewConfig,
-)
 from frontend_module.widgets.tabs import RegisterBindingContext, callback_no_args
+from frontend_module.widgets.tabs.numeric_bind_or_lineedit import (
+    append_spinbox_numeric_or_line_fallback,
+)
 from frontend_module.core.qt_imports import (
     QAbstractItemView,
     QGroupBox,
@@ -37,6 +35,7 @@ from frontend_module.core.qt_imports import (
 )
 from frontend_module.core.schema_config import coerce_schema_config
 
+from multiprocess_prototype.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER
 
 from .callbacks import HikvisionWidgetCallbacks
@@ -55,6 +54,23 @@ class HikvisionParamsRefs:
 
 class HikvisionWidget(BaseWidget[HikvisionModel]):
     """Виджет Hikvision: устройство, Open/Close, Grabbing, параметры."""
+
+    def __init__(
+        self,
+        *,
+        registers_manager=None,
+        callbacks: Optional[HikvisionWidgetCallbacks] = None,
+        ui: Optional[Union[HikvisionUiConfig, dict]] = None,
+        touch_keyboard: Any | None = None,
+        parent=None,
+    ) -> None:
+        self._touch_keyboard_parent = touch_keyboard
+        super().__init__(
+            registers_manager=registers_manager,
+            callbacks=callbacks,
+            ui=ui,
+            parent=parent,
+        )
 
     # ========================================================================
     # [1/7] _coerce_callbacks — нормализация колбэков (dict → HikvisionWidgetCallbacks)
@@ -98,10 +114,12 @@ class HikvisionWidget(BaseWidget[HikvisionModel]):
         hint = QLabel(u.device_list_hint)
         hint.setWordWrap(True)
         dev_layout.addWidget(hint)
+        # ---- Секция «Устройство»: hint, list_devices, btn_enum, btn_open/close ----
         self._list_devices = QListWidget()
         self._list_devices.setMinimumHeight(u.device_list_min_height)
         self._list_devices.setSelectionMode(QAbstractItemView.SingleSelection)
         dev_layout.addWidget(self._list_devices)
+
         self._btn_enum = QPushButton(u.btn_enum_devices)
         dev_layout.addWidget(self._btn_enum)
         row_open = QHBoxLayout()
@@ -136,36 +154,22 @@ class HikvisionWidget(BaseWidget[HikvisionModel]):
         u = self._ui
         group = QGroupBox(u.group_params)
         layout = QVBoxLayout(group)
-        line_edits: List[Optional[QLineEdit]] = []
-
-        # Ветка с привязкой к регистру → NumericControl (spinbox)
-        if binding.can_bind and binding.rm is not None:
-            for spec in u.hikvision_spinbox_rows:
-                label = u.spinbox_label_for_row(spec)
-                result = NumericControl.create(
-                    binding.rm,
-                    BindingConfig(CAMERA_REGISTER, spec.register_field),
-                    NumericViewConfig(
-                        view_type="spinbox",
-                        label=label,
-                        min_val=spec.min_val,
-                        max_val=spec.max_val,
-                    ),
-                )
-                layout.addWidget(result.widget)
-            line_edits = [None] * len(u.hikvision_spinbox_rows)
-        # Ветка без регистра → QLineEdit (fallback)
-        else:
-            placeholders = (u.placeholder_fps, u.placeholder_exposure, u.placeholder_gain)
-            for spec, ph in zip(u.hikvision_spinbox_rows, placeholders):
-                row = QHBoxLayout()
-                row.addWidget(QLabel(u.spinbox_label_for_row(spec)))
-                edit = QLineEdit()
-                edit.setPlaceholderText(ph)
-                edit.setMaximumWidth(u.hikvision_line_edit_max_width)
-                row.addWidget(edit)
-                layout.addLayout(row)
-                line_edits.append(edit)
+        placeholders = (u.placeholder_fps, u.placeholder_exposure, u.placeholder_gain)
+        tk = merge_touch_keyboard_dicts(
+            self._touch_keyboard_parent,
+            getattr(self._ui, "touch_keyboard", None),
+        )
+        line_edits = append_spinbox_numeric_or_line_fallback(
+            layout,
+            binding=binding,
+            register_name=CAMERA_REGISTER,
+            row_specs=u.hikvision_spinbox_rows,
+            label_for_row=u.spinbox_label_for_row,
+            placeholders=placeholders,
+            line_edit_max_width=u.hikvision_line_edit_max_width,
+            touch_keyboard=tk,
+            host_widget=group,
+        )
 
         row_btns = QHBoxLayout()
         self._btn_get_params = QPushButton(u.btn_get_parameters)

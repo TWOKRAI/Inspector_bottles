@@ -1,4 +1,4 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab/
+# multiprocess_prototype/frontend/widgets/camera_tab/
 """
 Вкладка камеры: контейнер с переключателем Simulator/Webcam/Hikvision.
 

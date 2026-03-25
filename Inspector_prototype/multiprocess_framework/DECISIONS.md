@@ -16,6 +16,72 @@
 
 ---
 
+## ADR-097: Touch-клавиатура — проброс из `FrontendConfig`, делегат по колонкам
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: После **ADR-096** таблицы/деревья не получали **`touch_keyboard`** из конфига приложения; отдельные **`QLineEdit`** (слот рецепта, имя региона) не подключались. **`setItemDelegate`** на весь **`QAbstractItemView`** избыточен для колонок с чекбоксами; на Windows (PyQt5) запрещён сброс делегата в **`None`** (**ADR-096** / hotfix).
+- Решение: В **`FrontendConfig`** — поле **`touch_keyboard`** (dict, опционально), в **`build_dict`** ключ **`touch_keyboard`** (мерж с **`app_cfg`**). **`FrontendAppContext.get_touch_keyboard`**, фабрика вкладок передаёт dict в панели рецептов / настроек / ROI / постобработки. Хелпер **`multiprocess_prototype/frontend/touch_keyboard_bind.bind_touch_keyboard_line_edit`**. **`StructuredTableWidget`** / **`StructuredTwoLevelTreeWidget`**: touch-делегат только на не-checkbox колонки (**`setItemDelegateForColumn`**), сброс — **`QStyledItemDelegate(self)`** по тем же индексам, без **`setItemDelegateForColumn(..., None)`**.
+- Причина: Один источник правды для сенсорного стенда; клавиатура на полях формы и в ячейках; меньше побочных эффектов на чекбокс-колонках.
+- Отклонённые альтернативы: только per-widget YAML на каждой вкладке — дублирование; глобальный **`setItemDelegate`** без разделения колонок — уже вызывало проблемы на Windows.
+
+## ADR-096: Touch-клавиатура — `TouchKeyboardConfig`, интеграция numeric / tables
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: На панельных ПК нужен ввод без физической клавиатуры; в App уже были **`VirtualKeyboard`** / **`VirtualKeyboardMini`** и клик по полю; во **`frontend_module`** поле **`touch_keyboard_factory`** в **`NumericViewConfig`** не доходило до view.
+- Решение: Dataclass **`TouchKeyboardConfig`** в **`components/base/touch_keyboard_config.py`** (режим **off | mini | full**, порог **`min_screen_height_px`**, геометрия). Модуль **`widgets/keyboard/touch_keyboard.py`**: **`should_show`**, **`show_for_line_edit`**, **`install_touch_keyboard_on_line_edit`**; одна активная клавиатура закрывается перед открытием следующей. **`SliderValueView`** / **`SpinBoxValueView`**: клик по **`QLineEdit`**; таблицы/дерево — **`TouchLineEditItemDelegate`** + опционально **`touch_keyboard`** / **`touch_keyboard_factory`** на **`StructuredTableWidget`**, **`StructuredTwoLevelTreeWidget`**, тулбары. **`StructuredTableWidget`**: сигнал **`cell_changed`** дополняется **`itemChanged`** для текстовых ячеек. Реестр слайдера (**`default_factories`**) передаёт **`touch_keyboard`** (dict допускается, **`coerce_touch_keyboard`**).
+- Причина: Конфиг без зависимости components→widgets; переиспользование клавиатур **`widgets/keyboard`**; совместимость с **`touch_keyboard_factory`**.
+- Отклонённые альтернативы: только фабрика без typed config — хуже для YAML/рецептов.
+
+## ADR-091: ROI по камерам — вложенный `processor.crop_regions`
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Плоский legacy `{region → {params, rect}}` и расширенный набор полей ROI не подходят под несколько камер и удобную сборку рецепта.
+- Решение (фаза 1): В памяти и в регистре — **`camera_id → region_name → [x, y, width, height]`**. Адаптеры **`normalize_crop_regions_payload`** (загрузка + миграция плоского legacy в камеру по умолчанию из **`CroppedRegionsTabUiConfig.camera_ids`**) и **`merge_crop_regions_payload`** (снимок в `ProcessorRegisters.crop_regions`). UI: **дерево камера → регионы** (**`StructuredTwoLevelTreeWidget`**), поле имени и слайдеры; **«Сохранить»** — записать координаты и при смене имени **переименовать** выбранный регион; **«Добавить»** — только новый регион (для выбранной в дереве камеры). Отдельный регистр в `registers/schemas` и финальный пакет в data_schema для бэкенда — **после согласования** (фаза 2).
+- Причина: Один предсказуемый JSON-совместимый слой между GUI, YAML рецептов и будущим процессором.
+- Отклонённые альтернативы: держать данные только в виджете без записи в регистр — хуже для рецептов; правка имён только в таблице — дублирование с полем имени.
+
+**Уточнение (2026-03-25, UI — двойной выбор и правка):** Вертикальный порядок: **дерево «камера → регионы»** (**`StructuredTwoLevelTreeWidget`**, см. **ADR-095**) → кнопки «Добавить» / «Удалить» / «Сохранить» → **`QGroupBox`** «Параметры области (ROI)»: ComboBox списка регионов текущей камеры, поле имени, **`CroppedAreaControls`**. Источник истины по выбору — **`region_id`** (ключ в `regions`); его отражают выделение листа дерева, ComboBox регионов и слайдеры. Листья дерева **редактируемые**; изменения ячеек обрабатывает презентер (**`leaf_cell_changed`** / **`itemChanged`**), значения читаются через **`CroppedRegionsTreeAdapter.read_leaf_row`**. Переименование в дереве — те же правила конфликта имён, что и «Сохранить». Программное обновление дерева и ComboBox — с **`blockSignals`**, чтобы не зациклить выбор.
+
+## ADR-095: `StructuredTwoLevelTreeWidget` — группа → строки в `frontend_module/widgets/tables`
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Плоская **`StructuredTableWidget`** не показывает уровень камеры вместе с регионами; в legacy **Sort_widget** (App) уже использовался **`QTreeWidget`** для вложенных списков.
+- Решение: Во **`frontend_module`** добавлен **`StructuredTwoLevelTreeWidget`**: конфиг колонок как у **`StructuredTableWidget`**, данные **`set_data([(group_id, [row_dict, …]), …])`**, идентификатор листа через **`set_row_key`**, сигнал **`leaf_cell_changed(group_id, row_id, column_key, value)`**, **`get_selection()` → (group_id | None, leaf_id | None)`**, **`select_leaf` / `select_group`**. Прототип: **`CroppedRegionsTreeAdapter`** строит группы из **`regions_to_table_rows`** по списку id камер (**`camera_ids_union`**).
+- Причина: Переиспользуемый компонент фреймворка; данные на границе — словари; без зависимости прототипа от legacy App.
+- Отклонённые альтернативы: только правки в прототипе без виджета во фреймворке — дублирование для следующих экранов; **`QTreeView` + модель** — тяжелее для MVP.
+
+## ADR-092: Постобработка — `ProcessorRegisters.post_processing_regions` и вкладка прототипа
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Legacy **`Post_processing_widget`** (App) управляет списком регионов просмотра по камере с флагами и углами **x1,y1,x2,y2**; нужен аналог в **`multiprocess_prototype`** без **DataManager**, в стиле **BaseWidget + MVP**.
+- Решение: Поле **`post_processing_regions`** в **`ProcessorRegisters`**: **`camera_id` → список** (порядок строк = порядок в пайплайне), элемент — **`name`**, **`x1..y2`**, **`enabled`**, **`is_main`**, **`processing_enabled`**. Нормализация/снимок — **`post_processing_widget.params`**. UI: **`PostProcessingPanelWidget`**, **`TableWithToolbar`**, форма координат; кнопки «Показать» / «основной» — заглушки до связи с окном просмотра. Синхронизация **`register_sync`** для детектора по этому полю — не обязательна в фазе 1 (снимок для GUI/рецепта).
+- Причина: Dict at Boundary; один регистр с **`crop_regions`**; отказ от App-специфичного **DataManager** в MVP.
+- Отклонённые альтернативы: только дублировать данные в **crop_regions** — другая семантика (углы vs x,y,w,h).
+
+## ADR-093: Вложенные payload processor — канон в `registers`, миграция снимков, мульти-камера
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Нормализация **`crop_regions`** / **`post_processing_regions`** жила только во frontend (`params.py`), а рецепты и **`model_validate_all`** должны принимать legacy YAML без расхождений; нужен единый канон для тестов и **PostProcessingRegionEntry**; отдельно — стратегия **словаря камер** vs плоский **`CameraRegisters`**.
+- Решение:
+  - Канонические функции и типы: **`registers/schemas/processing_tab/crop_regions_payload.py`**, **`post_processing_payload.py`** (`PostProcessingRegionEntry`), реэкспорт **`nested_payload.py`**; виджеты реэкспортируют из регистров.
+  - **`ProcessorRegisters`**: `@model_validator(mode="before")` нормализует вложенные поля при **`model_validate`** / загрузке снимка.
+  - **`registers/snapshot_migrate.py`**: **`migrate_register_recipe_snapshot`** вызывается из **`RecipeManager.load_recipe_to_registers`** перед **`model_validate_all`** (явный слой I/O).
+  - **Мульти-камера (id → параметры):** до отдельного ADR и согласования с бэкендом оставляем плоский **`CameraRegisters`**; при необходимости — поле **`cameras: dict[str, CameraDeviceParams]`** (внутренний Pydantic-модель) или отдельный регистр.
+- Причина: один источник правды для YAML, GUI и валидации; Dict at Boundary сохраняется.
+- Отклонённые альтернативы: только нормализовать в виджете — рецепты без миграции ломают **`validate_all`**; дублировать логику в **`RecipeManager`** без выделенного модуля — хуже сопровождение.
+
+## ADR-094: Логические камеры в UI — `logical_camera_ids`, сидирование, `subscribe_all`
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: При переключении Simulator/Webcam/Hikvision список камер в ROI/постобработке должен пополняться стабильным id; панели должны обновляться без ручного переключения вкладки; **`register_update`** на процессор для чисто GUI-списка не нужен.
+- Решение:
+  - Поле **`ProcessorRegisters.logical_camera_ids`**: `list[str]`, **`FieldMeta.routing`** с **`process_targets: []`**; в **`registers_module.RegistersManager._resolve_dispatch_targets`** явная ветка: пустой список целей → не слать **`register_update`** в процессы (перекрывает **`register_dispatch`** класса).
+  - **`frontend/coordinators/logical_cameras.py`**: **`compute_logical_camera_id`**, **`ensure_logical_camera_and_seed_roi`** — вызов из **`CameraTabPresenter`** после записи **`camera_type`**; сидирование **`crop_regions`** (регион **`full`**) и ключа в **`post_processing_regions`**.
+  - Презентеры ROI/постобработки: **`camera_ids_union`** включает **`logical_camera_ids`** из регистра.
+  - **`CroppedRegionsPanelWidget`** / **`PostProcessingPanelWidget`**: **`subscribe_all`** → отложенная **`load_from_register`**; **`closeEvent`** → **`unsubscribe_all`**.
+- Причина: один источник для ComboBox и рецепта; синхронизация панелей без дублирования опроса.
+- Отклонённые альтернативы: только ключи **`crop_regions`** без списка — пустые камеры не видны в UI до первого ROI; слать GUI-список в процессор «на всякий случай» — шум.
+
 ## ADR-085: Сжатие документации refactored — один актуальный контур
 - Дата: 2026-03-24
 - Статус: принято
@@ -23,6 +89,63 @@
 - Решение: Оставить операционный набор: `docs/FRAMEWORK_OVERVIEW.md`, `docs/ARCHITECTURE_REFERENCE.md`, `docs/ROUTING_GLOSSARY.md`, `docs/ARCHITECTURE_MODULE_CATALOG.md`, `docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`, `docs/MODULE_README_TEMPLATE.md`, плюс `README.md`, `DOCUMENTATION_INDEX.md`, `DECISIONS.md`, `PROBLEMS.md`, `MODULES_STATUS.md` и README/STATUS/docs внутри модулей. Удалены: `docs/archived/`, `docs/archive/CLEANUP_SUMMARY.md`, `DOCUMENTATION_SCORE.md`, `docs/ARCHITECTURE_ESSAY.md`, `docs/ARCHITECTURE_PHILOSOPHY.md`, `docs/FRAMEWORK_VISION_AND_WISHLIST.md`, `docs/FRAMEWORK_IDEAL_GLOBAL_PLAN.md`.
 - Причина: Один источник правды для онбординга и агентов; меньше расхождений; архивные отчёты не нужны для работы с кодом.
 - Отклонённые альтернативы: «оставить всё, пометить устаревшим» — шум; перенос архива в git без удаления — дубликаты в истории git сохраняются при необходимости.
+
+---
+
+## ADR-088: Оболочки вкладок (`*_tab`) — единый каталог `widgets/tabs_setting/`
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Пакеты `camera_tab`, `recipes_tab`, `settings_tab`, `processing_tab`, `cropped_regions_tab` лежали рядом с фиче-виджетами (`hikvision_widget`, `*_widget`), что усложняло навигацию.
+- Решение: Все тонкие оболочки вкладок перенесены в **`multiprocess_prototype/frontend/widgets/tabs_setting/<имя>/`** рядом с **`TabItemConfig`** / **`TabsConfig`**. Фиче-виджеты остаются на уровне **`widgets/`**. Импорт: **`multiprocess_prototype.frontend.widgets.tabs_setting.<tab>`** (или реэкспорт из **`widgets`** / **`tabs_setting`**).
+- Причина: Один визуальный контур «настройки полосы табов + сами вкладки»; меньше путаницы с переиспользуемыми панелями.
+- Отклонённые альтернативы: оставить вкладки соседями `hikvision_widget` — прежняя структура; тонкие шимы на старых путях — отказались для простоты.
+
+---
+
+## ADR-089: `numeric_bind_or_lineedit` — общий fallback NumericControl vs QLineEdit
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: В `HikvisionWidget` дублировалась ветка «есть RegistersManager → NumericControl / нет → QLineEdit»; другие фиче-виджеты могли скопировать тот же паттерн.
+- Решение: Модуль **`frontend_module/widgets/tabs/numeric_bind_or_lineedit.py`**, функция **`append_spinbox_numeric_or_line_fallback`** — вход `RegisterBindingContext`, имя регистра, спецификации строк, подписи и placeholder’ы; заполняет `QVBoxLayout` и возвращает `List[Optional[QLineEdit]]` (параллельно строкам). `HikvisionWidget._build_params_group` переведён на этот API.
+- Причина: один способ собрать параметры без копипасты; презентер по-прежнему читает значения через существующие утилиты (`line_params`).
+- Отклонённые альтернативы: оставить только в прототипе (`widgets/common`) — меньше переиспользования между приложениями; дублировать в каждом виджете — отвергнуто.
+
+---
+
+## ADR-090: `frontend/coordinators`, границы виджет / Presenter / `managers`, accessors контекста
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Требовалось зафиксировать слои (тонкий виджет, MVP-презентер, доменные менеджеры), убрать дублирование парсинга номера слота рецепта и повтор `config.get(...)` во фабрике вкладок; не смешивать «оркестрацию UI» с `RecipeManager` в одном пакете `managers/`.
+- Решение: Раздел описан в **`multiprocess_prototype/docs/FRONTEND_MAP.md`** и **`frontend/widgets/README.md`**. Пакет **`multiprocess_prototype/frontend/coordinators/`** — переиспользуемые чистые хелперы (например **`parse_clamped_recipe_slot_text`**), не YAML и не `AccessContext`. **`FrontendAppContext`** дополнен методами **`get_recipes_tab_ui`**, **`get_settings_tab_ui`**, **`get_cropped_regions_tab_ui`**, **`get_camera_tab_ui`**, **`get_recipe_access`**, **`get_processing_tab_ui`**. **`RegisterRecipePresenter`** вызывает методы **`RecipeManagerProtocol`** напрямую (без **`hasattr`**-веток).
+- Причина: Один смысл слова «менеджер» для домена; меньше копипасты; стабильная точка чтения секций конфига для **`tab_factory`**.
+- Отклонённые альтернативы: перенос всей логики экранов в корень **`managers/`** — размывает домен; массовый перенос презентеров из виджетов без дублирования ответственности — отложено.
+
+---
+
+## ADR-086: Вкладка «Регионы обрезки» и `ProcessorRegisters.crop_regions` без пакета App
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Нужны именованные ROI для последующей вырезки на бэкенде; старый `App/UI/Widgets/Cropped_area_widget` не должен тянуться в multiprocess_prototype.
+- Решение:
+  - **`multiprocess_prototype/frontend/widgets/tabs_setting/cropped_regions_tab/`**: локальные **`CroppedAreaControls`** (те же ключи params, что у legacy-виджета) + **`CroppedRegionsTabWidget`** (список регионов, сохранение снимка).
+  - Формат записи региона: **`{ "params": {...}, "rect": {x,y,width,height} }`**; `rect` выводится функцией **`params_to_rect`** (x=x_min, width=x_max−x_min, y=y_delta, height=height).
+  - Регистр **`ProcessorRegisters.crop_regions`**: `dict` (имя региона → payload), маршрутизация на процесс **processor**; синхронизация через **`set_field_value`**.
+- Причина: Dict at Boundary; один источник для GUI и boot; отвязка от устаревшего App.
+- Отклонённые альтернативы: встраивать импорт `App.CroppedAreaWidget` — лишняя связность и пути импорта.
+
+---
+
+## ADR-087: Таблица регионов ROI — `StructuredTableWidget` и `CroppedRegionsTabUiConfig`
+- Дата: 2026-03-25
+- Статус: принято
+- Контекст: Список регионов на `QListWidget` хуже обзора rect; на вкладке рецептов уже принят паттерн **`StructuredTableWidget`** + подписи из схемы.
+- Решение:
+  - **`CroppedRegionsTabWidget`**: колонки имя, x, y, width, height; **`regions_to_table_rows`** / **`rect_to_params`** для синхронизации с `params`.
+  - **`CroppedRegionsTabUiConfig`** + ключ **`cropped_regions_tab`** в **`FrontendConfig.build_dict`**; фабрика вкладок передаёт `ui=config.get("cropped_regions_tab")`.
+- Причина: Единообразие с `recipes_tab`, наглядность rect, двусторонняя связь таблицы и слайдеров.
+- Отклонённые альтернативы: только список имён без rect в таблице — меньше пользы для оператора.
+
+**Уточнение (2026-03-25):** панель **`CroppedAreaControls`** переведена на **`NumericControl` / `CheckboxControl`** + локальный **`RegistersManager`** с схемой **`CroppedRoiPanelRegisters`** (`FieldMeta` min/max); вид **slider** vs **spinbox** задаётся **`CroppedRegionsTabUiConfig.roi_numeric_views`**.
 
 ---
 
@@ -59,7 +182,8 @@
 - Статус: принято
 - Контекст: Две таблицы на одной вкладке «Рецепты» смешивали параметры алгоритма (регистры) и пресеты UI (`SchemaBase`); нужен единый код слота/`RecipeManager`/таблицы без дублирования.
 - Решение:
-  - Базовый виджет **`RecipeSlotTablePanel`** и наследники **`RegisterRecipePanel`**, **`AppRecipePanel`** ([`recipe_slot_table_panel.py`](../../multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/recipe_slot_table_panel.py)).
+  - Панели рецептов на **`BaseWidget` + MVP**: **`RegisterRecipePanelWidget`**, **`AppRecipePanelWidget`**; публичные имена **`RegisterRecipePanel`** / **`AppRecipePanel`** — реэкспорт ([`recipe_slot_table_panel.py`](../../multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/recipe_slot_table_panel.py)). Исторически общая база **`RecipeSlotTablePanel`** заменена на этот каркас (2026-03).
+  - Имена каталогов (2026-03, уточнено 2026-03-25): оболочки **`tabs_setting/recipes_tab/`**, **`tabs_setting/recipes_settings_tab/`**; фичи **`recipes_widget/`**, **`settings_recipe_widget/`** (в т.ч. **`settings_recipe_widget/schemas.py`**: `RecipesTabConfig`, `default_tab_item` — прежнее имя пакета `recipes_settings_widget` не используется). Ключи секций в **`FrontendConfig`** — по-прежнему **`recipes_tab`** / **`settings_tab`**.
   - **`RecipesTabWidget`** содержит только **`RegisterRecipePanel`**.
   - **`SettingsTabWidget`** — существующие контролы + **`AppRecipePanel`**; в **`create_tab_widget_factory`** в настройки передаются **`recipe_manager`**, **`recipe_access`**, **`recipes_tab`**, опционально **`processing_tab_ui`** (как для дефолтов агрегата app).
   - Один **`RecipeManager`** на сессию (лаунчер), без второго экземпляра.

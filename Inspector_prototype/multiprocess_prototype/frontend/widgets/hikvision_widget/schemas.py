@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, List, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from pydantic import Field, model_validator
 
@@ -15,6 +15,7 @@ from multiprocess_framework.modules.data_schema_module import (
 
 
 def _default_hikvision_api_map() -> List["HikvisionApiMapEntry"]:
+    """Тройка API ↔ поля регистра по умолчанию."""
     return [
         HikvisionApiMapEntry(
             api_key="frame_rate",
@@ -38,6 +39,7 @@ def _default_hikvision_api_map() -> List["HikvisionApiMapEntry"]:
 
 
 def _default_hikvision_spinbox_rows() -> List["HikvisionSpinboxRow"]:
+    """Конфиг строк NumericControl/spinbox для fps, exposure, gain."""
     return [
         HikvisionSpinboxRow(
             register_field="hikvision_frame_rate",
@@ -124,8 +126,17 @@ class HikvisionUiConfig(SchemaBase):
         default_factory=_default_hikvision_spinbox_rows
     )
 
+    touch_keyboard: Annotated[
+        Optional[Dict[str, Any]],
+        FieldMeta(
+            "Touch-клавиатура для NumericControl spinbox",
+            info="Перекрывает глобальный и camera_tab; mode: mini | full.",
+        ),
+    ] = Field(default=None)
+
     @model_validator(mode="after")
     def _validate_lengths(self) -> "HikvisionUiConfig":
+        """Согласованность длин списков и допустимых label_attribute."""
         if len(self.hikvision_api_to_register) != len(self.hikvision_spinbox_rows):
             raise ValueError(
                 "hikvision_api_to_register и hikvision_spinbox_rows должны быть одинаковой длины."
@@ -137,7 +148,9 @@ class HikvisionUiConfig(SchemaBase):
         return self
 
     def hikvision_api_field_pairs(self) -> Tuple[Tuple[str, str], ...]:
+        """Пары (api_key, register_field) для записи ответа камеры в регистр."""
         return tuple((m.api_key, m.register_field) for m in self.hikvision_api_to_register)
 
     def spinbox_label_for_row(self, row: HikvisionSpinboxRow) -> str:
+        """Текст подписи NumericControl по атрибуту HikvisionUiConfig (label_frame_rate и т.д.)."""
         return str(getattr(self, row.label_attribute, row.label_attribute))

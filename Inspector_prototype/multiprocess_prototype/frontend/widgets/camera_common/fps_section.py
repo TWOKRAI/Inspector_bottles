@@ -35,17 +35,27 @@ def add_fps_section_to_layout(
     binding: RegisterBindingContext,
     u: SimWebcamUiConfig,
     on_slider_changed: Callable[[int], None],
+    touch_keyboard: Any | None = None,
 ) -> FpsFallbackWidgets:
     """Добавляет секцию FPS в layout (NumericControl или QLabel+QSlider)."""
+    from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
+
+    tk_cfg = coerce_touch_keyboard(touch_keyboard)
+    # Ветка с живым rm: один NumericControl на поле fps регистра камеры
     if binding.can_bind and binding.rm is not None:
         result = NumericControl.create(
             binding.rm,
             BindingConfig(CAMERA_REGISTER, "fps"),
-            NumericViewConfig(view_type="slider", label=u.fps_numeric_control_label),
+            NumericViewConfig(
+                view_type="slider",
+                label=u.fps_numeric_control_label,
+                touch_keyboard=tk_cfg,
+            ),
         )
         layout.addWidget(result.widget)
         return FpsFallbackWidgets(None, None)
 
+    # Без rm: подпись + горизонтальный QSlider, сигнал → on_slider_changed
     label = QLabel(f"{u.initial_fps}{u.fps_suffix}")
     slider = QSlider(Qt.Horizontal)
     slider.setRange(u.fps_slider_min, u.fps_slider_max)

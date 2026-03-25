@@ -1,20 +1,21 @@
 # multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/
 """
-Вкладка рецептов: слот, загрузка/сохранение снимка, таблица полей регистров.
+Вкладка «Рецепты»: только оболочка (скролл, placeholder).
 
-Экспорты:
-- RecipesTabWidget — виджет вкладки
-- RecipesTabConfig — подписи и параметры UI
+Фиче-виджеты: recipes_widget, settings_recipe_widget; общая схема: settings_recipe_widget.schemas.
 """
 
-from .schemas import RecipesTabConfig
-from .recipe_slot_table_panel import AppRecipePanel, RecipeSlotTablePanel, RegisterRecipePanel
+from ...settings_recipe_widget.schemas import RecipesTabConfig
+from ...settings_recipe_widget import AppRecipePanelWidget
+from ...recipes_widget import RegisterRecipePanelWidget
+from .recipe_slot_table_panel import AppRecipePanel, RegisterRecipePanel
 from .widget import RecipesTabWidget
 
 __all__ = [
     "AppRecipePanel",
-    "RecipeSlotTablePanel",
+    "AppRecipePanelWidget",
     "RecipesTabConfig",
     "RecipesTabWidget",
     "RegisterRecipePanel",
+    "RegisterRecipePanelWidget",
 ]

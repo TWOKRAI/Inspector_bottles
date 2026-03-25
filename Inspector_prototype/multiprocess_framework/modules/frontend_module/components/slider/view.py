@@ -4,11 +4,12 @@ SliderValueView — только QLineEdit + QSlider, без подписи.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from frontend_module.components.base.infrastructure.signal_utils import (
     block_signals,
 )
+from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
 from frontend_module.components.common.slider_styles import (
     LAYOUT_SPACING_PX,
     SLIDER_MIN_HEIGHT_PX,
@@ -37,6 +38,8 @@ class SliderValueView(QWidget):
         show_ticks: bool = False,
         tick_interval: int = 10,
         parent: Optional[QWidget] = None,
+        touch_keyboard: Optional[TouchKeyboardConfig] = None,
+        touch_keyboard_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
         super().__init__(parent)
         self._line_edit = QLineEdit()
@@ -58,6 +61,18 @@ class SliderValueView(QWidget):
 
         self._slider.valueChanged.connect(self._on_slider_moved)
         self._line_edit.editingFinished.connect(self._on_input_finished)
+
+        from frontend_module.widgets.keyboard.touch_keyboard import (
+            install_touch_keyboard_on_line_edit,
+        )
+
+        install_touch_keyboard_on_line_edit(
+            self,
+            self._line_edit,
+            touch_keyboard,
+            self._on_input_finished,
+            keyboard_factory=touch_keyboard_factory,
+        )
 
     def set_range(self, min_val: float, max_val: float, step: float) -> None:
         self._step = step

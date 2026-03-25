@@ -2,6 +2,9 @@
 Синхронизация register_update → состояние детектора.
 
 Имена полей должны совпадать с ProcessorRegisters (registers/schemas/processing_tab).
+
+Поля ``crop_regions`` и ``post_processing_regions`` пока не разбираются здесь: снимок
+для GUI/рецепта; применение к пайплайну — отдельная задача (см. ADR-092, прототип).
 """
 
 from __future__ import annotations
@@ -42,3 +45,4 @@ def apply_processor_register_update(
         set_min_area({"min_area": value})
     elif field == "max_area":
         set_max_area({"max_area": value})
+    # crop_regions / post_processing_regions: см. модульный docstring

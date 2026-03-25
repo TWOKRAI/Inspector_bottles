@@ -1,8 +1,25 @@
 # Структура вкладки — шаблон и рекомендации
 
-Документ описывает рекомендованный подход к созданию вкладок приложения: когда использовать MVP, как организовывать файлы, какие утилиты применять. Эталонная реализация — `multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab`.
+Документ описывает рекомендованный подход к созданию вкладок приложения: когда использовать MVP, как организовывать файлы, какие утилиты применять.
 
-**Фреймворк:** `MvpTabBase` (фасад), `create_registers_placeholder`, `tab_callbacks_from_dict`/`to_dict`, шаблон — `MVP_TEMPLATE.md`.
+**Эталоны в прототипе:**
+- **Оболочка вкладки (tab shell):** `multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab` — combo + stack + вложенные виджеты + презентер вкладки.
+- **Фиче-виджет (`BaseWidget` + MVP):** `multiprocess_prototype/frontend/widgets/hikvision_widget`, `.../camera_common` (SimWebcam).
+
+**Фреймворк:** `BaseWidget`, `MvpTabBase`, `create_registers_placeholder`, `tab_callbacks_from_dict`/`to_dict`, шаблоны — `MVP_TEMPLATE.md`, `../base_widget/README.md`.
+
+---
+
+## Tab shell vs фиче-виджет
+
+| Роль | Класс | Ответственность |
+|------|--------|-----------------|
+| **Tab shell** | Обычно `BaseTab` (или тонкая композиция) | `QScrollArea`, `create_registers_placeholder`, сборка дочерних виджетов, проброс `pyqtSignal` наружу для launcher |
+| **Фиче-виджет** | `BaseWidget` (+ опционально `Model`) | Полный MVP: `schemas`, `presenter`, явные `_connect_signals` (или `MvpTabBase`, если связи в презентере), `signal_bus` для внешних подписчиков |
+
+`BaseWidget` наследует `BaseTab`, поэтому фиче-виджет можно вставить и в `TabWidget`, и в `QStackedWidget`. Разделение — прежде всего по папке и ответственности класса, а не по базовому типу Qt.
+
+Рекомендация: содержимое вкладки выносить в отдельные пакеты уровня `hikvision_widget`; файл `*_tab/widget.py` оставлять тонким.
 
 ---
 
@@ -14,16 +31,17 @@
 | Колбэки в backend (команды) | Да | Нет |
 | Регистры + привязка | Да | Возможно |
 | Секции с bind/fallback | Да | Редко |
-| Примеры | camera_tab | settings_tab, processing_tab, recipes_tab — простой виджет + `RegisterBindingContext` |
+| Примеры | `camera_tab` + вложенные `BaseWidget` | Устаревший паттерн; предпочтительно фиче-виджет `BaseWidget` внутри tab shell |
 
-**Когда использовать MVP:**
+**Когда использовать MVP (фиче-виджет):**
 - Вкладка отправляет команды в процессы (start/stop, enum devices, set parameters)
 - Несколько источников данных (регистр + внешние обновления)
 - Секции с `RegisterBindingContext` (NumericControl при rm / fallback при отсутствии)
+- Таблицы, рецепты, нетривиальная синхронизация с `IRegistersManagerGui`
 
 **Когда достаточно простого виджета:**
 - Только контролы `frontend_module.components` по конфигу, без колбэков
-- Все контролы уже привязаны к регистрам
+- Все контролы уже привязаны к регистрам (можно оформить как один `BaseWidget` без `Model` для единообразия)
 
 ---
 
@@ -83,7 +101,7 @@ class FeatureTabCallbacks:
 Для вкладок без RegistersManager — единая заглушка без дублирования текста и стилей:
 
 ```python
-from frontend_module.components.tabs import create_registers_placeholder
+from frontend_module.widgets.tabs import create_registers_placeholder
 
 if not binding.can_bind:
     layout.addWidget(create_registers_placeholder("Обработка"))

@@ -58,6 +58,39 @@ sequenceDiagram
 
 Слои **не свёрнуты в один класс**: меняется способ **передачи зависимостей** (см. `FrontendAppContext`).
 
+### Виджет, Presenter и `managers/`
+
+| Слой | Где живёт | Ответственность |
+|------|-----------|-----------------|
+| **Виджет** (`panel_widget`, `view`) | `frontend/widgets/<feature>/` | Разметка Qt, `pyqtSignal`, `_connect_signals` → вызовы презентера; методы протокола вида (`parse_slot`, `refresh_table_rows`, …). |
+| **Presenter** (или координатор с тем же контрактом) | Рядом с фичей (`presenter.py`) или при необходимости [`frontend/coordinators/`](../frontend/coordinators/README.md) | Логика без дерева виджетов: регистры, `RecipeManagerProtocol`, валидация, обновление вида через протокол. |
+| **Доменные менеджеры** | [`managers/`](../managers/README.md) | Долгоживущие сервисы: YAML рецептов, `AccessContext`, агрегаты app-рецепта — **не** привязка сигналов к кнопкам. |
+
+```mermaid
+flowchart TB
+    subgraph ui [Widgets]
+        W[QWidget]
+        Sig[Signal wiring]
+    end
+    subgraph coord [Presenter]
+        P[Presenter]
+    end
+    subgraph domain [managers]
+        RM[RecipeManager]
+        AC[AccessContext]
+    end
+    subgraph fw [Framework]
+        Bridge[Registers bridge]
+    end
+    W --> Sig
+    Sig --> P
+    P --> Bridge
+    P --> RM
+    P --> AC
+```
+
+Общие чистые хелперы UI (например парсинг номера слота рецепта) — в [`frontend/coordinators/`](../frontend/coordinators/README.md), чтобы не дублировать код в нескольких панелях и не смешивать с `RecipeManager`.
+
 ---
 
 ## `FrontendAppContext`
@@ -65,6 +98,8 @@ sequenceDiagram
 Один объект с полями, которые раньше перечислялись отдельными аргументами у **`create_tab_widget_factory`**:
 
 - `config`, `registers_manager`, `camera_callbacks_map`, `camera_type`, `recipe_manager`, опционально `command_handler`, `extras`.
+
+Методы **`get_recipes_tab_ui`**, **`get_settings_tab_ui`**, **`get_cropped_regions_tab_ui`**, **`get_camera_tab_ui`**, **`get_recipe_access`**, **`get_processing_tab_ui`** — стабильный доступ к секциям `config` (см. `FrontendConfig.build_dict`), чтобы фабрика вкладок не дублировала `config.get("…")`.
 
 Фабрика вкладок читает только контекст; новые зависимости можно добавить в dataclass без разрастания сигнатур вызовов.
 

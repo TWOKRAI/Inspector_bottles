@@ -72,12 +72,26 @@ except ImportError:
     VirtualKeyboardMini = None  # type: ignore[assignment]
 
 try:
-    from .tables import StructuredTableWidget, TableWithToolbar
+    from .tables import (
+        StructuredTableWidget,
+        StructuredTwoLevelTreeWidget,
+        TableWithToolbar,
+        TwoLevelTreeWithToolbar,
+    )
 
-    __all__.extend(["StructuredTableWidget", "TableWithToolbar"])
+    __all__.extend(
+        [
+            "StructuredTableWidget",
+            "StructuredTwoLevelTreeWidget",
+            "TableWithToolbar",
+            "TwoLevelTreeWithToolbar",
+        ]
+    )
 except ImportError:
     StructuredTableWidget = None  # type: ignore[assignment]
+    StructuredTwoLevelTreeWidget = None  # type: ignore[assignment]
     TableWithToolbar = None  # type: ignore[assignment]
+    TwoLevelTreeWithToolbar = None  # type: ignore[assignment]
 
 try:
     from .performance_monitor import PerformanceMonitor

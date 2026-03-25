@@ -18,6 +18,10 @@ from frontend_module.components.base.config import (
     LabelOverride,
     merge_config,
 )
+from frontend_module.components.base.touch_keyboard_config import (
+    TouchKeyboardConfig,
+    coerce_touch_keyboard,
+)
 from frontend_module.components.base.infrastructure import (
     RegisterAdapter,
     ValueTransformer,
@@ -52,6 +56,8 @@ __all__ = [
     "BindingConfig",
     "LabelOverride",
     "merge_config",
+    "TouchKeyboardConfig",
+    "coerce_touch_keyboard",
     "RegisterAdapter",
     "ValueTransformer",
     "block_signals",

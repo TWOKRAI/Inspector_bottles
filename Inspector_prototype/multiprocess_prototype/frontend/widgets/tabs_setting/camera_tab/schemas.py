@@ -1,4 +1,4 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab/schemas.py
+# multiprocess_prototype/frontend/widgets/camera_tab/schemas.py
 """
 Конфиг camera_tab: переключатель типа камеры (ComboBox).
 
@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
@@ -24,11 +24,13 @@ from multiprocess_framework.modules.data_schema_module import (
 
 
 def _default_camera_type_ids() -> List[str]:
+    """Идентификаторы типов камеры (ключи регистра / стека)."""
     from multiprocess_prototype.camera_policy import CAMERA_TYPES
     return list(CAMERA_TYPES)
 
 
 def _default_camera_type_labels() -> List[str]:
+    """Подписи для QComboBox в том же порядке, что и camera_type_register_ids."""
     from multiprocess_prototype.camera_policy import CAMERA_TYPE_LABELS
     return list(CAMERA_TYPE_LABELS)
 
@@ -51,10 +53,27 @@ class CameraTabUiConfig(SchemaBase):
     # Dict at Boundary → HikvisionWidget приводит к HikvisionUiConfig (без циклического импорта схем).
     hikvision: Dict[str, Any] = Field(default_factory=dict)
 
+    touch_keyboard: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Touch-клавиатура для вкладки камеры (FPS, spinbox Hikvision); mode: mini | full.",
+    )
+
+    touch_keyboard_fps: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Перекрывает touch_keyboard для Sim/Webcam (FPS и др.); mode: mini | full.",
+    )
+
+    touch_keyboard_hikvision: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Перекрывает touch_keyboard для Hikvision; mode: mini | full.",
+    )
+
     def camera_type_index_map(self) -> Dict[str, int]:
+        """Маппинг camera_type → индекс в ComboBox/стеке."""
         return {rid: i for i, rid in enumerate(self.camera_type_register_ids)}
 
     def camera_type_for_combo_index(self, index: int) -> str:
+        """Строковый id типа камеры по индексу ComboBox."""
         ids = self.camera_type_register_ids
         if not ids:
             return DEFAULT_CAMERA_TYPE
@@ -64,6 +83,7 @@ class CameraTabUiConfig(SchemaBase):
 
 
 def default_tab_item():
+    """TabItemConfig вкладки «Камера»."""
     from ..tab_item_config import TabItemConfig
 
     return TabItemConfig(id="camera", title="Камера", widget="camera")

@@ -1,21 +1,46 @@
-# Шаблон MVP-вкладки
+# Шаблон MVP-вкладки и фиче-виджета
 
-Копировать в `feature_tab/` и заполнить. Эталон: `camera_tab`.
+См. **Tab shell vs фиче-виджет** в `TAB_STRUCTURE.md`.
 
-## Структура папки
+- **Tab shell** — тонкий контейнер (`BaseTab`): скролл, placeholder, композиция. Эталон: `multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab`.
+- **Фиче-виджет** — переиспользуемый блок на **`BaseWidget`**. Эталон: `multiprocess_prototype/frontend/widgets/hikvision_widget`.
+
+## BaseWidget vs MvpTabBase
+
+| Вариант | Когда | Где вешать связи UI → логика |
+|---------|--------|------------------------------|
+| **`BaseWidget`** | Фиче-виджет, нужна явная карта сигналов | Переопределить `_connect_signals()` (как HikvisionWidget) |
+| **`MvpTabBase`** | Наследник `BaseWidget` с пустым `_connect_signals` по умолчанию | В `__init__` презентера или `_on_presenter_ready` |
+
+Оба проходят один жизненный цикл `BaseWidget` (см. `../base_widget/README.md`).
+
+## Структура папки фиче-виджета (`BaseWidget`)
+
+```
+feature_widget/
+├── __init__.py
+├── widget.py       # subclass BaseWidget[M] — _init_ui, _connect_signals, View methods
+├── presenter.py
+├── view.py         # Protocol: методы обновления UI для презентера
+├── callbacks.py    # опционально: frozen dataclass
+├── model.py        # опционально; иначе презентер + rm
+└── schemas.py      # UiConfig
+```
+
+## Структура папки tab shell (MVP презентер вкладки)
 
 ```
 feature_tab/
 ├── __init__.py
-├── widget.py
-├── presenter.py
+├── widget.py       # BaseTab или MvpTabBase — композиция дочерних виджетов
+├── presenter.py    # опционально (как camera_tab)
 ├── view.py
 ├── callbacks.py
 ├── schemas.py
 └── ui_coerce.py   # опционально
 ```
 
-## widget.py (наследует MvpTabBase)
+## widget.py tab shell (наследует MvpTabBase)
 
 ```python
 from frontend_module.widgets.tabs import MvpTabBase, RegisterBindingContext, callback_no_args

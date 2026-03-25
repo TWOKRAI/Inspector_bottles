@@ -2,7 +2,7 @@
 """
 FrontendConfig — корневая схема всего frontend-процесса.
 
-Композиция только из дочерних пакетов (main_window, loading, tabs_setting).
+Композиция только из дочерних пакетов (main_window, loading, tabs_setting, виджеты вкладок).
 Секции UI живут рядом с виджетами; здесь — склейка и build_dict.
 
 Конфиг приложения (вложенные схемы: tabs, settings_tab, recipes_tab, main_window и т.д.)
@@ -27,7 +27,13 @@ from multiprocess_framework.modules.data_schema_module import (
 from multiprocess_prototype.frontend.windows.loading import LoadingWindowConfig
 from multiprocess_prototype.frontend.windows.main_window import MainWindowConfig
 from multiprocess_prototype.frontend.widgets.tabs_setting import SettingsTabConfig, TabsConfig
-from multiprocess_prototype.frontend.widgets.tabs_setting.recipes_tab.schemas import RecipesTabConfig
+from multiprocess_prototype.frontend.widgets.cropped_regions_widget.schemas import (
+    CroppedRegionsTabUiConfig,
+)
+from multiprocess_prototype.frontend.widgets.post_processing_widget.schemas import (
+    PostProcessingTabUiConfig,
+)
+from multiprocess_prototype.frontend.widgets.settings_recipe_widget.schemas import RecipesTabConfig
 
 
 @register_schema("WindowRegistryEntry")
@@ -67,12 +73,22 @@ class FrontendConfig(SchemaBase):
 
     recipes_tab: RecipesTabConfig = Field(default_factory=RecipesTabConfig)
 
+    cropped_regions_tab: CroppedRegionsTabUiConfig = Field(default_factory=CroppedRegionsTabUiConfig)
+
+    post_processing_tab: PostProcessingTabUiConfig = Field(default_factory=PostProcessingTabUiConfig)
+
     # Путь к YAML рецептов (опционально; по умолчанию multiprocess_prototype/data/recipes.yaml)
     recipes_path: Optional[str] = None
 
     # Runtime (из app_cfg)
     camera_type: CameraTypeStr = DEFAULT_CAMERA_TYPE
     poll_interval_ms: int = 16
+
+    # Touch-клавиатура для панелей (деревья/таблицы/QLineEdit): dict для TouchKeyboardConfig
+    touch_keyboard: Optional[Dict[str, Any]] = Field(
+        default_factory=lambda: {"mode": "full"},
+        description="По умолчанию full (полная клавиатура); mini — только цифры; off — выкл. Перекрывается GuiConfig.",
+    )
 
     def build_dict(self, app_cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """
@@ -85,7 +101,7 @@ class FrontendConfig(SchemaBase):
 
         Returns:
             dict с window, header, image_panel, tabs, window_registry,
-            camera_type, poll_interval_ms, settings_tab.
+            camera_type, poll_interval_ms, settings_tab, touch_keyboard, …
         """
         app_cfg = app_cfg or {}
 
@@ -116,6 +132,10 @@ class FrontendConfig(SchemaBase):
         if env_on and not ui_diag.get("enabled"):
             ui_diag["enabled"] = True
 
+        tk = app_cfg.get("touch_keyboard")
+        if tk is None:
+            tk = self.touch_keyboard
+
         result = {
             "window": mw_data["window"],
             "header": mw_data["header"],
@@ -126,11 +146,14 @@ class FrontendConfig(SchemaBase):
             "poll_interval_ms": app_cfg.get("poll_interval_ms", self.poll_interval_ms),
             "settings_tab": self.settings_tab.model_dump(),
             "recipes_tab": self.recipes_tab.model_dump(),
+            "cropped_regions_tab": self.cropped_regions_tab.model_dump(),
+            "post_processing_tab": self.post_processing_tab.model_dump(),
             "recipes_path": recipes_path,
             "recipe_access": dict(app_cfg.get("recipe_access") or {}),
             "loading_window": self.loading_window.model_dump(),
             "camera_tab": camera_tab,
             "ui_diagnostics": ui_diag,
+            "touch_keyboard": tk,
         }
         return result
 

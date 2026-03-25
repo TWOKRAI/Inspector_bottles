@@ -44,8 +44,19 @@ _CAMERA_FIELDS = frozenset(
         "hikvision_gain",
     }
 )
-# Должно совпадать с modules/processor_frame/register_sync.py
-_PROCESSOR_FIELDS = frozenset({"color_lower", "color_upper", "min_area", "max_area"})
+# Поля ProcessorRegisters; обработка в processor_frame/register_sync.py — пока color/min_area/max_area;
+# crop_regions / post_processing_regions — снимок для GUI/рецепта (бэкенд может игнорировать до фазы 2).
+_PROCESSOR_FIELDS = frozenset(
+    {
+        "color_lower",
+        "color_upper",
+        "min_area",
+        "max_area",
+        "crop_regions",
+        "post_processing_regions",
+        "logical_camera_ids",
+    }
+)
 # Должно совпадать с modules/renderer/register_sync.py
 _RENDERER_FIELDS = frozenset(
     {"show_original", "show_mask", "draw_contours", "draw_bboxes", "save_frames"}

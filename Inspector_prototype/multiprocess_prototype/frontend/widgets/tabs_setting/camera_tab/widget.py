@@ -1,4 +1,4 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/camera_tab/widget.py
+# multiprocess_prototype/frontend/widgets/camera_tab/widget.py
 """
 CameraTabWidget — контейнер: ComboBox типа камеры + StackedWidget с тремя виджетами.
 
@@ -14,10 +14,12 @@ from frontend_module.widgets.tabs import BaseTab
 from frontend_module.core.qt_imports import QComboBox, QGroupBox, QStackedWidget, QVBoxLayout
 from frontend_module.core.schema_config import coerce_schema_config
 
+from multiprocess_prototype.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
+
 from ...hikvision_widget import HikvisionWidget
 from ...camera_common import SimWebcamWidget
 
-from .register_ops import persist_camera_type, set_camera_type_field
+from .presenter import CameraTabPresenter
 from .schemas import CameraTabUiConfig
 
 
@@ -31,50 +33,65 @@ class CameraTabWidget(BaseTab):
         registers_manager: Optional[Any] = None,
         callbacks_map: Optional[Dict[str, Any]] = None,
         ui: Optional[Union[CameraTabUiConfig, dict]] = None,
+        touch_keyboard: Any | None = None,
         parent: Optional[Any] = None,
     ):
+        """ComboBox типа камеры + стек из SimWebcam×2 и Hikvision."""
         super().__init__(parent)
         self._registers_manager = registers_manager
         self._callbacks_map = callbacks_map or {}
         self._ui = coerce_schema_config(ui, CameraTabUiConfig)
+        self._touch_keyboard = merge_touch_keyboard_dicts(
+            touch_keyboard, getattr(self._ui, "touch_keyboard", None)
+        )
         self._camera_type_map = self._ui.camera_type_index_map()
+        self._presenter = CameraTabPresenter(
+            view=self,
+            rm=registers_manager,
+            ui=self._ui,
+            callbacks_map=self._callbacks_map,
+        )
         self._init_ui()
 
         idx = self._camera_type_map.get(camera_type, 0)
-        self._combo_camera_type.setCurrentIndex(idx)
-        self._stack.setCurrentIndex(idx)
-        if registers_manager:
-            set_camera_type_field(registers_manager, camera_type)
-            persist_camera_type(camera_type)
+        self._presenter.apply_initial_camera_type(camera_type, stack_index=idx)
 
     def _init_ui(self) -> None:
+        """Верх: выбор типа камеры; низ: QStackedWidget с тремя страницами."""
         u = self._ui
         root = QVBoxLayout(self)
 
+        # --- Блок: тип камеры (ComboBox) ---
         type_group = QGroupBox(u.group_camera_type)
         type_layout = QVBoxLayout(type_group)
         self._combo_camera_type = QComboBox()
         self._combo_camera_type.addItems(list(u.camera_type_options))
         self._combo_camera_type.setMinimumWidth(u.camera_type_combo_min_width)
-        self._combo_camera_type.currentIndexChanged.connect(self._on_camera_type_changed)
+        self._combo_camera_type.currentIndexChanged.connect(self._presenter.on_camera_type_changed)
         type_layout.addWidget(self._combo_camera_type)
         root.addWidget(type_group)
 
+        # --- Блок: три виджета (simulator, webcam, hikvision) в стеке ---
         self._stack = QStackedWidget()
+        tk_fps = merge_touch_keyboard_dicts(self._touch_keyboard, getattr(u, "touch_keyboard_fps", None))
+        tk_hik = merge_touch_keyboard_dicts(self._touch_keyboard, getattr(u, "touch_keyboard_hikvision", None))
         sim = SimWebcamWidget(
             camera_type_id="simulator",
             registers_manager=self._registers_manager,
             callbacks=self._callbacks_map.get("simulator"),
+            touch_keyboard=tk_fps,
         )
         web = SimWebcamWidget(
             camera_type_id="webcam",
             registers_manager=self._registers_manager,
             callbacks=self._callbacks_map.get("webcam"),
+            touch_keyboard=tk_fps,
         )
         hik = HikvisionWidget(
             registers_manager=self._registers_manager,
             callbacks=self._callbacks_map.get("hikvision"),
             ui=self._ui.hikvision,
+            touch_keyboard=tk_hik,
         )
         self._stack.addWidget(sim)
         self._stack.addWidget(web)
@@ -83,30 +100,33 @@ class CameraTabWidget(BaseTab):
 
         root.addWidget(self._stack)
 
-    def _on_camera_type_changed(self, index: int) -> None:
-        camera_type = self._ui.camera_type_for_combo_index(index)
-        set_camera_type_field(self._registers_manager, camera_type)
-        persist_camera_type(camera_type)
-        # Явная команда — register_update обрабатывается только в capture_worker,
-        # который при остановленном захвате не читает очередь.
-        cb = self._callbacks_map.get("on_camera_type_changed")
-        if cb:
-            cb(camera_type)
+    def set_stack_index(self, index: int) -> None:
+        """Показать страницу стека по индексу."""
         self._stack.setCurrentIndex(index)
 
+    def set_combo_index(self, index: int, *, block_signals: bool = False) -> None:
+        """Синхронизировать ComboBox с регистром/стеком (опционально без currentIndexChanged)."""
+        if block_signals:
+            self._combo_camera_type.blockSignals(True)
+        self._combo_camera_type.setCurrentIndex(index)
+        if block_signals:
+            self._combo_camera_type.blockSignals(False)
+
     def sync_camera_type(self, camera_type: str) -> None:
+        """Выставить combo и стек по строковому id типа камеры."""
         idx = self._camera_type_map.get(camera_type, 0)
-        self._combo_camera_type.blockSignals(True)
-        self._combo_camera_type.setCurrentIndex(idx)
-        self._combo_camera_type.blockSignals(False)
-        self._stack.setCurrentIndex(idx)
+        self.set_combo_index(idx, block_signals=True)
+        self.set_stack_index(idx)
 
     def update_camera_devices(self, devices: list) -> None:
+        """Проброс списка устройств в HikvisionWidget (IPC / enum)."""
         self._hik_widget.update_camera_devices(devices)
 
     def update_camera_parameters(self, params: dict) -> None:
+        """Проброс параметров камеры в HikvisionWidget."""
         self._hik_widget.update_camera_parameters(params)
 
     @property
     def registers_manager(self):
+        """Rm вкладки (для внешнего кода)."""
         return self._registers_manager

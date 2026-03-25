@@ -52,7 +52,17 @@ class VirtualKeyboardMini(QWidget):
                     grid.addWidget(btn, row, col)
         layout.addLayout(grid)
         self.setLayout(layout)
-        self.resize(300, 250)
+        self.apply_geometry_for_touch()
+
+    def apply_geometry_for_touch(
+        self,
+        width_px: int = 300,
+        height_px: int = 250,
+        scale: float = 1.0,
+    ) -> None:
+        w = max(80, int(width_px * scale))
+        h = max(80, int(height_px * scale))
+        self.resize(w, h)
 
     @property
     def signal_bus(self) -> WidgetSignalBus:

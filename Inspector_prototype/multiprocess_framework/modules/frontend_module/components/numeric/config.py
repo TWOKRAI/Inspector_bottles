@@ -7,12 +7,13 @@ NumericViewConfig — настройки отображения числовог
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from frontend_module.components.base.config import (
     BaseControlConfig,
     LabelOverride,
 )
+from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
 
 
 @dataclass
@@ -22,7 +23,9 @@ class NumericViewConfig(BaseControlConfig):
     view_type: Literal["slider", "spinbox"] = "slider"
     show_ticks: bool = False
     tick_interval: Optional[int] = None
-    touch_keyboard_factory: Optional[object] = None  # Callable[[], keyboard_widget]
+    touch_keyboard: Optional[TouchKeyboardConfig] = None
+    touch_keyboard_factory: Optional[Callable[[], Any]] = None
+    """Если задано, вызывается вместо встроенной mini/full (совместимость со старым API)."""
     min_val: Optional[float] = None  # для элементов массива (например, BGR 0–255)
     max_val: Optional[float] = None
     label_position: Literal["left", "right", "top", "bottom"] = "left"

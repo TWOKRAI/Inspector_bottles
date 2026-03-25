@@ -33,5 +33,6 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-03-25 | `_resolve_dispatch_targets`: пустой **`process_targets`** в **`FieldMeta.routing`** → не слать **`register_update`** (GUI-only поля в **`ProcessorRegisters`**, ADR-094). | — |
 | 2026-03-20 | Register dispatch: build_connection_map_from_registers, set_field_value + fan-out, тесты test_dispatch_routing | 0 |
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |

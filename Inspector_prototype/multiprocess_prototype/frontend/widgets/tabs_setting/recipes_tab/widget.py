@@ -13,10 +13,12 @@ from frontend_module.core.qt_imports import QScrollArea, QVBoxLayout, QWidget, p
 from frontend_module.core.schema_config import coerce_schema_config
 from frontend_module.interfaces import IRegistersManagerGui
 
+from multiprocess_prototype.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 from multiprocess_prototype.managers.access_context import AccessContext
+from multiprocess_prototype.managers.recipe_manager_protocol import RecipeManagerProtocol
 
-from .recipe_slot_table_panel import RegisterRecipePanel
-from .schemas import RecipesTabConfig
+from ...settings_recipe_widget.schemas import RecipesTabConfig
+from ...recipes_widget import RegisterRecipePanelWidget as RegisterRecipePanel
 
 
 class RecipesTabWidget(BaseTab):
@@ -31,12 +33,14 @@ class RecipesTabWidget(BaseTab):
         *,
         registers_manager: Optional[IRegistersManagerGui] = None,
         ui: Optional[Union[RecipesTabConfig, dict]] = None,
-        recipe_manager: Optional[Any] = None,
+        recipe_manager: Optional[RecipeManagerProtocol] = None,
         recipe_access: Optional[Union[AccessContext, dict]] = None,
         on_recipe_applied: Optional[Callable[[int], None]] = None,
         on_recipe_saved: Optional[Callable[[int], None]] = None,
+        touch_keyboard: Any | None = None,
         parent: Optional[QWidget] = None,
     ):
+        """Панель рецептов регистров в QScrollArea или заглушка без rm."""
         super().__init__(parent)
         self._registers_manager = registers_manager
         self._ui = coerce_schema_config(ui, RecipesTabConfig)
@@ -48,17 +52,23 @@ class RecipesTabWidget(BaseTab):
         )
         self._on_recipe_applied = on_recipe_applied
         self._on_recipe_saved = on_recipe_saved
+        self._touch_keyboard = merge_touch_keyboard_dicts(
+            touch_keyboard, getattr(self._ui, "touch_keyboard", None)
+        )
         self._register_panel: Optional[RegisterRecipePanel] = None
         self._init_ui()
 
     @property
     def registers_manager(self) -> Optional[IRegistersManagerGui]:
+        """Rm для внешних обновлений."""
         return self._registers_manager
 
     def _init_ui(self) -> None:
+        """Placeholder или RegisterRecipePanel внутри прокручиваемой области."""
         layout = QVBoxLayout(self)
         binding = RegisterBindingContext(rm=self._registers_manager)
 
+        # --- Нет регистров: только заглушка ---
         if not binding.can_bind:
             layout.addWidget(create_registers_placeholder("Рецепты"))
             layout.addStretch()
@@ -67,11 +77,13 @@ class RecipesTabWidget(BaseTab):
         rm = binding.rm
         assert rm is not None
 
+        # --- Панель рецептов + прокрутка + сигналы load/save/default ---
         self._register_panel = RegisterRecipePanel(
             rm=rm,
             ui=self._ui,
             recipe_manager=self._recipe_manager,
             recipe_access=self._access_ctx,
+            touch_keyboard=self._touch_keyboard,
             on_recipe_applied=self._on_recipe_applied,
             on_recipe_saved=self._on_recipe_saved,
         )

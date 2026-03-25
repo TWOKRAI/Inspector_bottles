@@ -44,3 +44,7 @@ def test_create_tab_widget_factory_uses_frontend_app_context():
     factory = create_tab_widget_factory(ctx)
     w = factory("processing", {})
     assert w is not None
+    w_crop = factory("cropped_regions", {})
+    assert w_crop is not None
+    w_post = factory("post_processing", {})
+    assert w_post is not None

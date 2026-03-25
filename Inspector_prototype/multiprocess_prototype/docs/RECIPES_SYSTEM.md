@@ -3,6 +3,8 @@
 Документ описывает **текущее** поведение: два независимых вида рецептов, один YAML-файл, связь с фреймворком и с процессом GUI.  
 Архитектурные решения зафиксированы в [DECISIONS.md — ADR-080 … ADR-082](../../multiprocess_framework/DECISIONS.md) (снимки, два вида рецептов, разделение вкладок).
 
+**Вложенные данные (ROI, постобработка, матрёшка):** [DATA_MODEL_NESTED.md](DATA_MODEL_NESTED.md).
+
 ---
 
 ## 1. Цель
@@ -95,11 +97,11 @@ app_recipes:
 | **`RecipeManager`** | Загрузка/сохранение YAML, слоты `register_recipes` и `app_recipes`, текущие индексы слотов. |
 | **`app_recipe_aggregate`** ( [`managers/app_recipe_aggregate.py`](../managers/app_recipe_aggregate.py) ) | Сборка/снимок агрегата `RecipesTabConfig` + `ProcessingTabUiConfig`; ленивые импорты схем, чтобы не тянуть `widgets/__init__` при тестах менеджера. |
 | **`AccessContext`** ([`managers/access_context.py`](../managers/access_context.py)) | Уровень доступа и флаги `bypass_readonly` / `show_hidden` для таблиц. |
-| **`RecipeSlotTablePanel`** / **`RegisterRecipePanel`** / **`AppRecipePanel`** | Общая логика слота и таблицы ([`recipe_slot_table_panel.py`](../frontend/widgets/tabs_setting/recipes_tab/recipe_slot_table_panel.py)); регистры и app разведены по подклассам. |
+| **`RegisterRecipePanelWidget`** / **`AppRecipePanelWidget`** (`BaseWidget` + MVP) | Реализация в [`recipes_widget/`](../frontend/widgets/recipes_widget/), [`settings_recipe_widget/`](../frontend/widgets/settings_recipe_widget/); имена **`RegisterRecipePanel`** / **`AppRecipePanel`** — алиасы в [`recipe_slot_table_panel.py`](../frontend/widgets/tabs_setting/recipes_tab/recipe_slot_table_panel.py). |
 | **`RecipesTabWidget`** | Только **`RegisterRecipePanel`** (параметры алгоритма); `RecipeManager` + `AccessContext`. |
 | **`SettingsTabWidget`** | Слайдеры/чекбоксы по конфигу + **`AppRecipePanel`** (пресеты UI-схем); тот же `RecipeManager` и `recipe_access`, словарь **`recipes_tab`** для подписей и дефолтов агрегата. |
-| **`build_recipe_rows`** ( [`recipe_rows.py`](../frontend/widgets/tabs_setting/recipes_tab/recipe_rows.py) ) | Строки таблицы регистров из `RegistersManager` + `FieldMeta` / `AccessContext`. |
-| **`build_app_recipe_rows`** ( [`app_recipe_rows.py`](../frontend/widgets/tabs_setting/recipes_tab/app_recipe_rows.py) ) | Строки таблицы по агрегату `SchemaBase`. |
+| **`build_recipe_rows`** ( [`recipe_rows.py`](../frontend/widgets/recipes_widget/recipe_rows.py) ) | Строки таблицы регистров из `RegistersManager` + `FieldMeta` / `AccessContext`. |
+| **`build_app_recipe_rows`** ( [`app_recipe_rows.py`](../frontend/widgets/settings_recipe_widget/app_recipe_rows.py) ) | Строки таблицы по агрегату `SchemaBase`. |
 
 ---
 

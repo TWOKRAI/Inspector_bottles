@@ -7,6 +7,8 @@
 
 from typing import Annotated, Any, Dict, Optional
 
+from pydantic import Field
+
 from multiprocess_prototype.camera_policy import CameraTypeStr, DEFAULT_CAMERA_TYPE
 
 from multiprocess_framework.modules.data_schema_module import (
@@ -63,3 +65,11 @@ class GuiConfig(ProcessConfigBase):
             ),
         ),
     ] = None
+
+    touch_keyboard: Annotated[
+        Optional[Dict[str, Any]],
+        FieldMeta(
+            "Виртуальная клавиатура для QLineEdit / spinbox / слайдеров",
+            info="По умолчанию full (RU/EN); mini — цифровая; выключить: {\"mode\": \"off\"}.",
+        ),
+    ] = Field(default_factory=lambda: {"mode": "full"})

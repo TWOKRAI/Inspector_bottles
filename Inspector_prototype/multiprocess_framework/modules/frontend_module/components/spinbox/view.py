@@ -4,14 +4,16 @@ SpinBoxValueView — только QDoubleSpinBox, без подписи.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from frontend_module.components.base.infrastructure.signal_utils import (
     block_signals,
 )
+from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
 from frontend_module.core.qt_imports import (
     QDoubleSpinBox,
     QHBoxLayout,
+    QLineEdit,
     QWidget,
     pyqtSignal,
 )
@@ -23,7 +25,12 @@ class SpinBoxValueView(QWidget):
     value_changed = pyqtSignal(float)
     value_finished = pyqtSignal(float)
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        touch_keyboard: Optional[TouchKeyboardConfig] = None,
+        touch_keyboard_factory: Optional[Callable[[], Any]] = None,
+    ) -> None:
         super().__init__(parent)
         self._spinbox = QDoubleSpinBox()
         QHBoxLayout(self).addWidget(self._spinbox)
@@ -31,6 +38,23 @@ class SpinBoxValueView(QWidget):
         self._spinbox.editingFinished.connect(
             lambda: self.value_finished.emit(self._spinbox.value())
         )
+        le = self._spinbox.lineEdit()
+        if isinstance(le, QLineEdit):
+            from frontend_module.widgets.keyboard.touch_keyboard import (
+                install_touch_keyboard_on_line_edit,
+            )
+
+            install_touch_keyboard_on_line_edit(
+                self,
+                le,
+                touch_keyboard,
+                self._touch_keyboard_enter,
+                keyboard_factory=touch_keyboard_factory,
+            )
+
+    def _touch_keyboard_enter(self) -> None:
+        self._spinbox.interpretText()
+        self._spinbox.clearFocus()
 
     def set_range(self, min_val: float, max_val: float, step: float) -> None:
         self._spinbox.setMinimum(min_val)

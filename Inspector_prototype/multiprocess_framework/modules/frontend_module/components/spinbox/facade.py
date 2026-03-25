@@ -41,6 +41,8 @@ def _spinbox_config_to_numeric_view_config(config: SpinBoxConfig) -> NumericView
         min_val=config.min_val,
         max_val=config.max_val,
         label_position=config.label_position,
+        touch_keyboard=config.touch_keyboard,
+        touch_keyboard_factory=config.touch_keyboard_factory,
     )
 
 

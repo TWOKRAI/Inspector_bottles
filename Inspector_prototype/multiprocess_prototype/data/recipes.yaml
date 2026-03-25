@@ -67,3 +67,36 @@ app_recipes:
       checkbox_contours: Contours
       checkbox_bbox: BBox
       checkbox_save_frames: Save
+  '0':
+    RecipesTabConfig:
+      group_register_box: Рецепт регистров
+      group_app_box: App-рецепт (UI)
+      label_slot: 'Слот:'
+      btn_load: Загрузить
+      btn_save: Сохранить
+      btn_default: По умолчанию
+      table_group_title: Параметры алгоритма (регистры)
+      table_app_group_title: Параметры UI (app-рецепт)
+      col_param: Параметр
+      col_value: Значение
+      col_info: Информация
+      recipe_index_min: 0
+      recipe_index_max: 21
+    ProcessingTabUiConfig:
+      group_color: Цветовая детекция (BGR)
+      group_area: Площадь пятна
+      group_display: Отображение
+      channel_b: B
+      channel_g: G
+      channel_r: R
+      color_hint: Lower | Upper
+      label_min_area_prefix: 'Мин:'
+      label_max_area_prefix: 'Макс:'
+      label_max_area_unlimited: ' (без огр.)'
+      label_max_area_initial_suffix: ' (0=без огр.)'
+      label_px: px
+      checkbox_original: Original
+      checkbox_mask: Mask
+      checkbox_contours: Contours
+      checkbox_bbox: BBox
+      checkbox_save_frames: Save

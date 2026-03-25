@@ -81,6 +81,8 @@ class CompoundNumericControl:
                 label=labels[i],
                 show_ticks=view_config.show_ticks,
                 tick_interval=view_config.tick_interval,
+                touch_keyboard=view_config.touch_keyboard,
+                touch_keyboard_factory=view_config.touch_keyboard_factory,
                 min_val=view_config.min_val,
                 max_val=view_config.max_val,
             )

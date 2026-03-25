@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional, Union
 
 import yaml
 
+from multiprocess_prototype.registers.snapshot_migrate import migrate_register_recipe_snapshot
+
 RecipeId = Union[int, str]
 
 _DATA_VERSION = 1
@@ -152,7 +154,8 @@ class RecipeManager:
         if raw is None:
             return False
         try:
-            registers_bridge.model_validate_all(deepcopy(raw), strict=False)
+            migrated = migrate_register_recipe_snapshot(deepcopy(raw))
+            registers_bridge.model_validate_all(migrated, strict=False)
         except Exception:
             return False
         return True

@@ -1,4 +1,4 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/settings_tab/schemas.py
+# multiprocess_prototype/frontend/widgets/tabs_setting/recipes_settings_tab/schemas.py
 """
 Конфиг вкладки «Настройки».
 
@@ -78,10 +78,12 @@ class SettingsTabConfig(SchemaBase):
     group_title: str = "Параметры отображения"
 
     def to_controls_dict_list(self) -> List[dict]:
+        """Список словарей привязок контролов (для дампов / совместимости)."""
         return [c.to_control_dict() for c in self.controls]
 
 
 def default_tab_item():
+    """TabItemConfig вкладки «Настройки»."""
     from ..tab_item_config import TabItemConfig
 
     return TabItemConfig(id="settings", title="Настройки", widget="settings")

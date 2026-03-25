@@ -22,6 +22,8 @@ def processor_process_boot_values() -> dict[str, Any]:
         "max_area": r.max_area,
         "color_lower": list(r.color_lower),
         "color_upper": list(r.color_upper),
+        "crop_regions": dict(r.crop_regions),
+        "logical_camera_ids": list(r.logical_camera_ids),
     }
 
 

@@ -30,6 +30,7 @@ class SimWebcamPresenter(TabPresenterBase["SimWebcamView", SimWebcamUiConfig]):
         self._callbacks = callbacks
 
     def on_fps_changed(self, value: int) -> None:
+        """Обновить подпись FPS и при наличии вызвать on_set_fps (команда в бэкенд)."""
         self._view.set_fps_label_text(f"{value}{self._ui.fps_suffix}")
         if self._callbacks.on_set_fps:
             self._callbacks.on_set_fps(value)

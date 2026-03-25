@@ -111,10 +111,19 @@ class VirtualKeyboard(QWidget):
         space_btn.clicked.connect(self.on_space_clicked)
         self.layout.addWidget(space_btn, 3, num_columns, 1, 2)
         self.setLayout(self.layout)
-        screen_geometry = QApplication.primaryScreen().geometry()
-        self.setGeometry(0, screen_geometry.height() - screen_geometry.height() // 3, screen_geometry.width(), screen_geometry.height() // 3)
+        self.apply_geometry_for_touch()
         self.btn_е = None
         self.apply_states()
+
+    def apply_geometry_for_touch(self, keyboard_height_fraction: float = 1.0 / 3.0) -> None:
+        """Разместить клавиатуру в нижней полосе экрана (доля высоты — keyboard_height_fraction)."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        screen_geometry = screen.geometry()
+        h = max(1, int(screen_geometry.height() * keyboard_height_fraction))
+        y = screen_geometry.height() - h
+        self.setGeometry(0, y, screen_geometry.width(), h)
 
     @property
     def signal_bus(self) -> WidgetSignalBus:
@@ -143,8 +152,7 @@ class VirtualKeyboard(QWidget):
         else:
             self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
             self.show()
-            screen_geometry = QApplication.primaryScreen().geometry()
-            self.setGeometry(0, screen_geometry.height() - screen_geometry.height() // 3, screen_geometry.width(), screen_geometry.height() // 3)
+            self.apply_geometry_for_touch()
 
     def on_button_clicked(self):
         button = self.sender()

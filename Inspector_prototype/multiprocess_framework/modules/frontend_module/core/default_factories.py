@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
 from frontend_module.core.widget_registry import WidgetRegistry
 from frontend_module.interfaces import IRegistersManager
 
@@ -25,6 +26,7 @@ def _slider_config_from_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
         "ui_elements",
         "controls",
         "callback",
+        "touch_keyboard",
         "touch_keyboard_factory",
     ):
         if key in kwargs and kwargs[key] is not None:
@@ -42,6 +44,7 @@ def _slider_config_from_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
                 "ui_elements",
                 "controls",
                 "callback",
+                "touch_keyboard",
                 "touch_keyboard_factory",
             ):
                 if k in extra and k not in config:
@@ -88,6 +91,8 @@ def _create_slider(
     view_config = NumericViewConfig(
         view_type="slider",
         label=config.get("label"),
+        touch_keyboard=coerce_touch_keyboard(config.get("touch_keyboard")),
+        touch_keyboard_factory=config.get("touch_keyboard_factory"),
     )
     result = NumericControl.create(registers_manager, binding, view_config)
     return result.widget

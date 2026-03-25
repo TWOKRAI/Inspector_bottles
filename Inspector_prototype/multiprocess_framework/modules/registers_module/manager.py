@@ -146,18 +146,24 @@ class RegistersManager:
             fm = get_fm(field_name)
             if fm is not None and getattr(fm, "routing", None):
                 raw_pt = (fm.routing or {}).get("process_targets")
-                if raw_pt:
-                    if isinstance(raw_pt, (list, tuple)):
-                        return [str(x) for x in raw_pt if x is not None and str(x)]
-                    return [str(raw_pt)]
+                if raw_pt is not None:
+                    if isinstance(raw_pt, (list, tuple)) and len(raw_pt) == 0:
+                        return []
+                    if raw_pt:
+                        if isinstance(raw_pt, (list, tuple)):
+                            return [str(x) for x in raw_pt if x is not None and str(x)]
+                        return [str(raw_pt)]
 
         meta = self.get_field_metadata(register_name, field_name)
         routing = meta.get("routing") or {}
         raw_pt = routing.get("process_targets")
-        if raw_pt:
-            if isinstance(raw_pt, (list, tuple)):
-                return [str(x) for x in raw_pt if x is not None and str(x)]
-            return [str(raw_pt)]
+        if raw_pt is not None:
+            if isinstance(raw_pt, (list, tuple)) and len(raw_pt) == 0:
+                return []
+            if raw_pt:
+                if isinstance(raw_pt, (list, tuple)):
+                    return [str(x) for x in raw_pt if x is not None and str(x)]
+                return [str(raw_pt)]
 
         cls = type(reg)
         dispatch = getattr(cls, "register_dispatch", None)

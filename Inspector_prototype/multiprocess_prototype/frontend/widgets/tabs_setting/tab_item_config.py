@@ -3,7 +3,7 @@
 TabItemConfig — описание одной вкладки в TabWidget.
 
 id — уникальный ключ (callback_key, routing). title — текст на табе.
-widget — ключ фабрики (tab_factory): recipes, settings, processing, camera.
+widget — ключ фабрики (tab_factory): recipes, settings, processing, cropped_regions, camera.
 """
 
 from __future__ import annotations

@@ -2,9 +2,11 @@
 
 Общий каркас для виджетов по паттерну MVP (Model–View–Presenter) с опциональным слоем Model.
 
-## Связь с MvpTabBase
+## Связь с MvpTabBase и вкладками
 
 **MvpTabBase** наследует **BaseWidget** и по умолчанию делает `_connect_signals` пустым (презентер подключается при создании или в `_on_presenter_ready`). Для полного flow с отдельным шагом привязки кнопок используйте **BaseWidget** и реализуйте `_connect_signals` (как HikvisionWidget).
+
+**Tab shell vs фиче-виджет:** оболочка вкладки (скролл, placeholder, композиция) — отдельно от переиспользуемого фиче-виджета на `BaseWidget`. Подробно: `../tabs/TAB_STRUCTURE.md` (раздел «Tab shell vs фиче-виджет»), шаблоны: `../tabs/MVP_TEMPLATE.md`.
 
 ## Жизненный цикл
 

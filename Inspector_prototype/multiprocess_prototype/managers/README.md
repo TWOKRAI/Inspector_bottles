@@ -9,3 +9,5 @@
 | `app_recipe_aggregate.py` | Снимок/дефолты для app-части рецепта (`SchemaBase`) |
 
 Подробнее: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) (раздел «Менеджеры и доступ»), [docs/RECIPES_SYSTEM.md](../docs/RECIPES_SYSTEM.md).
+
+Общие чистые хелперы для нескольких панелей (не доменные менеджеры): [../frontend/coordinators/README.md](../frontend/coordinators/README.md).

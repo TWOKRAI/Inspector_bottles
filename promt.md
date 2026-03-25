@@ -228,7 +228,7 @@ BaseManager (абстрактный)
 ├── RouterManager
 ├── WorkerManager
 ├── ConsoleManager
-├── ConfigManager
+├── ConfigManagerа
 ├── SharedResourcesManager
 ├── ProcessModule (наследует BaseManager и добавляет специфику процесса)
 │   ├── GUIProcessModule

@@ -5,12 +5,13 @@ SpinBoxConfig — настройки спинбокса (value-часть).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from frontend_module.components.base.config import (
     BaseControlConfig,
     LabelOverride,
 )
+from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
 
 
 @dataclass
@@ -20,6 +21,8 @@ class SpinBoxConfig(BaseControlConfig):
     min_val: Optional[float] = None
     max_val: Optional[float] = None
     label_position: Literal["left", "right", "top", "bottom"] = "left"
+    touch_keyboard: Optional[TouchKeyboardConfig] = None
+    touch_keyboard_factory: Optional[Callable[[], Any]] = None
 
     def to_label_override(self) -> LabelOverride:
         return LabelOverride(

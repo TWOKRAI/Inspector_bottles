@@ -2,14 +2,18 @@
 """
 Виджеты вкладок и прочие UI-пакеты.
 
-Вкладки главного окна и полоса табов: widgets.tabs_setting (TabItemConfig, TabsConfig,
-CameraTabWidget, …).
+Полоса табов: `tabs_setting` (TabItemConfig, TabsConfig, оболочки `recipes_tab/`, `recipes_settings_tab/`, …); реэкспорт
+публичных классов вкладок — через `from .tabs_setting import …`.
 """
 
 from .tabs_setting import (
     CameraTabUiConfig,
     CameraTabWidget,
     ControlBinding,
+    CroppedRegionsTabUiConfig,
+    CroppedRegionsTabWidget,
+    PostProcessingTabUiConfig,
+    PostProcessingTabWidget,
     ProcessingTabUiConfig,
     ProcessingTabWidget,
     RecipesTabConfig,
@@ -29,6 +33,10 @@ __all__ = [
     "ControlBinding",
     "ProcessingTabWidget",
     "ProcessingTabUiConfig",
+    "CroppedRegionsTabUiConfig",
+    "CroppedRegionsTabWidget",
+    "PostProcessingTabWidget",
+    "PostProcessingTabUiConfig",
     "CameraTabWidget",
     "build_camera_tab_callbacks",
     "CameraTabUiConfig",

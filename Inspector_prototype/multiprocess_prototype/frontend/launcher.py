@@ -23,7 +23,9 @@ from multiprocess_prototype.frontend.configs.frontend_config import build_fronte
 from multiprocess_prototype.frontend.diagnostics import attach_ui_diagnostics
 from multiprocess_prototype.frontend.commands import GuiCommandHandler
 from multiprocess_prototype.frontend.widgets import build_camera_tab_callbacks
-from multiprocess_prototype.frontend.widgets.tabs_setting.camera_tab.schemas import CameraTabUiConfig
+from multiprocess_prototype.frontend.widgets.tabs_setting.camera_tab.schemas import (
+    CameraTabUiConfig,
+)
 from multiprocess_prototype.frontend.app_context import FrontendAppContext
 from multiprocess_prototype.frontend.windows.main_window import MainWindow, create_tab_widget_factory
 

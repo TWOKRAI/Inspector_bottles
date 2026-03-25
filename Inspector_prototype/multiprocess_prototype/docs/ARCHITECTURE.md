@@ -106,7 +106,7 @@ flowchart LR
 5. **GUI** — `GuiProcess.run()` → **`FrontendLauncher`** (`frontend/launcher.py`): `build_frontend_config`, `create_registers()`, `RecipeManager`, регистрация `MainWindow` / `LoadingWindow` через `frontend_module`.
 6. **Регистры приложения** — `registers/factory.py`, схемы в `registers/schemas/`; мост UI ↔ регистры — `FrontendRegistersBridge` (фреймворк) + колбэки вкладок.
 7. **Команды к процессам** — `GuiCommandHandler` + `registers/command_routing.py` + `gui_command_catalog.py`; на стороне процесса — `GuiProcessMixin._send_command` и маршрутизация фреймворка.
-8. **Рецепты** — один файл YAML, два пространства имён: `register_recipes` / `app_recipes` ([RECIPES_SYSTEM.md](RECIPES_SYSTEM.md)); UI: вкладка «Рецепты» (`RegisterRecipePanel`) и «Настройки» (`AppRecipePanel`), общая база `RecipeSlotTablePanel`.
+8. **Рецепты** — один файл YAML, два пространства имён: `register_recipes` / `app_recipes` ([RECIPES_SYSTEM.md](RECIPES_SYSTEM.md)); UI: вкладка «Рецепты» (`RegisterRecipePanel` / `RegisterRecipePanelWidget`) и «Настройки» (`AppRecipePanel` / `AppRecipePanelWidget`), фиче-виджеты на `BaseWidget` + MVP ([RECIPES_SYSTEM.md](RECIPES_SYSTEM.md), раздел 4).
 
 **Граница «фреймворк / приложение»:** в репозитории модульный код фреймворка лежит в `multiprocess_framework/modules/`; всё под `multiprocess_prototype/` — демо-приложение (схемы регистров, вкладки, бэкенд-пайплайн, YAML рецептов).
 

@@ -1,4 +1,4 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/recipe_rows.py
+# multiprocess_prototype/frontend/widgets/recipes_widget/recipe_rows.py
 """
 Построение строк таблицы рецептов из RegistersManager / bridge (обход регистров и полей).
 """
@@ -7,20 +7,24 @@ from __future__ import annotations
 
 import ast
 import json
-from typing import Any, List, Optional
+from collections import defaultdict
+from typing import Any, List, Optional, Tuple
 
 from multiprocess_prototype.managers.access_context import AccessContext
 
 
 def scalar_for_editing(value: Any) -> bool:
+    """True, если значение можно править как скаляр в текстовой ячейке."""
     return value is None or isinstance(value, (bool, int, float, str))
 
 
 def _scalar_for_editing(value: Any) -> bool:
+    """Алиас для scalar_for_editing (внутри build_recipe_rows)."""
     return scalar_for_editing(value)
 
 
 def _register_field_editable(rm: Any, reg: Any, register_name: str, field_name: str, ctx: AccessContext) -> bool:
+    """Доступность поля по FieldMeta регистра или метаданным rm."""
     if hasattr(reg, "get_field_meta"):
         meta = reg.get_field_meta(field_name)
         if meta is None:
@@ -41,6 +45,7 @@ def _register_field_editable(rm: Any, reg: Any, register_name: str, field_name: 
 
 
 def format_value_for_cell(value: Any) -> str:
+    """Строка для отображения в QTable (bool/json/scalar)."""
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -100,6 +105,7 @@ def build_recipe_rows(rm: Any, access_ctx: Optional[AccessContext] = None) -> Li
     Каждая строка: field_id, param, value (сырое для format), info, register_name,
     field_name, _value_editable.
     """
+    # Обход всех регистров и полей model_dump/dict с фильтром hidden и правами.
     ctx = access_ctx or AccessContext()
     rows: List[dict] = []
     names_fn = getattr(rm, "register_names", None)
@@ -144,3 +150,23 @@ def build_recipe_rows(rm: Any, access_ctx: Optional[AccessContext] = None) -> Li
                 }
             )
     return rows
+
+
+def group_rows_by_register(rows: List[dict]) -> List[Tuple[str, List[dict]]]:
+    """
+    Сгруппировать строки рецепта по register_name для StructuredTwoLevelTreeWidget.
+
+    В листьях колонка param — кратко field_name; field_id и прочие ключи сохраняются.
+    """
+    order: List[str] = []
+    by_reg: dict = defaultdict(list)
+    for r in rows:
+        reg = str(r.get("register_name") or "")
+        if reg not in order:
+            order.append(reg)
+        rr = dict(r)
+        rr["param"] = str(r.get("field_name") or r.get("param") or "")
+        by_reg[reg].append(rr)
+    for reg in by_reg:
+        by_reg[reg].sort(key=lambda x: str(x.get("field_name", "")))
+    return [(k, by_reg[k]) for k in order]

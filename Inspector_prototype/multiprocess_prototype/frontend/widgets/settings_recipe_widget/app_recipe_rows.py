@@ -1,20 +1,22 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/recipes_tab/app_recipe_rows.py
+# multiprocess_prototype/frontend/widgets/settings_recipe_widget/app_recipe_rows.py
 """
 Строки таблицы для app-рецептов (SchemaBase приложения, не RegistersManager).
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase
 
 from multiprocess_prototype.managers.access_context import AccessContext
 
-from .recipe_rows import scalar_for_editing
+from ..recipes_widget.recipe_rows import scalar_for_editing
 
 
 def _field_editable(schema: SchemaBase, field_name: str, ctx: AccessContext) -> bool:
+    """Учитывая FieldMeta и уровень доступа — можно ли редактировать ячейку значения."""
     meta = schema.get_field_meta(field_name) if hasattr(schema, "get_field_meta") else None
     if meta is None:
         return True
@@ -59,3 +61,19 @@ def build_app_recipe_rows(
                 }
             )
     return rows
+
+
+def group_rows_by_schema(rows: List[dict]) -> List[Tuple[str, List[dict]]]:
+    """Сгруппировать строки app-рецепта по schema_name для StructuredTwoLevelTreeWidget."""
+    order: List[str] = []
+    by_schema: dict = defaultdict(list)
+    for r in rows:
+        sch = str(r.get("schema_name") or "")
+        if sch not in order:
+            order.append(sch)
+        rr = dict(r)
+        rr["param"] = str(r.get("field_name") or r.get("param") or "")
+        by_schema[sch].append(rr)
+    for sch in by_schema:
+        by_schema[sch].sort(key=lambda x: str(x.get("field_name", "")))
+    return [(k, by_schema[k]) for k in order]

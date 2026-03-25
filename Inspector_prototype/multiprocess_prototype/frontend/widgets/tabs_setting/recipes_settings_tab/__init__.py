@@ -1,4 +1,4 @@
-# multiprocess_prototype/frontend/widgets/tabs_setting/settings_tab/
+# multiprocess_prototype/frontend/widgets/tabs_setting/recipes_settings_tab/
 """
 Вкладка настроек: таблица app-рецепта (AppRecipePanel), без отдельных слайдеров.
 

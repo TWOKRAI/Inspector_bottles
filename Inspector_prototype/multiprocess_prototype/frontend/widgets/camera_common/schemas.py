@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, Dict, Optional
+
+from pydantic import Field
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -34,3 +36,11 @@ class SimWebcamUiConfig(SchemaBase):
     fps_suffix: Annotated[str, FieldMeta("Суффикс FPS")] = " FPS"
     fps_slider_min: Annotated[int, FieldMeta("Мин. FPS")] = 1
     fps_slider_max: Annotated[int, FieldMeta("Макс. FPS")] = 60
+
+    touch_keyboard: Annotated[
+        Optional[Dict[str, Any]],
+        FieldMeta(
+            "Touch-клавиатура для FPS (NumericControl)",
+            info="Перекрывает глобальный + конфиг вкладки камеры; mode: mini | full.",
+        ),
+    ] = Field(default=None)
