@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from multiprocess_prototype.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
+
 from .model import RegisterRecipeModel
 from .recipe_rows import build_recipe_rows, coerce_string_to_value, format_value_for_cell
 
@@ -35,7 +37,7 @@ class RegisterRecipePresenter:
         self._apply_save_slot(idx)
 
     def on_default_clicked(self) -> None:
-        """Загрузить в регистры слот default_value."""
+        """Загрузить в регистры слот 0 (заводской пресет)."""
         mgr = self._model.recipe_manager
         if mgr is None:
             return
@@ -80,12 +82,13 @@ class RegisterRecipePresenter:
             self._model.on_recipe_saved(idx)
 
     def _apply_default_slot(self) -> None:
-        """load_recipe_to_registers('default_value')."""
+        """load_recipe_to_registers слот 0 (или legacy default_value)."""
         mgr = self._model.recipe_manager
         rm = self._model.rm
         if mgr is None:
             return
-        mgr.load_recipe_to_registers(rm, "default_value")
+        if not mgr.load_recipe_to_registers(rm, DEFAULT_RECIPE_SLOT_ID):
+            mgr.load_recipe_to_registers(rm, "default_value")
         self._view.refresh_table_rows()
 
     def initial_slot(self) -> int:

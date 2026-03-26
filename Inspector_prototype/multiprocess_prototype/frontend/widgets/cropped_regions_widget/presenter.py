@@ -5,14 +5,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, List, Optional
 
+from multiprocess_prototype.registers.schemas.pipeline.widget_bridge import (
+    apply_crop_nested_to_pipeline,
+    crop_nested_from_pipeline,
+    pipeline_config_from_register,
+)
 from multiprocess_prototype.registers.schemas.processing_tab import PROCESSOR_REGISTER
 
 from .model import CroppedRegionsModel
 from .params import (
     DEFAULT_CROPPED_PARAMS,
     coords_list_from_params,
-    merge_crop_regions_payload,
-    normalize_crop_regions_payload,
     params_from_coords_list,
     params_to_rect,
     parse_int_coordinate,
@@ -64,7 +67,7 @@ class CroppedRegionsPresenter:
         self._view.set_region_combo_options(names, current)
 
     def load_from_register(self) -> None:
-        """Считать processor.crop_regions в model и обновить UI."""
+        """Считать vision_pipeline → ROI в model и обновить UI."""
         rm = self._model.registers_manager
         if rm is None:
             self._view.set_camera_options(self.camera_ids_union(), self._default_camera_id())
@@ -72,15 +75,11 @@ class CroppedRegionsPresenter:
             self._fill_region_combo()
             return
         reg = rm.get_register(PROCESSOR_REGISTER)
-        if reg is None or not hasattr(reg, "crop_regions"):
+        if reg is None or not hasattr(reg, "vision_pipeline"):
             self._apply_loaded_state({})
             return
-        raw = getattr(reg, "crop_regions") or {}
-        if not isinstance(raw, dict):
-            self._apply_loaded_state({})
-            return
-        normalized = normalize_crop_regions_payload(raw, default_camera=self._default_camera_id())
-        self._apply_loaded_state(normalized)
+        nested = crop_nested_from_pipeline(pipeline_config_from_register(reg))
+        self._apply_loaded_state(nested)
 
     def _apply_loaded_state(self, normalized: dict) -> None:
         self._model.crop_regions_by_camera.clear()
@@ -286,5 +285,19 @@ class CroppedRegionsPresenter:
         rm = self._model.registers_manager
         if rm is None:
             return
-        payload = merge_crop_regions_payload(self._model.crop_regions_by_camera)
-        rm.set_field_value(PROCESSOR_REGISTER, "crop_regions", payload)
+        reg = rm.get_register(PROCESSOR_REGISTER)
+        if reg is None:
+            return
+        cfg = apply_crop_nested_to_pipeline(
+            pipeline_config_from_register(reg),
+            self._model.crop_regions_by_camera,
+            color_lower=list(reg.color_lower),
+            color_upper=list(reg.color_upper),
+            min_area=int(reg.min_area),
+            max_area=int(reg.max_area),
+        )
+        rm.set_field_value(
+            PROCESSOR_REGISTER,
+            "vision_pipeline",
+            cfg.model_dump(mode="python"),
+        )

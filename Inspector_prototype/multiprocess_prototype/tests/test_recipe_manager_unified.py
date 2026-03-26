@@ -52,6 +52,10 @@ def test_recipe_manager_save_new_format_roundtrip():
         assert loaded == app_snap
 
         with open(path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-        assert "register_recipes" in raw
-        assert "app_recipes" in raw
+            raw_main = yaml.safe_load(f)
+        assert "register_recipes" in raw_main
+        assert "app_recipes" not in raw_main
+        side = os.path.join(os.path.dirname(path), "settings_recipes.yaml")
+        with open(side, "r", encoding="utf-8") as f:
+            raw_side = yaml.safe_load(f)
+        assert "app_recipes" in raw_side

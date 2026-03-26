@@ -45,16 +45,15 @@ _CAMERA_FIELDS = frozenset(
     }
 )
 # Поля ProcessorRegisters; обработка в processor_frame/register_sync.py — пока color/min_area/max_area;
-# crop_regions / post_processing_regions — снимок для GUI/рецепта (бэкенд может игнорировать до фазы 2).
+# vision_pipeline — снимок для GUI/рецепта (бэкенд может игнорировать до фазы 2).
 _PROCESSOR_FIELDS = frozenset(
     {
         "color_lower",
         "color_upper",
         "min_area",
         "max_area",
-        "crop_regions",
-        "post_processing_regions",
         "logical_camera_ids",
+        "vision_pipeline",
     }
 )
 # Должно совпадать с modules/renderer/register_sync.py

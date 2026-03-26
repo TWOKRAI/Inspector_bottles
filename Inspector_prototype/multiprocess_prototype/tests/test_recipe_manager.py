@@ -67,8 +67,8 @@ def test_recipe_load_migrates_legacy_crop_in_yaml():
         mgr = RecipeManager(data_path=path)
         assert mgr.load_recipe_to_registers(registers, "0") is True
         proc = registers.get_register("processor")
-        assert "default" in proc.crop_regions
-        assert proc.crop_regions["default"]["only"] == [0, 0, 4, 2]
+        r = proc.vision_pipeline.cameras["default"].regions["only"].rect
+        assert [r.x, r.y, r.width, r.height] == [0, 0, 4, 2]
 
 
 def test_recipe_manager_satisfies_protocol():
@@ -90,3 +90,85 @@ def test_build_recipe_rows_non_empty():
     assert len(rows) >= 1
     assert "register_name" in rows[0]
     assert "field_name" in rows[0]
+
+
+def test_recipe_manager_split_settings_yaml():
+    """register_recipes в одном файле, app_recipes — в settings_recipes.yaml рядом."""
+    registers, _ = create_registers()
+    with tempfile.TemporaryDirectory() as tmp:
+        main_path = os.path.join(tmp, "recipes.yaml")
+        side_path = os.path.join(tmp, "settings_recipes.yaml")
+        mgr = RecipeManager(data_path=main_path, app_recipes_path=side_path)
+        mgr.save_registers_to_recipe(registers, "0")
+        mgr.save_app_recipe_snapshot("0", {"RecipesTabConfig": {"group_title": "T"}})
+        mgr2 = RecipeManager(data_path=main_path, app_recipes_path=side_path)
+        assert "0" in mgr2._data.get("register_recipes", {})
+        assert mgr2.load_app_recipe_snapshot("0") == {"RecipesTabConfig": {"group_title": "T"}}
+        with open(main_path, "r", encoding="utf-8") as f:
+            main_raw = f.read()
+        assert "register_recipes" in main_raw
+        assert "app_recipes" not in main_raw
+        with open(side_path, "r", encoding="utf-8") as f:
+            side_raw = f.read()
+        assert "app_recipes" in side_raw
+
+
+def test_settings_recipes_alias_loads_as_app_recipes():
+    """Ключ settings_recipes в YAML читается как app_recipes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        side_path = os.path.join(tmp, "settings_recipes.yaml")
+        import yaml
+
+        with open(side_path, "w", encoding="utf-8") as f:
+            yaml.dump(
+                {"version": 1, "settings_recipes": {"0": {"RecipesTabConfig": {"x": 1}}}},
+                f,
+            )
+        main_path = os.path.join(tmp, "recipes.yaml")
+        with open(main_path, "w", encoding="utf-8") as f:
+            yaml.dump({"version": 1, "register_recipes": {}}, f)
+        mgr = RecipeManager(data_path=main_path, app_recipes_path=side_path)
+        snap = mgr.load_app_recipe_snapshot("0")
+        assert snap == {"RecipesTabConfig": {"x": 1}}
+
+
+def test_combined_legacy_recipes_yaml_splits_on_save():
+    """Старый объединённый recipes.yaml с app_recipes внутри разносится в два файла при save."""
+    registers, _ = create_registers()
+    import yaml
+
+    with tempfile.TemporaryDirectory() as tmp:
+        main_path = os.path.join(tmp, "recipes.yaml")
+        side_path = os.path.join(tmp, "settings_recipes.yaml")
+        combined = {
+            "version": 1,
+            "current_register_recipe": 0,
+            "current_app_recipe": 0,
+            "register_recipes": {
+                "0": {
+                    "camera": registers.get_register("camera").model_dump(),
+                    "processor": registers.get_register("processor").model_dump(),
+                    "renderer": registers.get_register("renderer").model_dump(),
+                }
+            },
+            "app_recipes": {
+                "0": {"RecipesTabConfig": {"group_title": "G"}, "ProcessingTabUiConfig": {"group_color": "C"}}
+            },
+        }
+        with open(main_path, "w", encoding="utf-8") as f:
+            yaml.dump(combined, f, allow_unicode=True)
+        assert not os.path.isfile(side_path)
+
+        mgr = RecipeManager(data_path=main_path, app_recipes_path=side_path)
+        assert mgr.load_app_recipe_snapshot("0")["RecipesTabConfig"]["group_title"] == "G"
+        mgr.save()
+
+        with open(main_path, "r", encoding="utf-8") as f:
+            main_raw = yaml.safe_load(f)
+        assert "app_recipes" not in main_raw
+        assert "register_recipes" in main_raw
+
+        assert os.path.isfile(side_path)
+        with open(side_path, "r", encoding="utf-8") as f:
+            side_raw = yaml.safe_load(f)
+        assert side_raw["app_recipes"]["0"]["RecipesTabConfig"]["group_title"] == "G"

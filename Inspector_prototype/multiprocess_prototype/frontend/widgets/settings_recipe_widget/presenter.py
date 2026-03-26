@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from multiprocess_prototype.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
+
 from multiprocess_prototype.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
     build_default_app_aggregate,
@@ -47,7 +49,7 @@ class AppRecipePresenter:
         self._apply_save_slot(idx)
 
     def on_default_clicked(self) -> None:
-        """Подставить слот default_value или встроенные дефолты схем."""
+        """Подставить слот 0 (заводской пресет) или встроенные дефолты схем."""
         mgr = self._model.recipe_manager
         if mgr is None:
             return
@@ -88,11 +90,15 @@ class AppRecipePresenter:
             mgr.save_app_recipe_snapshot(str(idx), aggregate_to_snapshot(self._model.app_aggregate))
 
     def _apply_default_slot(self) -> None:
-        """Загрузить default_value или build_default_app_aggregate при отсутствии файла."""
+        """Загрузить слот 0 или legacy default_value; иначе build_default_app_aggregate."""
         mgr = self._model.recipe_manager
         if mgr is None:
             return
-        raw = mgr.load_app_recipe_snapshot("default_value") if hasattr(mgr, "load_app_recipe_snapshot") else None
+        raw = None
+        if hasattr(mgr, "load_app_recipe_snapshot"):
+            raw = mgr.load_app_recipe_snapshot(DEFAULT_RECIPE_SLOT_ID)
+            if raw is None:
+                raw = mgr.load_app_recipe_snapshot("default_value")
         if raw:
             self._model.app_aggregate.clear()
             self._model.app_aggregate.update(merge_aggregate_with_defaults(raw))

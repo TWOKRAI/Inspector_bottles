@@ -80,6 +80,9 @@ class FrontendConfig(SchemaBase):
     # Путь к YAML рецептов (опционально; по умолчанию multiprocess_prototype/data/recipes.yaml)
     recipes_path: Optional[str] = None
 
+    # Путь к YAML app-пресетов (опционально; по умолчанию рядом с recipes_path)
+    settings_recipes_path: Optional[str] = None
+
     # Runtime (из app_cfg)
     camera_type: CameraTypeStr = DEFAULT_CAMERA_TYPE
     poll_interval_ms: int = 16
@@ -122,6 +125,7 @@ class FrontendConfig(SchemaBase):
             camera_tab["webcam_enum_max_index"] = app_cfg["webcam_enum_max_index"]
 
         recipes_path = app_cfg.get("recipes_path", self.recipes_path)
+        settings_recipes_path = app_cfg.get("settings_recipes_path", self.settings_recipes_path)
 
         ui_diag = dict(app_cfg.get("ui_diagnostics") or {})
         env_on = os.environ.get("INSPECTOR_UI_DIAGNOSTICS", "").strip().lower() in (
@@ -149,6 +153,7 @@ class FrontendConfig(SchemaBase):
             "cropped_regions_tab": self.cropped_regions_tab.model_dump(),
             "post_processing_tab": self.post_processing_tab.model_dump(),
             "recipes_path": recipes_path,
+            "settings_recipes_path": settings_recipes_path,
             "recipe_access": dict(app_cfg.get("recipe_access") or {}),
             "loading_window": self.loading_window.model_dump(),
             "camera_tab": camera_tab,

@@ -1,21 +1,19 @@
 # multiprocess_prototype/frontend/coordinators/logical_cameras.py
-"""Логические id камер для ROI/постобработки и сидирование матрёшки processor."""
+"""Логические id камер для ROI/постобработки и сидирование vision_pipeline."""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import List, Optional
 
 from frontend_module.interfaces import IRegistersManagerGui
 
 from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER
+from multiprocess_prototype.registers.schemas.pipeline.widget_bridge import (
+    apply_crop_nested_to_pipeline,
+    crop_nested_from_pipeline,
+    pipeline_config_from_register,
+)
 from multiprocess_prototype.registers.schemas.processing_tab import PROCESSOR_REGISTER
-from multiprocess_prototype.registers.schemas.processing_tab.crop_regions_payload import (
-    merge_crop_regions_payload,
-)
-from multiprocess_prototype.registers.schemas.processing_tab.post_processing_payload import (
-    normalize_post_processing_payload,
-)
 
 DEFAULT_FULL_REGION_NAME = "full"
 
@@ -42,7 +40,7 @@ def ensure_logical_camera_and_seed_roi(
 ) -> None:
     """
     Добавить текущую логическую камеру в logical_camera_ids и при отсутствии —
-    full ROI и пустой список постобработки для этого id.
+    регион ``full`` на весь кадр в ``vision_pipeline``.
 
     Вызывать после смены типа камеры (и при необходимости после старта захвата).
     """
@@ -78,29 +76,23 @@ def ensure_logical_camera_and_seed_roi(
         if proc is None:
             return
 
-    crop = deepcopy(getattr(proc, "crop_regions", None) or {})
-    if not isinstance(crop, dict):
-        crop = {}
-    inner = crop.get(logical_id)
-    need_seed = logical_id not in crop or not isinstance(inner, dict) or len(inner) == 0
-    if need_seed:
-        merged = merge_crop_regions_payload(
-            {
-                logical_id: {
-                    DEFAULT_FULL_REGION_NAME: [0, 0, w, h],
-                },
-            }
-        )
-        crop.update(merged)
-        rm.set_field_value(PROCESSOR_REGISTER, "crop_regions", crop)
-
     proc = rm.get_register(PROCESSOR_REGISTER)
     if proc is None:
         return
-    post = deepcopy(getattr(proc, "post_processing_regions", None) or {})
-    if not isinstance(post, dict):
-        post = {}
-    if logical_id not in post:
-        post[logical_id] = []
-        post = normalize_post_processing_payload(post)
-        rm.set_field_value(PROCESSOR_REGISTER, "post_processing_regions", post)
+    nested = crop_nested_from_pipeline(pipeline_config_from_register(proc))
+    inner = nested.get(logical_id)
+    need_seed = not isinstance(inner, dict) or len(inner) == 0
+    if need_seed:
+        cfg = apply_crop_nested_to_pipeline(
+            pipeline_config_from_register(proc),
+            {logical_id: {DEFAULT_FULL_REGION_NAME: [0, 0, w, h]}},
+            color_lower=list(proc.color_lower),
+            color_upper=list(proc.color_upper),
+            min_area=int(proc.min_area),
+            max_area=int(proc.max_area),
+        )
+        rm.set_field_value(
+            PROCESSOR_REGISTER,
+            "vision_pipeline",
+            cfg.model_dump(mode="python"),
+        )

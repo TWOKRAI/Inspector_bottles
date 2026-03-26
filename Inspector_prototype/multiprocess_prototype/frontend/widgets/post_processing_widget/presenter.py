@@ -6,13 +6,16 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from multiprocess_prototype.registers.schemas.pipeline.widget_bridge import (
+    apply_post_list_to_pipeline,
+    pipeline_config_from_register,
+    post_list_from_pipeline,
+)
 from multiprocess_prototype.registers.schemas.processing_tab import PROCESSOR_REGISTER
 
 from .model import PostProcessingModel
 from .params import (
     default_new_region,
-    merge_post_processing_payload,
-    normalize_post_processing_payload,
     normalize_region_entry,
 )
 
@@ -67,12 +70,11 @@ class PostProcessingPresenter:
             self._view.apply_form_from_region(None)
             return
         reg = rm.get_register(PROCESSOR_REGISTER)
-        raw = getattr(reg, "post_processing_regions", None) if reg is not None else None
-        if not isinstance(raw, dict):
-            raw = {}
-        normalized = normalize_post_processing_payload(raw)
         self._model.post_regions_by_camera.clear()
-        self._model.post_regions_by_camera.update(normalized)
+        if reg is not None:
+            self._model.post_regions_by_camera.update(
+                post_list_from_pipeline(pipeline_config_from_register(reg))
+            )
         ids = self.camera_ids_union()
         if self._model.selected_camera not in ids:
             self._model.selected_camera = ids[0]
@@ -259,5 +261,15 @@ class PostProcessingPresenter:
         rm = self._model.registers_manager
         if rm is None:
             return
-        payload = merge_post_processing_payload(self._model.post_regions_by_camera)
-        rm.set_field_value(PROCESSOR_REGISTER, "post_processing_regions", payload)
+        reg = rm.get_register(PROCESSOR_REGISTER)
+        if reg is None:
+            return
+        cfg = apply_post_list_to_pipeline(
+            pipeline_config_from_register(reg),
+            self._model.post_regions_by_camera,
+        )
+        rm.set_field_value(
+            PROCESSOR_REGISTER,
+            "vision_pipeline",
+            cfg.model_dump(mode="python"),
+        )

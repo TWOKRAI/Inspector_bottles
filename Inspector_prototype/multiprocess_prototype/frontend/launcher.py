@@ -15,6 +15,7 @@ from frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype.registers import create_registers
 from multiprocess_prototype.managers import RecipeManager
+from multiprocess_prototype.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
     build_default_app_aggregate,
@@ -79,12 +80,15 @@ class FrontendLauncher:
         width = window_cfg.get("width", window_cfg.get("min_width", 1024))
         height = window_cfg.get("height", window_cfg.get("min_height", 600))
 
-        recipe_manager = RecipeManager(data_path=config.get("recipes_path"))
+        recipe_manager = RecipeManager(
+            data_path=config.get("recipes_path"),
+            app_recipes_path=config.get("settings_recipes_path"),
+        )
         regs = fm.get_registers() if fm else None
         if regs is not None:
-            recipe_manager.ensure_slot_from_registers(regs, "default_value")
+            recipe_manager.ensure_slot_from_registers(regs, DEFAULT_RECIPE_SLOT_ID)
         recipe_manager.ensure_app_slot_from_snapshot(
-            "default_value",
+            DEFAULT_RECIPE_SLOT_ID,
             aggregate_to_snapshot(build_default_app_aggregate()),
         )
 

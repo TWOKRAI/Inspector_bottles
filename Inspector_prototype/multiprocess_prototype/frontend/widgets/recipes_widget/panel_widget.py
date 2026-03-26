@@ -157,7 +157,7 @@ class RegisterRecipePanelWidget(BaseWidget[RegisterRecipeModel]):
         self.save_requested.emit(idx)
 
     def _on_default_with_signal(self) -> None:
-        """Загрузка слота default_value + default_requested."""
+        """Загрузка слота 0 (заводской пресет) + default_requested."""
         self._presenter.on_default_clicked()
         self.default_requested.emit()
 

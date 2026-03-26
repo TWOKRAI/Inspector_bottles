@@ -11,7 +11,7 @@
 
 ## Файлы
 
-- Фабрика: `factory.py` → `RegistersManager` + `connection_map`
+- Фабрика: `factory.py` → `RegistersManager` + `connection_map`. Полная картина связки схем, UI и YAML-рецептов при старте GUI: [../docs/SCHEMA_REGISTERS_UI_INIT.md](../docs/SCHEMA_REGISTERS_UI_INIT.md).
 - Маршрутизация GUI-команд: `command_routing.py` → `resolve_command_targets(command_id)` из `RegisterDispatchMeta` схем + `EXPLICIT_COMMAND_TARGETS` (например `system.shutdown` → ProcessManager). Каталог payload: `gui_command_catalog.py` (`GUI_COMMAND_CATALOG`); отправка — `frontend/commands/gui_command_handler.py` и `backend/gui_process_mixin.py`.
 - Чеклист нового поля: `CHECKLIST.md`
 - Boot-значения для процессов (синхронно с регистрами):

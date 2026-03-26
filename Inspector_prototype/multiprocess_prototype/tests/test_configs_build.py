@@ -114,6 +114,7 @@ def test_frontend_config_build_dict():
         "cropped_regions_tab",
         "post_processing_tab",
         "recipes_path",
+        "settings_recipes_path",
         "recipe_access",
         "loading_window",
         "camera_type",
@@ -140,10 +141,12 @@ def test_frontend_build_dict_merges_gui_recipe_fields():
 
     app_cfg = GuiConfig(
         recipes_path="D:/data/recipes.yaml",
+        settings_recipes_path="D:/data/ui.yaml",
         recipe_access={"level": 5, "show_hidden": False},
     ).model_dump()
     d = FrontendConfig().build_dict(app_cfg)
     assert d["recipes_path"] == "D:/data/recipes.yaml"
+    assert d["settings_recipes_path"] == "D:/data/ui.yaml"
     assert d["recipe_access"]["level"] == 5
 
 

@@ -1,9 +1,11 @@
 # Система рецептов (multiprocess_prototype)
 
-Документ описывает **текущее** поведение: два независимых вида рецептов, один YAML-файл, связь с фреймворком и с процессом GUI.  
+Документ описывает **текущее** поведение: два независимых вида рецептов, **два YAML-файла** (регистры и app-пресеты), связь с фреймворком и с процессом GUI.  
 Архитектурные решения зафиксированы в [DECISIONS.md — ADR-080 … ADR-082](../../multiprocess_framework/DECISIONS.md) (снимки, два вида рецептов, разделение вкладок).
 
 **Вложенные данные (ROI, постобработка, матрёшка):** [DATA_MODEL_NESTED.md](DATA_MODEL_NESTED.md).
+
+**Схемы, регистры, UI и порядок инициализации GUI:** [SCHEMA_REGISTERS_UI_INIT.md](SCHEMA_REGISTERS_UI_INIT.md).
 
 ---
 
@@ -39,54 +41,63 @@ flowchart LR
     app_agg[Агрегат app-схем]
   end
   subgraph disk [Диск]
-    YAML[recipes.yaml]
+    RY[recipes.yaml]
+    SY[settings_recipes.yaml]
   end
 
   GC -->|"model_dump в proc_dict"| GP
   GP --> app_cfg
   app_cfg --> FL
   FL --> FC
-  FC -->|"recipes_path recipe_access"| FL
+  FC -->|"recipes_path settings_recipes_path recipe_access"| FL
   FL --> RM
-  RM --> YAML
+  RM --> RY
+  RM --> SY
   TW --> RegMgr
   TW --> RM
   SW --> app_agg
   SW --> RM
-  RM --> YAML
   RegMgr -->|"model_dump_all / validate_all"| RM
 ```
 
-1. **`GuiConfig`** ([`backend/processes/gui/gui_config.py`](../backend/processes/gui/gui_config.py)) задаёт поля **`recipes_path`** (абсолютный или относительный путь к YAML) и **`recipe_access`** (словарь для `AccessContext`: `level`, `bypass_readonly`, `show_hidden`).  
+1. **`GuiConfig`** ([`backend/processes/gui/gui_config.py`](../backend/processes/gui/gui_config.py)) задаёт **`recipes_path`**, опционально **`settings_recipes_path`** (пресеты UI; по умолчанию — `settings_recipes.yaml` в той же папке, что и `recipes_path`), и **`recipe_access`** (словарь для `AccessContext`: `level`, `bypass_readonly`, `show_hidden`).  
 2. При **`process(GuiConfig())`** в `proc_dict["config"]` попадает **полный** `model_dump()` конфига, включая эти поля ([`backend/configs/base_config.py`](../backend/configs/base_config.py)).  
 3. **`GuiProcess.run()`** создаёт **`FrontendLauncher`** с `app_config = get_config("config")` ([`gui_process.py`](../backend/processes/gui/gui_process.py)).  
-4. **`FrontendLauncher.register_windows`** ([`frontend/launcher.py`](../frontend/launcher.py)) создаёт **`RecipeManager(data_path=config.get("recipes_path"))`**, при необходимости заполняет слоты `default_value` для регистров и для app-снимка.  
-5. **`build_frontend_config(app_cfg)`** ([`frontend/configs/frontend_config.py`](../frontend/configs/frontend_config.py)) мержит в итоговый dict для UI ключи **`recipes_path`** и **`recipe_access`**.  
+4. **`FrontendLauncher.register_windows`** ([`frontend/launcher.py`](../frontend/launcher.py)) создаёт **`RecipeManager`**, при необходимости заполняет слот **`"0"`** (заводской пресет) для регистров и для app-снимка.  
+5. **`build_frontend_config(app_cfg)`** ([`frontend/configs/frontend_config.py`](../frontend/configs/frontend_config.py)) мержит в итоговый dict для UI ключи **`recipes_path`**, **`settings_recipes_path`** и **`recipe_access`**.  
 6. **`create_tab_widget_factory(FrontendAppContext)`** ([`tab_factory.py`](../frontend/windows/main_window/tab_factory.py)) передаёт из контекста **`recipe_manager`**, **`recipe_access`** (из `ctx.config`) и **`registers_manager`** в **`RecipesTabWidget`** и **`SettingsTabWidget`**.
 
 ---
 
-## 3. Файл YAML
+## 3. Файлы YAML
 
-По умолчанию путь: **`multiprocess_prototype/data/recipes.yaml`** (если `recipes_path` не задан).
+По умолчанию: **`multiprocess_prototype/data/recipes.yaml`** и **`multiprocess_prototype/data/settings_recipes.yaml`** (если пути не заданы в конфиге). **Всегда два файла:** в первом — только снимки регистров; во втором — только **`app_recipes`** и **`current_app_recipe`**. Если файла нет, после первого **`ensure_*`** в лаунчере и **`save()`** создаётся структура с дефолтным слотом **`"0"`**. Старый **объединённый** `recipes.yaml`, где в одном файле были и **`register_recipes`**, и **`app_recipes`**, при следующем **`save()`** разносится на два файла. См. **ADR-098** в [`DECISIONS.md`](../../multiprocess_framework/DECISIONS.md).
 
-Актуальный формат:
+**Нумерация слотов:** **`"0"`** — заводской пресет (кнопка «По умолчанию»); **`"1"`**, **`"2"`**, … — сохранённые сорта. Старый ключ слота **`default_value`** в YAML по-прежнему допустим; UI в первую очередь использует **`"0"`**.
+
+**`recipes.yaml`:**
 
 ```yaml
 version: 1
 current_register_recipe: 0
-current_app_recipe: 0
 register_recipes:
-  "0": { ... }   # вложенный снимок как model_dump_all(): имя_регистра -> поля
+  "0": { ... }
+```
+
+**`settings_recipes.yaml`:**
+
+```yaml
+version: 1
+current_app_recipe: 0
 app_recipes:
   "0":
     RecipesTabConfig: { ... }
     ProcessingTabUiConfig: { ... }
 ```
 
-**Обратная совместимость:** старые файлы с полями **`current_recipe`** и **`recipes`** при загрузке маппятся в **`current_register_recipe`** и **`register_recipes`**. При сохранении в файл пишется новый формат.
+**Обратная совместимость:** старые файлы с полями **`current_recipe`** и **`recipes`** при загрузке маппятся в **`current_register_recipe`** и **`register_recipes`**.
 
-Реализация: [`managers/recipe_manager.py`](../managers/recipe_manager.py).
+Реализация: [`managers/recipe_manager.py`](../managers/recipe_manager.py), хранилища — [`managers/recipe_yaml_stores.py`](../managers/recipe_yaml_stores.py).
 
 ---
 
@@ -94,7 +105,7 @@ app_recipes:
 
 | Компонент | Роль |
 |-----------|------|
-| **`RecipeManager`** | Загрузка/сохранение YAML, слоты `register_recipes` и `app_recipes`, текущие индексы слотов. |
+| **`RecipeManager`** | Фасад: два YAML (`RegisterRecipesYamlStore` + `AppRecipesYamlStore`), слоты `register_recipes` / `app_recipes`. |
 | **`app_recipe_aggregate`** ( [`managers/app_recipe_aggregate.py`](../managers/app_recipe_aggregate.py) ) | Сборка/снимок агрегата `RecipesTabConfig` + `ProcessingTabUiConfig`; ленивые импорты схем, чтобы не тянуть `widgets/__init__` при тестах менеджера. |
 | **`AccessContext`** ([`managers/access_context.py`](../managers/access_context.py)) | Уровень доступа и флаги `bypass_readonly` / `show_hidden` для таблиц. |
 | **`RegisterRecipePanelWidget`** / **`AppRecipePanelWidget`** (`BaseWidget` + MVP) | Реализация в [`recipes_widget/`](../frontend/widgets/recipes_widget/), [`settings_recipe_widget/`](../frontend/widgets/settings_recipe_widget/); имена **`RegisterRecipePanel`** / **`AppRecipePanel`** — алиасы в [`recipe_slot_table_panel.py`](../frontend/widgets/tabs_setting/recipes_tab/recipe_slot_table_panel.py). |

@@ -2,8 +2,10 @@
 """
 Хранение рецептов в YAML.
 
-- register_recipes: снимки RegistersManager (model_dump_all), ADR-080.
-- app_recipes: снимки набора SchemaBase приложения (имя схемы -> dict полей).
+- register_recipes: снимки RegistersManager (model_dump_all), ADR-080 — файл recipes.yaml.
+- app_recipes: снимки SchemaBase приложения — файл settings_recipes.yaml (рядом с recipes).
+
+Всегда два файла; старый объединённый recipes.yaml при загрузке разносится при save.
 
 Обратная совместимость: старые ключи recipes / current_recipe подхватываются при load.
 """
@@ -14,13 +16,22 @@ import os
 from copy import deepcopy
 from typing import Any, Dict, Optional, Union
 
-import yaml
-
 from multiprocess_prototype.registers.snapshot_migrate import migrate_register_recipe_snapshot
+
+from .recipe_yaml_stores import (
+    AppRecipesYamlStore,
+    RECIPE_FILE_VERSION,
+    RegisterRecipesYamlStore,
+    default_settings_recipes_path,
+    pick_app_recipes_section,
+)
 
 RecipeId = Union[int, str]
 
-_DATA_VERSION = 1
+_DATA_VERSION = RECIPE_FILE_VERSION
+
+# Слот заводских значений регистров и UI-пресетов (кнопка «По умолчанию» в панелях рецептов).
+DEFAULT_RECIPE_SLOT_ID: str = "0"
 
 
 def _default_data_path() -> str:
@@ -30,13 +41,23 @@ def _default_data_path() -> str:
 
 class RecipeManager:
     """
-    Загрузка/сохранение рецептов в YAML.
+    Фасад: два YAML-файла (регистры + app-пресеты), единый контракт для UI.
 
     Ключи слотов: строки "0".."21", "default_value", "real_value" и т.д.
+    Слот **"0"** — заводской пресет (кнопка «По умолчанию»).
     """
 
-    def __init__(self, data_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        data_path: Optional[str] = None,
+        app_recipes_path: Optional[str] = None,
+    ) -> None:
         self.data_path = os.path.abspath(data_path or _default_data_path())
+        self.app_recipes_path = os.path.abspath(
+            app_recipes_path if app_recipes_path is not None else default_settings_recipes_path(self.data_path)
+        )
+        self._register_store = RegisterRecipesYamlStore(self.data_path)
+        self._app_store = AppRecipesYamlStore(self.app_recipes_path)
         self._data: Dict[str, Any] = {
             "version": _DATA_VERSION,
             "current_register_recipe": 0,
@@ -53,8 +74,8 @@ class RecipeManager:
         self._data["current_app_recipe"] = int(loaded.get("current_app_recipe", 0))
         recipes = loaded.get("recipes")
         self._data["register_recipes"] = dict(recipes) if isinstance(recipes, dict) else {}
-        ar = loaded.get("app_recipes")
-        self._data["app_recipes"] = dict(ar) if isinstance(ar, dict) else {}
+        picked = pick_app_recipes_section(loaded)
+        self._data["app_recipes"] = picked if picked is not None else {}
 
     def _apply_new_format(self, loaded: Dict[str, Any]) -> None:
         self._data["version"] = int(loaded.get("version", _DATA_VERSION))
@@ -69,38 +90,59 @@ class RecipeManager:
             self._data["register_recipes"] = dict(loaded["recipes"])
         else:
             self._data["register_recipes"] = {}
-        ar = loaded.get("app_recipes")
-        self._data["app_recipes"] = dict(ar) if isinstance(ar, dict) else {}
+        picked = pick_app_recipes_section(loaded)
+        self._data["app_recipes"] = picked if picked is not None else {}
+
+    def _apply_from_main_file(self, loaded: Dict[str, Any]) -> None:
+        if isinstance(loaded.get("register_recipes"), dict) or isinstance(
+            loaded.get("app_recipes"), dict
+        ):
+            self._apply_new_format(loaded)
+        elif isinstance(loaded.get("recipes"), dict):
+            self._apply_legacy_format(loaded)
+        else:
+            self._apply_new_format(loaded)
+
+    def _merge_app_from_sidecar(self) -> None:
+        """Снимок app из settings_recipes.yaml перекрывает встроенный app из старого объединённого файла."""
+        raw = self._app_store.read_dict()
+        if not raw:
+            return
+        picked = pick_app_recipes_section(raw)
+        if picked is not None:
+            self._data["app_recipes"] = picked
+        if "current_app_recipe" in raw:
+            try:
+                self._data["current_app_recipe"] = int(raw["current_app_recipe"])
+            except (TypeError, ValueError):
+                pass
 
     def load(self) -> None:
-        if not os.path.isfile(self.data_path):
-            return
         try:
-            with open(self.data_path, "r", encoding="utf-8") as f:
-                loaded = yaml.safe_load(f)
-            if not isinstance(loaded, dict):
-                return
-            if isinstance(loaded.get("register_recipes"), dict) or isinstance(
-                loaded.get("app_recipes"), dict
-            ):
-                self._apply_new_format(loaded)
-            elif isinstance(loaded.get("recipes"), dict):
-                self._apply_legacy_format(loaded)
+            main = self._register_store.read_dict()
+            if isinstance(main, dict):
+                self._apply_from_main_file(main)
+            self._merge_app_from_sidecar()
         except OSError:
             pass
 
     def save(self) -> None:
         try:
-            os.makedirs(os.path.dirname(self.data_path) or ".", exist_ok=True)
-            payload = {
-                "version": self._data.get("version", _DATA_VERSION),
-                "current_register_recipe": self._data.get("current_register_recipe", 0),
-                "current_app_recipe": self._data.get("current_app_recipe", 0),
-                "register_recipes": self._data.get("register_recipes", {}),
-                "app_recipes": self._data.get("app_recipes", {}),
-            }
-            with open(self.data_path, "w", encoding="utf-8") as f:
-                yaml.dump(payload, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            ver = int(self._data.get("version", _DATA_VERSION))
+            cr = int(self._data.get("current_register_recipe", 0))
+            ca = int(self._data.get("current_app_recipe", 0))
+            rr = self._data.get("register_recipes", {})
+            ar = self._data.get("app_recipes", {})
+            self._register_store.save(
+                version=ver,
+                current_register_recipe=cr,
+                register_recipes=rr,
+            )
+            self._app_store.save(
+                version=ver,
+                current_app_recipe=ca,
+                app_recipes=ar,
+            )
         except OSError:
             pass
 

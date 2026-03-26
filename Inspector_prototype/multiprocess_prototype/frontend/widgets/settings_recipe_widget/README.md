@@ -1,6 +1,8 @@
 # settings_recipe_widget
 
-Пакет вкладки **settings** (app/UI-рецепт). **App recipe** panel: UI presets (`RecipesTabConfig` + `ProcessingTabUiConfig` aggregate), table of `SchemaBase` fields, load/save per slot via `RecipeManager` app snapshots.
+Пакет вкладки **settings** (app/UI-рецепт). Здесь управляется **группа пресетов UI-параметров**: слоты `app_recipes` в YAML ↔ агрегат app-схем (не `RegistersManager`). Параллельно — [`recipes_widget`](../recipes_widget/) для снимков регистров алгоритма (`register_recipes`); принцип слотов похож, акцент в документации сейчас на стороне регистров — см. [docs/SCHEMA_REGISTERS_UI_INIT.md](../../../docs/SCHEMA_REGISTERS_UI_INIT.md).
+
+**App recipe** panel: UI presets (`RecipesTabConfig` + `ProcessingTabUiConfig` aggregate), table of `SchemaBase` fields, load/save per slot via `RecipeManager` app snapshots.
 
 ## Классы и MVP
 

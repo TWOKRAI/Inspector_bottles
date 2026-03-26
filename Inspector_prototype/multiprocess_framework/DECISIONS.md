@@ -16,6 +16,14 @@
 
 ---
 
+## ADR-098: Рецепты — два файла (`recipes.yaml` + `settings_recipes.yaml`), слот `0` = заводской
+- Дата: 2026-03-26 (уточнение 2026-03-26: всегда два файла, классы хранилищ)
+- Статус: принято
+- Контекст: Нужно разделить «базу» снимков регистров и «базу» пресетов UI; явная нумерация слотов: **0** — дефолт, **1…n** — сохранённые сорта.
+- Решение: **`RecipeManager`** — фасад; физически **всегда** два YAML: **`RegisterRecipesYamlStore`** → `recipes_path` (только **`register_recipes`**, **`current_register_recipe`**, **`version`**), **`AppRecipesYamlStore`** → **`settings_recipes_path`** по умолчанию рядом с `recipes_path` или из **`GuiConfig.settings_recipes_path` / `FrontendConfig.build_dict`**. Во втором файле ключ записи — **`app_recipes`**; при чтении допускается алиас **`settings_recipes`**. Старый **объединённый** `recipes.yaml` с вложенным **`app_recipes`** при **`save()`** разносится: основной файл без `app_recipes`, пресеты — во второй файл. Константа **`DEFAULT_RECIPE_SLOT_ID = "0"`**; fallback на слот **`default_value`** в презентерах при необходимости.
+- Причина: Две логические БД; единый контракт загрузки/сохранения без режима «всё в одном файле» в продакшене.
+- Отклонённые альтернативы: опциональный второй файл — усложняет тесты и деплой; один монолитный класс без разделения ответственности — хуже сопровождение.
+
 ## ADR-097: Touch-клавиатура — проброс из `FrontendConfig`, делегат по колонкам
 - Дата: 2026-03-25
 - Статус: принято
@@ -201,7 +209,7 @@
   - **Регистры**: по-прежнему снимок `model_dump_all()` (ADR-080).
   - **App**: снимок `{ "RecipesTabConfig": {...}, "ProcessingTabUiConfig": {...} }`; хелперы в `managers/app_recipe_aggregate.py` (ленивые импорты схем, чтобы не тянуть `widgets/__init__` при тестах менеджера).
   - **UI**: таблица регистров — `RecipesTabWidget` (`RegisterRecipePanel`); таблица app — `SettingsTabWidget` (`AppRecipePanel`); см. **ADR-082**. **`AccessContext`** (`level`, `bypass_readonly`, `show_hidden`) и ключ **`recipe_access`** в `FrontendConfig.build_dict`.
-  - **`FrontendLauncher`**: `ensure_app_slot_from_snapshot("default_value", …)` рядом с `ensure_slot_from_registers`.
+  - **`FrontendLauncher`**: `ensure_app_slot_from_snapshot("0", …)` рядом с `ensure_slot_from_registers` (см. **ADR-098** для раздельных YAML и слота **`"0"`**).
   - **`GuiConfig`**: поля **`recipes_path`**, **`recipe_access`** — в `proc_dict["config"]` → `GuiProcess.get_config("config")` → `FrontendLauncher` / `build_frontend_config` (Dict at Boundary).
 - Причина: два домена данных без смешения в одном слоте; единый файл рецептов; согласованность с FieldMeta и табличным редактированием.
 - Отклонённые альтернативы: один стол с колонкой «тип» — хуже UX; отдельные файлы без запроса — отложено.

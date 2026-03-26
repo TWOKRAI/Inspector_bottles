@@ -7,6 +7,17 @@ from .camera_tab import (
     CameraRegisters,
     camera_process_boot_values,
 )
+from .pipeline import (
+    BlobDetectionParams,
+    Camera,
+    ColorDetectionParams,
+    PipelineConfig,
+    ProcessingBlock,
+    ProcessorParams,
+    Rect,
+    Region,
+    migrate_crop_regions_to_pipeline_dict,
+)
 from .processing_tab import (
     PROCESSOR_REGISTER,
     PROCESSOR_ROUTING,
@@ -20,6 +31,15 @@ from .processing_tab import (
 )
 
 __all__ = [
+    "BlobDetectionParams",
+    "Camera",
+    "ColorDetectionParams",
+    "PipelineConfig",
+    "ProcessingBlock",
+    "ProcessorParams",
+    "Rect",
+    "Region",
+    "migrate_crop_regions_to_pipeline_dict",
     "CAMERA_REGISTER",
     "CAMERA_ROUTING",
     "CameraRegisters",

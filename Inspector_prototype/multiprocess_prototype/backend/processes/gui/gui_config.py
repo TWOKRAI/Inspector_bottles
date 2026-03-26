@@ -47,6 +47,14 @@ class GuiConfig(ProcessConfigBase):
         ),
     ] = None
 
+    settings_recipes_path: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Путь к YAML пресетов UI (app_recipes)",
+            info="По умолчанию — settings_recipes.yaml в той же папке, что и recipes_path.",
+        ),
+    ] = None
+
     recipe_access: Annotated[
         Optional[Dict[str, Any]],
         FieldMeta(

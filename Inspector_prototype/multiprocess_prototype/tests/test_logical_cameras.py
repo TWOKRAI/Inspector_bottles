@@ -23,6 +23,7 @@ from multiprocess_prototype.frontend.coordinators.logical_cameras import (
     ensure_logical_camera_and_seed_roi,
 )
 from multiprocess_prototype.registers import create_registers
+from multiprocess_prototype.registers.schemas.pipeline.widget_bridge import crop_nested_from_pipeline
 from multiprocess_prototype.registers.schemas.processing_tab.names import PROCESSOR_REGISTER
 
 
@@ -44,10 +45,8 @@ def test_ensure_seeds_ids_and_full_roi():
 
     proc = registers.get_register(PROCESSOR_REGISTER)
     assert "webcam_0" in proc.logical_camera_ids
-    assert "webcam_0" in proc.crop_regions
-    assert proc.crop_regions["webcam_0"]["full"] == [0, 0, 800, 600]
-    assert "webcam_0" in proc.post_processing_regions
-    assert proc.post_processing_regions["webcam_0"] == []
+    nested = crop_nested_from_pipeline(proc.vision_pipeline)
+    assert nested["webcam_0"]["full"] == [0, 0, 800, 600]
 
 
 def test_processor_registers_has_logical_camera_ids_field():
