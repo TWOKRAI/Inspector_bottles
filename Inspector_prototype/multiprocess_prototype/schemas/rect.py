@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Прямоугольник ROI для schema_v3."""
+"""Прямоугольник ROI (multiprocess_prototype.schemas)."""
 
 from __future__ import annotations
 

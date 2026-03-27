@@ -2,10 +2,16 @@
 """
 Обобщённый менеджер регистров.
 
-Не зависит от конкретных классов регистров: принимает словарь имя -> экземпляр Pydantic-модели.
-Поддерживает get_register, get_field_metadata (включая routing), validate_field_value, model_dump_all/model_validate_all.
+Универсальный контейнер: словарь **имя регистра → экземпляр модели**. Не содержит веток под
+версии схемы приложения — состав задаётся снаружи (фабрика прототипа передаёт экземпляры).
+
+Сериализация: ``model_dump_all`` / ``model_validate_all`` по классу каждого экземпляра
+(Pydantic v2). Миграции legacy YAML и переименования полей — на границе приложения
+(например ``migrate_register_recipe_snapshot``), не в этом модуле.
+
+Поддерживает get_register, get_field_metadata (включая routing), validate_field_value.
 Расширение для frontend: subscribe_all, set_field_value, доставка register_update
-    (register_dispatch / routing.process_targets / connection_map).
+(register_dispatch / routing.process_targets / connection_map).
 """
 from __future__ import annotations
 
@@ -17,7 +23,9 @@ from .interfaces import IRegistersManager
 
 class RegistersManager:
     """
-    Менеджер регистров на основе словаря имя -> экземпляр модели.
+    Менеджер регистров: ``{имя: экземпляр модели}``. Типы моделей определяет приложение;
+    менеджер вызывает ``model_dump`` / ``model_validate`` по ``type(экземпляр)``.
+
     Каждый процесс создаёт свой экземпляр со своим набором регистров.
     connection_map: опциональный override — register_name -> имя процесса для register_update
         (если нет process_targets в routing поля и нет register_dispatch на классе).

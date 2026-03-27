@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Обработки schema_v3: базовый блок и разновидности параметров."""
+"""Обработки: базовый блок и разновидности параметров (multiprocess_prototype.schemas)."""
 
 from .blob_detection import BlobDetectionParams
 from .color_detection import ColorDetectionParams

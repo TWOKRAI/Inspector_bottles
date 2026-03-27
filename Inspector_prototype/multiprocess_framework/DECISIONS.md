@@ -16,6 +16,30 @@
 
 ---
 
+## ADR-099: Пакет `multiprocess_prototype.registers_2` — слой над `schema_v3` без второго RegistersManager
+- Дата: 2026-03-27
+- Статус: устарело
+- Суперсед: **ADR-100** (2026-03-27)
+- Контекст: Нужен прикладной слой для корневых регистров (`Pipeline` из schema_v3 + renderer), фабрики и фасада рецепт↔dict↔менеджер; типы пайплайна остаются в неизменном `registers/schema_v3`.
+- Решение (историческое): Каталог **`registers_2/`** с **`REGISTER_MODELS`**, **`PipelineRegisterRoot`**, **`RegisterRecipeBridge`**.
+- Причина отмены: Дублирование с основным **`registers/`**; карта регистров перенесена в **`registers/registry.py`**, пакет **`registers_2`** удалён; диспетчеризация на **`Pipeline`** — см. **ADR-100**.
+
+## ADR-100: Единая карта `REGISTER_MODELS` в `multiprocess_prototype.registers`, без пакета `registers_2`
+- Дата: 2026-03-27
+- Статус: принято
+- Контекст: Два входа к фабрике (`registers/factory` и `registers_2`) и отдельная обёртка **`PipelineRegisterRoot`** усложняли сопровождение; цель — универсальный **`RegistersManager`** без знания версий схемы приложения.
+- Решение: **`multiprocess_prototype/registers/registry.py`** — единственная **`REGISTER_MODELS`** (имя → класс `SchemaBase`); **`factory.create_registers`** и **`build_default_connection_map`** строятся из этой карты; пакет **`registers_2`** удалён; миграции снимков YAML остаются в **`snapshot_migrate`** до **`model_validate_all`**; метаданные диспетчеризации для корня **`schema_v3.Pipeline`** перенесены на сам класс **`Pipeline`** (вместо отдельной обёртки).
+- Причина: Один контур «схемы приложения + менеджер»; рецепт и IPC — dict через **`model_dump_all`** / **`model_validate_all`**.
+- Отклонённые альтернативы: отдельный фасад **`RegisterRecipeBridge`** при том, что **`RecipeManager`** уже принимает **`RegistersManager`** — отклонено.
+
+## ADR-101: Канонические схемы v3 в `multiprocess_prototype.schemas`; legacy регистры — `archive/registers`
+- Дата: 2026-03-27 (уточнение 2026-03-27: каталог переименован **`schema_v3` → `schemas`**)
+- Статус: принято
+- Контекст: Разделить канонические схемы v3 и накопленный слой legacy (`archive/registers/schemas`, фабрика, миграции, GUI-команды).
+- Решение: Пакет **`multiprocess_prototype/schemas/`** — публичные модели v3 (`Pipeline`, камеры, обработки); импорт **`multiprocess_prototype.schemas`**. Не путать с legacy **`multiprocess_prototype.registers.schemas`**. Реализация прежнего **`multiprocess_prototype/registers`** перенесена в **`multiprocess_prototype/archive/registers/`**; тонкий модуль **`multiprocess_prototype/registers/__init__.py`** загружает дерево **`archive.registers`**, регистрирует в **`sys.modules`** алиасы **`multiprocess_prototype.registers.*` → `multiprocess_prototype.archive.registers.*`**, чтобы не дублировались классы Pydantic при импортах. Дубликат **`Rect`** внутри **`region.py`** удалён — **`Region`** импортирует **`Rect`** только из **`rect.py`**.
+- Причина: Один набор типов при импорте через `registers` или `archive.registers`; v3-схемы доступны отдельным пакетом.
+- Отклонённые альтернативы: только `sys.modules['registers']=archive` без алиасов подмодулей — приводило к двум классам **`PipelineConfig`** и падению **`isinstance`** в **`widget_bridge`**.
+
 ## ADR-098: Рецепты — два файла (`recipes.yaml` + `settings_recipes.yaml`), слот `0` = заводской
 - Дата: 2026-03-26 (уточнение 2026-03-26: всегда два файла, классы хранилищ)
 - Статус: принято
@@ -1311,3 +1335,5 @@
   - При изменении → _on_config_changed → emit_event("config_changed") → WindowManager.update_config()
   - Окна с методом apply_config(config) получают новый конфиг
 - Причина: Гибкость для масштабирования, единый источник конфига в ConfigManager.
+
+---

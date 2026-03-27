@@ -8,6 +8,10 @@
 Всегда два файла; старый объединённый recipes.yaml при загрузке разносится при save.
 
 Обратная совместимость: старые ключи recipes / current_recipe подхватываются при load.
+
+Загрузка в регистры: перед ``model_validate_all`` вызывается
+``migrate_register_recipe_snapshot`` (снимок legacy → форма текущих моделей в
+``multiprocess_prototype.registers``); это не часть ``RegistersManager``.
 """
 
 from __future__ import annotations
@@ -16,7 +20,6 @@ import os
 from copy import deepcopy
 from typing import Any, Dict, Optional, Union
 
-from multiprocess_prototype.registers.snapshot_migrate import migrate_register_recipe_snapshot
 
 from .recipe_yaml_stores import (
     AppRecipesYamlStore,

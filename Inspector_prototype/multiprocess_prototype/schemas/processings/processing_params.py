@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Union параметров обработок для schema_v3."""
+"""Union параметров обработок (multiprocess_prototype.schemas)."""
 
 from __future__ import annotations
 

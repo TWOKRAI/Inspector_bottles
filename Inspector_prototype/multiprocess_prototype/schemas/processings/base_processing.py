@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Базовые сущности параметров обработок для schema_v3."""
+"""Базовые сущности параметров обработок (multiprocess_prototype.schemas)."""
 
 from __future__ import annotations
 

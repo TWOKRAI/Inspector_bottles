@@ -1,9 +1,10 @@
 # multiprocess_prototype/registers/snapshot_migrate.py
 """
-Нормализация снимка register_recipes перед model_validate_all (YAML / старые форматы).
+Нормализация снимка ``register_recipes`` **до** вызова ``RegistersManager.model_validate_all``.
 
-Миграция legacy ``crop_regions`` / ``post_processing_regions`` в ``vision_pipeline`` —
-``normalize_processor_register_payload`` (см. pipeline.migration).
+Граница приложения: миграции legacy YAML и переименования полей не входят в
+``registers_module.RegistersManager`` — только сюда и в вызывающий код (см. ``RecipeManager``).
+``normalize_processor_register_payload`` — см. ``schemas.pipeline.migration``.
 """
 from __future__ import annotations
 

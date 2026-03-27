@@ -8,7 +8,7 @@
 |----------|--------|-------------|
 | Код (читаемость, стандарты) | 7 | начальная оценка |
 | Тесты (покрытие) | 3 | начальная оценка |
-| Документация (README, interfaces) | 3 | начальная оценка |
+| Документация (README, interfaces) | 4 | docstring manager: универсальный контейнер, миграции вне модуля (2026-03-27) |
 | Связанность (меньше = лучше) | 3 | начальная оценка |
 | Дублирование | 8 | начальная оценка |
 | Работоспособность | 7 | Нет тестов, нужна проверка routing_map на этапе 4 |
@@ -35,4 +35,5 @@
 |------|-------------|------|
 | 2026-03-25 | `_resolve_dispatch_targets`: пустой **`process_targets`** в **`FieldMeta.routing`** → не слать **`register_update`** (GUI-only поля в **`ProcessorRegisters`**, ADR-094). | — |
 | 2026-03-20 | Register dispatch: build_connection_map_from_registers, set_field_value + fan-out, тесты test_dispatch_routing | 0 |
+| 2026-03-27 | Docstring ``RegistersManager``: универсальность, dump/validate по типам; миграции снимка — в приложении | — |
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |

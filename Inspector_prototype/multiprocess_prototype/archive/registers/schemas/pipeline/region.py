@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Регион ROI для schema_v3."""
+"""Region (ROI) inside camera."""
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Dict
 
 from pydantic import Field
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
+from .processing_block import ProcessingBlock
 from .rect import Rect
 
 
-@register_schema("RegionV3")
+@register_schema("Region")
 class Region(SchemaBase):
-    """Базовый регион ROI без вложенных обработок."""
+    """ROI: rectangle, flags, named processing blocks."""
 
     rect: Rect = Field(default_factory=Rect)
     enabled: Annotated[
@@ -33,3 +34,4 @@ class Region(SchemaBase):
         int,
         FieldMeta("Order", info="Order in post-processing table (lower first)."),
     ] = 0
+    processing: Dict[str, ProcessingBlock] = Field(default_factory=dict)

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from typing import Dict, FrozenSet, List, Tuple, Type
 
-from multiprocess_prototype.registers.schemas.camera_tab import (
+from .schemas.camera_tab import (
     CAMERA_REGISTER,
     CameraRegisters,
 )
-from multiprocess_prototype.registers.schemas.processing_tab import (
+from .schemas.processing_tab import (
     PROCESSOR_REGISTER,
     RENDERER_REGISTER,
     ProcessorRegisters,

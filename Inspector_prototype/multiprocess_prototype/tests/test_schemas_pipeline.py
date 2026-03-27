@@ -1,5 +1,5 @@
-# multiprocess_prototype/tests/test_schema_v3_pipeline.py
-"""Тесты для чистой схемы registers.schema_v3."""
+# multiprocess_prototype/tests/test_schemas_pipeline.py
+"""Тесты для канонических схем multiprocess_prototype.schemas (v3 pipeline)."""
 
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ def _paths() -> None:
 
 _paths()
 
-from multiprocess_prototype.registers.schema_v3.camera import HikvisionCameraRegisters, WebcamCameraRegisters
-from multiprocess_prototype.registers.schema_v3.pipeline import Pipeline
+from multiprocess_prototype.schemas.camera import HikvisionCameraRegisters, WebcamCameraRegisters
+from multiprocess_prototype.schemas.pipeline import Pipeline
 
 
-def test_schema_v3_pipeline_nested_structure():
+def test_schemas_pipeline_nested_structure():
     raw = {
         "cameras": {
             "cam_1": {
@@ -64,7 +64,7 @@ def test_schema_v3_pipeline_nested_structure():
     assert isinstance(pipeline.cameras["cam_1"].registers, WebcamCameraRegisters)
 
 
-def test_schema_v3_pipeline_hikvision_registers():
+def test_schemas_pipeline_hikvision_registers():
     raw = {
         "cameras": {
             "cam_hk": {
