@@ -16,15 +16,20 @@ def build_camera_tab_callbacks(
     *,
     webcam_enum_max_index: int = WEBCAM_ENUM_DEFAULT_MAX_INDEX,
 ) -> dict:
-    """Собрать callbacks_map для CameraTabWidget из GuiCommandHandler."""
-    from ...hikvision_widget import build_hikvision_callbacks
+    """Собрать callbacks_map для CameraTabWidget из GuiCommandHandler (Sim/Webcam + смена типа камеры).
+
+    Hikvision обслуживается HikvisionCameraMvpWidget через command_handler; колбэки hikvision не нужны.
+
+    ``webcam_enum_max_index`` оставлен для совместимости вызовов (launcher); для Hikvision используется
+    ``CameraTabUiConfig.webcam_enum_max_index`` во вкладке.
+    """
+    _ = webcam_enum_max_index
     from ...camera_common import build_sim_webcam_callbacks
 
     sim_web = build_sim_webcam_callbacks(cmd)
     return {
         "simulator": sim_web,
         "webcam": sim_web,
-        "hikvision": build_hikvision_callbacks(cmd, webcam_enum_max_index=webcam_enum_max_index),
         "on_camera_type_changed": cmd.send_camera_type_changed,
     }
 

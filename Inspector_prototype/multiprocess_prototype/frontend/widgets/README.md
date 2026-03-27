@@ -16,7 +16,7 @@ flowchart TB
     end
 
     subgraph features["Фиче-виджеты BaseWidget / MVP"]
-        HV[hikvision_widget]
+        HM[hikvision_camera_mvp]
         CC[camera_common]
         RRW[recipes_widget]
         ARW[settings_recipe_widget]
@@ -29,7 +29,7 @@ flowchart TB
     end
 
     CT --> CC
-    CT --> HV
+    CT --> HM
     RT --> RRW
     ST --> ARW
     PT --> PPW
@@ -44,7 +44,8 @@ flowchart TB
 |--------|----------------|----------------|
 | `tabs_setting/` | `*TabWidget` в каждой подпапке | `tab_item_config`, `tabs_config`, оболочки |
 | `camera_common/` | `SimWebcamWidget` | `widget`, `binder`, `fps_section`, `presenter`, `model` |
-| `hikvision_widget/` | `HikvisionWidget` | `widget`, `presenter`, `model`, `line_params` |
+| `hikvision_widget/` | `HikvisionWidget` (legacy, колбэки) | `widget`, `presenter`, `model`, `line_params` |
+| `hikvision_camera_mvp/` | `HikvisionCameraMvpWidget` | `view`, `schemas`, `widget`, `presenter`, `model`; границы — `CameraRegisters` / `hikvision_param_rows` |
 | `recipes_widget/` | `RegisterRecipePanelWidget` | `panel_widget`, `recipe_rows` |
 | `settings_recipe_widget/` | `AppRecipePanelWidget` | `schemas.py` (`RecipesTabConfig`), `panel_widget`, `app_recipe_rows` |
 | `processing_panel_widget/` | `ProcessingPanelWidget` | привязка к `PROCESSOR_REGISTER` / `RENDERER_REGISTER` |

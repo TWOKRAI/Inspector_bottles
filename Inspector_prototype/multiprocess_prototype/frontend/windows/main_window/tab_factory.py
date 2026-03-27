@@ -67,6 +67,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 camera_type=camera_type,
                 registers_manager=registers_manager,
                 callbacks_map=camera_callbacks_map,
+                command_handler=ctx.command_handler,
                 ui=ctx.get_camera_tab_ui(),
                 touch_keyboard=tk,
             )

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-CameraRegisters — параметры камеры (тип, FPS, разрешение).
+Схемы регистров камеры: стандарт (Simulator/Webcam) и расширение Hikvision.
+
+Публичное имя регистра процесса — :data:`CameraRegisters` (полный набор полей).
 
 Маршрутизация: camera.
 """
@@ -18,8 +20,8 @@ from multiprocess_framework.modules.data_schema_module import (
 CAMERA_ROUTING = FieldRouting(channel="control_camera")
 
 
-class CameraRegisters(SchemaBase):
-    """Регистры параметров камеры."""
+class StandardCameraRegisters(SchemaBase):
+    """Регистры общих параметров камеры (Simulator / Webcam): тип, FPS, разрешение, устройство."""
 
     register_dispatch: ClassVar[RegisterDispatchMeta] = RegisterDispatchMeta(
         process_targets=("camera",),
@@ -33,6 +35,17 @@ class CameraRegisters(SchemaBase):
             routing=CAMERA_ROUTING,
         ),
     ] = DEFAULT_CAMERA_TYPE
+
+    device_id: Annotated[
+        int,
+        FieldMeta(
+            "ID устройства",
+            info="Индекс устройства Webcam / OpenCV (0…63, см. enum_devices).",
+            min=0,
+            max=63,
+            routing=CAMERA_ROUTING,
+        ),
+    ] = 0
 
     fps: Annotated[
         int,
@@ -70,16 +83,10 @@ class CameraRegisters(SchemaBase):
         ),
     ] = 480
 
-    device_id: Annotated[
-        int,
-        FieldMeta(
-            "ID устройства",
-            info="Индекс устройства Webcam / OpenCV (0…63, см. enum_devices).",
-            min=0,
-            max=63,
-            routing=CAMERA_ROUTING,
-        ),
-    ] = 0
+
+
+class HikvisionCameraRegisters(StandardCameraRegisters):
+    """Дополнительные поля для камеры Hikvision (индекс SDK, разрешение, экспозиция, gain)."""
 
     camera_index: Annotated[
         int,
@@ -119,10 +126,10 @@ class CameraRegisters(SchemaBase):
     hikvision_frame_rate: Annotated[
         float,
         FieldMeta(
-            "Frame Rate Hikvision",
+            "Частота кадров Hikvision",
             info="Частота кадров Hikvision (Get/Set Parameters).",
-            min=0.1,
-            max=120.0,
+            min=1,
+            max=120,
             unit="fps",
             routing=CAMERA_ROUTING,
         ),
@@ -131,10 +138,10 @@ class CameraRegisters(SchemaBase):
     hikvision_exposure_time: Annotated[
         float,
         FieldMeta(
-            "Exposure Hikvision",
+            "Экспозиция Hikvision",
             info="Время экспозиции Hikvision (μs).",
-            min=0.0,
-            max=1000000.0,
+            min=1,
+            max=100000,
             unit="μs",
             routing=CAMERA_ROUTING,
         ),
@@ -143,7 +150,7 @@ class CameraRegisters(SchemaBase):
     hikvision_gain: Annotated[
         float,
         FieldMeta(
-            "Gain Hikvision",
+            "Усиление Hikvision",
             info="Усиление Hikvision (dB).",
             min=0.0,
             max=24.0,
@@ -151,3 +158,7 @@ class CameraRegisters(SchemaBase):
             routing=CAMERA_ROUTING,
         ),
     ] = 0.0
+
+
+# Полная схема регистра `camera` (обратная совместимость импорта).
+CameraRegisters = HikvisionCameraRegisters

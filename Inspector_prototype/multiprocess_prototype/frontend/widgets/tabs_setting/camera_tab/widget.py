@@ -2,8 +2,8 @@
 """
 CameraTabWidget — контейнер: ComboBox типа камеры + StackedWidget с тремя виджетами.
 
-Дочерние виджеты: SimWebcamWidget (simulator / webcam) и HikvisionWidget.
-callbacks_map: {"simulator": SimWebcamWidgetCallbacks, "webcam": ..., "hikvision": ...}.
+Дочерние виджеты: SimWebcamWidget (simulator / webcam) и HikvisionCameraMvpWidget.
+Нужны ``command_handler`` (для Hikvision MVP) и ``callbacks_map`` для Sim/Webcam и on_camera_type_changed.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from ...hikvision_widget import HikvisionWidget
+from ...hikvision_camera_mvp import HikvisionCameraMvpWidget
 from ...camera_common import SimWebcamWidget
 
 from .presenter import CameraTabPresenter
@@ -32,14 +32,16 @@ class CameraTabWidget(BaseTab):
         camera_type: str = "simulator",
         registers_manager: Optional[Any] = None,
         callbacks_map: Optional[Dict[str, Any]] = None,
+        command_handler: Optional[Any] = None,
         ui: Optional[Union[CameraTabUiConfig, dict]] = None,
         touch_keyboard: Any | None = None,
         parent: Optional[Any] = None,
     ):
-        """ComboBox типа камеры + стек из SimWebcam×2 и Hikvision."""
+        """ComboBox типа камеры + стек из SimWebcam×2 и Hikvision MVP."""
         super().__init__(parent)
         self._registers_manager = registers_manager
         self._callbacks_map = callbacks_map or {}
+        self._command_handler = command_handler
         self._ui = coerce_schema_config(ui, CameraTabUiConfig)
         self._touch_keyboard = merge_touch_keyboard_dicts(
             touch_keyboard, getattr(self._ui, "touch_keyboard", None)
@@ -87,11 +89,14 @@ class CameraTabWidget(BaseTab):
             callbacks=self._callbacks_map.get("webcam"),
             touch_keyboard=tk_fps,
         )
-        hik = HikvisionWidget(
+        if self._command_handler is None:
+            raise TypeError("CameraTabWidget requires command_handler for HikvisionCameraMvpWidget")
+        hik = HikvisionCameraMvpWidget(
             registers_manager=self._registers_manager,
-            callbacks=self._callbacks_map.get("hikvision"),
+            command_handler=self._command_handler,
             ui=self._ui.hikvision,
             touch_keyboard=tk_hik,
+            webcam_enum_max_index=self._ui.webcam_enum_max_index,
         )
         self._stack.addWidget(sim)
         self._stack.addWidget(web)

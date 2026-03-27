@@ -22,6 +22,10 @@ from multiprocess_framework.modules.data_schema_module import (
     register_schema,
 )
 
+from multiprocess_prototype.frontend.widgets.hikvision_camera_mvp.schemas import (
+    HikvisionCameraMvpUiConfig,
+)
+
 
 def _default_camera_type_ids() -> List[str]:
     """Идентификаторы типов камеры (ключи регистра / стека)."""
@@ -50,8 +54,8 @@ class CameraTabUiConfig(SchemaBase):
         le=WEBCAM_ENUM_HARD_CAP,
         description="Опрос OpenCV [0..N-1] при enum_devices в режиме Webcam; Hikvision SDK список целиком.",
     )
-    # Dict at Boundary → HikvisionWidget приводит к HikvisionUiConfig (без циклического импорта схем).
-    hikvision: Dict[str, Any] = Field(default_factory=dict)
+    # Секция UI Hikvision (MVP); dict из YAML приводится к модели при валидации CameraTabUiConfig.
+    hikvision: HikvisionCameraMvpUiConfig = Field(default_factory=HikvisionCameraMvpUiConfig)
 
     touch_keyboard: Optional[Dict[str, Any]] = Field(
         default=None,

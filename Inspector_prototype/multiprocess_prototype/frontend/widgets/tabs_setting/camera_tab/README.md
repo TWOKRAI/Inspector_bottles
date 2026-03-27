@@ -15,7 +15,7 @@ flowchart TB
 
     P0[SimWebcamWidget simulator]
     P1[SimWebcamWidget webcam]
-    P2[HikvisionWidget]
+    P2[HikvisionCameraMvpWidget]
 
     CB -->|currentIndexChanged| Pr[CameraTabPresenter]
     Pr -->|set_stack_index| ST
@@ -47,7 +47,7 @@ classDiagram
 | `widget.py` | `CameraTabWidget` — ComboBox + стек из 3 страниц |
 | `view.py` | `CameraTabView` — `set_stack_index`, `set_combo_index` |
 | `presenter.py` | `CameraTabPresenter` — тип в регистре, диск, IPC, стек |
-| `schemas.py` | `CameraTabUiConfig` — id/лейблы типов, вложенный dict Hikvision |
+| `schemas.py` | `CameraTabUiConfig` — id/лейблы типов, вложенный `HikvisionCameraMvpUiConfig` |
 | `register_ops.py` | `set_camera_type_field`, `persist_camera_type` |
 | `__init__.py` | `build_camera_tab_callbacks(cmd)` → `callbacks_map` |
 
@@ -63,10 +63,12 @@ camera_tab/           — контейнер: ComboBox + QStackedWidget
 └── build_camera_tab_callbacks(cmd) → callbacks_map (в __init__.py)
 
 camera_common/        — SimWebcamWidget + FPS + схема (Simulator/Webcam)
-hikvision_widget/     — рядом в widgets/
+hikvision_camera_mvp/ — Hikvision на вкладке (`GuiCommandHandler`); legacy: `hikvision_widget/`
 ```
 
-## callbacks_map
+## callbacks_map и command_handler
+
+`tab_factory` передаёт во вкладку **`command_handler`** (тот же `GuiCommandHandler`, что и в лаунчере) — им пользуется **`HikvisionCameraMvpWidget`**.
 
 Launcher вызывает `build_camera_tab_callbacks(cmd)` и передаёт в tab_factory:
 
@@ -74,8 +76,7 @@ Launcher вызывает `build_camera_tab_callbacks(cmd)` и передаёт 
 {
     "simulator": SimWebcamWidgetCallbacks(...),  # тот же объект, что и webcam
     "webcam": ...,
-    "hikvision": HikvisionWidgetCallbacks(on_enum_devices=..., on_open=..., ...),
-    "on_camera_type_changed": cmd.send_camera_type_changed,  # явная команда воркеру при смене типа
+    "on_camera_type_changed": cmd.send_camera_type_changed,
 }
 ```
 
@@ -83,4 +84,4 @@ Launcher вызывает `build_camera_tab_callbacks(cmd)` и передаёт 
 
 - **View** — `view.py` (Protocol), методы реализует `CameraTabWidget`.
 - **Presenter** — `presenter.py`, без Qt; колбэки и регистры — здесь.
-- Дочерние `camera_common` / `hikvision_widget` — свои MVP внутри пакетов.
+- Дочерние `camera_common` и `hikvision_camera_mvp` — свои MVP внутри пакетов (legacy `hikvision_widget` без изменений в репозитории).
