@@ -1,122 +1,34 @@
 ## Project context
-Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codebase-mcp)
+Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codebase-mcp). Дерево каталогов синхронизировано с **user-codebase-mcp** (`get_context`, `get_structure`); обзор соглашений — `get_conventions` (слабые сигналы, детали в блоке Conventions ниже).
 
 **Inspector_bottles** — инспекция бутылок / машинное зрение; основная разработка в `Inspector_prototype/`.
 
 ### Ограничение MCP `get_context`
-Инструмент **не подставляет** этот файл: он **пересканирует** репозиторий и генерирует Markdown заново (см. `codebase-mcp` → `generateMarkdown(scan)`). Поэтому в ответе MCP строка **Stack → Language: JavaScript** — артефакт сканера для проектов без JS/TS-стека; для правды о стеке смотрите блок ниже и `pyproject.toml` / `requirements.txt`.
+Инструмент **не подставляет** этот файл: он **пересканирует** репозиторий и генерирует Markdown заново (см. `codebase-mcp` → `generateMarkdown(scan)`). Поэтому в сыром ответе MCP строка **Stack → Language: JavaScript** — артефакт сканера для проектов без JS/TS-стека; для правды о стеке смотрите блок ниже и `Inspector_prototype/pyproject.toml`.
 
 ### Source of truth для агента (ручной блок)
 - **Язык:** Python 3 (не JavaScript; codebase-mcp по умолчанию путает стек без `package.json` фронта).
+- **Пакет:** `inspector-prototype` **0.1.0** — `Inspector_prototype/pyproject.toml`.
 - **Фреймворк:** `Inspector_prototype/multiprocess_framework/` — многопроцессный каркас (оркестрация, IPC, конфиги, логи, shared resources).
 - **Точка входа приложения:** `Inspector_prototype/multiprocess_prototype/main.py` (`SystemLauncher`, процессы через `data_schema_module.process`).
 - **Документация фреймворка:** `Inspector_prototype/multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`).
-- **Схемы регистров приложения:** в прототипе (`multiprocess_prototype` / `registers`), не внутри абстрактного «ядра» фреймворка.
+- **Журнал решений:** `Inspector_prototype/multiprocess_framework/DECISIONS.md`.
+- **Схемы регистров приложения:** в прототипе (`multiprocess_prototype` / `schemas`; `registers` в v2/v3), не внутри абстрактного «ядра» фреймворка.
 - **Правила репозитория:** `.cursor/rules/framework-architecture.mdc`.
-- **Валидация:** `python Inspector_prototype/scripts/validate.py` (из корня `Inspector_prototype` или согласно README скрипта).
-
-**Inspector_bottles** vunknown (версия из `pyproject.toml` / пакета при необходимости уточнять)
+- **Валидация:** `python Inspector_prototype/scripts/validate.py` (из корня репозитория; при смене cwd см. README скрипта).
 
 ## Stack
-- Language: **Python**
+- Language: **Python** (`requires-python >=3.9`; зависимости: Pydantic, SQLAlchemy, NumPy, PyQt5, OpenCV, Pillow — см. `Inspector_prototype/pyproject.toml`)
 - Domain: **multiprocess desktop / vision pipeline** (camera, processor, renderer, robot, DB, GUI)
 - Config / typing: **Pydantic внутри процессов**; **только `dict` на границе процессов** (Dict at Boundary)
 
 ## Structure
 ```
-├── .cursor/  # 2 files
+├── .cursor/  # 3 files
 │   ├── plans/  # 5 files
-│   └── rules/  # 3 files
-├── archive/  # 4 files
-│   ├── examples/  # 8 files
-│   ├── modules (no work!!!) go refactored/  # 16 files
-│   │   ├── Base_manager_module/  # 9 files
-│   │   ├── Command_module/  # 6 files
-│   │   ├── Component_data_module/  # 1 files
-│   │   ├── Config_module/  # 4 files
-│   │   ├── Console_module/  # 6 files
-│   │   ├── Dispatch_module/  # 9 files
-│   │   ├── GUI_module/  # 4 files
-│   │   ├── Logger_module/  # 12 files
-│   │   ├── Message_module/  # 5 files
-│   │   ├── Process_manager_module/  # 18 files
-│   │   ├── Process_module/  # 9 files
-│   │   ├── Router_module/  # 7 files
-│   │   ├── Shared_resources_module/  # 9 files
-│   │   └── Worker_module/  # 3 files
-│   ├── Multiproccesing/  # 5 files
-│   │   └── Processes/  # 11 files
-│   └── REGISTERS_APPROACH_ANALYSIS.md
-├── BASKET/  # 28 files
-│   ├── App/  # 5 files
-│   │   ├── Components/  # 1 files
-│   │   ├── Threads/  # 1 files
-│   │   ├── Widget/  # 4 files
-│   │   └── Windows/  # 1 files
-│   ├── App2/  # 2 files
-│   │   ├── Components/  # 1 files
-│   │   └── Widget/  # 4 files
-│   ├── BasicDemo/  # 1 files
-│   ├── Camera_module2/  # 4 files
-│   ├── Create_bottles/  # 15 files
-│   │   └── Images/  # 11 files
-│   ├── Data/  # 4 files
-│   │   ├── debug_logs/  # 1 files
-│   │   └── Recipes/  # 1 files
-│   ├── dataset/  # 2 files
-│   │   ├── bad/  # 4 files
-│   │   └── good/  # 2 files
-│   ├── Inspector_backup_worker/  # 22 files
-│   │   ├── App/  # 8 files
-│   │   ├── Bot/  # 3 files
-│   │   ├── Devices/  # 4 files
-│   │   ├── Display_robot/  # 2 files
-│   │   ├── Multiproccesing/  # 5 files
-│   │   ├── Neuron/  # 12 files
-│   │   ├── Process_image/  # 4 files
-│   │   └── Utils/  # 7 files
-│   ├── logs/  # 1 files
-│   ├── modules (no work!!!) go refactored/  # 14 files
-│   │   ├── Base_manager_module/  # 1 files
-│   │   ├── Command_module/  # 1 files
-│   │   ├── Config_module/  # 1 files
-│   │   ├── Console_module/  # 1 files
-│   │   ├── Dispatch_module/  # 2 files
-│   │   ├── GUI_module/  # 1 files
-│   │   ├── Logger_module/  # 1 files
-│   │   ├── Message_module/  # 1 files
-│   │   ├── Process_manager_module/  # 11 files
-│   │   ├── Process_module/  # 1 files
-│   │   ├── Router_module/  # 1 files
-│   │   ├── Shared_resources_module/  # 2 files
-│   │   └── Worker_module/  # 1 files
-│   ├── Multiproccesing/  # 10 files
-│   │   ├── process_module_new/  # 2 files
-│   │   ├── process_module_new2/  # 10 files
-│   │   ├── Process_modules/  # 10 files
-│   │   └── Processes/  # 8 files
-│   ├── Neuron/  # 1 files
-│   │   └── Data_image/  # 4 files
-│   ├── Services/  # 5 files
-│   │   ├── graph/  # 2 files
-│   │   ├── hikvision_camera/  # 9 files
-│   │   └── Operation_crop/  # 4 files
-│   ├── Test_bottle/  # 5 files
-│   │   └── Images/  # 10 files
-│   ├── Utils/  # 7 files
-│   ├── Visualization/  # 2 files
-│   ├── color_process.py
-│   ├── combine_files.py
-│   ├── combined_code_anton.txt
-│   ├── combined_code.txt
-│   ├── frame_test2.jpg
-│   ├── launcher.bat
-│   ├── main.pyw
-│   ├── plot_numpy.png
-│   ├── test.py
-│   ├── value_settings.xlsx
-│   └── value.dat
-├── Inspector_prototype/  # 14 files
+│   ├── rules/  # 3 files
+│   └── mcp.json
+├── Inspector_prototype/  # 12 files
 │   ├── App/  # 11 files
 │   │   ├── Core/  # 10 files
 │   │   ├── Data/  # 4 files
@@ -129,8 +41,6 @@ Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codeba
 │   │   ├── sdk/  # 18 files
 │   │   ├── sdk_app/  # 3 files
 │   │   └── tests/  # 4 files
-│   ├── inspector_prototype.egg-info/  # 5 files
-│   ├── logs/  # 4 files
 │   ├── multiprocess_framework/  # 14 files
 │   │   ├── core/  # 1 files
 │   │   ├── docs/  # 10 files
@@ -176,17 +86,7 @@ Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codeba
 │   │   └── fps_module/  # 8 files
 │   ├── pyproject.toml
 │   └── UNIFICATION_PLAN.md
-├── logs/  # 4 files
-│   ├── critical.log
-│   ├── errors.log
-│   ├── stats_TestStats.json
-│   └── warnings.log
-├── Neuron/  # 1 files
-│   └── Data_image/  # 4 files
-│       ├── Data_all/  # 0 files
-│       ├── Data_bad/  # 0 files
-│       ├── Data_good/  # 0 files
-│       └── Data_none/  # 0 files
+├── logs/  # 0 files
 ├── venv/  # 6 files
 │   ├── etc/  # 1 files
 │   │   └── jupyter/  # 1 files
@@ -202,22 +102,15 @@ Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codeba
 ├── .cursorignore
 ├── .DS_Store
 ├── .gitignore
-├── camera.log
-├── database.log
-├── frames.log
+├── CONTEXT.md
 ├── GIT_WORKFLOW_BEGINNER.md
-├── gui.log
-├── messages.log
-├── processor.log
 ├── promt.md
-├── README.md
-├── renderer.log
-├── requirements.txt
-├── robot.log
-└── system.log
+└── README.md
 ```
 
 ## Conventions (репозиторий)
+Ответ **user-codebase-mcp** `get_conventions` для этого дерева: без устойчивых алиасов/barrel-экспортов (`componentNaming`/`fileNaming`: unknown). Для работы в репозитории используйте правила фреймворка:
+
 - **Импорты:** относительные внутри модуля фреймворка; между модулями — абсолютные (`multiprocess_framework.modules...`).
 - **Публичный контракт модуля:** `interfaces.py`; README и `STATUS.md` по шаблону в `docs/`.
 - **Тесты:** `pytest`, файлы `test_*.py` в `tests/` модулей.
