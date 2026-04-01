@@ -1,0 +1,5 @@
+2026-04-01 11:04:32,736 [INFO] renderer: Process state registered: renderer
+2026-04-01 11:04:32,736 [INFO] renderer: RendererProcess initializing...
+2026-04-01 11:04:32,736 [INFO] renderer: RendererProcess ready
+2026-04-01 11:04:32,736 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-01 11:04:32,736 [INFO] renderer: Process 'renderer' initialized successfully

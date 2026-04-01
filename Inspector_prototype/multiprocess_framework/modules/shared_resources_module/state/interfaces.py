@@ -17,9 +17,8 @@ class IProcessStateRegistry(ABC):
         self,
         process_name: str,
         initial_state: Optional[Dict[str, Any]] = None,
-        config: Optional[Any] = None,
     ) -> bool:
-        """Зарегистрировать процесс."""
+        """Зарегистрировать процесс. Конфигурация — в initial_state.custom или через ConfigStore (SRM)."""
 
     @abstractmethod
     def has_process(self, process_name: str) -> bool:

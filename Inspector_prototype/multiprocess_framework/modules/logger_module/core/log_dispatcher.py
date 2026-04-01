@@ -14,7 +14,7 @@ LogDispatcher — маршрутизация записей лога по кан
      Регистрация через register_level_route(level, channel_name, handler).
 
 Почему channel-based вызывает handler напрямую, а level-based — через Dispatcher?
-  В channel-based список каналов уже известен (ScopeConfig); Dispatcher здесь
+  В channel-based список каналов уже известен (LoggerScopeSchema); Dispatcher здесь
   лишний посредник. В level-based ключ определяется динамически → Dispatcher
   нужен для flexibel routing (EXACT + PATTERN + FALLBACK).
 """

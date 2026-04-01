@@ -100,10 +100,11 @@ error_module/
 ├── __init__.py           ← Публичный API
 │
 ├── core/
-│   └── error_manager.py  ← ErrorManager(LoggerManager)
+│   ├── error_manager.py           ← ErrorManager(LoggerManager)
+│   └── error_config_assembly.py   ← expand_error_manager_config (merge severity channels)
 │
-├── config/
-│   └── error_config.py   ← ErrorManagerConfig(ChannelRoutingConfig)
+├── configs/
+│   └── error_manager_config.py    ← ErrorManagerConfig(SchemaBase), только поля
 │
 └── tests/
     ├── test_error_manager.py

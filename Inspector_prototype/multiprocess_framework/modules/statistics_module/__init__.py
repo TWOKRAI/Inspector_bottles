@@ -6,7 +6,7 @@ statistics_module — менеджер статистики и метрик.
 интегрируется с logger_module, command_module, router_module.
 """
 from .interfaces import IStatsManager
-from .config import StatsManagerConfig
+from .configs import StatsManagerConfig
 from .core import StatsManager, MetricRecord, MetricType, AggregationWindow
 from .channels import LogStatsChannel, FileStatsChannel
 from .adapters import StatsAdapter

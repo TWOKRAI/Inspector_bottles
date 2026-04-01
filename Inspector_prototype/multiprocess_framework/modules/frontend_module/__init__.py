@@ -20,6 +20,11 @@ from frontend_module.core.registers_bridge import FrontendRegistersBridge
 from frontend_module.schemas.widget_descriptor import WidgetDescriptor, widget_descriptor_from_dict
 from frontend_module.schemas.window_config import WindowConfig
 from frontend_module.core.layout_composer import compose_layout
+from frontend_module.configs import (
+    FrontendManagerConfig,
+    ThreadManagerConfig as FrontendThreadManagerConfig,
+    WindowManagerConfig,
+)
 
 __all__ = [
     "BaseConfigurableWidget",
@@ -32,6 +37,9 @@ __all__ = [
     "create_default_registry",
     "WindowConfig",
     "compose_layout",
+    "FrontendManagerConfig",
+    "FrontendThreadManagerConfig",
+    "WindowManagerConfig",
 ]
 
 from frontend_module.application import (

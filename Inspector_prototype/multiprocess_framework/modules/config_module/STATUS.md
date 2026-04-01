@@ -18,7 +18,7 @@
 - [x] Этап 0: Удалён REFACTORING_SUMMARY.md (устаревший)
 - [x] Этап 1: core/config.py переписан (~160 строк), убраны load/save/to_model/from_model
 - [x] Этап 2: core/config_manager.py переписан (~215 строк), убраны StorageManager и EventManager
-- [x] Этап 3: config/config_config.py — ConfigManagerConfig(SchemaBase) через @register_schema
+- [x] Этап 3: configs/config_manager_config.py — ConfigManagerConfig(SchemaBase); core/ без дублирующего base_config
 - [x] Этап 4: interfaces.py обновлён — IConfigObserver Protocol, IConfig без load/save
 - [x] Этап 5: sections/config_section.py — исправлены импорты (абсолютные)
 - [x] Этап 6: adapters/schema_adapter.py — почищен docstring
@@ -36,7 +36,7 @@
 
 ## Известные проблемы
 
-- Нет: все известные проблемы устранены
+- **Разделение:** `configs/` — только SchemaBase; `core/` — Config + ConfigManager; удалён неиспользуемый `core/base_config.py`
 
 ## История изменений
 

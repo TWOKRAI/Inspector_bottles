@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ..adapters.console_adapter import ConsoleAdapter
-from ..core.console_config import ConsoleConfig
+from ..configs.console_config import ConsoleConfig
 from ..core.console_manager import ConsoleManager
 
 

@@ -38,13 +38,14 @@ ConfigStore (SRM)           ← ГДЕ: pickle-safe хранение между 
 config_module/
 ├── __init__.py              # Публичный API: Config, ConfigManager, ConfigSection
 ├── interfaces.py            # IConfig, IConfigManager, IConfigObserver
+├── configs/
+│   ├── config_manager_config.py  # ConfigManagerConfig (SchemaBase) — схема модуля
+│   └── __init__.py
 ├── core/
-│   ├── config.py            # Config (~160 строк) — runtime контейнер
-│   └── config_manager.py    # ConfigManager (~215 строк) — менеджер конфигов
+│   ├── config.py            # Config — runtime контейнер (dot-notation, подписки)
+│   └── config_manager.py    # ConfigManager — менеджер множества Config
 ├── sections/
 │   └── config_section.py    # ConfigSection — view на часть Config
-├── config/
-│   └── config_config.py     # ConfigManagerConfig (SchemaBase) — конфиг самого модуля
 ├── adapters/
 │   └── schema_adapter.py    # ConfigSchemaAdapter — адаптер SchemaBase
 ├── docs/

@@ -15,13 +15,13 @@ except ImportError:
     requests = None
 
 from ..interfaces import ILogChannel
-from ..core.log_config import ChannelConfig
+from ..configs.logger_manager_config import LoggerChannelSchema
 
 
 class LogChannel(ILogChannel):
     """Базовый класс канала логирования (реализует ILogChannel → IChannel)."""
 
-    def __init__(self, config: ChannelConfig):
+    def __init__(self, config: LoggerChannelSchema):
         self.config = config
         self._name = config.name
         self._type = config.type
@@ -44,7 +44,7 @@ class LogChannel(ILogChannel):
 class FileChannel(LogChannel):
     """Канал записи в файл"""
     
-    def __init__(self, config: ChannelConfig):
+    def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         self.file_path = Path(config.file_path or f"logs/{config.name}.log")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +92,7 @@ class FileChannel(LogChannel):
 class ConsoleChannel(LogChannel):
     """Канал записи в консоль"""
     
-    def __init__(self, config: ChannelConfig):
+    def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         self.handler = logging.StreamHandler()
         formatter = logging.Formatter(config.format)
@@ -127,7 +127,7 @@ class ConsoleChannel(LogChannel):
 class HttpChannel(LogChannel):
     """Канал отправки логов по HTTP"""
     
-    def __init__(self, config: ChannelConfig):
+    def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         if requests is None:
             raise ImportError("requests library is required for HttpChannel")
@@ -148,17 +148,16 @@ class HttpChannel(LogChannel):
             return {'status': 'error', 'error': str(e), 'channel': self.name}
 
 
-def create_channel(config: ChannelConfig) -> LogChannel:
-    """Фабрика для создания каналов"""
+def create_channel(channel_name: str, config: LoggerChannelSchema) -> LogChannel:
+    """Фабрика для создания каналов (name задаётся ключом словаря channels)."""
+    cfg = config.model_copy(update={"name": channel_name})
     channel_types = {
-        'file': FileChannel,
-        'console': ConsoleChannel,
-        'http': HttpChannel
+        "file": FileChannel,
+        "console": ConsoleChannel,
+        "http": HttpChannel,
     }
-    
-    channel_class = channel_types.get(config.type)
+    channel_class = channel_types.get(cfg.type)
     if not channel_class:
-        raise ValueError(f"Unknown channel type: {config.type}")
-    
-    return channel_class(config)
+        raise ValueError(f"Unknown channel type: {cfg.type}")
+    return channel_class(cfg)
 

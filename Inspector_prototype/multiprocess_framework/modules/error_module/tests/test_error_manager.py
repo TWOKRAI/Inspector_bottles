@@ -4,7 +4,7 @@
 import pytest
 
 from ..core.error_manager import ErrorManager
-from ..config.error_config import ErrorManagerConfig
+from ..configs.error_manager_config import ErrorManagerConfig
 
 
 class TestErrorManager:
@@ -17,7 +17,7 @@ class TestErrorManager:
         """
         em = ErrorManager(config=None)
         assert em.app_name == "errors"
-        assert em.config.default_level.value == "WARNING"
+        assert em.config.default_level == "WARNING"
 
     def test_init_with_dict(self) -> None:
         """Инициализация с config=dict."""

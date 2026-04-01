@@ -4,7 +4,7 @@
 import pytest
 from unittest.mock import Mock
 
-from ..config.process_config_handler import ProcessConfigHandler
+from ..configs.process_config_handler import ProcessConfigHandler
 
 
 def make_mock_shared_resources_with_data(custom_data=None):

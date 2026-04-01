@@ -20,8 +20,10 @@ import traceback
 from typing import Optional, Any, Union, Dict
 
 from ...logger_module import LoggerManager
-from ...logger_module.core.log_config import LogConfig, LogLevel, LogScope
+from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_dispatcher import LogRecord
+from ..configs.error_manager_config import ErrorManagerConfig
+from .error_config_assembly import expand_error_manager_config
 
 
 _DEFAULT_CONFIG: Dict[str, Any] = {
@@ -60,36 +62,48 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 
 
 def _normalize_error_config(
-    config: Optional[Union[Dict[str, Any], LogConfig, Any]],
-) -> tuple[str, LogConfig, bool]:
-    """Преобразовать config → (manager_name, LogConfig, include_stacktrace).
+    config: Optional[Union[Dict[str, Any], LoggerManagerConfig, Any]],
+) -> tuple[str, LoggerManagerConfig, bool]:
+    """Преобразовать config → (manager_name, LoggerManagerConfig, include_stacktrace).
 
-    Поддерживает: None | dict | LogConfig | объект с build() → (name, dict).
+    Поддерживает: None | dict | ErrorManagerConfig | LoggerManagerConfig | build() → (name, dict).
+    Плоские dict / ErrorManagerConfig проходят через :func:`expand_error_manager_config`.
     Вызывает TypeError для неизвестных типов.
     """
     manager_name = "ErrorManager"
     include_stacktrace = True
 
     if config is None:
-        return manager_name, LogConfig.from_dict(_DEFAULT_CONFIG), include_stacktrace
+        return manager_name, LoggerManagerConfig.from_dict(_DEFAULT_CONFIG), include_stacktrace
 
-    if isinstance(config, LogConfig):
+    if isinstance(config, LoggerManagerConfig):
         return manager_name, config, include_stacktrace
 
+    if isinstance(config, ErrorManagerConfig):
+        raw = config.model_dump()
+        d = expand_error_manager_config(raw)
+        manager_name = str(raw.get("manager_name", "ErrorManager"))
+        include_stacktrace = bool(d.get("include_stacktrace", True))
+        return manager_name, LoggerManagerConfig.from_dict(d), include_stacktrace
+
     if isinstance(config, dict):
-        include_stacktrace = config.get("include_stacktrace", True)
-        return manager_name, LogConfig.from_dict(config), include_stacktrace
+        d = expand_error_manager_config(dict(config))
+        include_stacktrace = bool(d.get("include_stacktrace", True))
+        manager_name = str(d.get("manager_name", "ErrorManager"))
+        return manager_name, LoggerManagerConfig.from_dict(d), include_stacktrace
 
     if hasattr(config, "build") and callable(config.build):
         name, config_dict = config.build()
         manager_name = name
-        include_stacktrace = config_dict.get("include_stacktrace", True)
+        d = dict(config_dict) if isinstance(config_dict, dict) else {}
+        include_stacktrace = d.get("include_stacktrace", True)
         if hasattr(config, "include_stacktrace"):
-            include_stacktrace = config.include_stacktrace
-        return manager_name, LogConfig.from_dict(config_dict), include_stacktrace
+            include_stacktrace = bool(config.include_stacktrace)
+        d = expand_error_manager_config(d)
+        return manager_name, LoggerManagerConfig.from_dict(d), include_stacktrace
 
     raise TypeError(
-        f"config must be dict, LogConfig, or object with build() -> (name, dict), got {type(config)}"
+        f"config must be dict, LoggerManagerConfig, ErrorManagerConfig, or object with build() -> (name, dict), got {type(config)}"
     )
 
 
@@ -119,7 +133,7 @@ class ErrorManager(LoggerManager):
         self,
         manager_name: str = "ErrorManager",
         process: Optional[Any] = None,
-        config: Optional[Union[Dict[str, Any], LogConfig, Any]] = None,
+        config: Optional[Union[Dict[str, Any], LoggerManagerConfig, Any]] = None,
         config_manager: Optional[Any] = None,
         router_manager: Optional[Any] = None,
         managers: Optional[Dict[str, Any]] = None,

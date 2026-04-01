@@ -4,6 +4,7 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- Корневая сборка `managers`: **`config/managers_config.py`** — `ManagersConfig`, `from_log_dir()` (ADR-103); нормализация вида **`normalize_managers_view`** + **`ProcessLaunchConfig`** (ADR-104)
 - Версия: 2.0.0 (Refactored)
 - Тесты: 61/62 проходят (98% успешность)
 - Документация: ✅ полная
@@ -27,6 +28,11 @@
 **Средний score: 8.5/10 — Production Ready** 🟢
 
 ---
+
+## Дополнения к документации (2026-03-30)
+
+- **docs/examples/process_config_canonical_examples.py** — эталонные plain-dict для `ProcessConfigHandler` / `ProcessConfigDict`; живые проверки по-прежнему в `tests/test_process_config.py`.
+- **README**: единая точка чтения конфига — `get_config` / `config_handler`; ссылка на фреймворк [CONFIG_PATHS.md](../../docs/CONFIG_PATHS.md) (ADR-102).
 
 ## Структура модуля
 

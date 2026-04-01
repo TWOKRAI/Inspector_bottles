@@ -16,6 +16,9 @@ from multiprocessing import Event
 from typing import Optional, Union, Dict, Any
 
 from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
+from multiprocess_framework.modules.process_module.configs.managers_normalize import (
+    normalize_managers_view,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +140,15 @@ def _build_shared_resources_from_bundle(
     shared_resources.register_process_state(
         process_name,
         initial_state={"custom": custom},
-        config={"process": process_config, "managers": process_config.get("managers", {})},
+    )
+    # ADR-102: согласовать child SRM с get_process_config (pickle-safe срез, не полный proc_dict)
+    _pc = process_config if isinstance(process_config, dict) else {}
+    shared_resources.config_store.store(
+        process_name,
+        {
+            "process": _pc,
+            "managers": normalize_managers_view(_pc) if isinstance(_pc, dict) else {},
+        },
     )
 
     all_process_memory = custom.pop("_all_process_memory", {})
@@ -172,6 +183,9 @@ def _build_shared_resources_from_bundle(
         if target_name == process_name:
             continue
         shared_resources.register_process_state(target_name)
+        shared_resources.config_store.store(
+            target_name, {"process": {}, "managers": {}}
+        )
         for qtype, q in (target_queues or {}).items():
             shared_resources.process_state_registry.add_queue(target_name, qtype, q)
 

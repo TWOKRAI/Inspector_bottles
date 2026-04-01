@@ -10,7 +10,10 @@ import os
 from pathlib import Path
 
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
-from multiprocess_framework.modules.logger_module.core.log_config import LogConfig, LogLevel
+from multiprocess_framework.modules.logger_module.core.log_config import (
+    LoggerManagerConfig,
+    LogLevel,
+)
 
 
 class TestLoggerManager:
@@ -82,7 +85,7 @@ class TestLoggerManager:
     def test_module_rotate_false_uses_file_handler(self, tmp_path):
         """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов)."""
         log_file = tmp_path / "frames.log"
-        cfg = LogConfig.from_dict(
+        cfg = LoggerManagerConfig.from_dict(
             {
                 "enable_batching": False,
                 "modules": {
@@ -138,7 +141,7 @@ class TestLoggerManager:
         manager.initialize()
         
         # Обновляем конфигурацию напрямую (LoggerManager имеет свой метод update_config)
-        # update_config в ObservableMixin ожидает dict, а не LogConfig
+        # update_config в ObservableMixin ожидает dict, а не LoggerManagerConfig
         # Поэтому обновляем напрямую через атрибут config
         manager.config.app_name = "NewApp"
         

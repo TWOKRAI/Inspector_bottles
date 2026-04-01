@@ -17,9 +17,11 @@
 
 | Поле | Тип | Описание | Потребитель |
 |------|-----|----------|-------------|
-| `config` | dict | `model_dump()` конфига процесса | ProcessConfigHandler в process_module |
+| `config` | dict | Полезная нагрузка процесса: часто `model_dump()` схемы (в т.ч. вложенный `managers` — см. `ManagersConfig`, `ProcessLaunchConfig`) | ProcessConfigHandler в process_module |
 | `memory` | dict | SharedMemory: `{name: (h, w, c), "coll": N}` | process_runner нормализует в полный формат |
-| `managers` | dict | Конфиг менеджеров (logger, error, stats, router) | ProcessSpawner при инициализации процесса |
+| `managers` | dict (опц.) | Секции менеджеров на верхнем уровне proc_dict (legacy / merge в `proc_assembly`-стиле) | Совместимость; в каноне SchemaBase секции часто только в `config.managers` |
+
+`get_managers_config()` / `normalize_managers_view` в `process_module` приводят к одному виду: верхний `managers`, либо `config.managers`, либо плоские ключи секций (`logger`, `console`, …).
 
 ## Поток данных
 
@@ -37,3 +39,7 @@ App Config (CameraConfig, etc.)
 - **config_to_dict** (data_schema_module) — единственная реализация HasBuild → (name, dict)
 - **ProcessSchemaAdapter** — делегирует в config_to_dict при наличии build()
 - **DEFAULT_PROCESS_SCHEMA** (launcher/schema.py) — эталонная структура для нормализации
+
+## Эталонные примеры в коде
+
+См. [examples/proc_dict_canonical_examples.py](examples/proc_dict_canonical_examples.py) — готовые `proc_dict` и демонстрация `merge_with_defaults` (без импорта всего `process_manager_module`).

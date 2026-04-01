@@ -1,0 +1,36 @@
+version: 1
+current_register_recipe: 0
+register_recipes:
+  '0':
+    camera:
+      camera_type: simulator
+      device_id: 0
+      fps: 25
+      resolution_width: 640
+      resolution_height: 480
+      camera_index: 0
+      hikvision_resolution_width: 1920
+      hikvision_resolution_height: 1080
+      hikvision_frame_rate: 25.0
+      hikvision_exposure_time: 10000.0
+      hikvision_gain: 0.0
+    processor:
+      color_lower:
+      - 0
+      - 0
+      - 150
+      color_upper:
+      - 100
+      - 100
+      - 255
+      min_area: 500
+      max_area: 50000
+      logical_camera_ids: []
+      vision_pipeline:
+        cameras: {}
+    renderer:
+      show_original: true
+      show_mask: true
+      draw_contours: true
+      draw_bboxes: true
+      save_frames: false

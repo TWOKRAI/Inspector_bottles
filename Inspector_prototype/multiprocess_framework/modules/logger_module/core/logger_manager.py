@@ -20,14 +20,12 @@ if TYPE_CHECKING:
 from ...channel_routing_module import ChannelRoutingManager
 from ...channel_routing_module.buffers.batch_buffer import BatchBuffer, BatchConfig as CRMBatchConfig
 from ..interfaces import ILoggerManager
-from .log_config import (
-    LogConfig,
-    LogLevel,
-    LogScope,
-    ScopeConfig,
-    ChannelConfig,
-    ModuleConfig,
+from ..configs.logger_manager_config import (
+    LoggerChannelSchema,
+    LoggerManagerConfig,
+    LoggerModuleSchema,
 )
+from .log_config import LogLevel, LogScope
 from .log_dispatcher import LogDispatcher, LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 
@@ -44,9 +42,9 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
       - self._dispatcher        — Dispatcher (базовый, для level-based routing в ErrorManager)
 
     Сохраняет свою специфику:
-      - LogConfig              — конфигурация областей/уровней/каналов
-      - LogDispatcher          — channel-based routing (backward compat для ErrorManager)
-      - Scope-based routing    — log() определяет каналы по ScopeConfig
+      - LoggerManagerConfig    — конфигурация областей/уровней/каналов (SchemaBase)
+      - LogDispatcher          — channel-based routing (ErrorManager)
+      - Scope-based routing    — log() определяет каналы по LoggerScopeSchema
       - Module channels        — отдельный файл для каждого модуля
       - Context stack          — push_context / pop_context
     """
@@ -165,22 +163,24 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
     # =========================================================================
 
     @staticmethod
-    def _resolve_log_config(config: Any) -> LogConfig:
-        """Convert config (None | dict | LogConfig | RegisterBase) to LogConfig."""
+    def _resolve_log_config(config: Any) -> LoggerManagerConfig:
+        """Convert config (None | dict | LoggerManagerConfig | build()) to LoggerManagerConfig."""
         if config is None:
-            return LogConfig()
-        if isinstance(config, LogConfig):
+            return LoggerManagerConfig()
+        if isinstance(config, LoggerManagerConfig):
             return config
         if isinstance(config, dict):
-            return LogConfig.from_dict(config)
-        if hasattr(config, 'build') and callable(config.build):
+            return LoggerManagerConfig.from_dict(config)
+        if hasattr(config, "build") and callable(config.build):
             result = config.build()
             if isinstance(result, tuple) and len(result) == 2:
                 _, cfg_dict = result
-                return LogConfig.from_dict(cfg_dict) if isinstance(cfg_dict, dict) else LogConfig()
+                if isinstance(cfg_dict, dict):
+                    return LoggerManagerConfig.from_dict(cfg_dict)
+                return LoggerManagerConfig()
             if isinstance(result, dict):
-                return LogConfig.from_dict(result)
-        return LogConfig()
+                return LoggerManagerConfig.from_dict(result)
+        return LoggerManagerConfig()
 
     def _setup_channels(self):
         """Создать каналы из конфига и зарегистрировать в CRM registry.
@@ -190,7 +190,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         """
         for channel_name, channel_config in self.config.channels.items():
             if channel_config.enabled:
-                self._setup_channel(channel_name, channel_config)
+                self._setup_channel(str(channel_name), channel_config)
 
         # Автосоздание каналов для модулей из config.modules
         for module_name, module_config in self.config.modules.items():
@@ -199,16 +199,16 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             ):
                 self._setup_module_channel(module_name, module_config)
 
-    def _setup_channel(self, channel_name: str, channel_config: ChannelConfig):
+    def _setup_channel(self, channel_name: str, channel_config: LoggerChannelSchema):
         try:
-            channel = create_channel(channel_config)
+            channel = create_channel(channel_name, channel_config)
             self._channel_registry.register(channel)
             self.dispatcher.register_channel_handler(channel_name, channel.write)
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
 
-    def _setup_module_channel(self, module_name: str, module_config: ModuleConfig):
-        """Создать файловый канал для module_* (из LogConfig.modules или enable_module_logging)."""
+    def _setup_module_channel(self, module_name: str, module_config: LoggerModuleSchema):
+        """Создать файловый канал для module_* (из modules или enable_module_logging)."""
         path = module_config.file_path or f"logs/{module_name}.log"
         max_size = (
             module_config.max_size
@@ -222,17 +222,18 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         )
         rotate = module_config.rotate
         try:
-            channel_config = ChannelConfig(
-                name=f"module_{module_name}",
+            ch_name = f"module_{module_name}"
+            channel_config = LoggerChannelSchema(
+                name=ch_name,
                 type="file",
                 enabled=True,
-                file_path=path,
+                file_path=str(path),
                 format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
                 max_size=max_size,
                 backup_count=backup_count,
                 rotate=rotate,
             )
-            channel = create_channel(channel_config)
+            channel = create_channel(ch_name, channel_config)
             self._module_channels[module_name] = channel
             self._channel_registry.register(channel)
             self.dispatcher.register_channel_handler(
@@ -445,7 +446,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     def enable_module_logging(self, module_name: str, file_path: Optional[str] = None):
         self._setup_module_channel(
-            module_name, ModuleConfig(enabled=True, file_path=file_path)
+            module_name, LoggerModuleSchema(enabled=True, file_path=file_path)
         )
 
     def disable_module_logging(self, module_name: str):
@@ -526,7 +527,7 @@ def get_logger() -> Optional[LoggerManager]:
     return LoggerManager._instance
 
 
-def init_logging(config: LogConfig, **kwargs) -> LoggerManager:
+def init_logging(config: LoggerManagerConfig, **kwargs) -> LoggerManager:
     return LoggerManager(config=config, **kwargs)
 
 

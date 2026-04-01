@@ -49,6 +49,7 @@
 
 ## Известные проблемы
 
+- **configs/:** `BaseManagerConfig` (SchemaBase)
 - `ObservableDecorators` (`logged`, `timed`, `monitored`) используют замыкания — НЕ pickle-совместимы. Отключены по умолчанию (`enable_decorators=False`). Если декораторы нужны в multiprocessing — требуется рефакторинг аналогичный тому, что был сделан для `_log_*`.
 
 - `types/__init__.py` пустой — планируется для типовых алиасов (`ManagerConfig`, `AdapterName` и т.д.).

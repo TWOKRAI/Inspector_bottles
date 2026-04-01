@@ -1,51 +1,49 @@
 # Статус модулей — MODULES_STATUS.md
 
-Обновляется после каждого этапа. Детали в `modules/{name}/STATUS.md`.
+Сводка синхронизирована с `modules/{name}/STATUS.md` (2026-03-31). Детали и чеклисты — только в файлах STATUS модулей.
 
 | Модуль | Этап | Код | Тесты | Docs | Связанность | Работает |
 |--------|------|-----|-------|------|-------------|----------|
-| **channel_routing_module** | **8/8** ✅ | **9** | **8** | **10** | **10** | **да** |
-| **sql_module** | **8/8** ✅ | **9** | **20** | **9** | **9** | **да** |
-| base_manager | 0/8 | 7 | 6 | 4 | 5 | да |
-| data_schema_module | 0/8 | 7 | 8 | 6 | 3 | да |
-| message_module | 0/8 | 5 | 3 | 3 | 2 | ? |
-| **logger_module** | **4/8** | **9** | **7** | **8** | **9** | **да** |
-| **error_module** | **3/8** | **10** | **7** | **9** | **9** | **да** |
-| **config_module** | **8/8** ✅ | **9** | **9** | **9** | **8** | **✅ 49 тестов** |
-| **console_module** | **8/8** | **8** | **7** | **9** | **8** | **да** |
-| shared_resources_module | 0/8 | 6 | 3 | 4 | 4 | да |
-| dispatch_module | 0/8 | 5 | 3 | 4 | 3 | ? |
-| **router_module** | **4/8** | **9** | **8** | **9** | **9** | **да** |
-| command_module | 0/8 | 5 | 3 | 5 | 4 | ? |
-| worker_module | 2/8 | 6 | 5 | 3 | 3 | да |
-| registers_module | 0/8 | 7 | 3 | 3 | 3 | да |
-| process_module | 2/8 | 5 | 3 | 4 | 2 | да |
-| process_manager_module | 2/8 | 7 | 5 | 5 | 3 | да |
+| **channel_routing_module** | **8/8** | **9** | **8** | **10** | **10** | да |
+| **sql_module** | **8/8** | **8** | **8** | **8** | **8** | да |
+| **config_module** | **8/8** | **9** | **9** | **8** | **8** | да |
+| **console_module** | **8/8** | **8** | **7** | **9** | **8** | да |
+| **dispatch_module** | **8/8** | **9** | **9** | **9** | **9** | да |
+| **command_module** | **8/8** | **9** | **9** | **9** | **8** | да |
+| **shared_resources_module** | **8/8** | **9** | **8** | **9** | **8** | да |
+| **process_manager_module** | **8/8** | **9** | **8** | **9** | **5** | да |
+| **worker_module** | **8/8** | **9** | **10** | **8** | **9** | да |
+| **process_module** | готов (см. STATUS) | **8** | **8** | **9** | — | да |
+| data_schema_module | 10/11 | 9 | 8 | 8 | 9 | да |
+| base_manager | 6/8 | 8 | 8 | 8 | 8 | да |
+| frontend_module | 6/8 | 9 | 7 | 8 | 9 | да |
+| logger_module | 4/8 | 9 | 7 | 8 | 9 | да |
+| error_module | 3/8 | 10 | 7 | 9 | 9 | да |
+| router_module | 4/8 | 9 | 8 | 9 | 9 | да |
+| statistics_module | 4/8 | 9 | 8 | 8 | 9 | да |
+| message_module | 2/8 | 8 | 6 | 8 | 8 | да |
+| registers_module | 0/8 | 7 | 3 | 4 | 3 | да |
+
+Оценки «Код» / «Тесты» / … — из столбцов соответствующих `STATUS.md` (или среднее, где в STATUS несколько метрик).
 
 ---
 
-## Модули первого приоритета (8/8 готовы к production)
+## Модули с завершённым чеклистом 8/8 (ориентир production)
 
-- **channel_routing_module** — CRM, каналы, буфер, 58 тестов
-- **config_module** — runtime конфиги, подписки, env-fallback, 49 тестов
-- **console_module** — консольный вывод, 7+ тестов
-- **sql_module** — SQLManager, sync/async UoW, доступ к БД через канал `database`, 20 тестов
+- **channel_routing_module** — CRM, каналы, буферы
+- **config_module** — runtime-конфиги, подписки
+- **console_module** — консольный вывод
+- **sql_module** — SQLManager, адаптеры
+- **dispatch_module** / **command_module** — диспетчеризация и команды
+- **shared_resources_module** — очереди, ConfigStore, PSR
+- **process_manager_module** — оркестратор
+- **worker_module** — потоки и воркеры
 
 ---
 
 ## Прогресс по этапам (общий roadmap)
 
-| Этап | Статус | Описание |
-|------|--------|----------|
-| 0 | ✅ Завершён | Инфраструктура, баги, validate.py, STATUS.md |
-| 1 | ✅ Завершён | SystemLauncher → ProcessManagerProcess запускается |
-| 2 | ✅ Завершён | ProcessManager создаёт Process1Module, Process2Module; воркеры работают |
-| 3 | ⏳ | Ping-pong коммуникация |
-| 4 | ⏳ | Живое ДНК |
-| 5 | ⏳ | CommandManager + correlation_id |
-| 6 | ⏳ | Graceful shutdown |
-| 7 | ⏳ | Unit-тесты |
-| 8 | ⏳ | Документация |
+Глобальные этапы 0–8 в разных модулях закрыты неравномерно. Актуальная правда — **`modules/*/STATUS.md`** и **DECISIONS.md** (ADR).
 
 ---
 
@@ -53,33 +51,24 @@
 
 | Фаза | Статус | Описание |
 |------|--------|----------|
-| Фаза 1 | ✅ Завершена | channel_routing_module создан (CRM, IChannel, ChannelRegistry, IBufferStrategy, буферы, тесты) |
-| Фаза 2 | ✅ Завершена | LoggerManager(ChannelRoutingManager), ILogChannel(IChannel), ChannelRoutingConfig |
-| Фаза 3 | ✅ Завершена | ErrorManagerConfig(ChannelRoutingConfig), _level_to_channel, log() override |
-| Фаза 4 | ✅ Завершена | RouterManager(ChannelRoutingManager), IMessageChannel(IChannel), _channel_registry из CRM |
-| Фаза 5 | ✅ Завершена | Документация: README, DECISIONS.md (ADR-013..016), STATUS.md всех модулей, cursor rules |
+| Фаза 1 | Завершена | channel_routing_module (CRM, IChannel, ChannelRegistry, буферы) |
+| Фаза 2 | Завершена | LoggerManager → CRM |
+| Фаза 3 | Завершена | ErrorManager, severity routing |
+| Фаза 4 | Завершена | RouterManager → CRM |
+| Фаза 5 | Завершена | Документация, ADR-013..016 |
 
 ---
 
-## Config Module Refactoring — Статус
+## Тесты (ориентир; точные числа — pytest по модулю)
 
-| Фаза | Статус | Описание |
-|------|--------|----------|
-| Этап 0-8 | ✅ Завершено | Config (~160 строк), ConfigManager (~215 строк), ConfigSection, ConfigManagerConfig |
-| Документация | ✅ Завершено | README.md, docs/ARCHITECTURE.md, docs/USAGE_GUIDE.md (20+ примеров) |
-| Интеграция | ✅ Завершено | Добавлен в MODULES_STATUS, DECISIONS (ADR-023), docs/ |
-| Тесты | ✅ 49 passed | Config, ConfigManager, ConfigSection полностью покрыты |
+| Область | Примечание |
+|---------|------------|
+| channel_routing_module | 58+ тестов |
+| logger_module / error_module / router_module | десятки тестов каждый |
+| config_module | 49 тестов |
+| dispatch_module | 56 тестов |
+| command_module | 34 теста |
+| worker_module | 49 тестов |
+| shared_resources_module | 50+ тестов |
 
----
-
-## Тесты после CRM-миграции и config_module рефакторинга
-
-```
-channel_routing_module  58 passed  ✅
-logger_module           ~30 passed ✅
-error_module            ~30 passed ✅
-router_module           ~37 passed ✅
-config_module           49 passed  ✅
-─────────────────────────────────────
-ИТОГО                   204 passed ✅
-```
+Полный прогон (2026-03-31): из каталога `multiprocess_framework/modules` выполнить `python -m pytest` — **1567 passed** (конфиг `pytest.ini` в том же каталоге).

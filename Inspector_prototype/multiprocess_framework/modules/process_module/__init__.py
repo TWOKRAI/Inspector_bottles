@@ -6,9 +6,13 @@ Process Module (Refactored) — базовый модуль процессов.
 - interfaces — IProcessModule, ISharedResources, IProcessCommunication
 - types — ProcessStatus, ManagerType, QueueType, ProcessConfigDict, ProcessStatsDict
 - adapters — ProcessAdapter, SchemaAdapter
+
+ProcessModule подгружается лениво (PEP 562), чтобы импорт подмодулей вроде
+``process_module.configs.managers_config`` не тянул тяжёлую цепочку до
+``ProcessModule`` (консольный процессный конфиг и др.).
 """
 
-from .core.process_module import ProcessModule
+from typing import Any
 
 # Публичные контракты
 from .interfaces import IProcessModule, ISharedResources, IProcessCommunication
@@ -26,6 +30,15 @@ from .types import (
 
 # Адаптеры
 from .adapters import ProcessAdapter, SchemaAdapter
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ProcessModule":
+        from .core.process_module import ProcessModule
+
+        return ProcessModule
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Основной класс

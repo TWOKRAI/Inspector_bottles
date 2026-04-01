@@ -19,7 +19,8 @@ from .core.shared_resources_manager import SharedResourcesManager
 from .events import EventManager
 from .queues import QueueRegistry
 from .memory.core import MemoryManager
-from .config.config_store import ConfigStore
+from .config_store import ConfigStore
+from .configs.shared_resources_manager_config import SharedResourcesManagerConfig
 from .adapters.data_schema_adapter import DataSchemaAdapter
 
 # Данные процессов
@@ -49,6 +50,7 @@ __all__ = [
     "QueueRegistry",
     "MemoryManager",
     "ConfigStore",
+    "SharedResourcesManagerConfig",
     "DataSchemaAdapter",
 
     # Данные процессов

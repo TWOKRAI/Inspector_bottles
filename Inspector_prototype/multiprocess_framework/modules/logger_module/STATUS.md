@@ -20,7 +20,8 @@
 - [x] `LoggerManager(ChannelRoutingManager, ILoggerManager)` — убраны дублирующие реализации registry/buffer
 - [x] `self._channel_registry` из CRM вместо `channels: Dict` (был без lock)
 - [x] `BatchBuffer` из CRM вместо `BatchManager` (старый `BatchManager.py` оставлен для backward compatibility)
-- [x] `_resolve_log_config()` — принимает None | dict | LogConfig | RegisterBase → LogConfig
+- [x] `_resolve_log_config()` — None | dict | LoggerManagerConfig | `build()` → **LoggerManagerConfig** (SchemaBase)
+- [x] Конфиги: `config/logger_manager_config.py` — **LoggerManagerConfig** extends **ChannelRoutingConfig**
 - [x] Свойство `channels` сохранено для backward compatibility (возвращает dict из registry)
 - [x] Свойство `batcher` — alias для `self._buffer`
 - [x] `initialize()` / `shutdown()` обновлены — управляют CRM-компонентами
@@ -55,3 +56,4 @@
 | 2026-03-12 | BatchManager thread-safe, LogDispatcher fix, level-based routing | 3 |
 | 2026-03-12 | CRM Фаза 2: LoggerManager(ChannelRoutingManager), ILogChannel(IChannel), BatchBuffer | 4 |
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |
+| 2026-03-31 | ADR-108: убран избыточный `build()` у `LoggerManagerConfig` (наследует `SchemaMixin.build`) | — |

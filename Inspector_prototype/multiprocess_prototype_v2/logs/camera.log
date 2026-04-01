@@ -1,0 +1,10 @@
+2026-03-30 09:51:05,972 [INFO] camera: Process state registered: camera
+2026-03-30 09:51:05,973 [INFO] camera: UnifiedCameraProcess initializing...
+2026-03-30 09:51:06,973 [INFO] camera: UnifiedCameraProcess ready, camera_type=simulator
+2026-03-30 09:51:06,973 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-03-30 09:51:06,973 [INFO] camera: Process 'camera' initialized successfully
+2026-04-01 11:04:32,345 [INFO] camera: Process state registered: camera
+2026-04-01 11:04:32,345 [INFO] camera: UnifiedCameraProcess initializing...
+2026-04-01 11:04:32,345 [INFO] camera: UnifiedCameraProcess ready, camera_type=simulator
+2026-04-01 11:04:32,345 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-01 11:04:32,345 [INFO] camera: Process 'camera' initialized successfully

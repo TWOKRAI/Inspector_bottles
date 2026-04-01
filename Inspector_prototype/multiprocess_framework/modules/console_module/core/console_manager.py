@@ -14,7 +14,7 @@ from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
 from ...base_manager import BaseManager, ObservableMixin
 from ..interfaces import IConsoleManager, IPlatformConsole
 from ..platforms import create_platform_console
-from .console_config import ConsoleConfig
+from ..configs.console_config import ConsoleConfig
 
 if TYPE_CHECKING:
     from ..redirectors.console_redirector import ConsoleRedirector

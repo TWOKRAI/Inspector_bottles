@@ -1,0 +1,10 @@
+2026-03-30 09:51:07,152 [INFO] database: Process state registered: database
+2026-03-30 09:51:07,152 [INFO] database: DatabaseProcess: table detections created from schema
+2026-03-30 09:51:07,152 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-03-30 09:51:07,153 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-03-30 09:51:07,153 [INFO] database: Process 'database' initialized successfully
+2026-04-01 11:04:33,111 [INFO] database: Process state registered: database
+2026-04-01 11:04:33,111 [INFO] database: DatabaseProcess: table detections created from schema
+2026-04-01 11:04:33,113 [INFO] database: DatabaseProcess: SQLManager ready, commands db.query/execute/insert/save_detections registered
+2026-04-01 11:04:33,113 [INFO] database: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections', 'db.export_detections']
+2026-04-01 11:04:33,114 [INFO] database: Process 'database' initialized successfully

@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from sql_module.interfaces import ISyncEngineAdapter
-from sql_module.config import SQLManagerConfig
+from sql_module.configs import SQLManagerConfig
 from sql_module.core.engine_factory import create_sync_engine
 
 

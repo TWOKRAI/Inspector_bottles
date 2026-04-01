@@ -15,10 +15,11 @@
 
 ## Что сделано в CRM-миграции (Фаза 3)
 
-- [x] `ErrorManagerConfig(ChannelRoutingConfig)` — унифицированный конфиг
+- [x] `ErrorManagerConfig(SchemaBase)` в **`configs/error_manager_config.py`** — плоские поля; без кастомного `build()`
   - `critical_file_path`, `error_file_path`, `warnings_file_path` — пути к файлам severity-каналов
-  - `build()` генерирует 3 канала и мёрджит с унаследованным `channels` (точка расширения для Telegram/Slack)
-- [x] `_normalize_error_config()` — обработка `None | dict | ErrorManagerConfig | RegisterBase`
+  - **`expand_error_manager_config()`** в **`core/error_config_assembly.py`** — единственное место merge severity + `channels` (ADR-107)
+- [x] `_normalize_error_config()` — `None | dict | ErrorManagerConfig | build()` → **LoggerManagerConfig** (см. ADR-103, ADR-107)
+- [x] Конфиг: **`configs/error_manager_config.py`** — `ErrorManagerConfig`
 - [x] `_level_to_channel: Dict[str, str]` — прямой O(1) маппинг уровня в имя канала
 - [x] `_setup_level_routes()` — строит `_level_to_channel` из severity-каналов
 - [x] `log()` override — WARNING/ERROR/CRITICAL используют `_level_to_channel`; DEBUG/INFO → `super().log()`
@@ -46,6 +47,7 @@
 
 ## Известные проблемы / Следующие шаги
 
+- **configs/:** один файл схемы — `error_manager_config.py` (`ErrorManagerConfig`); дубликат `error_config.py` удалён (ADR-107)
 - Кастомный AlertChannel (Telegram/Slack) через `channels` в ErrorManagerConfig — не реализован (этап 4).
 - Интеграционный тест с реальной записью в файл не написан.
 - DEBUG/INFO в ErrorManager всё ещё идут через scope-based routing LoggerManager.
@@ -58,4 +60,5 @@
 | 2026-03-12 | interfaces.py улучшен (warning/info/critical/get_stats) | 1 |
 | 2026-03-12 | Severity channels, level routing, ErrorManagerConfig, README | 2 |
 | 2026-03-12 | CRM Фаза 3: ErrorManagerConfig(ChannelRoutingConfig), _level_to_channel, log() override | 3 |
+| 2026-03-31 | ADR-107: `error_config.py` удалён; `expand_error_manager_config`; плоский `ErrorManagerConfig` | 3 |
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |

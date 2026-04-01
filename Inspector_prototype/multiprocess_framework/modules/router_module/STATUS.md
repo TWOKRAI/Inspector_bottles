@@ -52,6 +52,7 @@ register_route("order", "queue_channel")
 
 ## Известные проблемы
 
+- **configs/:** `RouterManagerConfig` (SchemaBase) — метаданные; рантайм не переведён
 - `correlation_id` для request-response — этап 5
 - `ErrorManager` не подключён — ошибки через `_log_error` попадают в `LoggerManager`
 - `StatsManager` не реализован

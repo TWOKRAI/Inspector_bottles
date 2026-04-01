@@ -2,7 +2,7 @@
 import pytest
 
 from sql_module.core.engine_factory import create_sync_adapter, create_async_adapter
-from sql_module.config import SQLManagerConfig
+from sql_module.configs import SQLManagerConfig
 
 
 class TestSyncAdapters:

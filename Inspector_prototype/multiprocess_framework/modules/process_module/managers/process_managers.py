@@ -29,7 +29,7 @@ class ProcessManagers:
         from ...worker_module.adapters.worker_adapter import WorkerAdapter
         from ...router_module import RouterManager, RouterAdapter
         from ...command_module import CommandManager, CommandAdapter
-        from ...logger_module import LoggerManager, LogConfig
+        from ...logger_module import LoggerManager, LoggerManagerConfig
         from ...logger_module.adapters.logger_adapter import LoggerAdapter
 
         managers_config = self.process.config_handler.get_managers_config()
@@ -43,15 +43,14 @@ class ProcessManagers:
 
         # 2. LoggerManager
         logger_config = managers_config.get("logger", {})
-        if isinstance(logger_config, dict) and "channels" in logger_config:
-            log_config = LogConfig.from_dict({**logger_config, "app_name": logger_config.get("app_name", self.process.name)})
+        if isinstance(logger_config, dict):
+            merged = {
+                **logger_config,
+                "app_name": logger_config.get("app_name", self.process.name),
+            }
+            log_config = LoggerManagerConfig.model_validate(merged)
         else:
-            log_config = LogConfig()
-            log_config.app_name = self.process.name
-            if isinstance(logger_config, dict):
-                for key, value in logger_config.items():
-                    if hasattr(log_config, key):
-                        setattr(log_config, key, value)
+            log_config = LoggerManagerConfig(app_name=self.process.name)
 
         self.process.logger_manager = LoggerManager(
             manager_name=f"logger_{self.process.name}",
@@ -67,10 +66,7 @@ class ProcessManagers:
         if isinstance(error_config_dict, dict) and error_config_dict:
             from ...error_module import ErrorManager, ErrorManagerConfig
 
-            error_config = ErrorManagerConfig()
-            for key, value in error_config_dict.items():
-                if hasattr(error_config, key):
-                    setattr(error_config, key, value)
+            error_config = ErrorManagerConfig.model_validate(error_config_dict)
 
             self.process.error_manager = ErrorManager(
                 manager_name=f"error_{self.process.name}",
@@ -158,7 +154,7 @@ class ProcessManagers:
 
         # 6. ConsoleManager (disabled по умолчанию)
         from ...console_module import ConsoleManager
-        from ...console_module.core.console_config import ConsoleConfig
+        from ...console_module.configs.console_config import ConsoleConfig
         from ...console_module.adapters.console_adapter import ConsoleAdapter
 
         console_cfg_dict = managers_config.get("console", {})

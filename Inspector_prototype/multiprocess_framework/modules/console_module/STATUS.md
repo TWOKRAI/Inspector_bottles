@@ -23,7 +23,7 @@
 - [x] Этап 6: ConsoleRedirector рефакторинг — убрана Queue, прямой вызов manager.write()
 - [x] Этап 7: ConsoleAdapter(BaseAdapter) — интеграция с LoggerManager и CommandManager
 - [x] Этап 8: Интеграция в ProcessModule (process_module.py, process_managers.py, process_lifecycle.py)
-- [x] Этап 9: ConsoleProcessConfig(SchemaBase) — God Mode конфиг
+- [x] Этап 9: ConsoleProcessConfig(SchemaBase) — God Mode: `ManagersConfig` + `ProcessLaunchConfig.build()`, без shared `_GOD` default
 - [x] Этап 10: pytest тесты (5 файлов), STATUS.md и README.md обновлены
 
 ## Архитектурные решения

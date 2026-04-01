@@ -88,7 +88,7 @@
 ## Известные проблемы и ТВДЧ
 
 ### Текущие проблемы
-- **Нет:** Модуль в хорошем состоянии
+- **configs/:** SchemaBase-схемы `ThreadWorkerConfig`, `WorkerManagerConfig`; рантайм `ThreadConfig` не заменён
 
 ### ТВДЧ (TODO: В Ближайшем Часе)
 

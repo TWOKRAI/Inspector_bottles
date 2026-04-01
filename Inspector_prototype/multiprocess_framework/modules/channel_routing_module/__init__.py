@@ -34,6 +34,7 @@ from .core.channel_routing_manager import ChannelRoutingManager
 from .core.channel_registry import ChannelRegistry
 from .core.config_normalizer import normalize_config
 from .core.config import ChannelRoutingConfig
+from .configs.channel_routing_manager_config import ChannelRoutingManagerConfig
 from .buffers.async_sender_buffer import AsyncSenderBuffer
 from .buffers.batch_buffer import BatchBuffer, BatchConfig
 from .buffers.direct_buffer import DirectBuffer
@@ -47,6 +48,7 @@ __all__ = [
     "ChannelRoutingManager",
     "ChannelRegistry",
     "ChannelRoutingConfig",
+    "ChannelRoutingManagerConfig",
     "normalize_config",
     # Буферы
     "AsyncSenderBuffer",

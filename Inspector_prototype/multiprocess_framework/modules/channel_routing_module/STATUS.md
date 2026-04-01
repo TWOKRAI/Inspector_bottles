@@ -35,6 +35,7 @@ ChannelRoutingManager
 
 ## Известные ограничения
 
+- **configs/ vs core:** `ChannelRoutingManagerConfig` (реестр/UI) и `ChannelRoutingConfig` в `core/` (база для наследников CRM) — оба нужны; см. **ADR-108**
 - `AsyncSenderBuffer.flush()` — не гарантирует синхронное ожидание; используй `stop()` + `start()`.
 - `BatchBuffer` timer thread запускается в `start()` — вызывай `initialize()` перед использованием.
 - `RouterManager` не использует `IBufferStrategy` из CRM — см. ADR-015.
@@ -49,3 +50,4 @@ ChannelRoutingManager
 | 2026-03-12 | Фаза 3: ErrorManagerConfig(ChannelRoutingConfig), _level_to_channel, log() override | 3 |
 | 2026-03-12 | Фаза 4: IMessageChannel(IChannel), RouterManager мигрирован | 4 |
 | 2026-03-12 | Фаза 5: README полный, DECISIONS.md ADR-013..016, STATUS.md всех модулей | 5 |
+| 2026-03-31 | ADR-108: убран дублирующий `build()` у `ChannelRoutingConfig`; зафиксированы две роли схем | — |

@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from ...base_manager.adapters.base_adapter import BaseAdapter
 from ..interfaces import IConsoleManager
-from ..core.console_config import ConsoleConfig
+from ..configs.console_config import ConsoleConfig
 
 
 class ConsoleAdapter(BaseAdapter):

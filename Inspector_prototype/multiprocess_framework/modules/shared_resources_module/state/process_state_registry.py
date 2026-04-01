@@ -62,9 +62,8 @@ class ProcessStateRegistry(IProcessStateRegistry):
         self,
         process_name: str,
         initial_state: Optional[Dict[str, Any]] = None,
-        config: Optional[Any] = None,
     ) -> bool:
-        """Зарегистрировать процесс. Если уже есть — обновить."""
+        """Зарегистрировать процесс. Если уже есть — обновить. Полезная нагрузка конфига — в initial_state.custom."""
         try:
             if process_name in self.states:
                 process_data = self.states[process_name]

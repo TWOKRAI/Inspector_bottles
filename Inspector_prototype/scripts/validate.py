@@ -12,20 +12,27 @@
 
 import sys
 import importlib
-import subprocess
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
 MODULES_ROOT = BASE / "multiprocess_framework" / "modules"
 
+# Как в pytest conftest модулей: плоские импорты (data_schema_module) + пакет multiprocess_framework
+for _p in (MODULES_ROOT, BASE):
+    _s = str(_p)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
+
 MODULES = [
     "base_manager",
+    "channel_routing_module",
     "command_module",
     "config_module",
     "console_module",
     "data_schema_module",
     "dispatch_module",
     "error_module",
+    "frontend_module",
     "logger_module",
     "message_module",
     "process_manager_module",
@@ -34,6 +41,8 @@ MODULES = [
     "router_module",
     "shared_resources_module",
     "sql_module",
+    "statistics_module",
+    "worker_module",
 ]
 
 # Модули, которые обязаны иметь interfaces.py
@@ -50,6 +59,7 @@ REQUIRED_INTERFACES = [
     "router_module",
     "shared_resources_module",
     "sql_module",
+    "statistics_module",
 ]
 
 # Файлы production-кода (без тестов), где нельзя sys.path.insert

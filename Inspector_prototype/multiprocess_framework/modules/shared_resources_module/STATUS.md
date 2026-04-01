@@ -40,8 +40,15 @@
 - `_safe_close_shm()` — DRY для close/unlink SharedMemory
 - `typing_extensions.TypedDict` для Dict at Boundary контрактов
 
+## Обновление 2026-03-30 (ADR-102)
+
+- **`IProcessStateRegistry.register_process`**: удалён неиспользуемый параметр `config`; полезная нагрузка — в `initial_state.custom`.
+- **`register_process_state`**: больше не принимает `config`; аргумент `queue_names` по-прежнему игнорируется (совместимость вызова).
+- Документация: [../../docs/CONFIG_PATHS.md](../../docs/CONFIG_PATHS.md).
+
 ## Известные ограничения
 
+- **configs/:** `SharedResourcesManagerConfig` (SchemaBase); **config_store/** — рантайм-хранилище (`ConfigStore`), не путать со схемами
 - MemoryManager.reinitialize_handles() открывает shm по именам — требует чтобы owner process ещё не сделал unlink
 - QueueRegistry.registered_queues — локальный кэш (дублирует PSR для broadcast); в следующей итерации можно убрать
 

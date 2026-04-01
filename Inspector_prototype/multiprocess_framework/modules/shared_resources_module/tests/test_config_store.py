@@ -1,10 +1,10 @@
 """
-Тесты для config/config_store.py.
+Тесты для config_store (хранилище конфигов процессов).
 """
 
 import pickle
 import pytest
-from ..config.config_store import ConfigStore
+from ..config_store import ConfigStore
 
 
 @pytest.fixture

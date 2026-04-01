@@ -30,6 +30,7 @@
 
 ## Известные проблемы
 
+- **configs/:** `FrontendManagerConfig`, `WindowManagerConfig`, `FrontendThreadManagerConfig` (SchemaBase)
 - PyQt5 — зависимость от конкретного UI-фреймворка (пока приемлемо)
 
 ## История изменений

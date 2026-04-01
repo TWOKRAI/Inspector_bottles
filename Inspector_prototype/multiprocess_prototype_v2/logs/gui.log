@@ -1,0 +1,13 @@
+2026-03-30 09:51:07,172 [INFO] gui: Process state registered: gui
+2026-03-30 09:51:07,173 [INFO] gui: GuiProcess initializing...
+2026-03-30 09:51:07,173 [INFO] gui: GuiProcess ready (frontend_module stack)
+2026-03-30 09:51:07,173 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-03-30 09:51:07,173 [INFO] gui: Process 'gui' initialized successfully
+2026-04-01 11:04:33,174 [INFO] gui: Process state registered: gui
+2026-04-01 11:04:33,174 [INFO] gui: GuiProcess initializing...
+2026-04-01 11:04:33,174 [INFO] gui: GuiProcess ready (frontend_module stack)
+2026-04-01 11:04:33,174 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-01 11:04:33,174 [INFO] gui: Process 'gui' initialized successfully
+2026-04-01 11:04:35,508 [INFO] gui: [DEBUG] gui: received 1 msg(s), data_types=[]
+2026-04-01 11:06:42,600 [INFO] gui: GUI: requesting system shutdown
+2026-04-01 11:06:42,253 [INFO] gui: GUI: shutdown request sent, ok=True

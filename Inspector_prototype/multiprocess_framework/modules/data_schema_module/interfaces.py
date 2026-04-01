@@ -556,7 +556,7 @@ IAsyncRegisterStorage = IAsyncSchemaStorage
 
 class ISchemaManager(ABC):
     """
-    Backward-compatible интерфейс реестра схем (старое имя из core/interfaces.py).
+    Backward-compatible интерфейс реестра схем (старое имя до канона ISchemaRegistry).
 
     Используйте ISchemaRegistry для нового кода.
     Отличие от ISchemaRegistry: методы называются get_schema/has_schema/create_instance.

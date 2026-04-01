@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Ядро error_module."""
+"""Ядро error_module.
 
-from .error_manager import ErrorManager
+``ErrorManager`` импортируйте из ``error_module`` или ``error_module.core.error_manager`` —
+не из этого пакета, чтобы избежать циклических импортов при загрузке.
+"""
 
-__all__ = ["ErrorManager"]
+from .error_config_assembly import expand_error_manager_config
+
+__all__ = ["expand_error_manager_config"]

@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 # Импорт из подмодулей (co-location: интерфейс рядом с реализацией)
-from ..config.interfaces import IConfigStore
+from ..config_store import IConfigStore
 from ..state.interfaces import IProcessStateRegistry
 from ..queues.interfaces import IQueueRegistry
 from ..events.interfaces import IEventManager

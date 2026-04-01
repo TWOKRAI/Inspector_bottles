@@ -9,7 +9,7 @@ from typing import Any, Dict, Union
 
 from sql_module.adapters.sync_adapter import BaseSyncAdapter
 from sql_module.adapters.async_adapter import BaseAsyncAdapter
-from sql_module.config import SQLManagerConfig
+from sql_module.configs import SQLManagerConfig
 
 
 class PostgreSQLSyncAdapter(BaseSyncAdapter):

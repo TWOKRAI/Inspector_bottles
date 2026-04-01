@@ -21,7 +21,7 @@ from sql_module.interfaces import (
     ISyncEngineAdapter,
     IUnitOfWork,
 )
-from sql_module.config import SQLManagerConfig
+from sql_module.configs import SQLManagerConfig
 from sql_module.core.engine_factory import create_async_adapter, create_sync_adapter
 from sql_module.core.base_repository import GenericRepository
 from sql_module.adapters.schema_mapper import SchemaBaseMapper

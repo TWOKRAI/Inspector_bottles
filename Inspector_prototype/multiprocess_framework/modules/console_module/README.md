@@ -96,15 +96,15 @@ console_module/
   README.md
   core/
     console_manager.py           # ConsoleManager (BaseManager + ObservableMixin)
+  config/
     console_config.py            # ConsoleConfig(SchemaBase)
+    console_process_config.py    # ConsoleProcessConfig — God Mode
   channels/
     console_log_channel.py       # ConsoleLogChannel(ILogChannel)
   redirectors/
     console_redirector.py        # ConsoleRedirector
   adapters/
     console_adapter.py           # ConsoleAdapter(BaseAdapter)
-  configs/
-    console_process_config.py    # ConsoleProcessConfig — God Mode
   platforms/
     __init__.py                  # create_platform_console() фабрика
     base.py                      # re-export IPlatformConsole

@@ -15,6 +15,7 @@ from .channels.base_channel import MessageChannel
 from .channels.queue_channel import QueueChannel
 from .adapters.router_adapter import RouterAdapter
 from .interfaces import IRouterManager, IMessageChannel
+from .configs.router_manager_config import RouterManagerConfig
 
 __all__ = [
     "RouterManager",
@@ -23,4 +24,5 @@ __all__ = [
     "RouterAdapter",
     "IRouterManager",
     "IMessageChannel",
+    "RouterManagerConfig",
 ]

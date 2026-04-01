@@ -15,7 +15,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
 from sql_module.interfaces import ISyncEngineAdapter
-from sql_module.config import SQLManagerConfig
+from sql_module.configs import SQLManagerConfig
 
 
 def _should_use_null_pool(config: Union[SQLManagerConfig, Dict[str, Any]]) -> bool:

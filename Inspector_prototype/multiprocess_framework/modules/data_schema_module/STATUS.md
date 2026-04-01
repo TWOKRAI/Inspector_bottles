@@ -1,6 +1,6 @@
 # data_schema_module — Статус рефакторинга
 
-**Дата последнего обновления:** 2026-03-13 | **Версия:** 2.0 | **Ветка:** `manual_refactored`
+**Дата последнего обновления:** 2026-03-31 | **Версия:** 2.0 | **Ветка:** `manual_refactored`
 
 ---
 
@@ -43,6 +43,8 @@
 - [x] **Шаг 9:** Обновление потребляющих модулей — все работают без breakage
 - [x] **Шаг 10:** Обновлена документация — README, STATUS, MIGRATION (текущий этап)
 - [ ] **Шаг 11:** Примеры адаптеров — RouterAdapter, ConfigAdapter, ProcessAdapter (планируется)
+
+- **SchemaMixin.build():** `(manager_name, model_dump())` для Dict at Boundary; см. ADR-105
 
 ---
 

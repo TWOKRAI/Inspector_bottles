@@ -72,9 +72,9 @@ except (ImportError, ModuleNotFoundError):
     RouterManager = None
 
 try:
-    from .modules.logger_module import LogConfig, LoggerManager, get_logger
+    from .modules.logger_module import LoggerManager, LoggerManagerConfig, get_logger
 except (ImportError, ModuleNotFoundError):
-    LogConfig = LoggerManager = get_logger = None
+    LoggerManagerConfig = LoggerManager = get_logger = None
 
 try:
     from .modules.config_module import ConfigManager
@@ -138,7 +138,7 @@ __all__ = [
     "MessageAdapter",
     "RouterManager",
     "LoggerManager",
-    "LogConfig",
+    "LoggerManagerConfig",
     "get_logger",
     "ConfigManager",
     "ConsoleManager",

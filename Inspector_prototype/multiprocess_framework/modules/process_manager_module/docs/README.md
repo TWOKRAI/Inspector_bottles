@@ -1,5 +1,7 @@
 # Документация process_manager_module
 
+**Эталонные примеры `proc_dict`:** [`examples/proc_dict_canonical_examples.py`](examples/proc_dict_canonical_examples.py). Контракт полей: [`CONFIG_CONTRACT.md`](CONFIG_CONTRACT.md).
+
 ## Основные концепции
 
 `process_manager_module` управляет жизненным циклом OS-процессов системы.

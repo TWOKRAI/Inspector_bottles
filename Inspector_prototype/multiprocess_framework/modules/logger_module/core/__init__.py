@@ -4,18 +4,24 @@
 """
 
 from .logger_manager import LoggerManager
-from .log_config import LogConfig, LogLevel, LogScope, ChannelConfig, ScopeConfig, ModuleConfig
+from .log_config import (
+    LogLevel,
+    LogScope,
+    LoggerChannelSchema,
+    LoggerManagerConfig,
+    LoggerModuleSchema,
+    LoggerScopeSchema,
+)
 from .log_dispatcher import LogDispatcher, LogRecord
 
 __all__ = [
     "LoggerManager",
-    "LogConfig",
+    "LoggerManagerConfig",
+    "LoggerChannelSchema",
+    "LoggerScopeSchema",
+    "LoggerModuleSchema",
     "LogLevel",
     "LogScope",
-    "ChannelConfig",
-    "ScopeConfig",
-    "ModuleConfig",
     "LogDispatcher",
     "LogRecord",
 ]
-

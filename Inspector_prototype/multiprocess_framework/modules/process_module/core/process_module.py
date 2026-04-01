@@ -16,7 +16,7 @@ from ..interfaces import IProcessModule, ISharedResources
 from ..types import ProcessStatus
 
 # Импорт компонентов из нового модуля
-from ..config import ProcessConfigHandler
+from ..configs import ProcessConfigHandler
 from ..communication import ProcessCommunication
 
 # Импорт компонентов процесса

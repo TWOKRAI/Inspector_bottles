@@ -9,6 +9,7 @@ from .core.base_dispatcher import BaseDispatcher
 from .core.dispatcher import Dispatcher
 from .builders.scenario_builder import ScenarioBuilder
 from .interfaces import IDispatcher
+from .configs.dispatcher_config import DispatcherConfig
 
 # Для обратной совместимости
 AdvancedDispatcher = Dispatcher
@@ -28,5 +29,6 @@ __all__ = [
     "AdvancedDispatcher",
     # Лёгкий диспетчер (без ObservableMixin, EXACT_MATCH only)
     "BaseDispatcher",
+    "DispatcherConfig",
 ]
 

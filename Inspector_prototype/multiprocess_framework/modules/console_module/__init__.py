@@ -18,12 +18,11 @@ console_module — менеджер терминальных окон проце
 """
 
 from .core.console_manager import ConsoleManager
-from .core.console_config import ConsoleConfig
+from .configs import ConsoleConfig, ConsoleProcessConfig
 from .interfaces import IConsoleManager, IPlatformConsole
 from .channels.console_log_channel import ConsoleLogChannel
 from .redirectors.console_redirector import ConsoleRedirector
 from .adapters.console_adapter import ConsoleAdapter
-from .configs.console_process_config import ConsoleProcessConfig
 
 __all__ = [
     "ConsoleManager",

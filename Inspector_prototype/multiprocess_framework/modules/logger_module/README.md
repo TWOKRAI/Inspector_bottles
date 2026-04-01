@@ -95,7 +95,10 @@ logger_module/
 ├── core/
 │   ├── logger_manager.py     ← LoggerManager(ChannelRoutingManager, ILoggerManager)
 │   ├── log_dispatcher.py     ← LogDispatcher + LogRecord (backward compatibility)
-│   └── log_config.py         ← LogConfig, LogLevel, LogScope, ChannelConfig, ...
+│   ├── log_config.py         ← реэкспорт LoggerManagerConfig, LogLevel, LogScope
+│   └── log_enums.py          ← LogLevel, LogScope (enum)
+├── config/
+│   └── logger_manager_config.py  ← LoggerManagerConfig(ChannelRoutingConfig)
 │
 ├── channels/
 │   └── log_channel.py        ← LogChannel(ILogChannel), FileChannel, ConsoleChannel, HttpChannel
@@ -115,7 +118,7 @@ logger_module/
 ## Быстрый старт
 
 ```python
-from logger_module import LoggerManager, LogConfig, LogLevel, LogScope
+from logger_module import LoggerManager, LoggerManagerConfig, LogLevel, LogScope
 
 # Вариант 1: минимальная конфигурация
 logger = LoggerManager(manager_name="app_logger")
@@ -135,8 +138,8 @@ logger = LoggerManager(
 )
 logger.initialize()
 
-# Вариант 3: через LogConfig (Pydantic)
-config = LogConfig.from_dict({
+# Вариант 3: через LoggerManagerConfig (SchemaBase)
+config = LoggerManagerConfig.from_dict({
     "app_name": "inspector",
     "default_level": "INFO",
     "enable_batching": True,
@@ -295,9 +298,9 @@ logger.register_channel(DatabaseChannel())
 ## Конфигурация каналов
 
 ```python
-from logger_module import LogConfig
+from logger_module import LoggerManagerConfig
 
-config = LogConfig.from_dict({
+config = LoggerManagerConfig.from_dict({
     "app_name": "my_app",
     "default_level": "INFO",
     "enable_batching": True,
@@ -391,7 +394,7 @@ class RouterManager(BaseManager, ObservableMixin):
 |---|---|
 | `None` | `LoggerManager()` — дефолтный конфиг |
 | `dict` | `{"app_name": "app", "default_level": "INFO", "channels": {...}}` |
-| `LogConfig` | `LoggerManager(config=log_config)` |
+| `LoggerManagerConfig` | `LoggerManager(config=...)` |
 | Объект с `build()` | `build()` возвращает `(manager_name: str, config: dict)` |
 
 ---

@@ -1,0 +1,99 @@
+2026-04-01 08:55:58,070 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,071 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,071 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,071 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,071 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,072 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,072 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,072 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,074 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,075 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,075 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,075 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,075 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,076 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,076 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,076 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,078 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,078 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,078 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,079 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,079 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,079 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,079 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,080 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,080 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,080 [INFO] [-] logger_manager: LoggerManager shutting down
+2026-04-01 08:55:58,082 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,082 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,083 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,083 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,083 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,083 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,084 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,084 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,088 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,088 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,088 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,089 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,089 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,089 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,090 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,090 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,092 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,092 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,092 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,092 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,093 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,093 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,093 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,093 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,095 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,095 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,095 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,096 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,096 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,096 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,096 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,096 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,097 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,097 [INFO] [-] logger_manager: LoggerManager shutting down
+2026-04-01 08:55:58,100 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> C:\Users\INNOTECH\AppData\Local\Temp\pytest-of-INNOTECH\pytest-40\test_module_rotate_false_uses_0\frames.log
+2026-04-01 08:55:58,100 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,100 [INFO] [-] logger_manager: LoggerManager shutting down
+2026-04-01 08:55:58,103 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,103 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,103 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,103 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,104 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,104 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,104 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,104 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,105 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,105 [DEBUG] [-] logger_manager: Module channel created: test_module -> C:\Users\INNOTECH\AppData\Local\Temp\tmpsdotsrw9.log
+2026-04-01 08:55:58,105 [INFO] [-] test_module: Module message
+2026-04-01 08:55:58,105 [INFO] [-] logger_manager: LoggerManager shutting down
+2026-04-01 08:55:58,207 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,208 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,208 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,208 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,208 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,208 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,209 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,209 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,211 [DEBUG] [-] logger_manager: Module channel created: router_messages -> messages.log
+2026-04-01 08:55:58,211 [DEBUG] [-] logger_manager: Module channel created: database -> database.log
+2026-04-01 08:55:58,211 [DEBUG] [-] logger_manager: Module channel created: processor -> processor.log
+2026-04-01 08:55:58,211 [DEBUG] [-] logger_manager: Module channel created: processor_frames -> frames.log
+2026-04-01 08:55:58,211 [DEBUG] [-] logger_manager: Module channel created: camera -> camera.log
+2026-04-01 08:55:58,212 [DEBUG] [-] logger_manager: Module channel created: renderer -> renderer.log
+2026-04-01 08:55:58,212 [DEBUG] [-] logger_manager: Module channel created: robot -> robot.log
+2026-04-01 08:55:58,212 [DEBUG] [-] logger_manager: Module channel created: gui -> gui.log
+2026-04-01 08:55:58,213 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,085 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,085 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,085 [INFO] [-] test: Test message
+2026-04-01 08:55:58,100 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,100 [INFO] [-] logger_manager: LoggerManager initialized
+2026-04-01 08:55:58,100 [ERROR] [-] test: Test error
+2026-04-01 08:55:58,210 [INFO] [-] logger_manager: LoggerManager initialized

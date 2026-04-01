@@ -18,7 +18,7 @@ Backward compatibility: RegisterMixin = SchemaMixin (алиас в конце ф
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 if TYPE_CHECKING:
     from .field_meta import FieldMeta
@@ -256,6 +256,16 @@ class SchemaMixin:
     # =========================================================================
     # 5. Операции со значениями
     # =========================================================================
+
+    def build(self) -> Tuple[str, Dict[str, Any]]:
+        """
+        Dict at Boundary: (manager_name, полный dict полей).
+
+        Имя берётся из поля ``manager_name``, иначе — имя класса.
+        Подклассы с кастомной сборкой могут переопределить (legacy).
+        """
+        name = getattr(self, "manager_name", type(self).__name__)
+        return (name, self.model_dump())  # type: ignore[attr-defined]
 
     def update_field(
         self,

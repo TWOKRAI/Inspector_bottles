@@ -25,6 +25,10 @@
 - [x] Этап 7: Unit-тесты написаны и проходят (8 файлов)
 - [x] Этап 8: README и interfaces.py готовы (ISystemLauncher, IProcessManagerProcess, IProcessRegistry)
 
+## Обновление 2026-03-30 (ADR-102)
+
+- **`process_runner._build_shared_resources_from_bundle`**: после `register_process_state` заполняется `ConfigStore` pickle-safe срезом `{"process", "managers"}` для текущего процесса и пустым срезом для имён из `routing_map`, чтобы `get_process_config` в child был согласован с контуром родителя.
+
 ## Что было сделано в рефакторинге (2026-03-13)
 
 ### interfaces.py
@@ -73,6 +77,7 @@
 
 - **ProcessSchemaAdapter** делегирует в `config_to_dict` (data_schema_module) при наличии `build()` — один источник правды
 - **CONFIG_CONTRACT.md** — документирован контракт proc_dict (обязательные/опциональные поля, потребители)
+- **docs/examples/proc_dict_canonical_examples.py** — эталонные dict и демо нормализации (2026-03-30)
 
 ## Известные проблемы
 
@@ -86,3 +91,4 @@
 | 2026-03-11 | Этап 1: SystemLauncher → ProcessManagerProcess запускается, stop_event работает | 1 |
 | 2026-03-11 | Этап 2: дочерние процессы создаются; flush=True в prints; graceful stop в spawner | 2 |
 | 2026-03-13 | Этапы 3-8: interfaces.py, error_module, graceful shutdown, CommandManager, тесты, документация | 8 |
+| 2026-03-30 | Добавлены docs/examples/proc_dict_canonical_examples.py; ссылка в CONFIG_CONTRACT.md и docs/README.md | 8 |

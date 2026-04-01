@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from ...base_manager import BaseManager, ObservableMixin
 from ...base_manager.core.base_manager import _noop
 
-from ..config.config_store import ConfigStore
+from ..config_store import ConfigStore
 from ..events import EventManager
 from ..queues import QueueRegistry
 from ..memory.core import MemoryManager
@@ -294,11 +294,10 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
         process_name: str,
         initial_state: Optional[Dict[str, Any]] = None,
         queue_names: Optional[Dict[str, str]] = None,
-        config: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Устаревший метод. Используйте register_process()."""
+        """Устаревший метод. Используйте register_process(). queue_names игнорируется (совместимость вызова)."""
         return self._process_state_registry.register_process(
-            process_name, initial_state, config=config
+            process_name, initial_state
         )
 
     def register_process_with_config(

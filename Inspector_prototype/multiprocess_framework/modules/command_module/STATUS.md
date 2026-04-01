@@ -27,6 +27,7 @@
 
 ## Известные проблемы
 
+- **configs/:** `CommandManagerConfig` (SchemaBase)
 - Dead code: `raise` в `except`-блоке `handle_command` — никогда не достигается, т.к. `Dispatcher.dispatch()` сам перехватывает все исключения. Не критично — можно убрать при следующем рефакторинге.
 
 ## История изменений

@@ -113,6 +113,7 @@ from .interfaces import IWorkerManager, IWorkerLifecycle, IWorkerRegistry
 
 from .adapters.worker_adapter import WorkerAdapter
 from .adapters.schema_adapter import WorkerSchemaAdapter
+from .configs import ThreadWorkerConfig, WorkerManagerConfig
 
 __all__ = [
     # Менеджер
@@ -132,4 +133,6 @@ __all__ = [
     # Адаптеры
     "WorkerAdapter",
     "WorkerSchemaAdapter",
+    "ThreadWorkerConfig",
+    "WorkerManagerConfig",
 ]

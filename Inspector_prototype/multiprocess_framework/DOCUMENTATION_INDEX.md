@@ -10,11 +10,13 @@
 | Документ | Для чего |
 |----------|----------|
 | [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) | Обзор архитектуры, модули, принципы, сценарии |
+| [docs/CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) | Цепочка: SchemaBase, dict, Config, process_manager / process_module |
+| [docs/CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) | Слой schema→dict, ветки доставки, фасад чтения конфига в процессе |
 | [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) | Таблицы, диаграммы, матрицы зависимостей |
 | [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) | Термины маршрутизации и регистров |
 | [docs/ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md) | Каталог модулей и пакетов прототипа |
 | [docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) | Дорожная карта команд UI / лаунчера |
-| [DECISIONS.md](./DECISIONS.md) | ADR — принятые архитектурные решения |
+| [DECISIONS.md](./DECISIONS.md) | ADR — принятые решения; **оглавление и сортировка по номеру**, раздел «Устарело» |
 | [docs/MODULE_README_TEMPLATE.md](./docs/MODULE_README_TEMPLATE.md) | Шаблон README нового модуля |
 
 ---
@@ -24,6 +26,8 @@
 | Задача | Куда смотреть |
 |--------|----------------|
 | Понять систему целиком | [FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) |
+| Цепочка схемы, dict, config, процессы | [CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) |
+| Одна модель schema→dict и куда уходит dict | [CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) |
 | Найти таблицу / схему | [ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) |
 | Понять «почему так» | [DECISIONS.md](./DECISIONS.md) |
 | Сообщения, Dict at Boundary | Overview + ADR-008 |
@@ -55,4 +59,4 @@
 
 ---
 
-*Обновлено: 2026-03-24 — сжатие документации: удалены архивы, дублирующие эссе/философия и черновики wishlist; единая канва — Overview + Reference + DECISIONS.*
+*Обновлено: 2026-03-30 — добавлены [CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) и [CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) (ADR-102). Ранее (2026-03-24): сжатие документации; единая канва — Overview + Reference + DECISIONS.*

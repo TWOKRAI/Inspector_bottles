@@ -10,7 +10,7 @@ Dual sync/async через адаптеры, Unit of Work, fork-safety, typed co
     from sql_module.interfaces import ISQLManager, IRepository
     from sql_module.commands import DBQueryCommand, DBExecuteCommand
 """
-from .config import SQLManagerConfig
+from .configs import SQLManagerConfig
 from .commands import DBExecuteCommand, DBInsertCommand, DBQueryCommand
 from .core import SQLManager, GenericRepository, SQLAlchemyUnitOfWork, AsyncSQLAlchemyUnitOfWork
 from .export import TableExporter, ExportFormat
