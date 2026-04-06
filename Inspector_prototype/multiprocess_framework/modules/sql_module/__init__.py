@@ -6,10 +6,11 @@ sql_module — универсальный SQL-менеджер для multiproce
 Dual sync/async через адаптеры, Unit of Work, fork-safety, typed commands.
 
 Импорты:
-    from sql_module import SQLManagerConfig, DBQueryCommand
+    from sql_module import SQLManagerConfig, DBQueryCommand, SchemaBaseMapper, ExportFormat
     from sql_module.interfaces import ISQLManager, IRepository
     from sql_module.commands import DBQueryCommand, DBExecuteCommand
 """
+from .adapters.schema_mapper import SchemaBaseMapper
 from .configs import SQLManagerConfig
 from .commands import DBExecuteCommand, DBInsertCommand, DBQueryCommand
 from .core import SQLManager, GenericRepository, SQLAlchemyUnitOfWork, AsyncSQLAlchemyUnitOfWork
@@ -31,6 +32,7 @@ __all__ = [
     "GenericRepository",
     "TableExporter",
     "ExportFormat",
+    "SchemaBaseMapper",
     "SQLAlchemyUnitOfWork",
     "AsyncSQLAlchemyUnitOfWork",
     "SQLManagerConfig",

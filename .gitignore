@@ -27,9 +27,28 @@ BASKET/
 
 /dataset
 
+
+# ============================
+# CLAUDE CODE (локальные настройки)
+# ============================
+CLAUDE.local.md
+.claude/CLAUDE.local.md
+
+
 # Runtime logs (multiprocess prototype)
 Inspector_prototype/multiprocess_prototype/logs/*
 !Inspector_prototype/multiprocess_prototype/logs/.gitkeep
 
+# Runtime logs (framework_minimal_prototype)
+Inspector_prototype/framework_minimal_prototype/logs/*
+!Inspector_prototype/framework_minimal_prototype/logs/.gitkeep
+
+# Accidental file logs next to framework modules (legacy cwd-based writes)
+Inspector_prototype/multiprocess_framework/modules/*.log
+Inspector_prototype/multiprocess_framework/modules/logs/
+
 # Legacy user prefs (migrated to ~/.inspector_prototype/user_prefs.json or INSPECTOR_DATA_DIR)
 Inspector_prototype/multiprocess_prototype/.inspector_prefs.json
+
+# Local Milvus standalone (docker compose) — data volumes
+milvus-docker/volumes/

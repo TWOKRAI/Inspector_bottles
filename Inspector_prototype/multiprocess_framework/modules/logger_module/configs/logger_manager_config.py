@@ -7,15 +7,13 @@ LoggerManagerConfig — SchemaBase / ChannelRoutingConfig для LoggerManager.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
 
-import yaml
 from pydantic import Field
 
 from ...channel_routing_module import ChannelRoutingConfig
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
-from ..core.log_enums import LogLevel, LogScope
+from ..core.log_enums import LogLevel
 
 _STD_FMT = "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s"
 _FILE_MAX = 10 * 1024 * 1024
@@ -42,7 +40,7 @@ class LoggerScopeSchema(SchemaBase):
     """Скоуп логирования (ключи SYSTEM, BUSINESS, …)."""
 
     enabled: bool = True
-    min_level: str = "INFO"
+    min_level: str = _LEVEL_ORDER[1]  # INFO
     channels: List[str] = Field(default_factory=list)
     modules: List[str] = Field(default_factory=list)
 
@@ -72,59 +70,31 @@ class LoggerModuleSchema(SchemaBase):
     rotate: bool = True
 
 
-def _default_channels() -> Dict[str, LoggerChannelSchema]:
-    return {
-        "system_file": LoggerChannelSchema(
-            type="file",
-            enabled=True,
-            file_path="system.log",
-            max_size=_FILE_MAX,
-            backup_count=5,
-            format=_STD_FMT,
-        ),
-        "messages_file": LoggerChannelSchema(
-            type="file",
-            enabled=True,
-            file_path="messages.log",
-            max_size=_FILE_MAX,
-            backup_count=5,
-            format=_STD_FMT,
-        ),
-        "console": LoggerChannelSchema(
-            type="console",
-            enabled=True,
-            format=_STD_FMT,
-        ),
-    }
 
+@register_schema("LoggerManagerConfig")
+class LoggerManagerConfig(ChannelRoutingConfig):
+    """Конфигурация LoggerManager: каналы, scopes, modules."""
 
-def _default_scopes(log_level: str = "INFO") -> Dict[str, LoggerScopeSchema]:
-    return {
-        "SYSTEM": LoggerScopeSchema(
-            enabled=True,
-            min_level="WARNING",
-            channels=["console", "system_file"],
-        ),
-        "BUSINESS": LoggerScopeSchema(
-            enabled=True,
-            min_level=log_level,
-            channels=["system_file", "messages_file"],
-        ),
-        "PERFORMANCE": LoggerScopeSchema(
-            enabled=True,
-            min_level="INFO",
-            channels=["system_file"],
-        ),
-        "DEBUG": LoggerScopeSchema(
-            enabled=True,
-            min_level="DEBUG",
-            channels=["system_file"],
-        ),
-    }
+    manager_name: Annotated[str, FieldMeta("Имя менеджера")] = "LoggerManager"
 
+    app_name: str = "unknown_app"
+    default_level: str = "INFO"
+    log_directory: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Корень для относительных file_path каналов и modules. "
+            "None — каталог из MULTIPROCESS_LOG_DIR / INSPECTOR_LOG_DIR или системный temp "
+            "(не текущий каталог пакета)."
+        ),
+    ] = None
+    enable_batching: bool = True
+    batch_size: int = 100
+    batch_interval: float = 1.0
 
-def _default_modules() -> Dict[str, LoggerModuleSchema]:
-    return {
+    modules: Annotated[
+        Dict[str, LoggerModuleSchema],
+        FieldMeta("Per-module файлы"),
+    ] = {
         "router_messages": LoggerModuleSchema(
             enabled=True,
             file_path="messages.log",
@@ -168,56 +138,55 @@ def _default_modules() -> Dict[str, LoggerModuleSchema]:
         ),
     }
 
-
-@register_schema("LoggerManagerConfig")
-class LoggerManagerConfig(ChannelRoutingConfig):
-    """Конфигурация LoggerManager: каналы, scopes, modules."""
-
-    manager_name: Annotated[str, FieldMeta("Имя менеджера")] = "LoggerManager"
-
-    app_name: str = "unknown_app"
-    default_level: str = "INFO"
-    enable_batching: bool = True
-    batch_size: int = 100
-    batch_interval: float = 1.0
-
     channels: Annotated[
         Dict[str, LoggerChannelSchema],
         FieldMeta("Каналы: имя → параметры"),
-    ] = Field(default_factory=_default_channels)
+    ] = {
+        "system_file": LoggerChannelSchema(
+            type="file",
+            enabled=True,
+            file_path="system.log",
+            max_size=_FILE_MAX,
+            backup_count=5,
+            format=_STD_FMT,
+        ),
+        "messages_file": LoggerChannelSchema(
+            type="file",
+            enabled=True,
+            file_path="messages.log",
+            max_size=_FILE_MAX,
+            backup_count=5,
+            format=_STD_FMT,
+        ),
+        "console": LoggerChannelSchema(
+            type="console",
+            enabled=True,
+            format=_STD_FMT,
+        ),
+    }
 
     scopes: Annotated[
         Dict[str, LoggerScopeSchema],
         FieldMeta("Скоупы: SYSTEM, BUSINESS, …"),
-    ] = Field(default_factory=_default_scopes)
-
-    modules: Annotated[
-        Dict[str, LoggerModuleSchema],
-        FieldMeta("Per-module файлы"),
-    ] = Field(default_factory=_default_modules)
-
-    def get_scope_config(self, scope: LogScope) -> LoggerScopeSchema:
-        key = scope.name
-        if key in self.scopes:
-            return self.scopes[key]
-        ch = list(self.channels.keys())[:1] if self.channels else []
-        return LoggerScopeSchema(
+    ] = {
+        "SYSTEM": LoggerScopeSchema(
             enabled=True,
-            min_level=self.default_level,
-            channels=ch,
-        )
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LoggerManagerConfig":
-        if not data:
-            return cls()
-        return cls.model_validate(data)
-
-    @classmethod
-    def from_yaml(cls, config_path: str) -> "LoggerManagerConfig":
-        path = Path(config_path)
-        if not path.exists():
-            return cls()
-        with open(path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-        return cls.model_validate(raw)
+            min_level="WARNING",
+            channels=["console", "system_file"],
+        ),
+        "BUSINESS": LoggerScopeSchema(
+            enabled=True,
+            min_level=_LEVEL_ORDER[1],
+            channels=["system_file", "messages_file"],
+        ),
+        "PERFORMANCE": LoggerScopeSchema(
+            enabled=True,
+            min_level=_LEVEL_ORDER[1],
+            channels=["system_file"],
+        ),
+        "DEBUG": LoggerScopeSchema(
+            enabled=True,
+            min_level="DEBUG",
+            channels=["system_file"],
+        ),
+    }

@@ -16,6 +16,7 @@ Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codeba
 - **Схемы регистров приложения:** в прототипе (`multiprocess_prototype` / `schemas`; `registers` в v2/v3), не внутри абстрактного «ядра» фреймворка.
 - **Правила репозитория:** `.cursor/rules/framework-architecture.mdc`.
 - **Валидация:** `python Inspector_prototype/scripts/validate.py` (из корня репозитория; при смене cwd см. README скрипта).
+- **Тесты фреймворка (модули):** `python Inspector_prototype/scripts/run_framework_tests.py` из `Inspector_prototype`, либо `cd Inspector_prototype/multiprocess_framework/modules` и `python -m pytest` — см. `multiprocess_framework/README.md` (Testing).
 
 ## Stack
 - Language: **Python** (`requires-python >=3.9`; зависимости: Pydantic, SQLAlchemy, NumPy, PyQt5, OpenCV, Pillow — см. `Inspector_prototype/pyproject.toml`)

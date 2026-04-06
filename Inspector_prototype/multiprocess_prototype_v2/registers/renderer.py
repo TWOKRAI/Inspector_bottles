@@ -11,11 +11,13 @@ from multiprocess_framework.modules.data_schema_module import (
     FieldRouting,
     RegisterDispatchMeta,
     SchemaBase,
+    register_schema,
 )
 
 RENDERER_ROUTING = FieldRouting(channel="control_renderer")
 
 
+@register_schema("RendererRegistersV3")
 class RendererRegisters(SchemaBase):
     """Регистры параметров отображения рендерера."""
 

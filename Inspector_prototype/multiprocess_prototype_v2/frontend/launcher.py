@@ -13,7 +13,7 @@ from frontend_module.windows import LoadingWindow
 
 from frontend_module.core.schema_config import coerce_schema_config
 
-from multiprocess_prototype_v2.app_registers import create_registers
+from multiprocess_prototype_v2.registers import create_registers
 from multiprocess_prototype_v2.managers import RecipeManager
 from multiprocess_prototype_v2.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype_v2.managers.app_recipe_aggregate import (

@@ -1,7 +1,7 @@
 """
 Синхронизация register_update → состояние детектора.
 
-Имена полей должны совпадать с ProcessorRegisters (registers/schemas/processing_tab).
+Имена полей — как у плоского ``ProcessorRegisters`` (``registers/processor_registers.py``).
 
 Поля ``crop_regions`` и ``post_processing_regions`` пока не разбираются здесь: снимок
 для GUI/рецепта; применение к пайплайну — отдельная задача (см. ADR-092, прототип).
@@ -11,9 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from multiprocess_prototype_v2.app_registers.processing_tab.names import (
-    PROCESSOR_REGISTER,
-)
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER
 
 
 def apply_processor_register_update(

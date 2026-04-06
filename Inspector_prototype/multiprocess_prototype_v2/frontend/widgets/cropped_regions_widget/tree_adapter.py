@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
 
-from multiprocess_prototype_v2.app_registers.processing_tab.crop_regions_payload import (
+from multiprocess_prototype_v2.registers.gui_payload.crop_regions_payload import (
     regions_to_table_rows,
 )
 

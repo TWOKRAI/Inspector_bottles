@@ -10,7 +10,7 @@ LoggerManager (Refactored) — наследник ChannelRoutingManager.
   - Публичный API не изменён (info, error, log, flush, get_stats и т.д.)
 """
 import time
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -24,10 +24,12 @@ from ..configs.logger_manager_config import (
     LoggerChannelSchema,
     LoggerManagerConfig,
     LoggerModuleSchema,
+    LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
 from .log_dispatcher import LogDispatcher, LogRecord
 from ..channels.log_channel import create_channel, LogChannel
+from .log_paths import resolve_log_file_path
 
 log_context: ContextVar[Dict[str, Any]] = ContextVar('log_context', default={})
 
@@ -170,17 +172,39 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         if isinstance(config, LoggerManagerConfig):
             return config
         if isinstance(config, dict):
-            return LoggerManagerConfig.from_dict(config)
+            return (
+                LoggerManagerConfig.model_validate(config) if config else LoggerManagerConfig()
+            )
         if hasattr(config, "build") and callable(config.build):
             result = config.build()
             if isinstance(result, tuple) and len(result) == 2:
                 _, cfg_dict = result
                 if isinstance(cfg_dict, dict):
-                    return LoggerManagerConfig.from_dict(cfg_dict)
+                    return (
+                        LoggerManagerConfig.model_validate(cfg_dict)
+                        if cfg_dict
+                        else LoggerManagerConfig()
+                    )
                 return LoggerManagerConfig()
             if isinstance(result, dict):
-                return LoggerManagerConfig.from_dict(result)
+                return (
+                    LoggerManagerConfig.model_validate(result)
+                    if result
+                    else LoggerManagerConfig()
+                )
         return LoggerManagerConfig()
+
+    def _scope_schema(self, scope: LogScope) -> LoggerScopeSchema:
+        """Скоуп из конфига или fallback (логика рядом с потребителем, не на схеме)."""
+        key = scope.name
+        if key in self.config.scopes:
+            return self.config.scopes[key]
+        ch = list(self.config.channels.keys())[:1] if self.config.channels else []
+        return LoggerScopeSchema(
+            enabled=True,
+            min_level=self.config.default_level,
+            channels=ch,
+        )
 
     def _setup_channels(self):
         """Создать каналы из конфига и зарегистрировать в CRM registry.
@@ -199,9 +223,27 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             ):
                 self._setup_module_channel(module_name, module_config)
 
+    def _resolved_file_path(self, file_path: Optional[str], fallback: str) -> str:
+        return resolve_log_file_path(
+            file_path,
+            fallback=fallback,
+            log_directory=self.config.log_directory,
+        )
+
     def _setup_channel(self, channel_name: str, channel_config: LoggerChannelSchema):
         try:
-            channel = create_channel(channel_name, channel_config)
+            cfg = channel_config
+            if channel_config.type == "file":
+                fb = f"logs/{channel_name}.log"
+                cfg = channel_config.model_copy(
+                    update={
+                        "file_path": self._resolved_file_path(
+                            channel_config.file_path,
+                            fb,
+                        ),
+                    }
+                )
+            channel = create_channel(channel_name, cfg)
             self._channel_registry.register(channel)
             self.dispatcher.register_channel_handler(channel_name, channel.write)
         except Exception as e:
@@ -209,7 +251,10 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     def _setup_module_channel(self, module_name: str, module_config: LoggerModuleSchema):
         """Создать файловый канал для module_* (из modules или enable_module_logging)."""
-        path = module_config.file_path or f"logs/{module_name}.log"
+        path = self._resolved_file_path(
+            module_config.file_path,
+            f"logs/{module_name}.log",
+        )
         max_size = (
             module_config.max_size
             if module_config.max_size is not None
@@ -227,7 +272,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                 name=ch_name,
                 type="file",
                 enabled=True,
-                file_path=str(path),
+                file_path=path,
                 format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
                 max_size=max_size,
                 backup_count=backup_count,
@@ -294,7 +339,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         return result
 
     def _should_log_direct(self, scope: LogScope, level: LogLevel, module: str) -> bool:
-        scope_config = self.config.get_scope_config(scope)
+        scope_config = self._scope_schema(scope)
         return scope_config.should_log(level, module)
 
     def log(
@@ -311,7 +356,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             self.stats['messages_skipped'] += 1
             return
 
-        scope_config = self.config.get_scope_config(scope)
+        scope_config = self._scope_schema(scope)
         channels = scope_config.channels or self._channel_registry.names()
 
         if module in self._module_channels:

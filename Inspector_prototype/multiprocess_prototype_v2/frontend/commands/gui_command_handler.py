@@ -2,7 +2,7 @@
 """
 GuiCommandHandler — единый слой отправки GUI-команд.
 
-Каталог payload: ``frontend.commands.gui_command_catalog``; targets — ``app_registers.command_routing``.
+Каталог payload: ``frontend.commands.gui_command_catalog``; targets — ``registers.command_routing``.
 
 Цепочка: process.send_message(target, msg) → ProcessCommunication.send_to_process
 → RouterManager.queue_registry.send_to_queue. MessageAdapter формирует формат command.

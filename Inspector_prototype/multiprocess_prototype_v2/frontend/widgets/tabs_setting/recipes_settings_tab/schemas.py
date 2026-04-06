@@ -15,10 +15,7 @@ from pydantic import Field
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
-from multiprocess_prototype_v2.app_registers.processing_tab import (
-    PROCESSOR_REGISTER,
-    RENDERER_REGISTER,
-)
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER, RENDERER_REGISTER
 
 
 @register_schema("ControlBinding")

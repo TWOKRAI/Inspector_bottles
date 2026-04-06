@@ -21,6 +21,7 @@ from ...channel_routing_module.core.config_normalizer import normalize_config
 from ..interfaces import IStatsManager
 from .metric_record import MetricRecord, MetricType
 from .aggregation_window import AggregationWindow
+from ...logger_module.core.log_paths import resolve_log_file_path
 from ..channels.log_stats_channel import LogStatsChannel
 from ..channels.file_stats_channel import FileStatsChannel
 
@@ -139,10 +140,12 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                 if not ch_params.get("enabled", True):
                     continue
                 if ch_params.get("type", "file") == "file":
+                    fb = f"logs/stats_{self.manager_name}.json"
                     file_ch = FileStatsChannel(
-                        file_path=ch_params.get(
-                            "file_path",
-                            f"logs/stats_{self.manager_name}.json",
+                        file_path=resolve_log_file_path(
+                            ch_params.get("file_path"),
+                            fallback=fb,
+                            log_directory=None,
                         ),
                         format=ch_params.get("format", "json"),
                         name=ch_name,
@@ -151,8 +154,9 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
 
         # Fallback: всегда хотя бы один канал
         if not self._channel_registry.names():
+            fb = f"logs/stats_{self.manager_name}.json"
             file_ch = FileStatsChannel(
-                file_path=f"logs/stats_{self.manager_name}.json",
+                file_path=resolve_log_file_path(None, fallback=fb, log_directory=None),
                 name="file_stats",
             )
             self.register_channel(file_ch)

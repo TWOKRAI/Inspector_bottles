@@ -23,7 +23,7 @@
 - [x] Этап 6: ConsoleRedirector рефакторинг — убрана Queue, прямой вызов manager.write()
 - [x] Этап 7: ConsoleAdapter(BaseAdapter) — интеграция с LoggerManager и CommandManager
 - [x] Этап 8: Интеграция в ProcessModule (process_module.py, process_managers.py, process_lifecycle.py)
-- [x] Этап 9: ConsoleProcessConfig(SchemaBase) — God Mode: `ManagersConfig` + `ProcessLaunchConfig.build()`, без shared `_GOD` default
+- [x] Этап 9: ConsoleProcessConfig(ProcessLaunchConfig) — God Mode: `ManagersConfig`, `build()` у базового процессного конфига, без shared `_GOD` default
 - [x] Этап 10: pytest тесты (5 файлов), STATUS.md и README.md обновлены
 
 ## Архитектурные решения
@@ -46,3 +46,4 @@
 | 2026-03-11 | Начальное состояние | 0 |
 | 2026-03-14 | Полный рефакторинг по плану console_module_refactoring | 4 |
 | 2026-03-14 | Очистка: удалены legacy (ConsoleChannel, window_process, test_basic, docs/, IConsoleChannel) | 8 |
+| 2026-04-03 | `ConsoleProcessConfig` наследует `ProcessLaunchConfig`; убран дублирующий `build()` (ADR-114) | 9 |

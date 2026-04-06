@@ -139,7 +139,7 @@ logger = LoggerManager(
 logger.initialize()
 
 # Вариант 3: через LoggerManagerConfig (SchemaBase)
-config = LoggerManagerConfig.from_dict({
+config = LoggerManagerConfig.model_validate({
     "app_name": "inspector",
     "default_level": "INFO",
     "enable_batching": True,
@@ -300,7 +300,7 @@ logger.register_channel(DatabaseChannel())
 ```python
 from logger_module import LoggerManagerConfig
 
-config = LoggerManagerConfig.from_dict({
+config = LoggerManagerConfig.model_validate({
     "app_name": "my_app",
     "default_level": "INFO",
     "enable_batching": True,

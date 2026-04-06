@@ -29,6 +29,14 @@
 - [ ] Этап 7: Стресс-тест — concurrent writes, высокая нагрузка, tag cardinality
 - [ ] Этап 8: Полная интеграция с process_manager_module
 
+## Обновление 2026-04-01
+
+- Пути файлов метрик по умолчанию резолвятся через **`logger_module.core.log_paths.resolve_log_file_path`** (не в дереве `modules/` при pytest; ADR-111).
+
+## Обновление 2026-04-03
+
+- **`StatsManagerConfig`**: **`ChannelRoutingConfig`** импортируется из публичного **`channel_routing_module`** (ADR-114, единый стиль с логгером).
+
 ## Известные проблемы
 
 - `_metric_key` дублируется в `stats_manager.py` и `aggregation_window.py` —
@@ -46,3 +54,4 @@
 | Дата | Что сделано |
 |------|-------------|
 | 2026-03-31 | ADR-108: убран избыточный `build()` у `StatsManagerConfig` (наследует `SchemaMixin.build`) |
+| 2026-04-03 | Импорт `ChannelRoutingConfig` из публичного `channel_routing_module` (ADR-114) |

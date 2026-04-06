@@ -85,7 +85,7 @@ class TestLoggerManager:
     def test_module_rotate_false_uses_file_handler(self, tmp_path):
         """Без ротации — FileHandler (избегаем os.rename на Windows для частых логов)."""
         log_file = tmp_path / "frames.log"
-        cfg = LoggerManagerConfig.from_dict(
+        cfg = LoggerManagerConfig.model_validate(
             {
                 "enable_batching": False,
                 "modules": {

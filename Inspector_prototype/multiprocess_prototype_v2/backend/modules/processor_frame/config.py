@@ -2,8 +2,8 @@
 """
 Конфигурация процесса обработки кадров.
 
-Поля, совпадающие с регистром GUI, берутся из registers/schemas/processing_tab/boot.py
-и метаданных ProcessorRegisters (один источник правды).
+Поля и метаданные совпадают с `ColorDetectionParams`
+(`registers/processings/color_detection.py`).
 """
 
 from typing import Annotated, List
@@ -15,12 +15,11 @@ from multiprocess_framework.modules.data_schema_module import (
 from multiprocess_framework.modules.process_module import ProcessPriorityLevel
 
 from multiprocess_prototype_v2.backend.configs.base_config import ProcessConfigBase
-from multiprocess_prototype_v2.app_registers.processing_tab import (
-    ProcessorRegisters,
-    processor_process_boot_values,
-)
 
-_BOOT = processor_process_boot_values()
+from multiprocess_prototype_v2.registers.processings import ColorDetectionParams
+
+
+_BOOT = ColorDetectionParams().model_dump()
 
 _PROCESSOR_CLASS_PATH = (
     "multiprocess_prototype_v2.backend.processes.processor.process.ProcessorProcess"
@@ -28,7 +27,7 @@ _PROCESSOR_CLASS_PATH = (
 
 
 def _pm(field: str):
-    return ProcessorRegisters.get_field_meta(field)
+    return ColorDetectionParams.get_field_meta(field)
 
 
 _m_min = _pm("min_area")

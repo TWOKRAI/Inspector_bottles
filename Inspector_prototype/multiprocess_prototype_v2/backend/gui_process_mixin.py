@@ -6,7 +6,7 @@ GuiProcessMixin — gui_* и _handle_* для GUI-процесса.
 
 Требует: self._msg (MessageAdapter), self.send_message, self.memory_manager, self._window.
 
-Команды camera/processor/renderer: targets из ``app_registers.command_routing`` (RegisterDispatchMeta).
+Команды camera/processor/renderer: targets из ``registers.command_routing`` (RegisterDispatchMeta).
 """
 
 from typing import Any, Dict, Optional

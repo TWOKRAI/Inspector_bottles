@@ -9,7 +9,7 @@ run() делегирует в FrontendLauncher (MainWindow, WindowManager, ре�
 from multiprocess_framework.modules.message_module import MessageAdapter
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_prototype_v2.backend.gui_process_mixin import GuiProcessMixin
-from multiprocess_prototype_v2.app_registers.command_routing import resolve_command_targets
+from multiprocess_prototype_v2.registers.command_routing import resolve_command_targets
 from multiprocess_prototype_v2.frontend.commands import GUI_COMMAND_CATALOG
 
 from frontend_module.core.routed_command import RoutedCommandSender

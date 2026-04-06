@@ -6,12 +6,12 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from multiprocess_prototype_v2.app_registers.vision_pipeline.widget_bridge import (
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER
+from multiprocess_prototype_v2.registers.vision_pipeline.widget_bridge import (
     apply_post_list_to_pipeline,
     pipeline_config_from_register,
     post_list_from_pipeline,
 )
-from multiprocess_prototype_v2.app_registers.processing_tab import PROCESSOR_REGISTER
 
 from .model import PostProcessingModel
 from .params import (

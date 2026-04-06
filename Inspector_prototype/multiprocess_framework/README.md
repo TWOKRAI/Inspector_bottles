@@ -443,34 +443,79 @@ config.update_field("confidence", 1.5)  # ✗ Error
 
 ## Testing
 
-**Полная проверка** (unit-тесты + валидация документации):
+Модули в `modules/` используют **плоские импорты** (`from data_schema_module import …`).
+Путь `multiprocess_framework/modules` должен быть на `sys.path` — это задаёт локальный
+[`modules/pytest.ini`](./modules/pytest.ini) (`pythonpath = .`), поэтому **рабочий каталог
+при запуске pytest — `multiprocess_framework/modules`**.
+
+**Лог-файлы:** относительные пути в `LoggerManager` больше не привязаны к этому каталогу исходников.
+По умолчанию используется каталог из **`MULTIPROCESS_LOG_DIR`** / **`INSPECTOR_LOG_DIR`**, иначе подкаталог в системном temp
+(см. `logger_module/core/log_paths.py`, **ADR-111**). В pytest под `modules/` **`conftest.py`** выставляет
+`MULTIPROCESS_LOG_DIR` в изолированный temp. Для приложения пути задают через **`ManagersConfig.from_log_dir(...)`**
+(абсолютные пути после нормализации) или явное **`log_directory`** в `LoggerManagerConfig`.
+
+### Рекомендуемый запуск (из `Inspector_prototype`)
+
+```bash
+python scripts/run_framework_tests.py
+```
+
+Опции pytest передаются в конец:
+
+```bash
+python scripts/run_framework_tests.py process_module/tests -q --maxfail=1
+```
+
+### Вручную: сменить каталог на `modules`
+
+```bash
+cd multiprocess_framework/modules
+python -m pytest
+```
+
+Тот же эффект, что и у скрипта выше: подхватывается `pytest.ini` и список `testpaths`
+(все `*/tests` перечисленных пакетов).
+
+### Вручную: остаться в `Inspector_prototype` (bash)
 
 ```bash
 cd Inspector_prototype
-python multiprocess_framework/tests/run_all_tests.py
+PYTHONPATH=multiprocess_framework/modules python -m pytest -c multiprocess_framework/modules/pytest.ini multiprocess_framework/modules
 ```
 
-**Только unit-тесты:**
+На **Windows (PowerShell)**:
 
-```bash
+```powershell
 cd Inspector_prototype
-python multiprocess_framework/tests/run_unit_tests.py
+$env:PYTHONPATH = "multiprocess_framework/modules"
+python -m pytest -c multiprocess_framework/modules/pytest.ini multiprocess_framework/modules
 ```
 
-**Тесты конкретного модуля:**
+Без `PYTHONPATH` и без `cwd` в `modules` команда `pytest multiprocess_framework/...` из корня
+`Inspector_prototype` обычно падает с `ModuleNotFoundError: No module named 'data_schema_module'`.
+
+### Coverage (пример)
+
+Из каталога `modules` (после `cd multiprocess_framework/modules`):
 
 ```bash
-python multiprocess_framework/tests/run_unit_tests.py --module config_module
+python -m pytest --cov=. --cov-report=html
 ```
 
-**Известные проблемы:** см. [PROBLEMS.md](PROBLEMS.md)
-
-С coverage (через pytest напрямую):
+Либо с явным `PYTHONPATH` из `Inspector_prototype` (bash):
 
 ```bash
-cd Inspector_prototype
-PYTHONPATH=multiprocess_framework/modules pytest multiprocess_framework/modules --cov=modules --cov-report=html
+PYTHONPATH=multiprocess_framework/modules python -m pytest -c multiprocess_framework/modules/pytest.ini multiprocess_framework/modules --cov=multiprocess_framework/modules --cov-report=html
 ```
+
+### Прочее
+
+- **Статическая проверка структуры** (импорты, `interfaces.py`, без `sys.path.insert` в production):
+  `python scripts/validate.py` из `Inspector_prototype`.
+- **Тесты приложения-прототипа** задаются в `Inspector_prototype/pyproject.toml` (`testpaths`:
+  `multiprocess_prototype/tests` и др.) — это отдельный набор от unit-тестов модулей фреймворка.
+- **Известные ограничения:** [PROBLEMS.md](PROBLEMS.md); интеграционные сценарии:
+  [tests/integration/TEST_ISSUES.md](./tests/integration/TEST_ISSUES.md).
 
 ---
 
@@ -536,7 +581,7 @@ When adding new features:
 2. Implement in module
 3. Write tests in `tests/`
 4. Update module `README.md`
-5. Run `pytest` — all tests must pass
+5. Запустить тесты модуля и полный прогон фреймворка: `python scripts/run_framework_tests.py` (из `Inspector_prototype`)
 6. Update `DECISIONS.md` if architectural
 7. Update `DOCUMENTATION_INDEX.md` if structure changed
 

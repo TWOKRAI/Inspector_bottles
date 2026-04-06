@@ -50,9 +50,25 @@ except ImportError:
     TabWidget = None  # type: ignore[assignment]
 
 try:
-    from .header import ButtonHeader, HeaderWidget
+    from .header import (
+        AdminButtonConfig,
+        ButtonHeader,
+        HeaderButtonItem,
+        HeaderConfig,
+        HeaderWidget,
+        LogoConfig,
+    )
 
-    __all__.extend(["HeaderWidget", "ButtonHeader"])
+    __all__.extend(
+        [
+            "HeaderWidget",
+            "ButtonHeader",
+            "HeaderConfig",
+            "LogoConfig",
+            "AdminButtonConfig",
+            "HeaderButtonItem",
+        ]
+    )
 except ImportError:
     HeaderWidget = None  # type: ignore[assignment]
     ButtonHeader = None  # type: ignore[assignment]

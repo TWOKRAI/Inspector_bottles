@@ -2,7 +2,7 @@
 """
 Каталог payload для GUI-команд (args/data для MessageAdapter.command).
 
-Targets задаются в ``app_registers.command_routing.resolve_command_targets``; здесь только builders.
+Targets задаются в ``registers.command_routing.resolve_command_targets``; здесь только builders.
 """
 from __future__ import annotations
 
@@ -43,6 +43,14 @@ def _args_show_mask(show: bool) -> Dict[str, Any]:
 
 def _args_draw_contours(draw: bool) -> Dict[str, Any]:
     return {"draw_contours": draw}
+
+
+def _args_draw_bboxes(draw: bool) -> Dict[str, Any]:
+    return {"draw_bboxes": draw}
+
+
+def _args_save_frames(save: bool) -> Dict[str, Any]:
+    return {"save_frames": save}
 
 
 def _args_fps(fps: int) -> Dict[str, Any]:
@@ -86,6 +94,8 @@ GUI_COMMAND_CATALOG: Dict[str, Callable[..., Dict[str, Any]]] = {
     "set_show_original": _args_show_original,
     "set_show_mask": _args_show_mask,
     "set_draw_contours": _args_draw_contours,
+    "set_draw_bboxes": _args_draw_bboxes,
+    "set_save_frames": _args_save_frames,
     "enum_devices": _args_enum_devices,
     "open": _args_camera_index,
     "close": _args_empty,

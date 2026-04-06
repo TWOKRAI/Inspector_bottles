@@ -1,7 +1,7 @@
 # multiprocess_prototype_v2/backend/processes/camera/config.py
 """Конфигурация процесса захвата видео (UnifiedCameraProcess).
 
-Изменяемые параметры — в registers/schemas/camera_tab; boot-значения оттуда.
+Изменяемые параметры — в ``registers.gui_camera_registers.GuiCameraRegisters``; boot из ``registers.boot``.
 """
 
 from typing import Optional
@@ -16,7 +16,7 @@ from multiprocess_prototype_v2.backend.modules.camera.constants import (
     CAMERA_SHM_HEIGHT,
     CAMERA_SHM_WIDTH,
 )
-from multiprocess_prototype_v2.app_registers.camera_tab import camera_process_boot_values
+from multiprocess_prototype_v2.registers.boot import camera_process_boot_values
 
 from .process import UnifiedCameraProcess
 

@@ -1,7 +1,7 @@
 # Известные проблемы фреймворка
 
 **Дата:** 2026-03-15  
-**Источник:** `python tests/run_all_tests.py`
+**Проверка unit-тестов:** из `Inspector_prototype` — `python scripts/run_framework_tests.py` (см. [README.md — Testing](./README.md#testing)).
 
 **Исправлено (2026-03-15):** MagicMock, console patch, config_handler, test_stop_with_alive, process_module log, data_schema импорты. MemoryManager — skip на macOS. **test_clear_queue** — учёт асинхронности multiprocessing.Queue на macOS в `clear_queue()`.
 
@@ -14,6 +14,14 @@
 | Unit-тесты              | ✅ OK (все проходят) |
 | Документация            | ✅ OK (19/19 модулей) |
 | MemoryManager на macOS | ⏭️ Пропуск (15 тестов) |
+
+---
+
+## Прототип v3 и слой приложения
+
+**Статус:** ожидаемое трение до выноса общего кода.
+
+- **`multiprocess_prototype_v3`** по-прежнему тянет **`multiprocess_prototype_v2`** для **`app_registers`**, **`managers`**, **`utils`**, **`persistence`** (в v3 этих пакетов нет; данные и общий слой приложения пока общие с v2). Схемы **`backend`**, **`frontend`**, **`registers`** в v3 — свои; реэкспорты фреймворка для удобных импортов — **ADR-115**. Полная автономия v3 — перенос или общий пакет приложения вместо кросс-импорта v2.
 
 ---
 
@@ -32,7 +40,7 @@
 См. `tests/integration/TEST_ISSUES.md`:
 - Pickle на Windows (лямбда в LoggerPlugin)
 - Проблемы с инициализацией процессов
-- Конфликт pytest.ini / pyproject.toml
+- Разные точки входа pytest: unit-тесты модулей — `modules/pytest.ini` и `cwd` в `modules/` (или `scripts/run_framework_tests.py`); в корне `Inspector_prototype` — только наборы из `pyproject.toml`
 
 ---
 

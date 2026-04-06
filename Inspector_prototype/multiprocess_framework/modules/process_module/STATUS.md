@@ -4,7 +4,7 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
-- Корневая сборка `managers`: **`config/managers_config.py`** — `ManagersConfig`, `from_log_dir()` (ADR-103); нормализация вида **`normalize_managers_view`** + **`ProcessLaunchConfig`** (ADR-104)
+- Корневая сборка `managers`: **`configs/managers_config.py`** — blueprint-дефолты, **`RouterManagerConfig` / `CommandManagerConfig`**, **`managers_from_log_dir`** / **`managers_payload_for_proc`** + тонкие **`from_log_dir`** / **`managers_for_proc_dict`** на классе (ADR-112, **ADR-113**, **ADR-114**); нормализация **`normalize_managers_view`** + **`ProcessLaunchConfig`** (ADR-104). Публичный импорт **`ManagersConfig`** / **`managers_*`** с корня пакета **`process_module`** — лениво (**`__getattr__`**, **ADR-115**), рядом с **`ProcessModule`**.
 - Версия: 2.0.0 (Refactored)
 - Тесты: 61/62 проходят (98% успешность)
 - Документация: ✅ полная

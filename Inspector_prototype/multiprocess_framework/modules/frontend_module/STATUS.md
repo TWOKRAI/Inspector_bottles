@@ -12,6 +12,8 @@
 | Связанность (меньше = лучше) | 9 | Примитивы в `components/` (flatten бывш. control_v2); shell в `widgets/`; без shim `controls/` |
 | Работоспособность | 9 | FrontendManager.run_app/shutdown_app, GuiProcess интеграция |
 
+**2026-04-03:** Пакет **`widgets`** реэкспортирует схемы шапки (**`HeaderConfig`**, **`LogoConfig`**, **`AdminButtonConfig`**, **`HeaderButtonItem`**) для импорта без **`widgets.header`** (**ADR-115**).
+
 ## Чеклист рефакторинга
 
 - [x] Этап 0: Фундамент — структура, interfaces.py, README, STATUS

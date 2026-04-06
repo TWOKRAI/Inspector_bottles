@@ -18,3 +18,10 @@ class RouterManagerConfig(SchemaBase):
         FieldMeta("Стратегия диспетчера исходящих"),
     ] = "exact"
     dispatcher_key_field: Annotated[str, FieldMeta("Поле ключа в сообщении")] = "command"
+    duplicate_messages_to_logger: Annotated[
+        bool,
+        FieldMeta(
+            "Дублировать исходящие сообщения в LoggerManager",
+            info="Используется ProcessManagers при инициализации.",
+        ),
+    ] = True

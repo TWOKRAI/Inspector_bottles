@@ -11,6 +11,7 @@
 |----------|----------|
 | [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) | Обзор архитектуры, модули, принципы, сценарии |
 | [docs/CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) | Цепочка: SchemaBase, dict, Config, process_manager / process_module |
+| [docs/CONFIG_SCHEMA_REGISTERS.md](./docs/CONFIG_SCHEMA_REGISTERS.md) | data_schema ↔ config_module ↔ registers_module; `model_dump` / `model_validate` (ADR-112) |
 | [docs/CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) | Слой schema→dict, ветки доставки, фасад чтения конфига в процессе |
 | [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) | Таблицы, диаграммы, матрицы зависимостей |
 | [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) | Термины маршрутизации и регистров |
@@ -34,6 +35,7 @@
 | ChannelRoutingManager | Overview + ADR-013 |
 | Остановка процессов | Overview (Graceful Shutdown) + `process_manager_module` |
 | Новый модуль | Шаблон + `base_manager` README + тесты |
+| Запуск unit-тестов фреймворка | [README.md — Testing](./README.md#testing); из `Inspector_prototype`: `python scripts/run_framework_tests.py` |
 
 ---
 

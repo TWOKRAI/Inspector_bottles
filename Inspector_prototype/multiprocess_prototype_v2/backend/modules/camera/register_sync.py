@@ -1,10 +1,10 @@
-"""register_update для CameraRegisters — имена полей как в registers/schemas/camera_tab."""
+"""register_update для GUI-камеры — поля ``GuiCameraRegisters``."""
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from multiprocess_prototype_v2.app_registers.camera_tab.names import CAMERA_REGISTER
+from multiprocess_prototype_v2.registers.names import CAMERA_REGISTER
 
 
 def apply_camera_register_update(

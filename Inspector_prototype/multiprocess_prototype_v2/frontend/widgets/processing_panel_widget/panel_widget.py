@@ -21,10 +21,7 @@ from frontend_module.interfaces import IRegistersManagerGui
 from frontend_module.widgets.base_widget import BaseWidget
 
 from multiprocess_prototype_v2.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
-from multiprocess_prototype_v2.app_registers.processing_tab import (
-    PROCESSOR_REGISTER,
-    RENDERER_REGISTER,
-)
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER, RENDERER_REGISTER
 
 from .model import ProcessingPanelModel
 from .presenter import ProcessingPanelPresenter

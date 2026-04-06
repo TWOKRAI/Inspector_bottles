@@ -9,12 +9,12 @@ alwaysApply: true
 
 - **Фреймворк**: `Inspector_prototype/multiprocess_framework/modules/` (16 модулей)
 - **Схемы регистров приложения**: `Inspector_prototype/multiprocess_prototype/registers/schemas/` (не часть фреймворка)
-- **Документация фреймворка**: `Inspector_prototype/multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`, глоссарий, каталог модулей), журнал решений — `refactored/DECISIONS.md`; отдельного архива отчётов нет
+- **Документация фреймворка**: `Inspector_prototype/multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`, глоссарий, каталог модулей), журнал решений — `multiprocess_framework/DECISIONS.md`; отдельного архива отчётов нет
 - **Тестовое приложение**: `Inspector_prototype/multiprocess_prototype/`
 - **Точка входа**: `Inspector_prototype/multiprocess_prototype/main.py`
 - **Оркестратор**: `process_manager_module/launcher/system_launcher.py`
 - **Базовый процесс**: `process_module/core/process_module.py`
-- **Журнал решений**: `refactored/DECISIONS.md` — читай перед предложением архитектурных изменений
+- **Журнал решений**: `multiprocess_framework/DECISIONS.md` — читай перед предложением архитектурных изменений
 
 ## Структура модуля (обязательная)
 
@@ -49,5 +49,5 @@ Frontend:      frontend_module
 ## После каждого изменения
 
 1. Обновить `STATUS.md` затронутого модуля
-2. Запустить `python scripts/validate.py`
+2. Запустить `python scripts/validate.py` и `python scripts/run_framework_tests.py` (cwd: `Inspector_prototype`)
 3. Зафиксировать новые архитектурные решения в `DECISIONS.md`

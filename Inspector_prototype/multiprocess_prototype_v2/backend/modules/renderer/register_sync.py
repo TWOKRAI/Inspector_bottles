@@ -1,12 +1,10 @@
-"""register_update для RendererRegisters — имена полей как в registers/schemas."""
+"""register_update для RendererRegisters — см. ``registers/renderer.py``."""
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from multiprocess_prototype_v2.app_registers.processing_tab.names import (
-    RENDERER_REGISTER,
-)
+from multiprocess_prototype_v2.registers.names import RENDERER_REGISTER
 
 
 def apply_renderer_register_update(

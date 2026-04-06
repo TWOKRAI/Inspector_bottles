@@ -2,16 +2,13 @@
 """
 Конфигурация процесса отрисовки.
 
-Флаги show_original / show_mask / draw_contours — из RendererRegisters через boot.py
-(тот же источник, что и GUI-регистры).
+Флаги show_* / draw_* — из ``RendererRegisters`` через ``registers.boot.renderer_process_boot_values``.
 """
 
 from multiprocess_framework.modules.data_schema_module import register_schema
 
 from multiprocess_prototype_v2.backend.configs.base_config import ProcessConfigBase
-from multiprocess_prototype_v2.app_registers.processing_tab import (
-    renderer_process_boot_values,
-)
+from multiprocess_prototype_v2.registers.boot import renderer_process_boot_values
 
 _RBOOT = renderer_process_boot_values()
 

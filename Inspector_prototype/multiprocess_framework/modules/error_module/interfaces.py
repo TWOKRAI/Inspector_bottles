@@ -139,7 +139,7 @@ ErrorConfigLike = Union[Dict[str, Any], Any]
 """Допустимые форматы конфига ErrorManager (Dict at Boundary):
 
   - ``None`` → встроенный дефолт (см. ``_DEFAULT_CONFIG`` в core/error_manager)
-  - ``dict`` → ``expand_error_manager_config`` → ``LoggerManagerConfig.from_dict``
+  - ``dict`` → ``expand_error_manager_config`` → ``LoggerManagerConfig.model_validate``
   - ``ErrorManagerConfig`` → ``model_dump()`` + expand (см. ADR-107)
   - ``LoggerManagerConfig`` → используется как есть
   - объект с ``build() -> (str, dict)`` → dict из build + expand (совместимость)

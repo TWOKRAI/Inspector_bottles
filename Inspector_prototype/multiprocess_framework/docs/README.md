@@ -12,6 +12,7 @@
 |------|------------|
 | **[FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)** | Полный обзор: слои, принципы, жизненный цикл, quick start |
 | **[CONFIG_SCHEMA_DATA_FLOW.md](./CONFIG_SCHEMA_DATA_FLOW.md)** | Цепочка: `SchemaBase` → dict → `Config` / `proc_dict` / процессы |
+| **[CONFIG_SCHEMA_REGISTERS.md](./CONFIG_SCHEMA_REGISTERS.md)** | `data_schema_module` ↔ `config_module` ↔ `registers_module`; `model_dump` / `model_validate` (ADR-112) |
 | **[CONFIG_PATHS.md](./CONFIG_PATHS.md)** | Канонический слой schema→dict, ветки доставки, фасад `get_config`, антипаттерны |
 | **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Диаграммы и таблицы (быстрая справка) |
 | **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` |

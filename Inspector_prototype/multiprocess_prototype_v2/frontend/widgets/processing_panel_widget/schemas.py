@@ -4,7 +4,7 @@
 Строки и подписи UI панели обработки.
 
 Только фронт: не участвует в register_update. Значения параметров — в
-`app_registers.processing_tab` (ProcessorRegisters, RendererRegisters).
+``registers.processor_registers`` / ``registers.renderer`` (имена — ``registers.names``).
 default_tab_item — для TabsConfig.
 """
 from __future__ import annotations

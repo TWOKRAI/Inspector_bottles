@@ -1,0 +1,57 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff *)",
+      "Bash(pytest *)",
+      "Bash(mypy *)",
+      "Bash(git *)",
+      "Bash(docker ps *)",
+      "Bash(docker logs *)",
+      "Bash(docker compose *)",
+      "Bash(docker-compose *)",
+      "Bash(ollama *)",
+      "Bash(python *)",
+      "Bash(uv *)",
+      "Bash(pip *)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker stop *)",
+      "Bash(docker kill *)",
+      "Bash(docker system *)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(chmod 777 *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/validate-safe-command.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v claude-ignore &> /dev/null; then claude-ignore; else echo 'Warning: claude-ignore not found, skipping' >&2; fi"
+          }
+        ]
+      }
+    ]
+  },
+  "alwaysThinkingEnabled": false,
+  "preferredLanguage": "ru"
+}

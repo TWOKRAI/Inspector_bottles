@@ -59,9 +59,7 @@ class ColorBlobDetector:
         self._min_area = max(10, min(10000, int(value)))
 
     def set_max_area(self, value: int) -> None:
-        from multiprocess_prototype_v2.app_registers.processing_tab.boot import (
-            processor_max_area_clamp,
-        )
+        from multiprocess_prototype_v2.registers.boot import processor_max_area_clamp
 
         upper = processor_max_area_clamp()
         self._max_area = max(0, min(upper, int(value)))

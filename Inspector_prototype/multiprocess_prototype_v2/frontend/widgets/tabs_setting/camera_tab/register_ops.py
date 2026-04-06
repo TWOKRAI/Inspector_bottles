@@ -7,7 +7,7 @@ from typing import Optional
 
 from frontend_module.interfaces import IRegistersManagerGui
 
-from multiprocess_prototype_v2.app_registers.camera_tab import CAMERA_REGISTER
+from multiprocess_prototype_v2.registers.names import CAMERA_REGISTER
 
 
 def set_camera_type_field(

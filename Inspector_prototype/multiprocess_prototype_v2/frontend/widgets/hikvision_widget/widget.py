@@ -36,7 +36,7 @@ from frontend_module.core.qt_imports import (
 from frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype_v2.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
-from multiprocess_prototype_v2.app_registers.camera_tab import CAMERA_REGISTER
+from multiprocess_prototype_v2.registers.names import CAMERA_REGISTER
 
 from .callbacks import HikvisionWidgetCallbacks
 from .line_params import apply_params_to_line_edits, parse_triple_from_line_edits

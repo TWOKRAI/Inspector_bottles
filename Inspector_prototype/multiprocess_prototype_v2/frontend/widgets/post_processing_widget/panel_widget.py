@@ -33,7 +33,7 @@ from multiprocess_prototype_v2.frontend.touch_keyboard_bind import (
     bind_touch_keyboard_line_edit,
     merge_touch_keyboard_dicts,
 )
-from multiprocess_prototype_v2.app_registers.processing_tab.names import PROCESSOR_REGISTER
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER
 
 
 class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):

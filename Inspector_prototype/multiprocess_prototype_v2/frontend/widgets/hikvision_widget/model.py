@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 from frontend_module.interfaces import IRegistersManagerGui
 
-from multiprocess_prototype_v2.app_registers.camera_tab import CAMERA_REGISTER
+from multiprocess_prototype_v2.registers.names import CAMERA_REGISTER
 
 from .schemas import HikvisionUiConfig
 

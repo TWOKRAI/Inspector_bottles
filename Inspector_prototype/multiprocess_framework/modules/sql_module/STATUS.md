@@ -12,6 +12,8 @@
 | Связанность | 8 | Зависит от base_manager, data_schema_module |
 | Работоспособность | 9 | Все тесты проходят, sync/async |
 
+**2026-04-03:** В **`sql_module.__init__`** реэкспорт **`SchemaBaseMapper`** (публичный контур вместе с **`ExportFormat`** / **`TableExporter`**, **ADR-115**).
+
 ## Чеклист рефакторинга
 
 - [x] Этап 1: interfaces.py, sql_manager_config.py, db_commands.py

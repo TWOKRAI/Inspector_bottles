@@ -127,6 +127,8 @@
 - ## ADR-108: Дублирующие `build()` у CRM-наследников и `ChannelRoutingConfig` в `core/`
 - ## ADR-109: Удаление `multiprocess_framework/core/interfaces.py` и `logging_facade`
 - ## ADR-110: Memory config — декларативно в конфиге, создание под капотом
+- ## ADR-111: Пути файлов логов — не от cwd пакета; pytest задаёт каталог
+- ## ADR-115: Публичный API пакета — lazy `ManagersConfig` / `SchemaBaseMapper`, реэкспорт схем шапки из `widgets`
 
 ---
 
@@ -1753,6 +1755,78 @@
   - Плоский формат: `{"camera_frame": (h,w,3)}` вместо `{"names": {...}, "coll": 2}`.
 - Причина: DRY, единая точка создания памяти, лаконичный конфиг.
 - Отклонённые альтернативы: Оставить fallback в процессах — отклонено как дублирование.
+
+---
+
+## ADR-111: Пути файлов логов — не от cwd пакета; pytest задаёт каталог
+- Дата: 2026-04-01
+- Статус: принято
+- Контекст: Относительные `file_path` в `LoggerManagerConfig` и дефолты (`system.log`, `logs/…`) резолвились через `Path` от **текущего рабочего каталога**. При `pytest` с `cwd = multiprocess_framework/modules` лог-файлы создавались внутри дерева исходников модулей.
+- Решение:
+  1. **`logger_module/core/log_paths.py`** — `default_log_base_directory()` (переменные окружения **`MULTIPROCESS_LOG_DIR`**, **`INSPECTOR_LOG_DIR`**, иначе подкаталог в системном **temp**) и **`resolve_log_file_path`** для относительных путей.
+  2. **`LoggerManagerConfig.log_directory`** — опциональный явный корень для относительных путей (относительный путь к корню интерпретируется от **cwd процесса** приложения).
+  3. **`LoggerManager`** перед созданием файловых каналов нормализует пути через `resolve_log_file_path`.
+  4. **`ManagersConfig.from_log_dir`** — нормализует `log_dir` в **абсолютный** путь (относительный — от cwd); для логгера задаёт **`LoggerManagerConfig(log_directory=..., default_level=...)`** и дефолтные относительные пути каналов/modules (см. **ADR-112**), без дублирующего dict.
+  5. **`statistics_module`** — относительные пути `FileStatsChannel` проходят через ту же `resolve_log_file_path`.
+  6. **`multiprocess_framework/modules/conftest.py`** — session autouse: выставляет **`MULTIPROCESS_LOG_DIR`** в каталог pytest `tmp_path_factory`, чтобы тесты не писали в репозиторий.
+- Причина: логи не должны появляться «где попало» в пакете; предсказуемое поведение для CI и разработчиков.
+- Отклонённые альтернативы: только документировать «меняйте cwd» — отклонено; всегда писать в `./logs` от cwd — отклонено (та же проблема при pytest в `modules/`).
+
+---
+
+## ADR-112: Единый контур данных — `model_dump` / `model_validate`, без лишних методов на схемах
+- Дата: 2026-04-02
+- Статус: принято
+- Контекст: На `LoggerManagerConfig` дублировали Pydantic API (`from_dict`, `from_yaml`, `get_scope_config`); `ManagersConfig.from_log_dir` повторял дефолты логгера большим dict.
+- Решение:
+  1. **Вход в модель:** `Model.model_validate(data)` (пустой dict → дефолты через `LoggerManagerConfig()` там, где нужно).
+  2. **Выход на границе:** `model_dump()` / dict → JSON/YAML общими средствами; не добавлять `from_yaml` на каждую схему без необходимости.
+  3. **Поведение scope для логгера** — в `LoggerManager._scope_schema`, не на классе конфига.
+  4. **`ManagersConfig.from_log_dir`** — `LoggerManagerConfig(app_name=..., default_level=..., log_directory=abs_log_dir)` + подстановка `scopes["BUSINESS"].min_level` по `log_level`; error-секция — абсолютные пути как раньше.
+  5. **Документ:** `docs/CONFIG_SCHEMA_REGISTERS.md` — цепочка data_schema → config_module → registers_module и правила без дублирования слоёв.
+- Причина: предсказуемый контур, меньше расхождений с дефолтами схем.
+- Отклонённые альтернативы: оставить `from_dict` как обёртку — отклонено (дублирование Pydantic v2).
+
+---
+
+## ADR-113: `ManagersConfig` — blueprint-дефолты; `RouterManagerConfig.duplicate_messages_to_logger`
+- Дата: 2026-04-02
+- Статус: принято
+- Контекст: В `process_module` дублировались узкие `RouterManagersSection` / `CommandManagersSection` вместо полных схем роутера/команды; флаг `duplicate_messages_to_logger` жил только в секции process, а не в `RouterManagerConfig`.
+- Решение:
+  1. **`RouterManagerConfig`** — поле **`duplicate_messages_to_logger`** (по умолчанию `True`), читается `ProcessManagers` из `managers["router"]`.
+  2. **`ManagersConfig`** — модульные **blueprints** (`_LOGGER_BLUEPRINT`, …) и **`default_factory`** через **`model_copy(deep=True)`**; секции **`router: RouterManagerConfig`**, **`command: CommandManagerConfig`**.
+  3. **`RouterManagersSection` / `CommandManagersSection`** — удалены; прототипы v2/v3: **`RouterConfigLite` → `RouterManagerConfig`**, добавлен **`CommandConfigLite` → `CommandManagerConfig`**.
+- Причина: один тип на секцию, читаемые дефолты в одном файле, без «обрезков» схем.
+- Отклонённые альтернативы: оставить отдельные SchemaBase только для process — отклонено (дублирование имён полей).
+
+---
+
+## ADR-114: `managers_from_log_dir` / `managers_payload_for_proc` — фабрики уровня модуля для `ManagersConfig`
+- Дата: 2026-04-03
+- Статус: принято
+- Контекст: Тело `ManagersConfig.from_log_dir` и логика `managers_for_proc_dict` держали на классе «сборку» dict; подклассы прототипа (`ManagersConfigLite`) должны переиспользовать ту же логику без копипасты.
+- Решение:
+  1. **`managers_from_log_dir(log_dir, log_level=None, *, model_cls=ManagersConfig)`** — вся сборка экземпляра; **`model_cls`** задаёт конкретный тип (в т.ч. lite).
+  2. **`managers_payload_for_proc(cfg)`** — `proc_dict['managers']` без ключа **`log_dir`**.
+  3. **`ManagersConfig.from_log_dir`** / **`managers_for_proc_dict`** остаются тонкими делегатами к функциям (совместимый API, полиморфизм по **`cls`**).
+  4. **`ConsoleProcessConfig`** наследует **`ProcessLaunchConfig`**, дублирующий **`build()``** удалён.
+  5. **`StatsManagerConfig`** импортирует **`ChannelRoutingConfig`** из публичного пакета **`channel_routing_module`**.
+- Причина: схема ближе к «только поля»; одна реализация фабрики для базового класса и подклассов; единый стиль импорта CRM.
+- Отклонённые альтернативы: оставить только методы класса и копировать тело в lite — отклонено.
+
+---
+
+## ADR-115: Публичный API пакета — lazy `ManagersConfig` / `managers_*`, `SchemaBaseMapper`, реэкспорт схем шапки из `widgets`
+- Дата: 2026-04-03
+- Статус: принято
+- Контекст: Прототип v3 импортировал `ManagersConfig`, `managers_from_log_dir`, `managers_payload_for_proc` из `process_module.configs.managers_config`, а `SchemaBaseMapper` — из `sql_module.adapters.schema_mapper`; схемы шапки — из `frontend_module.widgets.header`. Это обходит единый стиль «импорт с корня модуля», о котором говорят правила фреймворка.
+- Решение:
+  1. **`process_module`**: через **`__getattr__`** (PEP 562) лениво отдаются **`ManagersConfig`**, **`managers_from_log_dir`**, **`managers_payload_for_proc`** наряду с **`ProcessModule`**.
+  2. **`sql_module`**: **`SchemaBaseMapper`** включён в **`__init__`** пакета (рядом с **`ExportFormat`**, **`TableExporter`**).
+  3. **`frontend_module.widgets`**: в **`__all__`** добавлены **`HeaderConfig`**, **`LogoConfig`**, **`AdminButtonConfig`**, **`HeaderButtonItem`** (импорт из подпакета **`header`**).
+- Причина: приложениям не нужно знать внутренние пути `configs/` и `adapters/` для типовых сборок; меньше «трения» при потреблении фреймворка.
+- Отклонённые альтернативы: только документировать глубокие импорты — отклонено (прототип всё равно копировал бы пути).
 
 ---
 

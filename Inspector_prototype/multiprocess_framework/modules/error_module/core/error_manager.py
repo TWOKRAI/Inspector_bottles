@@ -74,7 +74,7 @@ def _normalize_error_config(
     include_stacktrace = True
 
     if config is None:
-        return manager_name, LoggerManagerConfig.from_dict(_DEFAULT_CONFIG), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(_DEFAULT_CONFIG), include_stacktrace
 
     if isinstance(config, LoggerManagerConfig):
         return manager_name, config, include_stacktrace
@@ -84,13 +84,13 @@ def _normalize_error_config(
         d = expand_error_manager_config(raw)
         manager_name = str(raw.get("manager_name", "ErrorManager"))
         include_stacktrace = bool(d.get("include_stacktrace", True))
-        return manager_name, LoggerManagerConfig.from_dict(d), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
 
     if isinstance(config, dict):
         d = expand_error_manager_config(dict(config))
         include_stacktrace = bool(d.get("include_stacktrace", True))
         manager_name = str(d.get("manager_name", "ErrorManager"))
-        return manager_name, LoggerManagerConfig.from_dict(d), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
 
     if hasattr(config, "build") and callable(config.build):
         name, config_dict = config.build()
@@ -100,7 +100,7 @@ def _normalize_error_config(
         if hasattr(config, "include_stacktrace"):
             include_stacktrace = bool(config.include_stacktrace)
         d = expand_error_manager_config(d)
-        return manager_name, LoggerManagerConfig.from_dict(d), include_stacktrace
+        return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
 
     raise TypeError(
         f"config must be dict, LoggerManagerConfig, ErrorManagerConfig, or object with build() -> (name, dict), got {type(config)}"
@@ -143,6 +143,12 @@ class ErrorManager(LoggerManager):
         resolved_name, log_config, include_stacktrace = _normalize_error_config(config)
         manager_name = resolved_name
 
+        # До super(): LoggerManager.__init__ в конце выставляет LoggerManager._instance = self.
+        # Если self — ErrorManager, до строки ниже у подкласса ещё нет _level_to_channel,
+        # а косвенные вызовы (get_logger().error/…) приводят к AttributeError в log().
+        self._level_to_channel: Dict[str, str] = {}
+        self._include_stacktrace = include_stacktrace
+
         super().__init__(
             manager_name=manager_name,
             process=process,
@@ -153,9 +159,6 @@ class ErrorManager(LoggerManager):
             enable_router_routing=enable_router_routing,
             **kwargs,
         )
-
-        self._include_stacktrace = include_stacktrace
-        self._level_to_channel: Dict[str, str] = {}
 
     def initialize(self) -> bool:
         result = super().initialize()

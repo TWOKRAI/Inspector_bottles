@@ -1,24 +1,21 @@
+# -*- coding: utf-8 -*-
 """
 God Mode: отдельный процесс с консолью. Пример: launcher.add_process(*process(ConsoleProcessConfig())).
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Tuple
+from typing import Annotated
 
 from pydantic import Field
 
-from ...data_schema_module import FieldMeta, register_schema, SchemaBase
+from ...data_schema_module import FieldMeta, register_schema
 from ...process_module.configs.managers_config import ManagersConfig
+from ...process_module.configs.process_launch_config import ProcessLaunchConfig
 from .console_config import ConsoleConfig
-
-_DEFAULT_PROCESS_CLASS = (
-    "Inspector_prototype.multiprocess_framework.modules"
-    ".process_module.core.process_module.ProcessModule"
-)
 
 
 def _god_managers() -> ManagersConfig:
-    """God Mode: консоль интерактивна, остальные секции — дефолты ManagersConfig."""
+    """Интерактивная консоль; прочие секции — дефолты :class:`ManagersConfig`."""
     return ManagersConfig(
         console=ConsoleConfig(
             enabled=True,
@@ -30,27 +27,15 @@ def _god_managers() -> ManagersConfig:
 
 
 @register_schema("ConsoleProcessConfig")
-class ConsoleProcessConfig(SchemaBase):
-    """Standalone консольный процесс (God Mode)."""
+class ConsoleProcessConfig(ProcessLaunchConfig):
+    """Standalone консольный процесс (God Mode). ``build()`` — у :class:`ProcessLaunchConfig`."""
 
     process_name: Annotated[
         str,
         FieldMeta("Имя процесса", info="Ключ процесса в launcher / shared registry."),
     ] = "console_app"
 
-    process_class: Annotated[
-        str,
-        FieldMeta("Класс процесса", info="Полный путь к классу ProcessModule."),
-    ] = _DEFAULT_PROCESS_CLASS
-
     managers: Annotated[
         ManagersConfig,
         FieldMeta("Секции менеджеров процесса (канон: config.managers в ProcessModule)."),
     ] = Field(default_factory=_god_managers)
-
-    def build(self) -> Tuple[str, Dict[str, Any]]:
-        """Как :class:`ProcessLaunchConfig`: ``(process_name, {class, config})``."""
-        payload = self.model_dump()
-        name = str(payload.pop("process_name"))
-        class_path = str(payload.pop("process_class"))
-        return name, {"class": class_path, "config": payload}

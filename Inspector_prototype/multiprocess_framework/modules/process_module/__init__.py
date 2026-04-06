@@ -6,10 +6,10 @@ Process Module (Refactored) — базовый модуль процессов.
 - interfaces — IProcessModule, ISharedResources, IProcessCommunication
 - types — ProcessStatus, ManagerType, QueueType, ProcessConfigDict, ProcessStatsDict
 - adapters — ProcessAdapter, SchemaAdapter
+- ManagersConfig, managers_from_log_dir, managers_payload_for_proc — сборка proc_dict['managers'] (лениво, ADR-114, ADR-115)
 
-ProcessModule подгружается лениво (PEP 562), чтобы импорт подмодулей вроде
-``process_module.configs.managers_config`` не тянул тяжёлую цепочку до
-``ProcessModule`` (консольный процессный конфиг и др.).
+ProcessModule и фабрики managers подгружаются лениво (PEP 562), чтобы лёгкий импорт
+``from process_module import ProcessPriorityLevel`` не тянул ``ManagersConfig`` / ``ProcessModule``.
 """
 
 from typing import Any
@@ -37,12 +37,27 @@ def __getattr__(name: str) -> Any:
         from .core.process_module import ProcessModule
 
         return ProcessModule
+    if name == "ManagersConfig":
+        from .configs.managers_config import ManagersConfig
+
+        return ManagersConfig
+    if name == "managers_from_log_dir":
+        from .configs.managers_config import managers_from_log_dir
+
+        return managers_from_log_dir
+    if name == "managers_payload_for_proc":
+        from .configs.managers_config import managers_payload_for_proc
+
+        return managers_payload_for_proc
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     # Основной класс
     "ProcessModule",
+    "ManagersConfig",
+    "managers_from_log_dir",
+    "managers_payload_for_proc",
 
     # Интерфейсы
     "IProcessModule",

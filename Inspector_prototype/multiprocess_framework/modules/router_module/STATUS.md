@@ -13,6 +13,10 @@
 | Дублирование | 9 | ChannelRegistry удалён из RouterManager; используется self._channel_registry из CRM |
 | Работоспособность | 8 | correlation_id отсутствует (этап 5); ErrorManager не подключён |
 
+## Обновление 2026-04-02
+
+- **`RouterManagerConfig`:** поле **`duplicate_messages_to_logger`** (см. **ADR-113**) — согласование с `ProcessManagers` и `ManagersConfig`.
+
 ## Что сделано в CRM-миграции (Фаза 4)
 
 - [x] `IMessageChannel(IChannel)` — унифицированная иерархия, `write() = alias send()`

@@ -27,8 +27,8 @@ from .recipe_yaml_stores import (
     default_settings_recipes_path,
     pick_app_recipes_section,
 )
-from multiprocess_prototype_v2.app_registers.processing_tab.names import PROCESSOR_REGISTER
-from multiprocess_prototype_v2.app_registers.vision_pipeline.migration import normalize_processor_register_payload
+from multiprocess_prototype_v2.registers.migration import normalize_processor_register_payload
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER
 
 RecipeId = Union[int, str]
 

@@ -2,9 +2,9 @@
 """Модуль регистров: менеджер, карта маршрутизации, отправка по роутеру."""
 
 from .interfaces import IRegistersManager, IRegistersConverter
-from .manager import RegistersManager
-from .connection_map_builder import build_connection_map_from_registers
-from .routing_map import (
+from .core.manager import RegistersManager
+from .core.connection_map_builder import build_connection_map_from_registers
+from .core.routing_map import (
     ROUTING_NOT_FOUND,
     PROCESS_UNREACHABLE,
     MESSAGE_LOST,

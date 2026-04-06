@@ -5,12 +5,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from multiprocess_prototype_v2.app_registers.vision_pipeline.widget_bridge import (
+from multiprocess_prototype_v2.registers.names import PROCESSOR_REGISTER
+from multiprocess_prototype_v2.registers.vision_pipeline.widget_bridge import (
     apply_crop_nested_to_pipeline,
     crop_nested_from_pipeline,
     pipeline_config_from_register,
 )
-from multiprocess_prototype_v2.app_registers.processing_tab import PROCESSOR_REGISTER
 
 from .model import CroppedRegionsModel
 from .params import (

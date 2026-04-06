@@ -13,6 +13,18 @@
 | Дублирование | 10 | Нет: _channel_registry из CRM, BatchBuffer из CRM, Dispatcher из CRM |
 | Работоспособность | 8 | BatchBuffer + scope routing работают; channel_routing вместо channels: Dict |
 
+## Обновление 2026-04-01
+
+- Резолв относительных путей логов: **`core/log_paths.py`**, поле **`LoggerManagerConfig.log_directory`**; файлы по умолчанию не создаются в каталоге пакета при запуске из `modules/` (см. **ADR-111**).
+
+## Обновление 2026-04-02
+
+- **`LoggerManagerConfig`:** без `from_dict` / `from_yaml` / `get_scope_config`; загрузка через **`model_validate`**, fallback scope — **`LoggerManager._scope_schema`** (см. **ADR-112**).
+
+## Обновление 2026-04-03
+
+- **`logger_manager_config.py`:** дефолтный порог **INFO** для **`LoggerScopeSchema`** и скоупов **BUSINESS** / **PERFORMANCE** задаётся как **`_LEVEL_ORDER[1]`** (один источник с порядком уровней в **`should_log`**); отдельное поле **`log_level`** у конфига не используется — глобальный уровень задаёт **`default_level`**, **BUSINESS** при необходимости подставляется в **`ManagersConfig.from_log_dir`**.
+
 ## Что сделано в CRM-миграции (Фаза 2)
 
 - [x] `ILogChannel(IChannel)` — унифицированная иерархия каналов

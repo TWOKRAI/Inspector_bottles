@@ -13,16 +13,16 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from multiprocess_framework.modules.command_module import CommandManagerConfig
 from multiprocess_framework.modules.error_module import ErrorManagerConfig
 from multiprocess_framework.modules.logger_module import LoggerManagerConfig
-from multiprocess_framework.modules.process_module.configs.managers_config import (
-    CommandManagersSection,
+from multiprocess_framework.modules.process_module import (
     ManagersConfig,
-    RouterManagersSection,
+    managers_from_log_dir,
+    managers_payload_for_proc,
 )
-from multiprocess_framework.modules.statistics_module.configs.stats_config import (
-    StatsManagerConfig,
-)
+from multiprocess_framework.modules.router_module import RouterManagerConfig
+from multiprocess_framework.modules.statistics_module import StatsManagerConfig
 
 # ---------------------------------------------------------------------------
 # Алиасы имён прототипа → схемы фреймворка
@@ -31,16 +31,13 @@ from multiprocess_framework.modules.statistics_module.configs.stats_config impor
 LoggerConfigLite = LoggerManagerConfig
 ErrorConfigLite = ErrorManagerConfig
 StatsConfigLite = StatsManagerConfig
-RouterConfigLite = RouterManagersSection
+RouterConfigLite = RouterManagerConfig
+CommandConfigLite = CommandManagerConfig
 
 
-class ManagersConfigLite(ManagersConfig):
-    """Корневая схема менеджеров прототипа (наследует фреймворк)."""
+ManagersConfigLite = ManagersConfig
 
-    pass
-
-
-# Публичное имя для импорта из backend.configs (алиас без дублирования логики).
+# Публичное имя для импорта из backend.configs.
 DefaultManagersConfig = ManagersConfigLite
 
 
@@ -51,9 +48,9 @@ def get_log_dir() -> str:
 
 
 def build_default_managers_model(log_dir: str | None = None) -> ManagersConfigLite:
-    """Экземпляр ManagersConfigLite с путями из ``from_log_dir`` (фреймворк)."""
+    """Экземпляр ManagersConfigLite с путями из ``managers_from_log_dir`` (фреймворк)."""
     ld = log_dir if log_dir is not None else get_log_dir()
-    return ManagersConfigLite.from_log_dir(ld)
+    return managers_from_log_dir(ld, model_cls=ManagersConfigLite)
 
 
 def merge_managers(
@@ -85,4 +82,6 @@ def get_default_managers_config(log_dir: str | None = None) -> Dict[str, Any]:
     """
     if log_dir is None:
         log_dir = get_log_dir()
-    return ManagersConfigLite.from_log_dir(log_dir).managers_for_proc_dict()
+    return managers_payload_for_proc(
+        managers_from_log_dir(log_dir, model_cls=ManagersConfigLite)
+    )

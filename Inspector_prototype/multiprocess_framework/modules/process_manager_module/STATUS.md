@@ -25,6 +25,10 @@
 - [x] Этап 7: Unit-тесты написаны и проходят (8 файлов)
 - [x] Этап 8: README и interfaces.py готовы (ISystemLauncher, IProcessManagerProcess, IProcessRegistry)
 
+## Обновление 2026-04-03
+
+- **`ProcessMonitor`**: цикл опроса вызывает `ProcessStateRegistry.get_all_process_data()` и собирает снимок из `ProcessData` (`status`, `metadata`, `custom`). Ранее вызывался несуществующий `get_all_processes()`, из‑за чего в логах оркестратора сыпался `AttributeError`.
+
 ## Обновление 2026-03-30 (ADR-102)
 
 - **`process_runner._build_shared_resources_from_bundle`**: после `register_process_state` заполняется `ConfigStore` pickle-safe срезом `{"process", "managers"}` для текущего процесса и пустым срезом для имён из `routing_map`, чтобы `get_process_config` в child был согласован с контуром родителя.

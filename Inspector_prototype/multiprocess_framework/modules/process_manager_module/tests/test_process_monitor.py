@@ -155,7 +155,7 @@ class TestProcessMonitorLoop:
     def test_monitoring_loop_handles_exception_gracefully(self) -> None:
         """Ошибка в цикле мониторинга не прерывает цикл."""
         mock_pm = _make_mock_process_manager()
-        mock_pm.shared_resources.process_state_registry.get_all_processes.side_effect = (
+        mock_pm.shared_resources.process_state_registry.get_all_process_data.side_effect = (
             RuntimeError("test error")
         )
         monitor = ProcessMonitor(mock_pm, poll_interval=0.01)

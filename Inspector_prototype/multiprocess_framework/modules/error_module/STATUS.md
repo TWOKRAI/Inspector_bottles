@@ -13,6 +13,10 @@
 | Дублирование | 10 | Нет дублирования — вся channel/buffer/registry логика через CRM |
 | Работоспособность | 9 | WARNING/ERROR/CRITICAL → отдельные файлы; DEBUG/INFO → scope-based LoggerManager |
 
+## Обновление 2026-04-03
+
+- **`ErrorManager.__init__`**: `_level_to_channel` и `_include_stacktrace` задаются **до** `LoggerManager.__init__`, чтобы глобальный `LoggerManager._instance` (выставляется в конце `LoggerManager.__init__`) никогда не указывал на `ErrorManager` без `_level_to_channel` и не ловил `AttributeError` при косвенном логировании во время конструктора.
+
 ## Что сделано в CRM-миграции (Фаза 3)
 
 - [x] `ErrorManagerConfig(SchemaBase)` в **`configs/error_manager_config.py`** — плоские поля; без кастомного `build()`
