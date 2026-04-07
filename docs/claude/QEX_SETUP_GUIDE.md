@@ -32,7 +32,7 @@ Claude Code (Claude Agent SDK)
               │
               └──► Dense vectors
                         │
-                        ├──► Ollama  :11434  (embeddings, nomic-embed-text-v2-moe, 768-dim)
+                        ├──► Ollama  :11434  (embeddings, qwen3-embedding:4b)
                         └──► Qdrant  :6333   (vector DB, Docker container)
 ```
 
@@ -54,7 +54,20 @@ Claude Code (Claude Agent SDK)
 
 > ⚠️ КРИТИЧНО: Claude Code читает конфиги в следующем приоритете. Неправильный файл = изменения игнорируются.
 
-### Приоритет конфигов MCP (по убыванию):
+### Стратегия: Windows vs macOS
+
+Проект используется **на двух платформах**. Конфигурация разнесена так:
+
+| Платформа | Где хранится конфиг | Модель эмбеддингов |
+|-----------|--------------------|--------------------|
+| Windows   | `C:\Users\INNOTECH\.claude.json` (глобальный mcpServers) | `qwen3-embedding:4b` |
+| macOS     | `~/.claude.json` (секция `projects` → путь к проекту) | `qwen3-embedding:4b` |
+
+Файл `.claude/mcp.json` в репозитории — **только справочник** (Windows-пример).  
+На Windows он перекрывается глобальным `mcpServers` в `~/.claude.json`.  
+На macOS он отключён через `disabledMcpjsonServers: ["qex"]` в проектной записи `~/.claude.json`.
+
+### Приоритет конфигов MCP — Windows (по убыванию):
 
 | # | Путь | Кто читает | Приоритет |
 |---|------|-----------|-----------|
@@ -66,7 +79,14 @@ Claude Code (Claude Agent SDK)
 > Файлы №1 и №2 — приоритетные. Именно они управляют запущенным процессом.  
 > Если правишь №3 или №4, а №1/#2 тоже существуют — правки №3/#4 **не применяются**.
 
-### Проверка активного конфига:
+### Приоритет конфигов MCP — macOS (по убыванию):
+
+| # | Путь | Приоритет |
+|---|------|-----------|
+| 1 | `~/.claude.json` → секция `projects["<путь к проекту>"]["mcpServers"]` | **ГЛАВНЫЙ** |
+| 2 | `.claude/mcp.json` (в проекте) | Проектный (отключён через disabledMcpjsonServers) |
+
+### Проверка активного конфига (Windows):
 
 ```powershell
 # Что сейчас прописано в главном конфиге
@@ -74,6 +94,22 @@ python -c "import json; d=json.load(open(r'C:\Users\INNOTECH\.claude.json')); pr
 
 # Какой процесс реально запущен
 Get-Process | Where-Object {$_.Name -like "*qex*"} | Select-Object Name, Path, Id
+```
+
+### Проверка активного конфига (macOS):
+
+```bash
+# Что прописано для проекта
+python3 -c "
+import json
+d = json.load(open('/Users/twokrai/.claude.json'))
+proj = d['projects'].get('/Users/twokrai/Project_code/inspector_bottles/Inspector_bottles', {})
+print(json.dumps(proj.get('mcpServers', {}), indent=2))
+print('disabled:', proj.get('disabledMcpjsonServers'))
+"
+
+# Запущен ли qex-процесс
+pgrep -la qex
 ```
 
 ---
@@ -141,7 +177,7 @@ docker rm qdrant
 ### Скачать нужную модель (один раз):
 
 ```powershell
-ollama pull nomic-embed-text-v2-moe
+ollama pull qwen3-embedding:4b
 ```
 
 ### Ежедневный запуск:
@@ -161,7 +197,7 @@ curl http://localhost:11434/
 ollama list
 
 # Тест эмбеддинга (должен вернуть массив из 768 чисел)
-curl http://localhost:11434/api/embed -d "{\"model\":\"nomic-embed-text-v2-moe\",\"input\":\"hello world\"}" | python -c "import sys,json; d=json.load(sys.stdin); emb=d['embeddings'][0]; print(f'dims={len(emb)}, first3={emb[:3]}')"
+curl http://localhost:11434/api/embed -d "{\"model\":\"qwen3-embedding:4b\",\"input\":\"hello world\"}" | python -c "import sys,json; d=json.load(sys.stdin); emb=d['embeddings'][0]; print(f'dims={len(emb)}, first3={emb[:3]}')"
 ```
 
 ---
@@ -234,7 +270,7 @@ cp qex/target/release/qex.exe venv/Scripts/qex-mcp-v3.exe
         "QDRANT_URL": "http://localhost:6333",
         "QDRANT_COLLECTION_NAME": "codebase_index",
         "OLLAMA_BASE_URL": "http://localhost:11434",
-        "EMBEDDING_MODEL": "nomic-embed-text-v2-moe",
+        "EMBEDDING_MODEL": "qwen3-embedding:4b",
         "QEX_EMBEDDING_PROVIDER": "ollama"
       }
     }
@@ -287,7 +323,7 @@ index_codebase(force=True)
 # или через MCP инструмент qex
 ```
 
-> Время индексации: ~8-10 минут для 14k+ чанков с nomic-embed-text-v2-moe.  
+> Время индексации: ~5-10 минут для 14k+ чанков с qwen3-embedding:4b.  
 > Пока идёт — не закрывать Claude Code, не останавливать Ollama/Qdrant.
 
 ### Проверка результата:
@@ -322,7 +358,7 @@ curl http://localhost:6333/collections
 # === 2. OLLAMA ===
 curl http://localhost:11434/
 ollama list | grep nomic
-# nomic-embed-text-v2-moe должен быть в списке
+# qwen3-embedding:4b должна быть в списке
 
 # === 3. QEX БИНАРНИК ===
 Get-Process | Where-Object {$_.Name -like "*qex*"} | Select-Object Name, Path, Id
@@ -338,7 +374,7 @@ print('env:', json.dumps(mcp.get('env',{}), indent=2))
 "
 
 # === 5. ТЕСТ ЭМБЕДДИНГА ===
-curl http://localhost:11434/api/embed -d "{\"model\":\"nomic-embed-text-v2-moe\",\"input\":\"test\"}" | python -c "import sys,json; d=json.load(sys.stdin); print('OK, dims=', len(d['embeddings'][0]))"
+curl http://localhost:11434/api/embed -d "{\"model\":\"qwen3-embedding:4b\",\"input\":\"test\"}" | python -c "import sys,json; d=json.load(sys.stdin); print('OK, dims=', len(d['embeddings'][0]))"
 ```
 
 ### Скрипт "один клик" для запуска всех служб:
@@ -521,5 +557,125 @@ curl http://localhost:11434/
 
 ---
 
+## 12. macOS — установка и настройка
+
+> Всё то же самое что на Windows, но: нет `.exe`, другая модель эмбеддингов, конфиг в `~/.claude.json`.
+
+### Бинарник qex:
+
+```bash
+# Путь к активному бинарнику (собран с --features "dense ollama"):
+/Users/twokrai/.local/bin/qex-mcp-v2
+
+# Проверка версии:
+/Users/twokrai/.local/bin/qex-mcp-v2 --version
+```
+
+> Название совпадает с Windows: `qex-mcp-v2.exe` (Windows) / `qex-mcp-v2` (macOS).
+
+Если нужно пересобрать:
+
+```bash
+cd qex
+cargo build --release --features "dense ollama"
+# Под новым именем (старый процесс может быть занят):
+cp target/release/qex ~/.local/bin/qex-mcp-v3
+# Обновить command в ~/.claude.json, перезапустить Claude Code
+```
+
+### Ollama — модель эмбеддингов:
+
+На macOS используется `qwen3-embedding:4b` (уже загружена).
+
+```bash
+# Проверить наличие модели:
+ollama list | grep qwen3-embedding
+
+# Тест эмбеддинга (должен вернуть массив ~4096 чисел):
+curl http://localhost:11434/api/embed \
+  -d '{"model":"qwen3-embedding:4b","input":"hello world"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); emb=d['embeddings'][0]; print(f'dims={len(emb)}, first3={emb[:3]}')"
+```
+
+### Конфигурация в `~/.claude.json`:
+
+Проект уже добавлен в секцию `projects`. Активный конфиг:
+
+```json
+"/Users/twokrai/Project_code/inspector_bottles/Inspector_bottles": {
+  "mcpServers": {
+    "qex": {
+      "type": "stdio",
+      "command": "/Users/twokrai/.local/bin/qex-mcp-v2",
+      "args": [],
+      "env": {
+        "RUST_LOG": "info",
+        "WORKSPACE_PATH": "/Users/twokrai/Project_code/inspector_bottles/Inspector_bottles",
+        "QDRANT_URL": "http://localhost:6333",
+        "QDRANT_COLLECTION_NAME": "codebase_index",
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "EMBEDDING_MODEL": "qwen3-embedding:4b",
+        "QEX_EMBEDDING_PROVIDER": "ollama"
+      }
+    }
+  },
+  "disabledMcpjsonServers": ["qex"]
+}
+```
+
+> `disabledMcpjsonServers: ["qex"]` — отключает Windows-конфиг из `.claude/mcp.json` в проекте.
+
+### Qdrant (macOS):
+
+```bash
+# Первый раз (создать контейнер):
+docker run -d \
+  --name qdrant \
+  -p 6333:6333 \
+  -p 6334:6334 \
+  -v qdrant_storage:/qdrant/storage \
+  qdrant/qdrant
+
+# Ежедневный запуск:
+docker start qdrant
+curl http://localhost:6333/healthz
+```
+
+### Ежедневный холодный старт (macOS):
+
+```bash
+# 1. Qdrant
+docker start qdrant
+
+# 2. Ollama (если не запущена)
+ollama serve &
+
+# 3. Проверка
+sleep 2
+curl http://localhost:6333/healthz && echo "Qdrant OK"
+curl http://localhost:11434/ && echo "Ollama OK"
+
+# 4. Запустить Claude Code — qex стартует автоматически
+# 5. При первом запуске: index_codebase(force=True)
+```
+
+> ⚠️ Коллекция `codebase_index` создаётся с размерностью qwen3-embedding:4b (одинаково на обеих платформах).  
+> Это отдельный локальный Qdrant — конфликтов с Windows-базой нет.
+
+---
+
+## 13. Важные отличия Windows vs macOS
+
+| Параметр | Windows | macOS |
+|----------|---------|-------|
+| Бинарник | `venv/Scripts/qex-mcp-v2.exe` | `~/.local/bin/qex-mcp-v2` |
+| Модель | `qwen3-embedding:4b` | `qwen3-embedding:4b` |
+| Конфиг | `~/.claude.json` → `mcpServers` (глобальный) | `~/.claude.json` → `projects[path]["mcpServers"]` |
+| `.claude/mcp.json` | Перекрыт глобальным конфигом | Отключён через `disabledMcpjsonServers` |
+| Коллекция Qdrant | `codebase_index` (свой локальный) | `codebase_index` (свой локальный) |
+
+---
+
 *Составлено по итогам отладочной сессии 2026-04-07.  
+macOS-секция добавлена 2026-04-06.  
 Проблемы: неправильные конфиги, Qdrant без маппинга портов, silent failure в embedder, неверный дефолт провайдера.*

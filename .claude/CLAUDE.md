@@ -43,7 +43,10 @@ Docker, Ollama, pytest | Pydantic v2, loguru
 
 ## Семантический поиск (MCP)
 
-- **qex** (настройки в `.claude/mcp.json`): Qdrant + Ollama, модель эмбеддингов как в `EMBEDDING_MODEL` (сейчас `nomic-embed-text-v2-moe`). Инструменты: `search_code`, `index_codebase`, `get_indexing_status`. **Холодный старт:** `docker start qdrant`, `ollama serve`.
+- **qex** (настройки в `~/.claude.json`): Qdrant + Ollama. Инструменты: `search_code`, `index_codebase`, `get_indexing_status`. **Холодный старт:** `docker start qdrant`, `ollama serve`.
+  - Windows: `EMBEDDING_MODEL=qwen3-embedding:4b`, бинарник `venv/Scripts/qex-mcp-v2.exe`
+  - macOS: `EMBEDDING_MODEL=qwen3-embedding:4b`, бинарник `/Users/twokrai/.local/bin/qex-mcp-v2`
+  - `.claude/mcp.json` в репозитории — только Windows-справочник; macOS конфиг в `~/.claude.json → projects`
 
 Для qex: `search_code(query)` —  перед рефакторингом; `index_codebase` / `get_indexing_status` — индекс и статус.
 
