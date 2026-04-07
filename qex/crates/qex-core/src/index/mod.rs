@@ -143,14 +143,19 @@ impl IncrementalIndexer {
         // Dense vector indexing (if embedder available)
         #[cfg(feature = "dense")]
         {
-            if let Ok(mut embedder) = Self::load_embedder() {
-                info!("Dense search enabled — embedding {} chunks", all_chunks.len());
-                let dims = embedder.info().dimensions;
-                let mut dense = DenseIndex::new(dims)?;
-                dense.add_chunks(&all_chunks, embedder.as_mut())?;
-                dense.save(&storage.dense_dir())?;
-                Self::save_dense_meta(&storage, &embedder.info())?;
-                info!("Dense index saved: {} vectors", dense.len());
+            match Self::load_embedder() {
+                Ok(mut embedder) => {
+                    info!("Dense search enabled — embedding {} chunks", all_chunks.len());
+                    let dims = embedder.info().dimensions;
+                    let mut dense = DenseIndex::new(dims)?;
+                    dense.add_chunks(&all_chunks, embedder.as_mut())?;
+                    dense.save(&storage.dense_dir())?;
+                    Self::save_dense_meta(&storage, &embedder.info())?;
+                    info!("Dense index saved: {} vectors", dense.len());
+                }
+                Err(e) => {
+                    warn!("Dense indexing skipped — embedder failed to load: {:#}", e);
+                }
             }
         }
 
@@ -275,32 +280,37 @@ impl IncrementalIndexer {
         // Dense vector indexing (if embedder available)
         #[cfg(feature = "dense")]
         {
-            if let Ok(mut embedder) = Self::load_embedder() {
-                let info = embedder.info();
-                let dims = info.dimensions;
+            match Self::load_embedder() {
+                Ok(mut embedder) => {
+                    let info = embedder.info();
+                    let dims = info.dimensions;
 
-                // Check for dimension mismatch with existing index
-                let mut dense = match Self::check_dense_meta(&storage, &info) {
-                    Ok(()) => DenseIndex::open(&storage.dense_dir(), dims)
-                        .or_else(|_| DenseIndex::new(dims))?,
-                    Err(e) => {
-                        warn!("Dense index mismatch: {}. Rebuilding.", e);
-                        DenseIndex::new(dims)?
+                    // Check for dimension mismatch with existing index
+                    let mut dense = match Self::check_dense_meta(&storage, &info) {
+                        Ok(()) => DenseIndex::open(&storage.dense_dir(), dims)
+                            .or_else(|_| DenseIndex::new(dims))?,
+                        Err(e) => {
+                            warn!("Dense index mismatch: {}. Rebuilding.", e);
+                            DenseIndex::new(dims)?
+                        }
+                    };
+
+                    // Remove vectors for deleted/modified files (preserves unchanged files)
+                    for rel_path in &files_to_remove {
+                        let abs_path = project_path.join(rel_path);
+                        dense.remove_file(&abs_path.to_string_lossy());
                     }
-                };
 
-                // Remove vectors for deleted/modified files (preserves unchanged files)
-                for rel_path in &files_to_remove {
-                    let abs_path = project_path.join(rel_path);
-                    dense.remove_file(&abs_path.to_string_lossy());
+                    if !all_chunks.is_empty() {
+                        dense.add_chunks(&all_chunks, embedder.as_mut())?;
+                    }
+                    dense.save(&storage.dense_dir())?;
+                    Self::save_dense_meta(&storage, &info)?;
+                    debug!("Dense index updated: {} vectors", dense.len());
                 }
-
-                if !all_chunks.is_empty() {
-                    dense.add_chunks(&all_chunks, embedder.as_mut())?;
+                Err(e) => {
+                    warn!("Dense indexing skipped — embedder failed to load: {:#}", e);
                 }
-                dense.save(&storage.dense_dir())?;
-                Self::save_dense_meta(&storage, &info)?;
-                debug!("Dense index updated: {} vectors", dense.len());
             }
         }
 

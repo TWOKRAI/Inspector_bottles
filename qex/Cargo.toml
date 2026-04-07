@@ -34,7 +34,7 @@ clap = { version = "4", features = ["derive"] }
 # Dense vector search (workspace refs, non-optional here — optional in leaf crates)
 ort = "2.0.0-rc.11"
 ndarray = "0.17"
-usearch = "2.24"
+usearch = { version = "2.24", default-features = false }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 
 # HTTP (sync)

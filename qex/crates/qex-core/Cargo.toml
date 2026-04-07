@@ -35,19 +35,19 @@ tree-sitter-cpp = "0.23"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-md = "0.3"
 
-# Dense vector search (optional, behind "dense" feature)
+# Dense vector search: ONNX embedder + Qdrant vector store (no C++ deps)
 ort = { workspace = true, optional = true }
 ndarray = { workspace = true, optional = true }
-usearch = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true, default-features = false, features = ["fancy-regex"] }
 
-# OpenAI embedding API (optional, behind "openai" feature)
+# HTTP client (shared by dense/openai/ollama)
 ureq = { workspace = true, optional = true }
 
 [features]
 default = []
-dense = ["ort", "ndarray", "usearch", "tokenizers"]
+dense = ["ort", "ndarray", "tokenizers", "ureq"]
 openai = ["ureq"]
+ollama = ["ureq"]
 
 [dev-dependencies]
 tempfile.workspace = true

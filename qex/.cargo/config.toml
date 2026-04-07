@@ -1,0 +1,2 @@
+[env]
+USEARCH_USE_SIMSIMD = "0"

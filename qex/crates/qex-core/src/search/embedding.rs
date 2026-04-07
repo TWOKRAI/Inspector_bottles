@@ -49,12 +49,23 @@ pub trait Embedder {
 
 /// Load the configured embedder based on env vars.
 ///
-/// Reads `QEX_EMBEDDING_PROVIDER` (default: "onnx"):
+/// Reads `QEX_EMBEDDING_PROVIDER` (default: auto-detected):
 /// - "onnx": loads ONNX model (requires `dense` feature)
 /// - "openai": uses OpenAI API (requires `openai` feature)
+/// - "ollama": uses Ollama API (requires `ollama` feature)
+///
+/// Auto-detection: if `OLLAMA_BASE_URL` or `EMBEDDING_MODEL` is set,
+/// defaults to "ollama" instead of "onnx".
 pub fn load_embedder() -> Result<Box<dyn Embedder>> {
-    let provider = std::env::var("QEX_EMBEDDING_PROVIDER")
-        .unwrap_or_else(|_| "onnx".to_string());
+    let default_provider = if std::env::var("OLLAMA_BASE_URL").is_ok()
+        || std::env::var("QEX_OLLAMA_BASE_URL").is_ok()
+        || std::env::var("EMBEDDING_MODEL").is_ok()
+    {
+        "ollama".to_string()
+    } else {
+        "onnx".to_string()
+    };
+    let provider = std::env::var("QEX_EMBEDDING_PROVIDER").unwrap_or(default_provider);
     load_embedder_for_provider(&provider)
 }
 
@@ -74,8 +85,18 @@ pub fn load_embedder_for_provider(provider: &str) -> Result<Box<dyn Embedder>> {
             "OpenAI embedding provider requested but 'openai' feature is not enabled. \
              Build with --features openai"
         ),
+        #[cfg(feature = "ollama")]
+        "ollama" => {
+            let embedder = super::ollama_embedder::OllamaEmbedder::from_env()?;
+            Ok(Box::new(embedder))
+        }
+        #[cfg(not(feature = "ollama"))]
+        "ollama" => anyhow::bail!(
+            "Ollama embedding provider requested but 'ollama' feature is not enabled. \
+             Build with --features ollama"
+        ),
         other => anyhow::bail!(
-            "Unknown embedding provider '{}'. Supported: onnx, openai",
+            "Unknown embedding provider '{}'. Supported: onnx, openai, ollama",
             other
         ),
     }

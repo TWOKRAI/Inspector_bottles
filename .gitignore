@@ -33,6 +33,7 @@ BASKET/
 # ============================
 CLAUDE.local.md
 .claude/CLAUDE.local.md
+.claude/settings.local.json
 
 
 # Runtime logs (multiprocess prototype)

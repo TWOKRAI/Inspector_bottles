@@ -26,7 +26,13 @@
     ],
     "deny": [
       "Bash(sudo *)",
-      "Bash(chmod 777 *)"
+      "Bash(chmod 777 *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fd *)",
+      "Bash(git clean -f *)",
+      "Bash(docker system prune *)"
     ]
   },
   "hooks": {
@@ -40,18 +46,22 @@
             "timeout": 30
           }
         ]
-      },
+      }
+    ],
+    "PostToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "if command -v claude-ignore &> /dev/null; then claude-ignore; else echo 'Warning: claude-ignore not found, skipping' >&2; fi"
+            "command": ".claude/hooks/autoformat-python.sh",
+            "timeout": 15
           }
         ]
       }
     ]
   },
   "alwaysThinkingEnabled": false,
-  "preferredLanguage": "ru"
+  "preferredLanguage": "ru",
+  "statusLine": "printf 'branch: %s | qdrant: %s' \"$(git branch --show-current 2>/dev/null)\" \"$(docker ps --filter name=qdrant --filter status=running --format '{{.Names}}' 2>/dev/null | grep -q qdrant && echo UP || echo DOWN)\""
 }

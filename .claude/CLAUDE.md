@@ -17,13 +17,14 @@
 - Данные/конфиг: `data_schema_module` (`SchemaBase`), `config_module` + `ConfigStore`.
 - GUI: `frontend_module` (PyQt), схемы регистров — в приложении.
 - **Роутинг:** не путать **имя процесса** (`targets`, `send_message`) и **канал Router** (`FieldRouting.channel`, `msg["channel"]`). См. `multiprocess_framework/docs/ROUTING_GLOSSARY.md`.
-- **Схемы регистров приложения:** `multiprocess_prototype`** — пакет **`registers/`**.
+- **Схемы регистров приложения:** `multiprocess_prototype` — пакет `registers/`.
 
 
 **Ключевые пути:**  
 Фреймворк: `Inspector_prototype/multiprocess_framework/` · обзор: `multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`)  
 Прототип: `Inspector_prototype/multiprocess_prototype/` · **точка входа:** `multiprocess_prototype/main.py`  
-Развёрнутый конспект: `.claude/FRAMEWORK_RULES_EXTRACT.md` · нарратив «конструктор»: `.claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md`
+Развёрнутый конспект: `docs/claude/FRAMEWORK_RULES_EXTRACT.md` · нарратив «конструктор»: `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md`  
+Настройка qex: `docs/claude/QEX_SETUP_GUIDE.md`
 
 **Правила правок (основные):**
 1. Dict at Boundary — между процессами только **dict** (сообщения: `to_dict` / `from_dict`); Pydantic внутри процесса.
@@ -59,6 +60,9 @@ Docker, Ollama, pytest | Pydantic v2, loguru
 - Менять публичные API без согласования
 - Новые зависимости без причины
 - Опасные команды (rm -rf /, curl \| sh и т.д.)
+
+## Планы
+Все планы (реализации, рефакторинга, аудита) сохранять в папку `plans/` в корне репозитория.
 
 ## Формат ответов
 План → семантический поиск (если подключён) с результатами → код (diff/файл, >100стр — только diff) → следующие шаги

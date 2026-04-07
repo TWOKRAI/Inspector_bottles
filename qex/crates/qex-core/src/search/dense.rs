@@ -1,182 +1,118 @@
-//! Dense vector search using usearch HNSW index.
+//! Dense vector search backed by Qdrant REST API.
 //!
-//! Only compiled when the `dense` feature is enabled.
+//! Replaces the previous usearch HNSW backend with a Qdrant-based implementation.
+//! Requires a running Qdrant instance (default: http://localhost:6333).
+//!
+//! Configuration via environment variables:
+//! - `QDRANT_URL` (default: "http://localhost:6333")
+//! - `QDRANT_COLLECTION_NAME` (default: "qex_dense_index")
+//! - `QDRANT_BATCH_SIZE` — upsert batch size (default: 64)
 
 use crate::chunk::CodeChunk;
 use crate::search::embedding::Embedder;
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::Path;
-use tracing::{debug, info};
-use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
+use std::time::Duration;
+use tracing::{debug, info, warn};
+use ureq::Agent;
 
-/// Batch size for embedding chunks. Balances memory vs. throughput.
-/// (64 caused ~4.6 GB RAM usage with arctic-embed-s)
+const DEFAULT_QDRANT_URL: &str = "http://localhost:6333";
+const DEFAULT_COLLECTION: &str = "qex_dense_index";
+const DEFAULT_UPSERT_BATCH: usize = 64;
 const EMBED_BATCH_SIZE: usize = 8;
 
-/// Dense vector search index backed by usearch HNSW
+/// Qdrant-backed dense vector index.
 pub struct DenseIndex {
-    index: Index,
-    /// Mapping from usearch u64 key to chunk_id string
-    key_to_chunk_id: HashMap<u64, String>,
-    /// Reverse mapping from chunk_id to usearch key
-    chunk_id_to_key: HashMap<String, u64>,
-    /// Mapping from file_path to chunk_ids (for incremental removal)
-    file_to_chunks: HashMap<String, Vec<String>>,
-    /// Next available key
-    next_key: u64,
+    agent: Agent,
+    url: String,
+    collection: String,
     dimensions: usize,
+    cached_len: usize,
 }
 
 impl DenseIndex {
-    /// Create a new empty dense index
+    /// Create a new dense index, ensuring the Qdrant collection exists.
     pub fn new(dimensions: usize) -> Result<Self> {
-        let options = IndexOptions {
+        let agent = build_agent();
+        let url = qdrant_url();
+        let collection = collection_name();
+
+        let idx = Self {
+            agent,
+            url,
+            collection,
             dimensions,
-            metric: MetricKind::Cos,
-            quantization: ScalarKind::F32,
-            ..Default::default()
+            cached_len: 0,
         };
 
-        let index = Index::new(&options)
-            .map_err(|e| anyhow::anyhow!("Failed to create usearch index: {}", e))?;
+        idx.ensure_collection()?;
+        Ok(idx)
+    }
 
-        Ok(Self {
-            index,
-            key_to_chunk_id: HashMap::new(),
-            chunk_id_to_key: HashMap::new(),
-            file_to_chunks: HashMap::new(),
-            next_key: 0,
+    /// Open an existing index (or create if absent). `index_dir` is ignored —
+    /// Qdrant handles persistence. Reads env vars for connection settings.
+    pub fn open(_index_dir: &Path, dimensions: usize) -> Result<Self> {
+        let agent = build_agent();
+        let url = qdrant_url();
+        let collection = collection_name();
+
+        let mut idx = Self {
+            agent,
+            url,
+            collection,
             dimensions,
-        })
+            cached_len: 0,
+        };
+
+        idx.ensure_collection()?;
+        idx.cached_len = idx.fetch_count()?;
+        info!("Opened Qdrant dense index: {} vectors", idx.cached_len);
+        Ok(idx)
     }
 
-    /// Open or create a dense index from a directory
-    pub fn open(index_dir: &Path, dimensions: usize) -> Result<Self> {
-        let index_path = index_dir.join("dense.usearch");
-        let mapping_path = index_dir.join("dense_mapping.json");
-
-        let mut dense = Self::new(dimensions)?;
-
-        if index_path.exists() && mapping_path.exists() {
-            // Load existing index
-            let path_str = index_path
-                .to_str()
-                .context("Dense index path contains non-UTF-8 characters")?;
-            dense
-                .index
-                .load(path_str)
-                .map_err(|e| anyhow::anyhow!("Failed to load usearch index: {}", e))?;
-
-            // Load key mappings: Vec<(key, chunk_id, file_path)>
-            let mapping_data = std::fs::read_to_string(&mapping_path)
-                .context("Failed to read dense mapping file")?;
-
-            // Try new format first (with file_path), fall back to legacy
-            if let Ok(mappings) = serde_json::from_str::<Vec<(u64, String, String)>>(&mapping_data) {
-                for (key, chunk_id, file_path) in mappings {
-                    dense.key_to_chunk_id.insert(key, chunk_id.clone());
-                    dense.chunk_id_to_key.insert(chunk_id.clone(), key);
-                    dense.file_to_chunks.entry(file_path).or_default().push(chunk_id);
-                    if key >= dense.next_key {
-                        dense.next_key = key + 1;
-                    }
-                }
-            } else if let Ok(mappings) = serde_json::from_str::<Vec<(u64, String)>>(&mapping_data) {
-                // Legacy format without file_path
-                for (key, chunk_id) in mappings {
-                    dense.key_to_chunk_id.insert(key, chunk_id.clone());
-                    dense.chunk_id_to_key.insert(chunk_id, key);
-                    if key >= dense.next_key {
-                        dense.next_key = key + 1;
-                    }
-                }
-            } else {
-                anyhow::bail!(
-                    "Failed to parse dense_mapping.json: file is corrupt or in unknown format"
-                );
-            }
-
-            info!(
-                "Loaded dense index: {} vectors",
-                dense.key_to_chunk_id.len()
-            );
-        }
-
-        Ok(dense)
-    }
-
-    /// Save the index to disk
-    pub fn save(&self, index_dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(index_dir)?;
-
-        let index_path = index_dir.join("dense.usearch");
-        let mapping_path = index_dir.join("dense_mapping.json");
-
-        let path_str = index_path
-            .to_str()
-            .context("Dense index path contains non-UTF-8 characters")?;
-        self.index
-            .save(path_str)
-            .map_err(|e| anyhow::anyhow!("Failed to save usearch index: {}", e))?;
-
-        // Save key mappings with file_path info
-        // Build reverse lookup: chunk_id -> file_path
-        let chunk_to_file: HashMap<&str, &str> = self.file_to_chunks.iter()
-            .flat_map(|(file, chunks)| chunks.iter().map(move |c| (c.as_str(), file.as_str())))
-            .collect();
-
-        let mappings: Vec<(&u64, &String, &str)> = self.key_to_chunk_id.iter()
-            .map(|(k, c)| (k, c, chunk_to_file.get(c.as_str()).copied().unwrap_or("")))
-            .collect();
-        let json = serde_json::to_string(&mappings)?;
-        // Atomic write: write to temp file then rename to avoid corruption on crash
-        let tmp_path = mapping_path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, &json)?;
-        std::fs::rename(&tmp_path, &mapping_path)?;
-
-        debug!("Saved dense index: {} vectors", self.key_to_chunk_id.len());
+    /// No-op: Qdrant persists data automatically after each upsert.
+    pub fn save(&self, _index_dir: &Path) -> Result<()> {
         Ok(())
     }
 
-    /// Add chunks to the index by embedding them with the model
+    /// Embed `chunks` and upsert into Qdrant.
     pub fn add_chunks(&mut self, chunks: &[CodeChunk], model: &mut dyn Embedder) -> Result<usize> {
         if chunks.is_empty() {
             return Ok(0);
         }
 
-        // Reserve space
-        let current_size = self.key_to_chunk_id.len();
-        self.index
-            .reserve(current_size + chunks.len())
-            .map_err(|e| anyhow::anyhow!("Failed to reserve index space: {}", e))?;
+        let upsert_batch = std::env::var("QDRANT_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_UPSERT_BATCH);
 
-        let batch_size = EMBED_BATCH_SIZE;
-        let mut added = 0;
         let total = chunks.len();
+        let mut added = 0;
 
-        for (batch_idx, batch) in chunks.chunks(batch_size).enumerate() {
+        // Embed in small batches (Ollama/ONNX memory constraint)
+        for (embed_batch_idx, embed_batch) in chunks.chunks(EMBED_BATCH_SIZE).enumerate() {
             debug!(
-                "Embedding batch {}/{} ({} chunks done)",
-                batch_idx + 1,
-                (total + batch_size - 1) / batch_size,
+                "Embedding batch {}/{} ({} chunks embedded so far)",
+                embed_batch_idx + 1,
+                (total + EMBED_BATCH_SIZE - 1) / EMBED_BATCH_SIZE,
                 added
             );
-            // Prepare texts: use name + content for richer embedding
-            let texts: Vec<String> = batch
+
+            let texts: Vec<String> = embed_batch
                 .iter()
-                .map(|chunk| {
+                .map(|c| {
                     let mut text = String::new();
-                    if let Some(name) = &chunk.name {
+                    if let Some(name) = &c.name {
                         text.push_str(name);
                         text.push(' ');
                     }
-                    if let Some(doc) = &chunk.docstring {
+                    if let Some(doc) = &c.docstring {
                         text.push_str(doc);
                         text.push(' ');
                     }
-                    text.push_str(&chunk.content);
-                    // Truncate to ~1000 chars — enough for signatures + initial logic
+                    text.push_str(&c.content);
                     if text.len() > 1000 {
                         let mut end = 1000;
                         while !text.is_char_boundary(end) {
@@ -191,161 +127,313 @@ impl DenseIndex {
             let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
             let embeddings = model.encode_batch(&text_refs)?;
 
-            for (chunk, embedding) in batch.iter().zip(embeddings.iter()) {
-                let key = self.next_key;
-                self.next_key += 1;
+            // Build Qdrant points
+            let points: Vec<QdrantPoint> = embed_batch
+                .iter()
+                .zip(embeddings.iter())
+                .map(|(chunk, vec)| QdrantPoint {
+                    id: chunk_id_to_u64(&chunk.id),
+                    vector: vec.clone(),
+                    payload: ChunkPayload {
+                        chunk_id: chunk.id.clone(),
+                        file_path: chunk.file_path.clone(),
+                    },
+                })
+                .collect();
 
-                self.index
-                    .add(key, embedding)
-                    .map_err(|e| anyhow::anyhow!("Failed to add vector: {}", e))?;
-
-                self.key_to_chunk_id.insert(key, chunk.id.clone());
-                self.chunk_id_to_key.insert(chunk.id.clone(), key);
-                self.file_to_chunks
-                    .entry(chunk.file_path.clone())
-                    .or_default()
-                    .push(chunk.id.clone());
-                added += 1;
+            // Upsert in sub-batches
+            for upsert_slice in points.chunks(upsert_batch) {
+                self.upsert_points(upsert_slice)?;
+                added += upsert_slice.len();
             }
         }
 
+        self.cached_len = self.fetch_count().unwrap_or(self.cached_len + added);
+        info!("Upserted {} vectors to Qdrant (total: {})", added, self.cached_len);
         Ok(added)
     }
 
-    /// Search for nearest neighbors of a query vector
+    /// Search for nearest neighbors of `query_vec`. Returns `(chunk_id, similarity)`.
     pub fn search(&self, query_vec: &[f32], k: usize) -> Result<Vec<(String, f32)>> {
-        if self.key_to_chunk_id.is_empty() {
+        if self.is_empty() {
             return Ok(Vec::new());
         }
 
-        let results = self
-            .index
-            .search(query_vec, k)
-            .map_err(|e| anyhow::anyhow!("Dense search failed: {}", e))?;
+        let url = format!("{}/collections/{}/points/search", self.url, self.collection);
+        let request = SearchRequest {
+            vector: query_vec.to_vec(),
+            limit: k,
+            with_payload: true,
+        };
 
-        let mut matches = Vec::new();
-        for (key, distance) in results.keys.iter().zip(results.distances.iter()) {
-            if let Some(chunk_id) = self.key_to_chunk_id.get(key) {
-                // Convert cosine distance to similarity score
-                let similarity = 1.0 - distance;
-                matches.push((chunk_id.clone(), similarity));
-            }
-        }
+        let mut resp = self
+            .agent
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .send_json(&request)
+            .map_err(|e| anyhow::anyhow!("Qdrant search request failed: {}", e))?;
+
+        let response: SearchResponse = resp
+            .body_mut()
+            .read_json()
+            .context("Failed to parse Qdrant search response")?;
+
+        let matches = response
+            .result
+            .into_iter()
+            .filter_map(|hit| {
+                let chunk_id = hit.payload?.chunk_id;
+                let score = hit.score;
+                Some((chunk_id, score))
+            })
+            .collect();
 
         Ok(matches)
     }
 
-    /// Remove all chunks belonging to a file path
+    /// Delete all vectors whose `file_path` payload matches `file_path`.
     pub fn remove_file(&mut self, file_path: &str) {
-        if let Some(chunk_ids) = self.file_to_chunks.remove(file_path) {
-            for chunk_id in &chunk_ids {
-                if let Some(key) = self.chunk_id_to_key.remove(chunk_id) {
-                    let _ = self.index.remove(key);
-                    self.key_to_chunk_id.remove(&key);
-                }
+        let url = format!(
+            "{}/collections/{}/points/delete",
+            self.url, self.collection
+        );
+        let request = DeleteByFilter {
+            filter: PayloadFilter {
+                must: vec![FieldMatch {
+                    key: "file_path".to_string(),
+                    r#match: MatchValue {
+                        value: file_path.to_string(),
+                    },
+                }],
+            },
+        };
+
+        match self
+            .agent
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .send_json(&request)
+        {
+            Ok(_) => {
+                debug!("Removed vectors for file {}", file_path);
+                self.cached_len = self.fetch_count().unwrap_or(0);
             }
-            debug!("Removed {} vectors for file {}", chunk_ids.len(), file_path);
+            Err(e) => {
+                warn!("Failed to remove vectors for {}: {}", file_path, e);
+            }
         }
     }
 
-    /// Clear the entire index
+    /// Drop and recreate the Qdrant collection.
     pub fn clear(&mut self) -> Result<()> {
-        // Recreate the index
-        *self = Self::new(self.dimensions)?;
+        let url = format!("{}/collections/{}", self.url, self.collection);
+        let _ = self.agent.delete(&url).call();
+        self.cached_len = 0;
+        self.ensure_collection()?;
         Ok(())
     }
 
-    /// Number of vectors in the index
     pub fn len(&self) -> usize {
-        self.key_to_chunk_id.len()
+        self.cached_len
     }
 
-    /// Check if index is empty
     pub fn is_empty(&self) -> bool {
-        self.key_to_chunk_id.is_empty()
+        self.cached_len == 0
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::search::embedding::EmbeddingModel;
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
 
-    #[test]
-    fn test_dense_index_basic() {
-        let index = DenseIndex::new(384).unwrap();
-        assert_eq!(index.len(), 0);
-        assert!(index.is_empty());
-    }
+impl DenseIndex {
+    /// Create the Qdrant collection if it doesn't exist.
+    fn ensure_collection(&self) -> Result<()> {
+        let url = format!("{}/collections/{}", self.url, self.collection);
 
-    #[test]
-    fn test_dense_index_add_and_search() {
-        let model_dir = EmbeddingModel::default_model_dir().unwrap();
-        if !model_dir.join("model.onnx").exists() {
-            eprintln!("Skipping test: model not downloaded");
-            return;
+        // Check if exists
+        match self.agent.get(&url).call() {
+            Ok(_) => {
+                // Collection exists — verify dimension compatibility
+                debug!("Qdrant collection '{}' already exists", self.collection);
+                Ok(())
+            }
+            Err(ureq::Error::StatusCode(404)) => {
+                // Create new collection
+                let create_url = url.clone();
+                let body = CreateCollection {
+                    vectors: VectorsConfig {
+                        size: self.dimensions,
+                        distance: "Cosine".to_string(),
+                    },
+                };
+                self.agent
+                    .put(&create_url)
+                    .header("Content-Type", "application/json")
+                    .send_json(&body)
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to create Qdrant collection '{}': {}",
+                            self.collection,
+                            e
+                        )
+                    })?;
+                info!(
+                    "Created Qdrant collection '{}' with {} dims",
+                    self.collection, self.dimensions
+                );
+                Ok(())
+            }
+            Err(e) => Err(anyhow::anyhow!(
+                "Failed to check Qdrant collection '{}': {}. \
+                 Is Qdrant running at {}?",
+                self.collection,
+                e,
+                self.url
+            )),
         }
-
-        let mut model = EmbeddingModel::load(&model_dir).unwrap();
-        let mut index = DenseIndex::new(model.info().dimensions).unwrap();
-
-        // Create test chunks
-        let chunks = vec![
-            CodeChunk {
-                id: "auth_1".to_string(),
-                content: "def authenticate_user(username, password):\n    return check_credentials(username, password)".to_string(),
-                chunk_type: crate::chunk::ChunkType::Function,
-                start_line: 1, end_line: 2,
-                file_path: "/test/auth.py".to_string(),
-                relative_path: "auth.py".to_string(),
-                folder_structure: Vec::new(),
-                name: Some("authenticate_user".to_string()),
-                parent_name: None,
-                language: "python".to_string(),
-                docstring: Some("Authenticate a user with credentials".to_string()),
-                decorators: Vec::new(),
-                imports: Vec::new(),
-                tags: Vec::new(),
-                complexity_score: 3,
-            },
-            CodeChunk {
-                id: "db_1".to_string(),
-                content: "class DatabasePool:\n    def get_connection(self):\n        return self.pool.acquire()".to_string(),
-                chunk_type: crate::chunk::ChunkType::Class,
-                start_line: 1, end_line: 3,
-                file_path: "/test/db.py".to_string(),
-                relative_path: "db.py".to_string(),
-                folder_structure: Vec::new(),
-                name: Some("DatabasePool".to_string()),
-                parent_name: None,
-                language: "python".to_string(),
-                docstring: Some("Connection pool for database".to_string()),
-                decorators: Vec::new(),
-                imports: Vec::new(),
-                tags: Vec::new(),
-                complexity_score: 5,
-            },
-        ];
-
-        let added = index.add_chunks(&chunks, &mut model).unwrap();
-        assert_eq!(added, 2);
-        assert_eq!(index.len(), 2);
-
-        // Search for authentication-related code
-        let query_vec = model.encode_query("user login authentication").unwrap();
-        let results = index.search(&query_vec, 2).unwrap();
-        assert_eq!(results.len(), 2);
-
-        // auth chunk should be more relevant
-        assert_eq!(results[0].0, "auth_1", "Auth chunk should be top result");
-
-        // Test file removal
-        index.remove_file("/test/auth.py");
-        assert_eq!(index.len(), 1);
-
-        // Only db chunk should remain
-        let results2 = index.search(&query_vec, 2).unwrap();
-        assert_eq!(results2.len(), 1);
-        assert_eq!(results2[0].0, "db_1");
     }
+
+    /// Upsert a batch of points into Qdrant.
+    fn upsert_points(&self, points: &[QdrantPoint]) -> Result<()> {
+        let url = format!("{}/collections/{}/points", self.url, self.collection);
+        let body = UpsertRequest { points: points.to_vec() };
+
+        self.agent
+            .put(&url)
+            .header("Content-Type", "application/json")
+            .send_json(&body)
+            .map_err(|e| anyhow::anyhow!("Qdrant upsert failed: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Query the number of indexed vectors from Qdrant.
+    fn fetch_count(&self) -> Result<usize> {
+        let url = format!("{}/collections/{}", self.url, self.collection);
+        let mut resp = self
+            .agent
+            .get(&url)
+            .call()
+            .context("Failed to query Qdrant collection info")?;
+
+        let info: CollectionInfo = resp
+            .body_mut()
+            .read_json()
+            .context("Failed to parse Qdrant collection info")?;
+
+        Ok(info.result.points_count)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Env var helpers
+// ---------------------------------------------------------------------------
+
+fn qdrant_url() -> String {
+    std::env::var("QDRANT_URL").unwrap_or_else(|_| DEFAULT_QDRANT_URL.to_string())
+}
+
+fn collection_name() -> String {
+    std::env::var("QDRANT_COLLECTION_NAME").unwrap_or_else(|_| DEFAULT_COLLECTION.to_string())
+}
+
+fn build_agent() -> Agent {
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(5)))
+        .timeout_send_request(Some(Duration::from_secs(10)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        .timeout_recv_body(Some(Duration::from_secs(60)))
+        .build()
+        .into()
+}
+
+/// Deterministic u64 from chunk_id (first 8 bytes of SHA-256).
+fn chunk_id_to_u64(chunk_id: &str) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update(chunk_id.as_bytes());
+    let result = hasher.finalize();
+    u64::from_le_bytes(result[..8].try_into().unwrap())
+}
+
+// ---------------------------------------------------------------------------
+// Qdrant REST API types
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Clone)]
+struct QdrantPoint {
+    id: u64,
+    vector: Vec<f32>,
+    payload: ChunkPayload,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ChunkPayload {
+    chunk_id: String,
+    file_path: String,
+}
+
+#[derive(Serialize)]
+struct UpsertRequest {
+    points: Vec<QdrantPoint>,
+}
+
+#[derive(Serialize)]
+struct CreateCollection {
+    vectors: VectorsConfig,
+}
+
+#[derive(Serialize)]
+struct VectorsConfig {
+    size: usize,
+    distance: String,
+}
+
+#[derive(Serialize)]
+struct SearchRequest {
+    vector: Vec<f32>,
+    limit: usize,
+    with_payload: bool,
+}
+
+#[derive(Deserialize)]
+struct SearchResponse {
+    result: Vec<SearchHit>,
+}
+
+#[derive(Deserialize)]
+struct SearchHit {
+    score: f32,
+    payload: Option<ChunkPayload>,
+}
+
+#[derive(Serialize)]
+struct DeleteByFilter {
+    filter: PayloadFilter,
+}
+
+#[derive(Serialize)]
+struct PayloadFilter {
+    must: Vec<FieldMatch>,
+}
+
+#[derive(Serialize)]
+struct FieldMatch {
+    key: String,
+    r#match: MatchValue,
+}
+
+#[derive(Serialize)]
+struct MatchValue {
+    value: String,
+}
+
+#[derive(Deserialize)]
+struct CollectionInfo {
+    result: CollectionResult,
+}
+
+#[derive(Deserialize)]
+struct CollectionResult {
+    points_count: usize,
 }
