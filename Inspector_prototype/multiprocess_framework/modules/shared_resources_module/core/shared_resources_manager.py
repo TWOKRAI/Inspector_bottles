@@ -16,7 +16,11 @@ from multiprocessing import Event, Queue
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ...base_manager import BaseManager, ObservableMixin
-from ...base_manager.core.base_manager import _noop
+
+
+def _noop(*a, **kw):
+    """Pickle-safe noop stub для методов после unpickle (Windows spawn)."""
+    return None
 
 from ..config_store import ConfigStore
 from ..events import EventManager
