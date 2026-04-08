@@ -211,16 +211,24 @@ curl http://localhost:11434/api/embed -d "{\"model\":\"qwen3-embedding:4b\",\"in
 - Rust toolchain: `rustup update stable`
 - MSVC Build Tools 14.x (Visual Studio Build Tools)
 
-### Команда сборки (из папки `qex/`):
+### Команда сборки (из папки с исходником qex-mcp-v2):
+
+> Исходник qex-mcp-v2 хранится **вне репозитория проекта** (чтобы не раздувать проект
+> 800+ MB build-артефактов). Стандартное расположение:
+> - **macOS/Linux:** `~/src/qex-mcp-v2/`
+> - **Windows:** `C:\Users\<USER>\src\qex-mcp-v2\` (или аналогичное место вне проекта)
+>
+> Если исходника ещё нет — клонируй его туда из upstream и один раз собери.
 
 ```powershell
-cd C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\qex
+# Windows — адаптируй путь под свою машину
+cd C:\Users\INNOTECH\src\qex-mcp-v2
 
 # ВАЖНО: features = dense + ollama обязательны!
 cargo build --release --features "dense ollama"
 
 # Бинарник появится здесь:
-# qex/target/release/qex.exe  (43 MB)
+# <путь к qex-mcp-v2>/target/release/qex.exe  (~43 MB)
 ```
 
 > ⚠️ `[[bin]] name = "qex"` в Cargo.toml → бинарник называется `qex.exe`, не `qex-mcp.exe`!
@@ -228,8 +236,8 @@ cargo build --release --features "dense ollama"
 ### Проверка что features включены правильно:
 
 ```powershell
-# Проверить Cargo.toml qex-mcp
-cat qex/crates/qex-mcp/Cargo.toml | grep -A5 'features'
+# Проверить Cargo.toml qex-mcp (путь относительно корня исходника qex-mcp-v2)
+cat crates/qex-mcp/Cargo.toml | grep -A5 'features'
 # Должно быть: features = ["dense", "ollama"]
 ```
 
@@ -244,8 +252,8 @@ cat qex/crates/qex-mcp/Cargo.toml | grep -A5 'features'
 # venv/Scripts/qex-mcp-v2.exe
 
 # Если собрали новую версию — НЕ перезаписывай работающий файл!
-# Скопируй под новым именем:
-cp qex/target/release/qex.exe venv/Scripts/qex-mcp-v3.exe
+# Скопируй под новым именем (путь к исходнику — вне репо, см. §5):
+cp ~/src/qex-mcp-v2/target/release/qex venv/Scripts/qex-mcp-v3.exe
 
 # Потом обнови путь в ~/.claude.json и AppData mcp.json
 ```
@@ -457,56 +465,70 @@ Write-Host "========================" -ForegroundColor Cyan
 
 ---
 
-## 10. Папка qex/ — что хранить, что удалять
+## 10. Исходник qex-mcp-v2 — где хранить
 
-### Структура папки:
+> **Важное изменение (2026-04-08):** исходник qex-mcp-v2 раньше лежал в `qex/` внутри
+> репозитория Inspector_bottles. Теперь он вынесен **за пределы репо**, чтобы не раздувать
+> проект 800+ MB build-артефактов и не путать семантический поиск лишними Rust-файлами.
+
+### Новое стандартное расположение:
+
+| Платформа | Путь |
+|-----------|------|
+| macOS / Linux | `~/src/qex-mcp-v2/` |
+| Windows | `C:\Users\<USER>\src\qex-mcp-v2\` |
+
+Путь можно поменять на любой другой — главное, **не внутри репозитория проекта**.
+
+### Что лежит в `~/src/qex-mcp-v2/`:
 
 ```
-qex/
-├── .cargo/          ← настройки cargo (registry mirror и т.п.)  ХРАНИТЬ
-├── .claude/         ← заметки/контекст для Claude               ХРАНИТЬ
-├── .gitignore       ← исключения git                            ХРАНИТЬ
-├── Cargo.lock       ← точные версии зависимостей                ХРАНИТЬ (важен для воспроизводимой сборки)
-├── Cargo.toml       ← манифест workspace                        ХРАНИТЬ
-├── crates/          ← ИСХОДНЫЙ КОД                              ХРАНИТЬ
-│   ├── qex-core/    ← ядро: BM25, dense, embedders              ХРАНИТЬ
-│   └── qex-mcp/     ← MCP сервер, точка входа                   ХРАНИТЬ
-├── docs/            ← документация                              ХРАНИТЬ
-├── scripts/         ← вспомогательные скрипты                   ХРАНИТЬ
-├── tests/           ← интеграционные тесты                      ХРАНИТЬ
-├── LICENSE          ← лицензия                                  ХРАНИТЬ
-├── PROGRESS.md      ← история разработки                        ХРАНИТЬ
-├── README.md        ← документация                              ХРАНИТЬ
-├── README.zh-CN.md  ← документация (китайский)                  ХРАНИТЬ
-└── target/          ← АРТЕФАКТЫ СБОРКИ (2 GB!)                  МОЖНО УДАЛИТЬ
+qex-mcp-v2/
+├── .cargo/          настройки cargo (registry mirror и т.п.)
+├── .gitignore       исключения git (в т.ч. /target)
+├── Cargo.lock       точные версии зависимостей (важен для воспроизводимой сборки)
+├── Cargo.toml       манифест workspace
+├── crates/          ИСХОДНЫЙ КОД
+│   ├── qex-core/    ядро: BM25, dense, embedders
+│   └── qex-mcp/     MCP сервер, точка входа
+├── docs/            документация upstream
+├── scripts/         вспомогательные скрипты
+├── tests/           интеграционные тесты
+├── LICENSE
+├── PROGRESS.md
+├── README.md
+└── target/          АРТЕФАКТЫ СБОРКИ (2 GB+, не в git)
     └── release/
-        └── qex.exe  ← скомпилированный бинарник (43 MB)
+        └── qex      скомпилированный бинарник (~43 MB)
 ```
 
-### Решение по `target/`:
+### Что делать с `target/`:
 
 | Ситуация | Действие |
 |----------|----------|
-| Бинарник уже скопирован в `venv/Scripts/` | `target/` **можно удалить** — освободит ~2 GB |
+| Бинарник уже скопирован в `~/.local/bin/qex-mcp-v2` | `target/` **можно удалить** — освободит ~2 GB |
 | Планируешь дорабатывать Rust-код | **Оставь** — инкрементальная сборка быстрее |
 | Нужно место, но код может меняться | Удали только `target/debug/`, оставь `target/release/` |
 
-```powershell
-# Безопасное удаление только debug артефактов:
-Remove-Item -Recurse -Force qex/target/debug
-
-# Полное удаление (только если бинарник уже в venv/Scripts/):
-Remove-Item -Recurse -Force qex/target
+```bash
+# macOS / Linux:
+rm -rf ~/src/qex-mcp-v2/target/debug        # освободит debug-артефакты
+rm -rf ~/src/qex-mcp-v2/target               # полное удаление (бинарник уже в ~/.local/bin/)
 ```
 
-> После удаления `target/` следующая `cargo build` займёт 5-15 минут (полная перекомпиляция).  
-> Частичная `target/release/` тоже можно удалить если `qex-mcp-v2.exe` уже в `venv/Scripts/`.
+```powershell
+# Windows:
+Remove-Item -Recurse -Force $HOME\src\qex-mcp-v2\target\debug
+Remove-Item -Recurse -Force $HOME\src\qex-mcp-v2\target
+```
 
-### Итог: что НЕЛЬЗЯ удалять никогда:
+> После удаления `target/` следующая `cargo build` займёт 5-15 минут (полная перекомпиляция).
 
-- `crates/` — это исходный код
-- `Cargo.toml` и `Cargo.lock` — манифест и lock файл
-- `venv/Scripts/qex-mcp-v2.exe` — активный бинарник MCP сервера
+### Что НЕЛЬЗЯ удалять никогда:
+
+- `~/src/qex-mcp-v2/crates/` — исходный код
+- `~/src/qex-mcp-v2/Cargo.toml` и `Cargo.lock` — манифест и lock
+- `~/.local/bin/qex-mcp-v2` (macOS) или `venv/Scripts/qex-mcp-v2.exe` (Windows) — **активный бинарник**, его использует Claude Code
 
 ---
 
@@ -663,9 +685,12 @@ curl http://localhost:11434/          # → "Ollama is running"
 Если нужно пересобрать:
 
 ```bash
-cd qex
+# Исходник qex-mcp-v2 хранится вне репозитория проекта (иначе target/ раздувает
+# проект на 800+ MB build-артефактов). Стандартное место: ~/src/qex-mcp-v2/
+cd ~/src/qex-mcp-v2
 cargo build --release --features "dense ollama"
-# Под новым именем (старый процесс может быть занят):
+
+# Под новым именем (старый процесс может быть занят файловой блокировкой):
 cp target/release/qex ~/.local/bin/qex-mcp-v3
 # Обновить command в ~/.claude.json, перезапустить Claude Code
 ```

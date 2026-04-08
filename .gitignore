@@ -53,3 +53,6 @@ Inspector_prototype/multiprocess_prototype/.inspector_prefs.json
 
 # Local Milvus standalone (docker compose) — data volumes
 milvus-docker/volumes/
+
+# qex-mcp-v2 source (moved to ~/src/qex-mcp-v2/ — keep build artifacts out of repo)
+/qex/
