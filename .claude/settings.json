@@ -7,12 +7,18 @@
       "Bash(git *)",
       "Bash(docker ps *)",
       "Bash(docker logs *)",
+      "Bash(docker start *)",
       "Bash(docker compose *)",
       "Bash(docker-compose *)",
+      "Bash(docker inspect *)",
       "Bash(ollama *)",
       "Bash(python *)",
       "Bash(uv *)",
-      "Bash(pip *)"
+      "Bash(pip *)",
+      "Bash(curl http://localhost*)",
+      "Bash(curl -s http://localhost*)",
+      "Bash(curl -X DELETE http://localhost:6333*)",
+      "Bash(curl -X PUT http://localhost:6333*)"
     ],
     "ask": [
       "Bash(rm *)",
@@ -63,5 +69,8 @@
   },
   "alwaysThinkingEnabled": false,
   "preferredLanguage": "ru",
-  "statusLine": "printf 'branch: %s | qdrant: %s' \"$(git branch --show-current 2>/dev/null)\" \"$(docker ps --filter name=qdrant --filter status=running --format '{{.Names}}' 2>/dev/null | grep -q qdrant && echo UP || echo DOWN)\""
+  "statusLine": {
+    "type": "command",
+    "command": "printf 'branch: %s | qdrant: %s' \"$(git branch --show-current 2>/dev/null)\" \"$(docker ps --filter name=qdrant --filter status=running --format '{{.Names}}' 2>/dev/null | grep -q qdrant && echo UP || echo DOWN)\""
+  }
 }
