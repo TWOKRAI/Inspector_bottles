@@ -151,7 +151,6 @@ class TestMixinIntegration:
         assert 'managers' in state
         assert 'logger' in state['managers']
         assert 'enabled' in state
-        assert 'plugins' in state
 
     def test_unregister_and_reregister(self):
         logger1 = MockLogger()

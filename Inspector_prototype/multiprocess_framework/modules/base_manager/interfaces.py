@@ -16,12 +16,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict, Set, List
 from contextlib import contextmanager
 
-try:
-    from .mixins.plugins.plugin_base import ObservablePlugin
-except ImportError:
-    ObservablePlugin = Any  # type: ignore[misc,assignment]
-
-
 # =============================================================================
 # IBaseManager
 # =============================================================================
@@ -190,23 +184,6 @@ class IObservableMixin(ABC):
     def get_state(self) -> Dict[str, Any]:
         """Полный снимок состояния."""
 
-    # ---- Плагины ----
-
-    @abstractmethod
-    def register_plugin(self, plugin: Any, name: Optional[str] = None) -> None:
-        """Зарегистрировать плагин."""
-
-    @abstractmethod
-    def unregister_plugin(self, name: str) -> None:
-        """Удалить плагин."""
-
-    @abstractmethod
-    def has_plugin(self, name: str) -> bool:
-        """True если плагин зарегистрирован."""
-
-    @abstractmethod
-    def get_plugin(self, name: str) -> Optional[Any]:
-        """Получить плагин по имени."""
 
     # ---- Встроенные методы наблюдаемости ----
 

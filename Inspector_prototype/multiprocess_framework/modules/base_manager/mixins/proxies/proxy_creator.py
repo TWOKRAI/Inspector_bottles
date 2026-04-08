@@ -1,80 +1,102 @@
 """
 Создатель прокси-методов для ObservableMixin.
 
-Автоматически создает публичные методы-прокси для стандартных менеджеров.
+Автоматически создает публичные методы-прокси для стандартных менеджеров
+(logger, stats/statistics, errors/error).
 """
 
-from typing import Callable, Any, Optional, List
-from ..plugins.plugin_registry import PluginRegistry
+from typing import Callable, Any
 
 
 class ProxyCreator:
     """
     Создатель прокси-методов.
-    
-    Внутренний компонент ObservableMixin, отвечающий за:
-    - Автоматическое создание публичных методов-прокси
-    - Поддержку альтернативных имен менеджеров
+
+    Внутренний компонент ObservableMixin, отвечающий за автоматическое
+    создание публичных методов-прокси для стандартных менеджеров.
     """
-    
+
     @staticmethod
     def create_proxy_methods(
         instance: Any,
         managers: dict,
         call_manager_func: Callable,
-        plugin_registry: Optional[PluginRegistry] = None
     ):
         """
         Создать прокси-методы на экземпляре.
-        
+
         Args:
-            instance: Экземпляр для создания методов
-            managers: Словарь менеджеров
+            instance:          Экземпляр для создания методов
+            managers:          Словарь менеджеров
             call_manager_func: Функция для вызова менеджера
-            plugin_registry: Реестр плагинов (опционально)
         """
         instance._proxy_created = True
-        
-        # Сначала создаем стандартные прокси-методы
         ProxyCreator._create_standard_proxies(instance, managers, call_manager_func)
-        
-        # Затем применяем плагины
-        if plugin_registry:
-            ProxyCreator._apply_plugin_proxies(instance, managers, call_manager_func, plugin_registry)
-    
+
     @staticmethod
     def _create_standard_proxies(instance: Any, managers: dict, call_manager_func: Callable):
-        """
-        Создать стандартные прокси-методы.
-        
-        Использует встроенные плагины для создания стандартных прокси-методов.
-        Это обеспечивает обратную совместимость и позволяет использовать плагины.
-        """
-        from ..plugins.builtin_plugins import LoggerPlugin, StatsPlugin, ErrorPlugin
-        
-        # Используем встроенные плагины для стандартных менеджеров
-        logger_plugin = LoggerPlugin()
-        stats_plugin = StatsPlugin()
-        error_plugin = ErrorPlugin()
-        
-        logger_plugin.create_proxy_methods(instance, managers, call_manager_func)
-        stats_plugin.create_proxy_methods(instance, managers, call_manager_func)
-        error_plugin.create_proxy_methods(instance, managers, call_manager_func)
-    
-    @staticmethod
-    def _apply_plugin_proxies(
-        instance: Any,
-        managers: dict,
-        call_manager_func: Callable,
-        plugin_registry: PluginRegistry
-    ):
-        """Применить прокси-методы из плагинов."""
-        for manager_name in managers.keys():
-            plugins = plugin_registry.get_plugins_for_manager(manager_name)
-            for plugin in plugins:
-                try:
-                    plugin.create_proxy_methods(instance, managers, call_manager_func)
-                except Exception:
-                    # Не падаем если плагин не работает
-                    pass
+        """Создать стандартные прокси-методы для logger, stats и error."""
+        # --- Logger ---
+        if 'logger' in managers:
+            def log_debug(msg, **kw):
+                return call_manager_func('logger', 'debug', msg, **kw)
 
+            def log_info(msg, **kw):
+                return call_manager_func('logger', 'info', msg, **kw)
+
+            def log_warning(msg, **kw):
+                return call_manager_func('logger', 'warning', msg, **kw)
+
+            def log_error(msg, **kw):
+                return call_manager_func('logger', 'error', msg, **kw)
+
+            def log_critical(msg, **kw):
+                return call_manager_func('logger', 'critical', msg, **kw)
+
+            instance.log_debug = log_debug
+            instance.log_info = log_info
+            instance.log_warning = log_warning
+            instance.log_error = log_error
+            instance.log_critical = log_critical
+
+        # --- Stats ---
+        stats_name = None
+        if 'stats' in managers:
+            stats_name = 'stats'
+        elif 'statistics' in managers:
+            stats_name = 'statistics'
+
+        if stats_name is not None:
+            def record_metric(name, value=1, tags=None):
+                return call_manager_func(stats_name, 'record_metric', name, value, tags or {})
+
+            def increment(name, tags=None):
+                return call_manager_func(stats_name, 'increment', name, tags or {})
+
+            def record_timing(name, duration, tags=None):
+                return call_manager_func(stats_name, 'record_timing', name, duration, tags or {})
+
+            def gauge(name, value, tags=None):
+                return call_manager_func(stats_name, 'gauge', name, value, tags or {})
+
+            instance.record_metric = record_metric
+            instance.increment = increment
+            instance.record_timing = record_timing
+            instance.gauge = gauge
+
+        # --- Error ---
+        error_name = None
+        if 'errors' in managers:
+            error_name = 'errors'
+        elif 'error' in managers:
+            error_name = 'error'
+
+        if error_name is not None:
+            def track_error(error, context=None):
+                return call_manager_func(error_name, 'track_error', error, context or {})
+
+            def record_error(error, context=None):
+                return call_manager_func(error_name, 'record_error', error, context or {})
+
+            instance.track_error = track_error
+            instance.record_error = record_error

@@ -40,8 +40,6 @@ from .core.manager_registry import ManagerRegistry
 from .core.method_cache import MethodCache
 from .proxies.proxy_creator import ProxyCreator
 from .decorators.observable_decorators import ObservableDecorators
-from .plugins.plugin_registry import PluginRegistry
-from .plugins.plugin_base import ObservablePlugin
 from ..interfaces import IObservableMixin
 
 
@@ -79,30 +77,20 @@ class ObservableMixin(IObservableMixin):
         config: Optional[Dict[str, Any]] = None,
         auto_proxy: bool = False,
         simple_mode: bool = False,
-        plugins: Optional[List[ObservablePlugin]] = None
     ):
         """
         Args:
-            managers: Словарь {имя: менеджер}, например {'logger': logger_mgr}
-            config:   Включение/выключение менеджеров.
-                      Простая форма:  {'logger': True}
-                      Подробная форма: {'logger': {'enabled': True}}
-            auto_proxy:   Создать публичные прокси-методы (log_info, record_metric …)
-            simple_mode:  Отключить плагины и декораторы (упрощает отладку)
-            plugins:      Пользовательские плагины ObservablePlugin
+            managers:    Словарь {имя: менеджер}, например {'logger': logger_mgr}
+            config:      Включение/выключение менеджеров.
+                         Простая форма:  {'logger': True}
+                         Подробная форма: {'logger': {'enabled': True}}
+            auto_proxy:  Создать публичные прокси-методы (log_info, record_metric …)
+            simple_mode: Отключить декораторы (упрощает отладку)
         """
         self._registry = ManagerRegistry(managers, config)
         self._cache = MethodCache()
-        self._plugin_registry = PluginRegistry()
         self._simple_mode = simple_mode
         self._auto_proxy = auto_proxy
-
-        if plugins:
-            for plugin in plugins:
-                self._plugin_registry.register(plugin)
-
-        if not simple_mode:
-            self._apply_plugin_methods()
 
         enable_decorators = (
             config.get('enable_decorators', False)
@@ -120,9 +108,6 @@ class ObservableMixin(IObservableMixin):
                 )
             except Exception:
                 pass
-
-        if not simple_mode:
-            self._apply_plugin_decorators()
 
         if auto_proxy and not simple_mode:
             self._proxy_created = True
@@ -216,14 +201,6 @@ class ObservableMixin(IObservableMixin):
             self._proxy_created = True
             self._create_proxy_methods()
 
-        for plugin in self._plugin_registry.get_plugins_for_manager(name):
-            try:
-                plugin.create_private_methods(self, self._call_manager)
-                if getattr(self, '_proxy_created', False):
-                    plugin.create_proxy_methods(self, self._registry.managers, self._call_manager)
-            except Exception:
-                pass
-
     def unregister_manager(self, name: str) -> None:
         """Удалить менеджер из реестра."""
         self._registry.unregister(name)
@@ -287,50 +264,9 @@ class ObservableMixin(IObservableMixin):
         Снимок текущего состояния mixin.
 
         Returns:
-            dict с ключами: config, enabled, managers, enabled_managers, plugins
+            dict с ключами: config, enabled, managers, enabled_managers
         """
-        state = self._registry.get_state()
-        state['plugins'] = list(self._plugin_registry.get_all_plugins().keys())
-        return state
-
-    # =========================================================================
-    # ПУБЛИЧНЫЙ API — УПРАВЛЕНИЕ ПЛАГИНАМИ
-    # =========================================================================
-
-    def register_plugin(self, plugin: ObservablePlugin, name: Optional[str] = None) -> None:
-        """
-        Зарегистрировать пользовательский плагин.
-
-        Плагин может добавлять новые приватные и публичные методы для работы
-        с произвольным менеджером.
-
-        Args:
-            plugin: Экземпляр ObservablePlugin
-            name:   Имя плагина (по умолчанию — имя класса)
-        """
-        self._plugin_registry.register(plugin, name)
-        try:
-            plugin.create_private_methods(self, self._call_manager)
-            if getattr(self, '_proxy_created', False):
-                plugin.create_proxy_methods(self, self._registry.managers, self._call_manager)
-            plugin.create_decorators(self, self._call_manager)
-        except Exception:
-            pass
-
-        if getattr(self, '_proxy_created', False):
-            self._create_proxy_methods()
-
-    def unregister_plugin(self, name: str) -> None:
-        """Удалить плагин из реестра."""
-        self._plugin_registry.unregister(name)
-
-    def has_plugin(self, name: str) -> bool:
-        """Проверить наличие плагина по имени."""
-        return self._plugin_registry.has_plugin(name)
-
-    def get_plugin(self, name: str) -> Optional[ObservablePlugin]:
-        """Получить плагин по имени."""
-        return self._plugin_registry.get_all_plugins().get(name)
+        return self._registry.get_state()
 
     # =========================================================================
     # ПУБЛИЧНЫЙ API — ДИАГНОСТИКА
@@ -432,28 +368,7 @@ class ObservableMixin(IObservableMixin):
             self,
             self._registry.managers,
             self._call_manager,
-            self._plugin_registry
         )
-
-    def _apply_plugin_methods(self) -> None:
-        """Применить приватные методы из всех зарегистрированных плагинов."""
-        for plugin in self._plugin_registry.get_all_plugins().values():
-            try:
-                plugin.create_private_methods(self, self._call_manager)
-                if getattr(self, '_proxy_created', False):
-                    plugin.create_proxy_methods(
-                        self, self._registry.managers, self._call_manager
-                    )
-            except Exception:
-                pass
-
-    def _apply_plugin_decorators(self) -> None:
-        """Применить декораторы из всех зарегистрированных плагинов."""
-        for plugin in self._plugin_registry.get_all_plugins().values():
-            try:
-                plugin.create_decorators(self, self._call_manager)
-            except Exception:
-                pass
 
     # =========================================================================
     # PICKLE SUPPORT
@@ -471,7 +386,7 @@ class ObservableMixin(IObservableMixin):
             'record_metric', 'increment', 'record_timing', 'gauge',
             'track_error', 'record_error',
             # Внутренние компоненты (содержат ссылки на менеджеры и кэши)
-            '_registry', '_cache', '_plugin_registry', '_proxy_created',
+            '_registry', '_cache', '_proxy_created',
         )
         for key in _EXCLUDE:
             state.pop(key, None)
@@ -492,7 +407,6 @@ class ObservableMixin(IObservableMixin):
         # and must be re-injected by the owner after unpickle.
         self._registry = ManagerRegistry()
         self._cache = MethodCache()
-        self._plugin_registry = PluginRegistry()
         # Recreate proxy methods shell (they call _call_manager which returns None for empty registry)
         if getattr(self, '_auto_proxy', False) and not getattr(self, '_simple_mode', False):
             self._proxy_created = True

@@ -262,7 +262,6 @@ class TestObservableMixin:
         state = m.get_state()
         assert 'managers' in state
         assert 'logger' in state['managers']
-        assert 'plugins' in state
 
     def test_update_config(self):
         logger = MockLogger()
