@@ -125,8 +125,7 @@ class BaseAdapter(ABC):
         
         # Проверяем использует ли менеджер ObservableMixin
         manager_has_observable = (
-            self.manager and 
-            hasattr(self.manager, '_managers') and 
+            self.manager and
             hasattr(self.manager, '_call_manager')
         )
         

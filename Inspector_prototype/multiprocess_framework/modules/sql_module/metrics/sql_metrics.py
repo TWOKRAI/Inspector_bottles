@@ -27,8 +27,8 @@ class SQLMetricsCollector:
         self, checkedin: int, checkedout: int, overflow: int = 0
     ) -> None:
         """Записать статистику пула соединений."""
-        if self._manager and hasattr(self._manager, "emit_event"):
-            self._manager.emit_event(
-                "db.pool.stats",
-                {"checkedin": checkedin, "checkedout": checkedout, "overflow": overflow},
-            )
+        if self._manager and hasattr(self._manager, "_record_metric"):
+            self._manager._record_metric("db.pool.checkedin", checkedin)
+            self._manager._record_metric("db.pool.checkedout", checkedout)
+            if overflow:
+                self._manager._record_metric("db.pool.overflow", overflow)

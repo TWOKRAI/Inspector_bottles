@@ -98,17 +98,14 @@ class SQLManager(BaseManager, ObservableMixin):
         """Выполнить DML."""
         if not self._adapter:
             raise RuntimeError("SQLManager not initialized")
-        self.emit_event("db.query.started", {"sql": sql})
         start = time.perf_counter()
         try:
             rows = self._adapter.execute(sql, params or {})
             self._record_timing("db.execute.duration", time.perf_counter() - start, {"op": "execute"})
-            self.emit_event("db.query.completed", {"sql": sql, "rows": rows})
             return rows
         except Exception as e:
             self._record_timing("db.execute.duration", time.perf_counter() - start, {"op": "execute", "error": True})
             self._track_error(e, {"context": "execute", "sql": sql[:100], "module": "sql_module"})
-            self.emit_event("db.query.failed", {"sql": sql, "error": str(e)})
             raise
 
     def query(
@@ -117,17 +114,14 @@ class SQLManager(BaseManager, ObservableMixin):
         """Выполнить SELECT."""
         if not self._adapter:
             raise RuntimeError("SQLManager not initialized")
-        self.emit_event("db.query.started", {"sql": sql})
         start = time.perf_counter()
         try:
             data = self._adapter.query(sql, params or {})
             self._record_timing("db.query.duration", time.perf_counter() - start, {"op": "query"})
-            self.emit_event("db.query.completed", {"sql": sql, "rows": len(data)})
             return data
         except Exception as e:
             self._record_timing("db.query.duration", time.perf_counter() - start, {"op": "query", "error": True})
             self._track_error(e, {"context": "query", "sql": sql[:100], "module": "sql_module"})
-            self.emit_event("db.query.failed", {"sql": sql, "error": str(e)})
             raise
 
     def query_range(

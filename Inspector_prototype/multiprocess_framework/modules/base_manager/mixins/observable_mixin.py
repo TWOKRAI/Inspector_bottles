@@ -282,16 +282,6 @@ class ObservableMixin(IObservableMixin):
         print("=" * 60)
 
     # =========================================================================
-    # BACKWARD COMPAT — свойство _managers для BaseAdapter
-    # =========================================================================
-
-    @property
-    def _managers(self) -> Dict[str, Any]:
-        """Словарь всех зарегистрированных менеджеров (backward compat)."""
-        registry = self.__dict__.get('_registry')
-        return registry.managers if registry is not None else {}
-
-    # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
     # =========================================================================
 

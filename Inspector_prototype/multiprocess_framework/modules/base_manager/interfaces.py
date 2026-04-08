@@ -75,16 +75,6 @@ class IBaseManager(ABC):
     def detach_adapter(self, name: str) -> bool:
         """Отключить адаптер. True если он был подключён."""
 
-    # ---- События ----
-
-    @abstractmethod
-    def on_event(self, event_type: str, callback: Any) -> None:
-        """Зарегистрировать обработчик события."""
-
-    @abstractmethod
-    def emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
-        """Генерировать событие."""
-
     # ---- Статистика / диагностика ----
 
     @abstractmethod

@@ -2,21 +2,11 @@
 BaseManager — абстрактный базовый класс для всех менеджеров системы.
 """
 
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, List
 from abc import abstractmethod
 
 from ..interfaces import IBaseManager
 from ..utils.name_utils import get_adapter_name_from_class
-
-
-def _noop(*a, **kw):
-    """
-    Заглушка для публичных прокси-методов после unpickle.
-
-    Модульная (не лямбда) — pickle-совместима на Windows (spawn).
-    Не экспортируется публично — деталь реализации.
-    """
-    return None
 
 
 class BaseManager(IBaseManager):
@@ -26,7 +16,6 @@ class BaseManager(IBaseManager):
     Реализует контракт IBaseManager и предоставляет:
     - Управление жизненным циклом (initialize / shutdown)
     - Подключение адаптеров (attach_adapter / get_adapter / detach_adapter)
-    - Систему событий (on_event / emit_event)
     - Диагностику (get_stats / get_debug_info)
 
     Типичное использование совместно с ObservableMixin:
@@ -59,7 +48,6 @@ class BaseManager(IBaseManager):
         self.manager_name = manager_name
         self.process = process
         self.is_initialized = False
-        self._event_handlers: Dict[str, List[Callable]] = {}
         self._adapters: Dict[str, Any] = {}
 
     # =========================================================================
@@ -162,36 +150,6 @@ class BaseManager(IBaseManager):
         return False
 
     # =========================================================================
-    # ПУБЛИЧНЫЙ API — СОБЫТИЯ
-    # =========================================================================
-
-    def on_event(self, event_type: str, callback: Callable) -> None:
-        """
-        Зарегистрировать обработчик события.
-
-        Args:
-            event_type: Тип события (произвольная строка)
-            callback:   Функция-обработчик, принимающая dict с данными события
-        """
-        self._event_handlers.setdefault(event_type, []).append(callback)
-
-    def emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
-        """
-        Генерировать событие и вызвать все зарегистрированные обработчики.
-
-        Ошибки в обработчиках перехватываются и не распространяются.
-
-        Args:
-            event_type: Тип события
-            data:       Словарь с данными события
-        """
-        for callback in self._event_handlers.get(event_type, []):
-            try:
-                callback(data)
-            except Exception as e:
-                print(f"[BaseManager] Error in event handler '{event_type}': {e}")
-
-    # =========================================================================
     # ПУБЛИЧНЫЙ API — СТАТИСТИКА
     # =========================================================================
 
@@ -279,43 +237,6 @@ class BaseManager(IBaseManager):
         print("=" * 60)
         print(json.dumps(info, indent=2, ensure_ascii=False))
         print("=" * 60)
-
-    # =========================================================================
-    # ВНУТРЕННИЕ МЕТОДЫ
-    # =========================================================================
-
-    def __getattr__(self, name: str) -> Any:
-        """
-        Magic-доступ к адаптерам: manager.my_adapter вместо manager.get_adapter('my').
-
-        Также возвращает _noop-заглушку для публичных прокси-методов ObservableMixin
-        (log_info, record_metric и т.д.) после unpickle, пока __setstate__ не
-        восстановил их.
-
-        РЕКОМЕНДУЕТСЯ использовать get_adapter() для явного доступа.
-
-        Raises:
-            AttributeError: Если атрибут не найден ни в адаптерах, ни в proxy-методах
-        """
-        _adapters = self.__dict__.get('_adapters', {})
-
-        if name in _adapters:
-            adapter = _adapters[name]
-            if adapter is None:
-                raise AttributeError(
-                    f"'{self.__class__.__name__}' has no attribute '{name}' (adapter is None)"
-                )
-            return adapter
-
-        for adapter_name, adapter in _adapters.items():
-            if adapter is None:
-                continue
-            if name == get_adapter_name_from_class(adapter.__class__.__name__):
-                return adapter
-
-        raise AttributeError(
-            f"'{self.__class__.__name__}' object has no attribute '{name}'"
-        )
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(name={self.manager_name!r}, initialized={self.is_initialized})"

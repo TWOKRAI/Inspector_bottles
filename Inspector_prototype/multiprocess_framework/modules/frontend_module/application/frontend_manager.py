@@ -19,7 +19,6 @@ from frontend_module.application.thread_manager import ThreadManager
 from frontend_module.application.window_manager import WindowManager
 from frontend_module.core.registers_bridge import FrontendRegistersBridge
 
-_CONFIG_CHANGED_EVENT = "config_changed"
 
 
 class FrontendManager(BaseManager, ObservableMixin):
@@ -143,7 +142,7 @@ class FrontendManager(BaseManager, ObservableMixin):
     def _on_config_changed(self, key: str, old_value: Any, new_value: Any) -> None:
         """Вызывается при изменении конфига (hot-reload)."""
         self._config = self._get_full_config()
-        self.emit_event(_CONFIG_CHANGED_EVENT, {"key": key, "old": old_value, "new": new_value})
+        self._log_debug(f"config changed: {key}", module="frontend_module")
         if self._window_manager and hasattr(self._window_manager, "update_config"):
             self._window_manager.update_config(self._config)
 

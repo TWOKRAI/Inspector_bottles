@@ -123,45 +123,21 @@ class TestBaseManager:
         m = ConcreteManager("test_manager")
         assert m.detach_adapter("nonexistent") is False
 
-    def test_magic_access_to_adapter(self):
+    def test_no_magic_getattr_for_adapters(self):
+        """Адаптеры больше не доступны через magic __getattr__; только get_adapter()."""
         m = ConcreteManager("test_manager")
         adapter = MockAdapter()
         m.attach_adapter(adapter, name="mock")
-        assert m.mock is adapter
+        # Явный доступ работает
+        assert m.get_adapter("mock") is adapter
+        # Magic-доступ НЕ работает — чистый AttributeError
+        with pytest.raises(AttributeError):
+            _ = m.mock
 
-    def test_magic_access_raises_attribute_error(self):
+    def test_attribute_error_for_nonexistent(self):
         m = ConcreteManager("test_manager")
         with pytest.raises(AttributeError):
             _ = m.nonexistent_adapter
-
-    # ---- События ----
-
-    def test_on_event_and_emit(self):
-        m = ConcreteManager("test_manager")
-        received = []
-
-        m.on_event("test_event", lambda data: received.append(data))
-        m.emit_event("test_event", {"key": "value"})
-
-        assert len(received) == 1
-        assert received[0] == {"key": "value"}
-
-    def test_emit_event_with_multiple_handlers(self):
-        m = ConcreteManager("test_manager")
-        calls = []
-        m.on_event("ev", lambda d: calls.append(1))
-        m.on_event("ev", lambda d: calls.append(2))
-        m.emit_event("ev", {})
-        assert calls == [1, 2]
-
-    def test_emit_event_handler_exception_does_not_propagate(self):
-        m = ConcreteManager("test_manager")
-        m.on_event("ev", lambda d: (_ for _ in ()).throw(RuntimeError("boom")))
-        m.emit_event("ev", {})  # должен не падать
-
-    def test_emit_unknown_event_is_noop(self):
-        m = ConcreteManager("test_manager")
-        m.emit_event("unknown", {})  # не должен падать
 
     # ---- Статистика ----
 
