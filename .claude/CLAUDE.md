@@ -24,7 +24,7 @@
 Фреймворк: `Inspector_prototype/multiprocess_framework/` · обзор: `multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`)  
 Прототип: `Inspector_prototype/multiprocess_prototype/` · **точка входа:** `multiprocess_prototype/main.py`  
 Развёрнутый конспект: `docs/claude/FRAMEWORK_RULES_EXTRACT.md` · нарратив «конструктор»: `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md`  
-Настройка qex: `docs/claude/QEX_SETUP_GUIDE.md`
+Настройка qex: `docs/claude/qex/README.md` (quick-start) · `docs/claude/qex/SETUP_GUIDE.md` (полный гайд)
 
 **Правила правок (основные):**
 1. Dict at Boundary — между процессами только **dict** (сообщения: `to_dict` / `from_dict`); Pydantic внутри процесса.
