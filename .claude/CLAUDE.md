@@ -29,13 +29,16 @@
 **Правила правок (основные):**
 1. Dict at Boundary — между процессами только **dict** (сообщения: `to_dict` / `from_dict`); Pydantic внутри процесса.
 2. Зависимости через `interfaces.py`; у каждого модуля `README.md`, `STATUS.md`, `tests/`.
-3. Архитектурные изменения → `multiprocess_framework/DECISIONS.md` + `STATUS.md` затронутого модуля.
+3. **ADR-решения:**
+   - **Локальные ADR** → `modules/X/DECISIONS.md` (архитектура внутри модуля, паттерны, удаления, внутренний API).
+   - **Глобальные ADR** → `multiprocess_framework/DECISIONS.md` (взаимодействие модулей, стык-решения, правила фреймворка: Dict at Boundary, pickle-safe, FieldRouting vs targets, этапы M1/M2/M3).
+   - Каждое локальное DECISIONS.md имеет прямые ссылки на `../../../DECISIONS.md` только при зависимости от глобальных решений.
 4. Тесты фреймворка: из `Inspector_prototype` — `python scripts/validate.py`, `python scripts/run_framework_tests.py`. 
 Из корня репозитория — `python Inspector_prototype/scripts/validate.py` (см. `CONTEXT.md`). 
 При ручном `pytest` по модулям — рабочий каталог / `PYTHONPATH` как в `multiprocess_framework/README.md` (иначе часто `ModuleNotFoundError` для плоских импортов под `modules/`).
 5. Конфиг на границе — dict, внутри Pydantic v2.
 6. Логи через `ObservableMixin`, пути логов из env (`MULTIPROCESS_LOG_DIR` / `INSPECTOR_LOG_DIR`), не хардкод от cwd исходников.
-7. Полный перечень ADR — `multiprocess_framework/DECISIONS.md`.
+7. Индекс ADR: главный `multiprocess_framework/DECISIONS.md` содержит раздел «Модульные решения» со ссылками на локальные DECISIONS.md каждого модуля.
 
 ## Стек
 Python 3.9+ (см. `Inspector_prototype/pyproject.toml`), PyQt5, OpenCV, NumPy | SQLite/PostgreSQL, Qdrant  
