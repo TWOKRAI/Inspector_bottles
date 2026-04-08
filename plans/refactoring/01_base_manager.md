@@ -1,6 +1,6 @@
 # Refactoring plan: `base_manager` (модуль #1)
 
-> **Статус:** Шаг 4.0 выполнен — аудит завершён, начинаем удаление.
+> **Статус:** Шаг 4 (все 7 шагов) — ✅ ЗАВЕРШЁН.
 > **Автор плана:** Opus, Фаза 1 мета-плана v4.1.
 > **Ссылки:** [мета-план §4.3 и §5](../floating-leaping-ritchie.md) · [ARCHITECTURE.md](../../Inspector_prototype/multiprocess_framework/ARCHITECTURE.md) · [00_overview.md](./00_overview.md)
 
@@ -125,6 +125,8 @@ base_manager/
 - `base_manager/STATUS.md`, `base_manager/MIGRATION.md` (если есть)
 
 **Целевые метрики:** ~17 файлов (−12), ~1 650 LOC (−32%), публичный API без изменений, тесты зелёные.
+
+**Фактические метрики (после Шага 4):** 17 файлов (−12 ✓), 1474 LOC (−39%, цель −32% перевыполнена ✓), 52 passed + 2 skipped (было 69: −10 удалённых plugin-тестов, −5 events/__getattr__ тестов, +2 новых). validate.py зелёный ✓.
 
 ### 3.3. `ObservableMixin.__init__` — целевая сигнатура
 
