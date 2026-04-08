@@ -163,7 +163,36 @@ graph BT
 
 > Каждая подсекция заполняется Haiku после рефакторинга соответствующего модуля (Фаза 1, Шаг 5). Объём одной подсекции — ≤ 100 строк: роль, mermaid-диаграмма локальных связей, ссылка на `README.md` модуля.
 
-### 6.1 `base_manager` — *TODO (после модуля #1)*
+### 6.1 `base_manager` — фундамент менеджеров
+
+**Роль:** Предоставляет две независимые строительные блоки, из которых собираются все менеджеры фреймворка.
+
+**`BaseManager`** — абстрактный класс с жизненным циклом (`initialize()`, `shutdown()`), управлением адаптерами (`attach_adapter()`, `get_adapter()`) и диагностикой (`get_debug_info()`).
+
+**`ObservableMixin`** — примесь для наблюдаемости: менеджер говорит `self._log_info("msg")`, и mixin сам найдёт `logger_manager` и вызовет его метод. Два режима: приватные методы (по умолчанию, pickle-safe) и опциональные публичные прокси-методы (`auto_proxy=True`). После unpickle в multiprocessing гарантирует, что `_log_*` возвращают `None` без исключений, пока менеджеры не перерегистрированы.
+
+**`BaseAdapter`** — базовый класс адаптеров, инкапсулирующих интеграцию с процессом или внешним ресурсом.
+
+```
+BaseManager (жизненный цикл, адаптеры)
+    ├── attach_adapter / get_adapter / detach_adapter
+    └── initialize / shutdown (abstract)
+
+ObservableMixin (наблюдаемость)
+    ├── _log_* / _record_* / _track_*  (приватные методы, всегда pickle-safe)
+    ├── [auto_proxy] log_*/record_*/track_*  (опциональные публичные)
+    └── ManagerRegistry (реестр сервисов — logger, stats, error, ...)
+
+Все менеджеры: class M(BaseManager, ObservableMixin)
+```
+
+Ключевые решения (ADR-040…043):
+- Удалена плагинная система (дублировала приватные методы).
+- Удалены декораторы `@logged`/`@timed`/`@monitored` (4-й способ делать одно и то же).
+- Удалена magic `BaseManager.__getattr__` для адаптеров (используйте `get_adapter(name)`).
+- Удалены события `on_event`/`emit_event` (дублируют dispatch_module/router_module).
+
+📖 Подробнее: [`modules/base_manager/README.md`](modules/base_manager/README.md) · [`modules/base_manager/docs/OBSERVABLE_ARCHITECTURE.md`](modules/base_manager/docs/OBSERVABLE_ARCHITECTURE.md)
 ### 6.2 `data_schema_module` — *TODO (после модуля #2)*
 ### 6.3 `dispatch_module` — *TODO (после модуля #3)*
 ### 6.4 `channel_routing_module` — *TODO (после модуля #4)*
