@@ -39,7 +39,6 @@ from contextlib import contextmanager
 from .core.manager_registry import ManagerRegistry
 from .core.method_cache import MethodCache
 from .proxies.proxy_creator import ProxyCreator
-from .decorators.observable_decorators import ObservableDecorators
 from ..interfaces import IObservableMixin
 
 
@@ -91,23 +90,6 @@ class ObservableMixin(IObservableMixin):
         self._cache = MethodCache()
         self._simple_mode = simple_mode
         self._auto_proxy = auto_proxy
-
-        enable_decorators = (
-            config.get('enable_decorators', False)
-            if isinstance(config, dict) else False
-        )
-        if enable_decorators and not simple_mode:
-            try:
-                ObservableDecorators.create_decorators(
-                    self,
-                    self._call_manager,
-                    self._log_error,
-                    self._track_error,
-                    self._record_metric,
-                    self._record_timing
-                )
-            except Exception:
-                pass
 
         if auto_proxy and not simple_mode:
             self._proxy_created = True
