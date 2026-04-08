@@ -37,7 +37,6 @@ from typing import Optional, Dict, Any, Set, List
 from contextlib import contextmanager
 
 from .core.manager_registry import ManagerRegistry
-from .core.method_cache import MethodCache
 from .proxies.proxy_creator import ProxyCreator
 from ..interfaces import IObservableMixin
 
@@ -75,23 +74,19 @@ class ObservableMixin(IObservableMixin):
         managers: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         auto_proxy: bool = False,
-        simple_mode: bool = False,
     ):
         """
         Args:
-            managers:    Словарь {имя: менеджер}, например {'logger': logger_mgr}
-            config:      Включение/выключение менеджеров.
-                         Простая форма:  {'logger': True}
-                         Подробная форма: {'logger': {'enabled': True}}
-            auto_proxy:  Создать публичные прокси-методы (log_info, record_metric …)
-            simple_mode: Отключить декораторы (упрощает отладку)
+            managers:   Словарь {имя: менеджер}, например {'logger': logger_mgr}
+            config:     Включение/выключение менеджеров.
+                        Простая форма:  {'logger': True}
+                        Подробная форма: {'logger': {'enabled': True}}
+            auto_proxy: Создать публичные прокси-методы (log_info, record_metric …)
         """
         self._registry = ManagerRegistry(managers, config)
-        self._cache = MethodCache()
-        self._simple_mode = simple_mode
         self._auto_proxy = auto_proxy
 
-        if auto_proxy and not simple_mode:
+        if auto_proxy:
             self._proxy_created = True
             self._create_proxy_methods()
         else:
@@ -177,7 +172,6 @@ class ObservableMixin(IObservableMixin):
             enabled: Включён ли сразу после регистрации
         """
         self._registry.register(name, manager, enabled)
-        self._cache.clear_manager(name)
 
         if getattr(self, '_proxy_created', False) or getattr(self, '_auto_proxy', False):
             self._proxy_created = True
@@ -186,7 +180,6 @@ class ObservableMixin(IObservableMixin):
     def unregister_manager(self, name: str) -> None:
         """Удалить менеджер из реестра."""
         self._registry.unregister(name)
-        self._cache.clear_manager(name)
 
     def get_manager(self, name: str) -> Optional[Any]:
         """Получить менеджер по имени (None если не найден)."""
@@ -307,7 +300,6 @@ class ObservableMixin(IObservableMixin):
         Универсальная точка вызова метода зарегистрированного менеджера.
 
         Безопасен при отсутствии _registry (после unpickle) — возвращает None.
-        Использует MethodCache для ускорения повторных вызовов.
 
         Returns:
             Результат вызова или None (если менеджер недоступен/выключен)
@@ -320,27 +312,12 @@ class ObservableMixin(IObservableMixin):
         if not manager:
             return None
 
-        cache: Optional[MethodCache] = self.__dict__.get('_cache')
-        method = cache.get(manager_name, method_name) if cache else None
-
-        if method is None and (cache is None or not cache.has(manager_name, method_name)):
-            try:
-                method = getattr(manager, method_name, None)
-                resolved = method if (method and callable(method)) else None
-                if cache:
-                    cache.set(manager_name, method_name, resolved)
-                method = resolved
-            except Exception:
-                if cache:
-                    cache.set(manager_name, method_name, None)
-                return None
-
-        if method and callable(method):
-            try:
+        try:
+            method = getattr(manager, method_name, None)
+            if method and callable(method):
                 return method(*args, **kwargs)
-            except Exception:
-                if cache:
-                    cache.pop(manager_name, method_name)
+        except Exception:
+            pass
 
         return None
 
@@ -367,8 +344,8 @@ class ObservableMixin(IObservableMixin):
             'log_debug', 'log_info', 'log_warning', 'log_error', 'log_critical',
             'record_metric', 'increment', 'record_timing', 'gauge',
             'track_error', 'record_error',
-            # Внутренние компоненты (содержат ссылки на менеджеры и кэши)
-            '_registry', '_cache', '_proxy_created',
+            # Внутренние компоненты (содержат ссылки на менеджеры)
+            '_registry', '_proxy_created',
         )
         for key in _EXCLUDE:
             state.pop(key, None)
@@ -388,9 +365,8 @@ class ObservableMixin(IObservableMixin):
         # Managers are NOT restored — they hold non-picklable resources (sockets, queues…)
         # and must be re-injected by the owner after unpickle.
         self._registry = ManagerRegistry()
-        self._cache = MethodCache()
         # Recreate proxy methods shell (they call _call_manager which returns None for empty registry)
-        if getattr(self, '_auto_proxy', False) and not getattr(self, '_simple_mode', False):
+        if getattr(self, '_auto_proxy', False):
             self._proxy_created = True
             self._create_proxy_methods()
         else:
