@@ -231,7 +231,9 @@ config = BaseManagerConfig()  # если содержимое есть
 - [`docs/INTERFACES_USAGE.md`](docs/INTERFACES_USAGE.md) — примеры использования `IBaseManager`, `IBaseAdapter`, `IObservableMixin` для моков и DI.
 - [`docs/OBSERVABLE_ARCHITECTURE.md`](docs/OBSERVABLE_ARCHITECTURE.md) — почему два режима наблюдаемости, почему методы класса (не `types.MethodType`), гарантии pickle для Windows spawn.
 
-Архитектурные решения — [`multiprocess_framework/DECISIONS.md`](../DECISIONS.md) (ADR-040…043).
+Архитектурные решения:
+- **Локальные:** [`DECISIONS.md`](DECISIONS.md) (ADR-114…117 — удаления плагинов, декораторов, __getattr__, on_event/emit_event).
+- **Глобальные:** [`multiprocess_framework/DECISIONS.md`](../../../DECISIONS.md) (ADR-008 Dict at Boundary, правила фреймворка).
 
 ---
 
