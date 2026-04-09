@@ -88,11 +88,11 @@ shared_resources_module/
 │   └── process_state_registry.py    ← (перенесено из process_module)
 └── ...
 
-# Для обратной совместимости
 process_module/state/
 ├── process_data.py                  # Алиас → shared_resources_module/state/
-└── process_state_registry.py       # Алиас → shared_resources_module/state/
 ```
+
+`ProcessStateRegistry` импортируется только из `shared_resources_module` (локальный shim-файл в `process_module/state/` удалён, ADR-165).
 
 **Импорты до рефакторинга:**
 ```python
@@ -107,8 +107,9 @@ from .state.process_state_registry import ProcessStateRegistry
 from .state.process_data import ProcessData
 from .state.process_state_registry import ProcessStateRegistry
 
-# process_module (для обратной совместимости)
-from ..shared_resources_module.state import ProcessData, ProcessStateRegistry
+# process_module — только ProcessData (алиас); ProcessStateRegistry — из SRM
+from .state import ProcessData
+from ..shared_resources_module.state import ProcessStateRegistry
 ```
 
 ### ADR-003: Dict at Boundary
@@ -225,8 +226,7 @@ process_module/
 ├── state/
 │   ├── __init__.py
 │   ├── process_state.py            # ProcessState (обёртка)
-│   ├── process_data.py             # Алиас → shared_resources_module
-│   └── process_state_registry.py   # Алиас → shared_resources_module
+│   └── process_data.py             # Алиас → shared_resources_module
 │
 ├── threads/
 │   ├── __init__.py

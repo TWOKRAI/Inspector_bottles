@@ -1,24 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-RouterManager (Refactored) — наследник ChannelRoutingManager.
+RouterManager — наследник ChannelRoutingManager.
 
-Фаза 4 — CRM унификация:
-  - Наследует ChannelRoutingManager: получает _channel_registry, _dispatcher, _buffer
-  - self._channel_registry (из CRM) заменяет self._channels (router's ChannelRegistry)
-  - self.channel_dispatcher = self._dispatcher (alias для backward compat)
-  - self.message_dispatcher остаётся (router-специфичный dispatcher для входящих)
-  - self._sender (AsyncSender) остаётся — его pipeline отличается от CRM buffer:
-      send_async → AsyncSender → _do_send() → middleware + resolve + channel.send()
-      (CRM buffer: enqueue(channel, data) → channel.write())
-
-  - IMessageChannel теперь наследует IChannel → QueueChannel совместим с CRM registry
-  - register_channel() override: inject logger, НЕ auto-register в dispatcher
-  - register_route() override: name-returning handler (RouterManager routing pattern)
-  - _resolve_channels() использует self._channel_registry
-
-Публичный API не изменён: send, send_async, receive, register_channel,
-register_route, register_message_handler, get_stats, etc.
+Координирует AsyncSender (outgoing pipeline), AsyncReceiver (incoming poll),
+channel_dispatcher (outgoing routing) и message_dispatcher (incoming handling).
 """
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -36,18 +23,7 @@ if TYPE_CHECKING:
 
 
 class RouterManager(ChannelRoutingManager):
-    """
-    Масштабируемый менеджер маршрутизации сообщений.
-
-    Координирует AsyncSender, AsyncReceiver, ChannelRegistry (из CRM),
-    channel_dispatcher (= self._dispatcher из CRM) и message_dispatcher.
-
-    Attrs:
-        router_id:          Синоним manager_name (backward compat)
-        channel_dispatcher: Dispatcher для маршрутизации ИСХОДЯЩИХ → каналы
-                            (= self._dispatcher из CRM)
-        message_dispatcher: Dispatcher для обработки ВХОДЯЩИХ сообщений
-    """
+    """Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + message_dispatcher."""
 
     def __init__(
         self,
@@ -79,8 +55,6 @@ class RouterManager(ChannelRoutingManager):
 
         self.router_id = manager_name
         self.queue_registry = queue_registry
-
-        # --- AsyncSender: buffers FULL send pipeline (middleware + resolve + send)
         self._sender = AsyncSender(
             name=manager_name,
             send_fn=self._do_send,
@@ -98,11 +72,7 @@ class RouterManager(ChannelRoutingManager):
 
         self._send_mw = MiddlewarePipeline("send", log_warning=self._log_warning)
         self._recv_mw = MiddlewarePipeline("receive", log_warning=self._log_warning)
-
-        # channel_dispatcher = CRM's _dispatcher (backward compat alias)
         self.channel_dispatcher = self._dispatcher
-
-        # message_dispatcher: router-specific, handles INCOMING messages
         self.message_dispatcher = Dispatcher(
             f"{manager_name}_message_dispatcher",
             process=process,
@@ -116,6 +86,11 @@ class RouterManager(ChannelRoutingManager):
             "errors":             0,
             "middleware_dropped": 0,
         }
+        self._stats_lock = threading.Lock()
+
+    def _inc_stat(self, key: str, value: int = 1) -> None:
+        with self._stats_lock:
+            self._stats[key] += value
 
     # ================================================================
     # LIFECYCLE
@@ -179,16 +154,16 @@ class RouterManager(ChannelRoutingManager):
 
     def _do_send(self, msg_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Применить middleware → резолвить каналы → channel.send()."""
-        self._stats["sent_attempted"] += 1
+        self._inc_stat("sent_attempted")
         try:
             processed = self._send_mw.apply(msg_dict)
             if processed is None:
-                self._stats["middleware_dropped"] += 1
+                self._inc_stat("middleware_dropped")
                 return {"status": "dropped", "reason": "send middleware returned None"}
 
             channels = self._resolve_channels(processed)
             if not channels:
-                self._stats["errors"] += 1
+                self._inc_stat("errors")
                 return {
                     "status": "error",
                     "reason": (
@@ -202,12 +177,12 @@ class RouterManager(ChannelRoutingManager):
             if len(channels) == 1:
                 result = channels[0].send(processed)
                 if isinstance(result, dict) and result.get("status") == "error":
-                    self._stats["errors"] += 1
+                    self._inc_stat("errors")
                     self._log_debug(
                         f"channel '{channels[0].name}' error: {result.get('reason')}"
                     )
                 else:
-                    self._stats["sent_ok"] += 1
+                    self._inc_stat("sent_ok")
                 return result
 
             results = []
@@ -216,14 +191,14 @@ class RouterManager(ChannelRoutingManager):
                 r = ch.send(processed)
                 results.append({"channel": ch.name, **r})
                 if isinstance(r, dict) and r.get("status") == "error":
-                    self._stats["errors"] += 1
+                    self._inc_stat("errors")
                     all_ok = False
             if all_ok:
-                self._stats["sent_ok"] += 1
+                self._inc_stat("sent_ok")
             return {"status": "success", "broadcast": True, "results": results}
 
         except Exception as e:
-            self._stats["errors"] += 1
+            self._inc_stat("errors")
             self._log_error(f"_do_send exception: {e}")
             return {"status": "error", "reason": str(e)}
 
@@ -258,7 +233,7 @@ class RouterManager(ChannelRoutingManager):
             try:
                 processed = self._recv_mw.apply(msg_dict)
                 if processed is None:
-                    self._stats["middleware_dropped"] += 1
+                    self._inc_stat("middleware_dropped")
                     continue
 
                 processed.setdefault("_receive_info", {}).update({
@@ -273,16 +248,18 @@ class RouterManager(ChannelRoutingManager):
                             processed,
                             key_field="command" if processed.get("command") else "type",
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self._log_warning(
+                            f"message_dispatcher error for '{dispatch_key}': {exc}"
+                        )
 
                 result.append(
                     Message.from_dict(processed) if return_messages else processed
                 )
-                self._stats["received"] += 1
+                self._inc_stat("received")
 
             except Exception as e:
-                self._stats["errors"] += 1
+                self._inc_stat("errors")
                 self._log_error(f"receive error: {e}")
 
         return result
@@ -484,9 +461,10 @@ class RouterManager(ChannelRoutingManager):
     def get_stats(self) -> Dict[str, Any]:
         """Полная статистика: счётчики, каналы, dispatcher'ы, потоки."""
         base = super().get_stats() if hasattr(super(), "get_stats") else {}
-
-        _ch_handlers  = self.channel_dispatcher.get_all_handlers()
-        _msg_handlers = self.message_dispatcher.get_all_handlers()
+        ch_h = self.channel_dispatcher.get_all_handlers()
+        msg_h = self.message_dispatcher.get_all_handlers()
+        with self._stats_lock:
+            stats_snap = dict(self._stats)
 
         router_stats: Dict[str, Any] = {
             "router_id":             self.router_id,
@@ -498,15 +476,15 @@ class RouterManager(ChannelRoutingManager):
             "callbacks_count":       self._receiver.callback_count,
             "send_middleware_count": len(self._send_mw),
             "recv_middleware_count": len(self._recv_mw),
-            "channel_handlers":      len(_ch_handlers),
-            "message_handlers":      len(_msg_handlers),
-            "channel_routes":        _ch_handlers,
-            "message_handler_list":  _msg_handlers,
+            "channel_handlers":      len(ch_h),
+            "message_handlers":      len(msg_h),
+            "channel_routes":        ch_h,
+            "message_handler_list":  msg_h,
             "queued_async":          self._sender.queued,
             "dropped":               self._sender.dropped,
             "processed":             self._receiver.processed,
-            **self._stats,
-            "errors":  self._stats["errors"] + self._receiver.errors,
+            **stats_snap,
+            "errors":  stats_snap["errors"] + self._receiver.errors,
             "channels": self._channel_registry.get_info(),
         }
 
@@ -606,11 +584,15 @@ class RouterManager(ChannelRoutingManager):
         return lambda msg: msg.get("channel")
 
     # ================================================================
-    # BACKWARD COMPAT
+    # REGISTRATION API (config-driven, Phase 8)
     # ================================================================
 
     def register_channel_handler(self, key: str, handler: Callable, **kwargs) -> bool:
-        """Backward-compat: регистрирует routing-handler в channel_dispatcher."""
+        """Зарегистрировать произвольный routing-handler в channel_dispatcher.
+
+        Аналог command_manager.register_command() для каналов.
+        Используется при config-driven channel setup (Phase 8).
+        """
         return self.channel_dispatcher.register_handler(
             key=key,
             handler=handler,

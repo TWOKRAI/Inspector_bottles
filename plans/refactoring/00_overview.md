@@ -37,7 +37,7 @@
 | 7  | `message_module`           | #2                 | Сжать `message.py` (508 LOC). Один `Message` + `MessageType` enum + опц. Pydantic-схема. Удалить backward compat «create без схемы». |
 | 8  | `shared_resources_module`  | #1                 | Аудит pickle-safe гарантий. Тест spawn на Windows. |
 | 9  | `router_module`            | #4, #7, #3         | Разнести `router_manager.py` (624 LOC): фасад + `sender.py` + `receiver.py` + `middleware.py`. Чётко отделить `targets` (имя процесса) от `FieldRouting.channel`. |
-| 10 | `worker_module`            | #1, #3             | Проверить, что `WorkerManager` и `Dispatcher` строятся из одних примитивов. Унифицировать жизненный цикл. |
+| 10 | `worker_module`            | #1                 | Документационное выравнивание. Удалено ложное ребро worker→dispatch (ADR-159). DECISIONS.md, §6.10 в ARCHITECTURE.md. |
 | 11 | `process_module`           | #10, #9, #5, #8, #2 | Сжать `process_module.py` (585 LOC): 6 субкомпонентов → 3–4 (`lifecycle` + `state` + `communication`). |
 | 12 | `command_module`           | #3                 | Оставить как самостоятельный. README объясняет разницу с `dispatch_module`. |
 | **13** | **`process_manager_module`** | #11, #12       | Аудит `launcher` / `spawner` / `runner`. Один линейный пайплайн запуска. **→ Milestone M1.** |
@@ -91,10 +91,10 @@
 | 6  | `config_module`              |  11   |  1074  |   3   |  TODO  | TODO | 11 | 1074 | 3 (49 passed) |
 | 7  | `message_module`             |  21   |  2088  |   3   |  TODO  | TODO | 16 | 1306 | 3 (112 passed) |
 | 8  | `shared_resources_module`    |  ~45  |  ~3500 |   8   |  DONE  | 2026-04-09 | Handle API, PSR-only queues, MemoryAccessStatus | — | — |
-| 9  | `router_module`              |  16   |  1995  |   2   |  TODO  | TODO | — | — | — |
-| 10 | `worker_module`              |  17   |  1591  |   6   |  TODO  | TODO | — | — | — |
-| 11 | `process_module`             |  27   |  2720  |   6   |  TODO  | TODO | — | — | — |
-| 12 | `command_module`             |   9   |   778  |   3   |  TODO  | TODO | — | — | — |
+| 9  | `router_module`              |  16   |  1995  |   2   |  TODO  | TODO | 15 | ~1818 | 4 (101 passed) |
+| 10 | `worker_module`              |  17   |  1591  |   6   |  TODO  | TODO | 17 | ~1503 | 6 (62 passed) |
+| 11 | `process_module`             |  27   |  2720  |   6   |  TODO  | TODO | 26 | ~2711 | 6 (69 passed) |
+| 12 | `command_module`             |   9   |   778  |   3   |  TODO  | TODO | 9 | ~746 | 3 (34 passed) |
 | 13 | `process_manager_module`     |  21   |  2486  |  10   |  TODO  | TODO | — | — | — |
 | 14 | `error_module`               |   7   |   580  |   2   |  TODO  | TODO | — | — | — |
 | 15 | `statistics_module`          |  13   |   981  |   3   |  TODO  | TODO | — | — | — |
@@ -112,6 +112,8 @@
 - `logger_module`: **14** файлов `.py` (без `tests/`), **~1526** LOC, **1** test-файл, **11** pytest; удалены `LogDispatcher`, пакет `batcher/`, `LogRecord` → `core/log_types.py`, убраны свойства `channels`/`batcher`/`self.dispatcher`; `error_module` переведён на `_channel_registry.get()` и импорт `LogRecord` из `log_types` (2026-04-09). Ранее: 16 / 1909 LOC — см. план `plans/refactoring/05_logger_module.md`.
 - `config_module`: **11** файлов `.py` (без `tests/`), **1074** LOC, **3** test-файла, **49** pytest; код без изменений — добавлены `DECISIONS.md` (локальные **ADR-143…146**, глобальный **ADR-023** без дублирования номеров с ADR-024…027), раздел **Dict at Boundary** в README, §**6.6** в `ARCHITECTURE.md`, индекс в главном `DECISIONS.md`; проверено: `sync_config` / `load_config_from_storage` работают только с **dict** на границе ConfigStore (2026-04-09). См. план `plans/refactoring/06_config_module.md`.
 - `message_module`: **16** файлов `.py` (без `tests/`), **~1306** LOC, **3** test-файла, **112** pytest; **`Message` = `SchemaBase`** (план **08**): единый источник полей, `model_dump`/`model_validate`, удалены `converters/`, `validators/`, `schemas/base.py`; `BaseMessageSchema` — алиас на `Message`; `IMessage` — `Protocol`; **ADR-147…152** в `modules/message_module/DECISIONS.md`. План 07: `plans/refactoring/07_message_module.md`. План 08: `plans/refactoring/08_message_schema_base.md`.
+- `shared_resources_module`: заполнен §**6.8** в `ARCHITECTURE.md` (Handle API, PSR, MemoryManager, pickle-safe); обновлена строка в главном `DECISIONS.md` (ADR-SRM-001…008). (2026-04-09).
+- `router_module`: **15** файлов `.py` (без `tests/`), **~1818** LOC (без мёртвого `core/_channel_registry.py`), **4** test-файла, **101** pytest; **thread-safe `_stats`**, `modules/router_module/DECISIONS.md` (**ADR-153…158**), заполнен §**6.9** в `ARCHITECTURE.md`, индекс в главном `DECISIONS.md`; `router_manager.py` **600** LOC; исправлен проглоченный `except: pass` в `message_dispatcher.dispatch()` (2026-04-09). См. план `plans/refactoring/10_router_module.md`.
 - `frontend_module` (147 файлов / 10 302 LOC) — четверть всего кода. Выделение в `frontend_framework` уберёт существенный объём из ядра.
 - Самые «толстые» файлы из §1.1 мета-плана (`dispatcher.py` 736, `router_manager.py` 624, `process_module.py` 585, `logger_manager.py` 582, `message.py` 508) — все целевые на расслоение в per-module шагах.
 - `logger_module` имеет только **1** test-файл — риск низкого покрытия. В per-module плане модуля #5 (Шаг 1) явно проверить и при необходимости добить тесты **до** рефакторинга.

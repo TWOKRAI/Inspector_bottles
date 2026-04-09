@@ -13,8 +13,10 @@ if TYPE_CHECKING:
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...base_manager import BaseManager, ObservableMixin
 
+from ..interfaces import ICommandManager
 
-class CommandManager(BaseManager, ObservableMixin):
+
+class CommandManager(BaseManager, ObservableMixin, ICommandManager):
     """
     Командный менеджер для обработки и управления командами.
 
@@ -52,13 +54,6 @@ class CommandManager(BaseManager, ObservableMixin):
         managers: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         config_manager: Optional[Any] = None,
-        # Обратная совместимость со старым API
-        logger_manager: Optional[Any] = None,
-        error_manager: Optional[Any] = None,
-        statistics_manager: Optional[Any] = None,
-        enable_logging: bool = True,
-        enable_error_tracking: bool = True,
-        enable_statistics: bool = True,
         **kwargs
     ):
         """
@@ -68,53 +63,33 @@ class CommandManager(BaseManager, ObservableMixin):
             manager_name (str): Имя менеджера (для BaseManager)
             process (Process): Ссылка на родительский процесс (опционально, для BaseManager)
             default_strategy (DispatchStrategy): Стратегия диспетчера по умолчанию
-            managers: Словарь менеджеров {имя: менеджер} (новый универсальный способ)
+            managers: Словарь менеджеров {имя: менеджер} (logger, stats и т.д.)
             config: Конфигурация включения/выключения функций {имя: bool}
             config_manager: Менеджер конфигурации для динамического обновления
-            logger_manager: Менеджер логирования (для обратной совместимости)
-            error_manager: Менеджер обработки ошибок (для обратной совместимости)
-            statistics_manager: Менеджер статистики (для обратной совместимости)
-            enable_logging: Включить логирование по умолчанию (для обратной совместимости)
-            enable_error_tracking: Включить отслеживание ошибок по умолчанию
-            enable_statistics: Включить статистику по умолчанию
             **kwargs: Дополнительные параметры для BaseManager и ObservableMixin
         """
         # Инициализация BaseManager
         BaseManager.__init__(self, manager_name=manager_name, process=process)
-        
+
         # Для обратной совместимости
         self.process_name = manager_name
-        
-        # Поддержка старого API для обратной совместимости
-        if managers is None:
-            managers = {}
-            if logger_manager:
-                managers['logger'] = logger_manager
-            if error_manager:
-                managers['error'] = error_manager
-            if statistics_manager:
-                managers['statistics'] = statistics_manager
-        
-        if config is None:
-            config = {
-                'logger': enable_logging,
-                'error': enable_error_tracking,
-                'statistics': enable_statistics
-            }
-        
+
+        mgr = managers or {}
+        cfg = config or {}
+
         # Инициализация ObservableMixin
         ObservableMixin.__init__(
             self,
-            managers=managers,
-            config=config
+            managers=mgr,
+            config=cfg,
         )
-        
+
         self.dispatcher = Dispatcher(
             manager_name=f"{manager_name}_commands",
             process=process,
             default_strategy=default_strategy,
-            managers=managers,
-            config=config,
+            managers=mgr,
+            config=cfg,
         )
         
         # НЕ вызываем initialize() здесь - это делается явно после создания
@@ -236,7 +211,8 @@ class CommandManager(BaseManager, ObservableMixin):
             message (Dict): Сообщение для обработки. Ожидается поле 'command' с именем команды.
 
         Returns:
-            Any: Результат выполнения команды или сообщение об ошибке
+            Any: Результат выполнения команды или ``{"status": "error", "reason": "..."}``
+            (ошибки обрабатываются внутри ``Dispatcher.dispatch()``).
 
         Example:
             message = {
@@ -250,27 +226,19 @@ class CommandManager(BaseManager, ObservableMixin):
         
         self._log_debug(f"Handling command: {command_name}", module="command_manager", command=command_name)
         self._record_metric("command_manager.command.execution.attempts", tags={"command": command_name})
-        
-        try:
-            result = self.dispatcher.dispatch(message, key_field="command", data_field="data")
-            
-            duration = time.time() - start_time
-            if isinstance(result, dict) and result.get("status") == "error":
-                self._log_warning(f"Command '{command_name}' failed: {result.get('reason')}", module="command_manager")
-                self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
-            else:
-                self._log_info(f"Command '{command_name}' executed successfully in {duration:.3f}s", module="command_manager")
-                self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
-            
-            self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
-            return result
-        except Exception as e:
-            duration = time.time() - start_time
-            self._log_error(f"Command '{command_name}' execution failed: {str(e)}", module="command_manager")
-            self._track_error(e, {"command": command_name, "message": str(message)})
-            self._record_timing("command_manager.command.execution.error_duration", duration)
+
+        result = self.dispatcher.dispatch(message, key_field="command", data_field="data")
+
+        duration = time.time() - start_time
+        if isinstance(result, dict) and result.get("status") == "error":
+            self._log_warning(f"Command '{command_name}' failed: {result.get('reason')}", module="command_manager")
             self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
-            raise
+        else:
+            self._log_info(f"Command '{command_name}' executed successfully in {duration:.3f}s", module="command_manager")
+            self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
+
+        self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
+        return result
 
     def get_commands(self) -> List[Dict]:
         """

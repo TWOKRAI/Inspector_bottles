@@ -1843,7 +1843,11 @@
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-140…142 (удаление LogDispatcher, BatchManager, выделение LogRecord) |
 | `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-023 (global) + ADR-143…146 (Dict at Boundary, no I/O, пять компонентов, env-fallback) |
 | `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-147…152 (Message = SchemaBase, MessageAdapter, IMessage Protocol, routers) |
-| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…006 (Handle API, PSR queues, MemoryAccessStatus, wait_for_event) |
+| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-153…158 (CRM inheritance, name-returning handlers, dual dispatchers, thread-safe stats) |
+| `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-159…162 (нет зависимости от dispatch, dual config, self.name alias, WorkerInfo TypedDict) |
+| `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-163…167 + 166a (dual comm API, ISharedResources DI, PSR shim removal, managers pipeline, lifecycle init + delegators, importlib) |
+| `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-168…172 (ICommandManager wiring, legacy kwargs removal, dead except removal, process_name alias, CRM distinction) |
+| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…008 (Handle API, PSR single source of truth, MemoryAccessStatus, for_process naming, expanded config) |
 
 ---
 

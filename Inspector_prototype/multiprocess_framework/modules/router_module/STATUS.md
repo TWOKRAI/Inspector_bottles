@@ -1,21 +1,28 @@
 # router_module — Статус рефакторинга
 
-## Текущий этап: 4 / 8
+## Текущий этап: 5 / 8
 
 ## Оценки (0–10)
 
 | Критерий | Оценка | Комментарий |
 |---|---|---|
-| Код | 9 | Мигрирован на CRM; _channel_registry из CRM; IMessageChannel(IChannel) |
-| Тесты | 8 | ~797 строк тестов; все проходят; нет тестов _attach_logger |
-| Документация | 9 | README — единый источник правды; лишние файлы удалены |
-| Связанность | 9 | Наследует ChannelRoutingManager; IMessageChannel(IChannel) унифицирован |
-| Дублирование | 9 | ChannelRegistry удалён из RouterManager; используется self._channel_registry из CRM |
-| Работоспособность | 8 | correlation_id отсутствует (этап 5); ErrorManager не подключён |
+| Код | 8 | CRM-наследование стабильно; `router_manager.py` ~600 LOC; мёртвый `_channel_registry.py` удалён; `_stats` под Lock |
+| Тесты | 8 | 4 файла тестов; адаптеры, `channel_types`, `_attach_logger`, concurrent stats; нет интеграции с LoggerManager в отдельных e2e |
+| Документация | 8 | README; `DECISIONS.md` ADR-153…158; §6.9 в `ARCHITECTURE.md`; индекс в главном `DECISIONS.md` |
+| Связанность | 9 | Чистое наследование CRM; осознанный импорт `IChannel` (ADR-157) |
+| Дублирование | 9 | Локальный ChannelRegistry удалён; единый реестр из CRM |
+| Работоспособность | 7 | correlation_id, ErrorManager/StatsManager — следующие этапы по плану модуля |
 
 ## Обновление 2026-04-02
 
 - **`RouterManagerConfig`:** поле **`duplicate_messages_to_logger`** (см. **ADR-113**) — согласование с `ProcessManagers` и `ManagersConfig`.
+
+## Обновление 2026-04-09 (план `10_router_module`)
+
+- Удалён неиспользуемый `core/_channel_registry.py`; реестр только из CRM.
+- Thread-safe счётчики `_stats` (`threading.Lock`, `_inc_stat`, снимок в `get_stats`).
+- Тесты: `test_router_adapter.py`, `test_schema_adapter.py`, расширения в `test_router_manager.py`.
+- Документация: `modules/router_module/DECISIONS.md`, §6.9 в `ARCHITECTURE.md`, строка в главном `DECISIONS.md`.
 
 ## Что сделано в CRM-миграции (Фаза 4)
 
@@ -51,16 +58,16 @@ register_route("order", "queue_channel")
 - [ ] Этап 4: ErrorManager интегрирован через ObservableMixin
 - [ ] Этап 5: correlation_id для request-response паттерна
 - [ ] Этап 6: StatsManager подключён
-- [ ] Этап 7: Тесты _attach_logger + интеграционные тесты с LoggerManager
+- [x] Этап 7: Тесты адаптеров + `_attach_logger` + `channel_types` (интеграционные с LoggerManager — опционально позже)
 - [ ] Этап 8: Полная интеграция с process_module (config-driven setup)
 
 ## Известные проблемы
 
 - **configs/:** `RouterManagerConfig` (SchemaBase) — метаданные; рантайм не переведён
-- `correlation_id` для request-response — этап 5
+- `correlation_id` для request-response — этап 5 (чеклист)
 - `ErrorManager` не подключён — ошибки через `_log_error` попадают в `LoggerManager`
 - `StatsManager` не реализован
-- Config-driven channels (объявление `worker_in` через конфиг процесса) — этап 4
+- Config-driven channels (объявление `worker_in` через конфиг процесса) — этап 8
 
 ## История изменений
 
@@ -70,3 +77,4 @@ register_route("order", "queue_channel")
 | 2026-03-12 | fix bugs, log injection, clean adapter, clean docs | 1–2 |
 | 2026-03-12 | CRM Фаза 4: RouterManager(ChannelRoutingManager), IMessageChannel(IChannel) | 3–4 |
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |
+| 2026-04-09 | План 10: dead code, Lock для _stats, тесты адаптеров, DECISIONS + ARCH §6.9 | 5 |

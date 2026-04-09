@@ -104,7 +104,6 @@ graph BT
 
     command --> dispatch
     worker --> base
-    worker --> dispatch
 
     process --> worker
     process --> router
@@ -385,11 +384,154 @@ MessageAdapter(sender=name)
 - **Поле `routers`:** RouterManager'ы внутри процесса.
 
 📖 [`modules/message_module/README.md`](modules/message_module/README.md) · [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md)
-### 6.8 `shared_resources_module` — *TODO (после модуля #8)*
-### 6.9 `router_module` — *TODO (после модуля #9)*
-### 6.10 `worker_module` — *TODO (после модуля #10)*
-### 6.11 `process_module` — *TODO (после модуля #11)*
-### 6.12 `command_module` — *TODO (после модуля #12)*
+
+### 6.8 `shared_resources_module` — межпроцессные ресурсы
+
+**Роль:** Централизованный pickle-safe реестр всех разделяемых ресурсов (очереди, события, SharedMemory). Разделяет статическую конфигурацию (ConfigStore) от динамического состояния (ProcessStateRegistry). Зависит только от #1 `base_manager`.
+
+**SharedResourcesManager** (~408 LOC) — фасад-делегатор: оркестрирует 5 внутренних менеджеров.
+**ProcessStateRegistry** (~230 LOC) — единственный источник истины для Queue/Event/status.
+**ProcessHandle** (~226 LOC) — chainable Handle API для доступа к ресурсам процесса.
+**MemoryManager** (~414 LOC) — жизненный цикл SharedMemory (owner create/unlink, consumer open/close).
+
+```
+SharedResourcesManager (facade)
+    ├── register_process(name, config) — единая точка регистрации (ADR-018)
+    ├── for_process(name) → ProcessHandle — Handle API (ADR-SRM-002)
+    │   ├── .queue("system").send(msg)     — QueueHandle
+    │   ├── .event("stop").set()           — EventHandle
+    │   └── .memory("frames").write(data)  — MemoryHandle
+    ├── ConfigStore — dict-хранилище (pickle-safe, статика)
+    ├── ProcessStateRegistry — Dict[str, ProcessData] (динамика)
+    │   └── ProcessData: status, queues (Proxy), events (Proxy), metadata
+    ├── QueueRegistry — делегирует хранение в PSR (ADR-SRM-003)
+    ├── EventManager — системные события + подписки + router-интеграция
+    └── MemoryManager — SharedMemory + MemoryAccessStatus enum (ADR-SRM-004)
+```
+
+Ключевые решения (ADR-SRM-001…008):
+- **Handle API:** `for_process()` → QueueHandle/EventHandle/MemoryHandle — единый chainable доступ (**ADR-SRM-002**).
+- **PSR — single source of truth:** QueueRegistry не кеширует очереди, делегирует в PSR (**ADR-SRM-003**).
+- **Pickle-safe:** ConfigStore = dict, Queue/Event — нативно. `reinitialize_in_child()` восстанавливает EventManager._event_queue и MemoryManager.handles (**ADR-020**, **ADR-021**).
+- **MemoryAccessStatus enum** вместо bool — диагностические причины отказа (**ADR-SRM-004**).
+
+📖 [`modules/shared_resources_module/README.md`](modules/shared_resources_module/README.md) · [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md)
+
+### 6.9 `router_module` — маршрутизация сообщений
+
+**Роль:** Масштабируемая маршрутизация IPC-сообщений между процессами. CRM-наследник (#4), использует Message (#7), Dispatcher (#3).
+
+**RouterManager** (CRM-наследник) — фасад: AsyncSender (outgoing pipeline), AsyncReceiver (incoming poll), два dispatcher'а.  
+**RouterAdapter** — тонкая обёртка для ProcessModule (контекст отправителя, `send_to_channel`).  
+**RouterSchemaAdapter** — FieldRouting → карта каналов для регистрации.
+
+```
+RouterManager(ChannelRoutingManager)
+    ├── send() / send_async() → _send_mw → _resolve_channels → channel.send()
+    ├── receive() → _poll_all_channels → _recv_mw → message_dispatcher
+    ├── channel_dispatcher (= CRM._dispatcher) — исходящие (handlers возвращают имя канала)
+    ├── message_dispatcher — входящие обработчики
+    ├── AsyncSender — PriorityQueue + фоновый поток
+    └── AsyncReceiver — poll thread + callbacks
+```
+
+Ключевые решения (ADR-153…158):
+- **CRM inheritance:** `_channel_registry`, `_dispatcher` из CRM; AsyncSender — отдельный pipeline (**ADR-153**, **ADR-015**).
+- **Name-returning handlers:** dispatch возвращает имя канала, не результат записи (**ADR-154**).
+- **Thread-safe _stats:** счётчики под `threading.Lock` (**ADR-156**).
+
+📖 [`modules/router_module/README.md`](modules/router_module/README.md) · [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md)
+
+### 6.10 `worker_module` — управление потоками-воркерами
+
+**Роль:** Централизованное управление жизненным циклом потоков внутри ProcessModule: создание, запуск, остановка, пауза, мониторинг, перезапуск. Зависит только от base_manager (#1).
+
+**WorkerManager** (BaseManager + ObservableMixin, ~231 LOC) — фасад: делегирует WorkerRegistry (хранение) и WorkerLifecycle (создание/запуск/остановка потоков).
+**WorkerAdapter** (~138 LOC) — тонкая обёртка для ProcessModule.
+**WorkerSchemaAdapter** (~94 LOC) — извлечение настроек потока из SchemaBase-конфигов.
+
+```
+WorkerManager(BaseManager, ObservableMixin, IWorkerManager)
+    ├── create_worker() / start / stop / restart / pause / resume
+    ├── _worker_registry: WorkerRegistry (threading.Lock, Dict[str, WorkerInfo])
+    ├── _lifecycle: WorkerLifecycle (create thread, start, stop, auto-restart)
+    ├── ThreadConfig (runtime) — to_dict/from_dict (Dict at Boundary)
+    └── ThreadWorkerConfig(SchemaBase) — декларативный конфиг (Pydantic)
+```
+
+Два режима выполнения:
+- **LOOP** — бесконечный цикл, stop_event для остановки. Финальный статус: STOPPED.
+- **TASK** — одноразовое выполнение. Финальный статус: COMPLETED.
+
+Два типа воркеров: **SYSTEM** (фреймворк, e.g. message_processor), **APPLICATION** (пользовательский).
+
+Ключевые решения (ADR-159…162):
+- **Нет зависимости от dispatch_module:** WorkerManager — lifecycle manager, не message router (ADR-159).
+- **Dual config:** ThreadConfig (runtime) + ThreadWorkerConfig (SchemaBase) — осознанное разделение (ADR-160).
+
+📖 [`modules/worker_module/README.md`](modules/worker_module/README.md) · [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md)
+
+### 6.11 `process_module` — базовый класс процесса
+
+**Роль:** Сборка worker, router, logger, command, config, statistics, console, shared resources в единый `ProcessModule` — базовый класс для прикладных процессов. Зависит от #2 `data_schema_module`, #5 `logger_module`, #8 `shared_resources_module`, #9 `router_module`, #10 `worker_module`.
+
+**ProcessModule** (BaseManager + ObservableMixin + IProcessModule) — фасад: делегирует подсистемам без изменения публичного контракта для 19+ наследников.
+
+```
+ProcessModule
+    ├── ProcessLifecycle — initialize/shutdown; конфиг/очереди: тело в ProcessLifecycle, вызов через `process._init_configuration` / `_init_queues` (делегаты → lifecycle, см. ADR-166a)
+    ├── ProcessManagers — pipeline: _create_*_manager → register → attach adapters → event_manager.set_router_manager
+    ├── ProcessCommunication — send_message / broadcast / receive_message; send / receive (расширенный API)
+    ├── ProcessState — регистрация и обновление состояния в PSR (через shared_resources)
+    └── SystemThreads — системные потоки (например message_processor)
+```
+
+Два API коммуникации (ADR-163):
+- **`send_message(target, message)`** → `bool`
+- **`send(message)`** → `Dict` со статусом
+
+**ISharedResources** (Protocol) — DI без жёсткой связи на конкретный SRM (ADR-164).
+
+Ключевые решения (ADR-163…167, ADR-166a):
+- **Dual comm API** и **ISharedResources** — см. выше.
+- **Удалён shim** `process_module/state/process_state_registry.py`; `ProcessStateRegistry` только из `shared_resources_module` (ADR-165).
+- **ProcessManagers** — декомпозиция `initialize()` на подметоды (ADR-166).
+- **Конфиг/очереди** — реализация в `ProcessLifecycle`, вызов через `ProcessModule._init_*` (делегаты, ADR-166a).
+- **Воркеры из конфига** — `importlib.import_module` (ADR-167).
+
+📖 [`modules/process_module/README.md`](modules/process_module/README.md) · [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md)
+
+### 6.12 `command_module` — фасад для обработки команд
+
+**Роль:** Тонкий фасад над `dispatch_module` с семантикой «команда». Предоставляет `register_command(name, handler)` / `handle_command(msg)` вместо низкоуровневых `register_handler` / `dispatch`. Зависит от `dispatch_module` (#3) и `base_manager` (#1).
+
+**CommandManager** (BaseManager + ObservableMixin + ICommandManager, ~360 LOC) — фасад: внутренний `Dispatcher` для маршрутизации `msg["command"]` → handler.  
+**BaseCommandManager** (~55 LOC) — lightweight конкретный класс для тестов и простых случаев. Только EXACT_MATCH, без ObservableMixin.  
+**CommandAdapter** (~109 LOC) — тонкая обёртка для ProcessModule, добавляет `execute_via_message()`.  
+**CommandManagerConfig** (SchemaBase) — плоская схема для реестра и UI.
+
+```
+CommandManager(BaseManager, ObservableMixin, ICommandManager)
+    ├── register_command(name, handler) → dispatcher.register_handler()
+    ├── handle_command(msg) → dispatcher.dispatch(msg, key="command")
+    ├── get_commands() / get_command_info() / get_commands_by_tag()
+    ├── overwrite_command() / update_command_metadata() / update_command_tags()
+    └── dispatcher: Dispatcher (composition, all 4 strategies available)
+```
+
+**Не путать с CRM:** CommandManager маршрутизирует команды **к функциям**. CRM маршрутизирует данные **в каналы** (файлы, очереди). Общее — оба используют Dispatcher через композицию (ADR-172).
+
+**Синхронный by design (ADR-172).** Async-буферизация обеспечена выше — RouterManager (AsyncSender + message_processor thread). CommandManager работает внутри потока message_processor. Команды — быстрые управляющие сигналы (set_fps, start_capture). Тройной dispatch path: `message_dispatcher → CommandManager → Dispatcher` — O(1) × 3, не bottleneck. Тяжёлые handlers → worker thread, не async command.
+
+Интеграция: `ProcessLifecycle._register_commands_with_router()` мостит команды в `router.message_dispatcher`, чтобы IPC-сообщения (из GUI) доходили до command handlers. `message_dispatcher` — встроенный generic аналог, CommandManager добавляет семантику (tags, metadata, timing stats).
+
+Ключевые решения (ADR-168…172):
+- **ICommandManager подключён** к CommandManager (ADR-168)
+- **Нет наследования от CRM, синхронный by design** — разные паттерны (ADR-172)
+- **Legacy kwargs удалены** — единственный caller использует новый API (ADR-169)
+
+📖 [`modules/command_module/README.md`](modules/command_module/README.md) · [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md)
+
 ### 6.13 `process_manager_module` — *TODO (после модуля #13, milestone M1)*
 ### 6.14 `error_module` — *TODO (после модуля #14)*
 ### 6.15 `statistics_module` — *TODO (после модуля #15)*

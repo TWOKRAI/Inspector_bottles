@@ -28,12 +28,12 @@
 ## Известные проблемы
 
 - **configs/:** `CommandManagerConfig` (SchemaBase)
-- Dead code: `raise` в `except`-блоке `handle_command` — никогда не достигается, т.к. `Dispatcher.dispatch()` сам перехватывает все исключения. Не критично — можно убрать при следующем рефакторинге.
 
 ## История изменений
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-04-09 | Systematic refactoring: ICommandManager wired, legacy kwargs removed, dead except removed, DECISIONS.md (ADR-168..172), §6.12 | 8 |
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |
 | 2026-03-12 | Рефакторинг: docs/ удалены, новый README.md | 8 |
 | 2026-03-12 | Fix: `BaseCommandManager` ABC → конкретный lightweight-класс | 8 |

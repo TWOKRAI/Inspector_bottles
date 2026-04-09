@@ -5,8 +5,8 @@
 Все процессы теперь являются менеджерами с единым интерфейсом.
 """
 
+import importlib
 from typing import Dict, Any, Optional
-from multiprocessing import Queue
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...base_manager.interfaces import IBaseManager
@@ -15,8 +15,6 @@ from ...base_manager.interfaces import IBaseManager
 from ..interfaces import IProcessModule, ISharedResources
 from ..types import ProcessStatus
 
-# Импорт компонентов из нового модуля
-from ..configs import ProcessConfigHandler
 from ..communication import ProcessCommunication
 
 # Импорт компонентов процесса
@@ -135,64 +133,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ========================================================================
     # ИНИЦИАЛИЗАЦИЯ КОМПОНЕНТОВ
     # ========================================================================
-    
-    def _init_configuration(self):
-        """Инициализация конфигурации процесса."""
-        # Создаем ProcessConfigHandler
-        self.config_handler = ProcessConfigHandler(
-            self.name,
-            self.shared_resources,
-            self.config
-        )
-        
-        # Создаем ConfigManager локально (как в старом ProcessCore)
-        from ...config_module import ConfigManager
-        self.config_manager = ConfigManager()
-        
-        # Загружаем конфигурацию из ProcessData если доступна (для ConfigManager)
-        # ConfigManager refactored не имеет update_process_config — конфиг берётся из config_handler
-        
-        # Устанавливаем config_manager в config_handler
-        self.config_handler.config_manager = self.config_manager
-        
-        # Обновляем self.config из config_handler (Config.data — плоский dict)
-        self.config = self.config_handler.data if self.config_handler else {}
-    
-    def _init_queues(self):
-        """Инициализация очередей процесса (функциональность ProcessCore)."""
-        # Получаем ProcessData для этого процесса
-        process_data = None
-        if self.shared_resources:
-            process_data = self.shared_resources.get_process_data(self.name)
-        
-        # Получаем очереди из ProcessData если доступны
-        if process_data and process_data.queues:
-            queues_dict = {}
-            for queue_type in process_data.queues.keys():
-                queue = process_data.get_queue(queue_type)
-                if queue:
-                    queues_dict[queue_type] = queue
-            self.queues = queues_dict if queues_dict else None
-        else:
-            self.queues = None
-        
-        # Если очереди не были получены из ProcessData, создаем дефолтные
-        if not self.queues:
-            self.queues = {
-                'system': Queue(maxsize=100),
-                'data': Queue(maxsize=50),
-                'broadcast': Queue(maxsize=20),
-                'custom': Queue(maxsize=20),
-            }
-        
-        # Получаем queue_registry и memory_manager через shared_resources (DI)
-        if self.shared_resources:
-            self.queue_registry = getattr(self.shared_resources, "queue_registry", None)
-            self.memory_manager = getattr(self.shared_resources, "memory_manager", None)
-        else:
-            self.queue_registry = None
-            self.memory_manager = None
-    
+
+    def _init_configuration(self) -> None:
+        """Инициализация конфигурации процесса. Реализация в ProcessLifecycle."""
+        self._lifecycle._init_configuration()
+
+    def _init_queues(self) -> None:
+        """Инициализация очередей процесса. Реализация в ProcessLifecycle."""
+        self._lifecycle._init_queues()
+
     def _init_managers(self):
         """Инициализация менеджеров процесса через ObservableMixin."""
         self._process_managers.initialize()
@@ -271,7 +220,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 continue
             try:
                 module_path, class_name = wc["class"].rsplit(".", 1)
-                module = __import__(module_path, fromlist=[class_name])
+                module = importlib.import_module(module_path)
                 cls = getattr(module, class_name)
                 instance = cls(process=self, config=wc.get("config", {}))
                 target = getattr(instance, "run", instance)
@@ -436,11 +385,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         """Получение менеджера по имени (делегирование к ObservableMixin напрямую)."""
         # Вызываем напрямую ObservableMixin, чтобы избежать рекурсии через ProcessManagers
         return ObservableMixin.get_manager(self, name)
-    
-    def reload_manager(self, manager_name: str) -> bool:
-        """Пересоздать менеджер на основе текущей конфигурации."""
-        return self._process_managers.reload_manager(manager_name)
-    
+
     # ========================================================================
     # КОММУНИКАЦИЯ (расширенные методы для совместимости)
     # ========================================================================
@@ -487,7 +432,11 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     def log(self, level: str, message: str, context: str = None):
         """
         Логирование через адаптер (для совместимости со старым API).
-        
+
+        .. deprecated::
+            Предпочтительно ``_log_info`` / ``_log_error`` и родственные методы
+            или адаптер логгера; метод сохранён для подклассов и существующих тестов.
+
         Args:
             level: Уровень логирования (INFO, DEBUG, ERROR и т.д.)
             message: Текст сообщения
@@ -536,13 +485,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if self.worker_manager:
             self.worker_manager.start_all_workers()
 
-        self.log("INFO", f"Process '{self.name}' started", "lifecycle")
+        self._log_info(f"Process '{self.name}' started", module="lifecycle")
 
     def stop(self):
         """Остановка процесса — статус STOPPING, остановка воркеров и shutdown."""
         self.update_process_state(status=ProcessStatus.STOPPING.value)
 
-        self.log("INFO", f"Process '{self.name}' stopping", "lifecycle")
+        self._log_info(f"Process '{self.name}' stopping", module="lifecycle")
         self.stop_process = True
 
         if self.worker_manager:

@@ -4,9 +4,10 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-04-09:** Рефакторинг по `plans/refactoring/12_process_module.md`: инициализация конфигурации/очередей в `ProcessLifecycle` с делегатами на `ProcessModule` (ADR-166a), pipeline `ProcessManagers.initialize()`, удалён shim `state/process_state_registry.py`, `DECISIONS.md` (ADR-163…167), §6.11 в `ARCHITECTURE.md`, `importlib` для воркеров, удалён `reload_manager`, помечен deprecated `log()`.
 - Корневая сборка `managers`: **`configs/managers_config.py`** — blueprint-дефолты, **`RouterManagerConfig` / `CommandManagerConfig`**, **`managers_from_log_dir`** / **`managers_payload_for_proc`** + тонкие **`from_log_dir`** / **`managers_for_proc_dict`** на классе (ADR-112, **ADR-113**, **ADR-114**); нормализация **`normalize_managers_view`** + **`ProcessLaunchConfig`** (ADR-104). Публичный импорт **`ManagersConfig`** / **`managers_*`** с корня пакета **`process_module`** — лениво (**`__getattr__`**, **ADR-115**), рядом с **`ProcessModule`**.
 - Версия: 2.0.0 (Refactored)
-- Тесты: 61/62 проходят (98% успешность)
+- Тесты: 69/69 в `process_module/tests` (pytest)
 - Документация: ✅ полная
 - Циклические зависимости: ✓ устранены
 
@@ -158,15 +159,13 @@ process.broadcast_message({"event": "status_changed"})
 ## Известные ограничения
 
 1. Lazy imports в ProcessManagers (архитектурное ограничение Python)
-2. Алиасы в state/ (для обратной совместимости)
-3. 1 тест падает на log_info (не критично)
+2. `state/process_data.py` остаётся алиасом к `shared_resources_module` (типы/импорты)
 
 ---
 
 ## Что дальше
 
 ### Опционально
-- Удалить алиасы в state/ (требует update импортов проекта)
 - Добавить метрики производительности
 - Настроить CI/CD для тестов
 

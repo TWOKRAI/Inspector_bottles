@@ -5,8 +5,6 @@
 """
 
 import traceback
-from typing import Dict, Any, Optional
-
 from ..types import ProcessStatus
 
 
@@ -25,7 +23,68 @@ class ProcessLifecycle:
             process: Ссылка на ProcessModule
         """
         self.process = process
-    
+
+    def _init_configuration(self) -> None:
+        """Инициализация конфигурации процесса."""
+        from ..configs import ProcessConfigHandler
+        from ...config_module import ConfigManager
+
+        self.process.config_handler = ProcessConfigHandler(
+            self.process.name,
+            self.process.shared_resources,
+            self.process.config,
+        )
+        self.process.config_manager = ConfigManager()
+        self.process.config_handler.config_manager = self.process.config_manager
+        self.process.config = (
+            self.process.config_handler.data if self.process.config_handler else {}
+        )
+
+    def _init_queues(self) -> None:
+        """Инициализация очередей процесса.
+
+        Основной путь: очереди уже созданы через
+        SharedResourcesManager.register_process() → QueueRegistry.create_and_register_queues()
+        и хранятся в ProcessData. Здесь они просто извлекаются.
+
+        Fallback: если shared_resources не передан (тесты, standalone),
+        создаются локальные multiprocessing.Queue.
+        """
+        process_data = None
+        if self.process.shared_resources:
+            process_data = self.process.shared_resources.get_process_data(self.process.name)
+
+        if process_data and process_data.queues:
+            queues_dict = {}
+            for queue_type in process_data.queues.keys():
+                queue = process_data.get_queue(queue_type)
+                if queue:
+                    queues_dict[queue_type] = queue
+            self.process.queues = queues_dict if queues_dict else None
+        else:
+            self.process.queues = None
+
+        # Fallback: создать локальные очереди если не получены из SRM
+        if not self.process.queues:
+            from multiprocessing import Queue
+            self.process.queues = {
+                "system": Queue(maxsize=100),
+                "data": Queue(maxsize=50),
+                "broadcast": Queue(maxsize=20),
+                "custom": Queue(maxsize=20),
+            }
+
+        if self.process.shared_resources:
+            self.process.queue_registry = getattr(
+                self.process.shared_resources, "queue_registry", None
+            )
+            self.process.memory_manager = getattr(
+                self.process.shared_resources, "memory_manager", None
+            )
+        else:
+            self.process.queue_registry = None
+            self.process.memory_manager = None
+
     def initialize(self) -> bool:
         """
         Инициализация процесса.
@@ -34,10 +93,8 @@ class ProcessLifecycle:
             bool: True если инициализация успешна
         """
         try:
-            # 1. Инициализация конфигурации
+            # 1–2. Конфигурация и очереди (через process для мокаемости в тестах)
             self.process._init_configuration()
-            
-            # 2. Инициализация очередей
             self.process._init_queues()
             
             # 3. Инициализация менеджеров через ObservableMixin

@@ -17,6 +17,7 @@ import threading
 import time
 import unittest
 from queue import Queue
+from types import SimpleNamespace
 from typing import Any, Callable, Dict
 
 from ..core.router_manager import RouterManager
@@ -284,6 +285,62 @@ class TestReceive(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Тесты channel_types (фильтр суффикса после префикса процесса)
+# ---------------------------------------------------------------------------
+
+
+class TestChannelTypesFilter(unittest.TestCase):
+
+    def setUp(self):
+        proc = SimpleNamespace(name="proc")
+        self.router = RouterManager(manager_name="rt", process=proc)
+        self.ch_sys, self.q_sys = _make_channel("proc_system")
+        self.ch_data, self.q_data = _make_channel("proc_data")
+        self.router.register_channel(self.ch_sys)
+        self.router.register_channel(self.ch_data)
+        self.router.initialize()
+
+    def tearDown(self):
+        self.router.shutdown()
+
+    def test_receive_with_channel_types_filter(self):
+        self.q_sys.put({"type": "command", "command": "sys_cmd"})
+        self.q_data.put({"type": "command", "command": "data_cmd"})
+        msgs = self.router.receive(
+            timeout=0.2,
+            return_messages=False,
+            channel_types=["system"],
+        )
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].get("command"), "sys_cmd")
+
+
+# ---------------------------------------------------------------------------
+# Тесты register_channel — инъекция логгера
+# ---------------------------------------------------------------------------
+
+
+class TestAttachLogger(unittest.TestCase):
+
+    def setUp(self):
+        self.router = _make_router()
+        self.router.initialize()
+
+    def tearDown(self):
+        self.router.shutdown()
+
+    def test_attach_logger_injects_callbacks(self):
+        ch, _ = _make_channel("logged_ch")
+        pre_w, pre_e = ch._log_warning, ch._log_error
+        self.router.register_channel(ch)
+        # bound methods — разные объекты, но те же реализации от этого RouterManager
+        self.assertIs(ch._log_warning.__self__, self.router)
+        self.assertIs(ch._log_error.__self__, self.router)
+        self.assertIsNot(ch._log_warning, pre_w)
+        self.assertIsNot(ch._log_error, pre_e)
+
+
+# ---------------------------------------------------------------------------
 # Тесты message_dispatcher — обработчики входящих
 # ---------------------------------------------------------------------------
 
@@ -457,6 +514,21 @@ class TestMiddleware(unittest.TestCase):
         received = self.q.get_nowait()
         self.assertTrue(received.get("s1"))
         self.assertTrue(received.get("s2"))
+
+    def test_receive_middleware_exception_then_second_runs(self):
+        def broken(msg: dict):
+            raise RuntimeError("mw1")
+
+        def enrich(msg: dict):
+            msg["_after_bad"] = True
+            return msg
+
+        self.router.add_receive_middleware(broken)
+        self.router.add_receive_middleware(enrich)
+        self.q.put({"type": "command", "command": "pipe_test"})
+        messages = self.router.receive(timeout=0.1, return_messages=False)
+        self.assertEqual(len(messages), 1)
+        self.assertTrue(messages[0].get("_after_bad"))
 
 
 # ---------------------------------------------------------------------------
@@ -755,6 +827,38 @@ class TestThreadSafety(unittest.TestCase):
             t.join(timeout=3.0)
 
         self.assertEqual(errors, [], f"Errors in concurrent stats test: {errors}")
+
+    def test_concurrent_stats_consistency(self):
+        """sent_attempted совпадает с числом sync send + send_async под нагрузкой."""
+        ch, _ = _make_channel("stats_mix")
+        self.router.register_channel(ch)
+        n = 25
+        errors: list = []
+
+        def sync_send(i: int) -> None:
+            try:
+                self.router.send({"channel": "stats_mix", "command": f"s{i}"})
+            except Exception as e:
+                errors.append(e)
+
+        def async_send(i: int) -> None:
+            try:
+                self.router.send_async({"channel": "stats_mix", "command": f"a{i}"})
+            except Exception as e:
+                errors.append(e)
+
+        threads = (
+            [threading.Thread(target=sync_send, args=(i,)) for i in range(n)]
+            + [threading.Thread(target=async_send, args=(i,)) for i in range(n)]
+        )
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15.0)
+        self.assertEqual(errors, [], f"thread errors: {errors}")
+        time.sleep(1.0)
+        stats = self.router.get_stats()["router"]
+        self.assertEqual(stats["sent_attempted"], 2 * n)
 
 
 # ---------------------------------------------------------------------------
