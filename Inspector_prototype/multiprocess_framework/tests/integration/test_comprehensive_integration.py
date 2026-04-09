@@ -490,7 +490,7 @@ class TestInterProcessCommunication:
             
             # Отправляем через RouterManager
             if app.vision_process.router_manager:
-                result = app.vision_process.router_manager.send_message(message)
+                result = app.vision_process.router_manager.send(message)
                 assert result is not None
             
             # Ждем обработки
@@ -631,7 +631,7 @@ class TestInterProcessCommunication:
             
             # Отправляем через RouterManager любого процесса
             if app.vision_process.router_manager:
-                result = app.vision_process.router_manager.send_message(broadcast_message)
+                result = app.vision_process.router_manager.send(broadcast_message)
                 assert result is not None
             
             time.sleep(1)

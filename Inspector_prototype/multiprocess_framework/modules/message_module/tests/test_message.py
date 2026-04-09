@@ -606,3 +606,78 @@ class TestPickleSafe:
         assert restored["message"] == "test warning"
         assert restored["level"] == "warning"
 
+    def test_message_object_pickle_roundtrip(self):
+        """Message объект должен быть pickle-safe (Pydantic BaseModel сериализуется)."""
+        import pickle
+
+        msg = Message.create(
+            MessageType.COMMAND,
+            "sender",
+            targets=["target"],
+            command="start",
+            args={"key": "value"},
+        )
+        msg.add_metadata("test", 123)
+
+        pickled = pickle.dumps(msg)
+        restored = pickle.loads(pickled)
+
+        assert restored.type == msg.type
+        assert restored.sender == msg.sender
+        assert restored.command == msg.command
+        assert restored.args == msg.args
+        assert restored.metadata == msg.metadata
+
+    def test_message_dict_pickle_roundtrip(self):
+        """to_dict() → pickle → unpickle → from_dict() — полный цикл."""
+        import pickle
+
+        msg = Message.create(
+            MessageType.LOG,
+            "logger_proc",
+            targets=["logger"],
+            level="info",
+            message="test log",
+        )
+
+        d = msg.to_dict()
+        restored_dict = pickle.loads(pickle.dumps(d))
+        restored_msg = Message.from_dict(restored_dict)
+
+        assert restored_msg.type == "log"
+        assert restored_msg.message == "test log"
+        assert restored_msg.sender == "logger_proc"
+
+
+class TestExtraFields:
+    """Поведение extra='allow' при сериализации."""
+
+    def test_extra_field_in_constructor(self):
+        """Extra-поля через конструктор попадают в model_dump."""
+        msg = Message(type="general", sender="s", targets=["t"], custom_field="value")
+        dump = msg.model_dump()
+        assert "custom_field" in dump
+
+    def test_extra_field_in_to_dict(self):
+        """Extra-поля попадают в to_dict() (не фильтруются)."""
+        msg = Message(type="general", sender="s", targets=["t"], custom_field="value")
+        d = msg.to_dict()
+        assert "custom_field" in d
+
+    def test_extra_field_not_in_model_fields(self):
+        """Extra-поля не регистрируются как model_fields."""
+        assert "custom_field" not in Message.model_fields
+
+    def test_extra_field_survives_from_dict(self):
+        """Extra-поля выживают при from_dict() → to_dict() roundtrip."""
+        data = {
+            "type": "general",
+            "sender": "s",
+            "targets": ["t"],
+            "custom_field": "value",
+        }
+        msg = Message.from_dict(data)
+        assert msg.custom_field == "value"
+        d = msg.to_dict()
+        assert d.get("custom_field") == "value"
+

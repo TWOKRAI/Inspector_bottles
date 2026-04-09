@@ -187,7 +187,7 @@ class TestTemplateApplication:
             
             # Отправляем через RouterManager
             if app.vision_process.router_manager:
-                result = app.vision_process.router_manager.send_message(message)
+                result = app.vision_process.router_manager.send(message)
                 assert result is not None
             
         finally:

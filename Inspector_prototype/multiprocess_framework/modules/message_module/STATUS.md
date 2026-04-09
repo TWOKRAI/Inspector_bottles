@@ -7,7 +7,7 @@
 | Критерий | Оценка | Комментарий |
 |---|---|---|
 | Код | 9 | `Message` = `SchemaBase`; один источник полей (`model_fields`), без Converter/Validator |
-| Тесты | 9 | 112 pytest в модуле; `TestSchemaBaseIntegration` + проверка `model_dump` без `_msg_*` |
+| Тесты | 9 | 118 pytest в модуле; pickle roundtrip + extra-поля; `TestSchemaBaseIntegration` + `model_dump` без `_msg_*` |
 | Документация | 9 | README + `DECISIONS.md` (ADR-147…152), §6.7 в `ARCHITECTURE.md` |
 | Связанность | 9 | `IMessage` как `Protocol`; фабрики и адаптер без изменений публичного API |
 | Дублирование | 9 | Удалены `VALID_MESSAGE_FIELDS` / `MESSAGE_FIELD_DEFAULTS` / дублирующая `BaseMessageSchema` |
@@ -16,7 +16,8 @@
 ## Рефакторинг по плану `plans/refactoring/08_message_schema_base.md` (2026-04-09)
 
 - [x] `core/message.py` — `Message(SchemaBase)`, `@model_validator` вместо `apply_type_defaults`, `model_dump`/`model_validate` вместо конвертера
-- [x] Удалены `converters/`, `validators/`, `schemas/base.py`; `BaseMessageSchema` = алиас на `Message` в `schemas/__init__.py`
+- [x] Удалены `converters/`, `validators/`, `schemas/base.py` (код); `BaseMessageSchema` = алиас на `Message` в `schemas/__init__.py`
+- [x] Plan 08a: с диска убраны пустые каталоги `converters/`, `validators/`; интеграционные тесты `send_message` → `send`; pickle + extra тесты; примечание ADR-152 про `FieldRouting`
 - [x] `types/message_types.py` — только enums и `MESSAGE_TYPE_*`; убраны `VALID_MESSAGE_FIELDS`, `MESSAGE_FIELD_DEFAULTS`
 - [x] `utils/utils.py` — только `generate_message_id()`
 - [x] `schemas/command.py`, `schemas/log.py` — наследование `SchemaBase` + `FieldMeta` на ключевых полях
@@ -61,3 +62,4 @@
 | 2026-03-12 | interfaces.py (IMessage), MessageAdapter, README, encoding headers | 2 |
 | 2026-04-09 | План 07: сжатие `message.py`, DECISIONS ADR-147…151, §6.7 ARCHITECTURE, тесты clone/validate/parse | 2 |
 | 2026-04-09 | План 08: Message = SchemaBase, удаление Converter/Validator/base schema, IMessage → Protocol, ADR-152 | 2 |
+| 2026-04-09 | Plan 08a: удалены пустые converters/, validators/; integration send_message→send; pickle + extra тесты; ADR-152 про FieldRouting | 2 |
