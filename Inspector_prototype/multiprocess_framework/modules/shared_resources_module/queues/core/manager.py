@@ -2,10 +2,9 @@
 QueueRegistry — создание и доступ к очередям процессов.
 
 PSR (ProcessStateRegistry) — единственный source of truth для Queue ссылок.
-QueueRegistry делегирует хранение в PSR, сам держит только read-only view
-через registered_queues для обратной совместимости.
+QueueRegistry делегирует хранение в PSR.
 
-Pickle-safe: registered_queues — dict с Queue (нативно pickle-safe).
+Pickle-safe: Queue ссылки живут в ProcessData (pickle-safe).
 """
 
 import time
@@ -51,8 +50,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         )
 
         self._process_state_registry = process_state_registry
-        # Локальный кэш для broadcast и get_queue без PSR
-        self.registered_queues: Dict[str, Dict[str, Queue]] = {}
+        # Queue refs хранятся в PSR (ProcessData._queues_dict) — единственный source of truth
 
         self._stats = {"created": 0, "registered": 0, "removed": 0, "errors": 0}
 
@@ -71,7 +69,6 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
 
     def shutdown(self) -> bool:
         try:
-            self.registered_queues.clear()
             self.is_initialized = False
             self._log_info("QueueRegistry shutdown completed")
             return True
@@ -106,15 +103,12 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         process_name: str,
         queues: Dict[str, Queue],
     ) -> bool:
-        """Зарегистрировать очереди в кэше и PSR."""
+        """Зарегистрировать очереди в PSR (единственный source of truth)."""
         try:
-            self.registered_queues.setdefault(process_name, {}).update(queues)
             self._stats["registered"] += len(queues)
-
             if self._process_state_registry:
                 for queue_type, queue in queues.items():
                     self._process_state_registry.add_queue(process_name, queue_type, queue)
-
             self._log_debug(f"Registered {len(queues)} queues for '{process_name}'")
             return True
         except Exception as e:
@@ -134,15 +128,18 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         return queues
 
     def get_queue(self, process_name: str, queue_type: str) -> Optional[Queue]:
-        """Получить очередь. Приоритет: PSR → локальный кэш."""
+        """Получить очередь из PSR."""
         if self._process_state_registry:
-            q = self._process_state_registry.get_queue(process_name, queue_type)
-            if q is not None:
-                return q
-        return self.registered_queues.get(process_name, {}).get(queue_type)
+            return self._process_state_registry.get_queue(process_name, queue_type)
+        return None
 
     def get_process_queues(self, process_name: str) -> Dict[str, Queue]:
-        return self.registered_queues.get(process_name, {})
+        """Получить все очереди процесса из PSR."""
+        if self._process_state_registry:
+            pd = self._process_state_registry.get_process_data(process_name)
+            if pd:
+                return dict(pd.queues.items())
+        return {}
 
     def send_to_queue(
         self,
@@ -191,8 +188,11 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         queue_type: str = "system",
         exclude_process: Optional[str] = None,
     ) -> int:
+        """Разослать сообщение всем процессам через PSR."""
+        if not self._process_state_registry:
+            return 0
         sent = 0
-        for process_name in list(self.registered_queues.keys()):
+        for process_name in list(self._process_state_registry.get_process_names()):
             if exclude_process and process_name == exclude_process:
                 continue
             if self.send_to_queue(process_name, queue_type, message):
@@ -201,28 +201,34 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
 
     def get_queue_sizes(self) -> Dict[str, Dict[str, int]]:
         sizes: Dict[str, Dict[str, int]] = {}
-        for process_name, queues in self.registered_queues.items():
+        if not self._process_state_registry:
+            return sizes
+        for process_name in self._process_state_registry.get_process_names():
+            pd = self._process_state_registry.get_process_data(process_name)
+            if not pd:
+                continue
             sizes[process_name] = {}
-            for queue_type, queue in queues.items():
+            for queue_type in pd.queues:
+                queue = pd.get_queue(queue_type)
+                if queue is None:
+                    continue
                 try:
                     sizes[process_name][queue_type] = queue.qsize()
                 except (NotImplementedError, OSError, AttributeError):
                     sizes[process_name][queue_type] = 0
-                except Exception as e:
-                    self._log_error(f"get_queue_sizes error: {e}")
-                    sizes[process_name][queue_type] = -1
         return sizes
 
     def remove_process_queues(self, process_name: str) -> bool:
-        if process_name in self.registered_queues:
-            count = len(self.registered_queues[process_name])
-            del self.registered_queues[process_name]
-            self._stats["removed"] += count
+        """Удалить процесс из PSR (unregister) — только статистика; PSR чистит SRM/PSR."""
+        if self._process_state_registry and self._process_state_registry.has_process(process_name):
+            self._stats["removed"] += 1
             return True
         return False
 
     def get_registered_processes(self) -> List[str]:
-        return list(self.registered_queues.keys())
+        if self._process_state_registry:
+            return self._process_state_registry.get_process_names()
+        return []
 
     # =========================================================================
     # Утилиты
@@ -269,11 +275,17 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
     # =========================================================================
 
     def get_stats(self) -> Dict[str, Any]:
-        total = sum(len(q) for q in self.registered_queues.values())
+        process_names = self.get_registered_processes()
+        total = 0
+        if self._process_state_registry:
+            for p in process_names:
+                pd = self._process_state_registry.get_process_data(p)
+                if pd:
+                    total += len(pd.queues)
         queue_stats = {
             **self._stats,
             "total_queues": total,
-            "processes_count": len(self.registered_queues),
-            "processes": list(self.registered_queues.keys()),
+            "processes_count": len(process_names),
+            "processes": process_names,
         }
         return self._merge_stats("queues", queue_stats)

@@ -28,6 +28,7 @@ import numpy as np
 from ....base_manager import BaseManager, ObservableMixin
 from ..interfaces import IMemoryManager
 from ...mixins import ManagerStatsMixin
+from ...types.types import MemoryAccessStatus
 
 from .. import format as fmt
 from .. import platform as po
@@ -185,10 +186,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             shm_list = po.create_shm_blocks(name, size, coll)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
-                print(
-                    f"[MemoryManager] ERROR: Cannot create SharedMemory for '{name}'",
-                    flush=True,
-                )
                 continue
 
             pd.custom["memory_names"][name] = [shm.name for shm in shm_list]
@@ -274,11 +271,19 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         pack_fast: bool = True,
     ) -> Optional[str]:
         memory_data = self.get_memory_data(process_name, shm_name)
-        if not val.validate_memory_access(memory_data, shm_name, index):
-            self._warn_access(process_name, shm_name, index, "not initialized or invalid index")
+        access = val.validate_memory_access(memory_data, shm_name, index)
+        if access != MemoryAccessStatus.OK:
+            self._log_warning(
+                f"Memory access failed for '{process_name}'/'{shm_name}'[{index}]: {access.value}"
+            )
             return None
-        if not val.validate_write_operation(memory_data, shm_name, index, len(images)):
-            self._log_warning(f"Invalid write: index {index} or too many images")
+        write_status = val.validate_write_operation(
+            memory_data, shm_name, index, len(images)
+        )
+        if write_status != MemoryAccessStatus.OK:
+            self._log_warning(
+                f"Write validation failed for '{process_name}'/'{shm_name}'[{index}]: {write_status.value}"
+            )
             return None
         try:
             handles = memory_data["handles"]
@@ -291,10 +296,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             return shm.name
         except Exception as e:
             self._log_error(f"write_images error: {e}")
-            print(
-                f"[MemoryManager] ERROR: write_images failed for '{process_name}'/'{shm_name}': {e}",
-                flush=True,
-            )
             self._stats["errors"] += 1
             val.clear_memory_slot(memory_data.get("handles"), index)
             return None
@@ -309,7 +310,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         copy: bool = True,
     ) -> Optional[List[np.ndarray]]:
         memory_data = self.get_memory_data(process_name, shm_name)
-        if not val.validate_memory_access(memory_data, shm_name, index):
+        access = val.validate_memory_access(memory_data, shm_name, index)
+        if access != MemoryAccessStatus.OK:
+            self._log_warning(
+                f"Memory read failed for '{process_name}'/'{shm_name}'[{index}]: {access.value}"
+            )
             return None
         try:
             handles = memory_data["handles"]
@@ -373,16 +378,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             for pname in list(self._local_handles.keys()):
                 for shm_name in list(self._local_handles[pname].keys()):
                     self.close_memory(pname, shm_name)
-
-    def _warn_access(
-        self, process_name: str, shm_name: str, index: int, msg: str
-    ) -> None:
-        """Логирование и print fallback при ошибках доступа (ADR-026)."""
-        self._log_warning(f"Memory '{shm_name}' {msg} for '{process_name}'")
-        print(
-            f"[MemoryManager] WARNING: Memory '{shm_name}' {msg} for '{process_name}'",
-            flush=True,
-        )
 
     def _safe_close_shm(
         self,

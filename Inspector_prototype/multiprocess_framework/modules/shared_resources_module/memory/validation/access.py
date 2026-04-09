@@ -4,34 +4,31 @@
 
 from typing import Any, Dict, List, Optional
 
+from ...types.types import MemoryAccessStatus
+
 
 def validate_memory_access(
     memory_data: Optional[Dict],
     shm_name: str,
     index: int,
-) -> bool:
+) -> MemoryAccessStatus:
     """
     Проверить доступ к слоту памяти.
 
-    Args:
-        memory_data: результат get_memory_data (handles, params, coll, ...)
-        shm_name: имя блока памяти
-        index: индекс слота
-
     Returns:
-        True если доступ валиден
+        MemoryAccessStatus.OK если доступ валиден, иначе конкретная причина.
     """
     if not memory_data:
-        return False
+        return MemoryAccessStatus.NO_DATA
     if index < 0:
-        return False
+        return MemoryAccessStatus.INVALID_INDEX
     coll = memory_data.get("coll", {})
     if shm_name not in coll or index >= coll[shm_name]:
-        return False
+        return MemoryAccessStatus.INDEX_OUT_OF_RANGE
     handles = memory_data.get("handles")
     if handles is None or index >= len(handles) or handles[index] is None:
-        return False
-    return True
+        return MemoryAccessStatus.HANDLE_MISSING
+    return MemoryAccessStatus.OK
 
 
 def validate_write_operation(
@@ -39,41 +36,29 @@ def validate_write_operation(
     shm_name: str,
     index: int,
     num_images: int,
-) -> bool:
+) -> MemoryAccessStatus:
     """
     Проверить возможность записи num_images изображений в слот.
-
-    Args:
-        memory_data: результат get_memory_data
-        shm_name: имя блока
-        index: индекс слота
-        num_images: количество изображений для записи
-
-    Returns:
-        True если операция допустима
     """
     if not memory_data:
-        return False
-    if not validate_memory_access(memory_data, shm_name, index):
-        return False
+        return MemoryAccessStatus.NO_DATA
+    access = validate_memory_access(memory_data, shm_name, index)
+    if access != MemoryAccessStatus.OK:
+        return access
     params = memory_data.get("params", {})
     if shm_name not in params:
-        return False
+        return MemoryAccessStatus.PARAM_MISSING
     max_images = params[shm_name][0]
-    return num_images <= max_images
+    if num_images > max_images:
+        return MemoryAccessStatus.EXCEEDS_MAX_IMAGES
+    return MemoryAccessStatus.OK
 
 
 def clear_memory_slot(
     handles: Optional[List[Any]],
     index: int,
 ) -> None:
-    """
-    Обнулить буфер слота памяти.
-
-    Args:
-        handles: список SharedMemory объектов
-        index: индекс слота
-    """
+    """Обнулить буфер слота памяти."""
     if not handles or index >= len(handles) or handles[index] is None:
         return
     shm = handles[index]

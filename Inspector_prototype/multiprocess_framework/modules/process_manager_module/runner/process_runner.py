@@ -137,7 +137,7 @@ def _build_shared_resources_from_bundle(
     custom = dict(bundle.get("custom", {}))
     custom.setdefault("process_config", process_config)
 
-    shared_resources.register_process_state(
+    shared_resources.process_state_registry.register_process(
         process_name,
         initial_state={"custom": custom},
     )
@@ -182,7 +182,7 @@ def _build_shared_resources_from_bundle(
     for target_name, target_queues in routing_map.items():
         if target_name == process_name:
             continue
-        shared_resources.register_process_state(target_name)
+        shared_resources.process_state_registry.register_process(target_name)
         shared_resources.config_store.store(
             target_name, {"process": {}, "managers": {}}
         )
@@ -326,10 +326,9 @@ def _update_process_state(
     if not shared_resources:
         return
     try:
-        process_data = shared_resources.get_process_data(process_name)
-        if process_data and hasattr(process_data, "state"):
-            if isinstance(process_data.state, dict):
-                process_data.state["status"] = state
+        psr = getattr(shared_resources, "process_state_registry", None)
+        if psr is not None and hasattr(psr, "update_state"):
+            psr.update_state(process_name, status=state)
     except Exception:
         pass
 
@@ -381,7 +380,7 @@ def run_process_function(
             shared_resources = shared_resources_or_bundle or SharedResourcesManager()
             process_data = shared_resources.get_process_data(process_name)
             if process_data is None:
-                shared_resources.register_process_state(process_name)
+                shared_resources.process_state_registry.register_process(process_name)
 
         process_data = shared_resources.get_process_data(process_name)
 

@@ -91,26 +91,6 @@ class ISharedResources:
         """Получить данные процесса по имени."""
         ...
 
-    def register_process_state(
-        self,
-        process_name: str,
-        initial_state: Optional[Dict[str, Any]] = None,
-        queue_names: Optional[Dict[str, str]] = None,
-    ) -> bool:
-        """Зарегистрировать состояние процесса."""
-        ...
-
-    def update_process_state(
-        self,
-        process_name: str,
-        status: Optional[str] = None,
-        events: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        custom: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """Обновить состояние процесса."""
-        ...
-
     @property
     def queue_registry(self) -> Any:
         """Реестр очередей."""

@@ -43,14 +43,17 @@
 ## Обновление 2026-03-30 (ADR-102)
 
 - **`IProcessStateRegistry.register_process`**: удалён неиспользуемый параметр `config`; полезная нагрузка — в `initial_state.custom`.
-- **`register_process_state`**: больше не принимает `config`; аргумент `queue_names` по-прежнему игнорируется (совместимость вызова).
 - Документация: [../../docs/CONFIG_PATHS.md](../../docs/CONFIG_PATHS.md).
+
+## Обновление 2026-04-09
+
+- Legacy `register_process_state` / `update_process_state` на фасаде SRM удалены; используйте `process_state_registry` или `register_process()`. См. `DECISIONS.md` модуля.
 
 ## Известные ограничения
 
 - **configs/:** `SharedResourcesManagerConfig` (SchemaBase); **config_store/** — рантайм-хранилище (`ConfigStore`), не путать со схемами
 - MemoryManager.reinitialize_handles() открывает shm по именам — требует чтобы owner process ещё не сделал unlink
-- QueueRegistry.registered_queues — локальный кэш (дублирует PSR для broadcast); в следующей итерации можно убрать
+- Прямой доступ к `config_store` / `queue_registry` / … на фасаде помечен deprecated в docstring; предпочтительно `srm.for_process(name)`.
 
 ## История изменений
 
@@ -64,6 +67,7 @@
 | 2026-03-15 | events, queues: рефакторинг по примеру memory (core/, interfaces, ManagerStatsMixin, README, STATUS) | 8 |
 | 2026-03-15 | Проверочный рефакторинг: документация data_schema_module, ARCHITECTURE, INTERFACES_GUIDE, DataSchemaAdapter | 8 |
 | 2026-03-15 | Интерфейсы раскиданы по подмодулям: config/, state/, queues/, events/, memory/interfaces.py; core — ISharedResourcesManager + re-export | 8 |
+| 2026-04-09 | Рефакторинг v4.1: Handle API, удалён legacy SRM API, PSR — единственный source of truth для очередей, MemoryAccessStatus, fix wait_for_event, см. DECISIONS.md | 8 |
 
 ## Проверочный рефакторинг (2026-03-15)
 

@@ -4,7 +4,15 @@
 
 import pickle
 import pytest
-from ..types import ProcessStatus, ResourceType, EventType, ProcessDataDict, QueueConfigDict, MemoryConfigDict
+from ..types import (
+    ProcessStatus,
+    ResourceType,
+    EventType,
+    MemoryAccessStatus,
+    ProcessDataDict,
+    QueueConfigDict,
+    MemoryConfigDict,
+)
 
 
 class TestProcessStatus:
@@ -48,6 +56,12 @@ class TestEventType:
     def test_pickle_roundtrip(self):
         for et in EventType:
             assert pickle.loads(pickle.dumps(et)) == et
+
+
+class TestMemoryAccessStatus:
+    def test_ok_and_reasons_exist(self):
+        assert MemoryAccessStatus.OK.value == "ok"
+        assert MemoryAccessStatus.NO_DATA.value == "no_data"
 
 
 class TestTypedDicts:

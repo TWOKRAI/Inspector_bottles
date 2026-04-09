@@ -50,7 +50,13 @@ class ProcessAdapter(BaseAdapter):
             return ProcessStatus.ERROR.value
         try:
             if hasattr(self.manager, "shared_resources") and self.manager.shared_resources:
-                state = self.manager.shared_resources.get_process_state(self.manager.name)
+                sr = self.manager.shared_resources
+                psr = getattr(sr, "process_state_registry", None)
+                state = (
+                    psr.get_state(self.manager.name)
+                    if psr is not None and hasattr(psr, "get_state")
+                    else None
+                )
                 if state and "status" in state:
                     return state["status"]
             if self.manager.stop_process:

@@ -197,16 +197,15 @@ class TestUpdateProcessState:
 
     def test_update_state_updates_status(self) -> None:
         mock_srm = MagicMock()
-        mock_data = MagicMock()
-        mock_data.state = {"status": "running"}
-        mock_srm.get_process_data.return_value = mock_data
+        mock_psr = MagicMock()
+        mock_srm.process_state_registry = mock_psr
 
         _update_process_state(mock_srm, "P1", "error")
-        assert mock_data.state["status"] == "error"
+        mock_psr.update_state.assert_called_once_with("P1", status="error")
 
     def test_update_state_handles_missing_process(self) -> None:
         mock_srm = MagicMock()
-        mock_srm.get_process_data.return_value = None
+        mock_srm.process_state_registry = None
         _update_process_state(mock_srm, "P1", "error")
 
 

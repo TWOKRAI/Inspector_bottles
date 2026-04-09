@@ -41,6 +41,17 @@ class EventType(Enum):
     CONFIG_UPDATED = "config_updated"
 
 
+class MemoryAccessStatus(Enum):
+    """Результат валидации доступа к SharedMemory."""
+    OK = "ok"
+    NO_DATA = "no_data"
+    INVALID_INDEX = "invalid_index"
+    INDEX_OUT_OF_RANGE = "index_out_of_range"
+    HANDLE_MISSING = "handle_missing"
+    EXCEEDS_MAX_IMAGES = "exceeds_max_images"
+    PARAM_MISSING = "param_missing"
+
+
 # ---------------------------------------------------------------------------
 # TypedDict — контракты для dict-границ (Dict at Boundary)
 # ---------------------------------------------------------------------------

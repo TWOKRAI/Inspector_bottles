@@ -9,6 +9,7 @@ Pickle: _event_queue, _subscribers, _new_event_event исключаются.
 """
 
 import time
+from queue import Empty
 from typing import Any, Callable, Dict, List, Optional
 from multiprocessing import Event, Queue
 
@@ -168,21 +169,33 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
         event_type: Optional[EventType] = None,
         timeout: float = 1.0,
     ) -> Optional[Dict[str, Any]]:
-        if self._new_event_event is None or self._event_queue is None:
+        """
+        Ожидать событие определённого типа с таймаутом.
+
+        Non-matching события сохраняются и возвращаются в очередь после завершения.
+        """
+        if self._event_queue is None:
             return None
 
-        start = time.time()
-        while time.time() - start < timeout:
-            if self._new_event_event.wait(timeout=0.1):
+        deadline = time.time() + timeout
+        deferred: List[Dict[str, Any]] = []
+        try:
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return None
                 try:
-                    event_data = self._event_queue.get(timeout=0.1)
-                    if event_type is None or event_data.get("event_type") == event_type.value:
-                        return event_data
-                    self._event_queue.put(event_data)
-                except Exception:
-                    pass
-                self._new_event_event.clear()
-        return None
+                    event_data = self._event_queue.get(
+                        timeout=min(remaining, 0.5)
+                    )
+                except Empty:
+                    continue
+                if event_type is None or event_data.get("event_type") == event_type.value:
+                    return event_data
+                deferred.append(event_data)
+        finally:
+            for evt in deferred:
+                self._event_queue.put(evt)
 
     # =========================================================================
     # Вспомогательное

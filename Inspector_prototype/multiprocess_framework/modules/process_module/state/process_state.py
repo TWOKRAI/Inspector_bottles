@@ -30,17 +30,11 @@ class ProcessState:
             return
 
         try:
-            queue_names = {}
-            if self.process.queues:
-                queue_names = {
-                    queue_type: f"{self.process.name}_{queue_type}"
-                    for queue_type in self.process.queues.keys()
-                }
-
             shared = self.process.shared_resources
-            if hasattr(shared, "register_process_state"):
-                shared.register_process_state(
-                    process_name=self.process.name,
+            psr = getattr(shared, "process_state_registry", None)
+            if psr is not None and hasattr(psr, "register_process"):
+                psr.register_process(
+                    self.process.name,
                     initial_state={
                         "status": "initializing",
                         "metadata": {
@@ -48,10 +42,13 @@ class ProcessState:
                             "queues_count": len(self.process.queues) if self.process.queues else 0,
                         },
                     },
-                    queue_names=queue_names,
                 )
-            elif hasattr(shared, "update_process_state"):
-                shared.update_process_state(self.process.name, status="initializing")
+            elif hasattr(shared, "process_state_registry") and hasattr(
+                shared.process_state_registry, "update_state"
+            ):
+                shared.process_state_registry.update_state(
+                    self.process.name, status="initializing"
+                )
 
             self.process._log_info(f"Process state registered: {self.process.name}")
         except Exception as e:
@@ -78,9 +75,10 @@ class ProcessState:
 
         try:
             shared = self.process.shared_resources
-            if hasattr(shared, "update_process_state"):
-                shared.update_process_state(
-                    process_name=self.process.name,
+            psr = getattr(shared, "process_state_registry", None)
+            if psr is not None and hasattr(psr, "update_state"):
+                psr.update_state(
+                    self.process.name,
                     status=status,
                     events=events,
                     metadata=metadata,

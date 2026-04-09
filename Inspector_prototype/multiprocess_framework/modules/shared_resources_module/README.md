@@ -40,6 +40,26 @@ p = Process(target=worker, args=(srm,))
 p.start()
 ```
 
+### Handle API (единый доступ к ресурсам процесса)
+
+```python
+handle = srm.for_process("camera")
+
+handle.queue("system").send({"cmd": "start"})
+msg = handle.queue("system").receive(timeout=1.0)
+
+handle.event("stop").set()
+handle.event("stop").wait(timeout=5.0)
+
+# SharedMemory (после register_process с config["memory"])
+handle.memory("frame").write(images, index=0)
+imgs = handle.memory("frame").read(index=0)
+
+srm.broadcast({"cmd": "stop_all"})
+srm.has_process("camera")
+statuses = srm.get_all_statuses()  # Dict[str, ProcessStatus]
+```
+
 ---
 
 ## Архитектура

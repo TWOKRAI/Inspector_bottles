@@ -90,7 +90,7 @@
 | 5  | `logger_module`              |  16   |  1909  |   1   |  TODO  | TODO | 14 | 1526 | 1 (11 passed) |
 | 6  | `config_module`              |  11   |  1074  |   3   |  TODO  | TODO | 11 | 1074 | 3 (49 passed) |
 | 7  | `message_module`             |  21   |  2088  |   3   |  TODO  | TODO | 16 | 1306 | 3 (112 passed) |
-| 8  | `shared_resources_module`    |  41   |  3217  |   8   |  TODO  | TODO | — | — | — |
+| 8  | `shared_resources_module`    |  ~45  |  ~3500 |   8   |  DONE  | 2026-04-09 | Handle API, PSR-only queues, MemoryAccessStatus | — | — |
 | 9  | `router_module`              |  16   |  1995  |   2   |  TODO  | TODO | — | — | — |
 | 10 | `worker_module`              |  17   |  1591  |   6   |  TODO  | TODO | — | — | — |
 | 11 | `process_module`             |  27   |  2720  |   6   |  TODO  | TODO | — | — | — |

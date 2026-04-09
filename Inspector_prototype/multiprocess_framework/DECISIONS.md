@@ -1843,6 +1843,7 @@
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-140…142 (удаление LogDispatcher, BatchManager, выделение LogRecord) |
 | `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-023 (global) + ADR-143…146 (Dict at Boundary, no I/O, пять компонентов, env-fallback) |
 | `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-147…152 (Message = SchemaBase, MessageAdapter, IMessage Protocol, routers) |
+| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…006 (Handle API, PSR queues, MemoryAccessStatus, wait_for_event) |
 
 ---
 

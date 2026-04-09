@@ -50,7 +50,10 @@ def _create_process_impl(
             queue_registry.create_and_register_queues(name, queue_config)
 
         queues = queue_registry.get_process_queues(name) if queue_registry else {}
-        routing_map = dict(queue_registry.registered_queues) if queue_registry else {}
+        routing_map: Dict[str, Any] = {}
+        if queue_registry:
+            for pname in queue_registry.get_registered_processes():
+                routing_map[pname] = queue_registry.get_process_queues(pname)
         process_data = shared_resources.get_process_data(name) if shared_resources else None
         custom = dict(process_data.custom) if process_data and process_data.custom else {}
         custom.setdefault("process_config", process_config)

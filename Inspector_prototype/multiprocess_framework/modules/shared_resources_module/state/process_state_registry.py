@@ -51,8 +51,8 @@ class ProcessStateRegistry(IProcessStateRegistry):
             event_type = getattr(EventType, event_type_name, None)
             if event_type is not None:
                 self.event_manager.emit_event(event_type, **kwargs)
-        except Exception:
-            pass
+        except Exception as e:
+            self._log("warning", f"PSR._emit('{event_type_name}') failed: {e}")
 
     # ------------------------------------------------------------------
     # IProcessStateRegistry
@@ -216,19 +216,6 @@ class ProcessStateRegistry(IProcessStateRegistry):
 
     def get_all_states(self) -> Dict[str, ProcessDataDict]:
         return {name: pd.to_dict() for name, pd in self.states.items()}
-
-    def register_process_with_config(
-        self,
-        process_name: str,
-        config: Any,
-        initial_state: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """Регистрация с конфигурацией (ProcessConfiguration или dict)."""
-        if hasattr(config, "to_dict"):
-            config = config.to_dict()
-        elif not isinstance(config, dict):
-            config = {}
-        return self.register_process(process_name, initial_state=initial_state or {})
 
     def get_stats(self) -> Dict[str, Any]:
         states = self.get_all_states()

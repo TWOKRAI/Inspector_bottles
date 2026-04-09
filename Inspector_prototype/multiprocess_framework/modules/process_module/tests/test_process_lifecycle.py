@@ -12,14 +12,14 @@ def make_mock_shared_resources():
     """Создать мок shared_resources, совместимый с ISharedResources."""
     sr = Mock()
     sr.get_process_data = Mock(return_value=None)
-    sr.register_process_state = Mock(return_value=True)
-    sr.update_process_state = Mock(return_value=True)
     sr.queue_registry = None
     sr.memory_manager = None
     sr.event_manager = Mock()
     sr.event_manager.set_router_manager = Mock()
     sr.process_state_registry = Mock()
     sr.process_state_registry.get_process_names = Mock(return_value=[])
+    sr.process_state_registry.register_process = Mock(return_value=True)
+    sr.process_state_registry.update_state = Mock(return_value=True)
     return sr
 
 

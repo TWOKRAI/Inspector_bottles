@@ -65,6 +65,27 @@ class ISharedResourcesManager(ABC):
     def get_process_names(self) -> List[str]:
         """Список всех зарегистрированных процессов."""
 
+    @abstractmethod
+    def for_process(self, name: str) -> Any:
+        """Получить ProcessHandle — единый доступ к ресурсам процесса (не `process`: см. BaseManager.process)."""
+
+    @abstractmethod
+    def has_process(self, name: str) -> bool:
+        """Проверить, зарегистрирован ли процесс."""
+
+    @abstractmethod
+    def broadcast(
+        self,
+        message: Any,
+        queue_type: str = "system",
+        exclude: Optional[str] = None,
+    ) -> int:
+        """Разослать сообщение всем процессам."""
+
+    @abstractmethod
+    def get_all_statuses(self) -> Dict[str, Any]:
+        """Получить статусы всех процессов."""
+
     # Properties — доступ к внутренним менеджерам
 
     @property

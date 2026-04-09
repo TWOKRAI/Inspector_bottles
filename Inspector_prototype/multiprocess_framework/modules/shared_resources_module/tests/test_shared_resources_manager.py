@@ -183,12 +183,7 @@ class TestDynamicAccess:
             _ = srm.nonexistent_process
 
 
-class TestBackwardCompatibility:
-    def test_register_process_state(self, srm):
-        result = srm.register_process_state("p1")
-        assert result is True
-        assert srm.has_process("p1") if hasattr(srm, "has_process") else srm.get_process_data("p1") is not None
-
+class TestConvenienceAccessors:
     def test_get_process_queue(self, srm):
         srm.register_process("p1", BASIC_CONFIG)
         q = srm.get_process_queue("p1", "system")
@@ -198,7 +193,3 @@ class TestBackwardCompatibility:
         srm.register_process("p1", BASIC_CONFIG)
         e = srm.get_process_event("p1", "stop")
         assert e is not None
-
-    def test_add_shared_resource(self, srm):
-        srm.add_shared_resource("my_key", "my_value")
-        assert srm.get_shared_resource("my_key") == "my_value"

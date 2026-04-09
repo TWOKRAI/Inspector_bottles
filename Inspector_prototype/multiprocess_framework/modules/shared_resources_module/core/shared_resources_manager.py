@@ -29,6 +29,7 @@ from ..memory.core import MemoryManager
 from ..state.process_data import ProcessData
 from ..state.process_state_registry import ProcessStateRegistry
 from ..types import ProcessStatus
+from ..handles import ProcessHandle
 from .interfaces import ISharedResourcesManager
 
 
@@ -98,9 +99,6 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             logger=logger,
         )
 
-        # Обратная совместимость: старый код мог использовать shared_resources dict
-        self.shared_resources: Dict[str, Any] = {}
-
     # =========================================================================
     # ISharedResourcesManager — жизненный цикл
     # =========================================================================
@@ -123,7 +121,6 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             self._event_manager.shutdown()
             self._queue_registry.shutdown()
             self._memory_manager.shutdown()
-            self.shared_resources.clear()
             self.is_initialized = False
             self._log_info("SharedResourcesManager shutdown completed")
             return True
@@ -242,27 +239,81 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             return False
 
     # =========================================================================
-    # Properties (ISharedResourcesManager)
+    # Handle API — единый паттерн доступа к ресурсам
+    # =========================================================================
+
+    def for_process(self, name: str) -> ProcessHandle:
+        """
+        Получить unified handle к ресурсам процесса.
+
+        Имя `for_process`, а не `process`: у BaseManager уже есть атрибут `self.process`
+        (ссылка на родительский ProcessModule), он перекрыл бы метод `process()`.
+
+        Использование:
+            handle = srm.for_process("worker")
+            handle.queue("system").send(msg)
+            handle.event("stop").set()
+            handle.memory("frame").write(images, index=0)
+
+        Raises:
+            KeyError: если процесс не зарегистрирован.
+        """
+        if not self._process_state_registry.has_process(name):
+            raise KeyError(
+                f"Process '{name}' not registered. "
+                f"Available: {self._process_state_registry.get_process_names()}"
+            )
+        return ProcessHandle(name, self)
+
+    def has_process(self, name: str) -> bool:
+        """Проверить, зарегистрирован ли процесс."""
+        return self._process_state_registry.has_process(name)
+
+    def broadcast(
+        self,
+        message: Any,
+        queue_type: str = "system",
+        exclude: Optional[str] = None,
+    ) -> int:
+        """Разослать сообщение всем процессам. Возвращает количество доставок."""
+        return self._queue_registry.broadcast_message(
+            message, queue_type=queue_type, exclude_process=exclude
+        )
+
+    def get_all_statuses(self) -> Dict[str, ProcessStatus]:
+        """Получить статусы всех процессов."""
+        return {
+            name: pd.status
+            for name, pd in self._process_state_registry.get_all_process_data().items()
+        }
+
+    # =========================================================================
+    # Properties — внутренние менеджеры (deprecated, используйте srm.for_process())
     # =========================================================================
 
     @property
     def config_store(self) -> ConfigStore:
+        """Deprecated. Для конфига используйте srm.for_process(name).config."""
         return self._config_store
 
     @property
     def process_state_registry(self) -> ProcessStateRegistry:
+        """Deprecated. Для данных используйте srm.for_process(name).data."""
         return self._process_state_registry
 
     @property
     def queue_registry(self) -> QueueRegistry:
+        """Deprecated. Используйте srm.for_process(name).queue(type)."""
         return self._queue_registry
 
     @property
     def event_manager(self) -> EventManager:
+        """Deprecated. Используйте srm.for_process(name).event(name)."""
         return self._event_manager
 
     @property
     def memory_manager(self) -> MemoryManager:
+        """Deprecated. Используйте srm.for_process(name).memory(name)."""
         return self._memory_manager
 
     # =========================================================================
@@ -288,67 +339,6 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
     def get_process_event(self, process_name: str, event_name: str) -> Optional[Event]:
         pd = self.get_process_data(process_name)
         return pd.get_event(event_name) if pd else None
-
-    # =========================================================================
-    # Обратная совместимость (старый API)
-    # =========================================================================
-
-    def register_process_state(
-        self,
-        process_name: str,
-        initial_state: Optional[Dict[str, Any]] = None,
-        queue_names: Optional[Dict[str, str]] = None,
-    ) -> bool:
-        """Устаревший метод. Используйте register_process(). queue_names игнорируется (совместимость вызова)."""
-        return self._process_state_registry.register_process(
-            process_name, initial_state
-        )
-
-    def register_process_with_config(
-        self,
-        process_name: str,
-        config: Any,
-        initial_state: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """Устаревший метод. Используйте register_process()."""
-        return self._process_state_registry.register_process_with_config(
-            process_name, config, initial_state
-        )
-
-    def update_process_state(
-        self,
-        process_name: str,
-        status: Optional[Any] = None,
-        events: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        queues: Optional[Dict[str, str]] = None,
-        custom: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        return self._process_state_registry.update_state(
-            process_name, status, events, metadata, queues, custom
-        )
-
-    def get_process_state(self, process_name: str) -> Optional[Dict[str, Any]]:
-        return self._process_state_registry.get_state(process_name)
-
-    def get_all_process_states(self) -> Dict[str, Dict[str, Any]]:
-        return self._process_state_registry.get_all_states()
-
-    def add_shared_resource(self, name: str, resource: Any) -> None:
-        self.shared_resources[name] = resource
-
-    def get_shared_resource(self, name: str) -> Optional[Any]:
-        return self.shared_resources.get(name)
-
-    def get_data_manager(self) -> Optional[Any]:
-        from ..adapters.data_schema_adapter import DataSchemaAdapter
-        if not hasattr(self, "_data_schema_adapter"):
-            self._data_schema_adapter = DataSchemaAdapter(self)
-        return self._data_schema_adapter.get_data_manager()
-
-    @property
-    def data_manager(self) -> Optional[Any]:
-        return self.get_data_manager()
 
     # =========================================================================
     # Статистика
@@ -381,7 +371,7 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
         if name in _PICKLE_SKIP or name.startswith(("_log_", "_record_", "_track_")):
             return _noop
         if name.startswith("_") or name in (
-            "_process_state_registry", "shared_resources", "_event_manager",
+            "_process_state_registry", "_event_manager",
             "_queue_registry", "_memory_manager", "_config_store",
             "get_stats", "__dict__",
         ):
