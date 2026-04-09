@@ -6,7 +6,15 @@
 import pytest
 from ..core.message import Message
 from ..types import MessageType, MessageValidationError
+from ..core.message import Message
 from ..schemas import BaseMessageSchema, CommandMessageSchema, LogMessageSchema
+
+
+class TestBaseMessageSchemaAlias:
+    """BaseMessageSchema — алиас на Message (план 08)."""
+
+    def test_alias_points_to_message(self):
+        assert BaseMessageSchema is Message
 
 
 class TestSchemaCreation:

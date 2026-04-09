@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-Утилиты для работы с сообщениями.
-"""
+"""Утилиты message_module."""
 
-from .utils import generate_message_id, apply_type_defaults
+from .utils import generate_message_id
 
-__all__ = ['generate_message_id', 'apply_type_defaults']
-
+__all__ = ["generate_message_id"]

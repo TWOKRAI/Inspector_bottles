@@ -1842,7 +1842,7 @@
 | `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-013…016 (CRM, буферы, broadcast), ADR-108 (двойная роль конфигов) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-140…142 (удаление LogDispatcher, BatchManager, выделение LogRecord) |
 | `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-023 (global) + ADR-143…146 (Dict at Boundary, no I/O, пять компонентов, env-fallback) |
-| `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-147…151 (value object, MessageAdapter, no pickle guarantee, routers field) |
+| `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-147…152 (Message = SchemaBase, MessageAdapter, IMessage Protocol, routers) |
 
 ---
 

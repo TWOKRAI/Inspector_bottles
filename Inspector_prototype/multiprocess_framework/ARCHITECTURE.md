@@ -355,15 +355,16 @@ ConfigManager
 
 **Роль:** Value object для межпроцессного взаимодействия. Leaf-зависимость (только `data_schema_module`).
 
-**Message** (~300 LOC) — typed IPC container с fluent API и Dict at Boundary.  
+**Message** (`SchemaBase`, ~485 LOC) — typed IPC container: поля Pydantic + `FieldMeta`, fluent API, Dict at Boundary.  
 **MessageAdapter** (~327 LOC) — контекстная фабрика (один на процесс, фиксированный sender).
 
 ```
-Message (value object)
+Message (SchemaBase / value object)
     ├── create(type, sender, targets, ...) — основной метод
-    ├── to_dict() / from_dict() — Dict at Boundary
+    ├── model_dump() / to_dict() / from_dict() — Dict at Boundary
     ├── fluent API: set_priority(), set_targets(), set_channel()
-    └── optional Pydantic schema через BaseMessageSchema
+    └── optional строгая схема: CommandMessageSchema, LogMessageSchema (extra='forbid')
+        (BaseMessageSchema — алиас на Message для обратной совместимости импорта)
 
 MessageAdapter(sender=name)
     ├── .command(targets, command, args)
@@ -376,9 +377,10 @@ MessageAdapter(sender=name)
     └── .event(event_type, targets, data)
 ```
 
-Ключевые решения (ADR-147…151):
+Ключевые решения (ADR-147…152):
 - **Dict at Boundary:** только `msg.to_dict()` пересекает границу.
-- **`schema=None` — нормальный путь,** Pydantic-схема — опциональное усиление.
+- **`schema=None` — нормальный путь,** отдельная Pydantic-схема (`CommandMessageSchema` / …) — опциональное усиление.
+- **Message = SchemaBase** — единый источник полей; **IMessage** — `Protocol` (**ADR-152**).
 - **MessageAdapter** — рекомендованный способ в процессах.
 - **Поле `routers`:** RouterManager'ы внутри процесса.
 

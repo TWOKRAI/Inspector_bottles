@@ -414,7 +414,70 @@ class TestClone:
             schema=CommandMessageSchema,
         )
         cloned = msg.clone()
-        assert cloned._schema == msg._schema
+        assert cloned.get_schema() == msg.get_schema()
+
+
+class TestSchemaBaseIntegration:
+    """Интеграция Message с SchemaBase (план 08)."""
+
+    def test_message_is_schema_base(self):
+        from ...data_schema_module import SchemaBase
+
+        assert issubclass(Message, SchemaBase)
+
+    def test_field_meta_available(self):
+        meta = Message.get_field_meta("sender")
+        assert meta is not None
+
+    def test_model_dump_equals_to_dict_no_filter(self):
+        msg = Message.create("general", "a", targets=["b"], content="x")
+        dump = msg.model_dump()
+        assert "type" in dump
+        assert dump["sender"] == "a"
+
+    def test_no_shared_mutable_defaults(self):
+        msg1 = Message.create("general", "a", targets=["b"])
+        msg2 = Message.create("general", "c", targets=["d"])
+        msg1.metadata["key"] = "value"
+        assert "key" not in msg2.metadata
+
+    def test_timeout_constraints(self):
+        meta = Message.get_field_meta("timeout")
+        assert meta is not None
+        assert meta.min == 0.1
+        assert meta.max == 300.0
+
+    def test_model_validate_from_dict(self):
+        data = {
+            "type": "command",
+            "sender": "a",
+            "targets": ["b"],
+            "command": "go",
+        }
+        msg = Message.model_validate(data)
+        assert msg.command == "go"
+
+    def test_isinstance_imessage(self):
+        from ..interfaces import IMessage
+
+        msg = Message.create("general", "a", targets=["b"])
+        assert isinstance(msg, IMessage)
+
+    def test_model_dump_excludes_private_schema_state(self):
+        """Метаданные внешней схемы в __dict__, не в model_dump (риск плана 08)."""
+        from ..schemas import CommandMessageSchema
+
+        msg = Message.create(
+            MessageType.COMMAND,
+            "s",
+            schema=CommandMessageSchema,
+            targets=["t"],
+            command="x",
+        )
+        dumped = msg.model_dump()
+        assert "_msg_schema" not in dumped
+        assert "_msg_schema_info" not in dumped
+        assert "_msg_schema_validated" not in dumped
 
 
 class TestValidateWithoutSchema:

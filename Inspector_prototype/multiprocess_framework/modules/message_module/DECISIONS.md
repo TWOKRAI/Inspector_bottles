@@ -33,15 +33,12 @@
 
 ## ADR-149: Удаление MessageSchema dataclass
 
-**Статус:** принято  
+**Статус:** принято (частично устарело по смыслу — см. **ADR-152**)  
 **Дата:** 2026-04-09  
 **Контекст:** `MessageSchema` дублировал `BaseMessageSchema` и `VALID_MESSAGE_FIELDS`.  
-**Решение:** Удалить dataclass. Единственный источник истины:
-- `VALID_MESSAGE_FIELDS` — валидация
-- `BaseMessageSchema` — Pydantic
-- `Message` атрибуты — runtime state
+**Решение (историческое):** Удалить dataclass; далее в **ADR-152** единственный источник — `Message.model_fields`.
 
-**Последствия:** При добавлении поля обновляем 2 места вместо 3.
+**Последствия:** См. **ADR-152**.
 
 ---
 
@@ -68,3 +65,31 @@
 **Тест:** `test_message_dict_is_pickle_safe` проверяет dict-форму.
 
 **Последствия:** Developers ВСЕГДА используют `msg.to_dict()` перед IPC отправкой.
+
+---
+
+## ADR-152: Message наследует SchemaBase (Pydantic v2)
+
+**Статус:** принято  
+**Дата:** 2026-04-09  
+**Контекст:** `Message` был plain class с ручным `MessageConverter`, `MessageValidator`, dict'ами `VALID_MESSAGE_FIELDS` / `MESSAGE_FIELD_DEFAULTS` и отдельным `BaseMessageSchema`, дублировавшим поля. Общие `{}` / `[]` в дефолтах давали риск мутации между экземплярами.
+
+**Решение:**
+
+- `Message` наследует `SchemaBase` (`data_schema_module`).
+- Все поля объявлены как поля Pydantic с `FieldMeta` где нужна интроспекция.
+- `model_dump()` / сериализация в `to_dict()` заменяют `MessageConverter`.
+- `model_validate()` / конструктор заменяют ручную сборку в конвертере.
+- `@model_validator(mode='after')` заменяет `apply_type_defaults()`.
+- `validate_assignment=False` на `Message` — без лишнего overhead на fluent setters (в отличие от базового `SchemaBase`).
+- `IMessage` — `Protocol` (`@runtime_checkable`) вместо ABC.
+- `BaseMessageSchema` — алиас на `Message` для обратной совместимости импорта.
+
+**Удалено:**
+
+- `converters/message_converter.py`
+- `validators/message_validator.py`
+- `schemas/base.py` (класс `BaseMessageSchema`)
+- `VALID_MESSAGE_FIELDS`, `MESSAGE_FIELD_DEFAULTS`, `apply_type_defaults()`
+
+**Последствия:** Один источник истины — `Message.model_fields`; строгие схемы `CommandMessageSchema` / `LogMessageSchema` остаются отдельными (`extra='forbid'`). Публичный API (`create`, `to_dict`, `from_dict`, `MessageAdapter`) сохранён.

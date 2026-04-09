@@ -6,7 +6,7 @@
 """
 
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 
 class MessageType(Enum):
@@ -88,46 +88,3 @@ MESSAGE_TYPE_DEFAULTS = {
 MESSAGE_TYPE_EXCLUDE_FIELDS = {
     MessageType.LOG: {"routers"},  # Логи не должны показывать routers в dict
 }
-
-# Список всех допустимых полей сообщения
-# Используется для валидации в __setitem__ и сериализации
-VALID_MESSAGE_FIELDS = {
-    'id', 'type', 'sender', 'targets', 'timestamp',
-    'priority', 'routers', 'channel', 'metadata',
-    'content', 'command', 'args', 'need_ack',
-    'level', 'message', 'module', 'action', 'data',
-    'exclude', 'data_type', 'use_shared_memory', 'memory_key',
-    'request_type', 'query', 'timeout', 'request_id',
-    'success', 'result', 'error', 'event_type', 'event_data'
-}
-
-# Дефолты для полей (кроме id, type, sender, targets, timestamp — задаются в Message.__init__)
-MESSAGE_FIELD_DEFAULTS: Mapping[str, Any] = {
-    'priority': 'normal',
-    'routers': ['internal'],
-    'channel': None,
-    'metadata': {},
-    'content': None,
-    'command': None,
-    'args': {},
-    'need_ack': False,
-    'level': None,
-    'message': None,
-    'module': 'main',
-    'action': None,
-    'data': None,
-    'exclude': [],
-    'data_type': None,
-    'use_shared_memory': False,
-    'memory_key': None,
-    'request_type': None,
-    'query': None,
-    'timeout': 5.0,
-    'request_id': None,
-    'success': True,
-    'result': None,
-    'error': None,
-    'event_type': None,
-    'event_data': None,
-}
-

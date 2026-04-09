@@ -32,37 +32,32 @@
 
 ## Структура модуля
 
+Ядро — **`Message(SchemaBase)`** (`data_schema_module`): все поля объявлены в одном классе с `FieldMeta`, сериализация через `model_dump()` / `to_dict()`, без отдельных конвертеров и валидаторов (план `plans/refactoring/08_message_schema_base.md`).
+
 ```
 message_module/
-├── interfaces.py          ← Публичный контракт (IMessage, IMessageFactory)
+├── interfaces.py          ← IMessage (Protocol), IMessageFactory (ABC)
 ├── __init__.py            ← Публичный API
 │
 ├── core/
-│   └── message.py         ← Класс Message (основной объект сообщения)
+│   └── message.py         ← Message(SchemaBase) — создание, валидация, to_dict/from_dict
 │
 ├── types/
-│   ├── message_types.py   ← MessageType, Priority, LogLevel, MessageSchema
+│   ├── message_types.py   ← MessageType, Priority, LogLevel, MESSAGE_TYPE_* 
 │   └── exceptions.py      ← MessageValidationError
 │
-├── schemas/               ← Pydantic-схемы (опциональная строгая валидация)
-│   ├── base.py            ← BaseMessageSchema (extra='allow')
-│   ├── command.py         ← CommandMessageSchema (extra='forbid')
-│   └── log.py             ← LogMessageSchema    (extra='forbid')
+├── schemas/               ← Строгие схемы (extra='forbid'); BaseMessageSchema = алиас на Message
+│   ├── command.py         ← CommandMessageSchema
+│   └── log.py             ← LogMessageSchema
 │
 ├── adapters/
 │   └── message_adapter.py ← MessageAdapter (рекомендуемый способ создания)
 │
 ├── factories/
-│   └── message_factory.py ← MessageFactory, create_message(), parse_message()
-│
-├── validators/
-│   └── message_validator.py ← MessageValidator (внутренний)
-│
-├── converters/
-│   └── message_converter.py ← MessageConverter (внутренний)
+│   └── message_factory.py ← create_message(), parse_message()
 │
 ├── utils/
-│   └── utils.py           ← generate_message_id(), apply_type_defaults()
+│   └── utils.py           ← generate_message_id()
 │
 └── tests/
     ├── test_message.py
@@ -330,8 +325,11 @@ msg = Message.create(
     schema=LogMessageSchema,
 )
 
-# BaseMessageSchema — разрешает доп. поля (extra='allow'), для общих случаев
+# BaseMessageSchema — алиас на тот же класс Message (обратная совместимость импорта;
+# расширяемые поля задаются через model_config Message: extra='allow')
 from message_module import BaseMessageSchema
+
+assert BaseMessageSchema is Message
 ```
 
 ### Создание своей схемы
@@ -404,6 +402,8 @@ def handle_response(msg):
 ---
 
 ## Публичный контракт (interfaces.py)
+
+`IMessage` — **`Protocol`** (`@runtime_checkable`): структурная типизация, `isinstance(msg, IMessage)` работает для `Message`.
 
 Внешние модули, которые принимают сообщения, должны type-hint через `IMessage`:
 

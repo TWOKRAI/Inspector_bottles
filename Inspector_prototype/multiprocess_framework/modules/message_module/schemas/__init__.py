@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Схемы сообщений (Pydantic v2).
+Pydantic-схемы для строгой валидации сообщений.
 
-Подмодуль для определения схем валидации сообщений.
-Позволяет создавать разные схемы для разных типов сообщений.
+BaseMessageSchema — алиас на Message (обратная совместимость с планом 07).
 """
 
-from .base import BaseMessageSchema
+from ..core.message import Message as BaseMessageSchema
 from .command import CommandMessageSchema
 from .log import LogMessageSchema
 
 __all__ = [
-    'BaseMessageSchema',
-    'CommandMessageSchema',
-    'LogMessageSchema',
+    "BaseMessageSchema",
+    "CommandMessageSchema",
+    "LogMessageSchema",
 ]
-
