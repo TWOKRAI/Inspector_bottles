@@ -9,7 +9,7 @@
 Использование:
 
     # StorageManager (зависит от ProcessData)
-    from data_schema_module.extensions.storage_manager import StorageManager
+    from data_schema_module.storage.storage_manager import StorageManager
 
     # VersionManager (зависит от ProcessData)
     from data_schema_module.extensions.versioning import VersionManager

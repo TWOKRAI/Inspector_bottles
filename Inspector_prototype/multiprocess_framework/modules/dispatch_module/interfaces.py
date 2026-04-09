@@ -19,8 +19,8 @@ class IDispatcher(ABC):
     
     @property
     @abstractmethod
-    def name(self) -> str:
-        """Имя диспетчера."""
+    def manager_name(self) -> str:
+        """Уникальное имя менеджера (как у BaseManager)."""
         pass
     
     @abstractmethod

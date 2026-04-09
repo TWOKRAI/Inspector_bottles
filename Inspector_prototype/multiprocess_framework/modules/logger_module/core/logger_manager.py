@@ -6,13 +6,11 @@ LoggerManager (Refactored) — наследник ChannelRoutingManager.
   - Наследует ChannelRoutingManager вместо BaseManager + ObservableMixin
   - Каналы хранятся в self._channel_registry (thread-safe, из CRM)
   - Батчинг через self._buffer (BatchBuffer из CRM)
-  - LogDispatcher сохранён для backward compat (ErrorManager, Фаза 3)
   - Публичный API не изменён (info, error, log, flush, get_stats и т.д.)
 """
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from contextvars import ContextVar
-from pathlib import Path
 
 if TYPE_CHECKING:
     from multiprocessing import Process
@@ -27,7 +25,7 @@ from ..configs.logger_manager_config import (
     LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
-from .log_dispatcher import LogDispatcher, LogRecord
+from .log_types import LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 from .log_paths import resolve_log_file_path
 
@@ -45,7 +43,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     Сохраняет свою специфику:
       - LoggerManagerConfig    — конфигурация областей/уровней/каналов (SchemaBase)
-      - LogDispatcher          — channel-based routing (ErrorManager)
       - Scope-based routing    — log() определяет каналы по LoggerScopeSchema
       - Module channels        — отдельный файл для каждого модуля
       - Context stack          — push_context / pop_context
@@ -93,9 +90,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         self.config = log_config
         self.app_name = log_config.app_name
 
-        # LogDispatcher — backward compat for ErrorManager (Phase 3 will remove)
-        self.dispatcher = LogDispatcher(app_name=self.config.app_name, process=process)
-
         # Module-specific channels (separate from main registry)
         self._module_channels: Dict[str, LogChannel] = {}
 
@@ -123,7 +117,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     def initialize(self) -> bool:
         try:
-            self.dispatcher.initialize()
             self._dispatcher.initialize()
             if self._buffer:
                 self._buffer.start()
@@ -140,7 +133,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             self.flush()
             if self._buffer:
                 self._buffer.stop()
-            self.dispatcher.shutdown()
             self._dispatcher.shutdown()
 
             for channel in self._channel_registry.clear():
@@ -245,7 +237,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                 )
             channel = create_channel(channel_name, cfg)
             self._channel_registry.register(channel)
-            self.dispatcher.register_channel_handler(channel_name, channel.write)
         except Exception as e:
             self._fallback_log("ERROR", f"Failed to setup channel {channel_name}: {e}")
 
@@ -281,9 +272,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             channel = create_channel(ch_name, channel_config)
             self._module_channels[module_name] = channel
             self._channel_registry.register(channel)
-            self.dispatcher.register_channel_handler(
-                f"module_{module_name}", channel.write
-            )
             self.stats['module_files_created'] += 1
             self.debug(
                 f"Module channel created: {module_name} -> {path}",
@@ -400,13 +388,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                     ch.write(record_dict)
                 except Exception:
                     pass
-            else:
-                handler = self.dispatcher.channel_handlers.get(ch_name)
-                if handler:
-                    try:
-                        handler(record_dict)
-                    except Exception:
-                        pass
 
     def _route_via_router(self, record: LogRecord) -> None:
         if not self._router_manager:
@@ -503,23 +484,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                 pass
             self._channel_registry.unregister(f"module_{module_name}")
             del self._module_channels[module_name]
-
-    # =========================================================================
-    # BACKWARD COMPAT: self.channels (property)
-    # =========================================================================
-
-    @property
-    def channels(self) -> Dict[str, Any]:
-        """Backward compat: {channel_name: channel_object}.
-
-        Used by ErrorManager._setup_level_routes() to access channels by name.
-        """
-        return {ch.name: ch for ch in self._channel_registry.all()}
-
-    @property
-    def batcher(self):
-        """Backward compat: alias for self._buffer."""
-        return self._buffer
 
     # =========================================================================
     # СТАТИСТИКА

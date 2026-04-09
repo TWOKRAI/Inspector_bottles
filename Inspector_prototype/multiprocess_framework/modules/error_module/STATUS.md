@@ -25,14 +25,14 @@
 - [x] `_normalize_error_config()` — `None | dict | ErrorManagerConfig | build()` → **LoggerManagerConfig** (см. ADR-103, ADR-107)
 - [x] Конфиг: **`configs/error_manager_config.py`** — `ErrorManagerConfig`
 - [x] `_level_to_channel: Dict[str, str]` — прямой O(1) маппинг уровня в имя канала
-- [x] `_setup_level_routes()` — строит `_level_to_channel` из severity-каналов
+- [x] `_setup_level_routes()` — строит `_level_to_channel` из severity-каналов (без LogDispatcher; см. logger_module ADR-140)
 - [x] `log()` override — WARNING/ERROR/CRITICAL используют `_level_to_channel`; DEBUG/INFO → `super().log()`
 - [x] `get_stats()` — включает `level_routes` маппинг
 
 ## Решённая архитектурная проблема
 
-До Фазы 3: `_setup_level_routes()` регистрировал маршруты в LogDispatcher, но `LoggerManager.log()`
-никогда не вызывал `route_by_level()` → severity routing был мёртвым кодом.
+До Фазы 3: `_setup_level_routes()` дублировал маршруты в старом LogDispatcher, но `LoggerManager.log()`
+никогда не вызывал `route_by_level()` → severity routing был мёртвым кодом. LogDispatcher удалён в logger_module (2026-04-09).
 
 После Фазы 3: `ErrorManager.log()` переопределён. При WARNING/ERROR/CRITICAL — прямое обращение
 к `_level_to_channel`, `enqueue(channel_name, record_dict)`. Severity routing РАБОТАЕТ.

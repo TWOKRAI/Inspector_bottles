@@ -35,10 +35,10 @@ from data_schema_module.registry.process_registry import (
     ProcessRegistersRegistry,
     RegistersMeta,
 )
-from data_schema_module.utils.registers_container import RegistersContainer
-from data_schema_module.fields.register_base import RegisterBase
-from data_schema_module.fields.field_meta import FieldMeta
-from data_schema_module.fields.field_routing import FieldRouting
+from data_schema_module.container.registers_container import RegistersContainer
+from data_schema_module.core.schema_base import RegisterBase
+from data_schema_module.core.field_meta import FieldMeta
+from data_schema_module.core.field_routing import FieldRouting
 
 
 # =============================================================================

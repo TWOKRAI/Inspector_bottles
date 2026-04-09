@@ -1,5 +1,5 @@
 """
-Unit-тесты для DataConverter (utils/converters.py).
+Unit-тесты для DataConverter (serialization/converter.py).
 
 Сценарии:
 - Round-trip одной Pydantic-модели: dict ↔ model, JSON ↔ model, YAML ↔ model.
@@ -13,7 +13,7 @@ import pytest
 from pydantic import BaseModel, Field
 from typing import Any, Dict
 
-from ..utils.converters import DataConverter, FormatType
+from ..serialization.converter import DataConverter, FormatType
 
 
 # ============================================================================

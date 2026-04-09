@@ -6,12 +6,12 @@
 В реальном приложении подставляете свои пакеты, например App.Registers.models.field_registers.
 """
 
-from ..registry.register_discovery import (
+from ..registry.discovery import (
     discover_registers_from_package,
     register_package_schemas,
 )
 from ..registry.schema_registry import SchemaManager
-from ..utils.registers_container import RegistersContainer
+from ..container.registers_container import RegistersContainer
 
 # Пакет-фикстура (в приложении: "App.Registers.models.field_registers" и "...field_data")
 FIXTURES_PACKAGE = "data_schema_module.tests.fixtures"

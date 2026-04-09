@@ -9,7 +9,7 @@ FileStorage    — персистентное хранение RegistersContaine
                  реализуйте тот же интерфейс: load / save / exists / delete.
 """
 from .storage_manager import StorageManager
-from .file_storage import FileStorage
+from ..serialization.file_storage import FileStorage
 
 # Опциональный импорт ProcessDataContainer
 try:

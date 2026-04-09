@@ -21,7 +21,7 @@ from typing import Optional, Any, Union, Dict
 
 from ...logger_module import LoggerManager
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
-from ...logger_module.core.log_dispatcher import LogRecord
+from ...logger_module.core.log_types import LogRecord
 from ..configs.error_manager_config import ErrorManagerConfig
 from .error_config_assembly import expand_error_manager_config
 
@@ -167,18 +167,15 @@ class ErrorManager(LoggerManager):
         return result
 
     def _setup_level_routes(self) -> None:
-        """Построить _level_to_channel и зарегистрировать маршруты в self._dispatcher.
+        """Построить _level_to_channel: {уровень → имя канала}.
 
-        После этого:
-          - self._level_to_channel["ERROR"] == "errors_file" (O(1) lookup в log())
-          - self._dispatcher знает маршрут "ERROR" → write() на errors_file
-          - self.dispatcher (LogDispatcher) тоже регистрирует для backward compat get_stats()
+        После этого self._level_to_channel["ERROR"] == "errors_file" (O(1) в log()).
         """
         self._level_to_channel = {}
 
-        has_critical = "critical_file" in self.channels
-        has_errors   = "errors_file" in self.channels
-        has_warnings = "warnings_file" in self.channels
+        has_critical = self._channel_registry.get("critical_file") is not None
+        has_errors = self._channel_registry.get("errors_file") is not None
+        has_warnings = self._channel_registry.get("warnings_file") is not None
 
         if has_critical:
             self._level_to_channel["CRITICAL"] = "critical_file"
@@ -192,13 +189,6 @@ class ErrorManager(LoggerManager):
             self._level_to_channel["WARNING"] = "warnings_file"
         elif has_errors:
             self._level_to_channel["WARNING"] = "errors_file"
-
-        # Register in LogDispatcher for backward compat (get_stats → get_level_routes)
-        d = self.dispatcher
-        for level_str, ch_name in self._level_to_channel.items():
-            ch = self._channel_registry.get(ch_name)
-            if ch is not None:
-                d.register_level_route(level_str, ch_name, ch.write)
 
     def log(
         self,

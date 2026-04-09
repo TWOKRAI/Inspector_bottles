@@ -14,7 +14,7 @@
 data_schema_module/
 ├── interfaces.py              # Публичный контракт (протоколы + ABC)
 ├── __init__.py                # Минимальный API (~50 экспортов)
-├── _compat.py                 # Алиасы для обратной совместимости
+├── DECISIONS.md               # Локальные ADR (shim cleanup, extensions)
 │
 ├── core/                      # ⚙️ Ядро: Schema + Field + Validation
 │   ├── __init__.py
@@ -44,6 +44,11 @@ data_schema_module/
 │   ├── registers_container.py # RegistersContainer — единое состояние
 │   └── config_converters.py   # config_to_dict, process()
 │
+├── storage/                   # ProcessData: StorageManager, ProcessDataContainer
+│   ├── __init__.py
+│   ├── storage_manager.py
+│   └── process_data_container.py
+│
 ├── extensions/                # 🔌 Опциональные расширения (явный импорт)
 │   ├── __init__.py
 │   ├── models/                # BaseComponentModel, ComponentDNA
@@ -51,8 +56,6 @@ data_schema_module/
 │   │   ├── base.py
 │   │   ├── dna.py
 │   │   └── types.py
-│   ├── storage_manager.py     # StorageManager (ProcessData)
-│   ├── process_data_container.py
 │   ├── manager_adapter.py     # ManagerDataAdapter
 │   ├── versioning.py          # VersionManager
 │   ├── factory.py             # ModelFactory
@@ -60,7 +63,7 @@ data_schema_module/
 │   │   ├── __init__.py
 │   │   ├── visualizer.py
 │   │   └── formatters.py
-│   ├── metrics.py
+│   ├── metrics.py             # re-export core.metrics (опционально)
 │   └── simple_api.py
 │
 └── tests/                     # ✅ Тесты
@@ -333,14 +336,14 @@ flowchart LR
 | **Модульность и независимость** | 9/10 | Ядро не тянет process_module/config_module. Реестр с опциональными метриками. Расширения — явный импорт. |
 | **Расширяемость** | 8/10 | ISchemaAdapter, ISchemaStorage, register_field_type(). Добавить свой тип поля или хранилище — без правки ядра. Нет плагинной системы и единого реестра «типов полей». |
 | **Производительность** | 8/10 | Кэши в SchemaMixin, model_dump_json вместо двойной сериализации. Модуль-уровневые кэши не очищаются при динамическом создании классов. |
-| **Документация** | 8/10 | README, STATUS, MIGRATION, диаграммы, примеры. Часть docs/ устарела (старая структура); нет единого «архитектурного» doc. |
+| **Документация** | 8/10 | README, STATUS, DECISIONS.md, диаграммы, примеры. Часть docs/ устарела (старая структура); нет единого «архитектурного» doc. |
 | **Типизация и практики Python** | 8/10 | Protocol, ABC, Optional в исключениях, TYPE_CHECKING. Не везде строгие аннотации (часть Any); Python 3.10+ union syntax можно шире использовать. |
 
 **Итоговая оценка: 8.3/10**
 
 **Сильные стороны:** независимое ядро, понятный контракт (interfaces), нормальная тестируемость реестра и контейнеров, Dict at Boundary и адаптеры в потребляющих модулях.
 
-**Слабые стороны и риски:** модульные кэши без сброса; IAsyncSchemaStorage не используется; обратная совместимость через _compat и старые импорты (StorageManager и т.д.) — при полном отказе от _compat часть кода сломается, пока потребители не перейдут на extensions.
+**Слабые стороны и риски:** модульные кэши без сброса; IAsyncSchemaStorage не используется; `StorageManager` / `ProcessDataContainer` — явный импорт из `data_schema_module.storage`, не из корня пакета.
 
 ---
 
@@ -659,17 +662,9 @@ config_module/
     └── schema_adapter.py  # ConfigSchemaAdapter implements ISchemaAdapter
 ```
 
-### Решение 5: Обратная совместимость через _compat.py
+### Решение 5: Алиасы имён в публичном API
 
-**Принцип:** Все старые импорты продолжают работать через переименование:
-
-```python
-# Старый импорт (всё ещё работает)
-from data_schema_module import RegisterBase, RegisterMixin
-
-# Новый импорт (рекомендуется)
-from data_schema_module import SchemaBase, SchemaMixin
-```
+`RegisterBase` / `RegisterMixin` и `SchemaBase` / `SchemaMixin` экспортируются из корня пакета (`__init__.py`); предпочтительны канонические имена `SchemaBase` / `SchemaMixin`.
 
 ---
 
@@ -875,17 +870,14 @@ tests/
 ### Миграция импортов
 
 ```python
-# ❌ Старый импорт (всё ещё работает через _compat.py)
-from data_schema_module import RegisterBase, RegisterMixin
-
-# ✅ Новый импорт (рекомендуется)
+# Рекомендуемые имена схем
 from data_schema_module import SchemaBase, SchemaMixin
 
-# ❌ Старый импорт расширений
-from data_schema_module import StorageManager
+# Алиасы (тот же объект, что и Schema*)
+from data_schema_module import RegisterBase, RegisterMixin
 
-# ✅ Новый импорт расширений
-from data_schema_module.extensions.storage_manager import StorageManager
+# StorageManager не в корневом __init__ — явный путь:
+from data_schema_module.storage.storage_manager import StorageManager
 ```
 
 ---
@@ -911,7 +903,7 @@ from data_schema_module.extensions.storage_manager import StorageManager
 
 ## 📚 Дополнительные ресурсы
 
-- **MIGRATION.md** — Подробная инструкция по миграции на новый API
+- **DECISIONS.md** — Локальные ADR модуля (cleanup shims, пути импорта)
 - **STATUS.md** — Статус рефакторинга, оценки критериев, чеклист
 - **docs/QUICK_REFERENCE.md** — Краткая справка по API
 - **docs/examples/** — Примеры использования

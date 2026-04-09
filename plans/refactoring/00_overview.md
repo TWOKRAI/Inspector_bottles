@@ -84,11 +84,11 @@
 | #  | Модуль                       | files | loc    | tests | public | cov | files_after | loc_after | tests_after |
 |----|------------------------------|-------|--------|-------|--------|-----|-------------|-----------|-------------|
 | 1  | `base_manager`               |  29   |  2425  |   4   |  TODO  | TODO | 17 | 1474 | 3 (52 passed, 2 skipped) |
-| 2  | `data_schema_module`         |  97   | 13888  |  24   |  TODO  | TODO | — | — | — |
-| 3  | `dispatch_module`            |  17   |  2243  |   4   |  TODO  | TODO | — | — | — |
-| 4  | `channel_routing_module`     |  14   |  1348  |   3   |  TODO  | TODO | — | — | — |
-| 5  | `logger_module`              |  16   |  1909  |   1   |  TODO  | TODO | — | — | — |
-| 6  | `config_module`              |  11   |  1074  |   3   |  TODO  | TODO | — | — | — |
+| 2  | `data_schema_module`         |  97   | 13888  |  24   |  TODO  | TODO | 60 | 8872 | 24 (532 passed) |
+| 3  | `dispatch_module`            |  17   |  2243  |   4   |  TODO  | TODO | 18 | 2310 | 5 (66 passed) |
+| 4  | `channel_routing_module`     |  14   |  1348  |   3   |  TODO  | TODO | 13 | 1334 | 3 (58 passed) |
+| 5  | `logger_module`              |  16   |  1909  |   1   |  TODO  | TODO | 14 | 1526 | 1 (11 passed) |
+| 6  | `config_module`              |  11   |  1074  |   3   |  TODO  | TODO | 11 | 1074 | 3 (49 passed) |
 | 7  | `message_module`             |  21   |  2088  |   3   |  TODO  | TODO | — | — | — |
 | 8  | `shared_resources_module`    |  41   |  3217  |   8   |  TODO  | TODO | — | — | — |
 | 9  | `router_module`              |  16   |  1995  |   2   |  TODO  | TODO | — | — | — |
@@ -106,7 +106,11 @@
 
 **Ключевые наблюдения:**
 
-- `data_schema_module` (97 файлов / 13 888 LOC / 24 теста) — действительно сердце фреймворка и одновременно главный кандидат на «жирок» (extensions, _compat, неиспользуемые инструменты).
+- `data_schema_module`: после cleanup shim-слоя — **60** файлов (без `tests/`), **~8872** LOC, **24** test-файла, **532** pytest в `data_schema_module/tests` (2026-04-09). Ранее: 97 / 13 888 LOC — см. план `plans/refactoring/02_data_schema_module.md`.
+- `dispatch_module`: **18** файлов `.py` (без `tests/`), **~2310** LOC, **5** test-файлов, **66** pytest; `core/scenarios.py` + делегаты на `Dispatcher`, удалены legacy kwargs и alias `AdvancedDispatcher` (2026-04-09). Ранее: 17 / 2243 LOC — см. план `plans/refactoring/03_dispatch_module.md`.
+- `channel_routing_module`: **13** файлов `.py` (без `tests/`), **~1334** LOC, **3** test-файла, **58** pytest; добавлен `DECISIONS.md`, заполнен §6.4 в `ARCHITECTURE.md`, удалён shim `buffers/base_buffer.py` (2026-04-09). Ранее: 14 / 1348 LOC — см. план `plans/refactoring/04_channel_routing_module.md`.
+- `logger_module`: **14** файлов `.py` (без `tests/`), **~1526** LOC, **1** test-файл, **11** pytest; удалены `LogDispatcher`, пакет `batcher/`, `LogRecord` → `core/log_types.py`, убраны свойства `channels`/`batcher`/`self.dispatcher`; `error_module` переведён на `_channel_registry.get()` и импорт `LogRecord` из `log_types` (2026-04-09). Ранее: 16 / 1909 LOC — см. план `plans/refactoring/05_logger_module.md`.
+- `config_module`: **11** файлов `.py` (без `tests/`), **1074** LOC, **3** test-файла, **49** pytest; код без изменений — добавлены `DECISIONS.md` (локальные **ADR-143…146**, глобальный **ADR-023** без дублирования номеров с ADR-024…027), раздел **Dict at Boundary** в README, §**6.6** в `ARCHITECTURE.md`, индекс в главном `DECISIONS.md`; проверено: `sync_config` / `load_config_from_storage` работают только с **dict** на границе ConfigStore (2026-04-09). См. план `plans/refactoring/06_config_module.md`.
 - `frontend_module` (147 файлов / 10 302 LOC) — четверть всего кода. Выделение в `frontend_framework` уберёт существенный объём из ядра.
 - Самые «толстые» файлы из §1.1 мета-плана (`dispatcher.py` 736, `router_manager.py` 624, `process_module.py` 585, `logger_manager.py` 582, `message.py` 508) — все целевые на расслоение в per-module шагах.
 - `logger_module` имеет только **1** test-файл — риск низкого покрытия. В per-module плане модуля #5 (Шаг 1) явно проверить и при необходимости добить тесты **до** рефакторинга.

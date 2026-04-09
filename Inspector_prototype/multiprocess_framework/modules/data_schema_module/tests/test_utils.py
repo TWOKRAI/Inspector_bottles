@@ -1,5 +1,5 @@
 """
-Unit-тесты для утилит (utils/helpers.py, utils/reference.py).
+Unit-тесты для утилит (core/helpers.py, core/reference.py).
 
 Сценарии:
 - helpers: get_nested_value, set_nested_value, merge_with_defaults, extract_fields (в т.ч. вложенные ключи).
@@ -10,13 +10,13 @@ from typing import Any, Dict
 
 import pytest
 
-from ..utils.helpers import (
+from ..core.helpers import (
     get_nested_value,
     set_nested_value,
     merge_with_defaults,
     extract_fields,
 )
-from ..utils.reference import (
+from ..core.reference import (
     DataReference,
     convert_all_references,
     is_reference,

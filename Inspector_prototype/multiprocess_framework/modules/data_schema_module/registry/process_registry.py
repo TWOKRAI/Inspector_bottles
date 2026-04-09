@@ -282,7 +282,7 @@ class ProcessRegistersRegistry:
             }
             Поля без routing пропускаются.
         """
-        from ..fields.register_mixin import RegisterMixin
+        from ..core.schema_mixin import RegisterMixin
 
         result: dict[str, dict[str, dict]] = {}
         for proc_name, entry in self._processes.items():
@@ -312,7 +312,7 @@ class ProcessRegistersRegistry:
                 }
             }
         """
-        from ..fields.register_mixin import RegisterMixin
+        from ..core.schema_mixin import RegisterMixin
 
         result: dict[str, dict[str, Any]] = {}
         for proc_name, entry in self._processes.items():

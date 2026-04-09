@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 import time
 
 from .base_dispatcher import BaseDispatcher
+from .scenarios import ScenarioManager
 from ..types.types import DispatchStrategy, HandlerInfo, Scenario
 from ..strategies import (
     ExactMatchStrategy,
@@ -75,14 +76,6 @@ class Dispatcher(BaseManager, ObservableMixin):
         managers: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         config_manager: Optional[Any] = None,
-        # Обратная совместимость со старым API
-        logger_manager: Optional[Any] = None,
-        error_manager: Optional[Any] = None,
-        statistics_manager: Optional[Any] = None,
-        enable_logging: bool = True,
-        enable_error_tracking: bool = True,
-        enable_statistics: bool = True,
-        **kwargs
     ):
         """
         Инициализация диспетчера.
@@ -91,47 +84,21 @@ class Dispatcher(BaseManager, ObservableMixin):
             manager_name: Уникальное имя менеджера (для BaseManager)
             process: Ссылка на родительский процесс (опционально, для BaseManager)
             default_strategy: Стратегия по умолчанию (используется если не указана в сообщении)
-            managers: Словарь менеджеров {имя: менеджер} (новый универсальный способ)
+            managers: Словарь менеджеров {имя: менеджер} (например logger / error / statistics)
             config: Конфигурация включения/выключения функций {имя: bool}
-            config_manager: Менеджер конфигурации для динамического обновления
-            logger_manager: Менеджер логирования (для обратной совместимости)
-            error_manager: Менеджер обработки ошибок (для обратной совместимости)
-            statistics_manager: Менеджер статистики (для обратной совместимости)
-            enable_logging: Включить логирование по умолчанию (для обратной совместимости)
-            enable_error_tracking: Включить отслеживание ошибок по умолчанию
-            enable_statistics: Включить статистику по умолчанию
-            **kwargs: Дополнительные параметры для BaseManager и ObservableMixin
+            config_manager: Менеджер конфигурации для динамического обновления (зарезервировано)
         """
-        # Инициализация BaseManager
         BaseManager.__init__(self, manager_name=manager_name, process=process)
-        
-        # Поддержка старого API для обратной совместимости
-        if managers is None:
-            managers = {}
-            if logger_manager:
-                managers['logger'] = logger_manager
-            if error_manager:
-                managers['error'] = error_manager
-            if statistics_manager:
-                managers['statistics'] = statistics_manager
-        
-        if config is None:
-            config = {
-                'logger': enable_logging,
-                'error': enable_error_tracking,
-                'statistics': enable_statistics
-            }
-        
-        # Инициализация ObservableMixin
+
         ObservableMixin.__init__(
             self,
             managers=managers,
             config=config
         )
+
+        self._config_manager = config_manager
         
         self._default_strategy = default_strategy
-        self.name = manager_name  # Для обратной совместимости
-        self.strategy = default_strategy  # Для обратной совместимости
         
         # Инициализация всех стратегий одновременно
         self._strategies: Dict[DispatchStrategy, BaseStrategy] = {
@@ -149,18 +116,17 @@ class Dispatcher(BaseManager, ObservableMixin):
             DispatchStrategy.CHAIN_MATCH: None,  # Не используется, сценарии в отдельном хранилище
         }
         
-        # Отдельное хранилище сценариев (не привязано к стратегии)
-        self._scenarios: Dict[str, Scenario] = {}
-        
-        # Для обратной совместимости
-        self.handlers = self._handlers_storage[DispatchStrategy.EXACT_MATCH]
-        
-        # НЕ вызываем initialize() здесь - это делается явно после создания
+        self._scenario_mgr = ScenarioManager()
+
+    @property
+    def default_strategy(self) -> DispatchStrategy:
+        """Стратегия по умолчанию для регистрации и диспетчеризации без явного поля strategy."""
+        return self._default_strategy
     
     @property
     def scenarios(self) -> Dict[str, Scenario]:
-        """Получить доступ к сценариям (для обратной совместимости)."""
-        return self._scenarios
+        """Словарь сценариев (имя → объект Scenario)."""
+        return self._scenario_mgr.scenarios
     
     # ========================================================================
     # РЕАЛИЗАЦИЯ BaseManager - ЖИЗНЕННЫЙ ЦИКЛ
@@ -202,8 +168,7 @@ class Dispatcher(BaseManager, ObservableMixin):
                 elif isinstance(storage, list):
                     storage.clear()
             
-            # Очищаем сценарии
-            self._scenarios.clear()
+            self._scenario_mgr.clear()
             
             # Очищаем стратегии
             self._strategies.clear()
@@ -296,10 +261,6 @@ class Dispatcher(BaseManager, ObservableMixin):
                 handlers_storage=storage
             )
             
-            # Синхронизация для обратной совместимости
-            if result and target_strategy == DispatchStrategy.EXACT_MATCH:
-                self.handlers = self._handlers_storage[DispatchStrategy.EXACT_MATCH]
-            
             if result:
                 self._log_info(f"Handler '{key}' registered successfully", module="dispatcher")
                 self._record_metric("dispatcher.handler.registration.success", tags={"key": key})
@@ -324,7 +285,7 @@ class Dispatcher(BaseManager, ObservableMixin):
         storage = self._handlers_storage[strategy]
 
         if strategy == DispatchStrategy.CHAIN_MATCH:
-            storage = self._scenarios
+            storage = self._scenario_mgr.scenarios
 
         return strategy_impl.find_handler(key, storage)
     
@@ -354,7 +315,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             return handler
         
         # 4. Проверка сценариев
-        if key in self._scenarios:
+        if self._scenario_mgr.has_scenario(key):
             # Возвращаем специальный маркер для сценария
             return HandlerInfo(
                 key=key,
@@ -401,7 +362,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             
             # 1. Проверка на явное указание сценария в сообщении
             explicit_scenario = message.get("scenario")
-            if explicit_scenario and explicit_scenario in self._scenarios:
+            if explicit_scenario and self._scenario_mgr.has_scenario(explicit_scenario):
                 self._log_debug(f"Executing scenario '{explicit_scenario}'", module="dispatcher")
                 result = self.dispatch_scenario(explicit_scenario, message, data_field)
                 duration = time.time() - start_time
@@ -409,7 +370,7 @@ class Dispatcher(BaseManager, ObservableMixin):
                 return result
             
             # 2. Проверка на сценарий по ключу (если ключ является сценарием)
-            if key in self._scenarios:
+            if self._scenario_mgr.has_scenario(key):
                 self._log_debug(f"Executing scenario '{key}'", module="dispatcher")
                 result = self.dispatch_scenario(key, message, data_field)
                 duration = time.time() - start_time
@@ -422,7 +383,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             # 4. Поиск обработчика
             if requested_strategy == DispatchStrategy.CHAIN_MATCH:
                 # Явный запрос chain — ключ должен быть именем сценария
-                if key in self._scenarios:
+                if self._scenario_mgr.has_scenario(key):
                     self._log_debug(f"Executing scenario '{key}' via chain strategy", module="dispatcher")
                     result = self.dispatch_scenario(key, message, data_field)
                     duration = time.time() - start_time
@@ -465,42 +426,29 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._record_metric("dispatcher.dispatch.errors", tags={"error": "exception"})
             return {"status": "error", "reason": error_msg}
     
-    # Методы для работы со сценариями
-    
+    # Методы для работы со сценариями (делегирование в ScenarioManager)
+
     def create_scenario(
         self,
         name: str,
         description: str = "",
-        metadata: Dict[str, Any] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Создать новый сценарий."""
-        if name in self._scenarios:
-            return False
-        
-        self._scenarios[name] = Scenario(
-            name=name,
-            description=description,
-            metadata=metadata or {}
-        )
-        return True
-    
+        return self._scenario_mgr.create_scenario(name, description, metadata)
+
     def delete_scenario(self, name: str) -> bool:
         """Удалить сценарий."""
-        if name not in self._scenarios:
-            return False
-        del self._scenarios[name]
-        return True
-    
+        return self._scenario_mgr.delete_scenario(name)
+
     def get_scenario_info(self, name: str) -> Optional[Dict[str, Any]]:
         """Получить информацию о сценарии."""
-        if name not in self._scenarios:
-            return None
-        return self._scenarios[name].get_info()
-    
+        return self._scenario_mgr.get_scenario_info(name)
+
     def get_all_scenarios(self) -> List[Dict[str, Any]]:
         """Получить информацию обо всех сценариях."""
-        return [scenario.get_info() for scenario in self._scenarios.values()]
-    
+        return self._scenario_mgr.get_all_scenarios()
+
     def add_handler_to_scenario(
         self,
         scenario_name: str,
@@ -508,129 +456,63 @@ class Dispatcher(BaseManager, ObservableMixin):
         handler: Callable,
         stage: int,
         expects_full_message: bool = False,
-        metadata: Dict[str, Any] = None,
-        tags: List[str] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
     ) -> bool:
         """Добавить обработчик в сценарий на определенный этап."""
-        if scenario_name not in self._scenarios:
-            return False
-        
-        handler_info = HandlerInfo(
-            key=handler_key,
-            handler=handler,
-            expects_full_message=expects_full_message,
-            metadata=metadata or {},
-            stage=stage,
-            tags=set(tags) if tags else set()
+        return self._scenario_mgr.add_handler_to_scenario(
+            scenario_name,
+            handler_key,
+            handler,
+            stage,
+            expects_full_message,
+            metadata,
+            tags,
         )
-        
-        return self._scenarios[scenario_name].add_handler(handler_info, stage)
-    
+
     def remove_handler_from_scenario(self, scenario_name: str, handler_key: str) -> bool:
         """Удалить обработчик из сценария."""
-        if scenario_name not in self._scenarios:
-            return False
-        return self._scenarios[scenario_name].remove_handler(handler_key)
-    
-    def reorder_handler_in_scenario(self, scenario_name: str, handler_key: str, new_stage: int) -> bool:
+        return self._scenario_mgr.remove_handler_from_scenario(scenario_name, handler_key)
+
+    def reorder_handler_in_scenario(
+        self, scenario_name: str, handler_key: str, new_stage: int
+    ) -> bool:
         """Изменить порядок обработчика в сценарии."""
-        if scenario_name not in self._scenarios:
-            return False
-        return self._scenarios[scenario_name].reorder_handler(handler_key, new_stage)
-    
+        return self._scenario_mgr.reorder_handler_in_scenario(
+            scenario_name, handler_key, new_stage
+        )
+
     def update_scenario_metadata(self, scenario_name: str, metadata: Dict[str, Any]) -> bool:
         """Обновить метаданные сценария."""
-        if scenario_name not in self._scenarios:
-            return False
-        self._scenarios[scenario_name].metadata = metadata
-        return True
-    
+        return self._scenario_mgr.update_scenario_metadata(scenario_name, metadata)
+
     def update_scenario_description(self, scenario_name: str, description: str) -> bool:
         """Обновить описание сценария."""
-        if scenario_name not in self._scenarios:
-            return False
-        self._scenarios[scenario_name].description = description
-        return True
-    
+        return self._scenario_mgr.update_scenario_description(scenario_name, description)
+
     def dispatch_scenario(
         self,
         scenario_name: str,
         message: Dict[str, Any],
         data_field: str = "data",
-        stop_on_error: bool = True
+        stop_on_error: bool = True,
     ) -> Dict[str, Any]:
         """
         Выполнить сценарий - цепочку обработчиков по порядку.
-        
+
         Args:
             scenario_name: Имя сценария для выполнения
             message: Сообщение для обработки
             data_field: Поле в сообщении, содержащее данные
             stop_on_error: Остановить выполнение при ошибке
-            
+
         Returns:
             Словарь с результатами выполнения всех этапов
         """
-        if scenario_name not in self._scenarios:
-            return {"status": "error", "reason": f"Scenario '{scenario_name}' not found"}
-        
-        scenario = self._scenarios[scenario_name]
-        results = {
-            "status": "success",
-            "scenario": scenario_name,
-            "stages": [],
-            "final_result": None
-        }
-        
-        current_data = message.get(data_field, message)
-        
-        for handler_info in scenario.handlers:
-            try:
-                handler_data = message if handler_info.expects_full_message else current_data
-                stage_result = handler_info.handler(handler_data)
-                
-                results["stages"].append({
-                    "stage": handler_info.stage,
-                    "handler_key": handler_info.key,
-                    "status": "success",
-                    "result": stage_result
-                })
-                
-                # Передаем результат предыдущего этапа следующему
-                if isinstance(stage_result, dict):
-                    # Если результат - словарь, передаем его целиком или поле data если есть
-                    if "data" in stage_result:
-                        current_data = stage_result["data"]
-                    else:
-                        current_data = stage_result
-                elif not handler_info.expects_full_message:
-                    # Если результат не словарь, передаем как есть
-                    current_data = stage_result
-                else:
-                    # Если expects_full_message, оставляем текущие данные
-                    pass
-                
-            except Exception as e:
-                results["stages"].append({
-                    "stage": handler_info.stage,
-                    "handler_key": handler_info.key,
-                    "status": "error",
-                    "error": str(e)
-                })
-                
-                if stop_on_error:
-                    results["status"] = "error"
-                    results["final_error"] = f"Stage {handler_info.stage} failed: {str(e)}"
-                    return results
-        
-        # Последний результат становится финальным
-        if results["stages"]:
-            last_stage = results["stages"][-1]
-            if last_stage["status"] == "success":
-                results["final_result"] = last_stage["result"]
-        
-        return results
-    
+        return self._scenario_mgr.dispatch_scenario(
+            scenario_name, message, data_field, stop_on_error
+        )
+
     # Методы для обновления обработчиков (работают с default_strategy)
     
     def update_handler_efficiency(self, key: str, new_efficiency: int) -> bool:

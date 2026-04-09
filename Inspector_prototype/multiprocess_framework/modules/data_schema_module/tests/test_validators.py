@@ -1,5 +1,5 @@
 """
-Unit-тесты для DataValidator (utils/validators.py).
+Unit-тесты для DataValidator (core/validators.py).
 
 Сценарии:
 - validate / is_valid / get_validation_errors для одной модели.
@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel
 from typing import Dict, Any
 
-from ..utils.validators import DataValidator
+from ..core.validators import DataValidator
 
 
 # ============================================================================

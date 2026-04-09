@@ -32,12 +32,12 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel
 
-from data_schema_module.registry.registers_scanner import (
+from data_schema_module.registry.discovery import (
     RegistersScanner,
     _class_name_to_snake,
 )
-from data_schema_module.fields.register_base import RegisterBase
-from data_schema_module.fields.field_meta import FieldMeta
+from data_schema_module.core.schema_base import RegisterBase
+from data_schema_module.core.field_meta import FieldMeta
 
 
 # =============================================================================
@@ -50,8 +50,8 @@ def reg_dir(tmp_path: Path) -> Path:
     (tmp_path / "alpha.py").write_text(
         textwrap.dedent("""\
             from typing import Annotated
-            from data_schema_module.fields.register_base import RegisterBase
-            from data_schema_module.fields.field_meta import FieldMeta
+            from data_schema_module.core.schema_base import RegisterBase
+            from data_schema_module.core.field_meta import FieldMeta
 
             class AlphaRegisters(RegisterBase):
                 value: Annotated[int, FieldMeta("Значение")] = 0
@@ -61,8 +61,8 @@ def reg_dir(tmp_path: Path) -> Path:
     (tmp_path / "beta.py").write_text(
         textwrap.dedent("""\
             from typing import Annotated
-            from data_schema_module.fields.register_base import RegisterBase
-            from data_schema_module.fields.field_meta import FieldMeta
+            from data_schema_module.core.schema_base import RegisterBase
+            from data_schema_module.core.field_meta import FieldMeta
 
             class BetaRegisters(RegisterBase):
                 flag: Annotated[bool, FieldMeta("Флаг")] = True
@@ -82,7 +82,7 @@ def multi_word_dir(tmp_path: Path) -> Path:
     """Директория с многословным именем класса."""
     (tmp_path / "frame_process.py").write_text(
         textwrap.dedent("""\
-            from data_schema_module.fields.register_base import RegisterBase
+            from data_schema_module.core.schema_base import RegisterBase
 
             class FrameProcessRegisters(RegisterBase):
                 timeout: int = 100
@@ -193,7 +193,7 @@ class TestScanDirectory:
         """Два файла с одинаковым именем класса → предупреждение в логе."""
         (tmp_path / "first.py").write_text(
             textwrap.dedent("""\
-                from data_schema_module.fields.register_base import RegisterBase
+                from data_schema_module.core.schema_base import RegisterBase
                 class DupeRegisters(RegisterBase):
                     x: int = 1
             """),
@@ -201,13 +201,13 @@ class TestScanDirectory:
         )
         (tmp_path / "second.py").write_text(
             textwrap.dedent("""\
-                from data_schema_module.fields.register_base import RegisterBase
+                from data_schema_module.core.schema_base import RegisterBase
                 class DupeRegisters(RegisterBase):
                     x: int = 2
             """),
             encoding="utf-8",
         )
-        with caplog.at_level(logging.WARNING, logger="data_schema_module.registry.registers_scanner"):
+        with caplog.at_level(logging.WARNING, logger="data_schema_module.registry.discovery"):
             result = RegistersScanner.scan_directory(tmp_path)
         assert "dupe" in result
         assert any("дублирующийся" in rec.message for rec in caplog.records)

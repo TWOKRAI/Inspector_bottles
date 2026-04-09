@@ -305,7 +305,7 @@ class CommandManager(BaseManager, ObservableMixin):
             "process_name": self.process_name,  # Для обратной совместимости
             "total_commands": len(commands),
             "commands": [cmd.get('key', '') for cmd in commands],
-            "dispatcher_strategy": self.dispatcher.strategy.value if hasattr(self.dispatcher, 'strategy') else None
+            "dispatcher_strategy": self.dispatcher.default_strategy.value
         }
     
     def get_command_info(self, command_name: str) -> Optional[Dict]:

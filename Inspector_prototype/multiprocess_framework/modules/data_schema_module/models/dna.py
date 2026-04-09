@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from enum import Enum
 
 from .base import BaseComponentModel
-from ..utils.reference import DataReference
+from ..core.reference import DataReference
 from .types import ComponentType
 
 

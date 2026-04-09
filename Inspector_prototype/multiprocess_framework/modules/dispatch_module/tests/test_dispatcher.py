@@ -33,10 +33,19 @@ class TestDispatcher(unittest.TestCase):
     def test_dispatcher_initialization(self):
         """Тест инициализации диспетчера."""
         self.assertEqual(self.dispatcher.manager_name, "test_dispatcher")
-        self.assertEqual(self.dispatcher.name, "test_dispatcher")  # Для обратной совместимости
-        self.assertEqual(self.dispatcher.strategy, DispatchStrategy.EXACT_MATCH)
-        self.assertIsNotNone(self.dispatcher.handlers)
+        self.assertEqual(self.dispatcher.default_strategy, DispatchStrategy.EXACT_MATCH)
         self.assertTrue(self.dispatcher.is_initialized)
+
+    def test_legacy_init_kwargs_rejected(self):
+        """Старые параметры logger_manager / error_manager / statistics_manager не поддерживаются."""
+        with self.assertRaises(TypeError):
+            Dispatcher("x", logger_manager=object())
+        with self.assertRaises(TypeError):
+            Dispatcher("x", error_manager=object())
+        with self.assertRaises(TypeError):
+            Dispatcher("x", statistics_manager=object())
+        with self.assertRaises(TypeError):
+            Dispatcher("x", enable_logging=False)
     
     def test_lifecycle_initialize(self):
         """Тест метода initialize()."""

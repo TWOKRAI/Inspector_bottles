@@ -1,12 +1,12 @@
 # data_schema_module — Статус рефакторинга
 
-**Дата последнего обновления:** 2026-03-31 | **Версия:** 2.0 | **Ветка:** `manual_refactored`
+**Дата последнего обновления:** 2026-04-09 | **Версия:** 2.0 | **Ветка:** `manual_refactored`
 
 ---
 
-## 📊 Текущий этап: 10 / 11
+## 📊 Текущий этап: 11 / 11
 
-✅ Все основные шаги рефакторинга завершены. Выполняется финализация документации и примеров адаптеров.
+✅ Рефакторинг v2.0 завершён; выполнена зачистка shim-слоя (`fields/`, `utils/`, `_compat.py`, `tests_backup/`, re-export в `registry/` и `storage/`, тонкие `extensions/*` для StorageManager). Публичный API `__init__.py` без изменений.
 
 ---
 
@@ -38,11 +38,11 @@
 - [x] **Шаг 4:** Создание serialization/ — converter, io, file_storage
 - [x] **Шаг 5:** Создание container/ — RegistersContainer, config_converters
 - [x] **Шаг 6:** Создание extensions/ — models, StorageManager, tools, versioning, factory
-- [x] **Шаг 7:** Обновление __init__.py — минимальный API (~50 экспортов) + _compat.py
+- [x] **Шаг 7:** Обновление __init__.py — минимальный API (~50 экспортов)
 - [x] **Шаг 8:** Тесты — полное покрытие ядра + интеграционные тесты (13+ тест-модулей)
 - [x] **Шаг 9:** Обновление потребляющих модулей — все работают без breakage
-- [x] **Шаг 10:** Обновлена документация — README, STATUS, MIGRATION (текущий этап)
-- [ ] **Шаг 11:** Примеры адаптеров — RouterAdapter, ConfigAdapter, ProcessAdapter (планируется)
+- [x] **Шаг 10:** Обновлена документация — README, STATUS
+- [x] **Шаг 11:** Cleanup shims — удалены `fields/`, `utils/`, `_compat.py`, `MIGRATION.md`, `tests_backup/`, re-export в `registry/` и `extensions/` для StorageManager/ProcessDataContainer; канон `storage/`, `registry/discovery.py`; см. `DECISIONS.md` (ADR-120…123)
 
 - **SchemaMixin.build():** `(manager_name, model_dump())` для Dict at Boundary; см. ADR-105
 
@@ -54,10 +54,9 @@
 data_schema_module/
 ├── interfaces.py              # ✅ Публичный контракт (протоколы + ABC)
 ├── __init__.py                # ✅ Минимальный API (~50 экспортов)
-├── _compat.py                 # ✅ Алиасы для обратной совместимости
+├── DECISIONS.md               # ✅ Локальные ADR (ADR-120…123)
 ├── README.md                  # ✅ Comprehensive (500+ строк)
 ├── STATUS.md                  # ✅ Этот файл
-├── MIGRATION.md               # ✅ Инструкции миграции
 │
 ├── core/                      # ✅ Ядро: Schema + Field + Validation
 │   ├── __init__.py
@@ -74,7 +73,13 @@ data_schema_module/
 ├── registry/                  # ✅ Реестр схем
 │   ├── __init__.py
 │   ├── schema_registry.py     # ✅ SchemaRegistry (no Singleton)
-│   └── discovery.py           # ✅ Auto-discovery
+│   ├── discovery.py           # ✅ Auto-discovery + RegistersScanner
+│   └── process_registry.py    # ✅ ProcessRegistersRegistry
+│
+├── storage/                   # ✅ ProcessData: StorageManager, ProcessDataContainer
+│   ├── __init__.py
+│   ├── storage_manager.py
+│   └── process_data_container.py
 │
 ├── serialization/             # ✅ Сериализация
 │   ├── __init__.py
@@ -87,11 +92,9 @@ data_schema_module/
 │   ├── registers_container.py # ✅ RegistersContainer
 │   └── config_converters.py   # ✅ config_to_dict, process()
 │
-├── extensions/                # ✅ Опциональные расширения
+├── extensions/                # ✅ Опциональные расширения (явный импорт)
 │   ├── __init__.py
 │   ├── models/                # ✅ BaseComponentModel, ComponentDNA
-│   ├── storage_manager.py     # ✅ StorageManager
-│   ├── process_data_container.py  # ✅
 │   ├── manager_adapter.py     # ✅ ManagerDataAdapter
 │   ├── versioning.py          # ✅ VersionManager
 │   ├── factory.py             # ✅ ModelFactory
@@ -164,16 +167,13 @@ launcher.add_process(*process(ProcessConfig(), WorkerConfig()))
 - `config_module/adapters/schema_adapter.py` → `ConfigSchemaAdapter`
 - `process_manager_module/adapters/schema_adapter.py` → `ProcessSchemaAdapter`
 
-### 5. Обратная совместимость ✅
+### 5. Публичные алиасы имён ✅
 
-**Решение:** `_compat.py` с полным набором алиасов.
+**Решение:** Корневой `__init__.py` экспортирует и канонические имена (`SchemaBase`, `ISchemaStorage`), и исторические (`RegisterBase`, `IRegisterStorage`).
 
 ```python
-# Старое имя — всё ещё работает
 from data_schema_module import RegisterBase, RegisterMixin, IRegisterStorage
-
-# Новое имя — рекомендуется
-from data_schema_module import SchemaBase, SchemaMixin, ISchemaStorage
+from data_schema_module import SchemaBase, SchemaMixin, ISchemaStorage  # рекомендуется
 ```
 
 ---
@@ -257,7 +257,7 @@ from data_schema_module import SchemaBase, SchemaMixin, ISchemaStorage
 |------|--------|---------|
 | **README.md** | ✅ | Comprehensive guide (500+ строк), архитектура, примеры, API справочник |
 | **STATUS.md** | ✅ | Этот файл, статус рефакторинга |
-| **MIGRATION.md** | ✅ | Инструкции миграции со старого API |
+| **DECISIONS.md** | ✅ | Локальные ADR модуля (ADR-120…123) |
 | **interfaces.py** | ✅ | Публичный контракт (595 строк, 30+ протоколов/ABC) |
 
 ### Документация в docs/ (унаследованные файлы)
@@ -335,7 +335,7 @@ Total: ~3500 строк (core + registry + serialization + container)
 Total: ~1500 строк
 ├── README.md: ~600 строк (новый comprehensive)
 ├── STATUS.md: ~300 строк
-├── MIGRATION.md: ~200 строк
+├── DECISIONS.md: локальные ADR
 ├── interfaces.py: ~600 строк (с docstrings)
 └── Docstrings в коде: ~4000 строк
 ```
@@ -361,7 +361,7 @@ from data_schema_module import SchemaBase, SchemaMixin
 from data_schema_module import StorageManager
 
 # ✅ Правильно (явный импорт)
-from data_schema_module.extensions.storage_manager import StorageManager
+from data_schema_module.storage.storage_manager import StorageManager
 ```
 
 ### Создавать адаптеры в своих модулях
@@ -381,7 +381,7 @@ class ConfigSchemaAdapter:
 ## 📚 Ссылки
 
 - **README.md** — Основная документация
-- **MIGRATION.md** — Миграция со старого API
+- **DECISIONS.md** — Локальные ADR модуля
 - **interfaces.py** — Публичный контракт
 - **docs/QUICK_REFERENCE.md** — Краткая справка
 - **docs/examples/** — Примеры кода
@@ -393,6 +393,7 @@ class ConfigSchemaAdapter:
 
 | Дата | Версия | Что сделано | Этап |
 |------|--------|-----------|------|
+| 2026-04-09 | 2.0 | Shim cleanup: удалены fields/, utils/, _compat, tests_backup; канон storage/, discovery | 11/11 |
 | 2026-03-13 | 2.0 | Обновлена документация (README, STATUS, MIGRATION) | 10/11 |
 | 2026-03-12 | 2.0 | Завершены тесты + интеграция модулей | 9/11 |
 | 2026-03-11 | 2.0 | Создана новая структура (extensions, переименования) | 6-8/11 |

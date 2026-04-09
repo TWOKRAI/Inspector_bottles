@@ -40,11 +40,11 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel
 
-from ..fields.field_meta import FieldMeta
-from ..fields.field_routing import FieldRouting
-from ..fields.register_base import RegisterBase
-from ..fields.register_mixin import _ALL_FIELDS_META_CACHE, _FIELD_META_CACHE
-from ..utils.registers_container import RegistersContainer
+from ..core.field_meta import FieldMeta
+from ..core.field_routing import FieldRouting
+from ..core.schema_base import RegisterBase
+from ..core.schema_mixin import _ALL_FIELDS_META_CACHE, _FIELD_META_CACHE
+from ..container.registers_container import RegistersContainer
 
 
 # =============================================================================

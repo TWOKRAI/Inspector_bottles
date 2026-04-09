@@ -1,5 +1,5 @@
 """
-Unit-тесты для register_discovery (registry/register_discovery.py).
+Unit-тесты для discovery (registry/discovery.py).
 
 Сценарии:
 - _class_name_to_key: преобразование имени по суффиксу (Registers/Data) в snake_case.
@@ -11,7 +11,7 @@ Unit-тесты для register_discovery (registry/register_discovery.py).
 import pytest
 from pydantic import BaseModel
 
-from ..registry.register_discovery import (
+from ..registry.discovery import (
     discover_registers_from_package,
     register_package_registers,
     register_package_schemas,

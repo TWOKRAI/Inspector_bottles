@@ -8,7 +8,7 @@ from typing import Any, Optional, Dict, List
 
 from ..storage.storage_manager import StorageManager
 from ..models.base import BaseManagerModel
-from ..utils.helpers import get_nested_value, set_nested_value
+from ..core.helpers import get_nested_value, set_nested_value
 
 
 class ManagerDataAdapter:

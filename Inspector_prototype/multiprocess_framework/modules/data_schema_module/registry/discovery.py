@@ -9,9 +9,6 @@ Auto-discovery схем и регистров.
 Оба механизма возвращают Dict[str, Type[BaseModel]] и совместимы
 с RegistersContainer и SchemaRegistry.
 
-Backward compatibility:
-    register_discovery.py  → re-export из этого файла
-    registers_scanner.py   → re-export из этого файла
 """
 from __future__ import annotations
 
@@ -53,6 +50,20 @@ def _class_name_to_key(class_name: str, suffix: str) -> str:
 def _class_name_to_register_name(class_name: str) -> str:
     """DrawRegisters -> draw. Оставлен для совместимости."""
     return _class_name_to_key(class_name, "Registers")
+
+
+def _class_name_to_snake(class_name: str, suffix: str) -> str:
+    """
+    Преобразование CamelCase + suffix → snake_case (старое поведение RegistersScanner).
+
+    Отличие от _class_name_to_key: при несовпадении суффикса возвращает class_name.lower().
+    """
+    if not suffix or not class_name.endswith(suffix):
+        return class_name.lower()
+    base = class_name[: -len(suffix)]
+    if not base:
+        return class_name.lower()
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", base).lower()
 
 
 # =============================================================================

@@ -12,7 +12,7 @@ from typing import Any, Dict
 import pytest
 from pydantic import BaseModel
 
-from ..utils.registers_io import (
+from ..serialization.io import (
     registers_to_dict,
     registers_from_dict,
     registers_to_json,

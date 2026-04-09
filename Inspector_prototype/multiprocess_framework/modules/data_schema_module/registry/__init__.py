@@ -24,11 +24,9 @@ from .discovery import (
     register_package_schemas,
     register_package_registers,
     _class_name_to_key,
+    _class_name_to_snake,
 )
 from .process_registry import ProcessRegistersRegistry, RegistersMeta
-
-# Backward compat: старые файлы теперь re-export из discovery
-# register_discovery.py и registers_scanner.py остаются как re-export обёртки
 
 __all__ = [
     # Новые имена
@@ -42,6 +40,8 @@ __all__ = [
     "discover_registers_from_package",
     "register_package_schemas",
     "register_package_registers",
+    "_class_name_to_key",
+    "_class_name_to_snake",
     # Process registry
     "ProcessRegistersRegistry",
     "RegistersMeta",

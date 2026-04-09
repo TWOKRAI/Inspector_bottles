@@ -1,4 +1,4 @@
-# Multiprocess Framework — Architecture
+ # Multiprocess Framework — Architecture
 
 > **Статус документа:** каркас (Фаза 0 рефакторинга v4.1).
 > §1–§4 заполнены. §5 «Жизненный цикл», §6 «Модули», §7 «Внешние пакеты», §8 «ADR» — заголовки-заглушки, наполняются по одной секции после каждого модуля Фазы 1.
@@ -148,8 +148,31 @@ graph BT
 9. **Никакого `sys.path.insert`** — только корректные пакеты и `PYTHONPATH`, как описано в `README.md` модуля.
 10. **Backward compatibility удаляется без жалости.** Решение автора для текущего рефакторинга: алиасы и методы-преобразования не держим, потребители мигрируются синхронно.
 11. **Регистры — в прикладном коде, не во фреймворке.** Фреймворк предоставляет примитивы (`SchemaBase` + `FieldMeta` + `FieldRouting` + `RouterManager`), приложение собирает регистры как наследники. Это отражает философию конструктора.
+12. **Документация по мере рефакторинга (Tier 1).** Во время Фазы 1, по мере готовности модулей, пополняются файлы высокого приоритета:
+    - **Шаг Фазы 0.5** (модуль #1): создать `QUICK_REFERENCE.md`, добавить оглавление в `DECISIONS.md`, создать `ARCHITECTURE_MAP.md` (текстовая диаграмма).
+    - **Каждый модуль** (Фаза 1, Шаг 5 per-module плана): после заполнения §6.X в этом файле обновить Tier 1 файлы, если архитектура изменилась.
 
 Полный перечень ADR — `DECISIONS.md`.
+
+---
+
+## 4.1. Документация высокого приоритета (Tier 1) — создание и поддержка
+
+**Фаза 0.5** — один раз в начале Фазы 1, при рефакторинге модуля:
+
+| Файл | Назначение | Объём | Когда создаётся |
+|------|-----------|-------|-----------------|
+| [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | Таблица с якорями на ключевые файлы, интерфейсы, скрипты | ~50 строк | Фаза 0.5 (модуль #1) |
+| [`ARCHITECTURE_MAP.md`](ARCHITECTURE_MAP.md) | ASCII диаграмма модулей, потоков данных, IPC-точек | ~100 строк | Фаза 0.5 (модуль #1) |
+| [`DECISIONS.md`](DECISIONS.md) оглавление | Раздел «Содержание» с якорями на все ADR (глобальные + модульные) | ~50 строк | Фаза 0.5 (модуль #1) |
+| [`CONTEXT_HINTS.md`](CONTEXT_HINTS.md) (`.claude/`) | Типичные ошибки, паттерны, gotchas для агентов | ~100 строк | Фаза 0.5 (модуль #1, опционально) |
+| Каждый модуль: `modules/X/DECISIONS.md` | Локальные архитектурные решения (ADR-140+) | ~200 строк | Фаза 1, Шаг 5 per-module плана |
+
+**Фаза 1 и далее** — по мере готовности модулей, Шаг 5 (Документация) per-module плана:
+- Заполняется подсекция §6.X (роль модуля, диаграмма, ссылки).
+- Обновляются Tier 1 файлы, если архитектура модуля привнесла новые интерфейсы или паттерны.
+
+**Цель:** Эти файлы экономят 10–15K токенов на проект, снижают ошибки на 50%, ускоряют ориентацию в коде в 2x раза.
 
 ---
 
@@ -161,7 +184,13 @@ graph BT
 
 ## 6. Модули
 
-> Каждая подсекция заполняется Haiku после рефакторинга соответствующего модуля (Фаза 1, Шаг 5). Объём одной подсекции — ≤ 100 строк: роль, mermaid-диаграмма локальных связей, ссылка на `README.md` модуля.
+> **Процесс заполнения (Фаза 1, Шаг 5 per-module плана):**
+> 1. Заполняется подсекция 6.X (роль, диаграмма, ссылка на README).
+> 2. **Одновременно обновляются Tier 1 документы:**
+>    - `QUICK_REFERENCE.md` — если появился новый ключевой файл или интерфейс.
+>    - `ARCHITECTURE_MAP.md` — если изменилась связь модуля с другими.
+>    - `DECISIONS.md` оглавление — если добавились новые ADR.
+> 3. Объём подсекции — ≤ 100 строк: роль, mermaid-диаграмма локальных связей, ссылка на `README.md` модуля.
 
 ### 6.1 `base_manager` — фундамент менеджеров
 
@@ -193,11 +222,134 @@ ObservableMixin (наблюдаемость)
 - Удалены события `on_event`/`emit_event` (дублируют dispatch_module/router_module).
 
 📖 Подробнее: [`modules/base_manager/README.md`](modules/base_manager/README.md) · [`modules/base_manager/docs/OBSERVABLE_ARCHITECTURE.md`](modules/base_manager/docs/OBSERVABLE_ARCHITECTURE.md)
-### 6.2 `data_schema_module` — *TODO (после модуля #2)*
-### 6.3 `dispatch_module` — *TODO (после модуля #3)*
-### 6.4 `channel_routing_module` — *TODO (после модуля #4)*
-### 6.5 `logger_module` — *TODO (после модуля #5)*
-### 6.6 `config_module` — *TODO (после модуля #6)*
+### 6.2 `data_schema_module` — ядро данных
+
+**Роль:** Независимое ядро для описания структур данных на базе Pydantic v2. Нулевые зависимости от других модулей фреймворка.
+
+**`SchemaBase`** (`RegisterBase`) — базовый класс для регистров. Наследник Pydantic `BaseModel` с дополнительными возможностями: `FieldMeta` (UI-метаданные, валидация, ограничения), `FieldRouting` (канал Router, process_targets), `RegisterDispatchMeta` (цели доставки для всего регистра).
+
+**`SchemaMixin`** (`RegisterMixin`) — ключевые методы для работы с полями: `build()` → `(manager_name, model_dump())` для Dict at Boundary.
+
+```
+SchemaBase (Pydantic v2 BaseModel)
+    ├── FieldMeta            — дескриптор поля (min/max, UI-подсказки)
+    ├── FieldRouting         — канал Router + process_targets
+    └── RegisterDispatchMeta — цели доставки для регистра
+
+SchemaRegistry              — реестр схем (без Singleton)
+DataConverter / FileStorage — сериализация: dict/JSON/YAML
+RegistersContainer          — контейнер состояния регистров
+```
+
+Ключевые решения (ADR-120…123):
+
+- Удалён `_compat.py` (0 внешних потребителей).
+- Удалены shim-директории (`fields/`, `utils/` re-exports).
+- `extensions/` — только явный импорт, не входит в top-level API.
+
+📖 Подробнее: [`modules/data_schema_module/README.md`](modules/data_schema_module/README.md)
+
+### 6.3 `dispatch_module` — маршрутизация внутри процесса
+
+**Роль:** Сопоставление входящего сообщения (`dict`) с обработчиком по ключу и стратегии: exact / pattern / fallback / chain (сценарии). Зависит только от `base_manager` (`BaseManager` + `ObservableMixin`).
+
+**`Dispatcher`** — фасад: регистрация обработчиков, `dispatch()`, сценарии через композицию **`ScenarioManager`** (`core/scenarios.py`). Стратегии — отдельные классы в `strategies/`. **`BaseDispatcher`** — облегчённый вариант только с `EXACT_MATCH`, без наблюдаемости.
+
+```
+Dispatcher
+    ├── strategies/*     — Exact / Pattern / Fallback / Chain
+    ├── ScenarioManager  — CRUD сценариев + dispatch_scenario
+    ├── types/types      — DispatchStrategy, HandlerInfo, Scenario
+    └── builders/        — ScenarioBuilder (fluent API)
+```
+
+Ключевые решения (ADR-130…132):
+
+- Сценарии вынесены в `ScenarioManager`; публичные методы на `Dispatcher` остаются тонкими делегатами.
+- Удалён legacy-конструктор (`logger_manager=` и т.д.); подключение сервисов — через `managers` / `config`.
+- Удалён alias `AdvancedDispatcher`.
+
+📖 Подробнее: [`modules/dispatch_module/README.md`](modules/dispatch_module/README.md) · [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md)
+### 6.4 `channel_routing_module` — паттерн CRM
+
+**Роль:** Базовый класс для всех менеджеров с канальной маршрутизацией. Устраняет дублирование между Logger, Error, Router, Stats — все наследуют `ChannelRoutingManager`.
+
+**`ChannelRoutingManager`** (`BaseManager` + `ObservableMixin`) — фасад, объединяющий:
+
+- `ChannelRegistry` — потокобезопасный реестр каналов (`IChannel`)
+- `Dispatcher` — маршрутизация ключ → канал (из `dispatch_module`)
+- `IBufferStrategy` — опциональная буферизация (Direct / Batch / AsyncSender)
+- `normalize_config()` — Dict at Boundary для конфигов
+
+```
+ChannelRoutingManager (BaseManager + ObservableMixin)
+    ├── ChannelRegistry    — register/get/unregister каналов
+    ├── Dispatcher         — key → handler (dispatch_module)
+    ├── IBufferStrategy    — Direct / Batch / AsyncSender
+    └── normalize_config() — dict ← None | dict | SchemaBase
+
+Наследники:
+    ├── LoggerManager   (BatchBuffer, scope/level → ILogChannel)
+    │       └── ErrorManager   (severity → channel)
+    └── RouterManager   (AsyncSender, IMessageChannel)
+```
+
+Ключевые решения (ADR-013…016, ADR-108):
+
+- CRM-паттерн как единая основа канальных менеджеров.
+- Три буфера для разных сценариев (sync/batch/async).
+- Две роли конфигов: runtime (для наследования) и flat (для реестра/UI).
+
+📖 Подробнее: [`modules/channel_routing_module/README.md`](modules/channel_routing_module/README.md) · [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md)
+### 6.5 `logger_module` — первый CRM-наследник
+
+**Роль:** Логирование со scope-based маршрутизацией (SYSTEM / BUSINESS / PERFORMANCE / AUDIT / SECURITY). Первый реальный наследник CRM-паттерна.
+
+**`LoggerManager`** (`ChannelRoutingManager`) — scope + level → каналы (FileChannel / ConsoleChannel / HttpChannel). Использует `BatchBuffer` из CRM для пакетной записи. Поддержка per-module файлов, thread-local контекста, динамического should_log().
+
+```
+LoggerManager (ChannelRoutingManager)
+    ├── _channel_registry  — FileChannel / ConsoleChannel / HttpChannel
+    ├── _buffer (BatchBuffer) — batch flush по size/interval
+    ├── _dispatcher (Dispatcher) — scope/level → handler
+    ├── LogRecord (core/log_types.py) — dataclass записи
+    └── LoggerAdapter — обёртка для multiprocess
+
+Наследник: ErrorManager (severity routing: WARNING/ERROR/CRITICAL → отдельные файлы)
+```
+
+Ключевые решения (ADR-140…142):
+
+- Удалён LogDispatcher (дублировал CRM's Dispatcher).
+- Удалён BatchManager (дублировал CRM's BatchBuffer).
+- LogRecord — отдельный тип в `core/log_types.py`.
+
+📖 Подробнее: [`modules/logger_module/README.md`](modules/logger_module/README.md) · [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md)
+### 6.6 `config_module` — конфигурационное хранилище
+
+**Роль:** Runtime-доступ к конфигурациям со scope-based подписками.
+
+**Config** (~160 LOC) — простой контейнер (dict + dot-notation + RLock), без валидации и файлового I/O.  
+**ConfigManager** (~215 LOC) — коллекция объектов `Config` с синхронизацией через ConfigStore (Dict at Boundary).
+
+```
+Config (dict + RLock + подписки)
+    ├── dot-notation: get("database.host")
+    ├── подписки: subscribe(callback, key="*")
+    ├── ConfigSection — view на подсекцию
+    └── env-fallback (опционально, через env_prefix)
+
+ConfigManager
+    ├── _configs: Dict[str, Config]
+    ├── ConfigStore (SRM): dict на границе для cross-process синхронизации
+    ├── create_config(), get_config(), remove_config()
+    ├── sync_config() → ConfigStore (config.data как dict)
+    └── load_config_from_storage() ← ConfigStore (dict → Config)
+```
+
+Ключевые решения: **ADR-023** (global) — тонкая обёртка над `data_schema_module`; **ADR-143…146** (локально в модуле) — Dict at Boundary для ConfigStore, отсутствие I/O в модуле, пять компонентов, опциональный env-fallback. **Pydantic / SchemaBase** — только у **`ConfigManagerConfig`** и в адаптере схем; payload в ConfigStore остаётся plain dict.
+
+📖 Подробнее: [`modules/config_module/README.md`](modules/config_module/README.md) · [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) · [`modules/config_module/docs/ARCHITECTURE.md`](modules/config_module/docs/ARCHITECTURE.md)
 ### 6.7 `message_module` — *TODO (после модуля #7)*
 ### 6.8 `shared_resources_module` — *TODO (после модуля #8)*
 ### 6.9 `router_module` — *TODO (после модуля #9)*

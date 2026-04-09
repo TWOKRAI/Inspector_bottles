@@ -94,17 +94,14 @@ logger_module/
 │
 ├── core/
 │   ├── logger_manager.py     ← LoggerManager(ChannelRoutingManager, ILoggerManager)
-│   ├── log_dispatcher.py     ← LogDispatcher + LogRecord (backward compatibility)
+│   ├── log_types.py          ← LogRecord (dataclass)
 │   ├── log_config.py         ← реэкспорт LoggerManagerConfig, LogLevel, LogScope
 │   └── log_enums.py          ← LogLevel, LogScope (enum)
-├── config/
+├── configs/
 │   └── logger_manager_config.py  ← LoggerManagerConfig(ChannelRoutingConfig)
 │
 ├── channels/
 │   └── log_channel.py        ← LogChannel(ILogChannel), FileChannel, ConsoleChannel, HttpChannel
-│
-├── batcher/
-│   └── batch_manager.py      ← BatchManager (сохранён для backward compatibility)
 │
 ├── adapters/
 │   └── logger_adapter.py     ← LoggerAdapter (для интеграции с процессами)

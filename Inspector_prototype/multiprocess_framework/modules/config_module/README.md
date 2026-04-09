@@ -32,6 +32,23 @@ ConfigStore (SRM)           ← ГДЕ: pickle-safe хранение между 
 
 ---
 
+## Dict at Boundary
+
+**ConfigStore** оперирует снимками конфигурации как **`dict`**, а не как экземплярами `Config`.
+
+| Слой | Формат |
+|------|--------|
+| **Граница (между процессами / ConfigStore)** | `dict` (pickle-safe, предсказуемая сериализация) |
+| **Внутри процесса** | объекты **`Config`** (подписки, блокировки, dot-notation) |
+| **Конфигурация самого менеджера** | **`ConfigManagerConfig`** (`SchemaBase`, Pydantic v2) — описывает настройки менеджера, **не** заменяет payload в хранилище |
+
+`ConfigManager.sync_config(name)` сохраняет **`config.data`** (копия внутреннего дерева в виде dict).  
+`load_config_from_storage(name)` читает dict из store и создаёт или обновляет **`Config`** локально.
+
+Подробнее: [`DECISIONS.md`](DECISIONS.md) (ADR-143), главный [`../../DECISIONS.md`](../../DECISIONS.md) (ADR-023).
+
+---
+
 ## Структура модуля
 
 ```
@@ -51,6 +68,7 @@ config_module/
 ├── docs/
 │   ├── ARCHITECTURE.md      # Архитектура модуля
 │   └── USAGE_GUIDE.md       # Подробное руководство с примерами
+├── DECISIONS.md             # Локальные ADR (ADR-143…146 + ссылка на глобальный ADR-023)
 ├── tests/
 │   ├── conftest.py
 │   ├── test_config.py       # 21 тест
@@ -171,6 +189,7 @@ db.set("port", 5432)  # отражается в cfg
 
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — детальная архитектура модуля
 - **[USAGE_GUIDE.md](docs/USAGE_GUIDE.md)** — полное руководство с примерами
+- **[DECISIONS.md](DECISIONS.md)** — локальные архитектурные решения (ADR-143…146)
 
 ---
 
@@ -214,14 +233,14 @@ pytest modules/config_module/tests/ -v
 
 ## Дизайн-решения
 
-- **Dict at Boundary:** ConfigStore хранит `Dict[str, dict]`, не объекты
-- **No file I/O:** загрузка файлов — ответственность DataConverter
-- **No validation:** Config хранит любые данные, валидация снаружи
-- **No configuration of config:** простой контейнер без meta-конфигов
-- **Env-fallback opt-in:** отключаемый по запросу
+- **Dict at Boundary:** ConfigStore хранит `Dict[str, dict]`, не объекты `Config` (см. раздел выше и [ADR-143](DECISIONS.md))
+- **No file I/O:** загрузка файлов — ответственность DataConverter / прикладного кода ([ADR-144](DECISIONS.md))
+- **No validation в Config:** произвольные dict; валидация — через `data_schema_module` при необходимости
+- **Env-fallback opt-in:** только если задан `env_prefix` ([ADR-146](DECISIONS.md))
 
 ---
 
 ## ADR
 
-- **ADR-023:** config_module — тонкая обёртка над data_schema_module (2026-03-15) · [подробнее](../DECISIONS.md#adr-023)
+- **ADR-023** (глобальный): тонкая обёртка над `data_schema_module` — [главный DECISIONS.md](../../DECISIONS.md) (поиск по заголовку ADR-023)
+- **ADR-143…146** (модуль): [DECISIONS.md](DECISIONS.md)

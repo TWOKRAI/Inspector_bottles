@@ -4,7 +4,7 @@
 
 import pytest
 
-from ..utils.config_converters import (
+from ..container.config_converters import (
     config_to_dict,
     configs_to_dicts,
     build_process_with_workers,

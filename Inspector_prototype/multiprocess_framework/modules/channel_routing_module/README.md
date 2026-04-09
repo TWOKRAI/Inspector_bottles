@@ -320,6 +320,7 @@ channel_routing_module/
 ├── __init__.py               — публичный API
 ├── README.md                 — этот файл
 ├── STATUS.md                 — карточка здоровья
+├── DECISIONS.md              — ADR-013…016, ADR-108
 │
 ├── core/
 │   ├── channel_routing_manager.py  — ChannelRoutingManager (BaseManager + ObservableMixin)
@@ -328,7 +329,6 @@ channel_routing_module/
 │   └── config_normalizer.py        — normalize_config(None|dict|RegisterBase → dict)
 │
 ├── buffers/
-│   ├── base_buffer.py              — re-export IBufferStrategy
 │   ├── direct_buffer.py            — DirectBuffer (прямой вызов, для тестов)
 │   ├── async_sender_buffer.py      — AsyncSenderBuffer (PriorityQueue + worker thread)
 │   └── batch_buffer.py             — BatchBuffer (deque + lock + timer flush)

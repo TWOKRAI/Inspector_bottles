@@ -1,6 +1,6 @@
 # channel_routing_module — Статус рефакторинга
 
-## Текущий этап: 8 / 8  ✅
+## Текущий этап: 9 / 9  ✅
 
 ## Оценки (0–10)
 
@@ -8,7 +8,7 @@
 |---|---|---|
 | Код | 9 | CRM + ChannelRegistry + 3 буфера + normalize_config + ChannelRoutingConfig |
 | Тесты | 8 | 58 тестов (registry + buffers + CRM); все проходят |
-| Документация | 10 | README полный: архитектура, примеры, API, зависимости, итог миграции |
+| Документация | 10 | README полный; `DECISIONS.md` (ADR-013…016, ADR-108); §6.4 в `ARCHITECTURE.md` |
 | Связанность | 10 | Зависит только от base_manager + dispatch_module + data_schema_module. Нет циклов |
 | Работоспособность | 9 | Все наследники мигрированы; 155 тестов зелёные |
 
@@ -23,6 +23,7 @@
 - [x] Этап 6: Тесты (test_channel_registry, test_buffers, test_channel_routing_manager) — 58 тестов
 - [x] Этап 7: Миграция LoggerManager (Фаза 2) + ErrorManager (Фаза 3)
 - [x] Этап 8: Миграция RouterManager (Фаза 4) + документация (Фаза 5)
+- [x] Этап 9 (2026-04-09): `DECISIONS.md`, заполнение `ARCHITECTURE.md` §6.4, удалён shim `buffers/base_buffer.py`
 
 ## Иерархия наследников
 
@@ -51,3 +52,4 @@ ChannelRoutingManager
 | 2026-03-12 | Фаза 4: IMessageChannel(IChannel), RouterManager мигрирован | 4 |
 | 2026-03-12 | Фаза 5: README полный, DECISIONS.md ADR-013..016, STATUS.md всех модулей | 5 |
 | 2026-03-31 | ADR-108: убран дублирующий `build()` у `ChannelRoutingConfig`; зафиксированы две роли схем | — |
+| 2026-04-09 | Фаза 0.5 документации: локальный `DECISIONS.md`, §6.4, строка в главном `DECISIONS.md`; удалён `base_buffer.py` | 9 |

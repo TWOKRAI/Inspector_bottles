@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 from ..registry.schema_registry import SchemaManager
 from ..models.base import BaseManagerModel
 from ..core.interfaces import IStorageManager
-from ..utils.helpers import get_nested_value, set_nested_value
+from ..core.helpers import get_nested_value, set_nested_value
 
 # Опциональный импорт для ДНК
 try:

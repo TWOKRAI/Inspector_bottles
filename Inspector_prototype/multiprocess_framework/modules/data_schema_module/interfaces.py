@@ -172,7 +172,7 @@ class ISchemaStorage(Protocol):
     """
     Протокол хранилища для RegistersContainer.
 
-    Переименован из IRegisterStorage (алиас сохранён в _compat.py).
+    Переименован из IRegisterStorage (старое имя удалено).
     Позволяет менять бэкенд хранения без изменения бизнес-логики.
 
     Готовые реализации:
@@ -207,7 +207,7 @@ class IAsyncSchemaStorage(Protocol):
     """
     Async-версия ISchemaStorage для неблокирующих бэкендов.
 
-    Переименован из IAsyncRegisterStorage (алиас сохранён в _compat.py).
+    Переименован из IAsyncRegisterStorage (старое имя удалено).
     Для использования с Redis, PostgreSQL, S3 и другими async-хранилищами.
 
     TODO: Интегрировать в RegistersContainer через async_save / async_load.
@@ -391,8 +391,8 @@ class IStorageManager(ABC):
     """
     Интерфейс для менеджера хранения данных компонентов в ProcessData.
 
-    Реализация живёт в extensions/storage_manager.py.
-    Зависит от process_module.ProcessData — поэтому в extensions/.
+    Реализация: storage/storage_manager.py.
+    Зависит от process_module.ProcessData.
     """
 
     @abstractmethod

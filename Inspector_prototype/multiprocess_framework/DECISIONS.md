@@ -1837,6 +1837,11 @@
 | Модуль | Файл | Слой | Статус |
 |--------|------|------|--------|
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-114…117 (удаление плагинов, декораторов, __getattr__, on_event/emit_event) |
+| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-120…123 (shim cleanup, `_compat`, `tests_backup`, явный `extensions/`) |
+| `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-130…132 (`ScenarioManager`, удаление legacy API и `AdvancedDispatcher`) |
+| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-013…016 (CRM, буферы, broadcast), ADR-108 (двойная роль конфигов) |
+| `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-140…142 (удаление LogDispatcher, BatchManager, выделение LogRecord) |
+| `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-023 (global) + ADR-143…146 (Dict at Boundary, no I/O, пять компонентов, env-fallback) |
 
 ---
 

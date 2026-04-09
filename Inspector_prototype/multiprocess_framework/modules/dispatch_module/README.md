@@ -13,7 +13,8 @@ dispatch_module/
 │
 ├── core/
 │   ├── dispatcher.py        ← Фасад (BaseManager + ObservableMixin) — основной класс
-│   └── base_dispatcher.py   ← Абстрактный базовый диспетчер (без ObservableMixin)
+│   ├── scenarios.py         ← ScenarioManager — CRUD сценариев и dispatch_scenario
+│   └── base_dispatcher.py   ← Лёгкий диспетчер (без ObservableMixin)
 │
 ├── strategies/
 │   ├── base_strategy.py     ← Абстрактный BaseStrategy
@@ -30,6 +31,7 @@ dispatch_module/
 │
 └── tests/
     ├── test_dispatcher.py
+    ├── test_scenarios.py
     ├── test_strategies.py
     ├── test_scenario_builder.py
     └── test_types.py
@@ -43,7 +45,7 @@ dispatch_module/
 dispatch(message) → key = message[key_field]
     │
     ├─ key == msg["scenario"]?  → dispatch_scenario()
-    ├─ key in _scenarios?       → dispatch_scenario()
+    ├─ key in scenarios?        → dispatch_scenario()
     ├─ msg["strategy"] задан?   → ищем только в указанной стратегии
     └─ иначе: обход всех стратегий по приоритету:
             1. EXACT_MATCH   (O(1), самый быстрый)
@@ -242,7 +244,7 @@ dispatcher = Dispatcher(
 python -m pytest Inspector_prototype/multiprocess_framework/modules/dispatch_module/tests/ -v
 ```
 
-Покрытие (49 тестов):
+Покрытие (66 тестов, включая прямые тесты `ScenarioManager`):
 - Жизненный цикл: `initialize` / `shutdown`
 - Стратегии: EXACT / PATTERN / FALLBACK / CHAIN — регистрация и поиск
 - Диспетчеризация: точное совпадение, паттерн, fallback, полное сообщение

@@ -12,7 +12,7 @@ from .log_config import (
     LoggerModuleSchema,
     LoggerScopeSchema,
 )
-from .log_dispatcher import LogDispatcher, LogRecord
+from .log_types import LogRecord
 
 __all__ = [
     "LoggerManager",
@@ -22,6 +22,5 @@ __all__ = [
     "LoggerModuleSchema",
     "LogLevel",
     "LogScope",
-    "LogDispatcher",
     "LogRecord",
 ]

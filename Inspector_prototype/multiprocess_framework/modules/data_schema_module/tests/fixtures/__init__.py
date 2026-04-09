@@ -1,4 +1,4 @@
-# Фикстуры для тестов register_discovery: пакет с классами *Registers и *Data.
+# Фикстуры для тестов registry.discovery: пакет с классами *Registers и *Data.
 from pydantic import BaseModel
 
 

@@ -11,9 +11,6 @@ from .builders.scenario_builder import ScenarioBuilder
 from .interfaces import IDispatcher
 from .configs.dispatcher_config import DispatcherConfig
 
-# Для обратной совместимости
-AdvancedDispatcher = Dispatcher
-
 __all__ = [
     # Типы данных
     "DispatchStrategy",
@@ -25,8 +22,6 @@ __all__ = [
     "ScenarioBuilder",
     # Интерфейсы
     "IDispatcher",
-    # Обратная совместимость
-    "AdvancedDispatcher",
     # Лёгкий диспетчер (без ObservableMixin, EXACT_MATCH only)
     "BaseDispatcher",
     "DispatcherConfig",

@@ -1,7 +1,7 @@
 """
 DataSchemaAdapter — тонкий мост к data_schema_module.
 
-Делегирует в data_schema_module.extensions.StorageManager.
+Делегирует в data_schema_module.storage.StorageManager.
 Не содержит схемной логики, валидации или типов — всё в data_schema_module.
 Ленивый импорт: data_schema_module опционален (graceful degradation).
 """
@@ -26,7 +26,7 @@ class DataSchemaAdapter:
         """Получить StorageManager (ленивая инициализация)."""
         if self._data_manager is None:
             try:
-                from ....data_schema_module.extensions.storage_manager import StorageManager
+                from ....data_schema_module.storage.storage_manager import StorageManager
                 self._data_manager = StorageManager(shared_resources=self._srm)
             except ImportError:
                 return None
