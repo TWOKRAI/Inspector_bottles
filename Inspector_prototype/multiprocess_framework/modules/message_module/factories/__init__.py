@@ -5,10 +5,9 @@
 Публичные функции для удобного создания сообщений.
 """
 
-from .message_factory import MessageFactory, create_message, parse_message
+from .message_factory import create_message, parse_message
 
 __all__ = [
-    'MessageFactory',
     'create_message',
     'parse_message',
 ]

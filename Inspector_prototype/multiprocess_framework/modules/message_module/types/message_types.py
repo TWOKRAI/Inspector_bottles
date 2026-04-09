@@ -6,7 +6,6 @@
 """
 
 from enum import Enum
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
@@ -38,67 +37,6 @@ class LogLevel(Enum):
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
-
-
-@dataclass
-class MessageSchema:
-    """
-    Базовая схема сообщения.
-    Определяет обязательные и опциональные поля для всех типов сообщений.
-    """
-    # Обязательные поля
-    id: str
-    type: str
-    sender: str
-    targets: List[str]
-    timestamp: float
-    
-    # Опциональные поля с дефолтными значениями
-    priority: str = "normal"
-    routers: List[str] = field(default_factory=lambda: ["internal"])
-    channel: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    # Специфичные поля для разных типов сообщений
-    # GENERAL
-    content: Any = None
-    
-    # COMMAND
-    command: Optional[str] = None
-    args: Dict[str, Any] = field(default_factory=dict)
-    need_ack: bool = False
-    
-    # LOG
-    level: Optional[str] = None
-    message: Optional[str] = None
-    module: str = "main"
-    
-    # SYSTEM
-    action: Optional[str] = None
-    data: Any = None
-    
-    # BROADCAST
-    exclude: List[str] = field(default_factory=list)
-    
-    # DATA
-    data_type: Optional[str] = None
-    use_shared_memory: bool = False
-    memory_key: Optional[str] = None
-    
-    # REQUEST
-    request_type: Optional[str] = None
-    query: Any = None
-    timeout: float = 5.0
-    
-    # RESPONSE
-    request_id: Optional[str] = None
-    success: bool = True
-    result: Any = None
-    error: Optional[str] = None
-    
-    # EVENT
-    event_type: Optional[str] = None
-    event_data: Any = None
 
 
 # Конфигурация по умолчанию для каждого типа сообщения
@@ -151,7 +89,7 @@ MESSAGE_TYPE_EXCLUDE_FIELDS = {
     MessageType.LOG: {"routers"},  # Логи не должны показывать routers в dict
 }
 
-# Список всех допустимых полей сообщения (из MessageSchema)
+# Список всех допустимых полей сообщения
 # Используется для валидации в __setitem__ и _sync_to_dict
 VALID_MESSAGE_FIELDS = {
     'id', 'type', 'sender', 'targets', 'timestamp',

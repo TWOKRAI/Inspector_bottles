@@ -18,44 +18,6 @@ from ..core.message import Message
 from ..types import MessageType
 
 
-class MessageFactory:
-    """
-    Фабрика для создания сообщений.
-    
-    Публичный класс для удобного создания сообщений.
-    """
-    
-    @staticmethod
-    def create(type: Union[MessageType, str], sender: str, **kwargs) -> Message:
-        """
-        Создает сообщение.
-        
-        Args:
-            type: Тип сообщения
-            sender: Отправитель
-            **kwargs: Дополнительные параметры
-            
-        Returns:
-            Экземпляр сообщения
-        """
-        return Message.create(type=type, sender=sender, **kwargs)
-    
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> Message:
-        """Создает сообщение из словаря."""
-        return Message.from_dict(data)
-    
-    @staticmethod
-    def from_json(json_str: str) -> Message:
-        """Создает сообщение из JSON."""
-        return Message.from_json(json_str)
-    
-    @staticmethod
-    def from_yaml(yaml_str: str) -> Message:
-        """Создает сообщение из YAML."""
-        return Message.from_yaml(yaml_str)
-
-
 def create_message(type: Union[MessageType, str], sender: str, **kwargs) -> Message:
     """
     Удобная функция для создания сообщений.
