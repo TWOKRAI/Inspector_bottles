@@ -7,11 +7,18 @@
 | Критерий | Оценка | Комментарий |
 |---|---|---|
 | Код | 8 | Чистый, структурированный, encoding headers везде |
-| Тесты | 6 | Базовое покрытие Message + схем; нужны тесты adapter'а |
-| Документация | 8 | README переписан по образцу router_module |
+| Тесты | 8 | 103 pytest в модуле; покрытие пакета ~94% (--cov) |
+| Документация | 9 | README + `DECISIONS.md` (ADR-147…151), §6.7 в `ARCHITECTURE.md` |
 | Связанность | 8 | IMessage / IMessageFactory как единый контракт |
 | Дублирование | 8 | MessageAdapter устраняет дублирование кода создания |
 | Работоспособность | 8 | Dict at Boundary соблюдается, все тесты проходят |
+
+## Рефакторинг по плану `plans/refactoring/07_message_module.md` (2026-04-09)
+
+- [x] `core/message.py` — убраны ленивый `_data` / `_sync_to_dict()`, `get`/`keys`/`values`/`items` на атрибутах; `__init__` + `MESSAGE_FIELD_DEFAULTS` в `types/message_types.py`
+- [x] `converters/message_converter.py` — `to_dict` собирает поля через `VALID_MESSAGE_FIELDS` и `getattr`
+- [x] `DECISIONS.md` модуля (ADR-147…151), строка в главном `multiprocess_framework/DECISIONS.md`, §6.7 в `ARCHITECTURE.md`
+- [x] Тесты: `TestClone`, `TestValidateWithoutSchema`, `TestParseMessage` в `tests/test_message.py`
 
 ## Что сделано в этапе 2
 
@@ -47,3 +54,4 @@
 |---|---|---|
 | 2026-03-11 | Начальное состояние, STATUS.md создан | 0 |
 | 2026-03-12 | interfaces.py (IMessage), MessageAdapter, README, encoding headers | 2 |
+| 2026-04-09 | План 07: сжатие `message.py`, DECISIONS ADR-147…151, §6.7 ARCHITECTURE, тесты clone/validate/parse | 2 |

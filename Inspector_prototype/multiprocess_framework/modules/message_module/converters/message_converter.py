@@ -15,7 +15,7 @@ try:
 except ImportError:
     YAML_AVAILABLE = False
 
-from ..types import MessageType, MESSAGE_TYPE_EXCLUDE_FIELDS
+from ..types import MessageType, MESSAGE_TYPE_EXCLUDE_FIELDS, VALID_MESSAGE_FIELDS
 
 if TYPE_CHECKING:
     from ..core.message import Message
@@ -48,10 +48,11 @@ class MessageConverter:
         Returns:
             Словарь с данными сообщения
         """
-        # Ленивая синхронизация
-        message._sync_to_dict()
-        
-        data = message._data.copy()
+        data = {
+            field: getattr(message, field)
+            for field in VALID_MESSAGE_FIELDS
+            if hasattr(message, field)
+        }
         
         # Применяем exclude_fields для типа сообщения
         try:
@@ -189,9 +190,6 @@ class MessageConverter:
         else:
             # Fallback на конструктор
             instance = message_class(**data)
-        
-        # Синхронизируем словарь (внутренний метод сам управляет _data)
-        instance._sync_to_dict()
         
         return instance
     

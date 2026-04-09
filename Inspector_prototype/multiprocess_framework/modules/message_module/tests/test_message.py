@@ -5,6 +5,7 @@
 
 import pytest
 from ..core.message import Message
+from ..factories import parse_message
 from ..types import MessageType, Priority, LogLevel, MessageValidationError
 
 
@@ -384,6 +385,95 @@ command: test_command
         """Тест что to_yaml выбрасывает ImportError если PyYAML не установлен."""
         # Этот тест сложно проверить без мокирования, но логика есть в коде
         pass
+
+
+class TestClone:
+    """Тесты clone() сохранения всех полей."""
+
+    def test_clone_general_message(self):
+        msg = Message.create(MessageType.GENERAL, sender="test", targets=["t"], content="x")
+        cloned = msg.clone()
+        assert cloned.id != msg.id
+        assert cloned.timestamp >= msg.timestamp
+        d_orig = msg.to_dict(exclude_none=False)
+        d_cloned = cloned.to_dict(exclude_none=False)
+        d_orig.pop("id", None)
+        d_cloned.pop("id", None)
+        d_orig.pop("timestamp", None)
+        d_cloned.pop("timestamp", None)
+        assert d_cloned == d_orig
+
+    def test_clone_preserves_schema(self):
+        from ..schemas import CommandMessageSchema
+
+        msg = Message.create(
+            MessageType.COMMAND,
+            sender="test",
+            targets=["t"],
+            command="start",
+            schema=CommandMessageSchema,
+        )
+        cloned = msg.clone()
+        assert cloned._schema == msg._schema
+
+
+class TestValidateWithoutSchema:
+    """Тесты validate() без Pydantic схемы."""
+
+    def test_validate_general_message(self):
+        msg = Message.create(MessageType.GENERAL, sender="test", targets=["t"], content="ok")
+        assert msg.validate() is True
+
+    def test_validate_missing_sender_raises(self):
+        msg = Message.create(MessageType.GENERAL, sender="", targets=["t"])
+        with pytest.raises(MessageValidationError):
+            msg.validate()
+
+    def test_validate_missing_targets_raises(self):
+        msg = Message.create(MessageType.GENERAL, sender="test", targets=[])
+        with pytest.raises(MessageValidationError):
+            msg.validate()
+
+
+class TestParseMessage:
+    """Тесты parse_message() функции."""
+
+    def test_parse_dict(self):
+        data = {"type": "general", "sender": "test", "targets": ["t"], "content": "x"}
+        msg = parse_message(data)
+        assert msg.type == "general"
+        assert msg.sender == "test"
+
+    def test_parse_json(self):
+        import json
+
+        data_dict = {
+            "type": "command",
+            "sender": "test",
+            "targets": ["t"],
+            "command": "start",
+        }
+        json_str = json.dumps(data_dict)
+        msg = parse_message(json_str)
+        assert msg.type == "command"
+        assert msg.command == "start"
+
+    def test_parse_yaml(self):
+        try:
+            import yaml
+        except ImportError:
+            pytest.skip("PyYAML not installed")
+
+        yaml_str = """
+type: log
+sender: logger
+targets: [logger]
+level: info
+message: test
+"""
+        msg = parse_message(yaml_str)
+        assert msg.type == "log"
+        assert msg.message == "test"
 
 
 class TestPickleSafe:

@@ -350,7 +350,39 @@ ConfigManager
 Ключевые решения: **ADR-023** (global) — тонкая обёртка над `data_schema_module`; **ADR-143…146** (локально в модуле) — Dict at Boundary для ConfigStore, отсутствие I/O в модуле, пять компонентов, опциональный env-fallback. **Pydantic / SchemaBase** — только у **`ConfigManagerConfig`** и в адаптере схем; payload в ConfigStore остаётся plain dict.
 
 📖 Подробнее: [`modules/config_module/README.md`](modules/config_module/README.md) · [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) · [`modules/config_module/docs/ARCHITECTURE.md`](modules/config_module/docs/ARCHITECTURE.md)
-### 6.7 `message_module` — *TODO (после модуля #7)*
+
+### 6.7 `message_module` — IPC-примитив
+
+**Роль:** Value object для межпроцессного взаимодействия. Leaf-зависимость (только `data_schema_module`).
+
+**Message** (~300 LOC) — typed IPC container с fluent API и Dict at Boundary.  
+**MessageAdapter** (~327 LOC) — контекстная фабрика (один на процесс, фиксированный sender).
+
+```
+Message (value object)
+    ├── create(type, sender, targets, ...) — основной метод
+    ├── to_dict() / from_dict() — Dict at Boundary
+    ├── fluent API: set_priority(), set_targets(), set_channel()
+    └── optional Pydantic schema через BaseMessageSchema
+
+MessageAdapter(sender=name)
+    ├── .command(targets, command, args)
+    ├── .log(level, message, module)
+    ├── .system(targets, action)
+    ├── .broadcast(content)
+    ├── .data(targets, data_type, data)
+    ├── .request(targets, request_type)
+    ├── .response(targets, request_id, result)
+    └── .event(event_type, targets, data)
+```
+
+Ключевые решения (ADR-147…151):
+- **Dict at Boundary:** только `msg.to_dict()` пересекает границу.
+- **`schema=None` — нормальный путь,** Pydantic-схема — опциональное усиление.
+- **MessageAdapter** — рекомендованный способ в процессах.
+- **Поле `routers`:** RouterManager'ы внутри процесса.
+
+📖 [`modules/message_module/README.md`](modules/message_module/README.md) · [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md)
 ### 6.8 `shared_resources_module` — *TODO (после модуля #8)*
 ### 6.9 `router_module` — *TODO (после модуля #9)*
 ### 6.10 `worker_module` — *TODO (после модуля #10)*

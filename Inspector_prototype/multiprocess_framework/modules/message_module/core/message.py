@@ -8,7 +8,14 @@
 import time
 from typing import Any, Dict, List, Optional, Union, Set, Type, TYPE_CHECKING
 
-from ..types import MessageType, Priority, LogLevel, MessageValidationError, VALID_MESSAGE_FIELDS
+from ..types import (
+    MessageType,
+    Priority,
+    LogLevel,
+    MessageValidationError,
+    VALID_MESSAGE_FIELDS,
+    MESSAGE_FIELD_DEFAULTS,
+)
 from ..validators.message_validator import MessageValidator
 from ..converters.message_converter import MessageConverter
 from ..utils import generate_message_id, apply_type_defaults
@@ -18,102 +25,38 @@ if TYPE_CHECKING:
 
 
 class Message:
-    """
-    Универсальный класс для работы с сообщениями.
-    
-    Публичный API модуля. Используется извне модуля.
-    
-    Разделение методов:
-    - Публичные методы (используются извне) - без префикса _
-    - Внутренние методы (используются только внутри класса) - с префиксом _
-    """
+    """IPC value object: публичные методы без `_`, внутренние с `_`."""
     
     def __init__(self, **kwargs):
-        """
-        Инициализация сообщения.
-        
-        Прямая инициализация не рекомендуется.
-        Используйте Message.create() для создания сообщений.
-        
-        Args:
-            **kwargs: Поля сообщения
-        """
-        # Обязательные поля
-        self.id: str = kwargs.get('id', generate_message_id(kwargs.get('type', 'general')))
-        self.type: str = kwargs.get('type', 'general')
-        self.sender: str = kwargs.get('sender', '')
-        self.targets: List[str] = kwargs.get('targets', [])
-        self.timestamp: float = kwargs.get('timestamp', time.time())
-        
-        # Опциональные поля
-        self.priority: str = kwargs.get('priority', 'normal')
-        self.routers: List[str] = kwargs.get('routers', ['internal'])
-        self.channel: Optional[str] = kwargs.get('channel', None)
-        self.metadata: Dict[str, Any] = kwargs.get('metadata', {})
-        
-        # Специфичные поля для разных типов
-        self.content: Any = kwargs.get('content', None)
-        self.command: Optional[str] = kwargs.get('command', None)
-        self.args: Dict[str, Any] = kwargs.get('args', {})
-        self.need_ack: bool = kwargs.get('need_ack', False)
-        self.level: Optional[str] = kwargs.get('level', None)
-        self.message: Optional[str] = kwargs.get('message', None)
-        self.module: str = kwargs.get('module', 'main')
-        self.action: Optional[str] = kwargs.get('action', None)
-        self.data: Any = kwargs.get('data', None)
-        self.exclude: List[str] = kwargs.get('exclude', [])
-        self.data_type: Optional[str] = kwargs.get('data_type', None)
-        self.use_shared_memory: bool = kwargs.get('use_shared_memory', False)
-        self.memory_key: Optional[str] = kwargs.get('memory_key', None)
-        self.request_type: Optional[str] = kwargs.get('request_type', None)
-        self.query: Any = kwargs.get('query', None)
-        self.timeout: float = kwargs.get('timeout', 5.0)
-        self.request_id: Optional[str] = kwargs.get('request_id', None)
-        self.success: bool = kwargs.get('success', True)
-        self.result: Any = kwargs.get('result', None)
-        self.error: Optional[str] = kwargs.get('error', None)
-        self.event_type: Optional[str] = kwargs.get('event_type', None)
-        self.event_data: Any = kwargs.get('event_data', None)
-        
-        # Применяем дефолты для типа
+        """Предпочтительно ``Message.create()``; kwargs — поля сообщения."""
+        _schema: Optional[Type['BaseModel']] = kwargs.pop('_schema', None)
+        _schema_info: Optional[Dict[str, str]] = kwargs.pop('_schema_info', None)
+        _schema_validated: bool = kwargs.pop('_schema_validated', False)
+
+        raw_type = kwargs.pop('type', 'general')
+        if isinstance(raw_type, MessageType):
+            self.type = raw_type.value
+        else:
+            self.type = raw_type
+
+        self.id = kwargs.pop('id', generate_message_id(self.type))
+        self.sender = kwargs.pop('sender', '')
+        self.targets = kwargs.pop('targets', [])
+        self.timestamp = kwargs.pop('timestamp', time.time())
+
+        for field, default in MESSAGE_FIELD_DEFAULTS.items():
+            setattr(self, field, kwargs.pop(field, default))
+
+        for key in list(kwargs.keys()):
+            if key in VALID_MESSAGE_FIELDS:
+                setattr(self, key, kwargs.pop(key))
+
         apply_type_defaults(self)
-        
-        # Внутренний словарь для O(1) доступа (ленивая синхронизация)
-        self._data: Optional[Dict[str, Any]] = None
-        self._data_synced: bool = False
-        
-        # Информация о схеме (для производительности и отслеживания)
-        self._schema: Optional[Type['BaseModel']] = kwargs.pop('_schema', None)
-        self._schema_info: Optional[Dict[str, str]] = kwargs.pop('_schema_info', None)
-        self._schema_validated: bool = kwargs.pop('_schema_validated', False)
-    
-    # ========================================================================
-    # ВНУТРЕННИЕ МЕТОДЫ (не используются извне)
-    # ========================================================================
-    
-    def _sync_to_dict(self):
-        """
-        Синхронизирует атрибуты объекта в внутренний словарь _data для O(1) доступа.
-        
-        Внутренний метод - не предназначен для использования извне.
-        Фильтрует только допустимые поля из схемы сообщения.
-        """
-        if self._data_synced and self._data is not None:
-            return
-        
-        # Фильтруем только допустимые поля из схемы
-        all_attrs = {
-            key: value for key, value in self.__dict__.items()
-            if not key.startswith('_') and key in VALID_MESSAGE_FIELDS
-        }
-        
-        self._data = all_attrs
-        self._data_synced = True
-    
-    # ========================================================================
-    # ПУБЛИЧНЫЙ API - ФАБРИЧНЫЙ МЕТОД
-    # ========================================================================
-    
+
+        self._schema = _schema
+        self._schema_info = _schema_info
+        self._schema_validated = _schema_validated
+
     @classmethod
     def create(
         cls,
@@ -122,31 +65,7 @@ class Message:
         schema: Optional[Type['BaseModel']] = None,
         **kwargs
     ) -> 'Message':
-        """
-        Фабричный метод для создания сообщений.
-        
-        Поддерживает опциональную схему (Pydantic) для валидации.
-        Если схема не указана, используется стандартная логика (обратная совместимость).
-        
-        Args:
-            type: Тип сообщения (MessageType enum или строка)
-            sender: Отправитель сообщения
-            schema: Опциональная схема Pydantic для валидации
-            **kwargs: Дополнительные параметры сообщения
-            
-        Returns:
-            Message: Новый экземпляр сообщения
-            
-        Example:
-            >>> from multiprocess_framework.modules.message.schemas import CommandMessageSchema
-            >>> msg = Message.create(
-            ...     MessageType.COMMAND,
-            ...     sender="sender",
-            ...     schema=CommandMessageSchema,
-            ...     targets=["target"],
-            ...     command="test"
-            ... )
-        """
+        """Создать сообщение; при ``schema`` — валидация Pydantic, иначе поля из kwargs."""
         if isinstance(type, MessageType):
             type = type.value
         
@@ -188,48 +107,38 @@ class Message:
             instance = cls(type=type, sender=sender, **kwargs)
         
         return instance
-    
-    # ========================================================================
-    # ПУБЛИЧНЫЙ API - FLUENT API ДЛЯ НАПОЛНЕНИЯ ДАННЫМИ
-    # ========================================================================
-     
+
     def set_priority(self, priority: Union[Priority, str]) -> 'Message':
         """Устанавливает приоритет сообщения."""
         if isinstance(priority, Priority):
             priority = priority.value
         self.priority = priority
-        self._data_synced = False
         return self
     
     def set_targets(self, targets: List[str]) -> 'Message':
         """Устанавливает список получателей."""
         self.targets = targets
-        self._data_synced = False
         return self
     
     def add_target(self, target: str) -> 'Message':
         """Добавляет получателя."""
         if target not in self.targets:
             self.targets.append(target)
-            self._data_synced = False
         return self
     
     def set_channel(self, channel: str) -> 'Message':
         """Устанавливает канал доставки."""
         self.channel = channel
-        self._data_synced = False
         return self
     
     def set_content(self, content: Any) -> 'Message':
         """Устанавливает содержимое сообщения (для GENERAL)."""
         self.content = content
-        self._data_synced = False
         return self
     
     def set_command(self, command: str, args: Dict[str, Any] = None) -> 'Message':
         """Устанавливает команду и аргументы (для COMMAND)."""
         self.command = command
-        self._data_synced = False
         if args:
             self.args = args
         return self
@@ -240,7 +149,6 @@ class Message:
             level = level.value
         self.level = level
         self.message = message
-        self._data_synced = False
         if module:
             self.module = module
         return self
@@ -248,26 +156,10 @@ class Message:
     def add_metadata(self, key: str, value: Any) -> 'Message':
         """Добавляет метаданные."""
         self.metadata[key] = value
-        self._data_synced = False
         return self
-    
-    # ========================================================================
-    # ПУБЛИЧНЫЙ API - ВАЛИДАЦИЯ
-    # ========================================================================
-    
+
     def validate(self) -> bool:
-        """
-        Валидирует сообщение перед отправкой.
-
-        - Если сообщение создано с Pydantic схемой, выполняет схему-валидацию
-        - Иначе выполняет базовую валидацию (sender, targets)
-
-        Returns:
-            bool: True если валидно
-
-        Raises:
-            MessageValidationError: Если сообщение невалидно
-        """
+        """Pydantic-схема или базовая проверка (sender, targets). ``MessageValidationError`` при ошибке."""
         # Если есть Pydantic схема - валидируем через неё
         if self._schema is not None:
             try:
@@ -284,20 +176,11 @@ class Message:
 
         # Стандартная валидация (базовые правила: sender, targets)
         return MessageValidator.validate(self)
-    
+
     def is_valid(self) -> bool:
-        """
-        Проверяет валидность сообщения без выброса исключения.
-        
-        Returns:
-            bool: True если валидно, False иначе
-        """
+        """Как validate(), но без исключения — только bool."""
         return MessageValidator.is_valid(self)
-    
-    # ========================================================================
-    # ПУБЛИЧНЫЙ API - КОНВЕРТАЦИЯ
-    # ========================================================================
-    
+
     def to_dict(
         self,
         exclude_none: bool = True,
@@ -337,16 +220,7 @@ class Message:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any], schema: Optional[Type['BaseModel']] = None) -> 'Message':
-        """
-        Создает сообщение из словаря.
-        
-        Args:
-            data: Словарь с данными сообщения
-            schema: Опциональная схема для валидации
-            
-        Returns:
-            Message: Экземпляр сообщения
-        """
+        """Собрать из dict; при ``schema`` — через Pydantic."""
         if schema is not None:
             # Фильтруем данные по схеме - оставляем только разрешенные поля
             schema_fields = set(schema.model_fields.keys())
@@ -378,11 +252,7 @@ class Message:
     def from_yaml(cls, yaml_str: str) -> 'Message':
         """Создает сообщение из YAML строки."""
         return MessageConverter.from_yaml(yaml_str, cls)
-    
-    # ========================================================================
-    # ПУБЛИЧНЫЙ API - ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
-    # ========================================================================
-    
+
     def get_type(self) -> Optional[MessageType]:
         """Возвращает тип сообщения как enum."""
         try:
@@ -409,59 +279,37 @@ class Message:
         if self._schema_info:
             cloned._schema_info = self._schema_info.copy()
         return cloned
-    
-    # ========================================================================
-    # ПУБЛИЧНЫЙ API - СЛОВАРНЫЙ ИНТЕРФЕЙС
-    # ========================================================================
-    
+
     def __getitem__(self, key: str) -> Any:
         """Доступ к полям сообщения как к словарю: msg['command']."""
-        self._sync_to_dict()
-        return self._data[key]
+        if key not in VALID_MESSAGE_FIELDS:
+            raise KeyError(key)
+        if not hasattr(self, key):
+            raise KeyError(key)
+        return getattr(self, key)
     
     def __contains__(self, key: str) -> bool:
         """Проверка наличия ключа: 'command' in msg."""
-        self._sync_to_dict()
-        return key in self._data
+        return key in VALID_MESSAGE_FIELDS and hasattr(self, key)
     
     def get(self, key: str, default: Any = None) -> Any:
-        """Безопасный доступ к полю с дефолтным значением.
-
-        Поведение совпадает со стандартным dict.get():
-        - Если ключ отсутствует, возвращает default
-        - Если ключ присутствует, возвращает значение (даже если оно None)
-        """
-        self._sync_to_dict()
-        return self._data.get(key, default)
+        """Как dict.get: отсутствующий атрибут → default."""
+        return getattr(self, key, default)
     
     def keys(self):
         """Возвращает итератор по ключам сообщения."""
-        self._sync_to_dict()
-        return self._data.keys()
+        return [f for f in VALID_MESSAGE_FIELDS if hasattr(self, f)]
     
     def values(self):
         """Возвращает итератор по значениям сообщения."""
-        self._sync_to_dict()
-        return self._data.values()
+        return [getattr(self, f, None) for f in VALID_MESSAGE_FIELDS if hasattr(self, f)]
     
     def items(self):
         """Возвращает итератор по парам (ключ, значение)."""
-        self._sync_to_dict()
-        return self._data.items()
+        return [(f, getattr(self, f, None)) for f in VALID_MESSAGE_FIELDS if hasattr(self, f)]
     
     def __setitem__(self, key: str, value: Any):
-        """
-        Установка значения поля: msg['command'] = 'process'.
-        
-        Валидирует, что поле существует в схеме сообщения.
-        
-        Args:
-            key: Имя поля
-            value: Значение поля
-            
-        Raises:
-            KeyError: Если поле не существует в схеме сообщения
-        """
+        """Запись поля; неизвестное имя → KeyError."""
         if key not in VALID_MESSAGE_FIELDS:
             raise KeyError(
                 f"Field '{key}' is not a valid message field. "
@@ -469,32 +317,23 @@ class Message:
             )
         
         setattr(self, key, value)
-        self._data_synced = False
     
     def get_schema_info(self) -> Optional[Dict[str, str]]:
-        """
-        Возвращает информацию о схеме сообщения.
-        
-        Returns:
-            Словарь с информацией о схеме (schema_name, schema_module, schema_path)
-            или None если схема не использовалась
-        """
+        """Метаданные Pydantic-схемы или None."""
         return self._schema_info
-    
+
     def get_schema(self) -> Optional[Type['BaseModel']]:
-        """
-        Возвращает класс схемы, использованной при создании сообщения.
-        
-        Returns:
-            Класс схемы или None если схема не использовалась
-        """
+        """Класс Pydantic-схемы или None."""
         return self._schema
     
     def __repr__(self) -> str:
         """Строковое представление сообщения."""
-        self._sync_to_dict()
         main_fields = ['type', 'id', 'sender', 'targets']
-        fields_str = ', '.join(f"{k}={repr(self._data.get(k, 'N/A'))}" for k in main_fields if k in self._data)
+        parts = []
+        for k in main_fields:
+            if hasattr(self, k):
+                parts.append(f"{k}={repr(getattr(self, k))}")
+        fields_str = ', '.join(parts)
         schema_info = f", schema={self._schema_info['schema_name']}" if self._schema_info else ""
         return f"Message({fields_str}{schema_info})"
     
