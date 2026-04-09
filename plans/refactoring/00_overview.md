@@ -79,29 +79,30 @@
 - `tests` — количество файлов `test_*.py` в `modules/<module>/tests/`.
 - `public` — TODO, заполняется в Шаге 1 per-module плана (grep по `from <module> import`).
 - `coverage` — TODO, заполняется после первого прогона `scripts/run_framework_tests.py --cov`.
+- `files_after` / `loc_after` / `tests_after` — метрики после рефакторинга модуля (`—` пока не сделано). Для `tests_after` при необходимости указывают число прогонов pytest в скобках.
 
-| #  | Модуль                       | files | loc    | tests | public | cov |
-|----|------------------------------|-------|--------|-------|--------|-----|
-| 1  | `base_manager`               |  29   |  2425  |   4   |  TODO  | TODO |
-| 2  | `data_schema_module`         |  97   | 13888  |  24   |  TODO  | TODO |
-| 3  | `dispatch_module`            |  17   |  2243  |   4   |  TODO  | TODO |
-| 4  | `channel_routing_module`     |  14   |  1348  |   3   |  TODO  | TODO |
-| 5  | `logger_module`              |  16   |  1909  |   1   |  TODO  | TODO |
-| 6  | `config_module`              |  11   |  1074  |   3   |  TODO  | TODO |
-| 7  | `message_module`             |  21   |  2088  |   3   |  TODO  | TODO |
-| 8  | `shared_resources_module`    |  41   |  3217  |   8   |  TODO  | TODO |
-| 9  | `router_module`              |  16   |  1995  |   2   |  TODO  | TODO |
-| 10 | `worker_module`              |  17   |  1591  |   6   |  TODO  | TODO |
-| 11 | `process_module`             |  27   |  2720  |   6   |  TODO  | TODO |
-| 12 | `command_module`             |   9   |   778  |   3   |  TODO  | TODO |
-| 13 | `process_manager_module`     |  21   |  2486  |  10   |  TODO  | TODO |
-| 14 | `error_module`               |   7   |   580  |   2   |  TODO  | TODO |
-| 15 | `statistics_module`          |  13   |   981  |   3   |  TODO  | TODO |
-| 16 | `sql_module`                 |  22   |  1546  |   4   |  TODO  | TODO |
-| 17 | `registers_module`           |   6   |   556  |   1   |  TODO  | TODO |
-| 18 | `console_module`             |  17   |   974  |   5   |  TODO  | TODO |
-| 19 | `frontend_module`            | 147   | 10302  |  12   |  TODO  | TODO |
-|    | **Итого (фреймворк + фронт)**| **548** | **50701** | **104** |      |      |
+| #  | Модуль                       | files | loc    | tests | public | cov | files_after | loc_after | tests_after |
+|----|------------------------------|-------|--------|-------|--------|-----|-------------|-----------|-------------|
+| 1  | `base_manager`               |  29   |  2425  |   4   |  TODO  | TODO | 17 | 1474 | 3 (52 passed, 2 skipped) |
+| 2  | `data_schema_module`         |  97   | 13888  |  24   |  TODO  | TODO | — | — | — |
+| 3  | `dispatch_module`            |  17   |  2243  |   4   |  TODO  | TODO | — | — | — |
+| 4  | `channel_routing_module`     |  14   |  1348  |   3   |  TODO  | TODO | — | — | — |
+| 5  | `logger_module`              |  16   |  1909  |   1   |  TODO  | TODO | — | — | — |
+| 6  | `config_module`              |  11   |  1074  |   3   |  TODO  | TODO | — | — | — |
+| 7  | `message_module`             |  21   |  2088  |   3   |  TODO  | TODO | — | — | — |
+| 8  | `shared_resources_module`    |  41   |  3217  |   8   |  TODO  | TODO | — | — | — |
+| 9  | `router_module`              |  16   |  1995  |   2   |  TODO  | TODO | — | — | — |
+| 10 | `worker_module`              |  17   |  1591  |   6   |  TODO  | TODO | — | — | — |
+| 11 | `process_module`             |  27   |  2720  |   6   |  TODO  | TODO | — | — | — |
+| 12 | `command_module`             |   9   |   778  |   3   |  TODO  | TODO | — | — | — |
+| 13 | `process_manager_module`     |  21   |  2486  |  10   |  TODO  | TODO | — | — | — |
+| 14 | `error_module`               |   7   |   580  |   2   |  TODO  | TODO | — | — | — |
+| 15 | `statistics_module`          |  13   |   981  |   3   |  TODO  | TODO | — | — | — |
+| 16 | `sql_module`                 |  22   |  1546  |   4   |  TODO  | TODO | — | — | — |
+| 17 | `registers_module`           |   6   |   556  |   1   |  TODO  | TODO | — | — | — |
+| 18 | `console_module`             |  17   |   974  |   5   |  TODO  | TODO | — | — | — |
+| 19 | `frontend_module`            | 147   | 10302  |  12   |  TODO  | TODO | — | — | — |
+|    | **Итого (фреймворк + фронт)**| **548** | **50701** | **104** |      |      | | | |
 
 **Ключевые наблюдения:**
 
