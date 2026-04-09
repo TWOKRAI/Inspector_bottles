@@ -230,12 +230,25 @@ class TestDictInterface:
         assert 'invalid_field' not in msg
     
     def test_get_with_default(self):
-        """Тест безопасного получения поля с дефолтным значением."""
+        """Тест безопасного получения поля с дефолтным значением.
+
+        Поведение совпадает со стандартным dict.get():
+        - Существующий ключ → его значение (даже если None)
+        - Отсутствующий ключ → default (редко, т.к. все поля инициализированы)
+        """
         msg = Message.create(MessageType.GENERAL, sender="Test", targets=["Target"])
-        
+
+        # Все поля Message инициализированы в __init__, поэтому 'command' существует
+        # со значением None, а не отсутствует
         assert msg.get('command') is None
-        assert msg.get('command', 'default') == 'default'
+        # Передача default не влияет, т.к. ключ существует (стандартная dict.get семантика)
+        assert msg.get('command', 'default') is None
+
+        # Существующее поле возвращает своё значение
         assert msg.get('sender') == 'Test'
+
+        # Несуществующее поле вернёт default (не применимо для Message, но демонстрируем)
+        assert msg.get('nonexistent_field', 'default') == 'default'
     
     def test_keys_values_items(self):
         """Тест методов keys(), values(), items()."""
@@ -371,4 +384,72 @@ command: test_command
         """Тест что to_yaml выбрасывает ImportError если PyYAML не установлен."""
         # Этот тест сложно проверить без мокирования, но логика есть в коде
         pass
+
+
+class TestPickleSafe:
+    """Тесты pickle-safe для Message.
+
+    Framework принцип #5: все объекты в multiprocessing.Queue должны быть pickle-safe.
+    Однако Message объект НЕ должен пересекать границу процесса, только dict.
+    Эти тесты проверяют оба аспекта.
+    """
+
+    import pickle
+
+    def test_message_general_pickle(self):
+        """Проверить, что GENERAL Message может быть pickled."""
+        msg = Message.create(
+            MessageType.GENERAL,
+            sender="test",
+            targets=["proc"],
+            content="test"
+        )
+        data = self.pickle.dumps(msg)
+        restored = self.pickle.loads(data)
+        assert restored.to_dict() == msg.to_dict()
+
+    def test_message_command_pickle(self):
+        """Проверить, что COMMAND Message может быть pickled."""
+        msg = Message.create(
+            MessageType.COMMAND,
+            sender="test",
+            targets=["cmd"],
+            command="start",
+            args={}
+        )
+        data = self.pickle.dumps(msg)
+        restored = self.pickle.loads(data)
+        assert restored["command"] == "start"
+        assert restored.sender == "test"
+
+    def test_message_dict_is_pickle_safe(self):
+        """Проверить, что dict-форма (Dict at Boundary) всегда pickle-safe.
+
+        Это единственное что должно пересекать границу процесса.
+        """
+        msg = Message.create(
+            MessageType.LOG,
+            sender="logger",
+            targets=["logger"],
+            level=LogLevel.INFO.value,
+            message="test"
+        )
+        # Только dict пересекает границу
+        d = msg.to_dict()
+        data = self.pickle.dumps(d)
+        restored = self.pickle.loads(data)
+        assert restored == d
+
+    def test_message_log_pickle(self):
+        """Проверить, что LOG Message может быть pickled."""
+        msg = Message.create(
+            MessageType.LOG,
+            sender="logger",
+            level=LogLevel.WARNING.value,
+            message="test warning"
+        )
+        data = self.pickle.dumps(msg)
+        restored = self.pickle.loads(data)
+        assert restored["message"] == "test warning"
+        assert restored["level"] == "warning"
 

@@ -258,32 +258,31 @@ class Message:
     def validate(self) -> bool:
         """
         Валидирует сообщение перед отправкой.
-        
-        Если сообщение было создано со схемой и уже прошло валидацию,
-        пропускает повторную валидацию для производительности.
-        
+
+        - Если сообщение создано с Pydantic схемой, выполняет схему-валидацию
+        - Иначе выполняет базовую валидацию (sender, targets)
+
         Returns:
             bool: True если валидно
-            
+
         Raises:
             MessageValidationError: Если сообщение невалидно
         """
-        # Если уже валидировано через схему - пропускаем (производительность)
-        if self._schema_validated and self._schema is not None:
-            # Быстрая проверка через схему (если нужно)
+        # Если есть Pydantic схема - валидируем через неё
+        if self._schema is not None:
             try:
                 # Фильтруем данные по схеме - оставляем только разрешенные поля
                 data = self.to_dict(exclude_none=False)
                 schema_fields = set(self._schema.model_fields.keys())
                 filtered_data = {k: v for k, v in data.items() if k in schema_fields}
-                
-                # Создаем временный экземпляр схемы для быстрой валидации
+
+                # Создаем временный экземпляр схемы для валидации
                 self._schema(**filtered_data)
                 return True
             except Exception as e:
                 raise MessageValidationError(f"Schema validation failed: {e}") from e
-        
-        # Стандартная валидация (обратная совместимость)
+
+        # Стандартная валидация (базовые правила: sender, targets)
         return MessageValidator.validate(self)
     
     def is_valid(self) -> bool:
@@ -426,17 +425,14 @@ class Message:
         return key in self._data
     
     def get(self, key: str, default: Any = None) -> Any:
-        """Безопасный доступ к полю с дефолтным значением."""
+        """Безопасный доступ к полю с дефолтным значением.
+
+        Поведение совпадает со стандартным dict.get():
+        - Если ключ отсутствует, возвращает default
+        - Если ключ присутствует, возвращает значение (даже если оно None)
+        """
         self._sync_to_dict()
-        # Если ключа нет в _data, возвращаем default
-        # Если ключ есть но значение None, тоже возвращаем default (если default не None)
-        if key not in self._data:
-            return default
-        value = self._data[key]
-        # Если значение None и передан default, возвращаем default
-        if value is None and default is not None:
-            return default
-        return value
+        return self._data.get(key, default)
     
     def keys(self):
         """Возвращает итератор по ключам сообщения."""
