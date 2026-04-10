@@ -1,32 +1,55 @@
-# docs/ — Документация фреймворка
+# Документация `multiprocess_framework`
 
-**Корень:** [../README.md](../README.md)  
+**Корень пакета:** [../README.md](../README.md)  
 **Индекс:** [../DOCUMENTATION_INDEX.md](../DOCUMENTATION_INDEX.md)  
-**Решения:** [../DECISIONS.md](../DECISIONS.md)
+**Глобальные ADR:** [../DECISIONS.md](../DECISIONS.md)  
+**Реестр модульных ADR:** [ADR_REGISTRY.md](./ADR_REGISTRY.md)
 
 ---
 
-## Актуальные документы
+## Для нового разработчика
+
+1. [QUICK_START.md](./QUICK_START.md) — минимальный запуск и термины.
+2. [EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md) — новый `ProcessModule` / менеджер.
+3. `modules/<name>/README.md` и `STATUS.md` — модульная глубина.
+
+## Для архитектора
+
+1. [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) — таблицы и матрицы.
+2. [../ARCHITECTURE.md](../ARCHITECTURE.md) — единый архитектурный документ.
+3. [../DECISIONS.md](../DECISIONS.md) + [ADR_REGISTRY.md](./ADR_REGISTRY.md) — решения и коды ADR.
+
+## Для AI-агента
+
+1. [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) — обзор и сценарии.
+2. [ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md) — процесс vs канал, регистры.
+3. [CONFIG_GUIDE.md](./CONFIG_GUIDE.md) — schema → dict → процессы.
+
+## Для тестировщика
+
+1. [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — типовые сбои.
+2. [../PROBLEMS.md](../PROBLEMS.md) — известные ограничения тестов.
+3. `modules/<name>/tests/` — pytest по модулю.
+
+---
+
+## Карта документов
 
 | Файл | Назначение |
 |------|------------|
-| **[FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md)** | Полный обзор: слои, принципы, жизненный цикл, quick start |
-| **[CONFIG_SCHEMA_DATA_FLOW.md](./CONFIG_SCHEMA_DATA_FLOW.md)** | Цепочка: `SchemaBase` → dict → `Config` / `proc_dict` / процессы |
-| **[CONFIG_SCHEMA_REGISTERS.md](./CONFIG_SCHEMA_REGISTERS.md)** | `data_schema_module` ↔ `config_module` ↔ `registers_module`; `model_dump` / `model_validate` (ADR-112) |
-| **[CONFIG_PATHS.md](./CONFIG_PATHS.md)** | Канонический слой schema→dict, ветки доставки, фасад `get_config`, антипаттерны |
-| **[ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md)** | Диаграммы и таблицы (быстрая справка) |
-| **[ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md)** | Процесс vs канал Router, регистры, `connection_map` |
-| **[ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md)** | Каталог модулей и связей с прототипом |
-| **[FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md)** | План: sender, лаунчер, фазы UI-команд |
-| **[MODULE_README_TEMPLATE.md](./MODULE_README_TEMPLATE.md)** | Шаблон `README.md` для нового модуля |
+| [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) | Полный обзор, слои, принципы |
+| [CONFIG_GUIDE.md](./CONFIG_GUIDE.md) | Конфигурация (консолидация; архив: [archive/](./archive/)) |
+| [DIAGRAMS.md](./DIAGRAMS.md) | Шесть mermaid-диаграмм |
+| [QUICK_START.md](./QUICK_START.md) | Быстрый старт |
+| [EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md) | Расширение фреймворка |
+| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | FAQ и отладка |
+| [ADR_REGISTRY.md](./ADR_REGISTRY.md) | Коды модулей и миграция ADR |
+| [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Справка |
+| [ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md) | Каталог модулей и прототипа |
+| [ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md) | Термины маршрутизации |
+| [MODULE_README_TEMPLATE.md](./MODULE_README_TEMPLATE.md) | Шаблон README модуля |
+| [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) | Дорожная карта UI-команд |
 
 ---
 
-## Порядок чтения
-
-1. **Первый контакт:** [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) (разделы 1–7).
-2. **Конфиги и схемы (dict at boundary):** [CONFIG_SCHEMA_DATA_FLOW.md](./CONFIG_SCHEMA_DATA_FLOW.md).
-2b. **Одна модель преобразования и ветки:** [CONFIG_PATHS.md](./CONFIG_PATHS.md).
-3. **Справка и схемы:** [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md).
-4. **Почему так устроено:** [../DECISIONS.md](../DECISIONS.md) (ADR).
-5. **Конкретный модуль:** `modules/<name>/README.md` и `STATUS.md`.
+*Обновлено: 2026-04-10 — навигация по ролям, CONFIG_GUIDE, архив legacy config docs.*

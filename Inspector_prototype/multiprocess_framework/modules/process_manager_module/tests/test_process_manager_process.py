@@ -120,7 +120,7 @@ class TestProcessManagerProcessStopProcess:
 
             mock_registry = MagicMock()
             mock_registry.get_process_by_name.return_value = mock_process
-            mock_registry.stop_event = Event()
+            mock_registry.stop_one.return_value = True
             pmp._process_registry = mock_registry
 
             def get_config(key):
@@ -128,13 +128,11 @@ class TestProcessManagerProcessStopProcess:
 
             pmp.get_config = get_config
 
-            # После join процесс "завершился"
             mock_process.is_alive.side_effect = [True, False, False]
 
             pmp.stop_process("TestProcess")
 
-            mock_registry.stop_event.is_set()  # stop_event установлен
-            mock_process.join.assert_called()
+            mock_registry.stop_one.assert_called_once_with("TestProcess", 0.1)
 
     def test_stop_process_unknown_returns_true(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
@@ -269,6 +267,7 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "process.list" in registered_names
             assert "process.start" in registered_names
             assert "process.stop" in registered_names
+            assert "process.restart" in registered_names
             assert "process.status" in registered_names
             assert "system.shutdown" in registered_names
             assert "system.stats" in registered_names

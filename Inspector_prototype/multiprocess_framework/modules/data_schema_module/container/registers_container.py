@@ -14,6 +14,7 @@ RegistersContainer — универсальный контейнер для на
 Доступ к регистрам:
     container.draw          → DrawRegisters instance (через __getattr__)
     container["camera"]     → CameraRegisters instance (через __getitem__)
+    container["cam"] = inst → заменить экземпляр (через __setitem__)
     "draw" in container     → True (через __contains__)
     for name, reg in container: ...  (через __iter__)
     len(container)          → кол-во регистров
@@ -23,7 +24,7 @@ RegistersContainer — универсальный контейнер для на
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator, Type
+from typing import Any, Iterator, Type, cast
 
 from pydantic import BaseModel
 
@@ -42,17 +43,28 @@ class RegistersContainer:
     Единственный источник правды — _registers dict.
     """
 
-    def __init__(self, register_map: dict[str, Type[BaseModel]]) -> None:
+    def __init__(self, register_map: dict[str, Any]) -> None:
         """
         Args:
-            register_map: {имя_регистра: класс_модели}
-                          например {"draw": DrawRegisters, "camera": CameraRegisters}
+            register_map: {имя_регистра: класс_модели | экземпляр_модели}
+                          Класс — создаётся ``model_class()``; экземпляр — сохраняется как есть
+                          (для runtime-менеджеров вроде ``RegistersManager``).
         """
-        self._register_map: dict[str, Type[BaseModel]] = dict(register_map)
-        self._registers: dict[str, BaseModel] = {
-            name: model_class()
-            for name, model_class in self._register_map.items()
-        }
+        self._register_map: dict[str, Type[BaseModel]] = {}
+        self._registers: dict[str, BaseModel] = {}
+        for name, val in dict(register_map or {}).items():
+            if isinstance(val, type) and issubclass(val, BaseModel):
+                model_class = cast(Type[BaseModel], val)
+                self._register_map[name] = model_class
+                self._registers[name] = model_class()
+            elif isinstance(val, BaseModel):
+                self._register_map[name] = type(val)
+                self._registers[name] = val
+            else:
+                raise TypeError(
+                    f"Регистр '{name}': ожидается подкласс BaseModel или экземпляр, "
+                    f"получено {type(val)!r}"
+                )
 
     @classmethod
     def from_package(cls, package_name: str) -> "RegistersContainer":
@@ -85,6 +97,13 @@ class RegistersContainer:
             return self._registers[name]
         except KeyError:
             raise KeyError(f"Регистр '{name}' не найден в контейнере.")
+
+    def __setitem__(self, name: str, reg: BaseModel) -> None:
+        """Установить или заменить экземпляр регистра (имя → модель)."""
+        if not isinstance(reg, BaseModel):
+            raise TypeError(f"Ожидается экземпляр BaseModel, получено {type(reg)!r}")
+        self._register_map[name] = type(reg)
+        self._registers[name] = reg
 
     def __contains__(self, name: str) -> bool:
         """'draw' in container → True/False."""

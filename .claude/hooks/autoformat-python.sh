@@ -39,6 +39,7 @@ fi
 # Форматирование
 "$RUFF_CMD" format "$FILE_PATH" --quiet 2>/dev/null
 
+
 # Автофикс линтера (только безопасные правила)
 "$RUFF_CMD" check "$FILE_PATH" --fix --quiet 2>/dev/null
 

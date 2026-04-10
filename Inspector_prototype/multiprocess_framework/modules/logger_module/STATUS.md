@@ -8,7 +8,7 @@
 |---|---|---|
 | Код | 9 | CRM; BatchBuffer; удалены LogDispatcher, legacy batcher/, свойства channels/batcher |
 | Тесты | 7 | ~30 тестов; стресс BatchBuffer и расширенное scope routing — по желанию |
-| Документация | 9 | README, DECISIONS.md (ADR-140…142), §6.5 в ARCHITECTURE.md |
+| Документация | 9 | README, DECISIONS.md (ADR-LOG-001…003), §6.5 в ARCHITECTURE.md |
 | Связанность | 9 | Наследует ChannelRoutingManager; зависит от channel_routing_module |
 | Дублирование | 10 | Нет: registry, BatchBuffer, Dispatcher — из CRM |
 | Работоспособность | 8 | BatchBuffer + scope routing; ErrorManager без LogDispatcher |
@@ -27,7 +27,7 @@
 
 ## Обновление 2026-04-09 (Фаза 3 cleanup)
 
-- Удалены **`LogDispatcher`** и пакет **`batcher/`**; **`LogRecord`** в **`core/log_types.py`** (см. **ADR-140…142**).
+- Удалены **`LogDispatcher`** и пакет **`batcher/`**; **`LogRecord`** в **`core/log_types.py`** (см. **ADR-LOG-001…003**).
 - Убраны backward compat: **`channels`**, **`batcher`**, **`self.dispatcher`**.
 
 ## Что сделано в CRM-миграции (Фаза 2–3)

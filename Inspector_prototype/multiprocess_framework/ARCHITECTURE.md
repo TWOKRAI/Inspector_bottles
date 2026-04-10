@@ -1,7 +1,7 @@
  # Multiprocess Framework — Architecture
 
-> **Статус документа:** каркас (Фаза 0 рефакторинга v4.1).
-> §1–§4 заполнены. §5 «Жизненный цикл», §6 «Модули», §7 «Внешние пакеты», §8 «ADR» — заголовки-заглушки, наполняются по одной секции после каждого модуля Фазы 1.
+> **Статус документа:** §1–§6.15 заполнены (19 пакетов в `modules/`). §6.16–§6.18, §7, §8 — TODO. **Mermaid-сводка:** [docs/DIAGRAMS.md](./docs/DIAGRAMS.md).
+> **Обновлено:** 2026-04-10 (после рефакторинга `process_manager_module`, milestone M1 ready).
 > **Принцип документа:** один входной документ на весь фреймворк. После Фазы 1 этот файл заменяет `README.md` (root), `STRUCTURE.md`, `DOCUMENTATION_INDEX.md`, `MODULES_STATUS.md`, `PROBLEMS.md`, `docs/FRAMEWORK_OVERVIEW.md`, `docs/ARCHITECTURE_REFERENCE.md`.
 
 ---
@@ -53,7 +53,7 @@
 | **Command & Work** | `command_module`, `worker_module` | `CommandManager` (семантика «команда» поверх dispatch) и `WorkerManager` (жизненный цикл воркеров внутри процесса). |
 | **Process** | `process_module`, `process_manager_module`, `console_module` | `ProcessModule` — база дочернего процесса; `ProcessManagerProcess` — оркестрация; `console_module` — кросс-платформенный интерактив для регистров. |
 | **Storage** | `sql_module` | SQL-воркер с dict-at-boundary для запросов. |
-| **Application kit** | `registers_module` | Инфраструктура для регистров (process_registry, discovery, RegistersMeta). Сами регистры создаются в прикладном коде. |
+| **Application kit** | `registers_module` | Runtime вокруг экземпляров регистров: pub/sub, `set_field_value` + dispatch, routing map; хранение через `RegistersContainer` (`data_schema_module`). Схемы — в прикладном коде. |
 | **External (Фаза 2)** | `frontend_framework` (вынесен из фреймворка) | PyQt-приложение как отдельный процесс, связь через `ProcessModule` + `RouterManager` + `FieldRouting`. |
 
 ---
@@ -177,7 +177,131 @@ graph BT
 
 ## 5. Жизненный цикл приложения
 
-> **TODO (Фаза 1).** Здесь появится sequence-диаграмма `SystemLauncher → ProcessManagerProcess → дочерние процессы → runtime-сообщения → graceful shutdown`. Заполняется после рефакторинга `process_manager_module` (модуль #13, milestone M1).
+Три фазы: **Запуск → Работа → Завершение**. Каждый компонент — отдельное устройство с чётким входом/выходом.
+
+### 5.1 Запуск (Startup)
+
+```
+App main.py
+    │
+    ├─ SystemLauncher()                         [Пульт управления]
+    │   └─ .add_process("camera", proc_dict)    Вход: (name, dict)
+    │   └─ .add_process("processor", proc_dict)
+    │   └─ .run()
+    │       │
+    │       ▼
+    │   ProcessSpawner                          [Стартер]
+    │       ├─ SharedResourcesManager()         Создаёт общую память
+    │       ├─ Process(ProcessManagerProcess)    Запускает оркестратор
+    │       └─ signal(SIGINT/SIGTERM)            Ловит Ctrl+C
+    │           │
+    │           ▼
+    │       [OS Process: ProcessManager]         [Генеральный директор]
+    │       ProcessManagerProcess(ProcessModule)
+    │           ├─ RouterManager.initialize()    Коммуникация
+    │           ├─ CommandManager.initialize()   Команды (process.start/stop/restart)
+    │           ├─ WorkerManager.initialize()    Потоки (state_monitor)
+    │           ├─ LoggerManager.initialize()    Логирование
+    │           │
+    │           ├─ Phase 1: register_process() для всех → очереди в SRM
+    │           └─ Phase 2: для каждого процесса:
+    │               ├─ ProcessRegistry.create_and_register()
+    │               │   ├─ stop_event = Event()     Индивидуальный!
+    │               │   ├─ bundle = build_bundle()  Pickle-safe dict
+    │               │   └─ Process(run_process_function, bundle)
+    │               ├─ process.start()
+    │               └─ ProcessPriority.apply()
+    │                   │
+    │                   ▼
+    │               [OS Process: camera]            [Дочерний процесс]
+    │               run_process_function()
+    │                   ├─ _load_process_class()     Динамическая загрузка
+    │                   ├─ _build_shared_resources()  SRM из bundle
+    │                   ├─ CameraProcess(ProcessModule)
+    │                   │   ├─ RouterManager         Коммуникация
+    │                   │   ├─ CommandManager         Приём команд
+    │                   │   ├─ WorkerManager          Потоки (capture_loop)
+    │                   │   └─ LoggerManager          Логирование
+    │                   └─ process.run()              Основной цикл
+```
+
+### 5.2 Работа (Runtime)
+
+```
+camera                   ProcessManager              processor
+  │                           │                          │
+  ├─ capture frame            │                          │
+  ├─ msg.data(targets=        │                          │
+  │    ["processor"],         │                          │
+  │    data_type="frame")     │                          │
+  │   │                       │                          │
+  │   └─ RouterManager ─────────────────────────────────→│
+  │     msg.to_dict()         │                     msg.from_dict()
+  │     AsyncSender           │                     AsyncReceiver
+  │     Queue.put()           │                     Queue.get()
+  │                           │                          │
+  │                           ├─ Monitor polls           ├─ process frame
+  │                           │  is_alive()? ✓           │
+  │                           │  state changed? ─→ broadcast
+  │                           │                          │
+  │   ←─────────── msg.command("set_fps", fps=60) ──────┤
+  │   CommandManager                                     │
+  │   handler(fps=60)                                    │
+```
+
+### 5.3 Завершение (Graceful Shutdown)
+
+```
+Ctrl+C (SIGINT)
+    │
+    ▼
+ProcessSpawner._signal_handler()            [Main process]
+    └─ stop()
+        ├─ _stop_event.set()                Сигнал оркестратору
+        ├─ process.join(3s)                 Ждём
+        ├─ if alive: terminate → kill       Принудительно
+        └─ shared_resources.shutdown()
+             │
+             ▼
+ProcessManagerProcess.shutdown()            [Оркестратор]
+    ├─ 1. ProcessMonitor.stop()             Остановить наблюдение
+    ├─ 2. ProcessRegistry.stop_all()        Остановить ВСЕ дочерние
+    │       ├─ for each: stop_event[name].set()   Per-process!
+    │       ├─ join_all(5s)                 Ждём graceful
+    │       ├─ for alive: terminate         SIGTERM
+    │       └─ for alive: kill              SIGKILL
+    ├─ 3. ConsoleManager.shutdown()
+    └─ 4. super().shutdown()                Workers, Router, Logger
+             │
+             ▼
+Каждый дочерний процесс:                    [Дочерний]
+    (stop_event.is_set() → выход из run())
+    ├─ process.shutdown()
+    │   ├─ WorkerManager.stop_all()
+    │   ├─ RouterManager.shutdown()
+    │   └─ LoggerManager.flush()
+    └─ exit(0)
+
+Итог: все процессы завершены, SharedMemory освобождена, логи сброшены.
+```
+
+### 5.4 Остановка/рестарт отдельного процесса
+
+```
+ProcessManagerProcess.stop_process("camera")
+    └─ ProcessRegistry.stop_one("camera")
+        ├─ stop_events["camera"].set()      Только camera!
+        ├─ camera.join(5s)
+        └─ if alive: terminate → kill
+    Остальные процессы продолжают работать.
+
+ProcessManagerProcess.restart_process("camera")
+    ├─ stop_process("camera")               Остановить
+    ├─ registry.remove_process("camera")    Убрать из реестра
+    ├─ create_and_register("camera", ...)   Новый процесс + новый Event
+    ├─ process.start()                      Запустить
+    └─ priority.apply()                     Приоритет
+```
 
 ---
 
@@ -532,11 +656,154 @@ CommandManager(BaseManager, ObservableMixin, ICommandManager)
 
 📖 [`modules/command_module/README.md`](modules/command_module/README.md) · [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md)
 
-### 6.13 `process_manager_module` — *TODO (после модуля #13, milestone M1)*
-### 6.14 `error_module` — *TODO (после модуля #14)*
-### 6.15 `statistics_module` — *TODO (после модуля #15)*
+### 6.13 `process_manager_module` — оркестратор (Генеральный директор)
+
+**Роль:** Запуск, мониторинг, управление и завершение всех процессов системы. Верхний слой фреймворка — соединяет все модули в единый работающий организм. Сам является `ProcessModule` с собственными workers, router, logger, commands.
+
+**Три уровня абстракции:**
+
+| Компонент | Входы (что принимает) | Выходы (что отдаёт) | Использует |
+|---|---|---|---|
+| **SystemLauncher** (фасад) | `add_process(name, dict)` — Dict at Boundary | `run()`, `stop()`, `get_status()` → dict | ProcessSpawner |
+| **ProcessSpawner** (стартер) | processes_config dict | OS Process с ProcessManagerProcess | SRM, _ProcessLogger, signal |
+| **ProcessManagerProcess** (оркестратор) | config dict через bundle | IPC-команды, broadcast, monitoring | ProcessRegistry, ProcessMonitor, ProcessPriority, ProcessStatus |
+
+```
+SystemLauncher                              [Пульт управления]
+    │  Вход: .add_process(name, dict)
+    │  Выход: .run() / .stop() / .get_status()
+    │
+    └─ ProcessSpawner                       [Стартер]
+        │  Создаёт: SRM, _ProcessLogger
+        │  Запускает: OS Process → ProcessManagerProcess
+        │  Ловит: SIGINT / SIGTERM → stop()
+        │
+        └─ ProcessManagerProcess            [Генеральный директор]
+            │  Наследник: ProcessModule (workers, router, logger, commands)
+            │
+            ├─ ProcessRegistry              [Отдел кадров]
+            │   ├─ _stop_events: Dict[name, Event]  — per-process!
+            │   ├─ create_and_register(name, class_path, config, priority)
+            │   ├─ stop_one(name, timeout)  — остановить одного
+            │   ├─ stop_all(timeout)        — остановить всех
+            │   └─ remove_process(name)     — удалить из реестра
+            │
+            ├─ ProcessMonitor               [Служба безопасности]
+            │   ├─ _monitoring_loop (worker thread)
+            │   ├─ State polling: ProcessStateRegistry
+            │   ├─ Heartbeat: process.is_alive() → crash detection
+            │   └─ Broadcast: status changes → все процессы
+            │
+            ├─ ProcessPriority              [HR: приоритеты]
+            │   └─ register / apply / get / set priority
+            │
+            ├─ ProcessStatus                [Отчётность]
+            │   └─ get_process_status / get_all_status / get_stats
+            │
+            └─ Built-in commands (CommandManager):
+                ├─ process.list     → список всех процессов
+                ├─ process.start    → запустить по имени
+                ├─ process.stop     → остановить по имени
+                ├─ process.restart  → перезапустить по имени
+                ├─ process.status   → статус по имени
+                ├─ system.shutdown  → завершить систему
+                └─ system.stats     → статистика
+```
+
+**Runner (запуск дочернего процесса):**
+
+```
+run_process_function(class_path, name, stop_event, bundle)  [Top-level, pickle-safe]
+    │
+    ├─ class_loader._load_process_class()     Динамическая загрузка класса
+    ├─ bundle_builder._build_shared_resources_from_bundle()  SRM из dict
+    ├─ console_redirect._setup_console_redirect()  stdout/stderr → queue
+    ├─ _attach_stop_event_to_process_data()   stop_event → custom
+    ├─ ProcessClass(name, shared_resources, config)
+    ├─ process.initialize()
+    ├─ _run_lifecycle(process, stop_event)    run() + wait stop_event
+    └─ process.shutdown()                     cleanup
+```
+
+**Bundle Contract** (`core/bundle_contract.py`):
+- `build_bundle(queues, config, custom, routing_map)` → pickle-safe dict
+- `validate_bundle(bundle)` → bool
+- Создаётся в ProcessRegistry, распаковывается в bundle_builder
+
+**Ключевые решения (ADR-PM-001…006):**
+- **ADR-PM-001:** Per-process stop events — каждый процесс получает свой `Event()`. Остановка одного не затрагивает другие.
+- **ADR-PM-002:** Минималистичный ProcessSpawner — только SRM + _ProcessLogger, без ConfigManager/LoggerManager/ErrorManager.
+- **ADR-PM-003:** Bundle Contract — формальная спецификация pickle-safe dict для дочернего процесса.
+- **ADR-PM-004:** Heartbeat monitoring — `process.is_alive()` для обнаружения crashed процессов.
+- **ADR-PM-005:** Runner split — process_runner.py (447→185 LOC) + 3 focused файла.
+- **ADR-PM-006:** stop_event оркестратора — передаётся аргументом, присоединяется к ProcessData через `_attach_stop_event_to_process_data`.
+
+📖 [`modules/process_manager_module/README.md`](modules/process_manager_module/README.md) · [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) · [`modules/process_manager_module/docs/CONFIG_CONTRACT.md`](modules/process_manager_module/docs/CONFIG_CONTRACT.md)
+### 6.14 `error_module` — severity-based channel routing
+
+**Роль:** Специализированный менеджер ошибок — наследник `LoggerManager` с level-based routing. WARNING/ERROR/CRITICAL направляются в отдельные файлы; DEBUG/INFO — через scope-based routing родителя.
+
+**`ErrorManager`** (`LoggerManager`) — severity routing через `_level_to_channel` dict. Использует CRM-инфраструктуру (ChannelRegistry, BatchBuffer) через наследование. Добавляет `log_exception()` с traceback и `track_error()` для ObservableMixin.
+
+```
+ErrorManager (LoggerManager → ChannelRoutingManager)
+    ├── _level_to_channel  — {CRITICAL→critical_file, ERROR→errors_file, WARNING→warnings_file}
+    ├── log() override     — severity routing для WARNING+, scope fallback для DEBUG/INFO
+    ├── log_exception()    — traceback + self.error()
+    ├── track_error()      — интеграция с ObservableMixin._track_error()
+    └── ErrorManagerConfig (SchemaBase) → expand_error_manager_config → LoggerManagerConfig
+```
+
+Ключевые решения (ADR-EM-001…006):
+
+- ErrorManager — наследник LoggerManager, не композиция и не слияние.
+- `_level_to_channel` — O(1) dict lookup, не через Dispatcher.
+- `_level_to_channel = {}` до `super().__init__()` — защита от AttributeError.
+- `error_module.core`: `ErrorManager` в `__all__`, подгрузка через `__getattr__` (не ломать ленивый импорт `expand_error_manager_config`).
+
+📖 [`modules/error_module/README.md`](modules/error_module/README.md) · [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md)
+
+### 6.15 `statistics_module` — метрики и агрегация
+
+**Роль:** Менеджер статистики и метрик — прямой наследник `ChannelRoutingManager` (ADR-022). Агрегирует counter/gauge/timing/histogram, периодически сбрасывает снапшоты в каналы. Все менеджеры с `ObservableMixin` маршрутизируют метрики сюда через `_record_metric()` / `_record_timing()`.
+
+**`StatsManager`** (`ChannelRoutingManager`, `IStatsManager`) — dual-layer: live-dict для `get_metric()` + `AggregationWindow` для flush. Sentinel `_STATS_SENTINEL` предотвращает N-кратный счёт при N каналах.
+
+```
+StatsManager (ChannelRoutingManager)
+    ├── _metrics (Dict)        — live-state для get_metric() / get_all_metrics()
+    ├── AggregationWindow      — IBufferStrategy с агрегацией (counter sum, gauge last, timing p95)
+    ├── _do_flush()            — broadcast snapshot во ВСЕ каналы
+    ├── LogStatsChannel        — IChannel → LoggerManager.performance()
+    ├── FileStatsChannel       — IChannel → JSON/CSV файл
+    ├── StatsAdapter           — BaseAdapter → CommandManager (5 команд)
+    └── StatsManagerConfig     — ChannelRoutingConfig + aggregation/flush/tags
+```
+
+Ключевые решения (ADR-SM-001…006):
+
+- Прямой наследник CRM, не LoggerManager (scope/level избыточны).
+- Dual-layer storage: live-dict + AggregationWindow.
+- Sentinel-паттерн: enqueue один раз, flush во все каналы.
+- `_metric_key` дупликация — намеренная изоляция слоёв.
+
+📖 [`modules/statistics_module/README.md`](modules/statistics_module/README.md) · [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md)
 ### 6.16 `sql_module` — *TODO (после модуля #16)*
-### 6.17 `registers_module` — *TODO (после модуля #17)*
+### 6.17 `registers_module`
+
+**Роль:** runtime вокруг именованных регистров (экземпляры прикладных схем): **pub/sub**, **`set_field_value`** с fan-out **`register_update`**, **`build_routing_map`** / **`send_register_message`**, **`build_connection_map_from_registers`**.
+
+**Граница с `data_schema_module`:** `RegistersManager` **композирует** `RegistersContainer` — хранение, `get_field_metadata`, `validate_field`, `model_dump_all` / `model_validate_all` не дублируются (ADR-RM-001). Логика выбора целей доставки — **`core/dispatch.py`** (`resolve_dispatch_targets`).
+
+```
+RegistersManager
+    ├── RegistersContainer (data_schema)  — экземпляры, metadata, dump/validate
+    ├── observers (field + global)
+    ├── connection_map + send_callback
+    └── resolve_dispatch_targets()  ← core/dispatch.py
+```
+
+📖 [`modules/registers_module/README.md`](modules/registers_module/README.md) · [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md)
 ### 6.18 `console_module` — *TODO (после модуля #18, milestone M2)*
 
 ---

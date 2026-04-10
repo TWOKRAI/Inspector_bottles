@@ -37,7 +37,7 @@ ErrorManager  (override log() для level-based routing)
 - Level-based routing: WARNING/ERROR/CRITICAL → отдельные файлы
 - `_level_to_channel` — O(1) lookup вместо scope-based routing
 - `log_exception()` — специализированный метод для ошибок с traceback
-- ErrorManagerConfig(ChannelRoutingConfig) для конфигурации путей
+- ErrorManagerConfig(SchemaBase) для конфигурации путей
 
 ---
 
@@ -108,7 +108,9 @@ error_module/
 │
 └── tests/
     ├── test_error_manager.py
-    └── test_error_config.py
+    ├── test_error_config.py
+    ├── test_error_level_routing.py
+    └── test_error_integration.py
 ```
 
 ---
@@ -132,7 +134,7 @@ em = ErrorManager(config={
 })
 em.initialize()
 
-# Вариант 3: RegisterBase-конфиг
+# Вариант 3: SchemaBase-конфиг
 config = ErrorManagerConfig(
     error_file_path="var/log/errors.log",
     critical_file_path="var/log/critical.log",
@@ -273,8 +275,8 @@ em = ErrorManager(config=config)
 em.initialize()
 ```
 
-**ErrorManagerConfig наследует ChannelRoutingConfig** → получает поля `manager_name` и `channels`
-из базового класса. Это позволяет расширять конфиг кастомными каналами без изменения базового класса.
+**ErrorManagerConfig наследует SchemaBase** → плоские поля путей и опциональный `channels`;
+полная сборка под `LoggerManager` — в `expand_error_manager_config()`.
 
 ---
 
@@ -384,13 +386,9 @@ router.register_message_handler(
 ## Тесты
 
 ```bash
-cd Inspector_prototype/multiprocess_framework/refactored
-pytest modules/error_module/tests/ -v
+cd Inspector_prototype/multiprocess_framework/modules
+python -m pytest error_module/tests/ -v
 ```
 
-Покрытие (11 тестов):
-- ErrorManagerConfig.build(): tuple, required keys, include_stacktrace, custom values
-- ErrorManager.__init__(): None / dict / ErrorManagerConfig / build-object / invalid
-- log_exception(): не падает при активном исключении
-- get_stats(): level_routes, include_stacktrace
-- TypeError при невалидном config
+Покрытие (25 тестов): expand/config, инициализация ErrorManager, `log_exception`, `get_stats`,
+level routing и fallback, DEBUG/INFO через родителя, `track_error`, интеграция записи в файл.

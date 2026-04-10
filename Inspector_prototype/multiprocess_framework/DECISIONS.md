@@ -13,6 +13,8 @@
 - Отклонённые альтернативы: …
 ```
 
+**Модульные ADR** (формат `ADR-{КОД}-NNN`) живут в `modules/*/DECISIONS.md`. Маппинг старых номеров и коды модулей: [docs/ADR_REGISTRY.md](./docs/ADR_REGISTRY.md).
+
 ---
 
 ## Оглавление (по номеру)
@@ -1638,7 +1640,7 @@
 - Статус: принято
 - Контекст: Высокая когнитивная нагрузка из‑за смешения ролей `proc_dict`, `bundle`, `ConfigStore`, `ProcessData.custom`, регистров; параметр `config` у `ProcessStateRegistry.register_process` не использовался и вводил в заблуждение.
 - Решение:
-  1. **Документация:** [docs/CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) — единый слой преобразования (HasBuild / `config_to_dict` / `model_dump` / `model_dump_all`) и отдельные **ветки доставки** (launcher, child runtime, регистры). [CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) ссылается на него.
+  1. **Документация:** [docs/CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) — консолидация; полные тексты перенесены в [docs/archive/](./docs/archive/) (`CONFIG_PATHS.md`, `CONFIG_SCHEMA_DATA_FLOW.md`, …).
   2. **Фасад в процессе:** прикладной код использует `IProcessModule.get_config` / `update_config` и `config_handler`; отдельный `ProcessConfigView` (Protocol) **не вводится** до отдельной необходимости.
   3. **Child и ConfigStore:** при подъёме SRM из bundle (`process_runner`) дублировать логический срез конфига в `ConfigStore.store`, чтобы `get_process_config` был согласован с родительским контуром (pickle-safe dict, не полный `proc_dict`).
   4. **PSR API:** параметр `config` у `register_process` **удалён** из контракта; данные передаются через `initial_state` / `custom`.
@@ -1783,7 +1785,7 @@
   2. **Выход на границе:** `model_dump()` / dict → JSON/YAML общими средствами; не добавлять `from_yaml` на каждую схему без необходимости.
   3. **Поведение scope для логгера** — в `LoggerManager._scope_schema`, не на классе конфига.
   4. **`ManagersConfig.from_log_dir`** — `LoggerManagerConfig(app_name=..., default_level=..., log_directory=abs_log_dir)` + подстановка `scopes["BUSINESS"].min_level` по `log_level`; error-секция — абсолютные пути как раньше.
-  5. **Документ:** `docs/CONFIG_SCHEMA_REGISTERS.md` — цепочка data_schema → config_module → registers_module и правила без дублирования слоёв.
+  5. **Документ:** [docs/CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) (архив: [docs/archive/CONFIG_SCHEMA_REGISTERS.md](./docs/archive/CONFIG_SCHEMA_REGISTERS.md)) — цепочка data_schema → config_module → registers_module.
 - Причина: предсказуемый контур, меньше расхождений с дефолтами схем.
 - Отклонённые альтернативы: оставить `from_dict` как обёртку — отклонено (дублирование Pydantic v2).
 
@@ -1848,6 +1850,10 @@
 | `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-163…167 + 166a (dual comm API, ISharedResources DI, PSR shim removal, managers pipeline, lifecycle init + delegators, importlib) |
 | `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-168…172 (ICommandManager wiring, legacy kwargs removal, dead except removal, process_name alias, CRM distinction) |
 | `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…008 (Handle API, PSR single source of truth, MemoryAccessStatus, for_process naming, expanded config) |
+| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PM-001…006 (per-process stop events, минимальный spawner, bundle contract, monitor liveness, split runner, stop_event оркестратора) |
+| `error_module` | [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md) | Observability | ADR-EM-001…006 (наследование LoggerManager, _level_to_channel, normalize config, expand assembly, init order, ленивый export в core) |
+| `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…006 (прямое наследование CRM, dual-layer storage, sentinel broadcast, _metric_key isolation, StatsAdapter, AggregationWindow) |
+| `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…004 (композиция RegistersContainer, удаление IRegistersConverter, dispatch.py, логирование) |
 
 ---
 

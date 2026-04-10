@@ -75,3 +75,43 @@ def test_connection_map_fallback_when_no_dispatch() -> None:
     )
     rm.set_field_value("b", "y", 3)
     assert calls == ["control_processor"]
+
+
+def test_empty_process_targets_no_dispatch() -> None:
+    class _Empty(SchemaBase):
+        register_dispatch: ClassVar[RegisterDispatchMeta] = RegisterDispatchMeta(
+            process_targets=(),
+        )
+        x: Annotated[int, FieldMeta("x")] = 0
+
+    calls: list[int] = []
+    rm = RegistersManager({"e": _Empty()}, send_callback=lambda *a: calls.append(1))
+    rm.set_field_value("e", "x", 5)
+    assert calls == []
+
+
+def test_no_dispatch_no_connection_map_no_send() -> None:
+    class _Plain(SchemaBase):
+        y: Annotated[int, FieldMeta("y")] = 0
+
+    calls: list[int] = []
+    rm = RegistersManager({"p": _Plain()}, send_callback=lambda *a: calls.append(1))
+    rm.set_field_value("p", "y", 3)
+    assert calls == []
+
+
+def test_channel_prefix_not_duplicated() -> None:
+    class _Ctrl(SchemaBase):
+        register_dispatch: ClassVar[RegisterDispatchMeta] = RegisterDispatchMeta(
+            process_targets=("control_renderer",),
+        )
+        z: Annotated[int, FieldMeta("z")] = 0
+
+    calls: list[str] = []
+
+    def send_cb(channel: str, *args: object) -> None:
+        calls.append(channel)
+
+    rm = RegistersManager({"c": _Ctrl()}, send_callback=send_cb)
+    rm.set_field_value("c", "z", 1)
+    assert calls == ["control_renderer"]

@@ -4,16 +4,16 @@
 
 **Version:** 2.0 (Refactored, Phase 8/8 Complete)  
 **Status:** ✅ Production Ready  
-**Python:** 3.8+  
+**Python:** 3.9+ (рекомендуется 3.11+)  
 **License:** MIT
 
 ---
 
 ## Start Here
 
-1. **Новичок?** Прочитай этот README (10 мин) → [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) → выбери путь.
-2. **AI-агент?** [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (разделы 1–7) → [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md).
-3. **Разработчик?** Quick Start ниже → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) → `modules/*/README.md`.
+1. **Новичок?** [docs/QUICK_START.md](./docs/QUICK_START.md) → этот README → [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) → выбери путь.
+2. **AI-агент?** [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) (разделы 1–7) → [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) → [docs/CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md).
+3. **Разработчик?** [docs/QUICK_START.md](./docs/QUICK_START.md) → [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) → `modules/*/README.md`.
 4. **Маршрутизация сообщений и регистров?** [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) (процесс vs канал Router, `connection_map`, `FieldRouting`).
 
 ---
@@ -47,7 +47,7 @@ launcher.run()  # blocks until Ctrl+C, graceful shutdown
 
 ## Core Features
 
-✅ **16 modular, independent components**  
+✅ **19 packages under `modules/`** (полный каталог: [docs/ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md))  
 ✅ **Unified messaging protocol** (Message with 9 types)  
 ✅ **Type-safe data structures** (Pydantic v2 + SchemaBase)  
 ✅ **Centralized logging & error handling** (through ObservableMixin)  

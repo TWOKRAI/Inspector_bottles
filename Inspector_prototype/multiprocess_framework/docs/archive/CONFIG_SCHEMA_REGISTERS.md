@@ -76,7 +76,7 @@ flowchart TB
 | `RegistersManager` | Словарь `имя → экземпляр регистра`; `get_register`, `set_field_value`, `model_dump_all` / `model_validate_all`, подписки |
 | `build_connection_map_from_registers` | `{register_name: process_name}` из `register_dispatch` на классах |
 | `build_routing_map`, `get_routing_for_message`, `send_register_message` | Карта `(register, field) → channel` и отправка через роутер |
-| `IRegistersManager`, `IRegistersConverter` | Протоколы для подстановки в тестах |
+| `IRegistersManager` | Протокол для подстановки в тестах (`IRegistersConverter` удалён, ADR-RM-002) |
 
 ---
 

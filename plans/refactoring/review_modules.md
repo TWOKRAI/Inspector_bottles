@@ -215,36 +215,39 @@
 | USB Controller | `worker_module` | 10/10 | Эталон |
 | CPU Core | `process_module` | 8/10 | Здоров |
 | Клавиатура | `command_module` | 9/10 | Здоров |
+| **Генеральный директор** | **`process_manager_module`** | **9/10** | **Здоров (после fix P1)** |
 
-**Средняя оценка: 8.8/10**
+**Средняя оценка: 8.8/10 → 8.8/10 (13 модулей)**
 
 ---
 
 ### Ключевые победы рефакторинга
 
 1. **−8000+ LOC мёртвого кода** — data_schema_module (−5000), message_module (−780), base_manager (−950), logger_module (−380)
-2. **1000+ тестов** суммарно по 12 модулям — каждый модуль имеет тесты
+2. **1100+ тестов** суммарно по 13 модулям — каждый модуль имеет тесты (1647 passed по всему фреймворку)
 3. **CRM-паттерн** (channel_routing_module) — единый «разъём» для Logger/Error/Stats/Router. Архитектурная жемчужина
 4. **Message = SchemaBase** — единый источник полей, без дупликации
-5. **Dict at Boundary** строго соблюдён во всех 12 модулях
+5. **Dict at Boundary** строго соблюдён во всех 13 модулях
 6. **Pickle-safe** — проверено для Windows spawn
+7. **Per-process stop events** — каждый процесс управляется индивидуально (stop/restart). Graceful shutdown cascade hardened
 
 ---
 
-### Риски перед ProcessManager (#13)
+### Оставшиеся риски
 
 | Риск | Модуль | Влияние |
 |------|--------|---------|
 | 11 тестов у logger | `logger_module` | ProcessManager активно использует логирование |
 | correlation_id не реализован | `router_module` | REQUEST/RESPONSE между процессами неполны |
 | `router_manager.py` — 600 LOC | `router_module` | Центральный для ProcessManager, сложность сохраняется |
-| `__getattr__` lazy import | `process_module` | Нетривиальный механизм при отладке |
+| Два SRM (main + PM) | `process_manager_module` | Архитектурная черта bootstrap, не баг, но усложняет ментальную модель |
+| `_process_configs` статический | `process_manager_module` | restart откатывает к начальному конфигу, не к runtime-изменённому |
 
 ---
 
-### Общий вердикт
+### Общий вердикт (после 13 модулей)
 
-Фреймворк готов к рефакторингу ProcessManager. 12 модулей образуют когерентную систему с чёткими интерфейсами, единым протоколом (Dict at Boundary) и двумя эталонными модулями (`channel_routing_module`, `worker_module`). Архитектура «конструктор процессов» — не метафора, а реальность: каждый модуль действительно вставляется в соседний через явный Protocol/Interface.
+**13 модулей отрефакторены.** Фреймворк — полноценный конструктор многопроцессных приложений. Оркестратор (`process_manager_module`) управляет отдельными процессами (stop/restart), обнаруживает crashes через heartbeat, завершает систему через graceful cascade. 1647 тестов зелёные. **Готов к Milestone M1** — первое multi-process приложение на фреймворке.
 
 ---
 
@@ -252,9 +255,18 @@
 
 > Секции ниже заполняются по мере рефакторинга модулей #13+.
 
-### #13 `process_manager_module` — ???
+### #13 `process_manager_module` — Генеральный директор (оркестратор)
 
-_TODO: после рефакторинга_
+| | |
+|---|---|
+| **Ответственность** | Запуск, мониторинг, управление lifecycle всех процессов. Верхний слой фреймворка. |
+| **Входы** | `add_process(name, dict)` — Dict at Boundary; SIGINT/SIGTERM сигналы; IPC-команды (process.start/stop/restart/status, system.shutdown) |
+| **Выходы** | OS-процессы с индивидуальными stop_events; broadcast status changes; get_status()/get_stats() → dict |
+| **Разъёмы** | `ISystemLauncher`, `IProcessManagerProcess`, `IProcessRegistry` — Protocol-based |
+| **Панель управления** | 7 builtin commands; per-process stop/restart; heartbeat monitoring; graceful shutdown cascade |
+| **Метрики** | 21→25 файлов (+4: runner split + bundle_contract), 2486→2490 LOC, 143 теста (11 тест-файлов) |
+
+**Вердикт: 9/10.** Критический баг P1 (shared stop_event) — исправлен: каждый процесс получает индивидуальный `Event()`. Добавлен `restart_process()` с сохранением конфигов. `process_runner.py` расслоен с 447 до 185 LOC (+ 3 focused файла). ProcessSpawner упрощён: убраны лишние ConfigManager/LoggerManager/ErrorManager. Monitor дополнен heartbeat (`process.is_alive()` → crash detection). Bundle формализован через `bundle_contract.py`. **Два осознанных технических долга:** (1) два экземпляра SRM (main + PM) — архитектурная черта bootstrap, не баг; (2) при динамическом изменении конфига `_process_configs` не обновляется автоматически.
 
 ### #14 `error_module` — ???
 

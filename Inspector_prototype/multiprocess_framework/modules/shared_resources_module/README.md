@@ -5,7 +5,7 @@
 Pickle-safe «записная книжка» для межпроцессного взаимодействия.
 Создаётся в ProcessManager, заполняется через `register_process()`, передаётся напрямую в дочерние процессы через pickle.
 
-**Связь с конфигурацией:** `ConfigStore` и `get_process_config` — часть инфраструктуры; **в коде самого процесса** предпочтительнее читать настройки через **`ProcessModule.get_config`** (см. [../../docs/CONFIG_PATHS.md](../../docs/CONFIG_PATHS.md)).
+**Связь с конфигурацией:** `ConfigStore` и `get_process_config` — часть инфраструктуры; **в коде самого процесса** предпочтительнее читать настройки через **`ProcessModule.get_config`** (см. [../../docs/CONFIG_GUIDE.md](../../docs/CONFIG_GUIDE.md)).
 
 ---
 

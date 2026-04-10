@@ -2,7 +2,7 @@
 
 > Ссылки: [`../../DECISIONS.md`](../../DECISIONS.md) (ADR-008 Dict at Boundary)
 
-## ADR-168: CommandManager реализует ICommandManager
+## ADR-CMD-001 (was ADR-168): CommandManager реализует ICommandManager
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -10,7 +10,7 @@
 **Решение:** Добавить `ICommandManager` в сигнатуру `CommandManager`. `BaseCommandManager` намеренно НЕ реализует `ICommandManager` — это lightweight-класс для тестов с подмножеством API (нет `get_commands_by_tag`, `update_command_metadata`, `update_command_tags`).  
 **Последствия:** Формальный контракт. Потребители (ProcessModule) могут типизировать через ICommandManager.
 
-## ADR-169: Удаление legacy backward-compat kwargs
+## ADR-CMD-002 (was ADR-169): Удаление legacy backward-compat kwargs
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -18,7 +18,7 @@
 **Решение:** Удалить legacy kwargs и блок маппинга (~30 LOC).  
 **Последствия:** Упрощение __init__. Если пользовательский код вне фреймворка использовал старый API — потребуется миграция на `managers={}`.
 
-## ADR-170: Удаление dead except+raise в handle_command
+## ADR-CMD-003 (was ADR-170): Удаление dead except+raise в handle_command
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -26,7 +26,7 @@
 **Решение:** Удалить try/except. Вызывать `dispatcher.dispatch()` напрямую и проверять результат.  
 **Последствия:** Упрощение кода. Все 34 теста продолжают работать без изменений.
 
-## ADR-171: Сохранение self.process_name как backward-compat alias
+## ADR-CMD-004 (was ADR-171): Сохранение self.process_name как backward-compat alias
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -37,7 +37,7 @@
 - Прототип может использовать в пользовательском коде  
 **Последствия:** Alias остаётся. При унификации именования менеджеров — ревизия.
 
-## ADR-172: CommandManager vs ChannelRoutingManager — разные паттерны, синхронный by design
+## ADR-CMD-005 (was ADR-172): CommandManager vs ChannelRoutingManager — разные паттерны, синхронный by design
 
 **Статус:** принято  
 **Дата:** 2026-04-09  

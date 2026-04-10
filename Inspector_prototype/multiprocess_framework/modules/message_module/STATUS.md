@@ -8,7 +8,7 @@
 |---|---|---|
 | Код | 9 | `Message` = `SchemaBase`; один источник полей (`model_fields`), без Converter/Validator |
 | Тесты | 9 | 118 pytest в модуле; pickle roundtrip + extra-поля; `TestSchemaBaseIntegration` + `model_dump` без `_msg_*` |
-| Документация | 9 | README + `DECISIONS.md` (ADR-147…152), §6.7 в `ARCHITECTURE.md` |
+| Документация | 9 | README + `DECISIONS.md` (ADR-MSG-001…006), §6.7 в `ARCHITECTURE.md` |
 | Связанность | 9 | `IMessage` как `Protocol`; фабрики и адаптер без изменений публичного API |
 | Дублирование | 9 | Удалены `VALID_MESSAGE_FIELDS` / `MESSAGE_FIELD_DEFAULTS` / дублирующая `BaseMessageSchema` |
 | Работоспособность | 9 | Dict at Boundary, `validate_assignment=False` для fluent API; полный прогон фреймворка OK |
@@ -17,12 +17,12 @@
 
 - [x] `core/message.py` — `Message(SchemaBase)`, `@model_validator` вместо `apply_type_defaults`, `model_dump`/`model_validate` вместо конвертера
 - [x] Удалены `converters/`, `validators/`, `schemas/base.py` (код); `BaseMessageSchema` = алиас на `Message` в `schemas/__init__.py`
-- [x] Plan 08a: с диска убраны пустые каталоги `converters/`, `validators/`; интеграционные тесты `send_message` → `send`; pickle + extra тесты; примечание ADR-152 про `FieldRouting`
+- [x] Plan 08a: с диска убраны пустые каталоги `converters/`, `validators/`; интеграционные тесты `send_message` → `send`; pickle + extra тесты; примечание ADR-MSG-006 про `FieldRouting`
 - [x] `types/message_types.py` — только enums и `MESSAGE_TYPE_*`; убраны `VALID_MESSAGE_FIELDS`, `MESSAGE_FIELD_DEFAULTS`
 - [x] `utils/utils.py` — только `generate_message_id()`
 - [x] `schemas/command.py`, `schemas/log.py` — наследование `SchemaBase` + `FieldMeta` на ключевых полях
 - [x] `interfaces.py` — `IMessage` переведён на `Protocol` (`@runtime_checkable`)
-- [x] ADR-152 в `DECISIONS.md` модуля; строка в главном `multiprocess_framework/DECISIONS.md`
+- [x] ADR-MSG-006 в `DECISIONS.md` модуля; строка в главном `multiprocess_framework/DECISIONS.md`
 
 ## Рефакторинг по плану `plans/refactoring/07_message_module.md` (2026-04-09) — база для 08
 

@@ -8,15 +8,14 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
     ProcessMonitor → ProcessRegistry.stop_all → WorkerManager → ConsoleManager → super
 """
 
-from typing import Dict, Any, Optional
+import copy
+from typing import Any, Dict, Optional
 
 from ...process_module import ProcessModule
 from ..core.process_registry import ProcessRegistry
 from ..core.process_priority import ProcessPriority
 from ..core.process_status import ProcessStatus
 from ..monitor import ProcessMonitor
-from multiprocessing import Event
-
 from ..platforms import get_platform_adapter
 from ...shared_resources_module import QueueRegistry
 from ...console_module import ConsoleManager
@@ -42,6 +41,7 @@ class ProcessManagerProcess(ProcessModule):
         config: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(name, shared_resources, config or {})
+        self._process_configs: Dict[str, Dict[str, Any]] = {}
         self._create_components()
 
     def _create_components(self) -> None:
@@ -51,15 +51,15 @@ class ProcessManagerProcess(ProcessModule):
             if self.shared_resources else None
         )
         custom = process_data.custom if process_data and process_data.custom else {}
-        self.stop_event = custom.get("stop_event") or Event()
+        from multiprocessing import Event as _MpEvent
 
-        # QueueRegistry: используем из shared_resources если доступен
+        self.stop_event = custom.get("stop_event") or _MpEvent()
+
         queue_registry = self._resolve_queue_registry()
 
         platform_adapter = get_platform_adapter()
 
         self._process_registry = ProcessRegistry(
-            stop_event=self.stop_event,
             logger=self,
             queue_registry=queue_registry,
             config_manager=None,
@@ -138,6 +138,7 @@ class ProcessManagerProcess(ProcessModule):
             "process.list": (self._cmd_process_list, "Список всех процессов и статусов"),
             "process.start": (self._cmd_process_start, "Запустить именованный процесс"),
             "process.stop": (self._cmd_process_stop, "Остановить именованный процесс"),
+            "process.restart": (self._cmd_process_restart, "Перезапустить именованный процесс"),
             "process.status": (self._cmd_process_status, "Статус именованного процесса"),
             "system.shutdown": (self._cmd_system_shutdown, "Завершить систему"),
             "system.stats": (self._cmd_system_stats, "Статистика системы"),
@@ -171,6 +172,13 @@ class ProcessManagerProcess(ProcessModule):
         if not process_name:
             return {"error": "process_name required"}
         success = self.stop_process(process_name)
+        return {"success": success, "process_name": process_name}
+
+    def _cmd_process_restart(self, process_name: str = "", **kwargs) -> dict:
+        """Перезапустить именованный процесс."""
+        if not process_name:
+            return {"error": "process_name required"}
+        success = self.restart_process(process_name)
         return {"success": success, "process_name": process_name}
 
     def _cmd_process_status(self, process_name: str = "", **kwargs) -> dict:
@@ -232,6 +240,7 @@ class ProcessManagerProcess(ProcessModule):
             return
 
         for name, proc_config in valid:
+            self._process_configs[name] = copy.deepcopy(proc_config)
             if self.shared_resources:
                 self.shared_resources.register_process(name, proc_config)
 
@@ -274,6 +283,9 @@ class ProcessManagerProcess(ProcessModule):
         priority: str = "normal",
     ):
         """Создать и зарегистрировать процесс."""
+        merged = copy.deepcopy(config) if config else {}
+        merged["class"] = class_path
+        self._process_configs[name] = merged
         process = self._process_registry.create_and_register(
             name, class_path, config, priority
         )
@@ -297,23 +309,42 @@ class ProcessManagerProcess(ProcessModule):
 
     def stop_process(self, process_name: Optional[str] = None) -> bool:
         """
-        Остановить процесс или все.
-
-        Graceful: stop_event → join(timeout) → terminate.
+        Остановить один процесс (per-process stop_event) или все.
         """
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)
-            if process and process.is_alive():
-                self._process_registry.stop_event.set()
-                stop_timeout = self.get_config("stop_process_timeout") or 3.0
-                process.join(timeout=stop_timeout)
-                if process.is_alive():
-                    process.terminate()
-                    process.join(timeout=1.0)
-                if process.is_alive():
-                    process.kill()
-            return True
-        self._process_registry.stop_all()
+            if not process:
+                return True
+            if not process.is_alive():
+                return True
+            stop_timeout = float(self.get_config("stop_process_timeout") or 5.0)
+            return self._process_registry.stop_one(process_name, stop_timeout)
+        shutdown_timeout = float(self.get_config("shutdown_timeout") or 5.0)
+        self._process_registry.stop_all(timeout=shutdown_timeout)
+        return True
+
+    def restart_process(self, process_name: str) -> bool:
+        """Перезапустить процесс: stop → снять с реестра → create → start."""
+        config = self._process_configs.get(process_name)
+        if not config:
+            self._log_error(f"No saved config for '{process_name}'")
+            return False
+        if not self.stop_process(process_name):
+            return False
+        self._process_registry.remove_process(process_name)
+        if self.shared_resources:
+            self.shared_resources.register_process(process_name, config)
+        priority = config.get("priority", "normal")
+        process = self._process_registry.create_and_register(
+            process_name, config["class"], config, priority
+        )
+        if not process:
+            self._log_error(f"Failed to recreate process '{process_name}'")
+            return False
+        process.start()
+        self._priority.register_priority(process_name, priority)
+        self._priority.apply_priority(process)
+        self._log_info(f"Process '{process_name}' restarted")
         return True
 
     def get_process_status(

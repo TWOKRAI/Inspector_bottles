@@ -4,7 +4,7 @@
 
 ---
 
-## ADR-120: Удаление `_compat.py`
+## ADR-DS-001 (was ADR-120): Удаление `_compat.py`
 - Дата: 2026-04-09
 - Статус: принято
 - Контекст: Файл реэкспортировал символы для «старого» API; grep по `Inspector_prototype` не показал внешних импортов из `_compat`. Все потребители используют `from data_schema_module import …`.
@@ -14,7 +14,7 @@
 
 ---
 
-## ADR-121: Удаление shim-директорий и re-export файлов
+## ADR-DS-002 (was ADR-121): Удаление shim-директорий и re-export файлов
 - Дата: 2026-04-09
 - Статус: принято
 - Контекст: После рефакторинга v2.0 остались переходные обёртки: `fields/`, `utils/`, `registry/register_discovery.py`, `registry/registers_scanner.py`, `storage/file_storage.py`, тонкие re-export в `extensions/storage_manager.py` и `extensions/process_data_container.py`. Дублировали канонические пути (`core/`, `serialization/`, `container/`, `registry/discovery.py`, `storage/`).
@@ -24,7 +24,7 @@
 
 ---
 
-## ADR-122: Удаление `tests_backup/`
+## ADR-DS-003 (was ADR-122): Удаление `tests_backup/`
 - Дата: 2026-04-09
 - Статус: принято
 - Контекст: Устаревшие тесты со старыми путями (`fields/register_base` и т.д.).
@@ -34,7 +34,7 @@
 
 ---
 
-## ADR-123: `extensions/` — только явный импорт
+## ADR-DS-004 (was ADR-123): `extensions/` — только явный импорт
 - Дата: 2026-04-09
 - Статус: принято
 - Контекст: Расширения (versioning, factory, tools, metrics-shim к `core.metrics`, api-обёртки) не входят в top-level `data_schema_module.__init__`.

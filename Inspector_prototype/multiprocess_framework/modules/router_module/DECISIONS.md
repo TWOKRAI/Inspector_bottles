@@ -2,7 +2,7 @@
 
 > Ссылки: [`../../DECISIONS.md`](../../DECISIONS.md) (ADR-008 Dict at Boundary, ADR-013 CRM, ADR-015 AsyncSender)
 
-## ADR-153: RouterManager наследует ChannelRoutingManager
+## ADR-RTR-001 (was ADR-153): RouterManager наследует ChannelRoutingManager
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -10,7 +10,7 @@
 **Решение:** `RouterManager(ChannelRoutingManager)`. CRM даёт `_channel_registry`, `_dispatcher`, `_buffer` (не используется). RouterManager добавляет: AsyncSender (outgoing pipeline с middleware), AsyncReceiver, message_dispatcher.  
 **Последствия:** Удалён локальный `core/_channel_registry.py` (мёртвый код после миграции). Единый паттерн для всех CRM-наследников. Для `channel_types` при опросе каналов суффикс — полный хвост после префикса `{process.name}_`, а не «последний сегмент по `_`», иначе ломаются имена вида `{process}_data_extra`.
 
-## ADR-154: Name-returning handler pattern
+## ADR-RTR-002 (was ADR-154): Name-returning handler pattern
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -18,7 +18,7 @@
 **Решение:** `register_route("key", "channel_name")` регистрирует `lambda msg: "channel_name"`. `_resolve_channels()` получает строку → `_channel_registry.get(name)`.  
 **Последствия:** Middleware всегда применяется. Dispatch возвращает имя канала, не результат отправки.
 
-## ADR-155: Два dispatcher'а — channel + message
+## ADR-RTR-003 (was ADR-155): Два dispatcher'а — channel + message
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -26,7 +26,7 @@
 **Решение:** `channel_dispatcher` = CRM's `_dispatcher` (исходящие). `message_dispatcher` = отдельный Dispatcher (входящие).  
 **Последствия:** Чёткое разделение; нет путаницы между routes и handlers.
 
-## ADR-156: Thread-safe _stats с Lock
+## ADR-RTR-004 (was ADR-156): Thread-safe _stats с Lock
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -34,7 +34,7 @@
 **Решение:** `_stats_lock = threading.Lock()`. Helper `_inc_stat()` для всех мутаций. `get_stats()` читает снимок `_stats` под lock.  
 **Последствия:** Корректные счётчики при параллельных sync и async отправках.
 
-## ADR-157: IMessageChannel(IChannel) — осознанный cross-module import
+## ADR-RTR-005 (was ADR-157): IMessageChannel(IChannel) — осознанный cross-module import
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -42,7 +42,7 @@
 **Решение:** Осознанная связь. IMessageChannel расширяет IChannel → QueueChannel совместим с CRM `ChannelRegistry` и `RouterManager`.  
 **Последствия:** Единая иерархия каналов. Документировано как допустимое зацепление.
 
-## ADR-158: Сохранение registration API (register_channel_handler, register_channel_scenario, cleanup)
+## ADR-RTR-006 (was ADR-158): Сохранение registration API (register_channel_handler, register_channel_scenario, cleanup)
 
 **Статус:** принято  
 **Дата:** 2026-04-09  

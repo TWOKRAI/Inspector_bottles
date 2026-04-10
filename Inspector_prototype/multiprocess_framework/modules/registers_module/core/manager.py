@@ -2,29 +2,29 @@
 """
 Обобщённый менеджер регистров.
 
-Универсальный контейнер: словарь **имя регистра → экземпляр модели**. Не содержит веток под
-версии схемы приложения — состав задаётся снаружи (фабрика прототипа передаёт экземпляры).
+Композиция ``RegistersContainer`` (data_schema_module): хранение, метаданные, dump/validate.
+Уникально здесь: pub/sub, ``set_field_value`` + dispatch, ``send_callback``.
 
-Сериализация: ``model_dump_all`` / ``model_validate_all`` по классу каждого экземпляра
-(Pydantic v2). Миграции legacy YAML и переименования полей — на границе приложения
-(например ``migrate_register_recipe_snapshot``), не в этом модуле.
-
-Поддерживает get_register, get_field_metadata (включая routing), validate_field_value.
-Расширение для frontend: subscribe_all, set_field_value, доставка register_update
-(register_dispatch / routing.process_targets / connection_map).
+См. ``registers_module/DECISIONS.md`` (ADR-RM-001).
 """
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from data_schema_module import RegistersContainer
+
+from .dispatch import resolve_dispatch_targets
+
+logger = logging.getLogger(__name__)
 
 
 class RegistersManager:
     """
     Менеджер регистров: ``{имя: экземпляр модели}``. Типы моделей определяет приложение;
-    менеджер вызывает ``model_dump`` / ``model_validate`` по ``type(экземпляр)``.
+    сериализация и метаданные — через ``RegistersContainer`` / ``SchemaMixin``.
 
-    Каждый процесс создаёт свой экземпляр со своим набором регистров.
     connection_map: опциональный override — register_name -> имя процесса для register_update
         (если нет process_targets в routing поля и нет register_dispatch на классе).
     send_callback: вызывается при изменении регистра, если есть хотя бы одна цель доставки.
@@ -42,7 +42,7 @@ class RegistersManager:
             connection_map: {register_name: process_name} — fallback для send_callback (см. ROUTING_GLOSSARY.md).
             send_callback: (channel, register_name, field_name, value, snapshot) — вызов при изменении.
         """
-        self._registers: Dict[str, Any] = dict(registers) if registers else {}
+        self._container = RegistersContainer(registers or {})
         self._connection_map: Dict[str, str] = dict(connection_map) if connection_map else {}
         self._send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = send_callback
         self._global_observers: List[Callable[[str, str, Any], None]] = []
@@ -50,7 +50,7 @@ class RegistersManager:
 
     def get_register(self, name: str) -> Optional[Any]:
         """Получить экземпляр регистра по имени."""
-        return self._registers.get(name)
+        return self._container.get_register(name)
 
     def set_connection(self, register_name: str, backend_channel: str) -> None:
         """Привязать регистр к бэкенд-каналу (connection)."""
@@ -118,9 +118,21 @@ class RegistersManager:
             setattr(reg, field_name, value)
         except Exception as exc:
             return False, str(exc)
+        logger.debug(
+            "set_field_value: %s.%s = %r",
+            register_name,
+            field_name,
+            value,
+        )
         self._notify_observers(register_name, field_name, value)
         if self._send_callback:
-            targets = self._resolve_dispatch_targets(register_name, field_name, reg)
+            targets = resolve_dispatch_targets(
+                register_name,
+                field_name,
+                reg,
+                self._connection_map,
+                self._get_field_metadata_for_dispatch,
+            )
             if targets:
                 snapshot = reg.model_dump() if hasattr(reg, "model_dump") else {}
                 for channel in targets:
@@ -131,57 +143,19 @@ class RegistersManager:
                         self._send_callback(
                             full_channel, register_name, field_name, value, snapshot
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(
+                            "send_callback failed for %s.%s → %s: %s",
+                            register_name,
+                            field_name,
+                            full_channel,
+                            e,
+                            exc_info=True,
+                        )
         return True, None
 
-    def _resolve_dispatch_targets(
-        self,
-        register_name: str,
-        field_name: str,
-        reg: Any,
-    ) -> List[str]:
-        """
-        Имена процессов для register_update.
-
-        Приоритет: process_targets в FieldMeta.routing (Annotated) → в dict из get_field_metadata
-        → register_dispatch класса → connection_map.
-        """
-        get_fm = getattr(type(reg), "get_field_meta", None)
-        if callable(get_fm):
-            fm = get_fm(field_name)
-            if fm is not None and getattr(fm, "routing", None):
-                raw_pt = (fm.routing or {}).get("process_targets")
-                if raw_pt is not None:
-                    if isinstance(raw_pt, (list, tuple)) and len(raw_pt) == 0:
-                        return []
-                    if raw_pt:
-                        if isinstance(raw_pt, (list, tuple)):
-                            return [str(x) for x in raw_pt if x is not None and str(x)]
-                        return [str(raw_pt)]
-
-        meta = self.get_field_metadata(register_name, field_name)
-        routing = meta.get("routing") or {}
-        raw_pt = routing.get("process_targets")
-        if raw_pt is not None:
-            if isinstance(raw_pt, (list, tuple)) and len(raw_pt) == 0:
-                return []
-            if raw_pt:
-                if isinstance(raw_pt, (list, tuple)):
-                    return [str(x) for x in raw_pt if x is not None and str(x)]
-                return [str(raw_pt)]
-
-        cls = type(reg)
-        dispatch = getattr(cls, "register_dispatch", None)
-        if dispatch is not None:
-            targets = getattr(dispatch, "process_targets", None) or ()
-            if targets:
-                return [str(t) for t in targets]
-
-        if register_name in self._connection_map:
-            return [self._connection_map[register_name]]
-
-        return []
+    def _get_field_metadata_for_dispatch(self, register_name: str, field_name: str) -> Dict[str, Any]:
+        return self.get_field_metadata(register_name, field_name)
 
     def notify_field_changed(
         self,
@@ -193,69 +167,65 @@ class RegistersManager:
         for cb in list(self._field_observers.get((register_name, field_name), [])):
             try:
                 cb(value)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "notify_field_changed observer failed for %s.%s: %s",
+                    register_name,
+                    field_name,
+                    e,
+                    exc_info=True,
+                )
 
     def _notify_observers(self, register_name: str, field_name: str, value: Any) -> None:
         """Уведомить field- и global-подписчиков."""
         for cb in list(self._field_observers.get((register_name, field_name), [])):
             try:
                 cb(value)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "field observer failed for %s.%s: %s",
+                    register_name,
+                    field_name,
+                    e,
+                    exc_info=True,
+                )
         for cb in list(self._global_observers):
             try:
                 cb(register_name, field_name, value)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "global observer failed for %s.%s: %s",
+                    register_name,
+                    field_name,
+                    e,
+                    exc_info=True,
+                )
 
     def register_names(self) -> List[str]:
         """Список имён зарегистрированных регистров."""
-        return list(self._registers.keys())
+        return self._container.register_names()
 
     def set_register(self, name: str, instance: Any) -> None:
         """Установить экземпляр регистра (для динамического добавления/замены)."""
-        self._registers[name] = instance
+        self._container[name] = instance
 
     def get_field_metadata(
         self,
         register_name: str,
         field_name: str,
         language: Optional[str] = None,
+        lang: Optional[str] = None,
+        translation_manager: Any = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """
-        Метаданные поля из json_schema_extra и model_fields.
-        Включает routing: {router?, channel} для маршрутизации.
-        """
-        reg = self._registers.get(register_name)
-        if reg is None:
-            return {}
-        field_info = getattr(reg, "model_fields", {}).get(field_name)
-        if field_info is None:
-            return {}
-        extra = getattr(field_info, "json_schema_extra", None) or {}
-        metadata = {
-            "description": getattr(field_info, "description", "") or "",
-            "info": extra.get("info", ""),
-            "unit": extra.get("unit", ""),
-            "range": extra.get("range", ""),
-            "min": extra.get("min"),
-            "max": extra.get("max"),
-            "access_level": extra.get("access_level", 0),
-            "examples": extra.get("examples", []),
-            "default": getattr(field_info, "default", None),
-            "readonly": extra.get("readonly", False),
-            "hidden": extra.get("hidden", False),
-            "transfer_k": extra.get("transfer_k", 1.0),
-            "round_k": extra.get("round_k"),
-        }
-        if "routing" in extra:
-            metadata["routing"] = dict(extra["routing"])
-        for key in ("info_i18n", "description_i18n"):
-            if key in extra:
-                metadata[key] = extra[key]
-        return metadata
+        """Метаданные поля через SchemaMixin (кэш FieldMeta)."""
+        effective_lang = lang if lang is not None else language
+        return self._container.get_field_metadata(
+            register_name,
+            field_name,
+            effective_lang,
+            translation_manager,
+        )
 
     def validate_field_value(
         self,
@@ -264,36 +234,20 @@ class RegistersManager:
         value: Any,
         current_access_level: int = 0,
     ) -> Tuple[bool, Optional[str]]:
-        """Проверка значения по min/max и уровню доступа."""
-        meta = self.get_field_metadata(register_name, field_name)
-        if not meta:
-            return False, f"Поле {register_name}.{field_name} не найдено"
-        if meta.get("access_level", 0) > current_access_level:
-            return False, f"Недостаточно прав доступа"
-        if isinstance(value, (int, float)):
-            min_val, max_val = meta.get("min"), meta.get("max")
-            if min_val is not None and value < min_val:
-                return False, f"Значение {value} меньше минимального {min_val}"
-            if max_val is not None and value > max_val:
-                return False, f"Значение {value} больше максимального {max_val}"
-        return True, None
+        """Проверка через RegistersContainer → SchemaMixin.validate_field (если регистр — SchemaMixin)."""
+        if self._container.get_register(register_name) is None:
+            return False, f"Регистр '{register_name}' не найден"
+        return self._container.validate_field(
+            register_name,
+            field_name,
+            value,
+            access_level=current_access_level,
+        )
 
     def model_dump_all(self) -> Dict[str, Any]:
         """Экспорт всех регистров в словарь."""
-        out: Dict[str, Any] = {}
-        for name, reg in self._registers.items():
-            if hasattr(reg, "model_dump"):
-                out[name] = reg.model_dump()
-            else:
-                out[name] = dict(reg) if hasattr(reg, "__iter__") else {}
-        return out
+        return self._container.model_dump_all()
 
     def model_validate_all(self, data: Dict[str, Any], strict: bool = False) -> None:
-        """Загрузить данные в регистры. Модели должны поддерживать model_validate (Pydantic v2)."""
-        for name, reg in list(self._registers.items()):
-            if name not in data:
-                continue
-            model_class = type(reg)
-            if hasattr(model_class, "model_validate"):
-                validated = model_class.model_validate(data[name], strict=strict)
-                self._registers[name] = validated
+        """Загрузить данные в регистры (in-place в контейнере)."""
+        self._container.model_validate_all(data, strict=strict)

@@ -2,21 +2,30 @@
 """
 Интерфейсы модуля регистров.
 
-Минимальный контракт для независимого тестирования и подстановки реализаций (SOLID).
+Полный runtime-контракт ``RegistersManager`` для подстановки в тестах, роутинг и UI
+(``build_routing_map``, ``FrontendRegistersBridge``). См. ADR-RM-001, ADR-RM-005.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 
 class IRegistersManager(Protocol):
     """
-    Протокол менеджера регистров.
-    Любая реализация с этими методами совместима с роутером и конвертером.
+    Протокол менеджера регистров: хранение, pub/sub, запись с dispatch.
     """
 
+    # --- Storage (делегирование в контейнер / экземпляры) ---
     def get_register(self, name: str) -> Optional[Any]:
         """Получить экземпляр регистра по имени."""
+        ...
+
+    def set_register(self, name: str, instance: Any) -> None:
+        """Добавить или заменить экземпляр регистра по имени."""
+        ...
+
+    def register_names(self) -> List[str]:
+        """Список имён зарегистрированных регистров."""
         ...
 
     def get_field_metadata(self, register_name: str, field_name: str, **kwargs: Any) -> Dict[str, Any]:
@@ -34,36 +43,56 @@ class IRegistersManager(Protocol):
         ...
 
     def model_dump_all(self) -> Dict[str, Any]:
-        """Экспорт всех регистров в словарь."""
+        """Сериализация всех регистров в словарь."""
         ...
 
     def model_validate_all(self, data: Dict[str, Any], strict: bool = False) -> None:
-        """Загрузка всех регистров из словаря."""
+        """Загрузка данных в регистры (in-place)."""
         ...
 
-    def register_names(self) -> List[str]:
-        """Список имён зарегистрированных регистров."""
+    # --- Pub/Sub ---
+    def subscribe(self, register_name: str, field_name: str, callback: Callable[[Any], None]) -> None:
+        """Подписка callback(value) на поле."""
         ...
 
-
-class IRegistersConverter(Protocol):
-    """
-    Протокол конвертера регистров.
-    Работа с dict, json, yaml, flat-форматом.
-    """
-
-    def to_dict(self, registers: IRegistersManager) -> Dict[str, Any]:
-        """Экспорт в словарь."""
+    def unsubscribe(self, register_name: str, field_name: str, callback: Callable[[Any], None]) -> None:
+        """Отписка от поля."""
         ...
 
-    def from_dict(self, data: Dict[str, Any], registers: IRegistersManager) -> None:
-        """Импорт из словаря в существующий менеджер."""
+    def subscribe_all(self, callback: Callable[[str, str, Any], None]) -> None:
+        """Глобальная подписка callback(register_name, field_name, value)."""
         ...
 
-    def to_flat_dict(self, registers: IRegistersManager, prefix: str = "") -> Dict[str, Any]:
-        """Экспорт в плоский словарь (для рецептов)."""
+    def unsubscribe_all(self, callback: Callable[[str, str, Any], None]) -> None:
+        """Отписка глобального observer."""
         ...
 
-    def from_flat_dict(self, flat_dict: Dict[str, Any], registers: IRegistersManager, prefix: str = "") -> None:
-        """Импорт из плоского словаря."""
+    # --- Запись и dispatch ---
+    def set_field_value(
+        self,
+        register_name: str,
+        field_name: str,
+        value: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        """Установить значение, уведомить подписчиков, при необходимости send_callback."""
+        ...
+
+    def notify_field_changed(self, register_name: str, field_name: str, value: Any) -> None:
+        """Уведомить только подписчиков поля (без глобальных и send_callback)."""
+        ...
+
+    # --- Конфигурация доставки ---
+    def set_connection(self, register_name: str, backend_channel: str) -> None:
+        """Привязать регистр к процессу/каналу (connection_map)."""
+        ...
+
+    def set_send_callback(
+        self,
+        callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]],
+    ) -> None:
+        """
+        Callback при изменении с целью доставки:
+        ``(channel, register_name, field_name, value, snapshot)``.
+        ``None`` отключает отправку.
+        """
         ...

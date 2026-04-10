@@ -2,7 +2,7 @@
 
 > Ссылки: [`../../DECISIONS.md`](../../DECISIONS.md) (ADR-008 Dict at Boundary)
 
-## ADR-147: Message как value object с опциональной Pydantic-схемой
+## ADR-MSG-001 (was ADR-147): Message как value object с опциональной Pydantic-схемой
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -17,7 +17,7 @@
 
 ---
 
-## ADR-148: MessageAdapter — единственная точка создания в процессе
+## ADR-MSG-002 (was ADR-148): MessageAdapter — единственная точка создания в процессе
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -31,7 +31,7 @@
 
 ---
 
-## ADR-149: Удаление MessageSchema dataclass
+## ADR-MSG-003 (was ADR-149): Удаление MessageSchema dataclass
 
 **Статус:** принято (частично устарело по смыслу — см. **ADR-152**)  
 **Дата:** 2026-04-09  
@@ -42,7 +42,7 @@
 
 ---
 
-## ADR-150: Поле `routers` — маршрутизация внутри процесса
+## ADR-MSG-004 (was ADR-150): Поле `routers` — маршрутизация внутри процесса
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -56,7 +56,7 @@
 
 ---
 
-## ADR-151: Нет pickle-safe гарантий для Message объекта
+## ADR-MSG-005 (was ADR-151): Нет pickle-safe гарантий для Message объекта
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -68,7 +68,7 @@
 
 ---
 
-## ADR-152: Message наследует SchemaBase (Pydantic v2)
+## ADR-MSG-006 (was ADR-152): Message наследует SchemaBase (Pydantic v2)
 
 **Статус:** принято  
 **Дата:** 2026-04-09  

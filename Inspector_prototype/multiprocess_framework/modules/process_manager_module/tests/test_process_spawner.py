@@ -48,15 +48,10 @@ class TestProcessSpawner:
         spawner = ProcessSpawner(processes_config={})
         spawner.wait()
 
-    def test_get_logger_before_launch(self) -> None:
-        """get_logger() до launch_orchestrator возвращает None."""
+    def test_logger_none_before_launch(self) -> None:
+        """До launch_orchestrator лёгкий логгер ещё не создан."""
         spawner = ProcessSpawner(processes_config={})
-        assert spawner.get_logger() is None
-
-    def test_get_error_manager_before_launch(self) -> None:
-        """get_error_manager() до launch_orchestrator возвращает None."""
-        spawner = ProcessSpawner(processes_config={})
-        assert spawner.get_error_manager() is None
+        assert spawner._logger is None
 
     def test_on_shutdown_called_on_stop(self) -> None:
         """on_shutdown callback вызывается при stop()."""

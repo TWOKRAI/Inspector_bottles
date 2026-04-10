@@ -1,17 +1,17 @@
 # process_manager_module — Статус рефакторинга
 
-## Текущий этап: 8 / 8
+## Текущий этап: 8 / 8 — доработка 2026-04-10 (план #14)
 
 ## Оценки (0-10)
 
 | Критерий | Оценка | Комментарий |
 |----------|--------|-------------|
-| Код (читаемость, стандарты) | 9 | Чистый runner, вспомогательные функции, нет print() |
-| Тесты (покрытие) | 8 | 8 тестовых файлов, ключевые сценарии покрыты |
-| Документация (README, interfaces) | 9 | interfaces.py, обновлённый README, диаграммы |
-| Связанность (меньше = лучше) | 5 | Извлечены компоненты, оркестратор по сути связан |
-| Дублирование | 8 | Вспомогательные функции, нет отладочных print-ов |
-| Работоспособность | 10 | Graceful shutdown, error recovery, CommandManager |
+| Код (читаемость, стандарты) | 9 | Runner расслоён; per-process stop events; bundle_contract |
+| Тесты (покрытие) | 9 | +bundle_contract, stop_one, monitor heartbeat |
+| Документация (README, interfaces) | 9 | DECISIONS.md модуля, CONFIG_CONTRACT (bundle), README |
+| Связанность (меньше = лучше) | 6 | Spawner упрощён; контракт bundle в одном месте |
+| Дублирование | 8 | build_bundle единая точка сборки dict |
+| Работоспособность | 10 | stop одного процесса, restart, liveness в мониторе |
 
 ## Чеклист рефакторинга
 
@@ -24,6 +24,13 @@
 - [x] Этап 6: Graceful shutdown работает (signal handler без sys.exit, настраиваемые timeout-ы)
 - [x] Этап 7: Unit-тесты написаны и проходят (8 файлов)
 - [x] Этап 8: README и interfaces.py готовы (ISystemLauncher, IProcessManagerProcess, IProcessRegistry)
+
+## Обновление 2026-04-10 (план process_manager_module)
+
+- **Per-process `stop_event`** в `ProcessRegistry`; `stop_one` / `remove_process`; `restart_process` + команда `process.restart`; конфиги для рестарта в `_process_configs`.
+- **ProcessSpawner**: только SRM + `_ProcessLogger`; `stop_event` оркестратора не в bundle — подстановка в `run_process_function` → `process_data.custom`.
+- **Runner**: `class_loader`, `bundle_builder`, `console_redirect`; `core/bundle_contract.py`.
+- **ProcessMonitor**: `_check_heartbeats()` + `crashed_processes` в stats.
 
 ## Обновление 2026-04-03
 

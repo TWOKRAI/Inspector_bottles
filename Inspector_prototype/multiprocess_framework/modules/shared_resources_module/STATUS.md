@@ -43,7 +43,7 @@
 ## Обновление 2026-03-30 (ADR-102)
 
 - **`IProcessStateRegistry.register_process`**: удалён неиспользуемый параметр `config`; полезная нагрузка — в `initial_state.custom`.
-- Документация: [../../docs/CONFIG_PATHS.md](../../docs/CONFIG_PATHS.md).
+- Документация: [../../docs/CONFIG_GUIDE.md](../../docs/CONFIG_GUIDE.md).
 
 ## Обновление 2026-04-09
 

@@ -26,7 +26,7 @@
 | `ipc-routing-checker` | Проверка смешения `targets` и `channel` в IPC |
 | `test-runner` | Запуск тестов с правильным PYTHONPATH |
 | `pyqt-ui-reviewer` | Ревью PyQt5: thread-safety, утечки QObject, сигналы/слоты |
-| `security-reviewer` | Ревью кода на безопасность |
+| `security-reviewer` | Ревью безопасности: pickle, IPC, shared memory, PyQt |
 
 ---
 
@@ -38,9 +38,9 @@
 |---|---|---|
 | `add-process-module` | `/add-process-module` | Чек-лист создания нового ProcessModule |
 | `add-register-schema` | `/add-register-schema` | Добавление схемы в `registers/` |
-| `qex-search` | `/qex-search` | Шаблон семантического поиска перед рефакторингом |
-| `debug-issue` | `/debug-issue` | Систематический дебаггинг |
-| `refactor-code` | `/refactor-code` | Рефакторинг с сохранением функциональности |
+| `qex-search` | `/qex-search` | `search_code` = вектор (Qdrant) + BM25 + гибрид; в паре с Grep |
+| `debug-issue` | `/debug-issue` | Дебаггинг с учётом IPC, процессов, PyQt |
+| `refactor-code` | `/refactor-code` | Рефакторинг: qex-first, тесты, ADR |
 
 ---
 
@@ -72,12 +72,8 @@
 
 Перенесены в `docs/claude/` для экономии токенов — Claude Code **не загружает их автоматически**:
 
+- `docs/claude/CLAUDE_FOLDER_OVERVIEW.md` — обзор папки `.claude/`: роли файлов, settings, хуки, MCP, эффективность
 - `docs/claude/FRAMEWORK_RULES_EXTRACT.md` — развёрнутый конспект правил фреймворка
 - `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` — нарратив «конструктор»
-- `docs/claude/QEX_SETUP_GUIDE.md` — инструкция по настройке qex MCP
+- `docs/claude/qex/SETUP_GUIDE.md` — полная инструкция по настройке qex MCP (quick-start: `docs/claude/qex/README.md`)
 
----
-
-## Шаблоны (`templates/`)
-
-- `templates/bug-report.md` — шаблон описания бага для сессии с Claude

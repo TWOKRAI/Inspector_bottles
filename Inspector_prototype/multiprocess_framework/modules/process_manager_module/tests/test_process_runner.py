@@ -13,10 +13,9 @@ import pytest
 from multiprocessing import Event
 from unittest.mock import MagicMock, patch, call
 
+from ..runner.bundle_builder import _build_shared_resources_from_bundle
+from ..runner.class_loader import _ProcessLogger, _load_process_class
 from ..runner.process_runner import (
-    _ProcessLogger,
-    _load_process_class,
-    _build_shared_resources_from_bundle,
     _run_lifecycle,
     _update_process_state,
     run_process_function,
@@ -117,6 +116,10 @@ class TestBuildSharedResourcesFromBundle:
         # OtherProcess должен быть зарегистрирован
         other_data = srm.get_process_data("OtherProcess")
         assert other_data is not None
+
+    def test_invalid_bundle_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid bundle"):
+            _build_shared_resources_from_bundle("P1", {"bad": True})
 
     def test_routing_map_skips_self(self) -> None:
         bundle = {

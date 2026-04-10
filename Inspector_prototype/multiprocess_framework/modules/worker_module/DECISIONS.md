@@ -2,7 +2,7 @@
 
 > Ссылки: [`../../DECISIONS.md`](../../DECISIONS.md) (ADR-008 Dict at Boundary)
 
-## ADR-159: Удаление ложного ребра worker → dispatch
+## ADR-WRK-001 (was ADR-159): Удаление ложного ребра worker → dispatch
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -10,7 +10,7 @@
 **Решение:** Удалить ребро из графа. worker_module зависит только от base_manager (#1).  
 **Последствия:** Граф зависимостей точнее отражает реальность. Упрощает анализ для process_module (#11).
 
-## ADR-160: Сохранение двух конфигурационных подходов (ThreadConfig + SchemaBase)
+## ADR-WRK-002 (was ADR-160): Сохранение двух конфигурационных подходов (ThreadConfig + SchemaBase)
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -26,7 +26,7 @@ STATUS.md явно отмечал: «рантайм ThreadConfig не замен
 - Замена ThreadConfig на SchemaBase добавит тяжёлый Pydantic в горячий путь lifecycle без выигрыша.  
 **Последствия:** Два объекта с похожими полями, но разными ролями. Документировано.
 
-## ADR-161: Сохранение self.name = manager_name (compatibility alias)
+## ADR-WRK-003 (was ADR-161): Сохранение self.name = manager_name (compatibility alias)
 
 **Статус:** принято  
 **Дата:** 2026-04-09  
@@ -37,7 +37,7 @@ STATUS.md явно отмечал: «рантайм ThreadConfig не замен
 - Удаление требует правки теста без выигрыша.  
 **Последствия:** Alias остаётся. Если BaseManager добавит `.name`, убрать дубликат.
 
-## ADR-162: WorkerInfo как TypedDict (документация) + plain dict (runtime)
+## ADR-WRK-004 (was ADR-162): WorkerInfo как TypedDict (документация) + plain dict (runtime)
 
 **Статус:** принято  
 **Дата:** 2026-04-09  

@@ -18,11 +18,13 @@ class TestSystemLauncher:
         assert launcher._processes == []
         assert launcher._spawner is None
 
-    def test_log_fallback_without_spawner(self) -> None:
-        """_log_info/_log_warning без spawner используют print (не падают)."""
+    def test_log_fallback_without_spawner(self, capsys) -> None:
+        """_log_info/_log_warning без spawner — print с префиксом SystemLauncher."""
         launcher = SystemLauncher()
         launcher._log_info("test info")
         launcher._log_warning("test warning")
+        out = capsys.readouterr().out
+        assert "[SystemLauncher]" in out
 
     def test_add_process_name_and_dict(self) -> None:
         """add_process(name, proc_dict)."""

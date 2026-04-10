@@ -12,7 +12,7 @@ docker start qdrant
 ```bash
 ollama serve
 ```
-Запускай в отдельном терминале или фоном. Проверь: `ollama list` — должна быть модель `nomic-embed-text-v2-moe`.
+Запускай в отдельном терминале или фоном. Проверь: `ollama list` — должна быть модель `qwen3-embedding:4b`.
 
 ### 3. Активируй venv
 ```bash
@@ -27,6 +27,6 @@ uv sync
 ## Быстрая проверка готовности
 ```bash
 docker ps | grep qdrant    # qdrant Up
-ollama list                 # nomic-embed-text-v2-moe присутствует
+ollama list                 # qwen3-embedding:4b присутствует
 python -c "import PyQt5"    # venv активен
 ```

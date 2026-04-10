@@ -132,15 +132,28 @@ class IProcessManagerProcess(ABC):
         ...
 
     @abstractmethod
-    def stop_process(self, process_name: str) -> bool:
+    def stop_process(self, process_name: Optional[str] = None) -> bool:
         """
-        Остановить именованный процесс (graceful: stop_event → join → terminate).
+        Остановить именованный процесс (per-process stop_event) или все.
+
+        Args:
+            process_name: Имя процесса; None — остановить все дочерние процессы.
+
+        Returns:
+            True при успехе.
+        """
+        ...
+
+    @abstractmethod
+    def restart_process(self, process_name: str) -> bool:
+        """
+        Перезапустить процесс: stop → recreate → start (нужен сохранённый конфиг).
 
         Args:
             process_name: Имя процесса.
 
         Returns:
-            True если остановлен успешно.
+            True если перезапуск выполнен.
         """
         ...
 
@@ -231,9 +244,19 @@ class IProcessRegistry(ABC):
         """
         Graceful остановка всех процессов.
 
-        Каскад: stop_event.set() → join(timeout) → terminate → join → kill.
+        Каскад: для каждого процесса свой stop_event → join(timeout) → terminate → kill.
 
         Args:
             timeout: Время ожидания join для каждого процесса (секунды).
         """
+        ...
+
+    @abstractmethod
+    def stop_one(self, name: str, timeout: float = 5.0) -> bool:
+        """Остановить один процесс (только его stop_event)."""
+        ...
+
+    @abstractmethod
+    def remove_process(self, name: str) -> None:
+        """Удалить запись из реестра (после остановки), освободить stop_event."""
         ...

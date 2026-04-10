@@ -8,24 +8,27 @@
 
 ---
 
-## Часть A — Multiprocess Framework (`refactored/modules/`)
+## Часть A — Multiprocess Framework (`multiprocess_framework/modules/`)
 
-### A.1 Слои (16 модулей)
+### A.1 Пакеты (19 под `modules/`)
 
 | Модуль | Слой | Назначение (1 строка) | Публичный вход | Типичные потребители |
 |--------|------|------------------------|----------------|----------------------|
 | **base_manager** | Foundation | Базовый менеджер, ObservableMixin, адаптеры | `interfaces.py`, `BaseManager` | почти все менеджеры |
 | **data_schema_module** | Foundation | Схемы Pydantic, `process()`, регистрация схем | `interfaces.py`, `SchemaBase`, `process` | config, registers, приложения |
 | **message_module** | Foundation | Сообщения, `MessageAdapter`, Dict at Boundary | `interfaces.py`, `Message`, `MessageAdapter` | process, router, frontend |
+| **channel_routing_module** | Routing | CRM, каналы, буферы, базовый класс менеджеров | `ChannelRoutingManager`, README | logger, error, stats, router |
+| **dispatch_module** | Communication | Диспетчеризация по ключу **внутри** обработчика | `interfaces.py`, `IDispatcher` | worker после parse сообщения |
+| **router_module** | Communication | RouterManager, каналы, send/receive | `interfaces.py`, `IRouterManager` | process_module |
+| **command_module** | Communication | CommandManager, **CommandAdapter** (внутри процесса) | `interfaces.py` | process_module, workers |
 | **logger_module** | Infra | Логирование, каналы | README / пакет | все процессы |
 | **error_module** | Infra | Ошибки, маршрутизация severity | README / пакет | logger, процессы |
+| **statistics_module** | Infra | Метрики, CRM-наследник | README, `StatsManager` | процессы, команды |
 | **config_module** | Infra | Конфиг из схем, hot-reload опции | README / пакет | frontend_module, приложения |
 | **console_module** | Infra | Терминальные окна (если используются) | README | опционально |
 | **shared_resources_module** | Infra | SHM, очереди, события | `interfaces.py`, SRM | process, camera, processor |
 | **registers_module** | Infra | RegistersManager, connection_map builder | `interfaces.py` | frontend_module, приложение (схемы снаружи) |
-| **dispatch_module** | Communication | Диспетчеризация по ключу **внутри** обработчика | `interfaces.py`, `IDispatcher` | worker после parse сообщения |
-| **router_module** | Communication | RouterManager, каналы, send/receive | `interfaces.py`, `IRouterManager` | process_module |
-| **command_module** | Communication | CommandManager, **CommandAdapter** (внутри процесса) | `interfaces.py` | process_module, workers |
+| **sql_module** | Storage | SQL-менеджер, запросы через сообщения | README | опциональный DB-процесс |
 | **worker_module** | Process | Воркеры, жизненный цикл задач | README | process_module |
 | **process_module** | Process | ProcessModule, интеграция менеджеров | README, `core/process_module.py` | приложения, launcher |
 | **process_manager_module** | Orchestration | SystemLauncher, оркестрация процессов | README | main.py приложений |

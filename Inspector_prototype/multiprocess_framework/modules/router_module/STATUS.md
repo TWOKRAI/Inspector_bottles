@@ -8,8 +8,8 @@
 |---|---|---|
 | Код | 8 | CRM-наследование стабильно; `router_manager.py` ~600 LOC; мёртвый `_channel_registry.py` удалён; `_stats` под Lock |
 | Тесты | 8 | 4 файла тестов; адаптеры, `channel_types`, `_attach_logger`, concurrent stats; нет интеграции с LoggerManager в отдельных e2e |
-| Документация | 8 | README; `DECISIONS.md` ADR-153…158; §6.9 в `ARCHITECTURE.md`; индекс в главном `DECISIONS.md` |
-| Связанность | 9 | Чистое наследование CRM; осознанный импорт `IChannel` (ADR-157) |
+| Документация | 8 | README; `DECISIONS.md` ADR-RTR-001…006; §6.9 в `ARCHITECTURE.md`; индекс в главном `DECISIONS.md` |
+| Связанность | 9 | Чистое наследование CRM; осознанный импорт `IChannel` (ADR-RTR-005) |
 | Дублирование | 9 | Локальный ChannelRegistry удалён; единый реестр из CRM |
 | Работоспособность | 7 | correlation_id, ErrorManager/StatsManager — следующие этапы по плану модуля |
 
@@ -31,7 +31,7 @@
 - [x] `self._channel_registry` из CRM вместо локального `self._channels`
 - [x] `self.channel_dispatcher = self._dispatcher` — alias из CRM для backward compatibility
 - [x] `message_dispatcher` — отдельный Dispatcher для ВХОДЯЩИХ сообщений (не смешивать!)
-- [x] `AsyncSender` сохранён — реализует полный pipeline с middleware (ADR-015)
+- [x] `AsyncSender` сохранён — реализует полный pipeline с middleware (глобальный ADR-015 / ADR-CRM-003)
 - [x] `register_channel()` переопределён: inject logger callbacks + без auto-dispatch регистрации
 - [x] `register_route()` сохраняет "name-returning handler" паттерн (handler возвращает str → имя канала)
 - [x] `_resolve_channels()` использует `self._channel_registry` для lookup

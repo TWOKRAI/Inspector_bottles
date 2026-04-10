@@ -25,7 +25,7 @@ StatsManager
 - `_channel_registry` — thread-safe реестр каналов (`IChannel`)
 - `_dispatcher` — маршрутизация данных
 - `flush()` / `shutdown()` — корректное завершение с финальным flush
-- `normalize_config()` — Dict at Boundary (принимает None / dict / RegisterBase)
+- `normalize_config()` — Dict at Boundary (принимает None / dict / SchemaBase)
 
 **Специфика StatsManager:**
 - Типы метрик: `counter`, `gauge`, `timing`, `histogram`
@@ -201,7 +201,7 @@ channels={
 ```python
 StatsManager(config=None)                       # дефолтный конфиг
 StatsManager(config={"flush_interval": 30.0})   # dict
-StatsManager(config=StatsManagerConfig(...))    # RegisterBase с build()
+StatsManager(config=StatsManagerConfig(...))    # SchemaBase с build()
 ```
 
 ---
@@ -254,7 +254,7 @@ statistics_module/
 ├── interfaces.py                # IStatsManager(IChannelRoutingManager)
 ├── README.md
 ├── STATUS.md
-├── config/
+├── configs/
 │   └── stats_config.py          # StatsManagerConfig(ChannelRoutingConfig) @register_schema
 ├── core/
 │   ├── stats_manager.py         # StatsManager(ChannelRoutingManager, IStatsManager)
@@ -267,6 +267,8 @@ statistics_module/
 │   └── stats_adapter.py         # StatsAdapter(BaseAdapter) → CommandManager
 └── tests/
     ├── test_stats_manager.py    # lifecycle, метрики, теги, N-count, flush
+    ├── test_stats_integration.py # каналы, get_metric+tags, thread-safety
+    ├── test_stats_adapter.py     # CommandManager registration
     ├── test_aggregation_window.py
     └── test_stats_config.py
 ```
@@ -284,6 +286,6 @@ statistics_module/
 ## Запуск тестов
 
 ```bash
-# из каталога refactored/modules/
+# из каталога modules/
 pytest statistics_module/tests/ -v
 ```

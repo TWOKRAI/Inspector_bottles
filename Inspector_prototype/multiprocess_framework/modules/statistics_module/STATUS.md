@@ -1,14 +1,14 @@
 # statistics_module — Статус рефакторинга
 
-## Текущий этап: 4 / 8
+## Текущий этап: 5 / 8
 
 ## Оценки (0–10)
 
 | Критерий        | Оценка | Комментарий                                                                   |
 |-----------------|--------|-------------------------------------------------------------------------------|
 | Код             | 9      | ChannelRoutingManager + AggregationWindow; sentinel-паттерн для broadcast     |
-| Тесты           | 8      | 24 теста: lifecycle, типы метрик, теги, N-кратный счёт, flush, каналы         |
-| Документация    | 8      | README с архитектурой, API, примерами; STATUS.md создан                       |
+| Тесты           | 9      | ~37 тестов; integration, adapter, thread-safety, tags                         |
+| Документация    | 10     | DECISIONS.md (ADR-SM-001…006), §6.15 в ARCHITECTURE.md, README fix              |
 | Связанность     | 9      | Наследует CRM; IStatsManager(IChannelRoutingManager); StatsPlugin-совместим   |
 | Дублирование    | 9      | _metric_key дублируется в core/ — приемлемо (изолированные слои)             |
 | Работоспособность | 9    | Все 24 теста проходят; broadcast, теги, flush работают корректно              |
@@ -24,10 +24,10 @@
 - [x] Этап 2: Ядро — StatsManager(ChannelRoutingManager), AggregationWindow, MetricRecord
 - [x] Этап 3: Каналы — LogStatsChannel, FileStatsChannel
 - [x] Этап 4: Адаптер — StatsAdapter (get_metrics, reset_metrics, stats_snapshot, flush_stats)
-- [ ] Этап 5: Интеграция — добавить StatsManager в process_managers.py
-- [ ] Этап 6: Graceful shutdown — тест flush перед остановкой в реальном процессе
-- [ ] Этап 7: Стресс-тест — concurrent writes, высокая нагрузка, tag cardinality
-- [ ] Этап 8: Полная интеграция с process_manager_module
+- [x] Этап 5: Формализация — DECISIONS.md (ADR-SM-001…006), ARCHITECTURE.md §6.15, тесты integration/adapter/thread-safety
+- [ ] Этап 6: Интеграция — добавить StatsManager в process_managers.py
+- [ ] Этап 7: Graceful shutdown — тест flush перед остановкой в реальном процессе
+- [ ] Этап 8: Стресс-тест — concurrent writes, высокая нагрузка, tag cardinality; полная интеграция с process_manager_module
 
 ## Обновление 2026-04-01
 
@@ -35,7 +35,7 @@
 
 ## Обновление 2026-04-03
 
-- **`StatsManagerConfig`**: **`ChannelRoutingConfig`** импортируется из публичного **`channel_routing_module`** (ADR-114, единый стиль с логгером).
+- **`StatsManagerConfig`**: **`ChannelRoutingConfig`** импортируется из публичного **`channel_routing_module`** (глобальный ADR-108 / ADR-CRM-005, единый стиль с логгером).
 
 ## Известные проблемы
 
@@ -55,3 +55,4 @@
 |------|-------------|
 | 2026-03-31 | ADR-108: убран избыточный `build()` у `StatsManagerConfig` (наследует `SchemaMixin.build`) |
 | 2026-04-03 | Импорт `ChannelRoutingConfig` из публичного `channel_routing_module` (ADR-114) |
+| 2026-04-10 | DECISIONS.md (ADR-SM-001…006), ARCHITECTURE.md §6.15, тесты integration/adapter/thread-safety, README fix; этап 4→5 |

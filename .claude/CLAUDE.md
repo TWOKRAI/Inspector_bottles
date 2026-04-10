@@ -44,14 +44,9 @@
 Python 3.9+ (см. `Inspector_prototype/pyproject.toml`), PyQt5, OpenCV, NumPy | SQLite/PostgreSQL, Qdrant  
 Docker, Ollama, pytest | Pydantic v2, loguru
 
-## Семантический поиск (MCP)
+## MCP: qex (семантический поиск)
 
-- **qex** (настройки в `~/.claude.json`): Qdrant + Ollama. Инструменты: `search_code`, `index_codebase`, `get_indexing_status`. **Холодный старт:** `docker start qdrant`, `ollama serve`.
-  - Windows: `EMBEDDING_MODEL=qwen3-embedding:4b`, бинарник `venv/Scripts/qex-mcp-v2.exe`
-  - macOS: `EMBEDDING_MODEL=qwen3-embedding:4b`, бинарник `/Users/twokrai/.local/bin/qex-mcp-v2`
-  - `.claude/mcp.json` в репозитории — только Windows-справочник; macOS конфиг в `~/.claude.json → projects`
-
-Для qex: `search_code(query)` —  перед рефакторингом; `index_codebase` / `get_indexing_status` — индекс и статус.
+**qex** = Qdrant (вектор) + Ollama (эмбеддинги, `qwen3-embedding:4b`) + BM25 (Tantivy). `search_code` — **гибрид** dense+sparse. Холодный старт: `docker start qdrant && ollama serve` (или `/cold-start`). Конфиг: `.claude/mcp.json`. Когда и как использовать — см. раздел «Поиск по коду» ниже.
 
 ## Правила
 1. Читаемость > краткость
@@ -70,8 +65,19 @@ Docker, Ollama, pytest | Pydantic v2, loguru
 ## Планы
 Все планы (реализации, рефакторинга, аудита) сохранять в папку `plans/` в корне репозитория.
 
+## Поиск по коду — qex-first
+
+**ОБЯЗАТЕЛЬНО:** при рефакторинге, анализе «где используется», смене API или IPC-контракта — **сначала `mcp__qex__search_code`**, потом `Grep` для уточнения. Не полагаться только на Grep при широких изменениях.
+
+- Смысловой/обзорный вопрос → `search_code` → `Grep` для символов
+- Точное имя, полный список вхождений → `Grep` → +1 `search_code` если публичный API/IPC
+- Индекс не обновляется автоматически: `/qex-status` → при необходимости `/qex-reindex`
+- Если Qdrant/Ollama не запущены — предложить `/cold-start`, не молча падать на Grep
+
+Подробная логика: `/qex-search`.
+
 ## Формат ответов
-План → семантический поиск (если подключён) с результатами → код (diff/файл, >100стр — только diff) → следующие шаги
+План → поиск (qex + Grep по задаче) → код (diff/файл, >100стр — только diff) → следующие шаги
 
 ## Команды
 `/mcp` — статус MCP | `/add` — файлы | `/clear` — очистить

@@ -9,7 +9,6 @@ import pytest
 from ..interfaces import ISystemLauncher, IProcessManagerProcess, IProcessRegistry
 from ..launcher.system_launcher import SystemLauncher
 from ..core.process_registry import ProcessRegistry
-from multiprocessing import Event
 
 
 class TestISystemLauncherContract:
@@ -87,7 +86,7 @@ class TestIProcessRegistryContract:
     """ProcessRegistry реализует IProcessRegistry."""
 
     def _make_registry(self) -> ProcessRegistry:
-        return ProcessRegistry(stop_event=Event(), logger=None)
+        return ProcessRegistry(logger=None)
 
     def test_has_add_process(self) -> None:
         registry = self._make_registry()
@@ -122,6 +121,16 @@ class TestIProcessRegistryContract:
     def test_stop_all_accepts_timeout_kwarg(self) -> None:
         registry = self._make_registry()
         registry.stop_all(timeout=0.1)
+
+    def test_has_stop_one(self) -> None:
+        registry = self._make_registry()
+        assert hasattr(registry, "stop_one")
+        assert callable(registry.stop_one)
+
+    def test_has_remove_process(self) -> None:
+        registry = self._make_registry()
+        assert hasattr(registry, "remove_process")
+        assert callable(registry.remove_process)
 
 
 class TestInterfaceAbstractness:

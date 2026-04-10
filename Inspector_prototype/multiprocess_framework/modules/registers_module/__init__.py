@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Модуль регистров: менеджер, карта маршрутизации, отправка по роутеру."""
 
-from .interfaces import IRegistersManager, IRegistersConverter
+from .interfaces import IRegistersManager
 from .core.manager import RegistersManager
-from .core.connection_map_builder import build_connection_map_from_registers
+from .core.dispatch import build_connection_map_from_registers, resolve_dispatch_targets
 from .core.routing_map import (
     ROUTING_NOT_FOUND,
     PROCESS_UNREACHABLE,
@@ -15,9 +15,9 @@ from .core.routing_map import (
 
 __all__ = [
     "IRegistersManager",
-    "IRegistersConverter",
     "RegistersManager",
     "build_connection_map_from_registers",
+    "resolve_dispatch_targets",
     "ROUTING_NOT_FOUND",
     "PROCESS_UNREACHABLE",
     "MESSAGE_LOST",

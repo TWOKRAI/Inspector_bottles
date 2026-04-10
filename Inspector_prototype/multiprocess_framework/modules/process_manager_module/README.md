@@ -116,7 +116,8 @@ launcher.get_stats() -> Dict    # spawner, shared_resources
 ```python
 pmp.create_process(name, class_path, config, priority) -> Process
 pmp.start_process(process_name) -> bool
-pmp.stop_process(process_name) -> bool   # graceful: stop_event → join → terminate → kill
+pmp.stop_process(process_name=None) -> bool   # один: свой stop_event; None — все
+pmp.restart_process(process_name) -> bool    # stop → recreate → start (нужен сохранённый конфиг)
 pmp.get_process_status(process_name) -> Dict
 pmp.get_all_processes_status() -> Dict[str, Dict]
 ```
@@ -128,7 +129,9 @@ registry.add_process(process) -> None
 registry.get_process_by_name(name) -> Optional[Process]
 registry.create_and_register(name, class_path, config, priority) -> Optional[Process]
 registry.start_all() -> None
-registry.stop_all(timeout: float) -> None  # настраиваемый timeout
+registry.stop_all(timeout: float) -> None  # все per-process stop_event
+registry.stop_one(name, timeout=5.0) -> bool
+registry.remove_process(name) -> None
 ```
 
 ---
@@ -249,13 +252,12 @@ SystemLauncher
 | Метод | Описание |
 |-------|----------|
 | `__init__(processes_config, platform_adapter)` | Конфигурация процессов. |
-| `launch_orchestrator()` | SharedResourcesManager, ConfigManager, LoggerManager, Process(), process.start(), setup_signals. |
-| `stop(timeout=3.0)` | stop_event.set(), terminate, join, kill, shared_resources.shutdown(). |
+| `launch_orchestrator()` | SharedResourcesManager, `_ProcessLogger`, Process(ProcessManager), process.start(), setup_signals. |
+| `stop(timeout=3.0)` | stop_event (оркестратора).set(), terminate, join, kill, shared_resources.shutdown(). |
 | `wait()` | process.join(). |
 | `is_running()` | process.is_alive(). |
 | `get_process()` | Process ОС. |
 | `get_shared_resources()` | SharedResourcesManager. |
-| `get_logger()` | LoggerManager (создаётся в launch_orchestrator). |
 
 ---
 
@@ -265,12 +267,14 @@ SystemLauncher
 
 | Метод | Описание |
 |-------|----------|
-| `__init__(stop_event, logger, queue_registry, config_manager, shared_resources)` | Зависимости через конструктор. |
+| `__init__(logger, queue_registry, config_manager, shared_resources)` | Без общего stop_event у детей. |
 | `add_process(process)` | Добавить Process в os_processes. |
 | `get_process_by_name(name)` | Найти процесс по имени. |
-| `create_and_register(name, class_path, config, priority)` | Создать Process ОС (helper _create_process_impl), добавить в реестр. |
+| `create_and_register(name, class_path, config, priority)` | Свой `Event` на процесс, `run_process_function`, add. |
 | `start_all()` | Запуск всех процессов. |
-| `stop_all(timeout=3.0)` | stop_event.set(), join, terminate, kill. |
+| `stop_all(timeout=3.0)` | Все `_stop_events.set()`, join, terminate, kill. |
+| `stop_one(name, timeout)` | Только событие и join/terminate/kill для имени. |
+| `remove_process(name)` | Убрать из `os_processes` и `_stop_events`. |
 
 ---
 
@@ -310,13 +314,16 @@ SystemLauncher
 | `shutdown()` | process_monitor.stop(), registry.stop_all(), console_manager.close_all(), ProcessModule.shutdown(). |
 | `create_process(name, class_path, config, priority)` | _registry.create_and_register + _priority.register. |
 | `start_process(process_name=None)` | _registry.start_all() или один процесс + _priority.apply. |
-| `stop_process(process_name=None)` | _registry.stop_all() или terminate одного. |
+| `stop_process(process_name=None)` | `stop_all` или `stop_one` (per-process event). |
+| `restart_process(process_name)` | stop → `remove_process` → `create_and_register` → start. |
 | `get_process_status(process_name=None)` | _status + расширенный через shared_resources. |
 | `get_all_processes_status()` | _status.get_all_status(). |
 
 ---
 
-### 7. `runner/process_runner.py` — run_process_function
+### 7. `runner/` — run_process_function + helpers
+
+**Файлы:** `process_runner.py` (entry + lifecycle), `class_loader.py`, `bundle_builder.py`, `console_redirect.py`.
 
 **Роль:** Top-level функция (pickle/spawn). Создаёт объекты внутри целевого процесса.
 
@@ -331,7 +338,7 @@ SystemLauncher
 
 ### 8. `monitor/process_monitor.py` — ProcessMonitor
 
-**Роль:** Отслеживание ProcessStateRegistry, broadcast при изменении статуса.
+**Роль:** ProcessStateRegistry + `process.is_alive()` (liveness), broadcast при изменении статуса.
 
 | Метод | Описание |
 |-------|----------|
@@ -351,7 +358,7 @@ SystemLauncher
 ```
 1. SystemLauncher().add_process(Process1Config(), workers=[Worker1Config()]).run()
 2. ProcessSpawner(processes_config).launch_orchestrator()
-   → SharedResourcesManager, ConfigManager, LoggerManager
+   → SharedResourcesManager, лёгкий лог spawner
    → Process(target=run_process_function, args=(ProcessManagerProcess, ...))
    → process.start()
    → setup_signals, wait()
@@ -364,9 +371,9 @@ SystemLauncher
        → Фаза 2: _registry.create_and_register + start + _priority.apply для каждого
      → process_monitor.start()
    → process_instance.run()
-4. При stop_event или shutdown:
+4. При stop_event оркестратора или shutdown:
    → process_monitor.stop()
-   → _registry.stop_all()
+   → _registry.stop_all() (все per-child stop_event)
    → console_manager.close_all()
    → super().shutdown()
 ```
@@ -375,15 +382,9 @@ SystemLauncher
 
 ## Обработка ошибок
 
-### ErrorManager в spawner
+### Bootstrap
 
-`ProcessSpawner` создаёт `ErrorManager` в `launch_orchestrator()`:
-
-```python
-spawner = ProcessSpawner(processes_config={...})
-spawner.launch_orchestrator()
-error_mgr = spawner.get_error_manager()  # доступен после launch
-```
+`ProcessSpawner` не создаёт `ErrorManager` / `LoggerManager` фреймворка: только SRM и `_ProcessLogger` (print-fallback). Полная инфраструктура — в `ProcessManagerProcess`.
 
 ### Ошибки в ProcessManagerProcess
 
@@ -430,12 +431,11 @@ SIGINT/SIGTERM
             → process.kill()       # если всё ещё жив
             → on_shutdown()        # app-level callback
             → SharedResourcesManager.shutdown()
-            → ErrorManager.shutdown()
 
 ProcessManagerProcess.shutdown():
     → ProcessMonitor.stop()
     → ProcessRegistry.stop_all(shutdown_timeout)
-        → stop_event.set()
+        → для каждого дочернего: свой stop_event.set()
         → join(timeout) для каждого процесса
         → terminate → join(1s) → kill
     → ConsoleManager.shutdown()  # только если console_enabled
@@ -457,13 +457,14 @@ config = {
 
 ## CommandManager — встроенные команды
 
-`ProcessManagerProcess` регистрирует 6 встроенных команд при инициализации:
+`ProcessManagerProcess` регистрирует встроенные команды при инициализации:
 
 | Команда | Аргументы | Описание |
 |---------|-----------|----------|
 | `process.list` | — | Список всех процессов и статусов |
 | `process.start` | `process_name` | Запустить именованный процесс |
 | `process.stop` | `process_name` | Остановить именованный процесс |
+| `process.restart` | `process_name` | Перезапустить процесс |
 | `process.status` | `process_name` | Статус именованного процесса |
 | `system.shutdown` | — | Завершить систему (stop_event.set()) |
 | `system.stats` | — | Статистика: monitor + processes |

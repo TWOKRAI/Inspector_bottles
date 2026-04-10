@@ -9,15 +9,18 @@
 
 | Документ | Для чего |
 |----------|----------|
+| [docs/QUICK_START.md](./docs/QUICK_START.md) | Минимальный запуск, термины, ссылки дальше |
 | [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) | Обзор архитектуры, модули, принципы, сценарии |
-| [docs/CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) | Цепочка: SchemaBase, dict, Config, process_manager / process_module |
-| [docs/CONFIG_SCHEMA_REGISTERS.md](./docs/CONFIG_SCHEMA_REGISTERS.md) | data_schema ↔ config_module ↔ registers_module; `model_dump` / `model_validate` (ADR-112) |
-| [docs/CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) | Слой schema→dict, ветки доставки, фасад чтения конфига в процессе |
+| [docs/CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) | Конфиг: три слоя, schema→dict, ветки доставки (замена трёх legacy docs → [archive](./docs/archive/)) |
+| [docs/DIAGRAMS.md](./docs/DIAGRAMS.md) | Шесть mermaid-диаграмм (слои, IPC, lifecycle, config, граф, аналогия) |
+| [docs/EXTENSION_GUIDE.md](./docs/EXTENSION_GUIDE.md) | Новый ProcessModule / менеджер, чеклисты |
+| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | FAQ, отладка, тесты |
+| [docs/ADR_REGISTRY.md](./docs/ADR_REGISTRY.md) | Коды модулей ADR-{CODE}-NNN, маппинг старых номеров |
 | [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) | Таблицы, диаграммы, матрицы зависимостей |
 | [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) | Термины маршрутизации и регистров |
 | [docs/ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md) | Каталог модулей и пакетов прототипа |
 | [docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) | Дорожная карта команд UI / лаунчера |
-| [DECISIONS.md](./DECISIONS.md) | ADR — принятые решения; **оглавление и сортировка по номеру**, раздел «Устарело» |
+| [DECISIONS.md](./DECISIONS.md) | Глобальные ADR (ADR-NNN); модульные — в `modules/*/DECISIONS.md` + реестр |
 | [docs/MODULE_README_TEMPLATE.md](./docs/MODULE_README_TEMPLATE.md) | Шаблон README нового модуля |
 
 ---
@@ -27,12 +30,12 @@
 | Задача | Куда смотреть |
 |--------|----------------|
 | Понять систему целиком | [FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) |
-| Цепочка схемы, dict, config, процессы | [CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) |
-| Одна модель schema→dict и куда уходит dict | [CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) |
+| Цепочка схемы, dict, config, процессы | [CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) |
+| Диаграммы mermaid | [DIAGRAMS.md](./docs/DIAGRAMS.md) |
 | Найти таблицу / схему | [ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) |
 | Понять «почему так» | [DECISIONS.md](./DECISIONS.md) |
 | Сообщения, Dict at Boundary | Overview + ADR-008 |
-| ChannelRoutingManager | Overview + ADR-013 |
+| ChannelRoutingManager | Overview + глобальный ADR-013 / модульный ADR-CRM-001 |
 | Остановка процессов | Overview (Graceful Shutdown) + `process_manager_module` |
 | Новый модуль | Шаблон + `base_manager` README + тесты |
 | Запуск unit-тестов фреймворка | [README.md — Testing](./README.md#testing); из `Inspector_prototype`: `python scripts/run_framework_tests.py` |
@@ -48,7 +51,7 @@
 - `interfaces.py` — публичный контракт
 - `tests/` — pytest
 
-Слои (16 модулей): Foundation (`base_manager`, `data_schema_module`, `message_module`), Infrastructure (`logger_module`, `error_module`, `config_module`, `console_module`, `shared_resources_module`, `registers_module`), Communication (`dispatch_module`, `router_module`, `command_module`), Process (`worker_module`, `process_module`), Orchestration (`process_manager_module`), Frontend (`frontend_module`). Дополнительно в дереве: `channel_routing_module`, `statistics_module` — см. [ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md).
+Пакеты под `modules/`: **19** — см. [ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md), [DIAGRAMS.md](./docs/DIAGRAMS.md).
 
 Углублённые гайды внутри модулей (например `data_schema_module/docs/`, `config_module/docs/`) остаются частью актуального набора.
 
@@ -61,4 +64,4 @@
 
 ---
 
-*Обновлено: 2026-03-30 — добавлены [CONFIG_SCHEMA_DATA_FLOW.md](./docs/CONFIG_SCHEMA_DATA_FLOW.md) и [CONFIG_PATHS.md](./docs/CONFIG_PATHS.md) (ADR-102). Ранее (2026-03-24): сжатие документации; единая канва — Overview + Reference + DECISIONS.*
+*Обновлено: 2026-04-10 — CONFIG_GUIDE, DIAGRAMS, ADR_REGISTRY, QUICK_START; legacy config docs → [docs/archive](./docs/archive/).*

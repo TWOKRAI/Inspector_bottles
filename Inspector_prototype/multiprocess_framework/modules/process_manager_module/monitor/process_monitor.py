@@ -76,11 +76,45 @@ class ProcessMonitor:
                 for pname in set(self.previous_states.keys()) - cur_names:
                     self.process._log_info(f"Process removed: {pname}")
                     self.previous_states.pop(pname, None)
+                self._check_heartbeats()
                 time.sleep(self.poll_interval)
             except Exception as e:
                 self.process._log_error(f"Error in monitoring loop: {e}")
                 time.sleep(self.poll_interval)
         self.process._log_info("Process monitor loop stopped")
+
+    def _check_heartbeats(self) -> None:
+        """Liveness: неживой OS-процесс без актуального state → stopped/crashed."""
+        if not hasattr(self.process, "_process_registry"):
+            return
+        for proc in self.process._process_registry.os_processes:
+            if proc.is_alive():
+                continue
+            exitcode = proc.exitcode
+            prev = self.previous_states.get(proc.name)
+            prev_status = (prev or {}).get("status", "unknown")
+            if prev_status in ("stopped", "error", "crashed"):
+                continue
+            new_status = "stopped" if exitcode == 0 else "crashed"
+            if new_status == "crashed":
+                self.process._log_warning(
+                    f"Process '{proc.name}' crashed (exitcode={exitcode})"
+                )
+            snap = {
+                "status": new_status,
+                "exitcode": exitcode,
+                "metadata": {},
+                "custom": {},
+            }
+            self._handle_state_change(proc.name, prev, snap)
+            self.previous_states[proc.name] = snap.copy()
+            if self.process.shared_resources:
+                try:
+                    psr = self.process.shared_resources.process_state_registry
+                    if psr is not None and hasattr(psr, "update_state"):
+                        psr.update_state(proc.name, status=new_status)
+                except Exception:
+                    pass
 
     def _handle_state_change(
         self,
@@ -133,4 +167,9 @@ class ProcessMonitor:
             "monitoring": self._monitoring,
             "tracked_processes": len(self.previous_states),
             "poll_interval": self.poll_interval,
+            "crashed_processes": [
+                n
+                for n, st in self.previous_states.items()
+                if st.get("status") == "crashed"
+            ],
         }

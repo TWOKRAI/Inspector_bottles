@@ -34,5 +34,5 @@ from base_manager.interfaces import IBaseManager, IBaseAdapter, IObservableMixin
 - **`README.md`** — переписан по новому правилу (10 разделов: назначение, API, быстрый старт, два режима, адаптеры, состояние, структура, потребители, конфиг, тесты).
 - **`docs/OBSERVABLE_ARCHITECTURE.md`** — новый файл: почему два режима наблюдаемости, почему методы класса (не `types.MethodType`), гарантии pickle для Windows spawn.
 - **`docs/INTERFACES_USAGE.md`** — актуален (примеры использования IBaseManager, IBaseAdapter, IObservableMixin).
-- **ADR-114…117** в `DECISIONS.md` — причины удаления плагинов, декораторов, __getattr__ magic, on_event/emit_event.
+- **ADR-BM-001…004** (ранее ADR-114…117) в `DECISIONS.md` — причины удаления плагинов, декораторов, __getattr__ magic, on_event/emit_event.
 - **`ARCHITECTURE.md` §6.1** — заполнена роль и диаграмма base_manager в общей архитектуре фреймворка.

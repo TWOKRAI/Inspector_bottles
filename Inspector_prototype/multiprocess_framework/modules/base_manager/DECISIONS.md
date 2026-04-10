@@ -1,10 +1,10 @@
 # base_manager — архитектурные решения (ADR)
 
-Локальные решения, касающиеся архитектуры модуля `base_manager`. Глобальные правила фреймворка — см. [`../../../DECISIONS.md`](../../../DECISIONS.md) (особенно ADR-008 Dict at Boundary, ADR-013 channel_routing_module, правила pickle-safe).
+Локальные решения, касающиеся архитектуры модуля `base_manager`. Глобальные правила фреймворка — см. [`../../../DECISIONS.md`](../../../DECISIONS.md) (особенно ADR-008 Dict at Boundary, глобальный ADR-013 / модульный ADR-CRM-001, правила pickle-safe). Реестр кодов: [docs/ADR_REGISTRY.md](../../docs/ADR_REGISTRY.md).
 
 ---
 
-## ADR-114: Удаление PluginRegistry/ObservablePlugin из base_manager
+## ADR-BM-001 (was ADR-114): Удаление PluginRegistry/ObservablePlugin из base_manager
 
 - Дата: 2026-04-08
 - Статус: принято
@@ -15,7 +15,7 @@
 
 ---
 
-## ADR-115: Удаление ObservableDecorators (logged/timed/monitored)
+## ADR-BM-002 (was ADR-115): Удаление ObservableDecorators (logged/timed/monitored)
 
 - Дата: 2026-04-08
 - Статус: принято
@@ -26,7 +26,7 @@
 
 ---
 
-## ADR-116: Удаление BaseManager.__getattr__ magic-доступа к адаптерам
+## ADR-BM-003 (was ADR-116): Удаление BaseManager.__getattr__ magic-доступа к адаптерам
 
 - Дата: 2026-04-08
 - Статус: принято
@@ -37,7 +37,7 @@
 
 ---
 
-## ADR-117: Удаление BaseManager.on_event/emit_event (дублирует dispatch_module)
+## ADR-BM-004 (was ADR-117): Удаление BaseManager.on_event/emit_event (дублирует dispatch_module)
 
 - Дата: 2026-04-08
 - Статус: принято
@@ -64,4 +64,4 @@
 - [`docs/OBSERVABLE_ARCHITECTURE.md`](docs/OBSERVABLE_ARCHITECTURE.md) — глубокое погружение в два режима наблюдаемости, почему методы класса, гарантии pickle.
 - [`docs/INTERFACES_USAGE.md`](docs/INTERFACES_USAGE.md) — примеры использования `IBaseManager`, `IBaseAdapter`, `IObservableMixin`.
 - [`STATUS.md`](STATUS.md) — статус модуля, метрики рефакторинга.
-- Глобальные правила: [`../../../DECISIONS.md`](../../../DECISIONS.md) (ADR-008 Dict at Boundary, ADR-013 channel_routing_module).
+- Глобальные правила: [`../../../DECISIONS.md`](../../../DECISIONS.md) (ADR-008 Dict at Boundary; ADR-013 / ADR-CRM-001 — CRM).

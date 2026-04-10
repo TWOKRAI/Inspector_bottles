@@ -132,6 +132,25 @@ class TestProcessMonitorStateDetection:
         mock_pm.communication.broadcast.assert_not_called()
 
 
+class TestProcessMonitorHeartbeats:
+    def test_check_heartbeats_marks_crashed(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        dead_proc = MagicMock()
+        dead_proc.is_alive.return_value = False
+        dead_proc.exitcode = -9
+        dead_proc.name = "DeadP"
+        mock_registry = MagicMock()
+        mock_registry.os_processes = [dead_proc]
+        mock_pm._process_registry = mock_registry
+        mock_pm.shared_resources.process_state_registry = MagicMock()
+
+        monitor = ProcessMonitor(mock_pm)
+        monitor._check_heartbeats()
+
+        assert monitor.previous_states.get("DeadP", {}).get("status") == "crashed"
+        mock_pm.shared_resources.process_state_registry.update_state.assert_called()
+
+
 class TestProcessMonitorGetStats:
     def test_get_stats_returns_dict(self) -> None:
         mock_pm = _make_mock_process_manager()
@@ -141,6 +160,7 @@ class TestProcessMonitorGetStats:
         assert "monitoring" in stats
         assert "tracked_processes" in stats
         assert "poll_interval" in stats
+        assert "crashed_processes" in stats
 
     def test_get_stats_reflects_state(self) -> None:
         mock_pm = _make_mock_process_manager()

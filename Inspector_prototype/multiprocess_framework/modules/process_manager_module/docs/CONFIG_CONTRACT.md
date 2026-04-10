@@ -34,6 +34,19 @@ App Config (CameraConfig, etc.)
     → ProcessSpawner
 ```
 
+## Bundle (connection bundle для `run_process_function`)
+
+Pickle-safe `dict`, собираемый в `ProcessRegistry` через `core/bundle_contract.build_bundle()` и разбираемый в `runner/bundle_builder._build_shared_resources_from_bundle()`.
+
+| Ключ | Обязательность | Описание |
+|------|------------------|----------|
+| `queues` | да | Очереди текущего процесса `{type: Queue}` |
+| `config` | да | Конфиг процесса (dict), в т.ч. `processes_config` для оркестратора |
+| `custom` | нет | Данные `ProcessData.custom` без non-picklable (`stop_event` в bundle не кладётся — передаётся аргументом top-level функции) |
+| `routing_map` | нет | Карта очередей по имени процесса для маршрутизации |
+
+Проверка минимальной структуры: `validate_bundle(bundle)` (`queues` и `config` присутствуют).
+
 ## Источник правды
 
 - **config_to_dict** (data_schema_module) — единственная реализация HasBuild → (name, dict)

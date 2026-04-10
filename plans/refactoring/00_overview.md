@@ -95,11 +95,11 @@
 | 10 | `worker_module`              |  17   |  1591  |   6   |  TODO  | TODO | 17 | ~1503 | 6 (62 passed) |
 | 11 | `process_module`             |  27   |  2720  |   6   |  TODO  | TODO | 26 | ~2711 | 6 (69 passed) |
 | 12 | `command_module`             |   9   |   778  |   3   |  TODO  | TODO | 9 | ~746 | 3 (34 passed) |
-| 13 | `process_manager_module`     |  21   |  2486  |  10   |  TODO  | TODO | — | — | — |
-| 14 | `error_module`               |   7   |   580  |   2   |  TODO  | TODO | — | — | — |
-| 15 | `statistics_module`          |  13   |   981  |   3   |  TODO  | TODO | — | — | — |
+| 13 | `process_manager_module`     |  21   |  2486  |  10   |  DONE  | 2026-04-10 | 25 | ~2490 | 11 (143 passed) |
+| 14 | `error_module`               |   7   |   580  |   2   |  TODO  | TODO | 7 | ~572 | 4 (25 passed) |
+| 15 | `statistics_module`          |  13   |   981  |   3   |  TODO  | TODO | 13 | 981 | 5 (~37 passed) |
 | 16 | `sql_module`                 |  22   |  1546  |   4   |  TODO  | TODO | — | — | — |
-| 17 | `registers_module`           |   6   |   556  |   1   |  TODO  | TODO | — | — | — |
+| 17 | `registers_module`           |   6   |   556  |   1   |  TODO  | TODO | — | — | — | готов тоже (заполни)
 | 18 | `console_module`             |  17   |   974  |   5   |  TODO  | TODO | — | — | — |
 | 19 | `frontend_module`            | 147   | 10302  |  12   |  TODO  | TODO | — | — | — |
 |    | **Итого (фреймворк + фронт)**| **548** | **50701** | **104** |      |      | | | |
@@ -114,6 +114,9 @@
 - `message_module`: **16** файлов `.py` (без `tests/`), **~1306** LOC, **3** test-файла, **112** pytest; **`Message` = `SchemaBase`** (план **08**): единый источник полей, `model_dump`/`model_validate`, удалены `converters/`, `validators/`, `schemas/base.py`; `BaseMessageSchema` — алиас на `Message`; `IMessage` — `Protocol`; **ADR-147…152** в `modules/message_module/DECISIONS.md`. План 07: `plans/refactoring/07_message_module.md`. План 08: `plans/refactoring/08_message_schema_base.md`.
 - `shared_resources_module`: заполнен §**6.8** в `ARCHITECTURE.md` (Handle API, PSR, MemoryManager, pickle-safe); обновлена строка в главном `DECISIONS.md` (ADR-SRM-001…008). (2026-04-09).
 - `router_module`: **15** файлов `.py` (без `tests/`), **~1818** LOC (без мёртвого `core/_channel_registry.py`), **4** test-файла, **101** pytest; **thread-safe `_stats`**, `modules/router_module/DECISIONS.md` (**ADR-153…158**), заполнен §**6.9** в `ARCHITECTURE.md`, индекс в главном `DECISIONS.md`; `router_manager.py` **600** LOC; исправлен проглоченный `except: pass` в `message_dispatcher.dispatch()` (2026-04-09). См. план `plans/refactoring/10_router_module.md`.
+- `process_manager_module`: **25** файлов `.py` (без `tests/`), **~2490** LOC, **11** test-файлов, **143** pytest; **Per-process stop events** (ADR-PM-001): каждый процесс получает индивидуальный `Event()`. Добавлены `restart_process()`, heartbeat monitoring (`process.is_alive()` → crash detection). `process_runner.py` split: 447→185 LOC + `bundle_builder.py` + `class_loader.py` + `console_redirect.py`. ProcessSpawner упрощён (убраны ConfigManager/LoggerManager/ErrorManager). Bundle формализован (`bundle_contract.py`). DECISIONS.md: **ADR-PM-001…006**. Заполнены §5 и §6.13 в `ARCHITECTURE.md` (2026-04-10). Ранее: 21 / 2486 LOC — см. план `plans/refactoring/14_process_manager_module.md`.
+- `error_module`: **7** файлов `.py` (без `tests/`), **~572** LOC, **4** test-файла, **25** pytest; `modules/error_module/DECISIONS.md` (**ADR-EM-001…005**), заполнен §**6.14** в `ARCHITECTURE.md`, реэкспорт `ErrorManager` из `core/__init__.py`, тесты level routing / fallback / `track_error` / запись в файл. См. план `plans/refactoring/15_erorr_module.md`.
+- `statistics_module`: **13** файлов `.py` (без `tests/`), **981** LOC, **5** test-файлов, **37** pytest; `modules/statistics_module/DECISIONS.md` (**ADR-SM-001…006**), заполнен §**6.15** в `ARCHITECTURE.md`, тесты integration (File/Log каналы), adapter, thread-safety, get_metric+tags; правки README. См. план `plans/refactoring/16_statistics_module.md`.
 - `frontend_module` (147 файлов / 10 302 LOC) — четверть всего кода. Выделение в `frontend_framework` уберёт существенный объём из ядра.
 - Самые «толстые» файлы из §1.1 мета-плана (`dispatcher.py` 736, `router_manager.py` 624, `process_module.py` 585, `logger_manager.py` 582, `message.py` 508) — все целевые на расслоение в per-module шагах.
 - `logger_module` имеет только **1** test-файл — риск низкого покрытия. В per-module плане модуля #5 (Шаг 1) явно проверить и при необходимости добить тесты **до** рефакторинга.
