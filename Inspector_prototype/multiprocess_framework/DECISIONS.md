@@ -1855,6 +1855,7 @@
 | `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…006 (прямое наследование CRM, dual-layer storage, sentinel broadcast, _metric_key isolation, StatsAdapter, AggregationWindow) |
 | `sql_module` | [`modules/sql_module/DECISIONS.md`](modules/sql_module/DECISIONS.md) | Data & SQL | ADR-SQL-001…011 (DDL из SchemaBase, QuerySet immutable builder, адаптеры Strategy, Dict at Boundary, fork-safety с NullPool) |
 | `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…004 (композиция RegistersContainer, удаление IRegistersConverter, dispatch.py, логирование) |
+| `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…007 (три уровня в одном менеджере, God Mode как конфиг, ConsoleLogChannel, IPlatformConsole фабрика, ConsoleProcessConfig наследует ProcessLaunchConfig, RegisterCommandHandler, ConsoleRedirector без Queue) |
 
 ---
 

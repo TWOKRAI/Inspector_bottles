@@ -849,7 +849,85 @@ RegistersManager
 ```
 
 📖 [`modules/registers_module/README.md`](modules/registers_module/README.md) · [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md)
-### 6.18 `console_module` — *TODO (после модуля #18, milestone M2)*
+### 6.18 `console_module` — терминальные окна и интерактивный ввод
+
+**Роль:** Менеджер терминальных окон процесса с тремя уровнями использования: **Passive** (enabled=True — показ окна), **Active** (команды в runtime через CommandManager), **God Mode** (interactive=True — stdin → CommandManager → RouterManager). Не логирует, не парсит команды, не маршрутизирует — предоставляет только терминальный I/O.
+
+**`ConsoleManager`** (`BaseManager`, `ObservableMixin`, `IConsoleManager`) — управление основным терминалом и дополнительными окнами, input loop в daemon-потоке, опциональный redirect stdout/stderr через `ConsoleRedirector`.
+
+```
+ConsoleManager (BaseManager + ObservableMixin)
+    ├── _platform (IPlatformConsole)       — основной терминал (фабрика create_platform_console)
+    ├── _consoles (Dict[str, IPlatformConsole]) — дополнительные терминалы
+    ├── _input_thread (daemon)             — чтение stdin → callback
+    ├── _redirector (ConsoleRedirector)    — перехват sys.stdout / sys.stderr
+    ├── show() / hide() / write()          — I/O основного терминала
+    ├── create_console(name) / close_console(name) / list_consoles()
+    ├── enable_input(callback) / disable_input()
+    └── setup_redirect(enabled)            — redirect on/off
+```
+
+**`ConsoleAdapter`** (`BaseAdapter`) — связывает ConsoleManager с остальными менеджерами процесса. `setup()`:
+
+1. Если `enabled` → регистрирует `ConsoleLogChannel` в `LoggerManager`.
+2. Если `interactive` → запускает input loop; raw-строка парсится в `{command, args}` и передаётся в `CommandManager.handle_command()`.
+3. Регистрирует встроенные команды (`reg`) в `CommandManager`.
+
+**`ConsoleLogChannel`** (`IChannel`) — канал лога: сообщения из `LoggerManager` перенаправляются в `ConsoleManager.write()`.
+
+**`ConsoleRedirector`** — перехватывает `sys.stdout` / `sys.stderr`; прямой вызов `ConsoleManager.write()` без очередей (ADR-CM-007). `restore()` возвращает оригинальные дескрипторы.
+
+**Конфиг:**
+
+```
+ConsoleConfig (SchemaBase)
+    enabled          bool = False  — показать терминал при инициализации
+    interactive      bool = False  — включить stdin → CommandManager
+    title            str  = ""     — заголовок окна (fallback: имя процесса)
+    redirect_stdout  bool = False  — перехватить sys.stdout / sys.stderr
+```
+
+**Платформы:**
+
+```
+IPlatformConsole (ABC)
+    └── WindowsConsole   — SetConsoleTitle, AllocConsole, ShowWindow (Win32 API)
+    └── UnixConsole      — ANSI-вывод, sys.stdin (POSIX)
+    create_platform_console() → WindowsConsole | UnixConsole  (фабрика по sys.platform)
+```
+
+**God Mode — `ConsoleProcessConfig`** (`ProcessLaunchConfig`) — standalone консольный процесс. `managers` предустановлен с `ConsoleConfig(enabled=True, interactive=True, title="Console — God Mode")`. Запуск: `launcher.add_process(*process(ConsoleProcessConfig()))`.
+
+**Команды — `RegisterCommandHandler`:**
+
+| Команда | Действие |
+|---------|----------|
+| `reg list` | Список зарегистрированных регистров |
+| `reg get <name>` | Значения всех полей регистра |
+| `reg set <name>.<field> <value>` | Установить поле + broadcast через RouterManager |
+| `reg info <name>` | Метаинформация (FieldMeta, FieldRouting) |
+| `reg help` | Справка |
+
+**Команды — `SystemCommandHandler`:**
+
+| Команда | Действие |
+|---------|----------|
+| `help` | Список всех зарегистрированных команд |
+| `status` | Имя процесса, PID, активные менеджеры |
+| `ps` | Дочерние процессы через `process_manager` |
+| `stats` | Метрики через `stats_manager.get_all_metrics()` |
+
+Ключевые решения (ADR-CM-001…007):
+
+- Три уровня — один `ConsoleManager`, не три класса (ADR-CM-001).
+- God Mode — конфигурация (`ConsoleProcessConfig`), не отдельный класс (ADR-CM-002).
+- `ConsoleLogChannel` живёт в `console_module`, не в `logger_module` (ADR-CM-003).
+- `IPlatformConsole` изолирует платформенную логику; фабрика выбирает реализацию (ADR-CM-004).
+- `ConsoleProcessConfig` наследует `ProcessLaunchConfig` (ADR-CM-005).
+- `RegisterCommandHandler` в `console_module` (ADR-CM-006).
+- `ConsoleRedirector` — прямой вызов без Queue (ADR-CM-007).
+
+📖 [`modules/console_module/README.md`](modules/console_module/README.md) · [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md)
 
 ---
 
