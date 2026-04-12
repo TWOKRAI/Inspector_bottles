@@ -29,7 +29,7 @@
 
 - **Per-process `stop_event`** в `ProcessRegistry`; `stop_one` / `remove_process`; `restart_process` + команда `process.restart`; конфиги для рестарта в `_process_configs`.
 - **ProcessSpawner**: только SRM + `_ProcessLogger`; `stop_event` оркестратора не в bundle — подстановка в `run_process_function` → `process_data.custom`.
-- **Runner**: `class_loader`, `bundle_builder`, `console_redirect`; `core/bundle_contract.py`.
+- **Runner**: `class_loader`, `bundle_builder`; `core/bundle_contract.py`.
 - **ProcessMonitor**: `_check_heartbeats()` + `crashed_processes` в stats.
 
 ## Обновление 2026-04-03
@@ -55,7 +55,7 @@
 - Graceful `stop_process()`: stop_event → join → terminate → kill
 
 ### process_runner.py
-- Извлечены вспомогательные функции: `_load_process_class`, `_build_shared_resources_from_bundle`, `_setup_console_redirect`, `_run_lifecycle`
+- Извлечены вспомогательные функции: `_load_process_class`, `_build_shared_resources_from_bundle`, `_run_lifecycle`
 - Создан `_ProcessLogger` — лёгкий логгер с fallback на print
 - Удалены диагностические print-ы (queue_id/handle)
 - Исправлен импорт `Console_module` → `console_module.ConsoleRedirector`

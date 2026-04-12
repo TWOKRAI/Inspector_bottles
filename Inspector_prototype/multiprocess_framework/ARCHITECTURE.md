@@ -717,7 +717,6 @@ run_process_function(class_path, name, stop_event, bundle)  [Top-level, pickle-s
     │
     ├─ class_loader._load_process_class()     Динамическая загрузка класса
     ├─ bundle_builder._build_shared_resources_from_bundle()  SRM из dict
-    ├─ console_redirect._setup_console_redirect()  stdout/stderr → queue
     ├─ _attach_stop_event_to_process_data()   stop_event → custom
     ├─ ProcessClass(name, shared_resources, config)
     ├─ process.initialize()

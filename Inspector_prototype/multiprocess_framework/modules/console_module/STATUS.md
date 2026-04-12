@@ -6,9 +6,9 @@
 
 | Критерий | Оценка | Комментарий |
 |----------|--------|-------------|
-| Код (читаемость, стандарты) | 8 | Чистая архитектура, SOLID, relative imports |
+| Код (читаемость, стандарты) | 8 | Чистая архитектура, SOLID, relative imports, command handlers |
 | Тесты (покрытие) | 7 | pytest, 5 файлов, lifecycle/write/input/redirect/adapter |
-| Документация (README, interfaces) | 9 | interfaces.py + README: импорты, точки входа, зависимости, примеры, примечания |
+| Документация (README, interfaces) | 10 | interfaces.py + README: импорты, точки входа, зависимости, примеры, Console Commands, God Mode |
 | Связанность (меньше = лучше) | 8 | IPlatformConsole изолирует платформенную логику |
 | Дублирование | 8 | Нет дублирования, вся платформенная логика в platforms/ |
 | Работоспособность | 7 | Базовая реализация работает, сложные WinAPI — optional |
@@ -25,6 +25,12 @@
 - [x] Этап 8: Интеграция в ProcessModule (process_module.py, process_managers.py, process_lifecycle.py)
 - [x] Этап 9: ConsoleProcessConfig(ProcessLaunchConfig) — God Mode: `ManagersConfig`, `build()` у базового процессного конфига, без shared `_GOD` default
 - [x] Этап 10: pytest тесты (5 файлов), STATUS.md и README.md обновлены
+- [x] Этап 11: Очистка legacy (ConsoleChannel, window_process, test_basic, docs/, IConsoleChannel)
+- [x] Этап 12: Platform fixes и cleanup после интеграции в ProcessModule
+- [x] Этап 13: RegisterCommandHandler (reg list/get/set/info) в commands/register_commands.py
+- [x] Этап 14: SystemCommandHandler (help/status/ps/stats) в commands/system_commands.py
+- [x] Этап 15: Обновление README.md (Console Commands секция, God Mode примеры)
+- [x] Этап 16: Обновление STATUS.md, создание DECISIONS.md
 
 ## Архитектурные решения
 
@@ -47,3 +53,5 @@
 | 2026-03-14 | Полный рефакторинг по плану console_module_refactoring | 4 |
 | 2026-03-14 | Очистка: удалены legacy (ConsoleChannel, window_process, test_basic, docs/, IConsoleChannel) | 8 |
 | 2026-04-03 | `ConsoleProcessConfig` наследует `ProcessLaunchConfig`; убран дублирующий `build()` (ADR-114) | 9 |
+| 2026-04-12 | Добавлены RegisterCommandHandler (reg list/get/set/info) и SystemCommandHandler (help/status/ps/stats) в commands/ | 13-14 |
+| 2026-04-12 | Обновлены README.md (Console Commands секция, God Mode примеры) и STATUS.md | 15-16 |

@@ -134,7 +134,11 @@ class RegistersManager:
                 self._get_field_metadata_for_dispatch,
             )
             if targets:
-                snapshot = reg.model_dump() if hasattr(reg, "model_dump") else {}
+                snapshot = (
+                    reg.model_dump(mode="json")
+                    if hasattr(reg, "model_dump")
+                    else {}
+                )
                 for channel in targets:
                     full_channel = (
                         f"control_{channel}" if not channel.startswith("control_") else channel

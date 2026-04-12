@@ -323,7 +323,7 @@ SystemLauncher
 
 ### 7. `runner/` — run_process_function + helpers
 
-**Файлы:** `process_runner.py` (entry + lifecycle), `class_loader.py`, `bundle_builder.py`, `console_redirect.py`.
+**Файлы:** `process_runner.py` (entry + lifecycle), `class_loader.py`, `bundle_builder.py`.
 
 **Роль:** Top-level функция (pickle/spawn). Создаёт объекты внутри целевого процесса.
 
