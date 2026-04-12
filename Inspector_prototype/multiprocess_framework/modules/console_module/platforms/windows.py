@@ -19,6 +19,7 @@ class WindowsConsole(IPlatformConsole):
     def __init__(self) -> None:
         self._visible = True
         self._created = False
+        self._allocated_console: bool = False
         self._title = ""
         self._extra_proc: Optional[subprocess.Popen] = None  # type: ignore[type-arg]
 
@@ -34,6 +35,7 @@ class WindowsConsole(IPlatformConsole):
             hwnd = kernel32.GetConsoleWindow()
             if not hwnd:
                 kernel32.AllocConsole()
+                self._allocated_console = True
             if title:
                 ctypes.windll.kernel32.SetConsoleTitleW(title)  # type: ignore[attr-defined]
             self._title = title
@@ -89,8 +91,10 @@ class WindowsConsole(IPlatformConsole):
             if self._extra_proc and self._extra_proc.poll() is None:
                 self._extra_proc.terminate()
                 self._extra_proc = None
-            import ctypes
-            ctypes.windll.kernel32.FreeConsole()  # type: ignore[attr-defined]
+            if self._allocated_console:
+                import ctypes
+                ctypes.windll.kernel32.FreeConsole()  # type: ignore[attr-defined]
+                self._allocated_console = False
         except Exception:
             pass
         self._created = False
