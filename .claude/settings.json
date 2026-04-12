@@ -1,34 +1,67 @@
 {
   "permissions": {
     "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Agent",
       "Bash(ruff *)",
       "Bash(pytest *)",
       "Bash(mypy *)",
-      "Bash(git *)",
-      "Bash(docker ps *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(uv run *)",
+      "Bash(uv sync*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch*)",
+      "Bash(git checkout *)",
+      "Bash(git stash*)",
+      "Bash(git merge *)",
+      "Bash(docker ps*)",
       "Bash(docker logs *)",
       "Bash(docker start *)",
       "Bash(docker compose *)",
       "Bash(docker-compose *)",
       "Bash(docker inspect *)",
       "Bash(ollama *)",
-      "Bash(python *)",
-      "Bash(uv *)",
-      "Bash(pip *)",
       "Bash(curl http://localhost*)",
       "Bash(curl -s http://localhost*)",
       "Bash(curl -X DELETE http://localhost:6333*)",
-      "Bash(curl -X PUT http://localhost:6333*)"
+      "Bash(curl -X PUT http://localhost:6333*)",
+      "Bash(mkdir -p *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(cat *.toml)",
+      "Bash(cat *.md)",
+      "Bash(cat *.json)",
+      "Bash(which *)",
+      "Bash(wc *)",
+      "Bash(cd * && python -m pytest *)",
+      "Bash(cd * && python -m pytest*)"
     ],
     "ask": [
-      "Bash(rm *)",
-      "Bash(curl *)",
-      "Bash(wget *)",
+      "Bash(pip install *)",
+      "Bash(uv add *)",
+      "Bash(uv pip install *)",
+      "Bash(git push *)",
+      "Bash(docker run *)",
+      "Bash(docker exec *)",
+      "Bash(docker stop *)",
       "Bash(docker rm *)",
       "Bash(docker rmi *)",
-      "Bash(docker stop *)",
       "Bash(docker kill *)",
-      "Bash(docker system *)"
+      "Bash(docker system *)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -62,12 +95,17 @@
             "type": "command",
             "command": ".claude/hooks/autoformat-python.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-imports.sh",
+            "timeout": 20
           }
         ]
       }
     ]
   },
-  "alwaysThinkingEnabled": false,
+  "alwaysThinkingEnabled": true,
   "preferredLanguage": "ru",
   "statusLine": {
     "type": "command",

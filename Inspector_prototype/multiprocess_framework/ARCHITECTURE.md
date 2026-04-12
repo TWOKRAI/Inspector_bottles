@@ -788,7 +788,52 @@ StatsManager (ChannelRoutingManager)
 - `_metric_key` дупликация — намеренная изоляция слоёв.
 
 📖 [`modules/statistics_module/README.md`](modules/statistics_module/README.md) · [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md)
-### 6.16 `sql_module` — *TODO (после модуля #16)*
+
+### 6.16 `sql_module` — универсальный SQL-инструментарий
+
+**Роль:** Управление БД с опорой на SchemaBase: DDL-генерация, QuerySet-запросы (Django-style), типизированные репозитории, Unit of Work, экспорт данных, команды. Dict at Boundary для IPC.
+
+**`SQLManager`** (BaseManager, ObservableMixin) — точка входа: `execute()`, `query()`, `create_tables()`, `objects()` (QuerySet), `get_repository()`, `uow()` / `uow_async()`, `execute_command()`. Ленивое создание async-адаптера при первом вызове.
+
+```
+SQLManager (BaseManager + ObservableMixin)
+    ├── _adapter (ISyncEngineAdapter)           — синхронный (SQLite/PostgreSQL/MySQL)
+    ├── _async_adapter (IAsyncEngineAdapter)    — асинхронный (ленивое создание)
+    ├── _schema_mapper (ISchemaMapper)          — SchemaBase → SQL metadata
+    ├── _repositories (Dict[Type, GenericRepository])
+    ├── execute(sql, params) → int              — DML (INSERT/UPDATE/DELETE)
+    ├── query(sql, params) → List[Dict]         — SELECT (Dict at Boundary)
+    ├── create_tables(schema_classes, dialect)  — DDL из SchemaBase
+    ├── objects(schema_class) → QuerySet        — Django-style builder
+    ├── get_repository(schema_class) → IRepository  — типизированный CRUD
+    ├── uow() → IUnitOfWork                     — транзакции (sync)
+    ├── uow_async() → IAsyncUnitOfWork          — транзакции (async)
+    └── execute_command(cmd: Dict) → Dict       — Dict at Boundary (БУД)
+```
+
+**Компоненты:**
+
+- **`DDLBuilder`** — генерация CREATE TABLE, INDEX из `schema_to_table_meta()` + FieldMeta + SQLMeta для SQLite/PostgreSQL/MySQL.
+- **`QuerySet[T]`** — Django-style immutable builder: `filter()`, `exclude()`, `order_by()`, `limit()` → parameterized SQL. Каждый вызов — новый QuerySet.
+- **`GenericRepository[T, ID]`** — типизированный CRUD (find_by_id, insert, update, delete, bulk ops). Readonly-защита для конкретных полей.
+- **`SchemaBaseMapper`** (ISchemaMapper) — маппинг SchemaBase ↔ SQL: FieldMeta → CHECK/VARCHAR/DEFAULT, entity_to_row/row_to_entity через model_dump/model_validate.
+- **`SQLMeta`** — декларативный ClassVar (table_name, indexes, unique_together). Pydantic игнорирует — чисто для SQL.
+- **Адаптеры:** ISyncEngineAdapter / IAsyncEngineAdapter (Strategy pattern, фабрика `create_sync/async_adapter()`).
+- **`UnitOfWork` / `AsyncUnitOfWork`** — контекстные менеджеры для транзакций.
+- **`TableExporter`** — экспорт List[Dict] в TXT (readable/table), CSV, XLSX.
+- **Typed commands:** `DBQueryCommand`, `DBExecuteCommand`, `DBInsertCommand` (Pydantic на границе).
+
+**Ключевые решения (ADR-SQL-001…011):**
+
+- Dict at Boundary: `execute()`, `query()`, `execute_command()` работают с dict. SchemaBase только внутри процесса.
+- QuerySet — immutable builder, никаких побочных эффектов кэширования.
+- Адаптеры — Strategy: sync и async разделены, фабрика выбирает по конфигу.
+- Fork-safety: NullPool когда `INSPECTOR_MULTIPROCESS=1` или `config.fork_safe=True`.
+
+**Зависимости:** `#1` base_manager, `#2` data_schema_module (SchemaBase, FieldMeta).
+
+📖 [`modules/sql_module/README.md`](modules/sql_module/README.md) · [`modules/sql_module/DECISIONS.md`](modules/sql_module/DECISIONS.md)
+
 ### 6.17 `registers_module`
 
 **Роль:** runtime вокруг именованных регистров (экземпляры прикладных схем): **pub/sub**, **`set_field_value`** с fan-out **`register_update`**, **`build_routing_map`** / **`send_register_message`**, **`build_connection_map_from_registers`**.

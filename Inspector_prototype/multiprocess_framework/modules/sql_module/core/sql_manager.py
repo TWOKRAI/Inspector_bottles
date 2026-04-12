@@ -24,6 +24,8 @@ from sql_module.interfaces import (
 from sql_module.configs import SQLManagerConfig
 from sql_module.core.engine_factory import create_async_adapter, create_sync_adapter
 from sql_module.core.base_repository import GenericRepository
+from sql_module.core.ddl_builder import DDLBuilder
+from sql_module.core.queryset import AsyncQuerySet, QuerySet
 from sql_module.adapters.schema_mapper import SchemaBaseMapper
 
 
@@ -143,6 +145,8 @@ class SQLManager(BaseManager, ObservableMixin):
         Returns:
             List[Dict] — строки
         """
+        self._validate_identifier(table)
+        self._validate_identifier(order_by)
         sql = f'SELECT * FROM "{table}" ORDER BY "{order_by}"'
         params: Dict[str, Any] = {}
         if limit is not None:
@@ -182,6 +186,77 @@ class SQLManager(BaseManager, ObservableMixin):
                 schema_mapper=self._schema_mapper,
             )
         return self._repositories[schema_class]
+
+    def create_tables(
+        self,
+        schema_classes: list,
+        dialect: Optional[str] = None,
+    ) -> int:
+        """Автоматически создать таблицы из SchemaBase-классов.
+
+        Args:
+            schema_classes: Список SchemaBase-подклассов
+            dialect: SQL-диалект (auto-detect из конфига если None)
+        Returns:
+            Количество выполненных DDL-операторов
+        """
+        if not self._adapter:
+            raise RuntimeError("SQLManager not initialized")
+        if dialect is None:
+            dialect = self._config_dict.get("dialect", "sqlite")
+        builder = DDLBuilder(self._schema_mapper)
+        statements = builder.build_create_all(schema_classes, dialect)
+        for stmt in statements:
+            self.execute(stmt)
+        self._log_info(
+            f"Created {len(schema_classes)} table(s) ({len(statements)} statements)",
+            module="sql_module",
+        )
+        return len(statements)
+
+    def objects(
+        self,
+        schema_class: Type[Any],
+        table_name: Optional[str] = None,
+    ) -> QuerySet:
+        """Получить QuerySet для Django-style chained queries.
+
+        Args:
+            schema_class: SchemaBase-подкласс
+            table_name: Переопределить имя таблицы (auto-detect из SQLMeta если None)
+        Returns:
+            QuerySet instance
+        """
+        if table_name is None:
+            meta = self._schema_mapper.schema_to_table_meta(schema_class)
+            table_name = meta["table_name"]
+        return QuerySet(self._adapter, schema_class, self._schema_mapper, table_name)
+
+    def objects_async(
+        self,
+        schema_class: Type[Any],
+        table_name: Optional[str] = None,
+    ) -> AsyncQuerySet:
+        """Получить AsyncQuerySet для async chained queries.
+
+        Args:
+            schema_class: SchemaBase-подкласс
+            table_name: Переопределить имя таблицы (auto-detect из SQLMeta если None)
+        Returns:
+            AsyncQuerySet instance
+        """
+        adapter = self._ensure_async_adapter()
+        if table_name is None:
+            meta = self._schema_mapper.schema_to_table_meta(schema_class)
+            table_name = meta["table_name"]
+        return AsyncQuerySet(adapter, schema_class, self._schema_mapper, table_name)
+
+    @staticmethod
+    def _validate_identifier(name: str) -> str:
+        import re
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+            raise ValueError(f"Invalid SQL identifier: {name!r}")
+        return name
 
     def _normalize_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Свести команду к плоскому dict для Pydantic-валидации.
@@ -229,8 +304,10 @@ class SQLManager(BaseManager, ObservableMixin):
         return {"status": "success", "rows": rows}
 
     def _handle_insert(self, cmd: Any) -> Dict[str, Any]:
-        table = cmd.table
+        table = self._validate_identifier(cmd.table)
         data = cmd.data
+        for key in data.keys():
+            self._validate_identifier(key)
         cols = ", ".join(f'"{k}"' for k in data.keys())
         placeholders = ", ".join(f":{k}" for k in data.keys())
         sql = f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders})'
