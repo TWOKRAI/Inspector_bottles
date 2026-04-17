@@ -10,13 +10,10 @@ from typing import Any, Dict, Tuple
 from registers_module import RegistersManager, build_connection_map_from_registers
 
 from .camera import GuiCameraRegisters
+from .gui_command_catalog import GUI_COMMAND_CATALOG
+from .names import CAMERA_REGISTER, PROCESSOR_REGISTER, RENDERER_REGISTER
 from .processor import ProcessorRegisters
 from .renderer import RendererRegisters
-
-# Register name constants
-CAMERA_REGISTER = "camera"
-PROCESSOR_REGISTER = "processor"
-RENDERER_REGISTER = "renderer"
 
 
 def create_registers() -> Tuple[RegistersManager, Dict[str, str]]:
@@ -32,6 +29,7 @@ def create_registers() -> Tuple[RegistersManager, Dict[str, str]]:
 
 __all__ = [
     "CAMERA_REGISTER", "PROCESSOR_REGISTER", "RENDERER_REGISTER",
+    "GUI_COMMAND_CATALOG",
     "create_registers",
     "GuiCameraRegisters", "ProcessorRegisters", "RendererRegisters",
 ]
