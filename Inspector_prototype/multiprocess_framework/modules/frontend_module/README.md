@@ -2,118 +2,155 @@
 
 ## Назначение
 
-Модуль предоставляет систему виджетов-конструктор для сборки UI из переиспользуемых компонентов. Использует `data_schema_module` и `config_module` для схем и конфигов. **Конкретные классы регистров** (поля, `FieldMeta`, `register_dispatch`) задаёт приложение как наследники `SchemaBase`; фреймворк их не поставляет. В прототипе Inspector — `multiprocess_prototype/registers/schemas`.
+Модуль-конструктор для сборки GUI из переиспользуемых компонентов.
+Новый проект может поднять интерфейс за 30 минут: регистры + хуки + виджеты.
 
-**Ключевые сущности:**
-- **FrontendManager** (BaseManager) — единая точка входа: регистры, конфиг, окна, потоки
-- **FrontendRegistersBridge** — связь frontend с backend (connection_map, send_callback)
-- **RoutedCommandSender** (`core/routed_command.py`) — единая отправка outbound COMMAND: `resolve_targets` → `SupportsCommandMessage.command` → `IRouterLike.send_message` (домен снаружи, см. ADR-058)
-- **run_process_attached_frontend** + **FrontendLaunchHooks** — каркас запуска UI, привязанного к процессу
-- **Config hot-reload** — подписка на config_module, обновление UI без перезапуска
+**Конкретные классы регистров** (поля, `FieldMeta`) задаёт приложение — фреймворк их не поставляет.
 
-## Импорты
+## Quick-start: подключение к процессу
+
+### 1. Определить хуки запуска
 
 ```python
-from frontend_module import (
-    FrontendManager,
-    FrontendRegistersBridge,
-    ApplicationCoordinator,
-    WindowManager,
-    ThreadManager,
-    create_default_registry,
-    compose_layout,
+from frontend_module import FrontendLaunchHooks, run_process_attached_frontend
+
+hooks = FrontendLaunchHooks(
+    build_ui_config=lambda proc: {"title": "My App"},
+    build_registers=lambda: (registers_manager, connection_map),
+    create_command_sender=lambda proc: RoutedCommandSender(proc, targets),
+    register_windows=my_register_windows,
+    on_registers_boot=None,  # опционально
 )
-from frontend_module.interfaces import IFrontendManager, IRegistersManager
 ```
 
-## Пример: Coordinator + FrontendManager
+### 2. Запустить UI
 
 ```python
-from frontend_module import ApplicationCoordinator, create_default_registry, compose_layout
-from registers_module import RegistersManager
-from multiprocess_prototype.registers.schemas.processing_tab import (
-    PROCESSOR_REGISTER,
-    ProcessorRegisters,
+exit_code = run_process_attached_frontend(
+    process_ref,
+    hooks=hooks,
+    initial_window="loading",
+    loading_delay_ms=2000,
 )
-
-registers = RegistersManager({PROCESSOR_REGISTER: ProcessorRegisters()})
-connection_map = {PROCESSOR_REGISTER: "processor"}
-
-coordinator = ApplicationCoordinator(config={})
-coordinator.initialize(registers=registers, connection_map=connection_map)
-
-wm = coordinator.window_manager
-wm.register("main", create_main_window)
-coordinator.run(initial_window="main")
 ```
 
-## Пример: Регистры и connection_map
+Последовательность внутри: `build_ui_config → build_registers → create_command_sender → on_registers_boot → FrontendManager.initialize → register_windows → run_app`.
+
+### 3. Зарегистрировать окна
 
 ```python
-from frontend_module import FrontendRegistersBridge
-from registers_module import RegistersManager
-from multiprocess_prototype.registers.schemas.processing_tab import (
-    PROCESSOR_REGISTER,
-    ProcessorRegisters,
-)
-
-rm = RegistersManager({PROCESSOR_REGISTER: ProcessorRegisters()})
-bridge = FrontendRegistersBridge(rm, router=process, connection_map={PROCESSOR_REGISTER: "processor"})
-
-# Виджет вызывает set_field_value → bridge → send_callback → process.send_message("processor", msg)
-bridge.set_field_value(PROCESSOR_REGISTER, "min_area", 600)
+def my_register_windows(wm, fm, config, sender, app, process_ref):
+    wm.register("loading", lambda: LoadingWindow(parent=None))
+    wm.register("main", lambda: create_main_window(fm, config, sender))
 ```
 
-## Пример: Простые виджеты
+## Создание MainWindow
+
+Типичное главное окно: `HeaderWidget` (шапка) + `ImagePanelWidget` (камеры) + `TabWidget` (вкладки настроек).
 
 ```python
-from frontend_module import create_default_registry, compose_layout
-from registers_module import RegistersManager
-from multiprocess_prototype.registers.schemas.processing_tab import (
-    PROCESSOR_REGISTER,
-    ProcessorRegisters,
-)
+from frontend_module.widgets import HeaderWidget, TabWidget, ImagePanelWidget
 
-rm = RegistersManager({PROCESSOR_REGISTER: ProcessorRegisters()})
-registry = create_default_registry()
-descriptors = [
-    {"widget_type": "slider", "register_name": PROCESSOR_REGISTER, "field_name": "min_area"},
-]
-compose_layout(parent, descriptors, registry, rm, orientation="vertical")
+header = HeaderWidget(config=header_config)
+tabs = TabWidget()
+tabs.add_tab("processing", ProcessingTab(rm=rm, callbacks=cbs))
+image_panel = ImagePanelWidget()
 ```
 
-## Зависимости
+## Создание своего виджета (BaseWidget pattern)
 
-- **Зависит от:** `data_schema_module`, `config_module`, `registers_module` (конкретные схемы регистров — в приложении)
-- **Используется в:** `multiprocess_prototype` (GuiProcess), `App` (при миграции)
+`BaseWidget[TModel]` — MVP-виджет с опциональной моделью и жизненным циклом:
+
+1. `_coerce_callbacks(callbacks)` — нормализовать колбэки
+2. `_coerce_ui(ui)` — нормализовать UI-конфиг
+3. `_create_model()` → Model или None
+4. `_init_ui()` — построить UI (без сигналов)
+5. `_create_presenter(model)` → Presenter
+6. `_connect_signals()` — связать UI и Presenter
+
+```python
+from frontend_module.widgets import BaseWidget
+
+class MyWidget(BaseWidget[MyModel]):
+    def _coerce_callbacks(self, cbs):
+        return MyCbs() if cbs is None else cbs
+
+    def _coerce_ui(self, ui):
+        return MyUiConfig() if ui is None else ui
+
+    def _create_model(self):
+        return MyModel(self._registers_manager)
+
+    def _init_ui(self):
+        self._slider = SliderControl.create(
+            registers_manager=self._registers_manager,
+            binding=BindingConfig(register_name=REG, field_name="threshold"),
+        )
+        # ... layout
+
+    def _create_presenter(self, model):
+        return MyPresenter(view=self, model=model)
+
+    def _connect_signals(self):
+        self._slider.presenter.on_value_changed(self._presenter.on_threshold)
+```
+
+## Привязка к регистрам (RegisterBindingContext)
+
+`RegisterBindingContext` — проверяет наличие `RegistersManager` и переключает виджет между NumericControl (с привязкой) и fallback QLineEdit (без привязки).
+
+```python
+from frontend_module.widgets.tabs import RegisterBindingContext
+
+ctx = RegisterBindingContext(rm=registers_manager)
+if ctx.can_bind:
+    control = NumericControl.create(
+        registers_manager=ctx.rm,
+        binding=BindingConfig(register_name=REG, field_name="min_area"),
+    )
+else:
+    control = QLineEdit()  # fallback без регистров
+```
 
 ## Структура модуля
 
 ```
 frontend_module/
-├── __init__.py
-├── interfaces.py       # IRegistersManager, IFrontendManager, IWidgetRegistry, ...
-├── application/       # FrontendManager, Coordinator, WindowManager, ThreadManager
-├── core/              # BaseConfigurableWidget, WidgetRegistry, WindowRegistry, FrontendRegistersBridge
-├── schemas/           # WidgetDescriptor, WindowConfig (SchemaBase)
+├── __init__.py              # Публичный API
+├── interfaces.py            # IRegistersManagerGui, ISignalProvider, ...
+├── application/             # FrontendManager, WindowManager, ThreadManager
+│   └── process_attached_frontend.py  # run_process_attached_frontend + FrontendLaunchHooks
+├── core/                    # qt_imports, WidgetRegistry, WindowRegistry, FrontendRegistersBridge
+├── components/              # Контролы: slider, checkbox, spinbox, numeric, compound, group, label
+│   ├── base/                # Протоколы (IControlView, INumericView), трейты, инфраструктура
+│   ├── examples/            # Учебные адаптеры и схемы (используются тестами)
+│   └── ...
+├── widgets/                 # Высокоуровневые виджеты: BaseWidget, HeaderWidget, TabWidget, ImagePanelWidget
+│   ├── base_widget/         # BaseWidget[TModel] — MVP-паттерн
+│   ├── header/              # HeaderWidget, HeaderConfig
+│   ├── tabs/                # TabWidget, TabPresenterBase, RegisterBindingContext, MvpTabBase
+│   ├── windows/             # LoadingWindow, MainWindow
+│   └── tables/              # StructuredTableWidget, TreeWithToolbar
+├── schemas/                 # WidgetDescriptor, WindowConfig, RegisterBinding
+├── configs/                 # FrontendManagerConfig, WindowManagerConfig
+├── styling/                 # Стили, тема
 └── tests/
 ```
 
-## Связь с другими модулями
+## Зависимости
 
-```
-frontend_module
-    │
-    ├── использует → data_schema_module (схемы виджетов, WindowConfig)
-    ├── использует → config_module (runtime-конфиг UI)
-    ├── использует → registers_module (RegistersManager)
-    ├── (приложение подставляет классы регистров в RegistersManager)
-    │
-    └── используется в → multiprocess_prototype (GuiProcess)
-    └── используется в → App (при миграции)
-```
+- **Зависит от:** `data_schema_module`, `config_module`, `registers_module`
+- **Используется в:** `multiprocess_prototype` (GuiProcess), `multiprocess_prototype_v3`
 
-## Примечания
+## Реально используемый публичный API
 
-- Этап 0: создан фундамент (интерфейсы, структура папок)
-- Реализация компонентов и виджетов — на следующих этапах
+Из top-level `__init__.py` прототипами импортируются:
+
+| Символ | old prototype | v3 |
+|--------|:---:|:---:|
+| `FrontendLaunchHooks` | + | + |
+| `run_process_attached_frontend` | + | + |
+| `FrontendManager` | + (тесты) | — |
+
+Остальные символы (BaseWidget, TabWidget, HeaderWidget и т.д.) импортируются из подпакетов напрямую:
+`frontend_module.widgets`, `frontend_module.components`, `frontend_module.core`.

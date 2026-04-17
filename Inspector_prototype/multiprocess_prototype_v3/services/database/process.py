@@ -38,6 +38,11 @@ class DatabaseProcess(ProcessModule):
     def _init_custom_managers(self):
         app_cfg = self.get_config("config") or {}
         db_url = app_cfg.get("db_url", "sqlite:///./inspector.db")
+        # Ensure database directory exists for SQLite
+        if db_url.startswith("sqlite:///"):
+            from pathlib import Path
+            db_path = db_url.replace("sqlite:///", "")
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         sql_config = SQLManagerConfig(url=db_url, dialect=app_cfg.get("db_dialect", "sqlite"), mode="sync", fork_safe=True)
         managers = {}
         if self.logger_manager:

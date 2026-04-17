@@ -24,6 +24,7 @@ class ProcessStatus(str, Enum):
     STOPPING = "stopping"
     STOPPED = "stopped"
     ERROR = "error"
+    CRASHED = "crashed"
 
 
 class ManagerType(str, Enum):

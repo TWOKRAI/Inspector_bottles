@@ -22,6 +22,7 @@ class ProcessStatus(Enum):
     STOPPING = "stopping"
     STOPPED = "stopped"
     ERROR = "error"
+    CRASHED = "crashed"
 
 
 class ResourceType(Enum):

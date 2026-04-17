@@ -243,6 +243,7 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
             "track_error", "record_error",
             "_call_manager", "_registry", "_plugin_registry", "_proxy_created",
             "_event_queue", "_subscribers", "_new_event_event",
+            "_router_manager",
         )
         for key in _EXCLUDE:
             state.pop(key, None)
@@ -254,3 +255,4 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
         self._event_queue = None
         self._new_event_event = None
         self._subscribers = {}
+        self._router_manager = None

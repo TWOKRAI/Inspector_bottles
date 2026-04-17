@@ -5,6 +5,11 @@ from multiprocessing import Event
 from ...worker_module import ThreadConfig, ThreadPriority
 
 
+_CUSTOM_EXCLUDE_KEYS = frozenset({
+    "stop_event", "pause_event", "error_manager",
+})
+
+
 def _state_snapshot_from_process_data(process_data: Any) -> Optional[Dict[str, Any]]:
     if not process_data:
         return None
@@ -14,10 +19,14 @@ def _state_snapshot_from_process_data(process_data: Any) -> Optional[Dict[str, A
     )
     meta = getattr(process_data, "metadata", None) or {}
     cust = getattr(process_data, "custom", None) or {}
+    safe_custom = {
+        k: v for k, v in (dict(cust) if isinstance(cust, dict) else {}).items()
+        if k not in _CUSTOM_EXCLUDE_KEYS
+    }
     return {
         "status": status_str,
         "metadata": dict(meta) if isinstance(meta, dict) else {},
-        "custom": dict(cust) if isinstance(cust, dict) else {},
+        "custom": safe_custom,
     }
 
 

@@ -202,7 +202,7 @@ class DatabaseConfig(ProcessConfigBase):
     class_path: str = "multiprocess_prototype_v3.services.database.process.DatabaseProcess"
     db_url: str = Field(default_factory=lambda: f"sqlite:///{_PROTO_ROOT / 'database' / 'inspector.db'}")
     db_dialect: str = "sqlite"
-    schema_module_path: str = "multiprocess_prototype_v3.services.database.schema.DetectionSchema"
+    schema_module_path: str = "multiprocess_prototype_v3.services.database.schema"
     schema_class_name: str = "DetectionSchema"
 
 

@@ -1,24 +1,24 @@
-# -*- coding: utf-8 -*-
 """
 LegacySyncTrait — синхронизация с ui_elements/controls для совместимости с v1.
 
 Опциональный трейт: при создании передать ui_elements, controls, callback.
 Вызывать после успешной записи и при первичной загрузке.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class LegacySyncContext:
     """Контекст legacy-синхронизации (ui_elements, controls, callback, parent)."""
 
-    ui_elements: Optional[dict] = None
+    ui_elements: dict | None = None
     controls: Any = None
     callback: Any = None
-    parent_widget: Optional[Any] = None
+    parent_widget: Any | None = None
 
 
 class LegacySyncTrait:
@@ -45,7 +45,7 @@ class LegacySyncTrait:
         value: Any,
         element: Any,
         can_modify: bool,
-        resolved_meta: Optional[Any],
+        resolved_meta: Any | None,
     ) -> None:
         """Первичная регистрация в ui_elements/controls (при attach_view)."""
         from frontend_module.components.common.legacy_sync import (

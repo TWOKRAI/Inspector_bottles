@@ -1,0 +1,148 @@
+2026-04-17 11:06:54,265 [INFO] database: Process state registered: database
+2026-04-17 11:06:54,265 [ERROR] database: Failed to initialize process 'database': (sqlite3.OperationalError) unable to open database file
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-17 11:06:54,265 [ERROR] database: Traceback: Traceback (most recent call last):
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 306, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: unable to open database file
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\Inspector_prototype\multiprocess_framework\modules\process_module\lifecycle\process_lifecycle.py", line 111, in initialize
+    self.process._init_custom_managers()
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\Inspector_prototype\multiprocess_prototype_v3\services\database\process.py", line 49, in _init_custom_managers
+    self.sql_manager.initialize()
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\Inspector_prototype\multiprocess_framework\modules\sql_module\core\sql_manager.py", line 66, in initialize
+    self._adapter.setup()
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\Inspector_prototype\multiprocess_framework\modules\sql_module\adapters\sync_adapter.py", line 38, in setup
+    with self._engine.connect() as conn:
+         ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    Connection._handle_dbapi_exception_noconnection(
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2448, in _handle_dbapi_exception_noconnection
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 306, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) unable to open database file
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+
+2026-04-17 11:17:48,855 [INFO] database: Process state registered: database
+2026-04-17 11:17:48,855 [ERROR] database: Failed to initialize process 'database': No module named 'multiprocess_prototype_v3.services.database.schema.DetectionSchema'; 'multiprocess_prototype_v3.services.database.schema' is not a package
+2026-04-17 11:17:48,855 [ERROR] database: Traceback: Traceback (most recent call last):
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\Inspector_prototype\multiprocess_framework\modules\process_module\lifecycle\process_lifecycle.py", line 111, in initialize
+    self.process._init_custom_managers()
+  File "C:\Users\INNOTECH\Desktop\PROJECT_INNOTECH\Inspector_bottles\Inspector_prototype\multiprocess_prototype_v3\services\database\process.py", line 59, in _init_custom_managers
+    schema_module = importlib.import_module(schema_path)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\INNOTECH\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py", line 126, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1204, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1176, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1135, in _find_and_load_unlocked
+ModuleNotFoundError: No module named 'multiprocess_prototype_v3.services.database.schema.DetectionSchema'; 'multiprocess_prototype_v3.services.database.schema' is not a package
+
+2026-04-17 11:28:33,020 [INFO] database: Process state registered: database
+2026-04-17 11:28:34,020 [INFO] database: DatabaseProcess ready
+2026-04-17 11:28:34,020 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 11:28:34,020 [INFO] database: Process 'database' initialized successfully
+2026-04-17 11:29:44,491 [INFO] database: Process state registered: database
+2026-04-17 11:29:44,491 [INFO] database: DatabaseProcess ready
+2026-04-17 11:29:44,491 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 11:29:44,491 [INFO] database: Process 'database' initialized successfully
+2026-04-17 12:01:50,300 [INFO] database: Process state registered: database
+2026-04-17 12:01:50,300 [INFO] database: DatabaseProcess ready
+2026-04-17 12:01:50,300 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 12:01:50,300 [INFO] database: Process 'database' initialized successfully
+2026-04-17 14:04:24,492 [INFO] database: Process state registered: database
+2026-04-17 14:04:24,492 [INFO] database: DatabaseProcess ready
+2026-04-17 14:04:24,493 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 14:04:24,493 [INFO] database: Process 'database' initialized successfully
+2026-04-17 14:10:47,578 [INFO] database: Process state registered: database
+2026-04-17 14:10:47,578 [INFO] database: DatabaseProcess ready
+2026-04-17 14:10:47,578 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 14:10:47,578 [INFO] database: Process 'database' initialized successfully
+2026-04-17 14:37:36,649 [INFO] database: Process state registered: database
+2026-04-17 14:37:36,649 [INFO] database: DatabaseProcess ready
+2026-04-17 14:37:36,649 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 14:37:36,649 [INFO] database: Process 'database' initialized successfully
+2026-04-17 15:00:05,260 [INFO] database: Process state registered: database
+2026-04-17 15:00:05,260 [INFO] database: DatabaseProcess ready
+2026-04-17 15:00:05,261 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 15:00:05,261 [INFO] database: Process 'database' initialized successfully
+2026-04-17 15:02:16,238 [INFO] database: Process state registered: database
+2026-04-17 15:02:16,238 [INFO] database: DatabaseProcess ready
+2026-04-17 15:02:16,238 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-17 15:02:16,238 [INFO] database: Process 'database' initialized successfully

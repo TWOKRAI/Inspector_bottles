@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Frontend Module — модуль UI-фреймворка.
 
@@ -6,59 +5,33 @@ Frontend Module — модуль UI-фреймворка.
 - Базовые компоненты (слайдеры, чекбоксы, таблицы)
 - Доменные виджеты (сборка компонентов + привязка к регистрам)
 - Окна верхнего уровня
-- Реестры виджетов и окон
 
 Использует data_schema_module и config_module для схем и конфигов.
-Конкретные классы регистров задаёт приложение (наследники SchemaBase); см. multiprocess_prototype/registers/schemas.
+Конкретные классы регистров задаёт приложение (наследники SchemaBase);
+см. multiprocess_prototype/registers/schemas.
+
+Остальные символы доступны через подпакеты:
+- frontend_module.core (qt_imports, WidgetRegistry, WindowRegistry, FrontendRegistersBridge, ...)
+- frontend_module.components (SliderControl, CheckboxControl, NumericControl, ...)
+- frontend_module.widgets (BaseWidget, HeaderWidget, TabWidget, ImagePanelWidget, ...)
+- frontend_module.schemas (WidgetDescriptor, WindowConfig, ...)
+- frontend_module.configs (FrontendManagerConfig, WindowManagerConfig, ...)
 """
 
-from frontend_module.core.base_configurable_widget import BaseConfigurableWidget
-from frontend_module.core.default_factories import create_default_registry
-from frontend_module.core.widget_registry import WidgetRegistry
-from frontend_module.core.window_registry import WindowRegistry, WindowEntry
-from frontend_module.core.registers_bridge import FrontendRegistersBridge
-from frontend_module.schemas.widget_descriptor import WidgetDescriptor, widget_descriptor_from_dict
-from frontend_module.schemas.window_config import WindowConfig
-from frontend_module.core.layout_composer import compose_layout
-from frontend_module.configs import (
-    FrontendManagerConfig,
-    ThreadManagerConfig as FrontendThreadManagerConfig,
-    WindowManagerConfig,
-)
-
-__all__ = [
-    "BaseConfigurableWidget",
-    "WidgetRegistry",
-    "WindowRegistry",
-    "WindowEntry",
-    "FrontendRegistersBridge",
-    "WidgetDescriptor",
-    "widget_descriptor_from_dict",
-    "create_default_registry",
-    "WindowConfig",
-    "compose_layout",
-    "FrontendManagerConfig",
-    "FrontendThreadManagerConfig",
-    "WindowManagerConfig",
-]
-
 from frontend_module.application import (
-    FrontendManager,
     FrontendLaunchHooks,
+    FrontendManager,
     RoutedCommandSender,
-    ThreadManager,
     WindowManager,
     run_process_attached_frontend,
 )
-__all__.extend(
-    [
-        "FrontendManager",
-        "FrontendLaunchHooks",
-        "RoutedCommandSender",
-        "ThreadManager",
-        "WindowManager",
-        "run_process_attached_frontend",
-    ]
-)
 
-__version__ = "0.2.0"
+__all__ = [
+    "FrontendManager",
+    "FrontendLaunchHooks",
+    "RoutedCommandSender",
+    "WindowManager",
+    "run_process_attached_frontend",
+]
+
+__version__ = "0.3.0"
