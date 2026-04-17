@@ -1,0 +1,20 @@
+{
+  "producer": {
+    "interval": 0.35,
+    "message_prefix": "msg",
+    "enabled": true
+  },
+  "camera_sim": {
+    "fps": 10,
+    "resolution_width": 640,
+    "resolution_height": 480,
+    "frame_color": "noise"
+  },
+  "processor": {
+    "brightness_threshold": 128,
+    "enabled": true
+  },
+  "aggregator": {
+    "report_interval": 2.0
+  }
+}

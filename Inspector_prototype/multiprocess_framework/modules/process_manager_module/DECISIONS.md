@@ -24,11 +24,12 @@
 - **Решение:** Дополнительно `process.is_alive()`; при выходе без актуального state — `stopped` (exitcode 0) или `crashed` (иначе), обновление PSR и broadcast.
 - **Следствие:** Видны внезапные падения без участия кода дочернего процесса.
 
-## ADR-PMM-005 (was ADR-PM-005): Расслоение process_runner (2026-04-10)
+## ADR-PMM-005 (was ADR-PM-005): Расслоение process_runner (2026-04-10, обновлено 2026-04-12)
 
 - **Контекст:** Один крупный файл совмещал загрузку класса, memory, SRM, console, lifecycle.
-- **Решение:** `runner/class_loader.py`, `bundle_builder.py`, `console_redirect.py`; публичный API — `run_process_function` без изменений смысла.
-- **Следствие:** Меньшие файлы и ясные границы.
+- **Решение:** `runner/class_loader.py`, `bundle_builder.py`; публичный API — `run_process_function` без изменений смысла.
+- **История:** `console_redirect.py` был создан как отдельный модуль (2026-04-10) для переадресации stdout/stderr в очередь, но позднее удалён при рефакторинге `console_module` (2026-04-12).
+- **Следствие:** Меньшие файлы и ясные границы; console redirection теперь управляется через `console_module.ConsoleManager`.
 
 ## ADR-PMM-006 (was ADR-PM-006): stop_event оркестратора вне bundle (2026-04-10)
 

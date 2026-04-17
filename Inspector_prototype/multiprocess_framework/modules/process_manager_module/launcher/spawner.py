@@ -68,6 +68,10 @@ class ProcessSpawner:
         return True
 
     def _setup_signals(self) -> None:
+        import threading
+
+        if threading.current_thread() is not threading.main_thread():
+            return
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 

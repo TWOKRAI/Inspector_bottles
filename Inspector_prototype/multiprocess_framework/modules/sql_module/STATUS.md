@@ -1,6 +1,6 @@
 # sql_module — Статус рефакторинга
 
-## Текущий этап: 8 / 8
+## Текущий этап: 9 / 9
 
 ## Оценки (0-10)
 
@@ -24,6 +24,16 @@
 - [x] Этап 6: Typed Commands, execute_command
 - [x] Этап 7: Observability (emit_event)
 - [x] Этап 8: MySQL адаптеры, unit-тесты, README, STATUS.md
+- [x] Этап 9: Auto DDL (create_tables), QuerySet builder, SQLMeta descriptor, Enhanced Repository, Legacy cleanup
+
+## Новые features (этап 9)
+
+- [x] Auto DDL (create_tables) — автоматическое создание таблиц из SchemaBase
+- [x] QuerySet builder (Django-style) — filter, exclude, order_by, limit, all, first, count, values, update, delete, lookups
+- [x] SQLMeta descriptor (sql_meta.py) — декларативные метаданные таблицы
+- [x] Enhanced SchemaBaseMapper (FieldMeta → CHECK, VARCHAR, readonly) — FieldMeta с constraints
+- [x] Enhanced Repository (find_by, insert_many, readonly protection) — защита readonly полей
+- [x] Legacy cleanup (removed metrics/, fixed async dispose, fixed SQL injection)
 
 ## Интеграция с модулями фреймворка
 

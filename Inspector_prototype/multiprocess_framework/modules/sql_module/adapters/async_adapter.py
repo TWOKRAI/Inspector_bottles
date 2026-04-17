@@ -76,18 +76,19 @@ class BaseAsyncAdapter:
 
     def dispose(self) -> None:
         """Освободить ресурсы."""
-        if self._engine:
+        if self._engine is not None:
             import asyncio
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self._engine.dispose())
-                else:
-                    loop.run_until_complete(self._engine.dispose())
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._engine.dispose())
             except RuntimeError:
-                pass
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(self._engine.dispose())
+                finally:
+                    loop.close()
             self._engine = None
-        self._initialized = False
+            self._initialized = False
 
     async def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> int:
         """Выполнить DML."""

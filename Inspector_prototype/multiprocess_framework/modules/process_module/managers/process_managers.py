@@ -170,11 +170,7 @@ class ProcessManagers:
         from ...console_module.configs.console_config import ConsoleConfig
 
         console_cfg_dict = managers_config.get("console", {})
-        console_config = ConsoleConfig()
-        if isinstance(console_cfg_dict, dict):
-            for key, value in console_cfg_dict.items():
-                if hasattr(console_config, key):
-                    setattr(console_config, key, value)
+        console_config = ConsoleConfig(**console_cfg_dict) if isinstance(console_cfg_dict, dict) and console_cfg_dict else ConsoleConfig()
 
         self.process.console_manager = ConsoleManager(
             manager_name=f"console_{self.process.name}",

@@ -4,6 +4,16 @@ import pytest
 from sql_module.core.engine_factory import create_sync_adapter, create_async_adapter
 from sql_module.configs import SQLManagerConfig
 
+try:
+    import pytest_asyncio  # noqa: F401
+    HAS_ASYNCIO = True
+except ImportError:
+    HAS_ASYNCIO = False
+
+skip_no_asyncio = pytest.mark.skipif(
+    not HAS_ASYNCIO, reason="pytest-asyncio not installed"
+)
+
 
 class TestSyncAdapters:
     def test_sqlite_sync(self):
@@ -27,6 +37,7 @@ class TestSyncAdapters:
 
 
 class TestAsyncAdapters:
+    @skip_no_asyncio
     @pytest.mark.asyncio
     async def test_sqlite_async(self):
         cfg = SQLManagerConfig(url="sqlite:///:memory:", dialect="sqlite")

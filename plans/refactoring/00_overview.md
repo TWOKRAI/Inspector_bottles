@@ -100,7 +100,7 @@
 | 15 | `statistics_module`          |  13   |   981  |   3   |  TODO  | TODO | 13 | 981 | 5 (~37 passed) |
 | 16 | `sql_module`                 |  22   |  1546  |   4   |  TODO  | TODO | — | — | — |
 | 17 | `registers_module`           |   6   |   556  |   1   |  TODO  | TODO | — | — | — | готов тоже (заполни)
-| 18 | `console_module`             |  17   |   974  |   5   |  TODO  | TODO | — | — | — |
+| 18 | `console_module`             |  17   |   974  |   5   |  TODO  | TODO | 19 | ~1454 | 7 |
 | 19 | `frontend_module`            | 147   | 10302  |  12   |  TODO  | TODO | — | — | — |
 |    | **Итого (фреймворк + фронт)**| **548** | **50701** | **104** |      |      | | | |
 
@@ -120,6 +120,7 @@
 - `frontend_module` (147 файлов / 10 302 LOC) — четверть всего кода. Выделение в `frontend_framework` уберёт существенный объём из ядра.
 - Самые «толстые» файлы из §1.1 мета-плана (`dispatcher.py` 736, `router_manager.py` 624, `process_module.py` 585, `logger_manager.py` 582, `message.py` 508) — все целевые на расслоение в per-module шагах.
 - `logger_module` имеет только **1** test-файл — риск низкого покрытия. В per-module плане модуля #5 (Шаг 1) явно проверить и при необходимости добить тесты **до** рефакторинга.
+- `console_module`: **19** файлов `.py` (без `tests/`), **~1454** LOC, **7** test-файлов; рефакторинг завершён: добавлены `platforms/` (Windows/Unix с кросс-платформенностью), `ConsoleLogChannel` для интеграции с LoggerManager, `RegisterCommandHandler` + `SystemCommandHandler` для интерактивного режима (God Mode). Убрана очередь, добавлена поддержка headless режима (Linux без GUI). `DECISIONS.md` заполнен (ADR-CM-001…). **M2 milestone**: интерактивная консоль для работы с регистрами в runtime. Ранее: 17 / 974 LOC — см. план `plans/refactoring/18_console_module.md`.
 
 ---
 

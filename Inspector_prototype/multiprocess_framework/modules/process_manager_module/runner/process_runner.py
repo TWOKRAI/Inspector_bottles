@@ -13,7 +13,6 @@ from multiprocess_framework.modules.shared_resources_module import SharedResourc
 
 from .class_loader import _ProcessLogger, _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
-from .console_redirect import _setup_console_redirect
 
 
 def _run_lifecycle(
@@ -99,7 +98,6 @@ def run_process_function(
     SRM mode: готовый SharedResourcesManager (тесты).
     """
     log = _ProcessLogger(process_name)
-    redirector = None
     process_instance = None
     shared_resources = None
 
@@ -136,8 +134,6 @@ def run_process_function(
                     "process_config", process_data.custom.copy()
                 )
 
-        redirector = _setup_console_redirect(process_name, process_data, log)
-
         process_instance = process_class(
             name=process_name,
             shared_resources=shared_resources,
@@ -169,12 +165,6 @@ def run_process_function(
         _log_exception_via_error_manager(shared_resources, e, "process failed")
         _update_process_state(shared_resources, process_name, "error")
     finally:
-        if redirector:
-            import sys as _sys
-            _sys.stdout = redirector.original_stdout
-            _sys.stderr = redirector.original_stderr
-            redirector.close()
-
         if process_instance is not None:
             try:
                 if hasattr(process_instance, "shutdown"):

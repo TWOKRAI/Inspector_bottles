@@ -1,79 +1,91 @@
-# .claude/ — Конфигурация Claude Code
+# .claude/ — Dev Company Configuration
 
-Индекс содержимого папки. **Не путать с проектной документацией** — та лежит в `Inspector_prototype/multiprocess_framework/docs/`.
+Универсальная конфигурация агентной системы разработки. Переносима между проектами.
+Проектная специфика — в корневом `CLAUDE.md`.
 
 ---
 
-## Основные файлы
+## Файлы
 
-| Файл | Назначение | В контексте? |
+| Файл | Назначение | Загрузка |
 |---|---|---|
-| `CLAUDE.md` | Главный проектный контекст: архитектура, правила, стек | **Всегда** |
-| `CLAUDE.local.md` | Локальные настройки (не коммитится) | **Всегда** |
-| `settings.json` | Permissions (allow/ask/deny), хуки, statusLine | Нет (конфиг) |
-| `settings.local.json` | Локальный override permissions (не коммитится) | Нет (конфиг) |
-| `mcp.json` | MCP-серверы: qex (Qdrant+Ollama) | Нет (конфиг) |
+| `CLAUDE.md` | Workflow компании (универсальный) | Всегда |
+| `../CLAUDE.md` | Проектный контекст (специфика) | Всегда |
+| `settings.json` | Разрешения, хуки, statusLine | Конфиг |
+| `settings.local.json` | Локальный override (gitignored) | Конфиг |
+| `mcp.json` | MCP-серверы (qex) | Конфиг |
 
 ---
 
-## Субагенты (`agents/`)
+## Команда (agents/)
 
-Загружаются только когда Claude Code создаёт субагент — **не влияют на базовый контекст**.
-
-| Агент | Когда использовать |
-|---|---|
-| `framework-architect` | Ревью архитектурных решений, ADR, Dict at Boundary |
-| `ipc-routing-checker` | Проверка смешения `targets` и `channel` в IPC |
-| `test-runner` | Запуск тестов с правильным PYTHONPATH |
-| `pyqt-ui-reviewer` | Ревью PyQt5: thread-safety, утечки QObject, сигналы/слоты |
-| `security-reviewer` | Ревью безопасности: pickle, IPC, shared memory, PyQt |
-
----
-
-## Скиллы (`skills/`)
-
-Загружаются только при явном вызове `/skill-name` — **не влияют на базовый контекст**.
-
-| Скилл | Команда | Назначение |
+| Агент | Модель | Роль |
 |---|---|---|
-| `add-process-module` | `/add-process-module` | Чек-лист создания нового ProcessModule |
-| `add-register-schema` | `/add-register-schema` | Добавление схемы в `registers/` |
-| `qex-search` | `/qex-search` | `search_code` = вектор (Qdrant) + BM25 + гибрид; в паре с Grep |
-| `debug-issue` | `/debug-issue` | Дебаггинг с учётом IPC, процессов, PyQt |
-| `refactor-code` | `/refactor-code` | Рефакторинг: qex-first, тесты, ADR |
+| `manager` | Opus | Декомпозиция задачи, ТЗ с уровнями сложности |
+| `teamlead` | Opus | Старший разработчик — Senior+ задачи, экспресс-ревью |
+| `developer` | Sonnet | Реализация кода по ТЗ |
+| `tester` | Sonnet | Тесты по acceptance criteria |
+| `docs-writer` | Haiku | Документация, docstrings |
+| `reviewer` | Opus | Финальный код-ревью (архитектура + безопасность + IPC + PyQt) |
+| `_template` | — | Шаблон для `/hire` |
 
 ---
 
-## Slash-команды (`commands/`)
+## Команды (commands/)
 
-Загружаются только при вызове — **не влияют на базовый контекст**.
+### Workflow
 
 | Команда | Действие |
 |---|---|
-| `/validate` | `python Inspector_prototype/scripts/validate.py` |
-| `/fw-test` | `python Inspector_prototype/scripts/run_framework_tests.py` |
+| `/plan` | Manager → декомпозиция → план в `plans/` |
+| `/implement` | Developer → реализация Task X.Y |
+| `/test` | Tester → тесты |
+| `/review` | Reviewer → код-ревью → апрув/правки |
+| `/docs` | Docs Writer → документация |
+| `/ship` | Финальная проверка: validate + тесты + линтер |
+| `/team` | Показать состав компании |
+| `/hire` | Создание нового агента по шаблону |
+| `/pipeline` | **Полный автомат:** plan → implement → test → review → ship |
+
+### Проектные (Inspector_bottles)
+
+| Команда | Действие |
+|---|---|
+| `/validate` | Валидация структуры фреймворка |
+| `/fw-test` | Тесты фреймворка |
 | `/qex-status` | Статус qex-индекса |
 | `/qex-reindex` | Переиндексация кодовой базы |
-| `/run-proto` | Запуск прототипа инспекции бутылок |
-| `/cold-start` | Холодный старт: Qdrant + Ollama + venv |
+| `/run-proto` | Запуск прототипа |
+| `/cold-start` | Холодный старт сервисов |
 
 ---
 
-## Хуки (`hooks/`)
+## Скиллы (skills/)
 
-| Скрипт | Тип | Триггер | Действие |
-|---|---|---|---|
-| `validate-safe-command.sh` | PreToolUse | Bash | Блокирует опасные команды (rm -rf /, curl\|sh, …) |
-| `autoformat-python.sh` | PostToolUse | Edit, Write | `ruff format` + `ruff check --fix` на изменённом `.py` |
+| Скилл | Назначение |
+|---|---|
+| `/add-process-module` | Создание нового ProcessModule |
+| `/add-register-schema` | Добавление схемы регистров |
+| `/qex-search` | Семантический поиск (гибрид) |
+| `/debug-issue` | Дебаггинг фреймворка |
+| `/refactor-code` | Рефакторинг с qex-first |
 
 ---
 
-## Справочники (не в .claude, загружаются по запросу)
+## Хуки (hooks/)
 
-Перенесены в `docs/claude/` для экономии токенов — Claude Code **не загружает их автоматически**:
+| Скрипт | Тип | Действие |
+|---|---|---|
+| `validate-safe-command.sh` | PreToolUse (Bash) | Блокирует опасные команды |
+| `autoformat-python.sh` | PostToolUse (Edit/Write) | `ruff format` + `ruff check --fix` |
+| `check-imports.sh` | PostToolUse (Edit/Write) | Проверка синтаксиса Python |
 
-- `docs/claude/CLAUDE_FOLDER_OVERVIEW.md` — обзор папки `.claude/`: роли файлов, settings, хуки, MCP, эффективность
-- `docs/claude/FRAMEWORK_RULES_EXTRACT.md` — развёрнутый конспект правил фреймворка
-- `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` — нарратив «конструктор»
-- `docs/claude/qex/SETUP_GUIDE.md` — полная инструкция по настройке qex MCP (quick-start: `docs/claude/qex/README.md`)
+---
 
+## Как перенести в другой проект
+
+1. Скопировать `.claude/` в новый проект
+2. Создать корневой `CLAUDE.md` с проектной спецификой
+3. Удалить проектные команды/скиллы (или адаптировать)
+4. Обновить `mcp.json` и `settings.json` под стек проекта
+5. Универсальные агенты и workflow-команды работают сразу

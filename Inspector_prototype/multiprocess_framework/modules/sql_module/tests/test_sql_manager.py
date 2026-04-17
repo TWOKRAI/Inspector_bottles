@@ -4,6 +4,16 @@ from unittest.mock import MagicMock
 
 from sql_module import SQLManager, SQLManagerConfig
 
+try:
+    import pytest_asyncio  # noqa: F401
+    HAS_ASYNCIO = True
+except ImportError:
+    HAS_ASYNCIO = False
+
+skip_no_asyncio = pytest.mark.skipif(
+    not HAS_ASYNCIO, reason="pytest-asyncio not installed"
+)
+
 
 class TestSQLManager:
     def test_initialize_shutdown(self, sql_config):
@@ -66,6 +76,7 @@ class TestSQLManager:
             conn.execute(text("CREATE TABLE uow_test (id INT)"))
             conn.execute(text("INSERT INTO uow_test VALUES (1)"))
 
+    @skip_no_asyncio
     @pytest.mark.asyncio
     async def test_uow_async_connection(self, sql_manager):
         """Async UoW: создание таблицы, вставка и проверка в одной транзакции."""
@@ -78,6 +89,7 @@ class TestSQLManager:
             rows = [dict(zip(result.keys(), r)) for r in result.fetchall()]
         assert rows == [{"id": 1}]
 
+    @skip_no_asyncio
     @pytest.mark.asyncio
     async def test_uow_async_lazy_adapter(self, sql_config):
         """Async адаптер создаётся только при первом вызове uow_async."""
@@ -114,3 +126,23 @@ class TestSQLManager:
         mgr.shutdown()
         assert result["status"] == "error"
         assert mock_errors.track_error.called
+
+    def test_query_range_rejects_injection(self, sql_manager):
+        """query_range отклоняет имена таблиц с SQL-инъекцией."""
+        with pytest.raises(ValueError):
+            sql_manager.query_range("users; DROP TABLE users--")
+
+    def test_query_range_valid_identifier(self, sql_manager):
+        """query_range принимает нормальный идентификатор таблицы."""
+        sql_manager.execute("CREATE TABLE valid_table (id INTEGER PRIMARY KEY, name TEXT)")
+        sql_manager.execute("INSERT INTO valid_table VALUES (1, 'test')")
+        rows = sql_manager.query_range("valid_table")
+        assert len(rows) == 1
+        assert rows[0]["name"] == "test"
+
+    def test_no_metrics_collector_export(self):
+        """IMetricsCollector не экспортируется из sql_module верхнего уровня."""
+        import sql_module
+        assert not hasattr(sql_module, "IMetricsCollector"), (
+            "IMetricsCollector не должен быть в публичном API sql_module"
+        )

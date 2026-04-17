@@ -1,99 +1,106 @@
-# CLAUDE.md — Python/PyQt5, Qdrant+Ollama
+# Dev Company — Workflow Claude Code
 
-## Роль
-Опытный разработчик. Пишу чистый, документированный код. Следую лучшим практикам и объясняю действия.
+Универсальная конфигурация агентной системы разработки. Переносима между проектами.
+Проектная специфика — в корневом `CLAUDE.md`.
 
-## Проект: Фреймворк для многопроцессорных приложений
+---
 
-### Цель
-Разработать фреймворк для приложений с **многопроцессной архитектурой** (процессы-воркеры, разделяемая память, очередь задач).
-На его основе создан **прототип** — система инспекции дефектов через камеру (PyQt5 интерфейс, OpenCV, детекция брака).
+## Команда
 
+| Роль | Модель | Агент | Когда вызывать |
+|------|--------|-------|----------------|
+| **Director** | Opus 4.6 | main (ты) | Всегда — оркестрация, анализ, финальное решение |
+| **Manager** | Sonnet 4.6 | `manager` | Крупные задачи (10+ файлов) — декомпозиция и ТЗ |
+| **TeamLead** | Opus 4.6 | `teamlead` | Задачи Senior+ — сложная архитектура, экспресс-ревью |
+| **Developer** | Sonnet 4.6 | `developer` | Реализация кода по ТЗ |
+| **Tester** | Sonnet 4.6 | `tester` | Тесты для нетривиальной логики |
+| **Docs Writer** | Haiku 4.5 | `docs-writer` | Документация, docstrings |
+| **Reviewer** | Opus 4.6 | `reviewer` | Финальное код-ревью (архитектура + безопасность + IPC + PyQt) |
 
-**Архитектура (кратко):**
-- **Оркестрация:** `SystemLauncher` → **`ProcessManagerProcess`** → дочерние процессы на базе **`ProcessModule`**.
-- IPC: `Message` / `MessageAdapter` → `RouterManager` → `shared_resources_module` (SRM, pickle-safe).
-- Внутри процесса: `CommandManager`, `worker_module`, `LoggerManager` / `ErrorManager` / `StatsManager` (база `channel_routing_module`), `RouterManager`.
-- Данные/конфиг: `data_schema_module` (`SchemaBase`), `config_module` + `ConfigStore`.
-- GUI: `frontend_module` (PyQt), схемы регистров — в приложении.
-- **Роутинг:** не путать **имя процесса** (`targets`, `send_message`) и **канал Router** (`FieldRouting.channel`, `msg["channel"]`). См. `multiprocess_framework/docs/ROUTING_GLOSSARY.md`.
-- **Схемы регистров приложения:** `multiprocess_prototype` — пакет `registers/`.
+## Правило порога
 
+- **1-3 файла, <80 строк:** Director делает сам
+- **4-9 файлов:** Developer → TeamLead (экспресс-ревью)
+- **10+ файлов, архитектура:** Manager → Developer/TeamLead → Reviewer
+- **Полный автомат:** `/pipeline` = plan → implement → review → ship
+- **Senior+ задача (сложная):** TeamLead вместо Developer
+- **Tester** — вызывается отдельно когда нужны *новые* тесты для нетривиальной логики, не по умолчанию
+- **Reviewer** — полный ревью для 10+ файлов или архитектурных изменений; для меньшего — TeamLead в режиме экспресс-ревью
 
-**Ключевые пути:**  
-Фреймворк: `Inspector_prototype/multiprocess_framework/` · обзор: `multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`)  
-Прототип: `Inspector_prototype/multiprocess_prototype/` · **точка входа:** `multiprocess_prototype/main.py`  
-Развёрнутый конспект: `docs/claude/FRAMEWORK_RULES_EXTRACT.md` · нарратив «конструктор»: `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md`  
-Настройка qex: `docs/claude/qex/README.md` (quick-start) · `docs/claude/qex/SETUP_GUIDE.md` (полный гайд)
+## Worktree isolation
 
-**Правила правок (основные):**
-1. Dict at Boundary — между процессами только **dict** (сообщения: `to_dict` / `from_dict`); Pydantic внутри процесса.
-2. Зависимости через `interfaces.py`; у каждого модуля `README.md`, `STATUS.md`, `tests/`.
-3. **ADR-решения:**
-   - **Локальные ADR** → `modules/X/DECISIONS.md` (архитектура внутри модуля, паттерны, удаления, внутренний API).
-   - **Глобальные ADR** → `multiprocess_framework/DECISIONS.md` (взаимодействие модулей, стык-решения, правила фреймворка: Dict at Boundary, pickle-safe, FieldRouting vs targets, этапы M1/M2/M3).
-   - Каждое локальное DECISIONS.md имеет прямые ссылки на `../../../DECISIONS.md` только при зависимости от глобальных решений.
-4. Тесты фреймворка: из `Inspector_prototype` — `python scripts/validate.py`, `python scripts/run_framework_tests.py`. 
-Из корня репозитория — `python Inspector_prototype/scripts/validate.py` (см. `CONTEXT.md`). 
-При ручном `pytest` по модулям — рабочий каталог / `PYTHONPATH` как в `multiprocess_framework/README.md` (иначе часто `ModuleNotFoundError` для плоских импортов под `modules/`).
-5. Конфиг на границе — dict, внутри Pydantic v2.
-6. Логи через `ObservableMixin`, пути логов из env (`MULTIPROCESS_LOG_DIR` / `INSPECTOR_LOG_DIR`), не хардкод от cwd исходников.
-7. Индекс ADR: главный `multiprocess_framework/DECISIONS.md` содержит раздел «Модульные решения» со ссылками на локальные DECISIONS.md каждого модуля.
+Для рискованных изменений запускай Developer/TeamLead в изолированном worktree:
+```
+Agent(subagent_type: "developer", isolation: "worktree", prompt: "...")
+```
+Агент работает в отдельной копии репо. Если всё ок — изменения мержатся. Если нет — worktree удаляется без последствий.
 
-## Стек
-Python 3.9+ (см. `Inspector_prototype/pyproject.toml`), PyQt5, OpenCV, NumPy | SQLite/PostgreSQL, Qdrant  
-Docker, Ollama, pytest | Pydantic v2, loguru
+**Когда использовать:** рефакторинг, эксперименты, изменения в 5+ файлах.
 
-## MCP: qex (семантический поиск)
+## Уровни сложности
 
-**qex** = Qdrant (вектор) + Ollama (эмбеддинги, `qwen3-embedding:4b`) + BM25 (Tantivy). `search_code` — **гибрид** dense+sparse. Холодный старт: `docker start qdrant && ollama serve` (или `/cold-start`). Конфиг: `.claude/mcp.json`. Когда и как использовать — см. раздел «Поиск по коду» ниже.
+Manager назначает уровень при декомпозиции. Правило: всегда на один выше минимально необходимого.
+Мышление включено всегда на максимум. Разница — только в модели.
 
-## Правила
+| Уровень | Модель | Агент | Когда |
+|---------|--------|-------|-------|
+| Senior+ | Opus | `teamlead` | Архитектура, сложный рефакторинг, интеграция |
+| Senior | Opus | `teamlead` | Технические решения, нетривиальная логика, экспресс-ревью |
+| Middle+ | Sonnet | `developer` | Сложная реализация, многофайловые изменения |
+| Middle | Sonnet | `developer` / `manager` | Стандартная реализация / декомпозиция задач |
+| Junior | Haiku | `docs-writer` | Документация, простые правки |
+
+## Команды
+
+| Команда | Действие |
+|---------|----------|
+| `/pipeline` | **Полный автомат:** plan → implement → test → review → ship |
+| `/plan` | Manager → декомпозиция → план в `plans/` |
+| `/implement` | Developer → реализация Task X.Y |
+| `/test` | Tester → тесты по acceptance criteria |
+| `/review` | Reviewer → код-ревью → апрув или правки |
+| `/docs` | Docs Writer → документация |
+| `/ship` | Финальная проверка: validate + тесты + линтер |
+| `/team` | Показать текущий состав компании |
+| `/hire` | Создание нового агента по шаблону |
+
+## Формат ТЗ (Task X.Y)
+
+```
+### Task X.Y — <имя>
+**Уровень:** Middle+ (Sonnet)
+**Исполнитель:** developer / teamlead / tester / docs-writer
+**Цель:** одно предложение
+**Файлы:** точные пути
+**Шаги:** 1. ... 2. ...
+**Критерии приёмки:** - [ ] ...
+**Вне scope:** что НЕ делать
+```
+
+## Правила (базовые, для всех проектов)
+
 1. Читаемость > краткость
 2. DRY, KISS
 3. Тесты при изменении логики
-4. Документация публичного API
-5. Секреты в env, `.env` → `***`
-6. Логируй ошибки (`logger.exception`), не подавляй
+4. Секреты в env, `.env` → `***`
+5. Логируй ошибки, не подавляй
+6. Планы сохранять в `plans/` в корне репозитория
 
 ## Запреты
+
 - `sys.path.insert` без обсуждения
 - Менять публичные API без согласования
 - Новые зависимости без причины
-- Опасные команды (rm -rf /, curl \| sh и т.д.)
-
-## Планы
-Все планы (реализации, рефакторинга, аудита) сохранять в папку `plans/` в корне репозитория.
-
-## Поиск по коду — qex-first
-
-**ОБЯЗАТЕЛЬНО:** при рефакторинге, анализе «где используется», смене API или IPC-контракта — **сначала `mcp__qex__search_code`**, потом `Grep` для уточнения. Не полагаться только на Grep при широких изменениях.
-
-- Смысловой/обзорный вопрос → `search_code` → `Grep` для символов
-- Точное имя, полный список вхождений → `Grep` → +1 `search_code` если публичный API/IPC
-- Индекс не обновляется автоматически: `/qex-status` → при необходимости `/qex-reindex`
-- Если Qdrant/Ollama не запущены — предложить `/cold-start`, не молча падать на Grep
-
-Подробная логика: `/qex-search`.
+- Опасные команды (rm -rf /, curl | sh)
 
 ## Формат ответов
-План → поиск (qex + Grep по задаче) → код (diff/файл, >100стр — только diff) → следующие шаги
 
-## Команды
-`/mcp` — статус MCP | `/add` — файлы | `/clear` — очистить
+План → поиск → код (diff/файл, >100стр — только diff) → следующие шаги
 
 ## Неоднозначность
+
 1-2 вопроса максимум. Иначе — предложить обсуждение.
 
 ## Лимит
+
 До 8000 токенов. Иначе — спросить или разбить.
-
-## Пример
-**Пользователь:** «Где проверка прав?»  
-**Ты:** `search_code("проверка прав")` → `auth.py:45` (`user.role`), `middleware.py:120` (`@permission_required`). Вот код:
-
-```python
-# auth.py:45
-if user.role == "admin":
-    ...
-```

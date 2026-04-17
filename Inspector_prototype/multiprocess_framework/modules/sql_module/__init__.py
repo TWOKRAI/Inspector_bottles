@@ -13,13 +13,12 @@ Dual sync/async через адаптеры, Unit of Work, fork-safety, typed co
 from .adapters.schema_mapper import SchemaBaseMapper
 from .configs import SQLManagerConfig
 from .commands import DBExecuteCommand, DBInsertCommand, DBQueryCommand
-from .core import SQLManager, GenericRepository, SQLAlchemyUnitOfWork, AsyncSQLAlchemyUnitOfWork
+from .core import SQLManager, GenericRepository, SQLAlchemyUnitOfWork, AsyncSQLAlchemyUnitOfWork, DDLBuilder, AsyncQuerySet, QuerySet
 from .export import TableExporter, ExportFormat
 from .interfaces import (
     IAsyncEngineAdapter,
     IAsyncUnitOfWork,
     IEngineAdapter,
-    IMetricsCollector,
     IRepository,
     ISchemaMapper,
     ISQLManager,
@@ -39,6 +38,9 @@ __all__ = [
     "DBQueryCommand",
     "DBExecuteCommand",
     "DBInsertCommand",
+    "DDLBuilder",
+    "AsyncQuerySet",
+    "QuerySet",
     "ISQLManager",
     "IRepository",
     "IUnitOfWork",
@@ -47,5 +49,4 @@ __all__ = [
     "ISyncEngineAdapter",
     "IAsyncEngineAdapter",
     "ISchemaMapper",
-    "IMetricsCollector",
 ]

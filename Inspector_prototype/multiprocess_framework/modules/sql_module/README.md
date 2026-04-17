@@ -148,6 +148,98 @@ exporter.save(rows, "out.xlsx", format=ExportFormat.XLSX)         # требуе
 
 При `INSPECTOR_MULTIPROCESS=1` или `config.fork_safe=True` используется NullPool. Рекомендуется создавать SQLManager и вызывать `initialize()` **внутри дочернего процесса** после fork.
 
+## Auto DDL — автоматическое создание таблиц
+
+Определите SchemaBase и создавайте таблицы автоматически:
+
+```python
+from data_schema_module import SchemaBase, FieldMeta
+from sql_module import SQLManager, SQLManagerConfig
+from sql_module.adapters.sql_meta import SQLMeta
+from typing import Annotated, Optional
+
+class UserSchema(SchemaBase):
+    class SQLMeta:
+        table_name = "users"
+        indexes = [("email",)]
+        unique_together = [("email",)]
+    
+    id: Optional[int] = None
+    name: Annotated[str, FieldMeta("Имя", max=100)] = ""
+    email: Annotated[str, FieldMeta("Email", max=255)] = ""
+    age: Annotated[int, FieldMeta("Возраст", min=0, max=150)] = 0
+
+# Автосоздание таблицы
+cfg = SQLManagerConfig(url="sqlite:///app.db")
+mgr = SQLManager(config=cfg)
+mgr.initialize()
+mgr.create_tables([UserSchema])
+# → CREATE TABLE IF NOT EXISTS "users" (
+#       "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+#       "name" VARCHAR(100) NOT NULL DEFAULT '',
+#       "email" VARCHAR(255) NOT NULL DEFAULT '',
+#       "age" INTEGER NOT NULL DEFAULT 0 CHECK ("age" >= 0 AND "age" <= 150),
+#       UNIQUE ("email")
+#   );
+#   CREATE INDEX IF NOT EXISTS "ix_users_email" ON "users" ("email");
+```
+
+## QuerySet — Django-style запросы
+
+```python
+# Все пользователи старше 18, отсортированные по рейтингу
+users = mgr.objects(UserSchema).filter(age__gte=18).order_by("-score").limit(10).all()
+
+# Первый пользователь с именем Alice
+alice = mgr.objects(UserSchema).filter(name="Alice").first()
+
+# Количество
+count = mgr.objects(UserSchema).filter(age__gte=18).count()
+
+# Как dict (Dict at Boundary)
+raw = mgr.objects(UserSchema).filter(age__gte=18).values()
+
+# Обновление
+mgr.objects(UserSchema).filter(name="Alice").update(age=26)
+
+# Удаление
+mgr.objects(UserSchema).filter(name="Bob").delete()
+
+# Lookups: eq, ne, gt, gte, lt, lte, in, like, isnull
+mgr.objects(UserSchema).filter(name__like="A%").all()
+mgr.objects(UserSchema).filter(age__in=[18, 21, 25]).all()
+mgr.objects(UserSchema).exclude(name="admin").all()
+```
+
+## Enhanced Repository
+
+```python
+repo = mgr.get_repository(UserSchema)
+
+# Bulk insert
+repo.insert_many([
+    UserSchema(name="Alice", age=25),
+    UserSchema(name="Bob", age=30),
+])
+
+# Поиск по полям
+users = repo.find_by(name="Alice")
+users = repo.find_by(name="Alice", age=25)  # AND логика
+
+# Readonly поля (FieldMeta(readonly=True)) автоматически защищены от update
+```
+
+## SQLMeta — декларативные метаданные таблицы
+
+```python
+class OrderSchema(SchemaBase):
+    class SQLMeta:
+        table_name = "orders"              # Имя таблицы (по умолчанию: class_name + "s")
+        indexes = [("user_id",), ("status", "created_at")]  # Индексы
+        unique_together = [("order_number",)]                # UNIQUE constraints
+    ...
+```
+
 ## Структура модуля
 
 ```
@@ -158,17 +250,20 @@ sql_module/
 │   ├── sql_manager.py
 │   ├── engine_factory.py
 │   ├── base_repository.py
-│   └── unit_of_work.py
+│   ├── unit_of_work.py
+│   ├── ddl_builder.py           # DDLBuilder, auto DDL generation
+│   └── queryset.py              # QuerySet builder (Django-style)
 ├── adapters/
 │   ├── sync_adapter.py
 │   ├── async_adapter.py
 │   ├── schema_mapper.py
+│   ├── sql_meta.py              # SQLMeta descriptor, extract_sql_meta()
 │   ├── sqlite.py
 │   ├── postgresql.py
 │   └── mysql.py
 ├── commands/
 │   └── db_commands.py
-├── config/
+├── configs/
 │   └── sql_manager_config.py
 ├── export/
 │   ├── __init__.py

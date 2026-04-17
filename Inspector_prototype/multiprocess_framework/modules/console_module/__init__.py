@@ -23,6 +23,7 @@ from .interfaces import IConsoleManager, IPlatformConsole
 from .channels.console_log_channel import ConsoleLogChannel
 from .redirectors.console_redirector import ConsoleRedirector
 from .adapters.console_adapter import ConsoleAdapter
+from .commands import RegisterCommandHandler, SystemCommandHandler
 
 __all__ = [
     "ConsoleManager",
@@ -33,6 +34,8 @@ __all__ = [
     "ConsoleRedirector",
     "ConsoleAdapter",
     "ConsoleProcessConfig",
+    "RegisterCommandHandler",
+    "SystemCommandHandler",
 ]
 
 __version__ = "3.0.0"

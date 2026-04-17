@@ -6,6 +6,7 @@ __pycache__/
 # Environments
 .env
 .venv
+.venv_pytest
 env/
 venv/
 ENV/
@@ -21,6 +22,9 @@ venv.bak/
 .vscode/
 *.swp
 *.swo
+
+# Build artifacts
+*.egg-info/
 
 # Basket with old/unused files
 BASKET/

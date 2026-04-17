@@ -86,6 +86,122 @@ launcher.run()
 
 God Mode — просто `ConsoleConfig(enabled=True, interactive=True)`. Ввод → `CommandManager` → `RouterManager` → любой процесс.
 
+## Console Commands
+
+Встроенные консольные команды, доступные в God Mode:
+
+### Register Commands (`reg ...`)
+
+```
+reg list                         List all registered registers
+reg get <name>                   Show field values of a register
+reg set <name>.<field> <value>   Set field value and broadcast update
+reg info <name>                  Show field metadata (FieldMeta, FieldRouting)
+reg help                         Register commands help
+```
+
+**Пример использования:**
+
+```python
+# Список регистров
+>>> reg list
+Registers:
+  status_register                (5 fields)
+  config_register                (8 fields)
+
+# Значения полей
+>>> reg get status_register
+Register: status_register
+
+  Field                  Value
+  ─────────────────────  ──────────────────────
+  is_running             True
+  frame_count            1042
+  error_count            0
+  last_update            2026-04-12T10:30:15
+
+# Изменение поля (отправляет broadcast через RouterManager)
+>>> reg set status_register.is_running false
+OK: status_register.is_running = False
+
+# Метаинформация (тип, описание, маршрутизация)
+>>> reg info status_register
+Register info: status_register
+
+  is_running:
+    description: Process running state
+    type: <class 'bool'>
+    routing_channel: control_channel
+```
+
+### System Commands
+
+```
+help                             Show available commands and descriptions
+status                           Show current process state (name, pid, managers)
+ps                               List child processes and their state
+stats                            Show aggregated metrics from stats_manager
+```
+
+**Пример использования:**
+
+```python
+# Статус текущего процесса
+>>> status
+Process status:
+────────────────────────────────
+  name:     GodConsoleProcess
+  pid:      12345
+  managers: command_manager, router_manager, console_manager, stats_manager
+────────────────────────────────
+
+# Список дочерних процессов
+>>> ps
+Child processes:
+────────────────────────────────
+  [1] WorkerProcess-A         pid=12346  state=RUNNING
+  [2] WorkerProcess-B         pid=12347  state=RUNNING
+  [3] DataProcess             pid=12348  state=IDLE
+────────────────────────────────
+Total: 3 process(es)
+
+# Агрегированная статистика
+>>> stats
+Statistics:
+────────────────────────────────
+  messages_processed           [counter] total=5042
+  frame_rate                   [gauge] value=29.8
+  command_execution_time       [timing] avg=0.042  count=412
+────────────────────────────────
+```
+
+### God Mode Integration
+
+Команды регистрируются в `CommandManager` через `ConsoleAdapter.setup()`:
+
+```python
+from console_module import ConsoleProcessConfig
+from process_module import process
+
+# Создаём God Mode консоль
+god_config = ConsoleProcessConfig(
+    enabled=True,
+    interactive=True,
+    redirect_stdout=False,
+)
+
+launcher = SystemLauncher()
+launcher.add_process(*process(god_config))  # интерактивная консоль
+launcher.add_process(*process(WorkerConfig()))  # рабочий процесс
+launcher.run()
+```
+
+В этом режиме пользователь может в реальном времени:
+- Смотреть статус процессов (`status`, `ps`)
+- Получать метрики (`stats`)
+- Проверять и изменять значения регистров (`reg list`, `reg set`)
+- Управлять системой через маршрутизацию сообщений
+
 ## Структура модуля
 
 ```
@@ -94,6 +210,7 @@ console_module/
   interfaces.py                  # IConsoleManager, IPlatformConsole
   STATUS.md
   README.md
+  DECISIONS.md                   # Архитектурные решения (ADR)
   core/
     console_manager.py           # ConsoleManager (BaseManager + ObservableMixin)
   config/
@@ -105,6 +222,10 @@ console_module/
     console_redirector.py        # ConsoleRedirector
   adapters/
     console_adapter.py           # ConsoleAdapter(BaseAdapter)
+  commands/
+    __init__.py                  # Публичный API команд
+    register_commands.py         # RegisterCommandHandler (reg list/get/set/info)
+    system_commands.py           # SystemCommandHandler (help/status/ps/stats)
   platforms/
     __init__.py                  # create_platform_console() фабрика
     base.py                      # re-export IPlatformConsole
@@ -180,6 +301,10 @@ python -m pytest Inspector_prototype/multiprocess_framework/modules/console_modu
 ```
 
 **Зависимости для тестов:** `pydantic`, `PyYAML`, `pytest` (см. `requirements.txt` в корне проекта).
+
+## Архитектурные решения (ADR)
+
+Ключевые решения по дизайну console_module задокументированы в [`DECISIONS.md`](./DECISIONS.md).
 
 ## Примечания
 

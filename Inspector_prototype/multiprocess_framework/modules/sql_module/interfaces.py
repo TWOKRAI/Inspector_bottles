@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
-from typing import Any, Dict, List, Optional, Protocol, Type, TypeVar, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Type, TypeVar, runtime_checkable
 
 try:
     from pydantic import BaseModel
@@ -99,6 +99,15 @@ class IRepository(Protocol[T, ID]):
     def delete(self, id: ID) -> bool:
         """Удалить сущность по ID. True если удалено."""
 
+    def insert_many(self, entities: List[T]) -> List[T]:
+        """Вставить список сущностей. Возвращает список вставленных."""
+
+    def update_many(self, updates: List[Tuple[Any, T]]) -> int:
+        """Обновить список сущностей. Возвращает количество обновлённых."""
+
+    def find_by(self, **kwargs: Any) -> List[T]:
+        """Найти сущности по условиям (AND). Без аргументов — все записи."""
+
 
 # =============================================================================
 # IUnitOfWork — транзакции spanning multiple tables
@@ -162,28 +171,6 @@ class ISchemaMapper(Protocol):
 
 
 # =============================================================================
-# IMetricsCollector — observability (legacy)
-# =============================================================================
-
-
-@runtime_checkable
-class IMetricsCollector(Protocol):
-    """Опциональный сборщик метрик для SQL-операций.
-
-    Предпочтительно: statistics_module через ObservableMixin (managers={'stats': stats_manager}).
-    SQLManager вызывает _record_timing для db.query.duration, db.execute.duration.
-    """
-
-    def record_query_time(self, sql: str, duration_ms: float) -> None:
-        """Записать время выполнения запроса."""
-
-    def record_pool_stats(
-        self, checkedin: int, checkedout: int, overflow: int = 0
-    ) -> None:
-        """Записать статистику пула соединений."""
-
-
-# =============================================================================
 # ISQLManager — контракт менеджера
 # =============================================================================
 
@@ -217,3 +204,10 @@ class ISQLManager(Protocol):
 
     def execute_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Обработать команду от CommandManager. Dict at Boundary."""
+
+    def create_tables(self, schema_classes: list, dialect: Optional[str] = None) -> int:
+        """Автоматически создать таблицы из списка SchemaBase-классов.
+        Возвращает количество выполненных DDL-операторов."""
+
+    def objects(self, schema_class: type) -> Any:
+        """Получить QuerySet для Django-style chained queries."""

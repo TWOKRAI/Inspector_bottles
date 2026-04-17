@@ -717,7 +717,6 @@ run_process_function(class_path, name, stop_event, bundle)  [Top-level, pickle-s
     │
     ├─ class_loader._load_process_class()     Динамическая загрузка класса
     ├─ bundle_builder._build_shared_resources_from_bundle()  SRM из dict
-    ├─ console_redirect._setup_console_redirect()  stdout/stderr → queue
     ├─ _attach_stop_event_to_process_data()   stop_event → custom
     ├─ ProcessClass(name, shared_resources, config)
     ├─ process.initialize()
@@ -788,7 +787,52 @@ StatsManager (ChannelRoutingManager)
 - `_metric_key` дупликация — намеренная изоляция слоёв.
 
 📖 [`modules/statistics_module/README.md`](modules/statistics_module/README.md) · [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md)
-### 6.16 `sql_module` — *TODO (после модуля #16)*
+
+### 6.16 `sql_module` — универсальный SQL-инструментарий
+
+**Роль:** Управление БД с опорой на SchemaBase: DDL-генерация, QuerySet-запросы (Django-style), типизированные репозитории, Unit of Work, экспорт данных, команды. Dict at Boundary для IPC.
+
+**`SQLManager`** (BaseManager, ObservableMixin) — точка входа: `execute()`, `query()`, `create_tables()`, `objects()` (QuerySet), `get_repository()`, `uow()` / `uow_async()`, `execute_command()`. Ленивое создание async-адаптера при первом вызове.
+
+```
+SQLManager (BaseManager + ObservableMixin)
+    ├── _adapter (ISyncEngineAdapter)           — синхронный (SQLite/PostgreSQL/MySQL)
+    ├── _async_adapter (IAsyncEngineAdapter)    — асинхронный (ленивое создание)
+    ├── _schema_mapper (ISchemaMapper)          — SchemaBase → SQL metadata
+    ├── _repositories (Dict[Type, GenericRepository])
+    ├── execute(sql, params) → int              — DML (INSERT/UPDATE/DELETE)
+    ├── query(sql, params) → List[Dict]         — SELECT (Dict at Boundary)
+    ├── create_tables(schema_classes, dialect)  — DDL из SchemaBase
+    ├── objects(schema_class) → QuerySet        — Django-style builder
+    ├── get_repository(schema_class) → IRepository  — типизированный CRUD
+    ├── uow() → IUnitOfWork                     — транзакции (sync)
+    ├── uow_async() → IAsyncUnitOfWork          — транзакции (async)
+    └── execute_command(cmd: Dict) → Dict       — Dict at Boundary (БУД)
+```
+
+**Компоненты:**
+
+- **`DDLBuilder`** — генерация CREATE TABLE, INDEX из `schema_to_table_meta()` + FieldMeta + SQLMeta для SQLite/PostgreSQL/MySQL.
+- **`QuerySet[T]`** — Django-style immutable builder: `filter()`, `exclude()`, `order_by()`, `limit()` → parameterized SQL. Каждый вызов — новый QuerySet.
+- **`GenericRepository[T, ID]`** — типизированный CRUD (find_by_id, insert, update, delete, bulk ops). Readonly-защита для конкретных полей.
+- **`SchemaBaseMapper`** (ISchemaMapper) — маппинг SchemaBase ↔ SQL: FieldMeta → CHECK/VARCHAR/DEFAULT, entity_to_row/row_to_entity через model_dump/model_validate.
+- **`SQLMeta`** — декларативный ClassVar (table_name, indexes, unique_together). Pydantic игнорирует — чисто для SQL.
+- **Адаптеры:** ISyncEngineAdapter / IAsyncEngineAdapter (Strategy pattern, фабрика `create_sync/async_adapter()`).
+- **`UnitOfWork` / `AsyncUnitOfWork`** — контекстные менеджеры для транзакций.
+- **`TableExporter`** — экспорт List[Dict] в TXT (readable/table), CSV, XLSX.
+- **Typed commands:** `DBQueryCommand`, `DBExecuteCommand`, `DBInsertCommand` (Pydantic на границе).
+
+**Ключевые решения (ADR-SQL-001…011):**
+
+- Dict at Boundary: `execute()`, `query()`, `execute_command()` работают с dict. SchemaBase только внутри процесса.
+- QuerySet — immutable builder, никаких побочных эффектов кэширования.
+- Адаптеры — Strategy: sync и async разделены, фабрика выбирает по конфигу.
+- Fork-safety: NullPool когда `INSPECTOR_MULTIPROCESS=1` или `config.fork_safe=True`.
+
+**Зависимости:** `#1` base_manager, `#2` data_schema_module (SchemaBase, FieldMeta).
+
+📖 [`modules/sql_module/README.md`](modules/sql_module/README.md) · [`modules/sql_module/DECISIONS.md`](modules/sql_module/DECISIONS.md)
+
 ### 6.17 `registers_module`
 
 **Роль:** runtime вокруг именованных регистров (экземпляры прикладных схем): **pub/sub**, **`set_field_value`** с fan-out **`register_update`**, **`build_routing_map`** / **`send_register_message`**, **`build_connection_map_from_registers`**.
@@ -804,7 +848,85 @@ RegistersManager
 ```
 
 📖 [`modules/registers_module/README.md`](modules/registers_module/README.md) · [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md)
-### 6.18 `console_module` — *TODO (после модуля #18, milestone M2)*
+### 6.18 `console_module` — терминальные окна и интерактивный ввод
+
+**Роль:** Менеджер терминальных окон процесса с тремя уровнями использования: **Passive** (enabled=True — показ окна), **Active** (команды в runtime через CommandManager), **God Mode** (interactive=True — stdin → CommandManager → RouterManager). Не логирует, не парсит команды, не маршрутизирует — предоставляет только терминальный I/O.
+
+**`ConsoleManager`** (`BaseManager`, `ObservableMixin`, `IConsoleManager`) — управление основным терминалом и дополнительными окнами, input loop в daemon-потоке, опциональный redirect stdout/stderr через `ConsoleRedirector`.
+
+```
+ConsoleManager (BaseManager + ObservableMixin)
+    ├── _platform (IPlatformConsole)       — основной терминал (фабрика create_platform_console)
+    ├── _consoles (Dict[str, IPlatformConsole]) — дополнительные терминалы
+    ├── _input_thread (daemon)             — чтение stdin → callback
+    ├── _redirector (ConsoleRedirector)    — перехват sys.stdout / sys.stderr
+    ├── show() / hide() / write()          — I/O основного терминала
+    ├── create_console(name) / close_console(name) / list_consoles()
+    ├── enable_input(callback) / disable_input()
+    └── setup_redirect(enabled)            — redirect on/off
+```
+
+**`ConsoleAdapter`** (`BaseAdapter`) — связывает ConsoleManager с остальными менеджерами процесса. `setup()`:
+
+1. Если `enabled` → регистрирует `ConsoleLogChannel` в `LoggerManager`.
+2. Если `interactive` → запускает input loop; raw-строка парсится в `{command, args}` и передаётся в `CommandManager.handle_command()`.
+3. Регистрирует встроенные команды (`reg`) в `CommandManager`.
+
+**`ConsoleLogChannel`** (`IChannel`) — канал лога: сообщения из `LoggerManager` перенаправляются в `ConsoleManager.write()`.
+
+**`ConsoleRedirector`** — перехватывает `sys.stdout` / `sys.stderr`; прямой вызов `ConsoleManager.write()` без очередей (ADR-CM-007). `restore()` возвращает оригинальные дескрипторы.
+
+**Конфиг:**
+
+```
+ConsoleConfig (SchemaBase)
+    enabled          bool = False  — показать терминал при инициализации
+    interactive      bool = False  — включить stdin → CommandManager
+    title            str  = ""     — заголовок окна (fallback: имя процесса)
+    redirect_stdout  bool = False  — перехватить sys.stdout / sys.stderr
+```
+
+**Платформы:**
+
+```
+IPlatformConsole (ABC)
+    └── WindowsConsole   — SetConsoleTitle, AllocConsole, ShowWindow (Win32 API)
+    └── UnixConsole      — ANSI-вывод, sys.stdin (POSIX)
+    create_platform_console() → WindowsConsole | UnixConsole  (фабрика по sys.platform)
+```
+
+**God Mode — `ConsoleProcessConfig`** (`ProcessLaunchConfig`) — standalone консольный процесс. `managers` предустановлен с `ConsoleConfig(enabled=True, interactive=True, title="Console — God Mode")`. Запуск: `launcher.add_process(*process(ConsoleProcessConfig()))`.
+
+**Команды — `RegisterCommandHandler`:**
+
+| Команда | Действие |
+|---------|----------|
+| `reg list` | Список зарегистрированных регистров |
+| `reg get <name>` | Значения всех полей регистра |
+| `reg set <name>.<field> <value>` | Установить поле + broadcast через RouterManager |
+| `reg info <name>` | Метаинформация (FieldMeta, FieldRouting) |
+| `reg help` | Справка |
+
+**Команды — `SystemCommandHandler`:**
+
+| Команда | Действие |
+|---------|----------|
+| `help` | Список всех зарегистрированных команд |
+| `status` | Имя процесса, PID, активные менеджеры |
+| `ps` | Дочерние процессы через `process_manager` |
+| `stats` | Метрики через `stats_manager.get_all_metrics()` |
+
+Ключевые решения (ADR-CM-001…007):
+
+- Три уровня — один `ConsoleManager`, не три класса (ADR-CM-001).
+- God Mode — конфигурация (`ConsoleProcessConfig`), не отдельный класс (ADR-CM-002).
+- `ConsoleLogChannel` живёт в `console_module`, не в `logger_module` (ADR-CM-003).
+- `IPlatformConsole` изолирует платформенную логику; фабрика выбирает реализацию (ADR-CM-004).
+- `ConsoleProcessConfig` наследует `ProcessLaunchConfig` (ADR-CM-005).
+- `RegisterCommandHandler` в `console_module` (ADR-CM-006).
+- `ConsoleRedirector` — прямой вызов без Queue (ADR-CM-007).
+
+📖 [`modules/console_module/README.md`](modules/console_module/README.md) · [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md)
 
 ---
 

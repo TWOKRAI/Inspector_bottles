@@ -40,7 +40,11 @@ class ConsoleRedirector:
             if isinstance(data, bytes):
                 data = data.decode("utf-8", errors="replace")
             self._console.write(data, level="STDOUT")
-        except Exception:
+        except Exception as e:
+            try:
+                self._original_stderr.write(f"ConsoleRedirector error: {e}\n")
+            except Exception:
+                pass
             self._closed = True
 
     def flush(self) -> None:

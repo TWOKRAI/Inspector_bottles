@@ -6,7 +6,7 @@ GenericRepository — CRUD репозиторий по схеме.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
 
 from sql_module.interfaces import ISchemaMapper, ISyncEngineAdapter
 
@@ -15,7 +15,7 @@ ID = TypeVar("ID", int, str)
 
 
 class GenericRepository:
-    """Generic репозиторий: find_by_id, insert, update, delete."""
+    """Generic репозиторий: find_by_id, insert, update, delete, insert_many, update_many, find_by."""
 
     def __init__(
         self,
@@ -29,10 +29,15 @@ class GenericRepository:
         self._schema_class = schema_class
         self._mapper = schema_mapper or _default_mapper()
         meta = self._mapper.schema_to_table_meta(schema_class)
+        self._meta = meta
         self._table_name = table_name or meta.get("table_name", schema_class.__name__.lower())
         self._id_column = id_column
         if meta.get("primary_key"):
             self._id_column = meta["primary_key"][0]
+        self._readonly_fields = {
+            name for name, col in self._meta.get("columns", {}).items()
+            if col.get("readonly")
+        }
 
     def find_by_id(self, id: ID) -> Optional[T]:
         """Найти сущность по ID."""
@@ -52,14 +57,18 @@ class GenericRepository:
         return self._schema_class.model_validate(row)
 
     def update(self, id: ID, entity: T) -> T:
-        """Обновить сущность по ID."""
+        """Обновить сущность по ID. Readonly поля пропускаются."""
         row = self._mapper.entity_to_row(entity)
-        set_clause = ", ".join(f'"{k}" = :{k}' for k in row.keys() if k != self._id_column)
-        sql = f'UPDATE "{self._table_name}" SET {set_clause} WHERE "{self._id_column}" = :id'
-        params = {k: v for k, v in row.items() if k != self._id_column}
+        pk_name = self._id_column
+        row = {k: v for k, v in row.items() if k not in self._readonly_fields}
+        if not row or (len(row) == 1 and pk_name in row):
+            raise ValueError("All non-key fields are readonly, cannot update")
+        set_clause = ", ".join(f'"{k}" = :{k}' for k in row.keys() if k != pk_name)
+        sql = f'UPDATE "{self._table_name}" SET {set_clause} WHERE "{pk_name}" = :id'
+        params = {k: v for k, v in row.items() if k != pk_name}
         params["id"] = id
         self._adapter.execute(sql, params)
-        row[self._id_column] = id
+        row[pk_name] = id
         return self._schema_class.model_validate(row)
 
     def delete(self, id: ID) -> bool:
@@ -67,6 +76,49 @@ class GenericRepository:
         sql = f'DELETE FROM "{self._table_name}" WHERE "{self._id_column}" = :id'
         count = self._adapter.execute(sql, {"id": id})
         return count > 0
+
+    def insert_many(self, entities: List[T]) -> List[T]:
+        """Вставить список сущностей (batch). Возвращает список вставленных."""
+        if not entities:
+            return []
+        rows = [self._mapper.entity_to_row(e) for e in entities]
+        cols = list(rows[0].keys())
+        col_sql = ", ".join(f'"{c}"' for c in cols)
+        results = []
+        for i, row in enumerate(rows):
+            params = {f"_{c}_{i}": row[c] for c in cols}
+            placeholders = ", ".join(f":_{c}_{i}" for c in cols)
+            sql = f'INSERT INTO "{self._table_name}" ({col_sql}) VALUES ({placeholders})'
+            self._adapter.execute(sql, params)
+            results.append(self._schema_class.model_validate(row))
+        return results
+
+    def update_many(self, updates: List[Tuple[Any, T]]) -> int:
+        """Обновить список сущностей. updates — список (id, entity).
+        Возвращает количество обновлённых записей."""
+        count = 0
+        for id_val, entity in updates:
+            self.update(id_val, entity)
+            count += 1
+        return count
+
+    def find_by(self, **kwargs: Any) -> List[T]:
+        """Найти сущности по произвольным условиям (AND). Без аргументов — все записи."""
+        if not kwargs:
+            sql = f'SELECT * FROM "{self._table_name}"'
+            rows = self._adapter.query(sql)
+            return [self._mapper.row_to_entity(r, self._schema_class) for r in rows]
+
+        conditions = []
+        params: Dict[str, Any] = {}
+        for i, (col, val) in enumerate(kwargs.items()):
+            param_name = f"_fb{i}"
+            conditions.append(f'"{col}" = :{param_name}')
+            params[param_name] = val
+
+        sql = f'SELECT * FROM "{self._table_name}" WHERE {" AND ".join(conditions)}'
+        rows = self._adapter.query(sql, params)
+        return [self._mapper.row_to_entity(r, self._schema_class) for r in rows]
 
 
 def _default_mapper() -> ISchemaMapper:
