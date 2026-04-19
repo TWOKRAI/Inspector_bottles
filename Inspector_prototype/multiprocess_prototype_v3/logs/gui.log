@@ -48,3 +48,8 @@
 2026-04-17 15:02:16,201 [INFO] gui: GuiProcess ready
 2026-04-17 15:02:16,201 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
 2026-04-17 15:02:16,201 [INFO] gui: Process 'gui' initialized successfully
+2026-04-19 16:11:46,581 [INFO] gui: Process state registered: gui
+2026-04-19 16:11:46,581 [INFO] gui: GuiProcess initializing...
+2026-04-19 16:11:46,581 [INFO] gui: GuiProcess ready
+2026-04-19 16:11:46,581 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-19 16:11:46,581 [INFO] gui: Process 'gui' initialized successfully

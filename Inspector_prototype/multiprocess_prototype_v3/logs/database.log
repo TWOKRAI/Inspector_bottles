@@ -146,3 +146,7 @@ ModuleNotFoundError: No module named 'multiprocess_prototype_v3.services.databas
 2026-04-17 15:02:16,238 [INFO] database: DatabaseProcess ready
 2026-04-17 15:02:16,238 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
 2026-04-17 15:02:16,238 [INFO] database: Process 'database' initialized successfully
+2026-04-19 16:11:45,922 [INFO] database: Process state registered: database
+2026-04-19 16:11:45,923 [INFO] database: DatabaseProcess ready
+2026-04-19 16:11:45,923 [INFO] database: Registered 9 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'db.query', 'db.execute', 'db.insert', 'db.save_detections']
+2026-04-19 16:11:45,923 [INFO] database: Process 'database' initialized successfully

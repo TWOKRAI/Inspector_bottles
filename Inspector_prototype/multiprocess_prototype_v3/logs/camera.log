@@ -64,3 +64,13 @@
 2026-04-17 15:02:15,376 [INFO] camera: UnifiedCameraProcess ready, camera_type=simulator
 2026-04-17 15:02:15,376 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
 2026-04-17 15:02:15,376 [INFO] camera: Process 'camera' initialized successfully
+2026-04-19 16:08:15,453 [INFO] camera: Process state registered: camera
+2026-04-19 16:08:15,453 [INFO] camera: UnifiedCameraProcess initializing...
+2026-04-19 16:08:18,526 [INFO] camera: UnifiedCameraProcess ready, camera_type=webcam
+2026-04-19 16:08:18,462 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-19 16:08:18,462 [INFO] camera: Process 'camera' initialized successfully
+2026-04-19 16:11:42,345 [INFO] camera: Process state registered: camera
+2026-04-19 16:11:42,345 [INFO] camera: UnifiedCameraProcess initializing...
+2026-04-19 16:11:44,925 [INFO] camera: UnifiedCameraProcess ready, camera_type=webcam
+2026-04-19 16:11:44,354 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-19 16:11:44,354 [INFO] camera: Process 'camera' initialized successfully

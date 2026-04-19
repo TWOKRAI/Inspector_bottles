@@ -14,7 +14,7 @@ dependencies = [
 
     # GUI
     "PyQt5>=5.15,<5.16",
-    "PyQt5-Qt5==5.15.2",
+    "PyQt5-Qt5>=5.15.2",
     "QDarkStyle>=3.2",
 
     # Vision / image
@@ -28,8 +28,8 @@ dependencies = [
     "seaborn>=0.13",
     "openpyxl>=3.1",
 
-    # Camera (GigE Vision)
-    "harvesters>=1.4",
+    # Camera (GigE Vision) — нет ARM-колёс genicam, пропускаем на macOS ARM
+    "harvesters>=1.4; sys_platform != 'darwin' or platform_machine != 'arm64'",
 
     # Network / utils
     "requests>=2.28",
@@ -37,9 +37,6 @@ dependencies = [
 
     # Simulation
     "pygame>=2.6",
-
-    # Vector DB
-    "pymilvus>=2.4",
 ]
 
 [dependency-groups]

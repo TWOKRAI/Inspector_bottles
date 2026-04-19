@@ -64,3 +64,13 @@
 2026-04-17 15:02:15,627 [INFO] processor: ProcessorProcess ready
 2026-04-17 15:02:15,627 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
 2026-04-17 15:02:15,627 [INFO] processor: Process 'processor' initialized successfully
+2026-04-19 16:08:15,965 [INFO] processor: Process state registered: processor
+2026-04-19 16:08:15,965 [INFO] processor: ProcessorProcess initializing...
+2026-04-19 16:08:15,965 [INFO] processor: ProcessorProcess ready
+2026-04-19 16:08:15,965 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-04-19 16:08:15,965 [INFO] processor: Process 'processor' initialized successfully
+2026-04-19 16:11:42,529 [INFO] processor: Process state registered: processor
+2026-04-19 16:11:42,529 [INFO] processor: ProcessorProcess initializing...
+2026-04-19 16:11:42,529 [INFO] processor: ProcessorProcess ready
+2026-04-19 16:11:42,529 [INFO] processor: Registered 8 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_color_range', 'set_min_area', 'set_max_area']
+2026-04-19 16:11:42,530 [INFO] processor: Process 'processor' initialized successfully
