@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ManagersConfig — корневая SchemaBase-сборка секций proc_dict['managers'].
 
@@ -11,7 +10,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import Field
 
@@ -87,7 +86,7 @@ class ManagersConfig(SchemaBase):
     command: CommandManagerConfig = Field(default_factory=_default_command)
     console: ConsoleConfig = Field(default_factory=_default_console)
 
-    def managers_for_proc_dict(self) -> Dict[str, Any]:
+    def managers_for_proc_dict(self) -> dict[str, Any]:
         """Секции proc_dict['managers'] без log_dir (Dict at Boundary)."""
         return managers_payload_for_proc(self)
 
@@ -95,13 +94,13 @@ class ManagersConfig(SchemaBase):
     def from_log_dir(
         cls: type[TManagersConfig],
         log_dir: str,
-        log_level: Optional[str] = None,
+        log_level: str | None = None,
     ) -> TManagersConfig:
         """Собрать конфиг: дефолты LoggerManagerConfig + log_directory и уровень BUSINESS = log_level."""
         return managers_from_log_dir(log_dir, log_level, model_cls=cls)
 
 
-def managers_payload_for_proc(cfg: ManagersConfig) -> Dict[str, Any]:
+def managers_payload_for_proc(cfg: ManagersConfig) -> dict[str, Any]:
     """Секции ``proc_dict['managers']`` без ``log_dir`` (Dict at Boundary)."""
     d = cfg.model_dump()
     d.pop("log_dir", None)
@@ -110,7 +109,7 @@ def managers_payload_for_proc(cfg: ManagersConfig) -> Dict[str, Any]:
 
 def managers_from_log_dir(
     log_dir: str,
-    log_level: Optional[str] = None,
+    log_level: str | None = None,
     *,
     model_cls: type[TManagersConfig] = ManagersConfig,
 ) -> TManagersConfig:
@@ -151,3 +150,25 @@ def managers_from_log_dir(
         command=_default_command(),
         console=_default_console(),
     )
+
+
+def merge_managers(
+    base: dict[str, Any],
+    overlay: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Deep merge managers config: overlay overwrites base keys recursively."""
+    import copy
+
+    if not overlay:
+        return copy.deepcopy(base)
+
+    def _deep(a: dict, b: dict) -> dict:
+        out = copy.deepcopy(a)
+        for k, v in b.items():
+            if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+                out[k] = _deep(out[k], v)
+            else:
+                out[k] = copy.deepcopy(v)
+        return out
+
+    return _deep(base, overlay)

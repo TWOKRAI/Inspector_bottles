@@ -14,22 +14,22 @@ ProcessModule и фабрики managers подгружаются лениво (
 
 from typing import Any
 
+# Адаптеры
+from .adapters import ProcessAdapter, SchemaAdapter
+
 # Публичные контракты
-from .interfaces import IProcessModule, ISharedResources, IProcessCommunication
+from .interfaces import IProcessCommunication, IProcessModule, ISharedResources
 
 # Типы
 from .types import (
-    ProcessPriorityLevel,
-    ProcessStatus,
     ManagerType,
-    QueueType,
     ProcessConfigDict,
-    ProcessStatsDict,
     ProcessMetadataDict,
+    ProcessPriorityLevel,
+    ProcessStatsDict,
+    ProcessStatus,
+    QueueType,
 )
-
-# Адаптеры
-from .adapters import ProcessAdapter, SchemaAdapter
 
 
 def __getattr__(name: str) -> Any:
@@ -49,6 +49,22 @@ def __getattr__(name: str) -> Any:
         from .configs.managers_config import managers_payload_for_proc
 
         return managers_payload_for_proc
+    if name == "ProcessLaunchConfig":
+        from .configs.process_launch_config import ProcessLaunchConfig
+
+        return ProcessLaunchConfig
+    if name == "class_path_from_type":
+        from .configs.process_launch_config import class_path_from_type
+
+        return class_path_from_type
+    if name == "DEFAULT_QUEUES":
+        from .configs.process_launch_config import DEFAULT_QUEUES
+
+        return DEFAULT_QUEUES
+    if name == "merge_managers":
+        from .configs.managers_config import merge_managers
+
+        return merge_managers
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -58,12 +74,10 @@ __all__ = [
     "ManagersConfig",
     "managers_from_log_dir",
     "managers_payload_for_proc",
-
     # Интерфейсы
     "IProcessModule",
     "ISharedResources",
     "IProcessCommunication",
-
     # Типы
     "ProcessPriorityLevel",
     "ProcessStatus",
@@ -72,8 +86,12 @@ __all__ = [
     "ProcessConfigDict",
     "ProcessStatsDict",
     "ProcessMetadataDict",
-
     # Адаптеры
     "ProcessAdapter",
     "SchemaAdapter",
+    # Launch config
+    "ProcessLaunchConfig",
+    "class_path_from_type",
+    "DEFAULT_QUEUES",
+    "merge_managers",
 ]
