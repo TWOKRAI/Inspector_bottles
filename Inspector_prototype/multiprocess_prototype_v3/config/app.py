@@ -5,12 +5,12 @@ from __future__ import annotations
 from multiprocess_framework.modules.data_schema_module import SchemaBase
 from multiprocess_framework.modules.process_module import ProcessLaunchConfig
 
-from multiprocess_prototype_v3.services.camera.config import CameraConfig
-from multiprocess_prototype_v3.services.database.config import DatabaseConfig
-from multiprocess_prototype_v3.services.gui.config import GuiConfig
-from multiprocess_prototype_v3.services.processor.config import ProcessorConfig
-from multiprocess_prototype_v3.services.renderer.config import RendererConfig
-from multiprocess_prototype_v3.services.robot.config import RobotConfig
+from multiprocess_prototype_v3.backend.processes.camera.config import CameraConfig
+from multiprocess_prototype_v3.backend.processes.database.config import DatabaseConfig
+from multiprocess_prototype_v3.backend.processes.gui.config import GuiConfig
+from multiprocess_prototype_v3.backend.processes.processor.config import ProcessorConfig
+from multiprocess_prototype_v3.backend.processes.renderer.config import RendererConfig
+from multiprocess_prototype_v3.backend.processes.robot.config import RobotConfig
 
 from .logging import LoggingConfig
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 from multiprocess_prototype_v3.services.robot.service import RobotService
 
@@ -73,10 +73,11 @@ class RobotProcess(ProcessModule):
 
 
 class _RobotAdapter:
-    """Реализует RobotOutputPort через ProcessModule."""
+    """Реализует RobotOutputPort: запись в log-файл + логи через ProcessIO."""
 
     def __init__(self, process: RobotProcess) -> None:
-        self._p = process
+        self._p = process  # нужен для get_config (log_file path)
+        self._io = ProcessIO(process)
         self._log_file = None
 
     def _get_log_file(self) -> str:
@@ -85,17 +86,15 @@ class _RobotAdapter:
         return self._log_file
 
     def write_log(self, text: str) -> None:
-        """Записать лог в файл."""
+        """Записать action-лог в файл на диске (не IPC)."""
         try:
             with open(self._get_log_file(), "a") as f:
                 f.write(text)
         except Exception as e:
-            self._p._log_error(f"Failed to write robot log: {e}")
+            self._io.log_error(f"Failed to write robot log: {e}")
 
     def log_info(self, text: str) -> None:
-        """Логирование через ProcessModule."""
-        self._p._log_info(text)
+        self._io.log_info(text)
 
     def log_error(self, text: str) -> None:
-        """Логирование ошибки через ProcessModule."""
-        self._p._log_error(text)
+        self._io.log_error(text)

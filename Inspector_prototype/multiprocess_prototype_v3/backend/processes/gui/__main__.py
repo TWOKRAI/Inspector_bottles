@@ -1,9 +1,9 @@
-"""Standalone: python -m multiprocess_prototype_v3.services.gui"""
+"""Standalone: python -m multiprocess_prototype_v3.backend.processes.gui"""
 
 import sys
 from pathlib import Path
 
-_root = Path(__file__).resolve().parent.parent.parent.parent  # Inspector_prototype
+_root = Path(__file__).resolve().parent.parent.parent.parent.parent  # Inspector_prototype
 _modules = _root / "multiprocess_framework" / "modules"
 for _p in (_root, _modules):
     if str(_p) not in sys.path:
@@ -11,7 +11,7 @@ for _p in (_root, _modules):
 
 from multiprocess_framework.modules.data_schema_module import process
 from multiprocess_framework.modules.process_manager_module import SystemLauncher
-from multiprocess_prototype_v3.services.gui.config import GuiConfig
+from multiprocess_prototype_v3.backend.processes.gui.config import GuiConfig
 
 if __name__ == "__main__":
     launcher = SystemLauncher(stop_timeout=3.0)

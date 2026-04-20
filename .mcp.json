@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "qex": {
+      "type": "stdio",
+      "command": "qex-mcp-v2",
+      "args": [],
+      "env": {
+        "QDRANT_URL": "http://localhost:6333",
+        "QDRANT_COLLECTION_NAME": "inspector_bottles",
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "EMBEDDING_MODEL": "qwen3-embedding:4b",
+        "QEX_EMBEDDING_PROVIDER": "ollama",
+        "QEX_OLLAMA_DIMENSIONS": "2560"
+      }
+    }
+  }
+}

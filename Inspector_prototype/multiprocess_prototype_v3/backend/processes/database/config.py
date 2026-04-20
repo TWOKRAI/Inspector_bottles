@@ -8,7 +8,7 @@ from multiprocess_framework.modules.data_schema_module import register_schema
 from multiprocess_framework.modules.process_module import ProcessLaunchConfig
 from pydantic import Field
 
-_SERVICE_ROOT = Path(__file__).resolve().parent.parent.parent
+_SERVICE_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 @register_schema("DatabaseConfigV3")

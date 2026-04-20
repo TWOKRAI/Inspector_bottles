@@ -4,8 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-from multiprocess_framework.modules.message_module import MessageAdapter
-from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 from multiprocess_prototype_v3.registers import PROCESSOR_REGISTER
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
@@ -40,10 +39,7 @@ class ProcessorProcess(ProcessModule):
             target_height=app_cfg.get("resolution_height", 480),
         )
 
-        # Регистрация команд — делегация в сервис
-        self.command_manager.register_command("set_color_range", self._cmd_set_color_range)
-        self.command_manager.register_command("set_min_area", self._cmd_set_min_area)
-        self.command_manager.register_command("set_max_area", self._cmd_set_max_area)
+        self._register_commands()
 
         # Воркер
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
@@ -51,6 +47,16 @@ class ProcessorProcess(ProcessModule):
             "processing_worker", self._processing_worker, cfg, auto_start=True
         )
         self._log_info("ProcessorProcess ready")
+
+    def _register_commands(self) -> None:
+        """Регистрация IPC-команд.
+
+        Обёртки — адаптеры формата: dict из IPC → позиционные аргументы
+        сервиса, число из сервиса → status-dict ответа.
+        """
+        self.command_manager.register_command("set_color_range", self._cmd_set_color_range)
+        self.command_manager.register_command("set_min_area", self._cmd_set_min_area)
+        self.command_manager.register_command("set_max_area", self._cmd_set_max_area)
 
     def _build_register_handlers(self) -> dict:
         """Маппинг register полей на команды сервиса."""
@@ -116,39 +122,28 @@ class ProcessorProcess(ProcessModule):
 
 
 class _ProcessorAdapter:
-    """Реализует ProcessorOutputPort через ProcessModule IPC."""
+    """Реализует ProcessorOutputPort через ProcessIO (IPC + SHM facade)."""
 
     def __init__(self, process: ProcessorProcess) -> None:
-        self._p = process
-        self._msg = MessageAdapter(sender=process.name)
+        self._io = ProcessIO(process)
+        self._p = process  # нужен для write_mask_to_shm (tuple-формат из frame_io)
 
     def send_detection_to_renderer(self, result_data: dict) -> None:
-        """Отправить результат детекции рендереру через IPC."""
-        msg = self._msg.data(
-            targets=["renderer"], data_type="detection_result", data=result_data
-        )
-        self._p.send_message("renderer", msg.to_dict())
+        self._io.send_data("renderer", "detection_result", result_data)
 
     def send_detections_to_database(self, rows: list[dict]) -> None:
-        """Отправить детекции в БД через IPC command."""
-        msg = self._msg.command(
-            targets=["database"],
-            command="db.save_detections",
-            args={"detections": rows},
-            data={},
+        self._io.send_command(
+            "database", "db.save_detections", args={"detections": rows}
         )
-        self._p.send_message("database", msg.to_dict())
 
     def send_feedback_to_camera(self, frame_id: int, processing_time: float) -> None:
-        """Отправить feedback камере через IPC event."""
-        feedback = self._msg.event(
-            event_type="frame_processed",
-            targets=["camera"],
-            event_data={"frame_id": frame_id, "processing_time": processing_time},
+        self._io.send_event(
+            "camera",
+            "frame_processed",
+            {"frame_id": frame_id, "processing_time": processing_time},
         )
-        self._p.send_message("camera", feedback.to_dict())
 
     def write_mask_to_shm(self, mask) -> tuple[Optional[str], int]:
-        """Записать маску в SHM."""
+        """Записать маску в SHM. Возвращает tuple (name, index) — legacy-формат."""
         from multiprocess_prototype_v3.shared.frame_io import write_frame_to_shm
         return write_frame_to_shm(self._p.memory_manager, self._p.name, "processor_mask", mask)

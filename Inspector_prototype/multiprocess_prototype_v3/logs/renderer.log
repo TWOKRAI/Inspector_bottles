@@ -74,3 +74,18 @@
 2026-04-19 16:11:42,638 [INFO] renderer: RendererProcess ready
 2026-04-19 16:11:42,638 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
 2026-04-19 16:11:42,638 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 17:40:32,054 [INFO] renderer: Process state registered: renderer
+2026-04-20 17:40:32,054 [INFO] renderer: RendererProcess initializing...
+2026-04-20 17:40:32,054 [INFO] renderer: RendererProcess ready
+2026-04-20 17:40:32,054 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 17:40:32,054 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 18:45:19,455 [INFO] renderer: Process state registered: renderer
+2026-04-20 18:45:19,455 [INFO] renderer: RendererProcess initializing...
+2026-04-20 18:45:19,455 [INFO] renderer: RendererProcess ready
+2026-04-20 18:45:19,455 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 18:45:19,455 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 22:04:33,966 [INFO] renderer: Process state registered: renderer
+2026-04-20 22:04:33,967 [INFO] renderer: RendererProcess initializing...
+2026-04-20 22:04:33,967 [INFO] renderer: RendererProcess ready
+2026-04-20 22:04:33,967 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_show_original', 'set_show_mask', 'set_draw_contours', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 22:04:33,967 [INFO] renderer: Process 'renderer' initialized successfully

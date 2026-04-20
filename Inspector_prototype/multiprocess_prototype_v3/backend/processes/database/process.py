@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib
 from typing import Any, Optional
 
-from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
 from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig
 from multiprocess_framework.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 from multiprocess_prototype_v3.services.database.service import DatabaseService
@@ -58,24 +58,26 @@ class DatabaseProcess(ProcessModule):
         adapter = _DatabaseAdapter(self)
         self._service = DatabaseService(output=adapter)
 
-        # Команды
-        self.command_manager.register_command(
-            "db.query", lambda msg: self.sql_manager.execute_command(msg)
-        )
-        self.command_manager.register_command(
-            "db.execute", lambda msg: self.sql_manager.execute_command(msg)
-        )
-        self.command_manager.register_command(
-            "db.insert", lambda msg: self.sql_manager.execute_command(msg)
-        )
-        self.command_manager.register_command("db.save_detections", self._cmd_save_detections)
+        self._register_commands()
         self._log_info("DatabaseProcess ready")
 
+    def _register_commands(self) -> None:
+        """Регистрация IPC-команд.
+
+        db.query / db.execute / db.insert — прямая делегация в SQLManager.
+        db.save_detections — адаптер (распаковка args/data → сервис).
+        """
+        assert self.sql_manager is not None, "sql_manager must be initialized"
+        sql_cmd = self.sql_manager.execute_command
+        
+        for cmd in ("db.query", "db.execute", "db.insert"):
+            self.command_manager.register_command(cmd, sql_cmd)
+        self.command_manager.register_command("db.save_detections", self._cmd_save_detections)
+
     def _cmd_save_detections(self, msg: dict) -> dict:
-        """Команда сохранения детекций — делегация в сервис."""
+        """Адаптер: распаковать детекции из args/data и передать в сервис."""
         args = msg.get("args", {}) or msg.get("data", {})
-        detections = args.get("detections", [])
-        return self._service.save_detections(detections)
+        return self._service.save_detections(args.get("detections", []))
 
     def shutdown(self) -> bool:
         if self.sql_manager:
@@ -87,19 +89,18 @@ class DatabaseProcess(ProcessModule):
 
 
 class _DatabaseAdapter:
-    """Реализует DatabaseOutputPort через ProcessModule."""
+    """Реализует DatabaseOutputPort: SQL + логи через ProcessIO."""
 
     def __init__(self, process: DatabaseProcess) -> None:
-        self._p = process
+        self._p = process  # нужен для прямого доступа к sql_manager
+        self._io = ProcessIO(process)
 
     def execute_sql(self, sql: str, params: Optional[dict[str, Any]] = None) -> None:
-        """Выполнить SQL через SQLManager."""
+        """Выполнить SQL через SQLManager (специфика БД, не IPC)."""
         self._p.sql_manager.execute(sql, params or {})
 
     def log_info(self, text: str) -> None:
-        """Логирование информационного сообщения."""
-        self._p._log_info(text)
+        self._io.log_info(text)
 
     def log_error(self, text: str) -> None:
-        """Логирование ошибки."""
-        self._p._log_error(text)
+        self._io.log_error(text)

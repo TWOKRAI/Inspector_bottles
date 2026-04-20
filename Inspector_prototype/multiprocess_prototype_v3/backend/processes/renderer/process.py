@@ -6,8 +6,7 @@ from typing import Optional
 
 import numpy as np
 
-from multiprocess_framework.modules.message_module import MessageAdapter
-from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 from multiprocess_prototype_v3.registers import RENDERER_REGISTER
 from multiprocess_prototype_v3.services.renderer.service import RendererService
@@ -18,9 +17,17 @@ from multiprocess_prototype_v3.shared.register_sync import apply_register_update
 class RendererProcess(ProcessModule):
     """Процесс рендеринга. Инфраструктура: воркеры, IPC, SHM, команды."""
 
+    # Флаги сервиса, управляемые через команды и register_update
+    _SERVICE_FLAGS: tuple[str, ...] = (
+        "show_original",
+        "show_mask",
+        "draw_contours",
+        "draw_bboxes",
+        "save_frames",
+    )
+
     def _init_application_threads(self) -> None:
         self._log_info("RendererProcess initializing...")
-        self._msg = MessageAdapter(sender=self.name)
 
         adapter = _RendererAdapter(self)
         self._service = RendererService(
@@ -33,14 +40,7 @@ class RendererProcess(ProcessModule):
             show_mask=self.get_config("show_mask", True),
         )
 
-        for cmd, handler in {
-            "set_draw_contours": self._cmd_set_draw_contours,
-            "set_show_original": self._cmd_set_show_original,
-            "set_show_mask": self._cmd_set_show_mask,
-            "set_draw_bboxes": self._cmd_set_draw_bboxes,
-            "set_save_frames": self._cmd_set_save_frames,
-        }.items():
-            self.command_manager.register_command(cmd, handler)
+        self._register_commands()
 
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         self.worker_manager.create_worker(
@@ -48,14 +48,25 @@ class RendererProcess(ProcessModule):
         )
         self._log_info("RendererProcess ready")
 
+    def _register_commands(self) -> None:
+        """Регистрация IPC-команд. Все — чистые setter'ы флагов сервиса."""
+        for flag in self._SERVICE_FLAGS:
+            self.command_manager.register_command(
+                f"set_{flag}", self._make_flag_setter(flag)
+            )
+
+    def _make_flag_setter(self, flag: str):
+        """Factory: setter для флага сервиса. Возвращает {"status": "ok"}."""
+        def handler(data: dict) -> dict:
+            setattr(self._service, flag, data.get(flag, getattr(self._service, flag)))
+            return {"status": "ok"}
+        return handler
+
     def _build_register_handlers(self) -> dict:
-        return {
-            "show_original": lambda v: self._cmd_set_show_original({"show_original": v}),
-            "show_mask": lambda v: self._cmd_set_show_mask({"show_mask": v}),
-            "draw_contours": lambda v: self._cmd_set_draw_contours({"draw_contours": v}),
-            "draw_bboxes": lambda v: self._cmd_set_draw_bboxes({"draw_bboxes": v}),
-            "save_frames": lambda v: self._cmd_set_save_frames({"save_frames": v}),
-        }
+        """Адаптер register_update: field_name → setattr на сервисе."""
+        def make(flag: str):
+            return lambda v: setattr(self._service, flag, v)
+        return {flag: make(flag) for flag in self._SERVICE_FLAGS}
 
     def _render_worker(self, stop_event, pause_event) -> None:
         """Воркер: receive → register_update → read SHM → service.render_frame()."""
@@ -120,28 +131,6 @@ class RendererProcess(ProcessModule):
             mask = np.zeros((height, width, 3), dtype=np.uint8)
         return mask
 
-    # --- Команды (делегация в сервис) ---
-
-    def _cmd_set_draw_contours(self, data: dict) -> dict:
-        self._service.draw_contours = data.get("draw_contours", self._service.draw_contours)
-        return {"status": "ok"}
-
-    def _cmd_set_show_original(self, data: dict) -> dict:
-        self._service.show_original = data.get("show_original", self._service.show_original)
-        return {"status": "ok"}
-
-    def _cmd_set_show_mask(self, data: dict) -> dict:
-        self._service.show_mask = data.get("show_mask", self._service.show_mask)
-        return {"status": "ok"}
-
-    def _cmd_set_draw_bboxes(self, data: dict) -> dict:
-        self._service.draw_bboxes = data.get("draw_bboxes", self._service.draw_bboxes)
-        return {"status": "ok"}
-
-    def _cmd_set_save_frames(self, data: dict) -> dict:
-        self._service.save_frames = data.get("save_frames", self._service.save_frames)
-        return {"status": "ok"}
-
     def shutdown(self) -> bool:
         self._log_info("RendererProcess shutting down...")
         if self.memory_manager:
@@ -151,51 +140,26 @@ class RendererProcess(ProcessModule):
 
 
 class _RendererAdapter:
-    """Реализует RendererOutputPort через ProcessModule IPC."""
+    """Реализует RendererOutputPort через ProcessIO (IPC + SHM facade)."""
 
     def __init__(self, process: RendererProcess) -> None:
-        self._p = process
-        self._msg = MessageAdapter(sender=process.name)
+        self._io = ProcessIO(process)
 
     def send_rendered_to_gui(self, notification_data: dict) -> None:
-        """Отправить уведомление о готовом кадре в GUI."""
-        msg = self._msg.data(
-            targets=["gui"], data_type="rendered_frame_ready", data=notification_data
-        )
-        self._p.send_message("gui", msg.to_dict())
+        self._io.send_data("gui", "rendered_frame_ready", notification_data)
 
     def send_reject_to_robot(self, frame_id: int, defects: list[dict]) -> None:
-        """Отправить команду отбраковки роботу."""
-        msg = self._msg.command(
-            targets=["robot"],
-            command="reject_item",
-            args={"frame_id": frame_id, "defects": defects},
-            data={"frame_id": frame_id, "defects": defects},
-        )
-        self._p.send_message("robot", msg.to_dict())
+        payload = {"frame_id": frame_id, "defects": defects}
+        self._io.send_command("robot", "reject_item", args=payload, data=payload)
 
     def write_rendered_to_shm(self, frame: np.ndarray, mask: np.ndarray) -> Optional[dict]:
-        """Записать rendered frame и mask в SHM."""
-        mm = self._p.memory_manager
-        if not mm:
+        """Записать rendered frame и mask в SHM (два отдельных слота)."""
+        rendered = self._io.write_frames_to_shm("renderer", "rendered_frame", [frame])
+        if rendered is None:
             return None
-
-        free_idx_rendered = mm.find_free_index("renderer", "rendered_frame") or 0
-        shm_rendered_name = mm.write_images("renderer", "rendered_frame", [frame], free_idx_rendered)
-
-        free_idx_mask = mm.find_free_index("renderer", "mask_frame") or 0
-        shm_mask_name = mm.write_images("renderer", "mask_frame", [mask], free_idx_mask)
-
-        if not shm_rendered_name:
-            return None
-
-        result = {
-            "shm_name": "rendered_frame",
-            "shm_index": free_idx_rendered,
-            "shm_actual_name": shm_rendered_name,
-        }
-        if shm_mask_name:
-            result["mask_shm_name"] = "mask_frame"
-            result["mask_shm_index"] = free_idx_mask
-            result["mask_shm_actual_name"] = shm_mask_name
-        return result
+        mask_info = self._io.write_frames_to_shm("renderer", "mask_frame", [mask])
+        if mask_info is not None:
+            rendered["mask_shm_name"] = mask_info["shm_name"]
+            rendered["mask_shm_index"] = mask_info["shm_index"]
+            rendered["mask_shm_actual_name"] = mask_info["shm_actual_name"]
+        return rendered

@@ -11,8 +11,7 @@ from typing import Optional
 
 import numpy as np
 
-from multiprocess_framework.modules.message_module import MessageAdapter
-from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 from multiprocess_prototype_v3.registers import CAMERA_REGISTER
 from multiprocess_prototype_v3.services.camera.service import CameraService
@@ -28,33 +27,13 @@ class CameraProcess(ProcessModule):
 
     def _init_application_threads(self) -> None:
         self._log_info("CameraProcess initializing...")
-        self._msg = MessageAdapter(sender=self.name)
 
         # Создать сервис с адаптером для IPC
         adapter = _CameraAdapter(self)
         app_cfg = self.get_config("config") or {}
         self._service = CameraService(output=adapter, config=app_cfg)
 
-        # Регистрация команд (все делегируют в сервис)
-        for cmd, handler in {
-            "set_camera_type": self._cmd_set_camera_type,
-            "get_camera_type": self._cmd_get_camera_type,
-            "start_capture": self._cmd_start_capture,
-            "stop_capture": self._cmd_stop_capture,
-            "set_fps": self._cmd_set_fps,
-            "set_resolution": self._cmd_set_resolution,
-            "enum_devices": self._cmd_enum_devices,
-            "set_device_id": self._cmd_set_device_id,
-            "set_camera_index": self._cmd_set_camera_index,
-            "set_hikvision_resolution": self._cmd_set_hikvision_resolution,
-            "open": self._cmd_open,
-            "close": self._cmd_close,
-            "start_grabbing": self._cmd_start_grabbing,
-            "stop_grabbing": self._cmd_stop_grabbing,
-            "get_parameters": self._cmd_get_parameters,
-            "set_parameters": self._cmd_set_parameters,
-        }.items():
-            self.command_manager.register_command(cmd, handler)
+        self._register_commands()
 
         # Воркер захвата (стартует в паузе — ждёт start_capture)
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
@@ -67,30 +46,67 @@ class CameraProcess(ProcessModule):
             f"CameraProcess ready, camera_type={self._service.current_type}"
         )
 
+    def _register_commands(self) -> None:
+        """Регистрация IPC-команд.
+
+        Команды с доп. логикой (управление воркером, cross-backend) — идут
+        через _cmd_* обёртки. Чистая делегация — напрямую в метод сервиса.
+        """
+        svc = self._service
+        commands = {
+            # С доп. логикой (пауза/resume воркера, cross-backend)
+            "set_camera_type": self._cmd_set_camera_type,
+            "start_capture": self._cmd_start_capture,
+            "stop_capture": self._cmd_stop_capture,
+            "enum_devices": self._cmd_enum_devices,
+            "start_grabbing": self._cmd_start_capture,  # alias (Hikvision SDK)
+            "stop_grabbing": self._cmd_stop_capture,    # alias (Hikvision SDK)
+            # Чистая делегация в сервис
+            "get_camera_type": lambda _: {"status": "ok", "camera_type": svc.current_type},
+            "set_fps": svc.set_fps,
+            "set_resolution": svc.set_resolution,
+            "set_device_id": svc.set_device_id,
+            "set_camera_index": svc.set_camera_index,
+            "set_hikvision_resolution": svc.set_hikvision_resolution,
+            "open": lambda d: svc.handle_hikvision_command("open", d),
+            "close": lambda d: svc.handle_hikvision_command("close", d),
+            "get_parameters": lambda d: svc.handle_hikvision_command("get_parameters", d),
+            "set_parameters": lambda d: svc.handle_hikvision_command("set_parameters", d),
+        }
+        for cmd, handler in commands.items():
+            self.command_manager.register_command(cmd, handler)
+
     # --- Register sync handlers ---
 
     def _build_register_handlers(self) -> dict:
-        """Маппинг полей регистра на обработчики в сервисе."""
+        """Маппинг полей регистра на обработчики.
+
+        Адаптер асинхронных register_update сообщений из GUI: имя_поля →
+        handler(value). Имена полей не совпадают с именами команд, payload —
+        одно значение (а не dict), несколько полей могут маппиться в один
+        метод сервиса (resolution_width + resolution_height → set_resolution).
+        """
+        svc = self._service
         return {
             "camera_type": lambda v: self._cmd_set_camera_type({"camera_type": v}),
-            "fps": lambda v: self._cmd_set_fps({"fps": v}),
-            "resolution_width": lambda v: self._cmd_set_resolution({"width": v}),
-            "resolution_height": lambda v: self._cmd_set_resolution({"height": v}),
-            "device_id": lambda v: self._cmd_set_device_id({"device_id": v}),
-            "camera_index": lambda v: self._cmd_set_camera_index({"camera_index": v}),
-            "hikvision_resolution_width": lambda v: self._cmd_set_hikvision_resolution(
+            "fps": lambda v: svc.set_fps({"fps": v}),
+            "resolution_width": lambda v: svc.set_resolution({"width": v}),
+            "resolution_height": lambda v: svc.set_resolution({"height": v}),
+            "device_id": lambda v: svc.set_device_id({"device_id": v}),
+            "camera_index": lambda v: svc.set_camera_index({"camera_index": v}),
+            "hikvision_resolution_width": lambda v: svc.set_hikvision_resolution(
                 {"width": v}
             ),
-            "hikvision_resolution_height": lambda v: self._cmd_set_hikvision_resolution(
+            "hikvision_resolution_height": lambda v: svc.set_hikvision_resolution(
                 {"height": v}
             ),
-            "hikvision_frame_rate": lambda v: self._service.patch_hikvision_params(
+            "hikvision_frame_rate": lambda v: svc.patch_hikvision_params(
                 {"frame_rate": v}
             ),
-            "hikvision_exposure_time": lambda v: self._service.patch_hikvision_params(
+            "hikvision_exposure_time": lambda v: svc.patch_hikvision_params(
                 {"exposure_time": v}
             ),
-            "hikvision_gain": lambda v: self._service.patch_hikvision_params({"gain": v}),
+            "hikvision_gain": lambda v: svc.patch_hikvision_params({"gain": v}),
         }
 
     # --- Команды (делегация в сервис + управление воркером) ---
@@ -102,9 +118,6 @@ class CameraProcess(ProcessModule):
             data.get("camera_type", "simulator")
         )
         return result
-
-    def _cmd_get_camera_type(self, data: dict) -> dict:
-        return {"status": "ok", "camera_type": self._service.current_type}
 
     def _cmd_start_capture(self, data: dict) -> dict:
         """Запустить захват: делегация в сервис + resume воркера."""
@@ -122,21 +135,6 @@ class CameraProcess(ProcessModule):
         time.sleep(0.05)
         return self._service.stop_capture(data)
 
-    def _cmd_set_fps(self, data: dict) -> dict:
-        return self._service.set_fps(data)
-
-    def _cmd_set_resolution(self, data: dict) -> dict:
-        return self._service.set_resolution(data)
-
-    def _cmd_set_device_id(self, data: dict) -> dict:
-        return self._service.set_device_id(data)
-
-    def _cmd_set_camera_index(self, data: dict) -> dict:
-        return self._service.set_camera_index(data)
-
-    def _cmd_set_hikvision_resolution(self, data: dict) -> dict:
-        return self._service.set_hikvision_resolution(data)
-
     def _cmd_enum_devices(self, data: dict) -> dict:
         """Перечисление устройств. Для cross-backend enum может паузить воркер."""
         payload = dict(data or {})
@@ -151,26 +149,6 @@ class CameraProcess(ProcessModule):
             self.worker_manager.resume_worker("capture_worker")
             return result
         return self._service.enumerate_devices(payload)
-
-    def _cmd_open(self, data: dict) -> dict:
-        return self._service.handle_hikvision_command("open", data)
-
-    def _cmd_close(self, data: dict) -> dict:
-        return self._service.handle_hikvision_command("close", data)
-
-    def _cmd_start_grabbing(self, data: dict) -> dict:
-        """Alias для start_capture (Hikvision SDK naming)."""
-        return self._cmd_start_capture(data)
-
-    def _cmd_stop_grabbing(self, data: dict) -> dict:
-        """Alias для stop_capture (Hikvision SDK naming)."""
-        return self._cmd_stop_capture(data)
-
-    def _cmd_get_parameters(self, data: dict) -> dict:
-        return self._service.handle_hikvision_command("get_parameters", data)
-
-    def _cmd_set_parameters(self, data: dict) -> dict:
-        return self._service.handle_hikvision_command("set_parameters", data)
 
     # --- Воркер захвата ---
 
@@ -210,51 +188,18 @@ class CameraProcess(ProcessModule):
 
 
 class _CameraAdapter:
-    """Реализует CameraOutputPort через ProcessModule IPC.
-
-    Связывает CameraService (бизнес-логика) с ProcessModule (инфраструктура):
-    - send_frame_to_processor → send_message("processor", ...)
-    - send_to_gui → send_message("gui", ...)
-    - write_frame_to_shm → memory_manager.write_images(...)
-    """
+    """Реализует CameraOutputPort через ProcessIO (IPC + SHM facade)."""
 
     def __init__(self, process: CameraProcess) -> None:
-        self._p = process
-        self._msg = MessageAdapter(sender=process.name)
+        self._io = ProcessIO(process)
 
     def send_frame_to_processor(self, data: dict) -> None:
-        """Отправить уведомление о новом кадре процессору."""
-        msg = self._msg.data(
-            targets=["processor"],
-            data_type="frame_ready",
-            data=data,
-        )
-        self._p.send_message("processor", msg.to_dict())
+        self._io.send_data("processor", "frame_ready", data)
 
     def send_to_gui(self, msg_type: str, data: dict) -> None:
-        """Отправить сообщение в GUI (статус, fps, ошибки и т.д.)."""
-        msg = self._msg.data(
-            targets=["gui"],
-            data_type=msg_type,
-            data=data,
-        )
-        self._p.send_message("gui", msg.to_dict())
+        self._io.send_data("gui", msg_type, data)
 
     def write_frame_to_shm(
         self, frame: np.ndarray, frame_id: int, timestamp: float
     ) -> Optional[dict]:
-        """Записать кадр в SHM. Возвращает dict с shm_name/index или None."""
-        mm = self._p.memory_manager
-        if not mm:
-            return None
-        free_idx = mm.find_free_index("camera", "camera_frame")
-        if free_idx is None:
-            free_idx = 0
-        shm_name = mm.write_images("camera", "camera_frame", [frame], free_idx)
-        if not shm_name:
-            return None
-        return {
-            "shm_name": "camera_frame",
-            "shm_index": free_idx,
-            "shm_actual_name": shm_name,
-        }
+        return self._io.write_frames_to_shm("camera", "camera_frame", [frame])

@@ -17,6 +17,9 @@ from typing import Any
 # Адаптеры
 from .adapters import ProcessAdapter, SchemaAdapter
 
+# IO-facade для адаптеров сервисов (Ports & Adapters)
+from .io import ProcessIO
+
 # Публичные контракты
 from .interfaces import IProcessCommunication, IProcessModule, ISharedResources
 
@@ -89,6 +92,8 @@ __all__ = [
     # Адаптеры
     "ProcessAdapter",
     "SchemaAdapter",
+    # IO-facade
+    "ProcessIO",
     # Launch config
     "ProcessLaunchConfig",
     "class_path_from_type",
