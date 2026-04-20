@@ -11,7 +11,7 @@ GuiCommandHandler — единый слой отправки GUI-команд.
 from typing import Any, Dict, Optional
 
 from multiprocess_prototype_v3.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
-from multiprocess_prototype_v3.registers.gui_command_catalog import GUI_COMMAND_CATALOG
+from multiprocess_prototype_v3.registers.commands.catalog import GUI_COMMAND_CATALOG
 
 
 class GuiCommandHandler:

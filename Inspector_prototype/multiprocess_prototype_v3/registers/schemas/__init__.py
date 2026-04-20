@@ -1,1 +1,4 @@
-"""Compat layer: redirects old schemas.* imports to v3 flat register modules."""
+"""Compat layer — redirect old registers.schemas.* imports to new domain modules.
+
+DEPRECATED: import directly from registers.camera, registers.pipeline, etc.
+"""

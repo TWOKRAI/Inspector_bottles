@@ -1,1 +1,1 @@
-"""Redirect: registers.schemas.pipeline → registers.vision_pipeline."""
+"""DEPRECATED: use registers.pipeline directly."""

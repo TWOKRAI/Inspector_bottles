@@ -1,0 +1,46 @@
+2026-04-20 15:14:09,458 [INFO] camera: Process state registered: camera
+2026-04-20 15:14:09,459 [INFO] camera: CameraModule initializing...
+2026-04-20 15:14:13,341 [INFO] camera: CameraModule ready, camera_type=webcam
+2026-04-20 15:14:13,489 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:14:13,490 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 15:14:30,120 [INFO] camera: Process state registered: camera
+2026-04-20 15:14:30,120 [INFO] camera: CameraModule initializing...
+2026-04-20 15:14:32,764 [INFO] camera: CameraModule ready, camera_type=webcam
+2026-04-20 15:14:32,136 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:14:32,136 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 15:19:01,064 [INFO] camera: Process state registered: camera
+2026-04-20 15:19:01,064 [INFO] camera: CameraModule initializing...
+2026-04-20 15:19:03,695 [INFO] camera: CameraModule ready, camera_type=webcam
+2026-04-20 15:19:03,094 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:19:03,094 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 15:19:57,797 [INFO] camera: Process state registered: camera
+2026-04-20 15:19:57,798 [INFO] camera: CameraModule initializing...
+2026-04-20 15:20:00,375 [INFO] camera: CameraModule ready, camera_type=webcam
+2026-04-20 15:20:00,828 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:20:00,828 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 15:20:47,126 [INFO] camera: Process state registered: camera
+2026-04-20 15:20:47,126 [INFO] camera: CameraModule initializing...
+2026-04-20 15:20:49,498 [INFO] camera: CameraModule ready, camera_type=webcam
+2026-04-20 15:20:49,156 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:20:49,157 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 15:22:29,695 [INFO] camera: Process state registered: camera
+2026-04-20 15:22:29,695 [INFO] camera: CameraModule initializing...
+2026-04-20 15:22:32,076 [INFO] camera: CameraModule ready, camera_type=webcam
+2026-04-20 15:22:32,722 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:22:32,722 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 15:24:03,476 [INFO] camera: Process state registered: camera
+2026-04-20 15:24:03,476 [INFO] camera: CameraModule initializing...
+2026-04-20 15:24:03,476 [INFO] camera: CameraModule ready, camera_type=hikvision
+2026-04-20 15:24:03,476 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution']
+2026-04-20 15:24:03,476 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 16:22:18,595 [INFO] camera: CameraModule shutting down...
+2026-04-20 16:23:45,707 [INFO] camera: Process state registered: camera
+2026-04-20 16:23:45,708 [INFO] camera: CameraProcess initializing...
+2026-04-20 16:23:45,708 [INFO] camera: CameraProcess ready, camera_type=simulator
+2026-04-20 16:23:45,708 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-04-20 16:23:45,708 [INFO] camera: Process 'camera' initialized successfully
+2026-04-20 16:34:16,623 [INFO] camera: Process state registered: camera
+2026-04-20 16:34:16,623 [INFO] camera: CameraProcess initializing...
+2026-04-20 16:34:20,355 [INFO] camera: CameraProcess ready, camera_type=webcam
+2026-04-20 16:34:20,664 [INFO] camera: Registered 21 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_camera_type', 'get_camera_type', 'start_capture', 'stop_capture', 'set_fps', 'set_resolution', 'enum_devices', 'set_device_id', 'set_camera_index', 'set_hikvision_resolution', 'open', 'close', 'start_grabbing', 'stop_grabbing', 'get_parameters', 'set_parameters']
+2026-04-20 16:34:20,664 [INFO] camera: Process 'camera' initialized successfully

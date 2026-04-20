@@ -1,0 +1,46 @@
+2026-04-20 15:14:10,022 [INFO] gui: Process state registered: gui
+2026-04-20 15:14:10,022 [INFO] gui: GuiModule initializing...
+2026-04-20 15:14:10,023 [INFO] gui: GuiModule ready
+2026-04-20 15:14:10,023 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:14:10,023 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 15:14:31,211 [INFO] gui: Process state registered: gui
+2026-04-20 15:14:31,211 [INFO] gui: GuiModule initializing...
+2026-04-20 15:14:31,211 [INFO] gui: GuiModule ready
+2026-04-20 15:14:31,211 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:14:31,214 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 15:19:01,209 [INFO] gui: Process state registered: gui
+2026-04-20 15:19:01,209 [INFO] gui: GuiModule initializing...
+2026-04-20 15:19:01,210 [INFO] gui: GuiModule ready
+2026-04-20 15:19:01,210 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:19:01,210 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 15:19:58,898 [INFO] gui: Process state registered: gui
+2026-04-20 15:19:58,898 [INFO] gui: GuiModule initializing...
+2026-04-20 15:19:58,898 [INFO] gui: GuiModule ready
+2026-04-20 15:19:58,898 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:19:58,898 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 15:20:48,171 [INFO] gui: Process state registered: gui
+2026-04-20 15:20:48,172 [INFO] gui: GuiModule initializing...
+2026-04-20 15:20:48,172 [INFO] gui: GuiModule ready
+2026-04-20 15:20:48,172 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:20:48,172 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 15:22:30,647 [INFO] gui: Process state registered: gui
+2026-04-20 15:22:30,648 [INFO] gui: GuiModule initializing...
+2026-04-20 15:22:30,648 [INFO] gui: GuiModule ready
+2026-04-20 15:22:30,648 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:22:30,648 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 15:24:04,371 [INFO] gui: Process state registered: gui
+2026-04-20 15:24:04,371 [INFO] gui: GuiModule initializing...
+2026-04-20 15:24:04,372 [INFO] gui: GuiModule ready
+2026-04-20 15:24:04,372 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 15:24:04,372 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 16:22:18,650 [INFO] gui: Process 'gui' shut down successfully
+2026-04-20 16:23:46,951 [INFO] gui: Process state registered: gui
+2026-04-20 16:23:46,951 [INFO] gui: GuiProcess initializing...
+2026-04-20 16:23:46,951 [INFO] gui: GuiProcess ready
+2026-04-20 16:23:46,951 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 16:23:46,951 [INFO] gui: Process 'gui' initialized successfully
+2026-04-20 16:34:17,312 [INFO] gui: Process state registered: gui
+2026-04-20 16:34:17,312 [INFO] gui: GuiProcess initializing...
+2026-04-20 16:34:17,313 [INFO] gui: GuiProcess ready
+2026-04-20 16:34:17,313 [INFO] gui: Registered 5 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats']
+2026-04-20 16:34:17,313 [INFO] gui: Process 'gui' initialized successfully

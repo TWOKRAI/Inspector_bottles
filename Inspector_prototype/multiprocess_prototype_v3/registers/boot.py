@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
-"""Boot-значения процессов из канонических схем registers/."""
+"""Boot values for processes, generated from canonical register schemas."""
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
-from multiprocess_prototype_v3.registers.gui_camera_registers import GuiCameraRegisters
-from multiprocess_prototype_v3.registers.processings import ColorDetectionParams
-from multiprocess_prototype_v3.registers.renderer import RendererRegisters
+from .camera import GuiCameraRegisters
+from .processor import ColorDetectionParams, ProcessorRegisters
+from .renderer import RendererRegisters
 
 
 def camera_process_boot_values() -> Dict[str, Any]:
@@ -19,9 +18,7 @@ def renderer_process_boot_values() -> Dict[str, Any]:
 
 
 def processor_process_boot_values() -> Dict[str, Any]:
-    """Совместимость: плоские поля как у ProcessorRegisters + пустые коллекции."""
-    from multiprocess_prototype_v3.registers.processor_registers import ProcessorRegisters
-
+    """Flat fields as in ProcessorRegisters + empty collections."""
     return ProcessorRegisters().model_dump()
 
 

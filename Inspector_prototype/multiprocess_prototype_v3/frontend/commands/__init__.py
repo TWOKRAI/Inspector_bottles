@@ -1,7 +1,7 @@
 # multiprocess_prototype_v3/frontend/commands/__init__.py
 """GUI-команды."""
 
-from multiprocess_prototype_v3.registers.gui_command_catalog import GUI_COMMAND_CATALOG
+from multiprocess_prototype_v3.registers.commands.catalog import GUI_COMMAND_CATALOG
 
 from .gui_command_handler import GuiCommandHandler
 

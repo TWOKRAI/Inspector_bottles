@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from multiprocess_prototype_v3.registers.schemas.processing_tab.post_processing_payload import (
+from multiprocess_prototype_v3.registers.payloads.post_processing import (
     PostProcessingRegionEntry,
     coords_label,
     default_new_region,

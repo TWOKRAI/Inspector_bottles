@@ -1,7 +1,6 @@
-"""Redirect: registers.schemas.pipeline.widget_bridge → registers.vision_pipeline.widget_bridge."""
+"""DEPRECATED: use registers.pipeline.widget_bridge directly."""
 
-from multiprocess_prototype_v3.registers.vision_pipeline.widget_bridge import *  # noqa: F401,F403
-from multiprocess_prototype_v3.registers.vision_pipeline.widget_bridge import (
+from multiprocess_prototype_v3.registers.pipeline.widget_bridge import (
     apply_crop_nested_to_pipeline,
     apply_post_list_to_pipeline,
     crop_nested_from_pipeline,

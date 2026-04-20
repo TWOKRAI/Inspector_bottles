@@ -6,7 +6,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Dict, List, Mapping, Optional
 
-from multiprocess_prototype_v3.registers.schemas.processing_tab.crop_regions_payload import (
+from multiprocess_prototype_v3.registers.payloads.crop_regions import (
     coords_list_from_params,
     merge_crop_regions_payload,
     normalize_crop_regions_payload,
