@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.examples.compound_mixed.schemas import (
+from frontend_module.components._examples.compound_mixed.schemas import (
     ExampleCompoundMixedUiConfig,
     ExampleMixedBoolRegister,
     ExampleMixedFloatRegister,

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from frontend_module.components.examples.compound_numeric.schemas import (
+from frontend_module.components._examples.compound_numeric.schemas import (
     ExampleBgrTripletRegister,
     ExampleCompoundNumericUiConfig,
 )

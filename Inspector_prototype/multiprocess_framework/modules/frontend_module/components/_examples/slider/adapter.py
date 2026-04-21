@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from frontend_module.components.examples.slider.schemas import (
+from frontend_module.components._examples.slider.schemas import (
     ExampleSliderUiConfig,
     ExampleSliderValueRegister,
 )

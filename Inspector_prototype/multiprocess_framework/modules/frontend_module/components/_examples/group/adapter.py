@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from frontend_module.components.examples.group.schemas import (
+from frontend_module.components._examples.group.schemas import (
     ExampleGroupRowUiConfig,
 )
 from frontend_module.components.group import create_labeled_numeric_view

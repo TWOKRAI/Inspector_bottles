@@ -8,7 +8,7 @@ from typing import Optional, Union
 
 from frontend_module.components.base.config import BindingConfig
 from frontend_module.components.base.interfaces import RegistersManagerLike
-from frontend_module.components.examples.numeric.schemas import (
+from frontend_module.components._examples.numeric.schemas import (
     ExampleNumericUiConfig,
     ExampleNumericValueRegister,
 )

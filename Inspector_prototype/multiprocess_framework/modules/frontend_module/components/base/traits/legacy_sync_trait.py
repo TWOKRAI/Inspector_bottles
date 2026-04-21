@@ -7,6 +7,7 @@ LegacySyncTrait — синхронизация с ui_elements/controls для с
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +36,11 @@ class LegacySyncTrait:
         register_name: str,
         field_name: str,
     ) -> None:
+        warnings.warn(
+            "LegacySyncTrait is deprecated; use SyncTrait instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._ctx = context
         self._rm = registers_manager
         self._register_name = register_name

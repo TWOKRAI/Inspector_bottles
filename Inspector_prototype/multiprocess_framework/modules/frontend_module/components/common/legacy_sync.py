@@ -7,7 +7,15 @@ Legacy-синхронизация: обновление словарей ui_elem
 """
 from __future__ import annotations
 
+import warnings
+
 from typing import Any, Optional
+
+warnings.warn(
+    "legacy_sync module is deprecated; use components.base.traits.sync_trait instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 def publish_legacy_ui_refs(

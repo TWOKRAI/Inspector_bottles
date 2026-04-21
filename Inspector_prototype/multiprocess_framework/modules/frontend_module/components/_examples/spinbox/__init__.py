@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Спинбокс: схемы + адаптер к v2."""
-from frontend_module.components.examples.spinbox.adapter import (
+from frontend_module.components._examples.spinbox.adapter import (
     coerce_ui,
     create_example_spinbox,
     spinbox_binding,
     spinbox_view_config_from_ui,
 )
-from frontend_module.components.examples.spinbox.schemas import (
+from frontend_module.components._examples.spinbox.schemas import (
     EXAMPLE_SPINBOX_ROUTING,
     ExampleSpinboxUiConfig,
     ExampleSpinboxValueRegister,

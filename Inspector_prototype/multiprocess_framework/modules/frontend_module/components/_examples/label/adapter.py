@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from frontend_module.components.examples.label.schemas import (
+from frontend_module.components._examples.label.schemas import (
     ExampleLabelUiConfig,
 )
 from frontend_module.components.label import LabelConfig, LabelView

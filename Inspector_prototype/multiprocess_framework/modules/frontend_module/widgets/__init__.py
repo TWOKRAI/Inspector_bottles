@@ -8,15 +8,15 @@ from .image_panel import ImagePanelWidget
 
 __all__ = ["ImagePanelWidget"]
 
+_HAS_QT = False
 try:
-    from .base_widget import BaseWidget, WidgetSignalBus
-
-    __all__.extend(["BaseWidget", "WidgetSignalBus"])
+    from frontend_module.core.qt_imports import QWidget  # noqa: F401
+    _HAS_QT = True
 except ImportError:
-    BaseWidget = None  # type: ignore[assignment]
-    WidgetSignalBus = None  # type: ignore[assignment]
+    pass
 
-try:
+if _HAS_QT:
+    from .base_widget import BaseWidget, WidgetSignalBus
     from .tabs import (
         BaseTab,
         MvpTabBase,
@@ -29,9 +29,29 @@ try:
         tab_callbacks_from_dict,
         tab_callbacks_to_dict,
     )
+    from .header import (
+        AdminButtonConfig,
+        ButtonHeader,
+        HeaderButtonItem,
+        HeaderConfig,
+        HeaderWidget,
+        LogoConfig,
+    )
+    from .keyboard import VirtualKeyboard
+    from .keyboard import VirtualKeyboardMini
+    from .keyboard import bind_touch_keyboard_line_edit, merge_touch_keyboard_dicts
+    from .tables import (
+        StructuredTableWidget,
+        StructuredTwoLevelTreeWidget,
+        TableWithToolbar,
+        TwoLevelTreeWithToolbar,
+    )
+    from .performance_monitor import PerformanceMonitor
 
     __all__.extend(
         [
+            "BaseWidget",
+            "WidgetSignalBus",
             "BaseTab",
             "MvpTabBase",
             "RegisterBindingContext",
@@ -42,76 +62,20 @@ try:
             "create_registers_placeholder",
             "tab_callbacks_from_dict",
             "tab_callbacks_to_dict",
-        ]
-    )
-except ImportError:
-    BaseTab = None  # type: ignore[assignment]
-    MvpTabBase = None  # type: ignore[assignment]
-    TabWidget = None  # type: ignore[assignment]
-
-try:
-    from .header import (
-        AdminButtonConfig,
-        ButtonHeader,
-        HeaderButtonItem,
-        HeaderConfig,
-        HeaderWidget,
-        LogoConfig,
-    )
-
-    __all__.extend(
-        [
             "HeaderWidget",
             "ButtonHeader",
             "HeaderConfig",
             "LogoConfig",
             "AdminButtonConfig",
             "HeaderButtonItem",
-        ]
-    )
-except ImportError:
-    HeaderWidget = None  # type: ignore[assignment]
-    ButtonHeader = None  # type: ignore[assignment]
-
-try:
-    from .keyboard import VirtualKeyboard
-
-    __all__.append("VirtualKeyboard")
-except ImportError:
-    VirtualKeyboard = None  # type: ignore[assignment]
-
-try:
-    from .keyboard import VirtualKeyboardMini
-
-    __all__.append("VirtualKeyboardMini")
-except ImportError:
-    VirtualKeyboardMini = None  # type: ignore[assignment]
-
-try:
-    from .tables import (
-        StructuredTableWidget,
-        StructuredTwoLevelTreeWidget,
-        TableWithToolbar,
-        TwoLevelTreeWithToolbar,
-    )
-
-    __all__.extend(
-        [
+            "VirtualKeyboard",
+            "VirtualKeyboardMini",
+            "merge_touch_keyboard_dicts",
+            "bind_touch_keyboard_line_edit",
             "StructuredTableWidget",
             "StructuredTwoLevelTreeWidget",
             "TableWithToolbar",
             "TwoLevelTreeWithToolbar",
+            "PerformanceMonitor",
         ]
     )
-except ImportError:
-    StructuredTableWidget = None  # type: ignore[assignment]
-    StructuredTwoLevelTreeWidget = None  # type: ignore[assignment]
-    TableWithToolbar = None  # type: ignore[assignment]
-    TwoLevelTreeWithToolbar = None  # type: ignore[assignment]
-
-try:
-    from .performance_monitor import PerformanceMonitor
-
-    __all__.append("PerformanceMonitor")
-except ImportError:
-    PerformanceMonitor = None  # type: ignore[assignment]

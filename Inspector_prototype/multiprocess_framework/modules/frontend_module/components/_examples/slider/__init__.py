@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Slider: схемы + адаптер к v2."""
-from frontend_module.components.examples.slider.adapter import (
+from frontend_module.components._examples.slider.adapter import (
     coerce_ui,
     create_example_slider,
     slider_binding,
     slider_view_config_from_ui,
 )
-from frontend_module.components.examples.slider.schemas import (
+from frontend_module.components._examples.slider.schemas import (
     EXAMPLE_SLIDER_ROUTING,
     ExampleSliderUiConfig,
     ExampleSliderValueRegister,
