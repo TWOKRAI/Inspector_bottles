@@ -8,6 +8,7 @@ from multiprocess_framework.modules.data_schema_module import FieldRouting
 CAMERA_REGISTER = "camera"
 PROCESSOR_REGISTER = "processor"
 RENDERER_REGISTER = "renderer"
+SETTINGS_REGISTER = "settings"
 
 # --- Routing channels ---
 CAMERA_ROUTING = FieldRouting(channel="control_camera")
@@ -15,6 +16,7 @@ CONTROL_PROCESSOR_1_ROUTING = FieldRouting(channel="control_processor_1")
 CONTROL_PROCESSOR_2_ROUTING = FieldRouting(channel="control_processor_2")
 PIPELINE_PARAMS_ROUTING = FieldRouting(channel="control_processor")
 RENDERER_ROUTING = FieldRouting(channel="control_renderer")
+SETTINGS_ROUTING = FieldRouting(channel="control_settings")
 
 # --- Shared defaults ---
 DEFAULT_RESOLUTION_WIDTH = 640
@@ -28,9 +30,9 @@ DEFAULT_MIN_AREA = 500
 DEFAULT_MAX_AREA = 50000
 
 __all__ = [
-    "CAMERA_REGISTER", "PROCESSOR_REGISTER", "RENDERER_REGISTER",
+    "CAMERA_REGISTER", "PROCESSOR_REGISTER", "RENDERER_REGISTER", "SETTINGS_REGISTER",
     "CAMERA_ROUTING", "CONTROL_PROCESSOR_1_ROUTING", "CONTROL_PROCESSOR_2_ROUTING",
-    "PIPELINE_PARAMS_ROUTING", "RENDERER_ROUTING",
+    "PIPELINE_PARAMS_ROUTING", "RENDERER_ROUTING", "SETTINGS_ROUTING",
     "DEFAULT_RESOLUTION_WIDTH", "DEFAULT_RESOLUTION_HEIGHT",
     "DEFAULT_HIKVISION_WIDTH", "DEFAULT_HIKVISION_HEIGHT",
     "DEFAULT_FPS",
