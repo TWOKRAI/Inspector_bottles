@@ -12,31 +12,33 @@ Structure:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from registers_module import RegistersManager, build_connection_map_from_registers
 
 from .camera import GuiCameraRegisters
 from .commands import GUI_COMMAND_CATALOG
-from .constants import CAMERA_REGISTER, PROCESSOR_REGISTER, RENDERER_REGISTER
+from .constants import CAMERA_REGISTER, PROCESSOR_REGISTER, RENDERER_REGISTER, SETTINGS_REGISTER
 from .processor import ProcessorRegisters
 from .renderer import RendererRegisters
+from .settings import AppSettingsRegisters
 
 
-def create_registers() -> Tuple[RegistersManager, Dict[str, str]]:
+def create_registers() -> tuple[RegistersManager, dict[str, str]]:
     """Create RegistersManager with all GUI register schemas."""
-    registers: Dict[str, Any] = {
+    registers: dict[str, Any] = {
         CAMERA_REGISTER: GuiCameraRegisters(),
         PROCESSOR_REGISTER: ProcessorRegisters(),
         RENDERER_REGISTER: RendererRegisters(),
+        SETTINGS_REGISTER: AppSettingsRegisters(),
     }
     connection_map = build_connection_map_from_registers(registers)
     return RegistersManager(registers=registers, connection_map=connection_map), connection_map
 
 
 __all__ = [
-    "CAMERA_REGISTER", "PROCESSOR_REGISTER", "RENDERER_REGISTER",
+    "CAMERA_REGISTER", "PROCESSOR_REGISTER", "RENDERER_REGISTER", "SETTINGS_REGISTER",
     "GUI_COMMAND_CATALOG",
     "create_registers",
-    "GuiCameraRegisters", "ProcessorRegisters", "RendererRegisters",
+    "GuiCameraRegisters", "ProcessorRegisters", "RendererRegisters", "AppSettingsRegisters",
 ]
