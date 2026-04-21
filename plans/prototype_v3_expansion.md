@@ -456,10 +456,10 @@ Camera_{id} → RingBuffer[K slots] + seq_id ──→ Router(frame.camera_{id})
 - **Semi-auto:** скрипт который стартует прототип, делает серию действий через Qt Test API, snapshot'ит state.
 
 ### Где тесты живут
-- `Inspector_prototype/multiprocess_prototype/tests/unit/` — L1.
-- `Inspector_prototype/multiprocess_prototype/tests/integration/` — L2 (с маркером `@pytest.mark.slow`).
+- `Inspector_prototype/multiprocess_prototype_v3/tests/unit/` — L1.
+- `Inspector_prototype/multiprocess_prototype_v3/tests/integration/` — L2 (с маркером `@pytest.mark.slow`).
 - `Inspector_prototype/scripts/smoke_tests/` — L3 (shell + Python).
-- `FakeCameraProcess` и `ProcessPipelineTestbed` — в `multiprocess_prototype/testing/` (не `tests/`, т.к. это переиспользуемая инфраструктура).
+- `FakeCameraProcess` и `ProcessPipelineTestbed` — в `multiprocess_prototype_v3/testing/` (не `tests/`, т.к. это переиспользуемая инфраструктура).
 
 ### Регламент
 - **На каждую фазу** — минимум один L2-тест, который проверяет главный сценарий фазы (см. «Критерий» фазы).
