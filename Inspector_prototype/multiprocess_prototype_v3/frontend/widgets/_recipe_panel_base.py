@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import abc
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from frontend_module.core.qt_imports import (
+    QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QVBoxLayout,
     pyqtSignal,
@@ -21,13 +21,9 @@ from frontend_module.widgets.tables.structured_two_level_tree import StructuredT
 from frontend_module.widgets.tabs import callback_no_args
 
 from multiprocess_prototype_v3.frontend.coordinators import parse_clamped_recipe_slot_text
-from multiprocess_prototype_v3.frontend.touch_keyboard_bind import (
-    bind_touch_keyboard_line_edit,
-    merge_touch_keyboard_dicts,
-)
-from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
-from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
+from .recipes_widget.slot_combo_model import RecipeSlotComboModel
 from .settings_recipe_widget.schemas import RecipesTabConfig
 
 TModel = TypeVar("TModel")
@@ -73,7 +69,7 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
     # Общая реализация
     # ------------------------------------------------------------------
 
-    def _coerce_ui(self, ui: Optional[object]) -> RecipesTabConfig:
+    def _coerce_ui(self, ui: object | None) -> RecipesTabConfig:
         """Привести ui к RecipesTabConfig."""
         return coerce_schema_config(ui, RecipesTabConfig)
 
@@ -82,23 +78,28 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
         m = self._model
         assert m is not None
         u = self._ui
-        tk_slot = merge_touch_keyboard_dicts(
-            self._touch_keyboard, getattr(u, "touch_keyboard_slot", None)
-        )
         tk_tree = merge_touch_keyboard_dicts(
             self._touch_keyboard, getattr(u, "touch_keyboard_tree", None)
         )
         layout = QVBoxLayout(self)
 
-        # --- Блок: слот + Загрузить / Сохранить / По умолчанию ---
+        # --- Блок: слот (ComboBox) + Загрузить / Сохранить / По умолчанию ---
+        self._slot_combo_model = RecipeSlotComboModel.from_manager(
+            m.recipe_manager,
+            u.recipe_index_min,
+            u.recipe_index_max,
+        )
+        initial_slot = str(m.compute_initial_slot())
+        self._slot_combo_model.current_index = self._slot_combo_model.index_for_slot_id(initial_slot)
+
         box = QGroupBox(self._get_box_title())
         ctrl = QHBoxLayout(box)
         ctrl.addWidget(QLabel(u.label_slot))
-        self._slot = QLineEdit()
-        self._slot.setFixedWidth(56)
-        self._slot.setText(str(m.compute_initial_slot()))
-        ctrl.addWidget(self._slot)
-        bind_touch_keyboard_line_edit(self, self._slot, tk_slot)
+        self._slot_combo = QComboBox()
+        self._slot_combo.setMinimumWidth(96)
+        self._slot_combo.addItems(self._slot_combo_model.labels)
+        self._slot_combo.setCurrentIndex(self._slot_combo_model.current_index)
+        ctrl.addWidget(self._slot_combo)
         self._btn_load = QPushButton(u.btn_load)
         self._btn_save = QPushButton(u.btn_save)
         self._btn_default = QPushButton(u.btn_default)
@@ -135,6 +136,7 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
             self._btn_default.clicked.connect(self.default_requested.emit)
 
         self._tree.leaf_cell_changed.connect(self._on_leaf_value_changed_slot)
+        self._slot_combo.currentIndexChanged.connect(self._on_slot_index_changed)
 
     def _on_load_with_signal(self) -> None:
         """load через презентер + pyqtSignal load_requested."""
@@ -153,14 +155,27 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
         self.default_requested.emit()
 
     def parse_slot(self) -> int:
-        """Номер слота из QLineEdit (min/max из UI)."""
+        """Номер слота из QComboBox (min/max из UI).
+
+        ComboBox-индекс конвертируется в slot-id через `RecipeSlotComboModel`,
+        затем `parse_clamped_recipe_slot_text` клампит к диапазону UI и возвращает int.
+        Fallback на `recipe_index_min` при нечисловом slot-id (например, если будущие
+        профили имеют строковые идентификаторы).
+        """
         u = self._ui
+        combo_idx = self._slot_combo.currentIndex()
+        slot_id = self._slot_combo_model.slot_id_for_index(combo_idx)
         return parse_clamped_recipe_slot_text(
-            self._slot.text(),
+            slot_id,
             min_index=u.recipe_index_min,
             max_index=u.recipe_index_max,
             fallback_on_invalid=u.recipe_index_min,
         )
+
+    def _on_slot_index_changed(self, index: int) -> None:
+        """Синхронизация модели с UI при смене индекса ComboBox (Task 1.2, расширено в 1.4)."""
+        if self._slot_combo_model is not None:
+            self._slot_combo_model.current_index = index
 
     def refresh_table_rows(self) -> None:
         """Перезаполнить дерево с блокировкой сигналов."""
