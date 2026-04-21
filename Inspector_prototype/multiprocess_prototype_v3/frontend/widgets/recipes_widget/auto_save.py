@@ -159,4 +159,41 @@ class RecipeAutoSave:
         return found
 
 
-__all__ = ["AutoSaveConfig", "RecipeAutoSave"]
+class QtDebounceAdapter:
+    """Qt-совместимый debouncer поверх `QTimer.singleShot` (Phase 1, Task 1.4).
+
+    Выносит таймер из `threading.Timer` в Qt event-loop: callback вызывается в GUI-потоке,
+    что безопасно для Qt-виджетов (в отличие от `threading.Timer.start()` → другой поток).
+
+    Использование::
+
+        adapter = QtDebounceAdapter(parent=self)
+        adapter.schedule(delay_ms=1500, callback=lambda: self._auto_save.flush())
+    """
+
+    def __init__(self, parent: Any = None) -> None:
+        from frontend_module.core.qt_imports import QTimer
+
+        self._QTimer = QTimer  # cache класс, чтобы не импортировать повторно
+        self._timer: Any = None
+        self._parent = parent
+
+    def schedule(self, delay_ms: int, callback: Callable[[], Any]) -> None:
+        """Запланировать `callback` через `delay_ms`; отменяет предыдущий pending-таймер."""
+        self.cancel()
+        timer = self._QTimer(self._parent) if self._parent is not None else self._QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timer.start(max(0, int(delay_ms)))
+        self._timer = timer
+
+    def cancel(self) -> None:
+        """Остановить pending-таймер без вызова callback."""
+        if self._timer is not None:
+            # Qt может бросить, если виджет уже удалён (напр. при закрытии окна).
+            with contextlib.suppress(Exception):
+                self._timer.stop()
+            self._timer = None
+
+
+__all__ = ["AutoSaveConfig", "QtDebounceAdapter", "RecipeAutoSave"]

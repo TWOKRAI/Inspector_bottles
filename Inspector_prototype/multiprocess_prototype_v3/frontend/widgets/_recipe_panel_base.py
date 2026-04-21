@@ -23,8 +23,11 @@ from frontend_module.widgets.tabs import callback_no_args
 from multiprocess_prototype_v3.frontend.coordinators import parse_clamped_recipe_slot_text
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
+from .recipes_widget.auto_save import AutoSaveConfig, QtDebounceAdapter, RecipeAutoSave
 from .recipes_widget.slot_combo_model import RecipeSlotComboModel
 from .settings_recipe_widget.schemas import RecipesTabConfig
+
+_DEFAULT_AUTOSAVE_DEBOUNCE_MS = 1500
 
 TModel = TypeVar("TModel")
 
@@ -109,6 +112,18 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
         ctrl.addStretch()
         layout.addWidget(box)
 
+        # --- Auto-save с debounce + версионированием (Task 1.4) ---
+        self._auto_save: RecipeAutoSave | None = None
+        self._auto_save_debouncer: QtDebounceAdapter | None = None
+        if m.recipe_manager is not None:
+            self._auto_save = RecipeAutoSave(
+                recipe_manager=m.recipe_manager,
+                slot_getter=self._current_slot_id,
+                rm_snapshot_fn=self._capture_snapshot,
+                config=AutoSaveConfig(),
+            )
+            self._auto_save_debouncer = QtDebounceAdapter(parent=self)
+
         # --- Блок: заголовок и дерево (параметр / значение / описание) ---
         layout.addWidget(QLabel(self._get_table_title()))
         columns = [
@@ -173,9 +188,38 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
         )
 
     def _on_slot_index_changed(self, index: int) -> None:
-        """Синхронизация модели с UI при смене индекса ComboBox (Task 1.2, расширено в 1.4)."""
+        """Смена слота в ComboBox — загрузка рецепта через presenter (Task 1.4)."""
         if self._slot_combo_model is not None:
             self._slot_combo_model.current_index = index
+        if self._model and self._model.recipe_manager is not None:
+            # Отменяем pending auto-save от предыдущего слота — иначе он запишет его
+            # данные в только что выбранный слот.
+            if self._auto_save_debouncer is not None:
+                self._auto_save_debouncer.cancel()
+            self._presenter.on_load_clicked()
+
+    def _current_slot_id(self) -> str:
+        """Slot-id текущего выбора (для slot_getter в RecipeAutoSave)."""
+        if self._slot_combo_model is None:
+            return ""
+        return self._slot_combo_model.current_slot_id()
+
+    def _capture_snapshot(self) -> dict[str, Any]:
+        """Снимок регистров для записи (для rm_snapshot_fn в RecipeAutoSave)."""
+        if self._model is None:
+            return {}
+        rm = self._model.rm
+        if rm is None or not hasattr(rm, "model_dump_all"):
+            return {}
+        return rm.model_dump_all()
+
+    def closeEvent(self, event: Any) -> None:  # noqa: N802 — Qt API naming
+        """Отменить pending auto-save при закрытии виджета."""
+        if self._auto_save_debouncer is not None:
+            self._auto_save_debouncer.cancel()
+        if self._auto_save is not None:
+            self._auto_save.cancel()
+        super().closeEvent(event)
 
     def refresh_table_rows(self) -> None:
         """Перезаполнить дерево с блокировкой сигналов."""
@@ -195,9 +239,14 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
     def _on_leaf_value_changed_slot(
         self, group_id: str, field_id: str, column_key: str, value: Any
     ) -> None:
-        """Редактирование колонки «значение» → презентер."""
+        """Редактирование колонки «значение» → презентер + auto-save (Task 1.4)."""
         if self._block_table or self._tree is None:
             return
         if column_key != "value":
             return
         self._presenter.on_leaf_value_changed(group_id, field_id, column_key, str(value))
+        if self._auto_save_debouncer is not None and self._auto_save is not None:
+            self._auto_save_debouncer.schedule(
+                delay_ms=_DEFAULT_AUTOSAVE_DEBOUNCE_MS,
+                callback=self._auto_save.flush,
+            )
