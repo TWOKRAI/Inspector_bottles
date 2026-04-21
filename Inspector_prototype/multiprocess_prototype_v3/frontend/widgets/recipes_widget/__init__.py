@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .auto_save import AutoSaveConfig, RecipeAutoSave
 from .recipe_rows import (
     build_recipe_rows,
     coerce_string_to_value,
@@ -44,9 +45,11 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "AutoSaveConfig",
     "RegisterRecipeModel",
     "RegisterRecipePanelWidget",
     "RegisterRecipePresenter",
+    "RecipeAutoSave",
     "RecipeSlotComboModel",
     "build_recipe_rows",
     "coerce_string_to_value",
