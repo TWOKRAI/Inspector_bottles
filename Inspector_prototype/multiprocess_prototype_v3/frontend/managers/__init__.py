@@ -1,4 +1,4 @@
-"""Application-level managers."""
+"""Менеджеры уровня frontend-приложения."""
 
 from .recipe_manager import DEFAULT_RECIPE_SLOT_ID, RecipeManager
 from .recipe_manager_protocol import RecipeManagerProtocol

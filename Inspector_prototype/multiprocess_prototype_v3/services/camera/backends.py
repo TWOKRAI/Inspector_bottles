@@ -95,25 +95,69 @@ def _reset_webcam(device_id: int = 0, delay_after_ms: int = 300) -> None:
 
 
 class WebcamBackend(BaseCaptureBackend):
+    """Webcam через OpenCV (DirectShow на Windows).
+
+    Камера НЕ открывается в конструкторе — только в start().
+    _open() делает до 3 попыток с задержкой (DirectShow на Windows
+    может не отпустить устройство мгновенно после release).
+    """
+
+    _OPEN_RETRIES = 3
+    _RETRY_DELAY = 0.3  # секунды между попытками
+
     def __init__(self, width: int, height: int, device_id: int = 0):
         self._width = width
         self._height = height
         self._device_id = device_id
         self._running = False
         self._cap = None
-        self._open()
 
-    def _open(self) -> None:
+    def _release_cap(self) -> None:
+        """Безопасно освободить текущий VideoCapture."""
         if self._cap is not None:
-            return
+            try:
+                self._cap.release()
+            except Exception:
+                pass
+            self._cap = None
+
+    def _open(self) -> bool:
+        """Открыть камеру. До 3 попыток с задержкой на Windows.
+
+        Returns:
+            True если камера открылась.
+        """
+        # Если уже открыт — ничего не делать
+        if self._cap is not None and self._cap.isOpened():
+            return True
+        # Если cap есть но не открыт — освободить
+        self._release_cap()
+
         try:
             import cv2
-            self._cap = cv2.VideoCapture(self._device_id, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(self._device_id)
-            if self._cap.isOpened():
-                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
-                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
-        except (ImportError, RuntimeError):
-            self._cap = None
+        except ImportError:
+            return False
+
+        for attempt in range(self._OPEN_RETRIES):
+            try:
+                self._cap = (
+                    cv2.VideoCapture(self._device_id, cv2.CAP_DSHOW)
+                    if os.name == "nt"
+                    else cv2.VideoCapture(self._device_id)
+                )
+                if self._cap.isOpened():
+                    self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
+                    self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+                    return True
+                # Не открылся — освободить и попробовать снова
+                self._release_cap()
+            except RuntimeError:
+                self._release_cap()
+
+            if attempt < self._OPEN_RETRIES - 1:
+                time.sleep(self._RETRY_DELAY)
+
+        return False
 
     def capture_frame(self) -> Optional[np.ndarray]:
         if not self._running or not self._cap:
@@ -122,17 +166,15 @@ class WebcamBackend(BaseCaptureBackend):
         return frame if ret else None
 
     def start(self) -> None:
-        self._open()
-        self._running = True
+        opened = self._open()
+        self._running = opened
 
     def stop(self) -> None:
         self._running = False
 
     def close(self) -> None:
         self._running = False
-        if self._cap:
-            self._cap.release()
-        self._cap = None
+        self._release_cap()
 
     def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
         if cmd == "enum_devices":
@@ -150,6 +192,7 @@ class HikvisionBackend(BaseCaptureBackend):
         self._target_width = target_width
         self._target_height = target_height
         self._send_to_gui = send_to_gui
+        self._running = False
         self._facade = HikvisionCameraFacade(
             on_status=lambda t: send_to_gui("status", {"status": t}),
             on_error=lambda t: send_to_gui("error", {"error": t}),
@@ -179,6 +222,8 @@ class HikvisionBackend(BaseCaptureBackend):
             return frame
 
     def capture_frame(self) -> Optional[np.ndarray]:
+        if not self._running:
+            return None
         frame = self._facade.capture_frame(timeout_ms=1000)
         if frame is None:
             return None
@@ -186,13 +231,22 @@ class HikvisionBackend(BaseCaptureBackend):
         return self._resize_frame(frame) if frame is not None else None
 
     def start(self) -> None:
-        self._facade.open(self._camera_index)
-        self._facade.start_grabbing()
+        result = self._facade.open(self._camera_index)
+        if result.get("status") != "ok":
+            self._send_to_gui("error", {"error": "Не удалось открыть камеру Hikvision"})
+            self._running = False
+            return
+        result = self._facade.start_grabbing()
+        self._running = result.get("status") == "ok"
+        if not self._running:
+            self._send_to_gui("error", {"error": "Не удалось начать захват Hikvision"})
 
     def stop(self) -> None:
+        self._running = False
         self._facade.stop_grabbing()
 
     def close(self) -> None:
+        self._running = False
         self._facade.close()
 
     def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
@@ -208,13 +262,17 @@ class HikvisionBackend(BaseCaptureBackend):
             self._camera_index = idx
             return self._facade.open(idx)
         if cmd == "close":
+            self._running = False
             self._facade.close()
             self._send_to_gui("status", {"status": "Camera closed"})
             return {"status": "ok"}
         if cmd == "start_grabbing":
             self._facade.open(self._camera_index)
-            return self._facade.start_grabbing()
+            result = self._facade.start_grabbing()
+            self._running = result.get("status") == "ok"
+            return result
         if cmd == "stop_grabbing":
+            self._running = False
             self._facade.stop_grabbing()
             return {"status": "ok"}
         if cmd == "get_parameters":
@@ -250,7 +308,11 @@ def create_camera_backend(camera_type: str, p: CameraBackendParams) -> BaseCaptu
         if sys.platform != "win32":
             p.send_to_gui("status", {"status": "Hikvision only on Windows, using Simulator"})
             return SimulatorBackend(p.width, p.height, image_path=p.simulator_image_path)
-        return HikvisionBackend(p.camera_index, p.hikvision_width, p.hikvision_height, send_to_gui=p.send_to_gui)
+        try:
+            return HikvisionBackend(p.camera_index, p.hikvision_width, p.hikvision_height, send_to_gui=p.send_to_gui)
+        except Exception:
+            p.send_to_gui("error", {"error": "Hikvision SDK unavailable, using Simulator"})
+            return SimulatorBackend(p.width, p.height, image_path=p.simulator_image_path)
     if camera_type == "webcam":
         return WebcamBackend(p.width, p.height, device_id=p.device_id)
     return SimulatorBackend(p.width, p.height, image_path=p.simulator_image_path)

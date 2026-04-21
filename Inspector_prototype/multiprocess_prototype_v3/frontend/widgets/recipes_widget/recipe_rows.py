@@ -10,7 +10,7 @@ import json
 from collections import defaultdict
 from typing import Any, List, Optional, Tuple
 
-from multiprocess_prototype_v3.managers.access_context import AccessContext
+from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
 
 
 def scalar_for_editing(value: Any) -> bool:

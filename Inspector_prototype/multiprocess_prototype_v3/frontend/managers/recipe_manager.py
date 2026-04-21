@@ -10,7 +10,7 @@ import yaml
 
 
 DEFAULT_RECIPE_SLOT_ID = "default"
-_PROTO_ROOT = Path(__file__).resolve().parent.parent
+_PROTO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class RecipeManagerProtocol(Protocol):

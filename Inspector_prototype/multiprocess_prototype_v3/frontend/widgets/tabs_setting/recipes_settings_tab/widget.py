@@ -20,8 +20,8 @@ from frontend_module.core.schema_config import coerce_schema_config
 from frontend_module.interfaces import IRegistersManagerGui
 
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
-from multiprocess_prototype_v3.managers.access_context import AccessContext
-from multiprocess_prototype_v3.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
+from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
 
 from ...settings_recipe_widget import AppRecipePanelWidget as AppRecipePanel
 from ...settings_recipe_widget.schemas import RecipesTabConfig

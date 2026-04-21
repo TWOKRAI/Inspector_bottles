@@ -1,7 +1,7 @@
 """CameraService — бизнес-логика управления камерой.
 
 Содержит:
-- Управление бэкендом (switch, create, handoff)
+- Управление бэкендом (switch, create)
 - Захват и публикация кадров (capture + resize + SHM + notify)
 - FPS throttling
 - Hikvision-специфичная логика (platform check, parameter patching)
@@ -37,6 +37,16 @@ from multiprocess_prototype_v3.services.camera.constants import (
 )
 from Utils.fps_module import FrameFPS
 
+# Задержка после close() аппаратных камер (ОС отпускает устройство)
+_HW_RELEASE_DELAY = {"webcam": 0.3, "hikvision": 0.3}
+
+
+def _wait_hw_release(camera_type: str) -> None:
+    """Подождать пока ОС освободит устройство после close()."""
+    delay = _HW_RELEASE_DELAY.get(camera_type, 0)
+    if delay > 0:
+        time.sleep(delay)
+
 
 def _resize_frame_for_shm(frame: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
     """Resize frame до размеров SHM-буфера."""
@@ -55,6 +65,11 @@ class CameraService:
 
     Управляет бэкендом захвата, FPS-троттлингом, переключением типов камер,
     параметрами Hikvision. Взаимодействует с инфраструктурой через CameraOutputPort.
+
+    Модель переключения (простая):
+        stop → close → wait_hw_release(old) → create(new)
+    Никаких pre-reset при переходе К новому типу — только задержка
+    после закрытия аппаратного бэкенда, чтобы ОС успела освободить устройство.
     """
 
     def __init__(self, output: "CameraOutputPort", config: dict) -> None:
@@ -78,12 +93,11 @@ class CameraService:
         self._frame_id = 0
         self._fps_counter = FrameFPS(interval=1.0)
 
-        # Инициализация бэкенда
+        # Инициализация бэкенда (без handoff — при старте устройство свободно)
         initial_type = config.get("camera_type", DEFAULT_CAMERA_TYPE)
         if initial_type not in CAMERA_TYPES:
             initial_type = DEFAULT_CAMERA_TYPE
         self._current_type = initial_type
-        self._handoff_camera_backend(DEFAULT_CAMERA_TYPE, initial_type)
         self._backend = self._create_backend(initial_type)
 
     # --- Публичные свойства ---
@@ -91,6 +105,11 @@ class CameraService:
     @property
     def current_type(self) -> str:
         return self._current_type
+
+    @property
+    def is_capturing(self) -> bool:
+        """Активен ли захват (бэкенд запущен)."""
+        return getattr(self._backend, "_running", False)
 
     # --- Создание и переключение бэкенда ---
 
@@ -111,23 +130,11 @@ class CameraService:
         """Создать экземпляр бэкенда по типу камеры."""
         return create_camera_backend(camera_type, self._backend_params())
 
-    def _handoff_camera_backend(self, old_type: str, new_type: str) -> None:
-        """Корректный переход между бэкендами с аппаратным сбросом."""
-        if old_type == "webcam":
-            from multiprocess_prototype_v3.services.camera.backends import _reset_webcam
-
-            _reset_webcam(device_id=self._device_id, delay_after_ms=450)
-        elif old_type == "hikvision":
-            time.sleep(0.28)
-
-        if new_type == "webcam":
-            from multiprocess_prototype_v3.services.camera.backends import _reset_webcam
-
-            _reset_webcam(device_id=self._device_id, delay_after_ms=300)
-            time.sleep(0.1)
-
     def switch_camera_type(self, new_type: str) -> dict:
-        """Переключить тип камеры. Возвращает dict с результатом."""
+        """Переключить тип камеры. Возвращает dict с результатом.
+
+        Модель: stop → close → wait(old) → create(new).
+        """
         if new_type not in CAMERA_TYPES:
             return {"status": "error", "error": f"Unknown camera_type: {new_type}"}
         if new_type == "hikvision" and sys.platform != "win32":
@@ -138,10 +145,12 @@ class CameraService:
                 self._out.send_to_gui("status", {"status": f"Already {new_type}"})
                 return {"status": "ok"}
             old_type = self._current_type
-            # Останавливаем текущий бэкенд
+            # Чистое завершение текущего бэкенда
             self._backend.stop()
             self._backend.close()
-            self._handoff_camera_backend(old_type, new_type)
+            # Задержка только после закрытия аппаратной камеры
+            _wait_hw_release(old_type)
+            # Создать новый бэкенд (конструктор откроет устройство)
             self._current_type = new_type
             self._backend = self._create_backend(new_type)
             self._out.send_to_gui("camera_type_changed", {"camera_type": new_type})
@@ -158,10 +167,21 @@ class CameraService:
                 return result
             else:
                 self._backend.start()
+                # Проверить что бэкенд реально запустился
+                if hasattr(self._backend, "_running") and not self._backend._running:
+                    self._out.send_to_gui(
+                        "error",
+                        {"error": f"Не удалось открыть камеру ({self._current_type})"},
+                    )
+                    return {"status": "error", "error": "Camera failed to open"}
                 return {"status": "ok"}
 
     def stop_capture(self, data: dict) -> dict:
-        """Остановить захват. Сбрасывает FPS-счётчик."""
+        """Остановить захват. Сбрасывает FPS-счётчик.
+
+        Не закрывает бэкенд — камера остаётся открытой для быстрого
+        повторного старта. close() делается только при switch или shutdown.
+        """
         self._fps_counter.reset()
         self._out.send_to_gui("fps_update", {"fps": 0})
         with self._backend_lock:
@@ -169,8 +189,6 @@ class CameraService:
                 result = self._backend.handle_command("stop_grabbing", data)
             else:
                 self._backend.stop()
-                if self._current_type == "webcam":
-                    self._backend.close()
                 result = {"status": "ok"}
         return result or {"status": "ok"}
 
@@ -336,7 +354,7 @@ class CameraService:
                     self._backend.close()
                 except Exception:
                     pass
-                self._handoff_camera_backend("webcam", "hikvision")
+                _wait_hw_release("webcam")
 
             from hikvision_camera_module.core.capture import enum_devices
 
@@ -347,7 +365,6 @@ class CameraService:
                         dev.setdefault("source", "hikvision")
 
             if need_restore_webcam:
-                self._handoff_camera_backend("hikvision", "webcam")
                 self._backend = self._create_backend("webcam")
             return result
 
@@ -369,7 +386,3 @@ class CameraService:
                     self._backend.close()
                 finally:
                     self._backend = None
-            if self._current_type == "webcam":
-                from multiprocess_prototype_v3.services.camera.backends import _reset_webcam
-
-                _reset_webcam(device_id=self._device_id)

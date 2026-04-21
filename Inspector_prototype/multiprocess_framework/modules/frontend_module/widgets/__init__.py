@@ -3,23 +3,28 @@
 Widgets — составной UI фреймворка: вкладки, BaseWidget, шапка, таблицы, клавиатура.
 
 Примитивы контролов (слайдер, чекбокс, …) — пакет ``frontend_module.components``.
+
+Импорты разделены на группы try/except: base_widget и tabs имеют
+взаимную зависимость (circular), поэ��ому их нельзя объединять в один блок.
 """
 from .image_panel import ImagePanelWidget
 
 __all__ = ["ImagePanelWidget"]
 
-_HAS_QT = False
+# --- base_widget (зависит от tabs.tab_widget) ---
 try:
-    from frontend_module.core.qt_imports import QWidget  # noqa: F401
-    _HAS_QT = True
+    from .base_widget import BaseWidget, WidgetSignalBus
+
+    __all__.extend(["BaseWidget", "WidgetSignalBus"])
 except ImportError:
     pass
 
-if _HAS_QT:
-    from .base_widget import BaseWidget, WidgetSignalBus
+# --- tabs (mvp_facade зависит от base_widget — circular) ---
+try:
     from .tabs import (
         BaseTab,
         MvpTabBase,
+        PanelTabBase,
         RegisterBindingContext,
         TabPresenterBase,
         TabViewProtocol,
@@ -29,6 +34,18 @@ if _HAS_QT:
         tab_callbacks_from_dict,
         tab_callbacks_to_dict,
     )
+
+    __all__.extend([
+        "BaseTab", "MvpTabBase", "PanelTabBase", "RegisterBindingContext",
+        "TabPresenterBase", "TabViewProtocol", "TabWidget",
+        "callback_no_args", "create_registers_placeholder",
+        "tab_callbacks_from_dict", "tab_callbacks_to_dict",
+    ])
+except ImportError:
+    pass
+
+# --- header ---
+try:
     from .header import (
         AdminButtonConfig,
         ButtonHeader,
@@ -37,45 +54,46 @@ if _HAS_QT:
         HeaderWidget,
         LogoConfig,
     )
-    from .keyboard import VirtualKeyboard
-    from .keyboard import VirtualKeyboardMini
+
+    __all__.extend([
+        "HeaderWidget", "ButtonHeader", "HeaderConfig",
+        "LogoConfig", "AdminButtonConfig", "HeaderButtonItem",
+    ])
+except ImportError:
+    pass
+
+# --- keyboard ---
+try:
+    from .keyboard import VirtualKeyboard, VirtualKeyboardMini
     from .keyboard import bind_touch_keyboard_line_edit, merge_touch_keyboard_dicts
+
+    __all__.extend([
+        "VirtualKeyboard", "VirtualKeyboardMini",
+        "merge_touch_keyboard_dicts", "bind_touch_keyboard_line_edit",
+    ])
+except ImportError:
+    pass
+
+# --- tables ---
+try:
     from .tables import (
         StructuredTableWidget,
         StructuredTwoLevelTreeWidget,
         TableWithToolbar,
         TwoLevelTreeWithToolbar,
     )
+
+    __all__.extend([
+        "StructuredTableWidget", "StructuredTwoLevelTreeWidget",
+        "TableWithToolbar", "TwoLevelTreeWithToolbar",
+    ])
+except ImportError:
+    pass
+
+# --- performance monitor ---
+try:
     from .performance_monitor import PerformanceMonitor
 
-    __all__.extend(
-        [
-            "BaseWidget",
-            "WidgetSignalBus",
-            "BaseTab",
-            "MvpTabBase",
-            "RegisterBindingContext",
-            "TabPresenterBase",
-            "TabViewProtocol",
-            "TabWidget",
-            "callback_no_args",
-            "create_registers_placeholder",
-            "tab_callbacks_from_dict",
-            "tab_callbacks_to_dict",
-            "HeaderWidget",
-            "ButtonHeader",
-            "HeaderConfig",
-            "LogoConfig",
-            "AdminButtonConfig",
-            "HeaderButtonItem",
-            "VirtualKeyboard",
-            "VirtualKeyboardMini",
-            "merge_touch_keyboard_dicts",
-            "bind_touch_keyboard_line_edit",
-            "StructuredTableWidget",
-            "StructuredTwoLevelTreeWidget",
-            "TableWithToolbar",
-            "TwoLevelTreeWithToolbar",
-            "PerformanceMonitor",
-        ]
-    )
+    __all__.append("PerformanceMonitor")
+except ImportError:
+    pass

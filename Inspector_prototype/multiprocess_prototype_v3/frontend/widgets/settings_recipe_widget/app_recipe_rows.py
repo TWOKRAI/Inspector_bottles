@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase
 
-from multiprocess_prototype_v3.managers.access_context import AccessContext
+from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
 
 from ..recipes_widget.recipe_rows import scalar_for_editing
 

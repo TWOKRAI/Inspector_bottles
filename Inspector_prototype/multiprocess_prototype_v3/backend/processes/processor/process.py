@@ -1,16 +1,22 @@
-"""ProcessorProcess — инфраструктурный контейнер для ProcessorService."""
+"""ProcessorProcess — инфраструктурный контейнер для ProcessorService.
+
+Тонкий ProcessModule: управление воркерами, IPC, SHM.
+Команды и register-хендлеры — в commands.py, адаптер — в adapter.py.
+"""
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
 
-from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
+from multiprocess_framework.modules.process_module import ProcessModule
+from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
+from multiprocess_prototype_v3.backend.helpers import apply_register_update, message_as_dict
 from multiprocess_prototype_v3.registers import PROCESSOR_REGISTER
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.processor.service import ProcessorService
-from multiprocess_prototype_v3.shared.frame_io import message_as_dict, read_frame_from_msg
-from multiprocess_prototype_v3.shared.register_sync import apply_register_update
+
+from .adapter import ProcessorAdapter
+from .commands import build_command_table, build_register_handlers
 
 
 class ProcessorProcess(ProcessModule):
@@ -20,8 +26,20 @@ class ProcessorProcess(ProcessModule):
         self._log_info("ProcessorProcess initializing...")
         app_cfg = self.get_config("config") or {}
 
+        # SHM middleware: приём кадров от камеры (camera/camera_frame)
+        self._recv_frame_mw = FrameShmMiddleware(
+            self.memory_manager, owner="camera", slot="camera_frame"
+        )
+        self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
+
+        # SHM middleware: отправка масок (processor/processor_mask)
+        self._send_mask_mw = FrameShmMiddleware(
+            self.memory_manager, owner=self.name, slot="processor_mask"
+        )
+        self.router_manager.add_send_middleware(self._send_mask_mw.on_send)
+
         # Создаём адаптер (реализация порта)
-        adapter = _ProcessorAdapter(self)
+        adapter = ProcessorAdapter(self)
 
         # Создаём детектор (бизнес-зависимость)
         detector = ColorBlobDetector(
@@ -39,7 +57,10 @@ class ProcessorProcess(ProcessModule):
             target_height=app_cfg.get("resolution_height", 480),
         )
 
-        self._register_commands()
+        # Команды из таблицы
+        cmd_table = build_command_table(self._service)
+        for cmd, handler in cmd_table.items():
+            self.command_manager.register_command(cmd, handler)
 
         # Воркер
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
@@ -48,34 +69,17 @@ class ProcessorProcess(ProcessModule):
         )
         self._log_info("ProcessorProcess ready")
 
-    def _register_commands(self) -> None:
-        """Регистрация IPC-команд.
-
-        Обёртки — адаптеры формата: dict из IPC → позиционные аргументы
-        сервиса, число из сервиса → status-dict ответа.
-        """
-        self.command_manager.register_command("set_color_range", self._cmd_set_color_range)
-        self.command_manager.register_command("set_min_area", self._cmd_set_min_area)
-        self.command_manager.register_command("set_max_area", self._cmd_set_max_area)
-
-    def _build_register_handlers(self) -> dict:
-        """Маппинг register полей на команды сервиса."""
-        return {
-            "color_lower": lambda v: self._service.set_color_range(lower=v),
-            "color_upper": lambda v: self._service.set_color_range(upper=v),
-            "min_area": lambda v: self._service.set_min_area(v),
-            "max_area": lambda v: self._service.set_max_area(v),
-        }
+    # --- Воркер обработки ---
 
     def _processing_worker(self, stop_event, pause_event) -> None:
-        """Воркер: receive → register_update → read SHM → service.process_frame()."""
-        register_handlers = self._build_register_handlers()
+        """Воркер: receive → register_update → middleware frame → service.process_frame()."""
+        register_handlers = build_register_handlers(self._service)
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.05)
                 continue
 
-            # Инфраструктура: получение сообщения
+            # Инфраструктура: получение сообщения (receive middleware уже читает frame из SHM)
             msg = self.receive_message(timeout=0.1, channel_types=["data"])
             msg_dict = message_as_dict(msg)
 
@@ -86,32 +90,21 @@ class ProcessorProcess(ProcessModule):
                 )
                 continue
 
-            # Инфраструктура: чтение кадра из SHM
-            frame, data = read_frame_from_msg(
-                msg, self.memory_manager, expected_data_type="frame_ready"
-            )
+            # Проверка типа сообщения
+            if msg_dict.get("data_type") != "frame_ready":
+                continue
+
+            # Кадр уже прочитан из SHM receive middleware (FrameShmMiddleware.on_receive)
+            frame = msg_dict.get("frame")
             if frame is None:
                 continue
+
+            data = msg_dict.get("data", {})
 
             # Делегация бизнес-логики в сервис
             self._service.process_frame(frame, data)
 
-    # --- Команды (делегация в сервис) ---
-
-    def _cmd_set_color_range(self, data: dict) -> dict:
-        return self._service.set_color_range(data.get("color_lower"), data.get("color_upper"))
-
-    def _cmd_set_min_area(self, data: dict) -> dict:
-        value = self._service.set_min_area(
-            data.get("min_area", self._service.detector.min_area)
-        )
-        return {"status": "ok", "min_area": value}
-
-    def _cmd_set_max_area(self, data: dict) -> dict:
-        value = self._service.set_max_area(
-            data.get("max_area", self._service.detector.max_area)
-        )
-        return {"status": "ok", "max_area": value}
+    # --- Shutdown ---
 
     def shutdown(self) -> bool:
         self._log_info("ProcessorProcess shutting down...")
@@ -119,31 +112,3 @@ class ProcessorProcess(ProcessModule):
             self.memory_manager.close_all(self.name)
         self.is_initialized = False
         return super().shutdown()
-
-
-class _ProcessorAdapter:
-    """Реализует ProcessorOutputPort через ProcessIO (IPC + SHM facade)."""
-
-    def __init__(self, process: ProcessorProcess) -> None:
-        self._io = ProcessIO(process)
-        self._p = process  # нужен для write_mask_to_shm (tuple-формат из frame_io)
-
-    def send_detection_to_renderer(self, result_data: dict) -> None:
-        self._io.send_data("renderer", "detection_result", result_data)
-
-    def send_detections_to_database(self, rows: list[dict]) -> None:
-        self._io.send_command(
-            "database", "db.save_detections", args={"detections": rows}
-        )
-
-    def send_feedback_to_camera(self, frame_id: int, processing_time: float) -> None:
-        self._io.send_event(
-            "camera",
-            "frame_processed",
-            {"frame_id": frame_id, "processing_time": processing_time},
-        )
-
-    def write_mask_to_shm(self, mask) -> tuple[Optional[str], int]:
-        """Записать маску в SHM. Возвращает tuple (name, index) — legacy-формат."""
-        from multiprocess_prototype_v3.shared.frame_io import write_frame_to_shm
-        return write_frame_to_shm(self._p.memory_manager, self._p.name, "processor_mask", mask)

@@ -13,6 +13,7 @@ from .callbacks_base import (
     tab_callbacks_to_dict,
 )
 from .mvp_facade import MvpTabBase
+from .panel_tab_base import PanelTabBase
 from .mvp_pattern import TabPresenterBase, TabViewProtocol
 from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
@@ -20,6 +21,7 @@ from .tab_widget import BaseTab, TabWidget
 __all__ = [
     "BaseTab",
     "MvpTabBase",
+    "PanelTabBase",
     "RegisterBindingContext",
     "TabPresenterBase",
     "TabViewProtocol",

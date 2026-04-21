@@ -48,6 +48,11 @@ Inspector_prototype/multiprocess_prototype/logs/*
 Inspector_prototype/framework_minimal_prototype/logs/*
 !Inspector_prototype/framework_minimal_prototype/logs/.gitkeep
 
+# Runtime logs (multiprocess_prototype_v3)
+Inspector_prototype/multiprocess_prototype_v3/logs/*
+!Inspector_prototype/multiprocess_prototype_v3/logs/.gitkeep
+Inspector_prototype/multiprocess_prototype_v3/robot_actions.log
+
 # Accidental file logs next to framework modules (legacy cwd-based writes)
 Inspector_prototype/multiprocess_framework/modules/*.log
 Inspector_prototype/multiprocess_framework/modules/logs/

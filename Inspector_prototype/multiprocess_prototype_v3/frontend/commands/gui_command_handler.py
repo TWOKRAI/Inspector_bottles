@@ -53,6 +53,12 @@ class GuiCommandHandler:
             return False
         return self._sender.send(command_id, **kwargs)
 
+    # --- Системные команды ---
+
+    def send_shutdown(self) -> bool:
+        """Отправить команду shutdown всем процессам."""
+        return self._send("system.shutdown", args={}, data={})
+
     # --- Удобные методы для callbacks ---
 
     def send_start_capture(self) -> bool:

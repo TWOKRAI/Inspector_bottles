@@ -1,11 +1,18 @@
-"""RobotProcess — инфраструктурный контейнер для RobotService."""
+"""RobotProcess — инфраструктурный контейнер для RobotService.
+
+Тонкий ProcessModule: управление воркерами, IPC.
+Команды — в commands.py, адаптер — в adapter.py.
+"""
 from __future__ import annotations
 
 import time
 
-from multiprocess_framework.modules.process_module import ProcessIO, ProcessModule
+from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 from multiprocess_prototype_v3.services.robot.service import RobotService
+
+from .adapter import RobotAdapter
+from .commands import build_command_table
 
 
 class RobotProcess(ProcessModule):
@@ -20,14 +27,17 @@ class RobotProcess(ProcessModule):
 
     def _init_application_threads(self) -> None:
         self._log_info("RobotProcess initializing...")
-        adapter = _RobotAdapter(self)
+        adapter = RobotAdapter(self)
         log_file = self.get_config("log_file", "./robot_actions.log")
         reject_delay = self.get_config("reject_delay", 0.5)
 
         self._service = RobotService(output=adapter, reject_delay=reject_delay)
         self._log_file = log_file
 
-        self.command_manager.register_command("reject_item", self._cmd_reject)
+        # Команды из таблицы
+        cmd_table = build_command_table(self._service)
+        for cmd, handler in cmd_table.items():
+            self.command_manager.register_command(cmd, handler)
 
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         self.worker_manager.create_worker(
@@ -35,15 +45,7 @@ class RobotProcess(ProcessModule):
         )
         self._log_info(f"RobotProcess ready: log_file={log_file}")
 
-    def _cmd_reject(self, data: dict) -> dict:
-        """Команда отбраковки — делегация в сервис."""
-        result = self._service.process_rejection(
-            frame_id=data.get("frame_id", 0),
-            defects=data.get("defects", []),
-        )
-        if self._service.reject_delay > 0:
-            time.sleep(self._service.reject_delay)
-        return result
+    # --- Воркер ---
 
     def _robot_worker(self, stop_event, pause_event) -> None:
         """Воркер: слушает system-канал для команд."""
@@ -65,36 +67,10 @@ class RobotProcess(ProcessModule):
                         self._log_error(f"Command '{msg_dict.get('command')}' failed: {e}")
             time.sleep(0.02)
 
+    # --- Shutdown ---
+
     def shutdown(self) -> bool:
         action_count = self._service.action_count if self._service else 0
         self._log_info(f"RobotProcess shutting down. Total actions: {action_count}")
         self.is_initialized = False
         return super().shutdown()
-
-
-class _RobotAdapter:
-    """Реализует RobotOutputPort: запись в log-файл + логи через ProcessIO."""
-
-    def __init__(self, process: RobotProcess) -> None:
-        self._p = process  # нужен для get_config (log_file path)
-        self._io = ProcessIO(process)
-        self._log_file = None
-
-    def _get_log_file(self) -> str:
-        if self._log_file is None:
-            self._log_file = self._p.get_config("log_file", "./robot_actions.log")
-        return self._log_file
-
-    def write_log(self, text: str) -> None:
-        """Записать action-лог в файл на диске (не IPC)."""
-        try:
-            with open(self._get_log_file(), "a") as f:
-                f.write(text)
-        except Exception as e:
-            self._io.log_error(f"Failed to write robot log: {e}")
-
-    def log_info(self, text: str) -> None:
-        self._io.log_info(text)
-
-    def log_error(self, text: str) -> None:
-        self._io.log_error(text)

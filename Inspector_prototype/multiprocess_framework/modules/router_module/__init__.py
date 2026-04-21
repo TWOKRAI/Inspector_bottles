@@ -16,6 +16,7 @@ from .channels.queue_channel import QueueChannel
 from .adapters.router_adapter import RouterAdapter
 from .interfaces import IRouterManager, IMessageChannel
 from .configs.router_manager_config import RouterManagerConfig
+from .middleware import FrameShmMiddleware
 
 __all__ = [
     "RouterManager",
@@ -25,4 +26,5 @@ __all__ = [
     "IRouterManager",
     "IMessageChannel",
     "RouterManagerConfig",
+    "FrameShmMiddleware",
 ]

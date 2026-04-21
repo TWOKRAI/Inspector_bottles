@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from multiprocess_prototype_v3.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
 
 
 @dataclass

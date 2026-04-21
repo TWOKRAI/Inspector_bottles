@@ -8,8 +8,8 @@ from typing import Callable, Optional
 
 from frontend_module.interfaces import IRegistersManagerGui
 
-from multiprocess_prototype_v3.managers.access_context import AccessContext
-from multiprocess_prototype_v3.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
+from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
 
 from ..settings_recipe_widget.schemas import RecipesTabConfig
 

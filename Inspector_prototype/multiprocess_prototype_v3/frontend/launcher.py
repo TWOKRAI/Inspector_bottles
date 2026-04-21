@@ -14,9 +14,9 @@ from frontend_module.windows import LoadingWindow
 from frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype_v3.registers import create_registers
-from multiprocess_prototype_v3.managers import RecipeManager
-from multiprocess_prototype_v3.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
-from multiprocess_prototype_v3.managers.app_recipe_aggregate import (
+from multiprocess_prototype_v3.frontend.managers import RecipeManager
+from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
+from multiprocess_prototype_v3.frontend.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
     build_default_app_aggregate,
 )

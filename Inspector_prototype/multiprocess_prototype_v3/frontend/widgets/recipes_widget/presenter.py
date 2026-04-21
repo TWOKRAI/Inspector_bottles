@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from multiprocess_prototype_v3.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
+from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 
 from .model import RegisterRecipeModel
 from .recipe_rows import build_recipe_rows, coerce_string_to_value, format_value_for_cell
