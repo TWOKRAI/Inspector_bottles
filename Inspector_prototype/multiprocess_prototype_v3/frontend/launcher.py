@@ -14,7 +14,7 @@ from frontend_module.windows import LoadingWindow
 from frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype_v3.registers import create_registers
-from multiprocess_prototype_v3.frontend.managers import RecipeManager
+from multiprocess_prototype_v3.frontend.managers import RecipeManager, SettingsProfileManager
 from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype_v3.frontend.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
@@ -92,6 +92,12 @@ class FrontendLauncher:
             aggregate_to_snapshot(build_default_app_aggregate()),
         )
 
+        settings_profile_manager = SettingsProfileManager(
+            data_path=config.get("settings_profiles_path"),
+        )
+        if regs is not None:
+            settings_profile_manager.ensure_default_profile(regs)
+
         camera_type = config.get("camera_type", "simulator")
         app_ctx = FrontendAppContext(
             config=config,
@@ -99,6 +105,7 @@ class FrontendLauncher:
             camera_callbacks_map=camera_callbacks_map,
             camera_type=camera_type,
             recipe_manager=recipe_manager,
+            settings_profile_manager=settings_profile_manager,
             command_handler=cmd,
         )
         tab_widget_factory = create_tab_widget_factory(app_ctx)

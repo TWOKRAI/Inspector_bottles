@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.managers.settings_profile_protocol import (
+    SettingsProfileManagerProtocol,
+)
 
 
 @dataclass
@@ -25,6 +28,7 @@ class FrontendAppContext:
         camera_callbacks_map: колбэки камеры (уже собранные из GuiCommandHandler).
         camera_type: режим камеры для CameraTabWidget.
         recipe_manager: менеджер YAML рецептов (или None).
+        settings_profile_manager: менеджер профилей настроек приложения (Phase 0, или None).
         command_handler: GuiCommandHandler — для будущих вкладок / диагностики; сейчас колбэки
             камеры уже замкнуты на него в launcher.
         Методы ``get_*_tab_ui`` / ``get_recipe_access``: стабильные ключи секций ``config`` для
@@ -36,6 +40,7 @@ class FrontendAppContext:
     camera_callbacks_map: Dict[str, Any]
     camera_type: str
     recipe_manager: Optional[RecipeManagerProtocol] = None
+    settings_profile_manager: Optional[SettingsProfileManagerProtocol] = None
     command_handler: Optional[Any] = None
     extras: Dict[str, Any] = field(default_factory=dict)
 
@@ -66,3 +71,7 @@ class FrontendAppContext:
     def get_processing_tab_ui(self) -> Any:
         """Optional processing tab UI dict for app-recipe aggregate (may be None if not in config)."""
         return self.config.get("processing_tab_ui")
+
+    def get_settings_profiles_path(self) -> Any:
+        """Путь к YAML профилей настроек приложения (Phase 0)."""
+        return self.config.get("settings_profiles_path")

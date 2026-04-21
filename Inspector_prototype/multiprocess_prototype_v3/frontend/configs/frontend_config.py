@@ -83,6 +83,9 @@ class FrontendConfig(SchemaBase):
     # Путь к YAML app-пресетов (опционально; по умолчанию рядом с recipes_path)
     settings_recipes_path: Optional[str] = None
 
+    # Путь к YAML профилей настроек приложения (Phase 0; по умолчанию data/settings_profiles.yaml)
+    settings_profiles_path: Optional[str] = None
+
     # Runtime (из app_cfg)
     camera_type: CameraTypeStr = DEFAULT_CAMERA_TYPE
     poll_interval_ms: int = 16
@@ -126,6 +129,7 @@ class FrontendConfig(SchemaBase):
 
         recipes_path = app_cfg.get("recipes_path", self.recipes_path)
         settings_recipes_path = app_cfg.get("settings_recipes_path", self.settings_recipes_path)
+        settings_profiles_path = app_cfg.get("settings_profiles_path", self.settings_profiles_path)
 
         ui_diag = dict(app_cfg.get("ui_diagnostics") or {})
         env_on = os.environ.get("INSPECTOR_UI_DIAGNOSTICS", "").strip().lower() in (
@@ -154,6 +158,7 @@ class FrontendConfig(SchemaBase):
             "post_processing_tab": self.post_processing_tab.model_dump(),
             "recipes_path": recipes_path,
             "settings_recipes_path": settings_recipes_path,
+            "settings_profiles_path": settings_profiles_path,
             "recipe_access": dict(app_cfg.get("recipe_access") or {}),
             "loading_window": self.loading_window.model_dump(),
             "camera_tab": camera_tab,
