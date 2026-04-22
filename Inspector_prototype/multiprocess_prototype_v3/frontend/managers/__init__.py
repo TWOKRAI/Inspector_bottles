@@ -1,5 +1,7 @@
 """Менеджеры уровня frontend-приложения."""
 
+from .display_router import DisplayRouter
+from .window_manager import DisplayWindowManager
 from .recipe_manager import DEFAULT_RECIPE_SLOT_ID, RecipeManager
 from .recipe_manager_protocol import RecipeManagerProtocol
 from .settings_profile_manager import (
@@ -19,6 +21,8 @@ from .settings_yaml_store import (
 __all__ = [
     "DEFAULT_RECIPE_SLOT_ID",
     "DEFAULT_PROFILE_ID",
+    "DisplayRouter",
+    "DisplayWindowManager",
     "SETTINGS_FILE_VERSION",
     "RecipeManager",
     "RecipeManagerProtocol",
