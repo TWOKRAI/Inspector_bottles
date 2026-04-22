@@ -9,16 +9,17 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any
 
+from ...console_module import ConsoleManager
 from ...process_module import ProcessModule
-from ..core.process_registry import ProcessRegistry
+from ...shared_resources_module import QueueRegistry
 from ..core.process_priority import ProcessPriority
+from ..core.process_registry import ProcessRegistry
 from ..core.process_status import ProcessStatus
 from ..monitor import ProcessMonitor
 from ..platforms import get_platform_adapter
-from ...shared_resources_module import QueueRegistry
-from ...console_module import ConsoleManager
 
 
 class ProcessManagerProcess(ProcessModule):
@@ -38,17 +39,16 @@ class ProcessManagerProcess(ProcessModule):
         self,
         name: str = "ProcessManager",
         shared_resources=None,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(name, shared_resources, config or {})
-        self._process_configs: Dict[str, Dict[str, Any]] = {}
+        self._process_configs: dict[str, dict[str, Any]] = {}
         self._create_components()
 
     def _create_components(self) -> None:
         """Создать внутренние компоненты оркестратора."""
         process_data = (
-            self.shared_resources.get_process_data(self.name)
-            if self.shared_resources else None
+            self.shared_resources.get_process_data(self.name) if self.shared_resources else None
         )
         custom = process_data.custom if process_data and process_data.custom else {}
         from multiprocessing import Event as _MpEvent
@@ -68,7 +68,7 @@ class ProcessManagerProcess(ProcessModule):
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatus(self._process_registry.os_processes)
         self._process_monitor = ProcessMonitor(self, poll_interval=0.5)
-        self._console_manager: Optional[ConsoleManager] = None
+        self._console_manager: ConsoleManager | None = None
 
     def _resolve_queue_registry(self):
         """Получить QueueRegistry из shared_resources или создать новый."""
@@ -85,8 +85,7 @@ class ProcessManagerProcess(ProcessModule):
         queue_registry = QueueRegistry(
             manager_name="queue_registry",
             process_state_registry=(
-                self.shared_resources.process_state_registry
-                if self.shared_resources else None
+                self.shared_resources.process_state_registry if self.shared_resources else None
             ),
         )
         queue_registry.initialize()
@@ -124,6 +123,13 @@ class ProcessManagerProcess(ProcessModule):
                 self._create_processes_from_config(processes_config)
 
             self._process_monitor.start()
+
+            # Router endpoint: другие процессы могут слать команды через Router (AD-8)
+            if self.router_manager:
+                self.router_manager.register_message_handler(
+                    "process.command", self._handle_process_command
+                )
+
             return True
         except Exception as exc:
             self._handle_critical_error(exc, "initialize")
@@ -136,6 +142,7 @@ class ProcessManagerProcess(ProcessModule):
 
         commands = {
             "process.list": (self._cmd_process_list, "Список всех процессов и статусов"),
+            "process.create": (self._cmd_process_create, "Создать процесс из inline-конфига"),
             "process.start": (self._cmd_process_start, "Запустить именованный процесс"),
             "process.stop": (self._cmd_process_stop, "Остановить именованный процесс"),
             "process.restart": (self._cmd_process_restart, "Перезапустить именованный процесс"),
@@ -159,6 +166,29 @@ class ProcessManagerProcess(ProcessModule):
     def _cmd_process_list(self, **kwargs) -> dict:
         """Вернуть список всех процессов и их статусы."""
         return self.get_all_processes_status()
+
+    def _cmd_process_create(
+        self,
+        process_name: str = "",
+        class_path: str = "",
+        config: dict[str, Any] | None = None,
+        priority: str = "normal",
+        **kwargs,
+    ) -> dict:
+        """Создать процесс из inline-конфига (AD-8).
+
+        Позволяет динамически создавать процессы через CommandManager или
+        Router-endpoint без предварительной записи в _process_configs.
+        """
+        if not process_name:
+            return {"error": "process_name required"}
+        if not class_path:
+            return {"error": "class_path required"}
+        process = self.create_process(process_name, class_path, config, priority)
+        return {
+            "success": bool(process),
+            "process_name": process_name,
+        }
 
     def _cmd_process_start(self, process_name: str = "", **kwargs) -> dict:
         """Запустить именованный процесс."""
@@ -201,6 +231,86 @@ class ProcessManagerProcess(ProcessModule):
         stats["processes"] = self.get_all_processes_status()
         return stats
 
+    # -------------------------------------------------------------------------
+    # Router endpoint — приём команд от других процессов (AD-8)
+    # -------------------------------------------------------------------------
+
+    def _handle_process_command(self, msg: dict) -> None:
+        """Обработчик Router-сообщений с command='process.command'.
+
+        Извлекает вложенную команду из msg['data'], делегирует в CommandManager
+        и отправляет ответ обратно через Router.
+
+        Формат запроса::
+
+            {
+                "command": "process.command",
+                "data": {
+                    "cmd": "process.start",
+                    "process_name": "camera_3",
+                    "config": {...},            # опционально, для process.create
+                    "correlation_id": "uuid"    # для сопоставления ответа
+                }
+            }
+
+        Формат ответа::
+
+            {
+                "command": "process.command.response",
+                "data": {
+                    "correlation_id": "uuid",
+                    "success": True/False,
+                    "result": {...}
+                }
+            }
+        """
+        data = msg.get("data") or {}
+        correlation_id = data.get("correlation_id") or str(uuid.uuid4())
+        cmd = data.get("cmd", "")
+
+        try:
+            if not cmd:
+                result = {"status": "error", "reason": "поле 'cmd' обязательно"}
+                success = False
+            elif not self.command_manager:
+                result = {"status": "error", "reason": "command_manager недоступен"}
+                success = False
+            else:
+                # Собираем внутреннее сообщение для CommandManager
+                inner_msg: dict[str, Any] = {"command": cmd, "data": {}}
+                # Пробрасываем все поля кроме служебных
+                for key, value in data.items():
+                    if key not in ("cmd", "correlation_id"):
+                        inner_msg["data"][key] = value
+
+                result = self.command_manager.handle_command(inner_msg)
+
+                # Определяем success: если result — dict с "error" или status="error"
+                if isinstance(result, dict):
+                    success = "error" not in result and result.get("status") != "error"
+                else:
+                    success = True
+
+        except Exception as exc:
+            self._log_error(f"Router process.command ошибка при выполнении '{cmd}': {exc}")
+            result = {"status": "error", "reason": str(exc)}
+            success = False
+
+        # Отправить ответ через Router
+        response = {
+            "command": "process.command.response",
+            "data": {
+                "correlation_id": correlation_id,
+                "success": success,
+                "result": result,
+            },
+        }
+        if self.router_manager:
+            try:
+                self.router_manager.send(response)
+            except Exception as send_exc:
+                self._log_error(f"Не удалось отправить process.command.response: {send_exc}")
+
     def _handle_critical_error(self, exc: Exception, context: str) -> None:
         """Логировать критическую ошибку через error_module и запустить shutdown."""
         error_manager = self._get_error_manager()
@@ -212,6 +322,7 @@ class ProcessManagerProcess(ProcessModule):
             )
         else:
             import traceback
+
             self._log_error(f"Critical error in {context}: {exc}")
             traceback.print_exc()
         self.shutdown()
@@ -228,13 +339,10 @@ class ProcessManagerProcess(ProcessModule):
             pass
         return None
 
-    def _create_processes_from_config(
-        self, processes_config: Dict[str, Dict[str, Any]]
-    ) -> None:
+    def _create_processes_from_config(self, processes_config: dict[str, dict[str, Any]]) -> None:
         """Двухфазно: очереди для всех, затем create + start."""
         valid = [
-            (n, c) for n, c in processes_config.items()
-            if isinstance(c, dict) and c.get("class")
+            (n, c) for n, c in processes_config.items() if isinstance(c, dict) and c.get("class")
         ]
         if not valid:
             return
@@ -279,21 +387,19 @@ class ProcessManagerProcess(ProcessModule):
         self,
         name: str,
         class_path: str,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         priority: str = "normal",
     ):
         """Создать и зарегистрировать процесс."""
         merged = copy.deepcopy(config) if config else {}
         merged["class"] = class_path
         self._process_configs[name] = merged
-        process = self._process_registry.create_and_register(
-            name, class_path, config, priority
-        )
+        process = self._process_registry.create_and_register(name, class_path, config, priority)
         if process:
             self._priority.register_priority(name, priority)
         return process
 
-    def start_process(self, process_name: Optional[str] = None) -> bool:
+    def start_process(self, process_name: str | None = None) -> bool:
         """Запустить процесс или все."""
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)
@@ -307,7 +413,7 @@ class ProcessManagerProcess(ProcessModule):
             self._priority.apply_priority(process)
         return True
 
-    def stop_process(self, process_name: Optional[str] = None) -> bool:
+    def stop_process(self, process_name: str | None = None) -> bool:
         """
         Остановить один процесс (per-process stop_event) или все.
         """
@@ -347,9 +453,7 @@ class ProcessManagerProcess(ProcessModule):
         self._log_info(f"Process '{process_name}' restarted")
         return True
 
-    def get_process_status(
-        self, process_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def get_process_status(self, process_name: str | None = None) -> dict[str, Any]:
         """Статус процесса или всех."""
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)
@@ -365,6 +469,6 @@ class ProcessManagerProcess(ProcessModule):
             return status
         return self._status.get_all_status()
 
-    def get_all_processes_status(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_processes_status(self) -> dict[str, dict[str, Any]]:
         """Статусы всех процессов."""
         return self._status.get_all_status()
