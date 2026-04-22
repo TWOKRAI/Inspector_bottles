@@ -1,6 +1,7 @@
 """ProcessorService — бизнес-логика обработки кадров."""
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -15,6 +16,20 @@ if TYPE_CHECKING:
 
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.database.schema import DetectionSchema
+from multiprocess_prototype_v3.services.processor.chain import (
+    ChainResult,
+    ChainRunnable,
+    GraphRunnableBuilder,
+    autofill_inputs,
+)
+from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
+from multiprocess_prototype_v3.registers.processor.catalog import (
+    ProcessingOperationDef,
+    load_catalog,
+)
+from multiprocess_prototype_v3.registers.pipeline.processing_node import ProcessingNode
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessorService:
@@ -26,11 +41,20 @@ class ProcessorService:
         detector: ColorBlobDetector,
         target_width: int = 640,
         target_height: int = 480,
+        pool: ChainThreadPool | None = None,
     ) -> None:
         self._out = output
         self._detector = detector
         self._target_width = target_width
         self._target_height = target_height
+
+        # Phase 5b: пул потоков для параллельного исполнения шагов (None = линейный режим)
+        self._pool = pool
+
+        # Phase 5a: per-region chain runnables
+        self._catalog: dict[str, ProcessingOperationDef] = {}
+        self._runnables: dict[str, ChainRunnable] = {}
+        self._catalog_path: str | None = None
 
     @property
     def detector(self) -> ColorBlobDetector:
@@ -44,8 +68,131 @@ class ProcessorService:
     def target_height(self) -> int:
         return self._target_height
 
+    # --- Phase 5a: каталог и per-region chain runnables ---
+
+    def set_catalog(self, catalog_path: str) -> None:
+        """Загрузить каталог операций из YAML-файла.
+
+        Каталог необходим для построения chain runnables из nodes.
+        Если файл не найден — каталог остаётся пустым (предупреждение в логе).
+        """
+        self._catalog_path = catalog_path
+        self._catalog = load_catalog(catalog_path)
+        logger.info(
+            "Каталог операций загружен: %d операций из %s",
+            len(self._catalog),
+            catalog_path,
+        )
+
+    def rebuild_runnables(self, pipeline_data: dict) -> None:
+        """Построить per-region ChainRunnable из pipeline dict (cameras → regions → nodes).
+
+        Для каждого региона: если есть непустой nodes → строим chain через GraphRunnableBuilder.
+        Если nodes нет или пуст, но есть processing_blocks → регион остаётся на legacy пути.
+
+        Атомарный swap: собираем новый dict целиком, затем присваиваем одним statement.
+        """
+        if not isinstance(pipeline_data, dict):
+            logger.warning("rebuild_runnables: ожидался dict, получен %s", type(pipeline_data).__name__)
+            return
+
+        cameras = pipeline_data.get("cameras")
+        if not isinstance(cameras, dict):
+            logger.debug("rebuild_runnables: пустой или невалидный cameras")
+            return
+
+        new_runnables: dict[str, ChainRunnable] = {}
+
+        for cam_id, cam_data in cameras.items():
+            if not isinstance(cam_data, dict):
+                continue
+            regions = cam_data.get("regions")
+            if not isinstance(regions, dict):
+                continue
+
+            for region_id, region_data in regions.items():
+                if not isinstance(region_data, dict):
+                    continue
+
+                raw_nodes = region_data.get("nodes")
+                if not isinstance(raw_nodes, dict) or not raw_nodes:
+                    # Нет nodes — этот регион остаётся на legacy пути
+                    continue
+
+                # Десериализация нод из dict
+                nodes: dict[str, ProcessingNode] = {}
+                for node_id, node_data in raw_nodes.items():
+                    if isinstance(node_data, dict):
+                        node = ProcessingNode.model_validate({**node_data, "node_id": node_id})
+                        nodes[node_id] = node
+                    elif isinstance(node_data, ProcessingNode):
+                        nodes[node_id] = node_data
+
+                if not nodes:
+                    continue
+
+                # Автозаполнение inputs для линейной цепочки
+                nodes = autofill_inputs(nodes)
+
+                try:
+                    # Phase 5b: передаём pool — builder выбирает parallel/linear автоматически
+                    runnable = GraphRunnableBuilder.build(nodes, self._catalog, pool=self._pool)
+                    # Ключ — составной: cam_id/region_id для уникальности
+                    composite_key = f"{cam_id}/{region_id}"
+                    new_runnables[composite_key] = runnable
+                    logger.info(
+                        "Chain построен: cam=%s region=%s, %d шагов",
+                        cam_id,
+                        region_id,
+                        len(runnable.steps),
+                    )
+                except (KeyError, ValueError) as exc:
+                    logger.error(
+                        "Ошибка построения chain для cam=%s region=%s: %s",
+                        cam_id,
+                        region_id,
+                        exc,
+                    )
+
+        # Атомарный swap — один assignment
+        self._runnables = new_runnables
+        logger.info("Runnables обновлены: %d регионов с chain", len(new_runnables))
+
+    def resize_pool(self, max_workers: int) -> None:
+        """Изменить размер пула потоков на лету.
+
+        Если пул не создан (workers_per_processor=1 или не задан) — вызов игнорируется.
+        После resize нужно вызвать rebuild_runnables(), чтобы применить новый режим.
+        """
+        if self._pool is not None:
+            self._pool.resize(max_workers)
+            logger.info("Пул потоков изменён: %d workers", max_workers)
+
+    def process_frame_chain(
+        self, frame: np.ndarray, metadata: dict[str, Any], region_id: str
+    ) -> ChainResult | None:
+        """Обработать кадр через chain для конкретного региона.
+
+        Если runnable для region_id отсутствует — возвращает None.
+        """
+        runnable = self._runnables.get(region_id)
+        if runnable is None:
+            return None
+
+        return runnable.execute(frame, {
+            "camera_id": metadata.get("camera_id", ""),
+            "region_id": region_id,
+            "seq_id": metadata.get("frame_id", 0),
+        })
+
+    # --- Обработка кадра ---
+
     def process_frame(self, frame: np.ndarray, metadata: dict[str, Any]) -> None:
-        """Обработать кадр: детекция → маска → отправка результатов через порт."""
+        """Обработать кадр: детекция → маска → отправка результатов через порт.
+
+        Если есть per-region runnables — используется chain путь.
+        Иначе — legacy детектор (backward compat).
+        """
         # Resize при необходимости
         if (
             frame.shape[0] != self._target_height or frame.shape[1] != self._target_width
@@ -59,6 +206,62 @@ class ProcessorService:
             metadata["width"] = self._target_width
             metadata["height"] = self._target_height
 
+        # Новый путь: per-region chain (Phase 5a)
+        if self._runnables:
+            self._process_frame_via_chain(frame, metadata)
+            return
+
+        # Legacy путь: единый detector (backward compat)
+        self._process_frame_legacy(frame, metadata)
+
+    def _process_frame_via_chain(self, frame: np.ndarray, metadata: dict[str, Any]) -> None:
+        """Обработать кадр через per-region chain runnables."""
+        for region_id, runnable in self._runnables.items():
+            chain_result = runnable.execute(frame, {
+                "camera_id": metadata.get("camera_id", ""),
+                "region_id": region_id,
+                "seq_id": metadata.get("frame_id", 0),
+            })
+
+            if chain_result.failed:
+                logger.warning(
+                    "Chain для region=%s завершился с ошибкой (level=%s)",
+                    region_id,
+                    chain_result.fail_level,
+                )
+                continue
+
+            # Записать маску в SHM если есть
+            mask_shm_name: str | None = None
+            mask_shm_index: int = -1
+            if chain_result.masks:
+                mask_shm_name, mask_shm_index = self._out.write_mask_to_shm(
+                    chain_result.masks[0]
+                )
+
+            # Построить и отправить результат рендереру
+            result_data = self._build_detection_result(
+                metadata,
+                chain_result.detections,
+                chain_result.contours,
+                chain_result.processing_time,
+                mask_shm_name,
+                mask_shm_index,
+            )
+            self._out.send_detection_to_renderer(result_data)
+
+            # Отправить детекции в БД
+            if chain_result.detections:
+                rows = self._build_detection_rows(chain_result.detections, metadata)
+                self._out.send_detections_to_database(rows)
+
+            # Feedback камере
+            self._out.send_feedback_to_camera(
+                metadata.get("frame_id", 0), chain_result.processing_time
+            )
+
+    def _process_frame_legacy(self, frame: np.ndarray, metadata: dict[str, Any]) -> None:
+        """Legacy путь обработки: единый детектор (backward compat)."""
         t_start = time.time()
         detections, mask, contours = self._detector.detect(frame)
         processing_time = time.time() - t_start

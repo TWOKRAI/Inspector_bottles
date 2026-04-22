@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
@@ -14,6 +15,7 @@ from multiprocess_prototype_v3.backend.helpers import apply_register_update, mes
 from multiprocess_prototype_v3.registers import PROCESSOR_REGISTER
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.processor.service import ProcessorService
+from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
 
 from .adapter import ProcessorAdapter
 from .commands import build_command_table, build_register_handlers
@@ -49,13 +51,32 @@ class ProcessorProcess(ProcessModule):
             app_cfg.get("max_area", 50000),
         )
 
+        # Phase 5b: создаём пул потоков для параллельного исполнения шагов chain
+        workers_per_processor: int = app_cfg.get("workers_per_processor", 2)
+        step_timeout: float = float(app_cfg.get("step_timeout", 10.0))
+        # workers_per_processor <= 1 → линейный режим, пул не создаётся
+        if workers_per_processor > 1:
+            pool: ChainThreadPool | None = ChainThreadPool(
+                max_workers=workers_per_processor,
+                step_timeout=step_timeout,
+            )
+        else:
+            pool = None
+        self._pool = pool
+
         # Создаём сервис с инжектированным портом
         self._service = ProcessorService(
             output=adapter,
             detector=detector,
             target_width=app_cfg.get("resolution_width", 640),
             target_height=app_cfg.get("resolution_height", 480),
+            pool=pool,
         )
+
+        # Phase 5a: загрузка каталога операций обработки
+        catalog_path = app_cfg.get("catalog_path", "data/processing_catalog.yaml")
+        resolved_catalog = str(Path(catalog_path).resolve())
+        self._service.set_catalog(resolved_catalog)
 
         # Команды из таблицы
         cmd_table = build_command_table(self._service)
@@ -108,6 +129,9 @@ class ProcessorProcess(ProcessModule):
 
     def shutdown(self) -> bool:
         self._log_info("ProcessorProcess shutting down...")
+        # Phase 5b: graceful shutdown пула потоков перед остановкой процесса
+        if self._pool is not None:
+            self._pool.shutdown(wait=True)
         if self.memory_manager:
             self.memory_manager.close_all(self.name)
         self.is_initialized = False

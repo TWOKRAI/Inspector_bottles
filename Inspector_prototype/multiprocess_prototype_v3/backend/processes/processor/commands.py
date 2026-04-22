@@ -35,17 +35,47 @@ def build_command_table(service) -> dict:
     }
 
 
+def _has_any_nodes(pipeline_data: dict) -> bool:
+    """Проверить, есть ли хотя бы один регион с непустым nodes dict.
+
+    Используется для выбора между chain (Phase 5a) и legacy путём.
+    """
+    cameras = pipeline_data.get("cameras")
+    if not isinstance(cameras, dict):
+        return False
+    for cam_data in cameras.values():
+        if not isinstance(cam_data, dict):
+            continue
+        regions = cam_data.get("regions")
+        if not isinstance(regions, dict):
+            continue
+        for region_data in regions.values():
+            if not isinstance(region_data, dict):
+                continue
+            nodes = region_data.get("nodes")
+            if isinstance(nodes, dict) and nodes:
+                return True
+    return False
+
+
 def _apply_vision_pipeline(service, value: object) -> None:
     """Применить vision_pipeline dict к ProcessorService.
 
-    Извлекает параметры детекции из первого найденного блока обработки
-    любого региона любой камеры. Phase 4 MVP — единый детектор,
-    per-region processing в Phase 5.
+    Phase 5a: если хотя бы один регион содержит непустой nodes —
+    вызываем service.rebuild_runnables() (per-region chain).
+    Иначе — legacy поведение: извлекаем параметры из первого processing_block.
     """
     if not isinstance(value, dict):
         logger.warning("vision_pipeline: ожидался dict, получен %s", type(value).__name__)
         return
 
+    # Phase 5a: новый формат с nodes → per-region chain runnables
+    if _has_any_nodes(value):
+        logger.info("vision_pipeline: обнаружены nodes — переход на chain runnables")
+        service.rebuild_runnables(value)
+        return
+
+    # Legacy путь: единый детектор, параметры из первого processing_block
     cameras = value.get("cameras")
     if not isinstance(cameras, dict):
         logger.debug("vision_pipeline: пустой или невалидный cameras")
@@ -119,4 +149,6 @@ def build_register_handlers(service) -> dict:
         "min_area": lambda v: service.set_min_area(v),
         "max_area": lambda v: service.set_max_area(v),
         "vision_pipeline": lambda v: _apply_vision_pipeline(service, v),
+        # Phase 5b: изменение размера пула потоков на лету через register_update
+        "workers_per_processor": lambda v: service.resize_pool(int(v)),
     }
