@@ -93,6 +93,7 @@ class CameraService:
         self._backend_lock = threading.Lock()
         self._frame_id = 0
         self._fps_counter = FrameFPS(interval=1.0)
+        self._last_frame: np.ndarray | None = None  # последний захваченный кадр (для recorder)
 
         # Инициализация бэкенда (без handoff — при старте устройство свободно)
         initial_type = config.get("camera_type", DEFAULT_CAMERA_TYPE)
@@ -111,6 +112,14 @@ class CameraService:
     def is_capturing(self) -> bool:
         """Активен ли захват (бэкенд запущен)."""
         return getattr(self._backend, "_running", False)
+
+    @property
+    def last_frame(self) -> np.ndarray | None:
+        """Последний захваченный кадр (после resize до SHM-размеров).
+
+        Используется RecorderWorker для записи видео (AD-10).
+        """
+        return self._last_frame
 
     # --- Создание и переключение бэкенда ---
 
@@ -141,7 +150,9 @@ class CameraService:
             return {"status": "error", "error": f"Unknown camera_type: {new_type}"}
         if new_type == "hikvision" and sys.platform != "win32":
             new_type = "simulator"
-            self._out.send_to_gui("status", {"status": "Hikvision only on Windows, using Simulator"})
+            self._out.send_to_gui(
+                "status", {"status": "Hikvision only on Windows, using Simulator"}
+            )
         with self._backend_lock:
             if self._current_type == new_type:
                 self._out.send_to_gui("status", {"status": f"Already {new_type}"})
