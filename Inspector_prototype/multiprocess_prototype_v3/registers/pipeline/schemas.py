@@ -16,6 +16,7 @@ from multiprocess_framework.modules.data_schema_module import (
 
 from ..camera.schemas import BaseCameraRegisters, HikvisionCameraRegisters, WebcamCameraRegisters
 from ..processor.processings.base import BaseProcessingBlock
+from .processing_node import ProcessingNode
 from .region import Region
 
 CameraRegistersUnion = Union[WebcamCameraRegisters, HikvisionCameraRegisters, BaseCameraRegisters]
@@ -28,9 +29,13 @@ CAMERAS_FIELD_ROUTING = FieldRouting(
 
 @register_schema("RegionNodeV3")
 class RegionNode(Region):
-    """Region in pipeline: ROI fields + dict of processing blocks."""
+    """Region in pipeline: ROI fields + dict of processing blocks (legacy) + nodes (Phase 5a)."""
 
+    # Устаревшее поле — оставлено для обратной совместимости
     processing_blocks: Dict[str, BaseProcessingBlock] = Field(default_factory=dict)
+
+    # Новый граф узлов обработки (Phase 5a — линейная цепочка, Phase 8 — полный граф)
+    nodes: Dict[str, ProcessingNode] = Field(default_factory=dict)
 
 
 @register_schema("CameraNodeV3")
