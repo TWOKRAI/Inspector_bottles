@@ -1,0 +1,46 @@
+2026-04-20 15:14:10,068 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:14:10,069 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:14:10,069 [INFO] renderer: RendererModule ready
+2026-04-20 15:14:10,070 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:14:10,070 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 15:14:30,611 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:14:30,611 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:14:30,612 [INFO] renderer: RendererModule ready
+2026-04-20 15:14:30,614 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:14:30,615 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 15:19:01,522 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:19:01,522 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:19:01,522 [INFO] renderer: RendererModule ready
+2026-04-20 15:19:01,522 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:19:01,522 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 15:19:58,312 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:19:58,312 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:19:58,313 [INFO] renderer: RendererModule ready
+2026-04-20 15:19:58,313 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:19:58,313 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 15:20:47,542 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:20:47,542 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:20:47,542 [INFO] renderer: RendererModule ready
+2026-04-20 15:20:47,542 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:20:47,542 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 15:22:30,176 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:22:30,176 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:22:30,176 [INFO] renderer: RendererModule ready
+2026-04-20 15:22:30,176 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:22:30,177 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 15:24:03,002 [INFO] renderer: Process state registered: renderer
+2026-04-20 15:24:03,002 [INFO] renderer: RendererModule initializing...
+2026-04-20 15:24:03,002 [INFO] renderer: RendererModule ready
+2026-04-20 15:24:03,002 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 15:24:03,002 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 16:22:18,598 [INFO] renderer: RendererModule shutting down...
+2026-04-20 16:23:46,120 [INFO] renderer: Process state registered: renderer
+2026-04-20 16:23:46,120 [INFO] renderer: RendererProcess initializing...
+2026-04-20 16:23:46,120 [INFO] renderer: RendererProcess ready
+2026-04-20 16:23:46,121 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 16:23:46,121 [INFO] renderer: Process 'renderer' initialized successfully
+2026-04-20 16:34:17,248 [INFO] renderer: Process state registered: renderer
+2026-04-20 16:34:17,248 [INFO] renderer: RendererProcess initializing...
+2026-04-20 16:34:17,249 [INFO] renderer: RendererProcess ready
+2026-04-20 16:34:17,250 [INFO] renderer: Registered 10 command(s) with router: ['get_metrics', 'get_metric', 'reset_metrics', 'stats_snapshot', 'flush_stats', 'set_draw_contours', 'set_show_original', 'set_show_mask', 'set_draw_bboxes', 'set_save_frames']
+2026-04-20 16:34:17,250 [INFO] renderer: Process 'renderer' initialized successfully

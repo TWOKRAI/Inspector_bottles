@@ -1,0 +1,39 @@
+default:
+  ProcessingTabUiConfig:
+    channel_b: B
+    channel_g: G
+    channel_r: R
+    checkbox_bbox: BBox
+    checkbox_contours: Contours
+    checkbox_mask: Mask
+    checkbox_original: Original
+    checkbox_save_frames: Save
+    color_hint: Lower | Upper
+    group_area: Площадь пятна
+    group_color: Цветовая детекция (BGR)
+    group_display: Отображение
+    label_max_area_initial_suffix: ' (0=без огр.)'
+    label_max_area_prefix: 'Макс:'
+    label_max_area_unlimited: ' (без огр.)'
+    label_min_area_prefix: 'Мин:'
+    label_px: px
+    touch_keyboard: null
+    touch_keyboard_area: null
+    touch_keyboard_bgr: null
+  RecipesTabConfig:
+    btn_default: По умолчанию
+    btn_load: Загрузить
+    btn_save: Сохранить
+    col_info: Информация
+    col_param: Параметр
+    col_value: Значение
+    group_app_box: App-рецепт (UI)
+    group_register_box: Рецепт регистров
+    label_slot: 'Слот:'
+    recipe_index_max: 21
+    recipe_index_min: 0
+    table_app_group_title: Параметры UI (app-рецепт)
+    table_group_title: Параметры алгоритма (регистры)
+    touch_keyboard: null
+    touch_keyboard_slot: null
+    touch_keyboard_tree: null

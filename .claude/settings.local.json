@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__qex__index_codebase",
+      "mcp__qex__search_code",
+      "mcp__qex__get_indexing_status",
+      "mcp__qex__clear_index",
+      "mcp__qex__download_model"
+    ]
+  }
+}

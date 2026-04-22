@@ -1,0 +1,53 @@
+---
+description: Архитектурные правила Multiprocess Framework
+alwaysApply: true
+---
+
+# Multiprocess Framework — Архитектурные правила
+
+## Где что находится
+
+- **Фреймворк**: `Inspector_prototype/multiprocess_framework/modules/` (16 модулей)
+- **Схемы регистров приложения**: `Inspector_prototype/multiprocess_prototype/registers/schemas/` (не часть фреймворка)
+- **Документация фреймворка**: `Inspector_prototype/multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`, глоссарий, каталог модулей), журнал решений — `multiprocess_framework/DECISIONS.md`; отдельного архива отчётов нет
+- **Тестовое приложение**: `Inspector_prototype/multiprocess_prototype/`
+- **Точка входа**: `Inspector_prototype/multiprocess_prototype/main.py`
+- **Оркестратор**: `process_manager_module/launcher/system_launcher.py`
+- **Базовый процесс**: `process_module/core/process_module.py`
+- **Журнал решений**: `multiprocess_framework/DECISIONS.md` — читай перед предложением архитектурных изменений
+
+## Структура модуля (обязательная)
+
+Каждый модуль должен содержать:
+- `interfaces.py` — публичный контракт (единственный файл, от которого зависят другие)
+- `README.md` — по шаблону из `docs/MODULE_README_TEMPLATE.md`
+- `STATUS.md` — карточка здоровья (этап X/8, оценки, известные проблемы)
+- `tests/` — unit-тесты
+
+## Соглашения
+
+- **Импорты**: относительные внутри модуля (`from ..interfaces import ...`), абсолютные между модулями
+- **Границы процессов**: только `dict` (не Pydantic объекты) — Dict at Boundary
+- **Конфиг**: принимать как `dict`, Pydantic только внутри модуля
+- **Тесты**: pytest, файлы `test_*.py`
+- **Никаких `sys.path.insert`** в production-коде
+
+## 16 модулей и их слои
+
+```
+Foundation:    base_manager, data_schema_module, message_module
+Infrastructure: logger_module, error_module, config_module, console_module,
+                shared_resources_module, registers_module
+Communication: dispatch_module, router_module, command_module
+Process:       worker_module, process_module
+Orchestration: process_manager_module
+Frontend:      frontend_module
+```
+
+Схемы регистров (поля алгоритма, `FieldMeta`, `register_dispatch`) задаёт **приложение** — классы на базе `data_schema_module.SchemaBase`, без отдельного пакета во фреймворке.
+
+## После каждого изменения
+
+1. Обновить `STATUS.md` затронутого модуля
+2. Запустить `python scripts/validate.py` и `python scripts/run_framework_tests.py` (cwd: `Inspector_prototype`)
+3. Зафиксировать новые архитектурные решения в `DECISIONS.md`

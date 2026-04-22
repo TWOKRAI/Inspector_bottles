@@ -1,0 +1,26 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+node_modules/
+.git/
+vendor/
+venv/
+env/
+__pycache__/
+*.pyc
+dist/
+build/
+.next/
+out/
+.cache/
+coverage/
+*.log
+.DS_Store
+
+BASKET/
+Inspector_prototype/Multiproccesing/
+Inspector_prototype/multiprocess_framework/modules (no work!!!) go refactored/
+# Services/
+#scripts/
+
+logs/
+archive/
+Inspector_prototype/multiprocess_framework/tests/

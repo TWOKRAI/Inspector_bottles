@@ -1,0 +1,52 @@
+// ============================================================================
+// qex MCP-конфиг — snippet для вставки в ~/.claude.json
+// ============================================================================
+//
+// КАК ПРИМЕНИТЬ:
+// 1. Открой ~/.claude.json в редакторе.
+// 2. Найди секцию "projects".
+// 3. Добавь новую запись, где ключ — абсолютный путь к корню проекта,
+//    значение — объект ниже (без этих комментариев: JSON не поддерживает //).
+// 4. Замени три плейсхолдера:
+//    - <PROJECT_ABSOLUTE_PATH>  абсолютный путь к проекту
+//    - <QEX_BINARY_PATH>        путь к бинарнику qex-mcp-v2
+//                               macOS default:  /Users/<USER>/.local/bin/qex-mcp-v2
+//                               Windows default: C:\\Users\\<USER>\\.local\\bin\\qex-mcp-v2.exe
+//    - <COLLECTION_NAME>        уникальное имя коллекции Qdrant для ЭТОГО проекта
+//                               (например myproj_index — чтобы не смешивать с другими)
+// 5. Сохрани файл и перезапусти Claude Code (Cmd+Shift+P → Developer: Reload Window).
+//
+// ПРИМЕЧАНИЕ: EMBEDDING_MODEL должен совпадать с тем, что установлен в Ollama.
+// Если меняешь модель — нужно очистить старую коллекцию Qdrant
+// (размерность векторов привязана к модели, смешивать нельзя).
+//
+// ============================================================================
+
+"<PROJECT_ABSOLUTE_PATH>": {
+  "mcpServers": {
+    "qex": {
+      "type": "stdio",
+      "command": "<QEX_BINARY_PATH>",
+      "args": [],
+      "env": {
+        "RUST_LOG": "info",
+        "WORKSPACE_PATH": "<PROJECT_ABSOLUTE_PATH>",
+        "QDRANT_URL": "http://localhost:6333",
+        "QDRANT_COLLECTION_NAME": "<COLLECTION_NAME>",
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "EMBEDDING_MODEL": "qwen3-embedding:4b",
+        "QEX_EMBEDDING_PROVIDER": "ollama",
+        "QEX_OLLAMA_DIMENSIONS": "2560"
+      }
+    }
+  },
+  "disabledMcpjsonServers": ["qex"]
+}
+
+// ============================================================================
+// ВАРИАНТ: Qdrant Cloud (синхронизация индекса между машинами)
+// ============================================================================
+// Замени в env:
+//   "QDRANT_URL": "https://YOUR-CLUSTER.aws.cloud.qdrant.io"
+//   "QDRANT_API_KEY": "YOUR_API_KEY"
+// Остальное без изменений. Подробнее — SETUP_GUIDE.md § 14.

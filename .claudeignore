@@ -1,0 +1,93 @@
+# ============================
+# BYTE-COMPILED / OPTIMIZED
+# ============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ============================
+# ENVIRONMENTS
+# ============================
+.env
+.env.*
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================
+# DEPENDENCIES & CACHE
+# ============================
+node_modules/
+.pytest_cache/
+.cache/
+*.tmp
+__pycache__/
+
+# ============================
+# BUILD ARTIFACTS
+# ============================
+dist/
+build/
+.next/
+target/
+
+# ============================
+# LOGS & TEMP FILES
+# ============================
+*.log
+logs/
+**/logs/
+# Но оставляем .gitkeep, чтобы структура папок сохранялась
+!**/logs/.gitkeep
+
+# ============================
+# IDE & OS JUNK
+# ============================
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ============================
+# PROJECT-SPECIFIC
+# ============================
+
+# Корзина старых/неиспользуемых файлов
+BASKET/
+
+# Датасеты (если большие – лучше исключить полностью)
+/dataset
+
+# Логи runtime для multiprocess_prototype
+Inspector_prototype/multiprocess_prototype/logs/*
+!Inspector_prototype/multiprocess_prototype/logs/.gitkeep
+
+# Логи runtime для framework_minimal_prototype
+Inspector_prototype/framework_minimal_prototype/logs/*
+!Inspector_prototype/framework_minimal_prototype/logs/.gitkeep
+
+# Случайные логи рядом с модулями framework (старое поведение)
+Inspector_prototype/multiprocess_framework/modules/*.log
+Inspector_prototype/multiprocess_framework/modules/logs/
+
+# Устаревшие пользовательские настройки (теперь хранятся глобально)
+Inspector_prototype/multiprocess_prototype/.inspector_prefs.json
+
+# Локальный Milvus (docker compose) – data volumes
+milvus-docker/volumes/
+
+# ============================
+# ADDITIONAL SAFETY (необязательно)
+# ============================
+# Если у вас есть большие бинарные файлы, обученные модели, архивы:
+# *.pkl
+# *.h5
+# *.pb
+# *.zip
+# *.tar.gz

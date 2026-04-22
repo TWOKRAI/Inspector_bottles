@@ -1,0 +1,46 @@
+---
+description: В начале каждого файла — комментарий с путём к файлу
+globs: "**/*.py,**/*.md"
+alwaysApply: false
+---
+
+# Комментарий с путём в начале файла
+
+В **первой строке** каждого `.py` и `.md` файла должен быть комментарий с путём к файлу.
+
+## Формат
+
+- **Python (`.py`)**: `# <путь>`, например `# multiprocess_prototype\processes\gui_process.py`
+- **Markdown (`.md`)**: `# <путь>`, например `# multiprocess_prototype\README.md`
+
+Путь — **относительный к папке `Inspector_prototype`** (чтобы в комментарии была видна структура: `multiprocess_prototype\...`, `multiprocess_framework\...` и т.д.).
+
+## Правила
+
+1. При **создании нового** `.py` или `.md` — сразу добавляй первой строкой комментарий с путём.
+2. При **редактировании** файла — не удаляй и не меняй первую строку с путём; если её нет — добавь.
+3. Символ комментария: для `.py` — `#`, для `.md` — `#`. После символа — один пробел, затем путь (слэши можно `\` или `/`).
+
+## Примеры
+
+```python
+# multiprocess_prototype\processes\gui_process.py
+"""
+GuiProcess — отображение видео и управление (PyQt5).
+"""
+```
+
+```markdown
+# multiprocess_prototype\README.md
+
+# Multiprocess Prototype
+...
+```
+
+## Массовое обновление
+
+Для добавления/обновления комментариев по папке использовать скрипт:
+
+```bash
+python -m Inspector_prototype.Utils.file_comments comment <root_dir> -b Inspector_prototype
+```

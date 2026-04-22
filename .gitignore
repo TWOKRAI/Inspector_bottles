@@ -6,11 +6,16 @@ __pycache__/
 # Environments
 .env
 .venv
+.venv_pytest
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# OS / IDE junk
+.DS_Store
+**/.DS_Store
 
 # IDE
 .idea/
@@ -18,5 +23,45 @@ venv.bak/
 *.swp
 *.swo
 
+# Build artifacts
+*.egg-info/
+
+# Basket with old/unused files
+BASKET/
 
 /dataset
+
+
+# ============================
+# CLAUDE CODE (локальные настройки)
+# ============================
+CLAUDE.local.md
+.claude/CLAUDE.local.md
+.claude/settings.local.json
+
+
+# Runtime logs (multiprocess prototype)
+Inspector_prototype/multiprocess_prototype/logs/*
+!Inspector_prototype/multiprocess_prototype/logs/.gitkeep
+
+# Runtime logs (framework_minimal_prototype)
+Inspector_prototype/framework_minimal_prototype/logs/*
+!Inspector_prototype/framework_minimal_prototype/logs/.gitkeep
+
+# Runtime logs (multiprocess_prototype_v3)
+Inspector_prototype/multiprocess_prototype_v3/logs/*
+!Inspector_prototype/multiprocess_prototype_v3/logs/.gitkeep
+Inspector_prototype/multiprocess_prototype_v3/robot_actions.log
+
+# Accidental file logs next to framework modules (legacy cwd-based writes)
+Inspector_prototype/multiprocess_framework/modules/*.log
+Inspector_prototype/multiprocess_framework/modules/logs/
+
+# Legacy user prefs (migrated to ~/.inspector_prototype/user_prefs.json or INSPECTOR_DATA_DIR)
+Inspector_prototype/multiprocess_prototype/.inspector_prefs.json
+
+# Local Milvus standalone (docker compose) — data volumes
+milvus-docker/volumes/
+
+# qex-mcp-v2 source (moved to ~/src/qex-mcp-v2/ — keep build artifacts out of repo)
+/qex/

@@ -1,0 +1,1 @@
+# Cropped Area Widget

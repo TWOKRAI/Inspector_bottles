@@ -1,0 +1,43 @@
+# .ignore — правила для qex-mcp-v2 (crate `ignore`, как у ripgrep)
+# НЕ путать с .gitignore. Этот файл git не отслеживает; git использует .gitignore.
+#
+# Стратегия: whitelist — индексируем ТОЛЬКО активные рабочие области,
+# всё остальное исключаем.
+#
+# В индексе остаются:
+#   Inspector_prototype/multiprocess_framework/      — ядро фреймворка
+#   Inspector_prototype/multiprocess_prototype/      — основной прототип (main.py)
+#   Inspector_prototype/multiprocess_prototype_v3/   — новый прототип
+#   Inspector_prototype/scripts/                     — тулинг (validate.py, тесты)
+#   Inspector_prototype/Services/                    — сервисы
+#   Inspector_prototype/Utils/                       — утилиты
+#   Inspector_prototype/hikvision_camera_module/     — камера
+#   Inspector_prototype/frontend_pyqt_module/        — будущий фронт (когда появится)
+#   docs/                                            — документация (FRAMEWORK_RULES, qex guides)
+
+# === Корень репо: исключить всё... ===
+/*
+
+# ... кроме активных директорий.
+!/Inspector_prototype/
+!/docs/
+
+# === Внутри Inspector_prototype/: исключить всё... ===
+Inspector_prototype/*
+
+# ... кроме активных подпапок.
+!Inspector_prototype/multiprocess_framework/
+!Inspector_prototype/multiprocess_prototype/
+!Inspector_prototype/multiprocess_prototype_v3/
+!Inspector_prototype/scripts/
+!Inspector_prototype/Services/
+!Inspector_prototype/Utils/
+!Inspector_prototype/hikvision_camera_module/
+!Inspector_prototype/frontend_pyqt_module/
+
+# === Исключить мусор внутри разрешённых папок ===
+**/*.log
+**/logs/
+**/archive/
+**/*.pyc
+**/__pycache__/

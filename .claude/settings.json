@@ -1,0 +1,114 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Agent",
+      "Bash(ruff *)",
+      "Bash(pytest *)",
+      "Bash(mypy *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(uv run *)",
+      "Bash(uv sync*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch*)",
+      "Bash(git checkout *)",
+      "Bash(git stash*)",
+      "Bash(git merge *)",
+      "Bash(docker ps*)",
+      "Bash(docker logs *)",
+      "Bash(docker start *)",
+      "Bash(docker compose *)",
+      "Bash(docker-compose *)",
+      "Bash(docker inspect *)",
+      "Bash(ollama *)",
+      "Bash(curl http://localhost*)",
+      "Bash(curl -s http://localhost*)",
+      "Bash(curl -X DELETE http://localhost:6333*)",
+      "Bash(curl -X PUT http://localhost:6333*)",
+      "Bash(mkdir -p *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(cat *.toml)",
+      "Bash(cat *.md)",
+      "Bash(cat *.json)",
+      "Bash(which *)",
+      "Bash(wc *)",
+      "Bash(cd * && python -m pytest *)",
+      "Bash(cd * && python -m pytest*)"
+    ],
+    "ask": [
+      "Bash(pip install *)",
+      "Bash(uv add *)",
+      "Bash(uv pip install *)",
+      "Bash(git push *)",
+      "Bash(docker run *)",
+      "Bash(docker exec *)",
+      "Bash(docker stop *)",
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker kill *)",
+      "Bash(docker system *)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(chmod 777 *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fd *)",
+      "Bash(git clean -f *)",
+      "Bash(docker system prune *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/validate-safe-command.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/autoformat-python.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-imports.sh",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  },
+  "alwaysThinkingEnabled": true,
+  "preferredLanguage": "ru",
+  "statusLine": {
+    "type": "command",
+    "command": "printf 'branch: %s | qdrant: %s' \"$(git branch --show-current 2>/dev/null)\" \"$(docker ps --filter name=qdrant --filter status=running --format '{{.Names}}' 2>/dev/null | grep -q qdrant && echo UP || echo DOWN)\""
+  }
+}
