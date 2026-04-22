@@ -61,9 +61,10 @@ class MainWindow(QMainWindow):
         self._header_action_handlers = header_action_handlers or {}
         self._header_on_unmatched = header_on_unmatched or show_window_callback
         self._app_ctx = app_ctx
-        # Кнопки undo/redo — заполняются в _setup_undo_redo_ui
+        # Кнопки undo/redo/history — заполняются в _setup_undo_redo_ui
         self._btn_undo: QPushButton | None = None
         self._btn_redo: QPushButton | None = None
+        self._btn_history: QPushButton | None = None
         self._init_ui()
         self._setup_undo_redo_ui()
 
@@ -80,7 +81,9 @@ class MainWindow(QMainWindow):
             )
         )
 
-    def _build_header_config(self, header_cfg: HeaderConfig | dict[str, Any] | None) -> dict[str, Any]:
+    def _build_header_config(
+        self, header_cfg: HeaderConfig | dict[str, Any] | None
+    ) -> dict[str, Any]:
         """HeaderConfig | dict → dict для HeaderWidget. Legacy: logo_path → logo.path."""
         if header_cfg is None:
             return HeaderConfig().model_dump()
@@ -163,11 +166,17 @@ class MainWindow(QMainWindow):
         self._btn_undo.setEnabled(False)
         self._btn_redo.setEnabled(False)
 
+        # Кнопка «История»
+        self._btn_history = create_header_button("История ▼", tooltip="Последние действия")
+        self._btn_history.clicked.connect(self._show_history_menu)
+        self._btn_history.setEnabled(False)
+
         # Вставить кнопки в header layout
         header_layout = self._header.layout()
         if header_layout is not None:
             header_layout.addWidget(self._btn_undo)
             header_layout.addWidget(self._btn_redo)
+            header_layout.addWidget(self._btn_history)
 
         # Подписаться на обновления bus
         if bus is not None:
@@ -186,7 +195,7 @@ class MainWindow(QMainWindow):
             bus.redo()
 
     def _update_undo_redo_state(self) -> None:
-        """Обновить enabled-состояние кнопок undo/redo."""
+        """Обновить enabled-состояние кнопок undo/redo и текст статус-бара."""
         bus = self._app_ctx.get_action_bus() if self._app_ctx else None
         if bus is None:
             return
@@ -194,6 +203,57 @@ class MainWindow(QMainWindow):
             self._btn_undo.setEnabled(bus.can_undo())
         if self._btn_redo is not None:
             self._btn_redo.setEnabled(bus.can_redo())
+        if self._btn_history is not None:
+            self._btn_history.setEnabled(bus.can_undo())
+        # Статус-бар
+        self._update_status_bar(bus)
+
+    def _update_status_bar(self, bus) -> None:
+        """Обновить текст статус-бара по последнему событию bus."""
+        event = bus.last_event
+        if event is None:
+            self.statusBar().showMessage("Готово")
+            return
+        event_type, action = event
+        desc = action.description or action.action_type.value
+        if event_type == "undo":
+            self.statusBar().showMessage(f"Отменено: {desc}")
+        elif event_type == "redo":
+            self.statusBar().showMessage(f"Повторено: {desc}")
+        else:
+            self.statusBar().showMessage(f"Последнее действие: {desc}")
+
+    def _show_history_menu(self) -> None:
+        """Показать dropdown с последними 20 Actions."""
+        from PyQt5.QtWidgets import QMenu
+
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is None:
+            return
+
+        actions = bus.history(20)
+        if not actions:
+            return
+
+        menu = QMenu(self)
+        # Показываем от новых к старым
+        for i, action in enumerate(reversed(actions)):
+            desc = action.description or action.action_type.value
+            label = f"{i + 1}. {desc}"
+            # Маркер текущей позиции (top of stack)
+            if i == 0:
+                label = f"● {label}"
+            menu_action = menu.addAction(label)
+            aid = action.action_id
+            menu_action.triggered.connect(lambda checked, _aid=aid: self._undo_to(_aid))
+
+        menu.exec_(self._btn_history.mapToGlobal(self._btn_history.rect().bottomLeft()))
+
+    def _undo_to(self, action_id: str) -> None:
+        """Откатить до указанного action."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is not None:
+            bus.undo_to(action_id)
 
     def closeEvent(self, event) -> None:
         """Отписаться от bus при закрытии окна."""
