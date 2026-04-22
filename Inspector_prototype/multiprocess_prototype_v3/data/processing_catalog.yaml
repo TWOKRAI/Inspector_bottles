@@ -1,0 +1,13 @@
+operations:
+  - type_key: color_detection
+    name: "Цветовая детекция"
+    params_schema: "registers.processor.processings.color_detection.ColorDetectionParams"
+    module_path: "services.processor.operations.color_detection_op.ColorDetectionOp"
+    on_error: skip
+    description: "Детекция объектов по цветовому диапазону BGR"
+  - type_key: blob_detection
+    name: "Детекция блобов"
+    params_schema: "registers.processor.processings.blob_detection.BlobDetectionParams"
+    module_path: "services.processor.operations.blob_detection_op.BlobDetectionOp"
+    on_error: skip
+    description: "Детекция крупных blob-объектов (stub)"
