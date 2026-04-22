@@ -87,6 +87,11 @@ class DisplayWindowManager:
         # Создаём виджет окна
         widget = DisplayWindow(window_id=window_id)
 
+        # Устанавливаем recording indicator если source — камера
+        camera_id = self._display_router._parse_camera_id(source_ref)
+        if camera_id is not None and hasattr(widget, 'set_recording_indicator_for_camera'):
+            widget.set_recording_indicator_for_camera(camera_id)
+
         # Формируем подписку с трансформацией (или дефолтной)
         sub = DisplaySubscription(
             source_ref=source_ref,

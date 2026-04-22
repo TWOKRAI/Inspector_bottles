@@ -136,6 +136,19 @@ class DisplayWindow(QWidget):
         )
         self._image_label.setPixmap(scaled)
 
+    def set_recording_indicator_for_camera(self, camera_id: int) -> None:
+        """Создать и установить RecordingIndicator для конкретной камеры.
+
+        Args:
+            camera_id: Идентификатор камеры для привязки индикатора.
+        """
+        from multiprocess_prototype_v3.frontend.widgets.recording_indicator.widget import RecordingIndicator
+
+        indicator = RecordingIndicator(self)
+        indicator.set_camera_id(camera_id)
+        self.set_recording_indicator(indicator)
+        self._recording_indicator = indicator
+
     def set_recording_indicator(self, indicator: QWidget) -> None:
         """Заменить placeholder на реальный RecordingIndicator.
 

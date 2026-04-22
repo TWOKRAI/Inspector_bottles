@@ -101,6 +101,34 @@ class FrontendLauncher:
 
         camera_type = config.get("camera_type", "simulator")
         camera_registry = CameraRegistry(config.get("camera_configs"))
+
+        # --- Phase 6: Display Router + Window Manager ---
+        from multiprocess_prototype_v3.backend.routing.throttle_middleware import FrameThrottleMiddleware
+        from multiprocess_prototype_v3.frontend.managers.display_router import DisplayRouter
+        from multiprocess_prototype_v3.frontend.managers.window_manager import DisplayWindowManager
+
+        # Создаём throttle middleware (без начальных лимитов — задаются при subscribe)
+        throttle_mw = FrameThrottleMiddleware()
+
+        # Определяем headless из app_config
+        display_enabled = config.get("display_enabled", True)
+
+        # Создаём DisplayRouter — мост UI ↔ backend routing
+        display_router = DisplayRouter(
+            router_manager=process.router_manager,
+            memory_manager=process.memory_manager,
+            throttle_middleware=throttle_mw,
+            headless=not display_enabled,
+        )
+
+        # Создаём WindowManager — lifecycle display-окон
+        window_manager_display = DisplayWindowManager(display_router)
+
+        # Сохраняем в process для доступа из _handle_new_frame
+        process._display_router = display_router
+        process._window_manager_display = window_manager_display
+        process._throttle_mw = throttle_mw
+
         app_ctx = FrontendAppContext(
             config=config,
             registers_manager=regs,
@@ -110,6 +138,10 @@ class FrontendLauncher:
             settings_profile_manager=settings_profile_manager,
             command_handler=cmd,
             camera_registry=camera_registry,
+            extras={
+                "window_manager": window_manager_display,
+                "display_router": display_router,
+            },
         )
         tab_widget_factory = create_tab_widget_factory(app_ctx)
 
@@ -139,6 +171,10 @@ class FrontendLauncher:
             process._stop_timer = QTimer()
             process._stop_timer.timeout.connect(lambda: process._check_stop(app))
             process._stop_timer.start(100)
+
+            # Phase 6: cleanup display-окон при выходе из приложения
+            app.aboutToQuit.connect(lambda: window_manager_display.destroy_all())
+
             return win
 
         def create_loading_window(**kwargs):

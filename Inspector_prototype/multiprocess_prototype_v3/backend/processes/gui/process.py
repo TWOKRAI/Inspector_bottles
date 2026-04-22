@@ -20,6 +20,7 @@ from .handlers import (
     handle_enum_devices_response,
     handle_fps_update,
     handle_parameters_response,
+    handle_recorder_stats,
 )
 
 # Dispatch table: data_type → handler function
@@ -30,6 +31,7 @@ _HANDLER_MAP = {
     "enum_devices_response": handle_enum_devices_response,
     "camera_type_changed": handle_camera_type_changed,
     "fps_update": handle_fps_update,
+    "recorder_stats": handle_recorder_stats,
 }
 
 
@@ -136,6 +138,12 @@ class GuiProcess(ProcessModule):
                 show_original=data.get("show_original", True),
                 show_mask=data.get("show_mask", True),
             )
+
+        # Phase 6: dispatch кадров в display-окна через DisplayRouter
+        if hasattr(self, '_display_router') and self._display_router is not None:
+            for sub in self._display_router.get_active_subscriptions():
+                channel = f"display_{sub.window_id}"
+                self._display_router.dispatch_frame(channel, original)
 
     def gui_request_shutdown(self):
         """Вызывается Qt при aboutToQuit — запрашиваем остановку процесса."""

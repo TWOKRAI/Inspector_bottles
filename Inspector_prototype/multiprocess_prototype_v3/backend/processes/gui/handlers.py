@@ -47,3 +47,13 @@ def handle_fps_update(window: Any, data: dict) -> None:
     """Обновить счётчик FPS в окне."""
     if window and hasattr(window, "update_camera_fps"):
         window.update_camera_fps(data.get("fps", 0))
+
+
+def handle_recorder_stats(window: Any, data: dict) -> None:
+    """Обновить индикатор записи в display-окнах.
+
+    Phase 6: RecorderWorker шлёт stats → GuiProcess → display windows.
+    Пока placeholder — будет задействован когда RecorderWorker начнёт
+    отправлять stats через IPC.
+    """
+    pass  # Реализация в Phase 6.9+, когда RecorderWorker stats IPC будет готов
