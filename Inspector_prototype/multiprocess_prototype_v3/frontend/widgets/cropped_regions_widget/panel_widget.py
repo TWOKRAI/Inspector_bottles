@@ -47,11 +47,13 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
         ui: Optional[Union[CroppedRegionsTabUiConfig, dict]] = None,
         controls_factory: Optional[CroppedControlsFactory] = None,
         touch_keyboard: Any | None = None,
+        camera_registry: Optional[Any] = None,
         parent: Optional[Any] = None,
     ) -> None:
         self._controls_factory = controls_factory
         self._rm_subscribe_cb = None
         self._touch_keyboard = touch_keyboard
+        self._camera_registry = camera_registry
         super().__init__(registers_manager=registers_manager, ui=ui, parent=parent)
 
     def _coerce_ui(self, ui: Optional[object]) -> CroppedRegionsTabUiConfig:
@@ -64,6 +66,7 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
             registers_manager=self._registers_manager,
             ui=self._ui,
             selected_camera=default_cam,
+            camera_registry=self._camera_registry,
         )
 
     def _init_ui(self) -> None:

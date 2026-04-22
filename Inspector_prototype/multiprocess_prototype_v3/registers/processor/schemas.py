@@ -20,6 +20,7 @@ from ..constants import (
     DEFAULT_COLOR_UPPER,
     DEFAULT_MAX_AREA,
     DEFAULT_MIN_AREA,
+    PIPELINE_PARAMS_ROUTING,
 )
 
 
@@ -52,7 +53,12 @@ class ProcessorRegisters(SchemaBase):
     ] = DEFAULT_MAX_AREA
 
     logical_camera_ids: List[str] = Field(default_factory=list)
-    vision_pipeline: Dict[str, Any] = Field(default_factory=dict)
+
+    vision_pipeline: Annotated[
+        Dict[str, Any],
+        FieldMeta("Vision Pipeline", info="Per-camera region tree (Pipeline schema).", routing=PIPELINE_PARAMS_ROUTING),
+    ] = Field(default_factory=dict)
+
     crop_regions: Dict[str, Any] = Field(default_factory=dict)
     post_processing_regions: Dict[str, Any] = Field(default_factory=dict)
 

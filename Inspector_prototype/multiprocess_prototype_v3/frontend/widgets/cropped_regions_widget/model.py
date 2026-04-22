@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from frontend_module.interfaces import IRegistersManagerGui
 
@@ -17,6 +17,7 @@ class CroppedRegionsModel:
     ui: CroppedRegionsTabUiConfig
     crop_regions_by_camera: Dict[str, Dict[str, List[int]]] = field(default_factory=dict)
     selected_camera: str = "default"
+    camera_registry: Optional[Any] = None
 
     def current_regions(self) -> Dict[str, List[int]]:
         """Регионы выбранной камеры (изменяемый словарь)."""

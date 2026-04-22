@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, Dict, List
 
 from pydantic import Field
 
@@ -36,6 +36,11 @@ class Region(SchemaBase):
         int,
         FieldMeta("Order", info="Order in post-processing table (lower first)."),
     ] = 0
+
+    steps: Annotated[
+        List[Dict[str, Any]],
+        FieldMeta("Processing steps", info="Ordered list of processing step configs. Filled in Phase 5."),
+    ] = Field(default_factory=list)
 
 
 __all__ = ["Region"]

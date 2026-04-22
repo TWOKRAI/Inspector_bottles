@@ -28,6 +28,7 @@ from multiprocess_prototype_v3.frontend.widgets.tabs_setting.camera_tab.schemas 
     CameraTabUiConfig,
 )
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
+from multiprocess_prototype_v3.frontend.managers.camera_registry import CameraRegistry
 from multiprocess_prototype_v3.frontend.windows.main_window import MainWindow, create_tab_widget_factory
 
 
@@ -99,6 +100,7 @@ class FrontendLauncher:
             settings_profile_manager.ensure_default_profile(regs)
 
         camera_type = config.get("camera_type", "simulator")
+        camera_registry = CameraRegistry(config.get("camera_configs"))
         app_ctx = FrontendAppContext(
             config=config,
             registers_manager=regs,
@@ -107,6 +109,7 @@ class FrontendLauncher:
             recipe_manager=recipe_manager,
             settings_profile_manager=settings_profile_manager,
             command_handler=cmd,
+            camera_registry=camera_registry,
         )
         tab_widget_factory = create_tab_widget_factory(app_ctx)
 

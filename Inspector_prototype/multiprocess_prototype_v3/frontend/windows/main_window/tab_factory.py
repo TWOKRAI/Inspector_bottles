@@ -62,6 +62,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 registers_manager=registers_manager,
                 ui=ctx.get_cropped_regions_tab_ui(),
                 touch_keyboard=tk,
+                camera_registry=ctx.camera_registry,
             )
         if widget_key == "camera":
             return CameraTabWidget(

@@ -42,6 +42,7 @@ class FrontendAppContext:
     recipe_manager: Optional[RecipeManagerProtocol] = None
     settings_profile_manager: Optional[SettingsProfileManagerProtocol] = None
     command_handler: Optional[Any] = None
+    camera_registry: Optional[Any] = None
     extras: Dict[str, Any] = field(default_factory=dict)
 
     def get_recipes_tab_ui(self) -> Any:
