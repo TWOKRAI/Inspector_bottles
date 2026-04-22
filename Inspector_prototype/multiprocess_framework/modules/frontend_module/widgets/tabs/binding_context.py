@@ -18,6 +18,7 @@ class RegisterBindingContext:
     """Есть ли rm для NumericControl; при отсутствии — fallback (слайдер / line edit)."""
 
     rm: Optional[IRegistersManagerGui]
+    action_bus: Optional[object] = None
 
     @property
     def can_bind(self) -> bool:

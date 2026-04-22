@@ -129,6 +129,10 @@ class FrontendLauncher:
         process._window_manager_display = window_manager_display
         process._throttle_mw = throttle_mw
 
+        from multiprocess_prototype_v3.frontend.actions.default_bus_factory import (
+            create_default_action_bus,
+        )
+
         app_ctx = FrontendAppContext(
             config=config,
             registers_manager=regs,
@@ -138,6 +142,7 @@ class FrontendLauncher:
             settings_profile_manager=settings_profile_manager,
             command_handler=cmd,
             camera_registry=camera_registry,
+            action_bus=create_default_action_bus(regs),
             extras={
                 "window_manager": window_manager_display,
                 "display_router": display_router,

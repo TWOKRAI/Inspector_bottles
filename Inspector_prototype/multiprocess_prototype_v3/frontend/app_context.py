@@ -43,6 +43,7 @@ class FrontendAppContext:
     settings_profile_manager: Optional[SettingsProfileManagerProtocol] = None
     command_handler: Optional[Any] = None
     camera_registry: Optional[Any] = None
+    action_bus: Optional[Any] = None
     extras: Dict[str, Any] = field(default_factory=dict)
 
     def get_recipes_tab_ui(self) -> Any:
@@ -80,3 +81,7 @@ class FrontendAppContext:
     def get_settings_profiles_path(self) -> Any:
         """Путь к YAML профилей настроек приложения (Phase 0)."""
         return self.config.get("settings_profiles_path")
+
+    def get_action_bus(self) -> Optional[Any]:
+        """ActionBus для выполнения действий с undo/redo (или None если не инициализирован)."""
+        return self.action_bus
