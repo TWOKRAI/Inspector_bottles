@@ -3,6 +3,9 @@
 Тонкий ProcessModule: управление воркерами, IPC, SHM.
 Команды и register-хендлеры — в commands.py, адаптер — в adapter.py.
 Вся бизнес-логика — в CameraService.
+
+Phase 3: параметризация по camera_id — каждый экземпляр обслуживает
+одну камеру с уникальным SHM region/slot.
 """
 from __future__ import annotations
 
@@ -23,20 +26,26 @@ class CameraProcess(ProcessModule):
     """Процесс камеры. Инфраструктура: воркеры, IPC, SHM, команды.
 
     Делегирует бизнес-логику в CameraService через adapter pattern.
+    camera_id из config определяет SHM region/slot naming.
     """
 
     def _init_application_threads(self) -> None:
-        self._log_info("CameraProcess initializing...")
+        # camera_id из конфига (default 0 для обратной совместимости)
+        app_cfg = self.get_config("config") or {}
+        self._camera_id: int = app_cfg.get("camera_id", 0)
+        shm_owner = f"camera_{self._camera_id}"
+        shm_slot = f"camera_{self._camera_id}_frame"
+
+        self._log_info(f"CameraProcess[{self._camera_id}] initializing...")
 
         # SHM middleware для отправки кадров (camera → processor)
         self._frame_mw = FrameShmMiddleware(
-            self.memory_manager, owner="camera", slot="camera_frame"
+            self.memory_manager, owner=shm_owner, slot=shm_slot
         )
         self.router_manager.add_send_middleware(self._frame_mw.on_send)
 
-        # Создать сервис с адаптером для IPC
-        adapter = CameraAdapter(self)
-        app_cfg = self.get_config("config") or {}
+        # Создать сервис с адаптером для IPC (параметризован camera_id)
+        adapter = CameraAdapter(self, camera_id=self._camera_id)
         self._service = CameraService(output=adapter, config=app_cfg)
 
         # Команды из таблицы
@@ -52,7 +61,7 @@ class CameraProcess(ProcessModule):
         self.worker_manager.pause_worker("capture_worker")
 
         self._log_info(
-            f"CameraProcess ready, camera_type={self._service.current_type}"
+            f"CameraProcess[{self._camera_id}] ready, camera_type={self._service.current_type}"
         )
 
     # --- Воркер захвата ---
@@ -85,11 +94,11 @@ class CameraProcess(ProcessModule):
 
     def shutdown(self) -> bool:
         """Корректное завершение: пауза воркера → shutdown сервиса → close SHM."""
-        self._log_info("CameraProcess shutting down...")
+        self._log_info(f"CameraProcess[{self._camera_id}] shutting down...")
         if self.worker_manager:
             self.worker_manager.pause_worker("capture_worker")
         self._service.shutdown()
         if self.memory_manager:
-            self.memory_manager.close_all("camera")
+            self.memory_manager.close_all(f"camera_{self._camera_id}")
         self.is_initialized = False
         return super().shutdown()

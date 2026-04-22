@@ -145,6 +145,43 @@ class GuiCameraRegisters(BaseCameraRegisters):
         FieldMeta("Усиление Hikvision", info="Усиление сигнала.", min=0.0, max=24.0, unit="dB", routing=CAMERA_ROUTING),
     ] = 0.0
 
+    # --- Recorder (AD-10) ---
+    record_video: Annotated[
+        bool,
+        FieldMeta("Запись видео", info="Включить/выключить запись.", routing=CAMERA_ROUTING),
+    ] = False
+
+    record_path: Annotated[
+        str,
+        FieldMeta("Путь записи", info="Директория для файлов записи.", routing=CAMERA_ROUTING),
+    ] = ""
+
+    record_codec: Annotated[
+        str,
+        FieldMeta("Кодек записи", info="Кодек VideoWriter (mp4v, XVID, H264).", routing=CAMERA_ROUTING),
+    ] = "mp4v"
+
+    max_record_minutes: Annotated[
+        int,
+        FieldMeta("Макс. длина записи", info="Авто-разделение файла (мин).", min=1, max=1440, unit="мин", routing=CAMERA_ROUTING),
+    ] = 30
+
+    # --- History buffer (AD-9, Phase 3.5) ---
+    history_enabled: Annotated[
+        bool,
+        FieldMeta("Буфер истории", info="Включить JPEG-буфер для перемотки.", routing=CAMERA_ROUTING),
+    ] = False
+
+    history_duration_sec: Annotated[
+        int,
+        FieldMeta("Длительность истории", info="Глубина буфера (сек).", min=10, max=600, unit="сек", routing=CAMERA_ROUTING),
+    ] = 120
+
+    history_jpeg_quality: Annotated[
+        int,
+        FieldMeta("Качество JPEG истории", info="Качество сжатия (1..100).", min=1, max=100, routing=CAMERA_ROUTING),
+    ] = 80
+
 
 __all__ = [
     "BaseCameraRegisters",

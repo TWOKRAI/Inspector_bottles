@@ -7,11 +7,13 @@ from multiprocess_prototype_v3.backend.processes.processor.config import Process
 from multiprocess_prototype_v3.backend.processes.renderer.config import RendererConfig
 from multiprocess_prototype_v3.backend.processes.robot.config import RobotConfig
 
-from .app import AppConfig
+from .app import AppConfig, build_cameras_from_profile, build_cameras_from_recipe
 from .logging import LoggingConfig
 
 __all__ = [
     "AppConfig",
+    "build_cameras_from_profile",
+    "build_cameras_from_recipe",
     "LoggingConfig",
     "CameraConfig",
     "ProcessorConfig",
