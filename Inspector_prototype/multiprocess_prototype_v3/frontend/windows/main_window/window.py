@@ -4,14 +4,19 @@ MainWindow — главное окно приложения.
 
 Layout: Header + ImagePanel + TabWidget.
 Конфиг: window, header, image_panel, tabs. Сигналы шапки: action_triggered + connect_action_handlers.
+Undo/Redo: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z + кнопки в header (подключаются через ActionBus).
 """
 
 from typing import Any, Callable, Dict, Optional, Union
 
+from PyQt5.QtWidgets import QShortcut
+from PyQt5.QtGui import QKeySequence
+
 from frontend_module.widgets import HeaderWidget, TabWidget
 from frontend_module.widgets.header import HeaderConfig
+from frontend_module.widgets.header.button_style import create_header_button
 from frontend_module.core.action_binding import connect_action_handlers
-from frontend_module.core.qt_imports import QMainWindow, QVBoxLayout, QWidget
+from frontend_module.core.qt_imports import QMainWindow, QPushButton, QVBoxLayout, QWidget
 from frontend_module.widgets.image_panel import ImagePanelWidget
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
@@ -30,6 +35,7 @@ class MainWindow(QMainWindow):
         header_action_handlers: {action_id: callable} для HeaderWidget.action_triggered
         header_on_unmatched: fallback (например show_window только для имён из window_registry)
         show_window_callback: устар.; эквивалент header_on_unmatched для обратной совместимости
+        app_ctx: FrontendAppContext — контекст с ActionBus для undo/redo (опционально)
     """
 
     def __init__(
@@ -43,6 +49,7 @@ class MainWindow(QMainWindow):
         tab_widget_factory: Optional[TabWidgetFactory] = None,
         header_action_handlers: Optional[Dict[str, Callable[[], None]]] = None,
         header_on_unmatched: Optional[Callable[[str], None]] = None,
+        app_ctx: Optional[FrontendAppContext] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -53,7 +60,12 @@ class MainWindow(QMainWindow):
         self._tab_widget_factory = tab_widget_factory
         self._header_action_handlers = header_action_handlers or {}
         self._header_on_unmatched = header_on_unmatched or show_window_callback
+        self._app_ctx = app_ctx
+        # Кнопки undo/redo — заполняются в _setup_undo_redo_ui
+        self._btn_undo: Optional[QPushButton] = None
+        self._btn_redo: Optional[QPushButton] = None
         self._init_ui()
+        self._setup_undo_redo_ui()
 
     def _resolve_tab_factory(self) -> TabWidgetFactory:
         if self._tab_widget_factory is not None:

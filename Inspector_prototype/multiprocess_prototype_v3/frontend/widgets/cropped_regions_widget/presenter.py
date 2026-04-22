@@ -22,6 +22,7 @@ from .params import (
 )
 
 if TYPE_CHECKING:
+    from frontend.actions.bus import ActionBus
     from .view import CroppedRegionsPanelViewProtocol
 
 
@@ -29,9 +30,16 @@ _TABLE_COL_KEYS = ("name", "x", "y", "width", "height")
 
 
 class CroppedRegionsPresenter:
-    def __init__(self, *, view: CroppedRegionsPanelViewProtocol, model: CroppedRegionsModel) -> None:
+    def __init__(
+        self,
+        *,
+        view: "CroppedRegionsPanelViewProtocol",
+        model: CroppedRegionsModel,
+        action_bus: Optional["ActionBus"] = None,
+    ) -> None:
         self._view = view
         self._model = model
+        self._action_bus = action_bus
 
     def _default_camera_id(self) -> str:
         ids = self._model.ui.camera_ids or []
@@ -168,7 +176,7 @@ class CroppedRegionsPresenter:
                 return
             coords = regions.pop(old_key)
             regions[new_name] = coords
-            self._push_register()
+            self._push_register_via_bus("modify", region_name=new_name, camera_id=camera_id)
             self._view.refresh_table()
             self._view.select_region(camera_id, new_name)
             self._fill_region_combo()
@@ -183,7 +191,7 @@ class CroppedRegionsPresenter:
         w = parse_int_coordinate(row_data.get("width"))
         h = parse_int_coordinate(row_data.get("height"))
         regions[old_key] = [x, y, w, h]
-        self._push_register()
+        self._push_register_via_bus("modify", region_name=old_key, camera_id=camera_id)
         self._view.refresh_table()
         self._view.select_region(camera_id, old_key)
         self._fill_region_combo()
@@ -203,7 +211,7 @@ class CroppedRegionsPresenter:
             regions[key] = coords_list_from_params(self._view.get_controls_params())
             self._view.refresh_table()
             self._view.select_region(cam, key)
-            self._push_register()
+            self._push_register_via_bus("modify", region_name=key, camera_id=cam)
             self._fill_region_combo()
         self.refresh_rect_label()
 
@@ -222,7 +230,7 @@ class CroppedRegionsPresenter:
         regions[name] = coords_list_from_params(self._view.get_controls_params())
         self._view.refresh_table()
         self._view.select_region(cam, name)
-        self._push_register()
+        self._push_register_via_bus("add", region_name=name, camera_id=cam)
         self._fill_region_combo()
         self.refresh_rect_label()
 
@@ -285,6 +293,7 @@ class CroppedRegionsPresenter:
         )
 
     def _push_register(self) -> None:
+        """Прямая запись vision_pipeline в регистр (без ActionBus)."""
         rm = self._model.registers_manager
         if rm is None:
             return
@@ -304,3 +313,95 @@ class CroppedRegionsPresenter:
             "vision_pipeline",
             cfg.model_dump(mode="python"),
         )
+
+    def _snapshot_pipeline(self) -> Any:
+        """Снять снимок текущего vision_pipeline из регистра (для backward_patch)."""
+        rm = self._model.registers_manager
+        if rm is None:
+            return None
+        reg = rm.get_register(PROCESSOR_REGISTER)
+        if reg is None:
+            return None
+        pipeline = getattr(reg, "vision_pipeline", None)
+        if pipeline is None:
+            return None
+        # Если pipeline уже dict — вернуть как есть; если Pydantic-модель — дампить
+        if hasattr(pipeline, "model_dump"):
+            return pipeline.model_dump(mode="python")
+        return pipeline
+
+    def _build_pipeline_after(self) -> Any:
+        """Построить новое значение vision_pipeline на основе текущего состояния model."""
+        rm = self._model.registers_manager
+        if rm is None:
+            return None
+        reg = rm.get_register(PROCESSOR_REGISTER)
+        if reg is None:
+            return None
+        cfg = apply_crop_nested_to_pipeline(
+            pipeline_config_from_register(reg),
+            self._model.crop_regions_by_camera,
+            color_lower=list(reg.color_lower),
+            color_upper=list(reg.color_upper),
+            min_area=int(reg.min_area),
+            max_area=int(reg.max_area),
+        )
+        return cfg.model_dump(mode="python")
+
+    def _push_register_via_bus(
+        self,
+        operation_type: str,
+        region_name: str = "",
+        camera_id: str = "",
+    ) -> None:
+        """
+        Записать vision_pipeline через ActionBus (если подключён) или fallback на _push_register().
+
+        Args:
+            operation_type: "add", "remove" или "modify" — тип операции для ActionBuilder.
+            region_name: имя региона (для description и coalesce_key).
+            camera_id: id камеры (для description и coalesce_key).
+        """
+        if self._action_bus is None:
+            # Fallback: старая логика без undo
+            self._push_register()
+            return
+
+        from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+        pipeline_before = self._snapshot_pipeline()
+        pipeline_after = self._build_pipeline_after()
+
+        cam = camera_id or self._model.selected_camera or ""
+
+        if operation_type == "add":
+            action = ActionBuilder.region_add(
+                cam,
+                {"name": region_name},
+                pipeline_before,
+                register_name=PROCESSOR_REGISTER,
+            )
+            # Подставляем реальный pipeline_after в forward_patch
+            # Action заморожен (frozen=True), поэтому создаём копию
+            action = action.model_copy(
+                update={"forward_patch": {**action.forward_patch, "pipeline_after": pipeline_after}}
+            )
+        elif operation_type == "remove":
+            action = ActionBuilder.region_remove(
+                cam,
+                region_name,
+                pipeline_before,
+                pipeline_after,
+                register_name=PROCESSOR_REGISTER,
+            )
+        else:
+            # "modify" и все остальные случаи
+            action = ActionBuilder.region_modify(
+                cam,
+                region_name,
+                pipeline_before,
+                pipeline_after,
+                register_name=PROCESSOR_REGISTER,
+            )
+
+        self._action_bus.execute(action)
