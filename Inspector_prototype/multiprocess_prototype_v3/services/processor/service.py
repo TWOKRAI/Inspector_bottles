@@ -23,6 +23,7 @@ from multiprocess_prototype_v3.services.processor.chain import (
     autofill_inputs,
 )
 from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
+from multiprocess_prototype_v3.services.processor.worker_pool.dispatcher import WorkerPoolDispatcher
 from multiprocess_prototype_v3.registers.processor.catalog import (
     ProcessingOperationDef,
     load_catalog,
@@ -42,6 +43,7 @@ class ProcessorService:
         target_width: int = 640,
         target_height: int = 480,
         pool: ChainThreadPool | None = None,
+        dispatcher: WorkerPoolDispatcher | None = None,
     ) -> None:
         self._out = output
         self._detector = detector
@@ -50,6 +52,9 @@ class ProcessorService:
 
         # Phase 5b: пул потоков для параллельного исполнения шагов (None = линейный режим)
         self._pool = pool
+
+        # Phase 5c: диспетчер worker pool для cross-process шагов (None = без worker pool)
+        self._dispatcher = dispatcher
 
         # Phase 5a: per-region chain runnables
         self._catalog: dict[str, ProcessingOperationDef] = {}
@@ -135,8 +140,10 @@ class ProcessorService:
                 nodes = autofill_inputs(nodes)
 
                 try:
-                    # Phase 5b: передаём pool — builder выбирает parallel/linear автоматически
-                    runnable = GraphRunnableBuilder.build(nodes, self._catalog, pool=self._pool)
+                    # Phase 5b/5c: передаём pool и dispatcher — builder выбирает режим автоматически
+                    runnable = GraphRunnableBuilder.build(
+                        nodes, self._catalog, pool=self._pool, dispatcher=self._dispatcher,
+                    )
                     # Ключ — составной: cam_id/region_id для уникальности
                     composite_key = f"{cam_id}/{region_id}"
                     new_runnables[composite_key] = runnable

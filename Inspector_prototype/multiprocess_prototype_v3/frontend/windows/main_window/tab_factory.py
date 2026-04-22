@@ -13,6 +13,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
     from multiprocess_prototype_v3.frontend.widgets import (
         CameraTabWidget,
         CroppedRegionsTabWidget,
+        DisplayTabWidget,
         PostProcessingTabWidget,
         ProcessingTabWidget,
         RecipesTabWidget,
@@ -72,6 +73,22 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 command_handler=ctx.command_handler,
                 ui=ctx.get_camera_tab_ui(),
                 touch_keyboard=tk,
+            )
+        if widget_key == "display":
+            # Менеджеры display доступны через extras контекста
+            window_manager = ctx.extras.get("window_manager")
+            display_router = ctx.extras.get("display_router")
+            camera_registry = ctx.camera_registry
+            if window_manager is None or display_router is None or camera_registry is None:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "display tab: window_manager, display_router или camera_registry не переданы в ctx.extras"
+                )
+                return None
+            return DisplayTabWidget(
+                window_manager=window_manager,
+                display_router=display_router,
+                camera_registry=camera_registry,
             )
         return None
 

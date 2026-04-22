@@ -16,6 +16,7 @@ from services.processor.chain.runnable import (
     ChainResult,
     RunnableStep,
     _collect_side_results,
+    _is_cross_process,
 )
 from services.processor.chain.thread_pool import ChainThreadPool
 from services.processor.operations.base import ChainContext
@@ -142,6 +143,9 @@ class ParallelChainRunnable:
 
         for step, res in results_list:
             if isinstance(res, Exception):
+                # Timeout — отдельно помечаем в context.timeouts для диагностики
+                if isinstance(res, TimeoutError):
+                    context.timeouts.append(step.node.node_id)
                 # Ошибка или timeout — обработка по on_error политике
                 _, step_break = self._handle_step_error(
                     step, res, current_frame, context, result,

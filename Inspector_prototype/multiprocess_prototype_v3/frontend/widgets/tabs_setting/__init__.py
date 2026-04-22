@@ -14,6 +14,7 @@ from .post_processing_tab import PostProcessingTabUiConfig, PostProcessingTabWid
 from .processing_tab import ProcessingTabUiConfig, ProcessingTabWidget
 from .recipes_tab import RecipesTabConfig, RecipesTabWidget
 from .recipes_settings_tab import ControlBinding, SettingsTabConfig, SettingsTabWidget
+from .display_tab import DisplayTabConfig, DisplayTabWidget
 
 __all__ = [
     "TabItemConfig",
@@ -32,4 +33,6 @@ __all__ = [
     "SettingsTabWidget",
     "SettingsTabConfig",
     "ControlBinding",
+    "DisplayTabConfig",
+    "DisplayTabWidget",
 ]

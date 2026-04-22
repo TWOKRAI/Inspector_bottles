@@ -16,6 +16,7 @@ from multiprocess_prototype_v3.registers import PROCESSOR_REGISTER
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.processor.service import ProcessorService
 from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
+from multiprocess_prototype_v3.services.processor.worker_pool.dispatcher import WorkerPoolDispatcher
 
 from .adapter import ProcessorAdapter
 from .commands import build_command_table, build_register_handlers
@@ -64,6 +65,26 @@ class ProcessorProcess(ProcessModule):
             pool = None
         self._pool = pool
 
+        # Phase 5c: создаём dispatcher для worker pool (если worker_pool_size > 0)
+        worker_pool_size: int = app_cfg.get("worker_pool_size", 0)
+        if worker_pool_size > 0:
+            dispatcher: WorkerPoolDispatcher | None = WorkerPoolDispatcher(
+                send_fn=lambda target, data, data_type: adapter._io.send_data(
+                    target, data_type, data
+                ),
+                worker_count=worker_pool_size,
+                timeout=float(app_cfg.get("worker_timeout", 5.0)),
+                input_queue_size=int(app_cfg.get("worker_queue_size", 4)),
+            )
+            self._log_info(
+                "WorkerPoolDispatcher создан: %d workers, timeout=%.1fs",
+                worker_pool_size,
+                float(app_cfg.get("worker_timeout", 5.0)),
+            )
+        else:
+            dispatcher = None
+        self._dispatcher = dispatcher
+
         # Создаём сервис с инжектированным портом
         self._service = ProcessorService(
             output=adapter,
@@ -71,6 +92,7 @@ class ProcessorProcess(ProcessModule):
             target_width=app_cfg.get("resolution_width", 640),
             target_height=app_cfg.get("resolution_height", 480),
             pool=pool,
+            dispatcher=dispatcher,
         )
 
         # Phase 5a: загрузка каталога операций обработки
@@ -95,6 +117,8 @@ class ProcessorProcess(ProcessModule):
     def _processing_worker(self, stop_event, pause_event) -> None:
         """Воркер: receive → register_update → middleware frame → service.process_frame()."""
         register_handlers = build_register_handlers(self._service)
+        # Phase 5c: счётчик кадров для периодического экспорта stats
+        frames_processed = 0
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.05)
@@ -111,6 +135,12 @@ class ProcessorProcess(ProcessModule):
                 )
                 continue
 
+            # Phase 5c: ответ от worker-процесса → dispatcher
+            if msg_dict.get("data_type") == "worker_task_response":
+                if self._dispatcher is not None:
+                    self._dispatcher.handle_response(msg_dict.get("data") or {})
+                continue
+
             # Проверка типа сообщения
             if msg_dict.get("data_type") != "frame_ready":
                 continue
@@ -124,6 +154,28 @@ class ProcessorProcess(ProcessModule):
 
             # Делегация бизнес-логики в сервис
             self._service.process_frame(frame, data)
+
+            # Phase 5c: периодический экспорт worker pool stats
+            frames_processed += 1
+            if self._dispatcher is not None and frames_processed % 100 == 0:
+                self._export_worker_pool_stats()
+
+    # --- Phase 5c: worker pool stats ---
+
+    def _export_worker_pool_stats(self) -> None:
+        """Экспортировать статистику worker pool через update_process_state."""
+        if self._dispatcher is None:
+            return
+        stats = self._dispatcher.stats
+        self.update_process_state(custom={"worker_pool": stats})
+        if stats.get("drops_total", 0) > 0:
+            self._log_warning(
+                "Worker pool stats: dispatched=%d, drops=%d, pending=%d, timeouts=%d",
+                stats.get("dispatched_total", 0),
+                stats.get("drops_total", 0),
+                stats.get("pending", 0),
+                stats.get("timeout_total", 0),
+            )
 
     # --- Shutdown ---
 

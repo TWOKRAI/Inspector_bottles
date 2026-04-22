@@ -8,8 +8,34 @@ from ..camera.schemas import BaseCameraRegisters
 from ..payloads.post_processing import normalize_region_entry
 from ..processor.processings.base import BaseProcessingBlock
 from ..processor.processings.color_detection import ColorDetectionParams
+from .processing_node import ProcessingNode
 from .rect import Rect
 from .schemas import CameraNode, Pipeline, RegionNode
+
+
+def nodes_from_processing_blocks(blocks: Dict[str, BaseProcessingBlock]) -> Dict[str, ProcessingNode]:
+    """Конвертирует устаревшие processing_blocks в новый формат nodes (Phase 5a).
+
+    Для каждого блока создаётся ProcessingNode с:
+    - operation_ref = тип алгоритма из params.type (например "color_detection")
+    - params = полный словарь параметров блока через model_dump()
+    - enabled = флаг включённости блока
+
+    Args:
+        blocks: dict node_id → BaseProcessingBlock (legacy формат).
+
+    Returns:
+        dict node_id → ProcessingNode (новый формат).
+    """
+    result: Dict[str, ProcessingNode] = {}
+    for node_id, block in blocks.items():
+        operation_ref = getattr(block.params, "type", "unknown")
+        result[node_id] = ProcessingNode(
+            operation_ref=operation_ref,
+            params=block.params.model_dump(),
+            enabled=block.enabled,
+        )
+    return result
 
 
 def pipeline_config_from_register(reg: Any) -> Pipeline:
@@ -62,7 +88,10 @@ def _region_node_with_detection(
         max_area=int(max_area),
     )
     blk = BaseProcessingBlock(params=params)
-    return RegionNode(rect=rect, processing_blocks={"main": blk})
+    blocks = {"main": blk}
+    # Dual populate: заполняем и legacy processing_blocks, и новый nodes (Phase 5a)
+    nodes = nodes_from_processing_blocks(blocks)
+    return RegionNode(rect=rect, processing_blocks=blocks, nodes=nodes)
 
 
 def apply_crop_nested_to_pipeline(
@@ -134,6 +163,8 @@ def apply_post_list_to_pipeline(
         node = cams.get(key)
         if node is None:
             node = CameraNode(registers=BaseCameraRegisters(), regions={})
+        # Старые регионы — для сохранения processing_blocks и конвертации в nodes
+        old_regs = dict(getattr(node, "regions", None) or {})
         regs: Dict[str, RegionNode] = {}
         for i, raw in enumerate(rows or []):
             row = normalize_region_entry(raw if isinstance(raw, dict) else {})
@@ -141,12 +172,21 @@ def apply_post_list_to_pipeline(
             x1, y1 = int(row.get("x1", 0)), int(row.get("y1", 0))
             x2, y2 = int(row.get("x2", 0)), int(row.get("y2", 0))
             w, h = max(0, x2 - x1), max(0, y2 - y1)
+            # Сохраняем processing_blocks из старого региона (если существовал)
+            old_region = old_regs.get(name)
+            old_blocks: Dict[str, BaseProcessingBlock] = dict(
+                getattr(old_region, "processing_blocks", None) or {}
+            )
+            # Конвертируем legacy blocks в nodes (Phase 5a); пустой dict если blocks нет
+            inherited_nodes = nodes_from_processing_blocks(old_blocks) if old_blocks else {}
             rn = RegionNode(
                 rect=Rect(x=x1, y=y1, width=w, height=h),
                 enabled=bool(row.get("enabled", True)),
                 is_main=bool(row.get("is_main", False)),
                 processing_enabled=bool(row.get("processing_enabled", True)),
                 sort_order=i,
+                processing_blocks=old_blocks,
+                nodes=inherited_nodes,
             )
             regs[name] = rn
         cams[key] = node.model_copy(update={"regions": regs})
@@ -154,6 +194,7 @@ def apply_post_list_to_pipeline(
 
 
 __all__ = [
+    "nodes_from_processing_blocks",
     "pipeline_config_from_register",
     "crop_nested_from_pipeline",
     "apply_crop_nested_to_pipeline",

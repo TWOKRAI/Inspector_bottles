@@ -19,6 +19,7 @@ from registers_module import RegistersManager, build_connection_map_from_registe
 from .camera import GuiCameraRegisters
 from .commands import GUI_COMMAND_CATALOG
 from .constants import CAMERA_REGISTER, PROCESSOR_REGISTER, RENDERER_REGISTER, SETTINGS_REGISTER
+from .display import DisplaySubscription, DisplayTransform, LayoutPreset, preset_subscriptions
 from .processor import ProcessorRegisters
 from .renderer import RendererRegisters
 from .settings import AppSettingsRegisters
@@ -41,4 +42,5 @@ __all__ = [
     "GUI_COMMAND_CATALOG",
     "create_registers",
     "GuiCameraRegisters", "ProcessorRegisters", "RendererRegisters", "AppSettingsRegisters",
+    "DisplaySubscription", "DisplayTransform", "LayoutPreset", "preset_subscriptions",
 ]
