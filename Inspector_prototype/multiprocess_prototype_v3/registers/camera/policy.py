@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Literal, Tuple
+from typing import Literal
 
-CameraTypeStr = Literal["simulator", "webcam", "hikvision"]
+CameraTypeStr = Literal["simulator", "webcam", "hikvision", "file"]
 
-CAMERA_TYPES: Tuple[str, ...] = ("simulator", "webcam", "hikvision")
+CAMERA_TYPES: tuple[str, ...] = ("simulator", "webcam", "hikvision", "file")
 DEFAULT_CAMERA_TYPE: str = "simulator"
-CAMERA_TYPE_LABELS: Tuple[str, ...] = ("Simulator", "Webcam", "Hikvision")
+CAMERA_TYPE_LABELS: tuple[str, ...] = ("Simulator", "Webcam", "Hikvision", "File")
 
-SUPPORTS_ENUM: Tuple[str, ...] = ("webcam", "hikvision")
-SUPPORTS_HARDWARE_HANDOFF: Tuple[str, ...] = ("webcam", "hikvision")
+SUPPORTS_ENUM: tuple[str, ...] = ("webcam", "hikvision")
+SUPPORTS_HARDWARE_HANDOFF: tuple[str, ...] = ("webcam", "hikvision")
 
 WEBCAM_ENUM_DEFAULT_MAX_INDEX = 32
 WEBCAM_ENUM_HARD_CAP = 64

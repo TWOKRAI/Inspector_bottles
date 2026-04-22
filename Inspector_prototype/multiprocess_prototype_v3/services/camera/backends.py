@@ -1,4 +1,4 @@
-"""Camera capture backends: Simulator, Webcam, Hikvision + factory."""
+"""Camera capture backends: Simulator, Webcam, Hikvision, FileSource + factory."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import os
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any
 
 import numpy as np
-
 from multiprocess_prototype_v3.registers.camera import (
     CAMERA_TYPES,
     DEFAULT_CAMERA_TYPE,
@@ -21,7 +21,7 @@ from multiprocess_prototype_v3.registers.camera import (
 
 class BaseCaptureBackend(ABC):
     @abstractmethod
-    def capture_frame(self) -> Optional[np.ndarray]:
+    def capture_frame(self) -> np.ndarray | None:
         pass
 
     def start(self) -> None:
@@ -33,17 +33,17 @@ class BaseCaptureBackend(ABC):
     def close(self) -> None:
         pass
 
-    def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
+    def handle_command(self, cmd: str, data: dict) -> dict | None:
         return None
 
 
 class SimulatorBackend(BaseCaptureBackend):
-    def __init__(self, width: int, height: int, image_path: Optional[str] = None):
+    def __init__(self, width: int, height: int, image_path: str | None = None):
         from multiprocess_prototype_v3.services.camera.frame_generator import FrameGenerator
         self._generator = FrameGenerator(width, height, image_path=image_path)
         self._running = False
 
-    def capture_frame(self) -> Optional[np.ndarray]:
+    def capture_frame(self) -> np.ndarray | None:
         return self._generator.generate_frame() if self._running else None
 
     def start(self) -> None:
@@ -159,7 +159,7 @@ class WebcamBackend(BaseCaptureBackend):
 
         return False
 
-    def capture_frame(self) -> Optional[np.ndarray]:
+    def capture_frame(self) -> np.ndarray | None:
         if not self._running or not self._cap:
             return None
         ret, frame = self._cap.read()
@@ -176,7 +176,7 @@ class WebcamBackend(BaseCaptureBackend):
         self._running = False
         self._release_cap()
 
-    def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
+    def handle_command(self, cmd: str, data: dict) -> dict | None:
         if cmd == "enum_devices":
             return _enum_webcam_devices(data.get("max_index"))
         return None
@@ -198,7 +198,7 @@ class HikvisionBackend(BaseCaptureBackend):
             on_error=lambda t: send_to_gui("error", {"error": t}),
         )
 
-    def _convert_to_rgb(self, frame: np.ndarray, pixel_type: int) -> Optional[np.ndarray]:
+    def _convert_to_rgb(self, frame: np.ndarray, pixel_type: int) -> np.ndarray | None:
         try:
             import cv2
         except ImportError:
@@ -221,7 +221,7 @@ class HikvisionBackend(BaseCaptureBackend):
         except ImportError:
             return frame
 
-    def capture_frame(self) -> Optional[np.ndarray]:
+    def capture_frame(self) -> np.ndarray | None:
         if not self._running:
             return None
         frame = self._facade.capture_frame(timeout_ms=1000)
@@ -249,7 +249,7 @@ class HikvisionBackend(BaseCaptureBackend):
         self._running = False
         self._facade.close()
 
-    def handle_command(self, cmd: str, data: dict) -> Optional[dict]:
+    def handle_command(self, cmd: str, data: dict) -> dict | None:
         if cmd == "enum_devices":
             result = self._facade.enum_devices() or {}
             if isinstance(result, dict) and result.get("status") == "ok":
@@ -289,6 +289,66 @@ class HikvisionBackend(BaseCaptureBackend):
         return None
 
 
+class FileSourceBackend(BaseCaptureBackend):
+    """Backend для тестирования без железа: зацикливает видеофайл.
+
+    Принимает путь к файлу и читает кадры через cv2.VideoCapture.
+    При достижении EOF перематывает на начало (loop). Если файл не найден
+    или cv2 недоступен — бросает понятное исключение при start().
+    """
+
+    def __init__(self, file_path: str):
+        self._file_path = file_path
+        self._cap = None
+        self._running = False
+
+    def start(self) -> None:
+        """Открыть файл. Бросает FileNotFoundError если файл не найден."""
+        if not os.path.isfile(self._file_path):
+            raise FileNotFoundError(
+                f"FileSourceBackend: файл не найден: {self._file_path!r}"
+            )
+        try:
+            import cv2
+        except ImportError as e:
+            raise ImportError("FileSourceBackend требует opencv-python") from e
+
+        self._cap = cv2.VideoCapture(self._file_path)
+        if not self._cap.isOpened():
+            self._cap = None
+            raise OSError(
+                f"FileSourceBackend: не удалось открыть файл: {self._file_path!r}"
+            )
+        self._running = True
+
+    def capture_frame(self) -> np.ndarray | None:
+        """Прочитать следующий кадр. При EOF — перемотка на начало (loop)."""
+        if not self._running or self._cap is None:
+            return None
+
+        ret, frame = self._cap.read()
+        if not ret:
+            # EOF — перемотать на начало и попробовать ещё раз
+            self._cap.set(0, 0)  # cv2.CAP_PROP_POS_FRAMES = 0
+            ret, frame = self._cap.read()
+            if not ret:
+                return None
+        return frame
+
+    def stop(self) -> None:
+        self._running = False
+
+    def close(self) -> None:
+        """Остановить захват и освободить VideoCapture."""
+        import contextlib
+
+        self._running = False
+        if self._cap is not None:
+            with contextlib.suppress(Exception):
+                self._cap.release()
+            self._cap = None
+
+
 @dataclass
 class CameraBackendParams:
     width: int
@@ -297,8 +357,9 @@ class CameraBackendParams:
     camera_index: int
     hikvision_width: int
     hikvision_height: int
-    simulator_image_path: Optional[str]
+    simulator_image_path: str | None
     send_to_gui: Callable[[str, dict], None]
+    file_source_path: str = ""
 
 
 def create_camera_backend(camera_type: str, p: CameraBackendParams) -> BaseCaptureBackend:
@@ -315,4 +376,6 @@ def create_camera_backend(camera_type: str, p: CameraBackendParams) -> BaseCaptu
             return SimulatorBackend(p.width, p.height, image_path=p.simulator_image_path)
     if camera_type == "webcam":
         return WebcamBackend(p.width, p.height, device_id=p.device_id)
+    if camera_type == "file":
+        return FileSourceBackend(p.file_source_path)
     return SimulatorBackend(p.width, p.height, image_path=p.simulator_image_path)

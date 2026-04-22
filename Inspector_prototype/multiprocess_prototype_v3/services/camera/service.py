@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -72,7 +72,7 @@ class CameraService:
     после закрытия аппаратного бэкенда, чтобы ОС успела освободить устройство.
     """
 
-    def __init__(self, output: "CameraOutputPort", config: dict) -> None:
+    def __init__(self, output: CameraOutputPort, config: dict) -> None:
         self._out = output
 
         # Параметры из конфига
@@ -87,6 +87,7 @@ class CameraService:
         self._hikvision_exposure_time = float(config.get("hikvision_exposure_time", 10000.0))
         self._hikvision_gain = float(config.get("hikvision_gain", 0.0))
         self._simulator_image_path = config.get("simulator_image_path")
+        self._file_source_path = config.get("file_source_path", "")
 
         # Бизнес-состояние
         self._backend_lock = threading.Lock()
@@ -124,6 +125,7 @@ class CameraService:
             hikvision_height=self._hikvision_height,
             simulator_image_path=self._simulator_image_path,
             send_to_gui=lambda msg_type, data: self._out.send_to_gui(msg_type, data),
+            file_source_path=self._file_source_path,
         )
 
     def _create_backend(self, camera_type: str):
@@ -159,7 +161,7 @@ class CameraService:
 
     # --- Управление захватом ---
 
-    def start_capture(self, data: dict) -> Optional[dict]:
+    def start_capture(self, data: dict) -> dict | None:
         """Запустить захват. Для hikvision делегирует handle_command."""
         with self._backend_lock:
             if self._current_type == "hikvision":
