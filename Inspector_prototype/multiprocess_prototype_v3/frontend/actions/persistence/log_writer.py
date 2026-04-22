@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ActionLogWriter — буферизованная запись Actions в БД батчами.
 
@@ -12,14 +11,18 @@ pending — последний заменяется новым (сохраняе
 Thread safety: enqueue вызывается из GUI-потока, flush — из Timer-потока.
 Используется threading.Lock для защиты буфера.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
-from typing import List, Optional
+from typing import TYPE_CHECKING
 
-from .repository import ActionLogRepository
 from ..schemas import Action
+from .repository import ActionLogRepository
+
+if TYPE_CHECKING:
+    from .rotation import ActionLogRotation
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +43,24 @@ class ActionLogWriter:
         repository: ActionLogRepository,
         flush_interval_ms: int = 500,
         max_buffer_size: int = 10,
+        rotation: ActionLogRotation | None = None,
     ) -> None:
         """
         Args:
             repository: репозиторий для записи Actions в БД.
             flush_interval_ms: интервал периодического flush в миллисекундах.
             max_buffer_size: максимальный размер буфера; при достижении — auto flush.
+            rotation: необязательный компонент ротации лога; если задан,
+                проверяет порог после каждого flush и при необходимости ротирует.
         """
         self._repository = repository
         self._flush_interval_sec: float = flush_interval_ms / 1000.0
         self._max_buffer_size = max_buffer_size
+        self._rotation = rotation
 
-        self._buffer: List[Action] = []
+        self._buffer: list[Action] = []
         self._lock = threading.Lock()
-        self._timer: Optional[threading.Timer] = None
+        self._timer: threading.Timer | None = None
         self._stopped = False
 
     # ------------------------------------------------------------------
@@ -88,9 +95,18 @@ class ActionLogWriter:
         Записать все pending Actions в БД.
 
         No-op при пустом буфере. Thread-safe.
+        После batch write — проверка ротации (если задан rotation).
         """
         with self._lock:
             self._flush_locked()
+
+        # Проверка ротации вне lock — БД-вызов может быть долгим
+        if self._rotation is not None:
+            try:
+                count = self._repository.count()
+                self._rotation.maybe_rotate(count)
+            except Exception:
+                logger.warning("Ошибка проверки ротации", exc_info=True)
 
     def start(self) -> None:
         """Запустить периодический таймер для автоматического flush."""
