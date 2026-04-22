@@ -13,6 +13,9 @@ from multiprocess_prototype_v3.backend.processes.camera.config import CameraConf
 from multiprocess_prototype_v3.backend.processes.database.config import DatabaseConfig
 from multiprocess_prototype_v3.backend.processes.gui.config import GuiConfig
 from multiprocess_prototype_v3.backend.processes.processor.config import ProcessorConfig
+from multiprocess_prototype_v3.backend.processes.processor_worker.config import (
+    ProcessorWorkerConfig,
+)
 from multiprocess_prototype_v3.backend.processes.renderer.config import RendererConfig
 from multiprocess_prototype_v3.backend.processes.robot.config import RobotConfig
 
@@ -24,6 +27,8 @@ class AppConfig(SchemaBase):
 
     cameras — гетерогенный список: каждая камера может быть своего типа
     (webcam, hikvision, simulator, file). Если пуст — fallback на 1 симулятор.
+
+    worker_pool_size — количество ProcessorWorker-процессов в пуле (0 = пул отключён).
     """
 
     logging: LoggingConfig = LoggingConfig()
@@ -34,22 +39,39 @@ class AppConfig(SchemaBase):
     database: DatabaseConfig = DatabaseConfig()
     gui: GuiConfig = GuiConfig()
     stop_timeout: float = 5.0
+    worker_pool_size: int = 0
+    # Headless-режим: False — renderer не запускается, display SHM не аллоцируется
+    display_enabled: bool = True
 
     def model_post_init(self, __context: object) -> None:
         """Fallback: если cameras пуст — создаём 1 симулятор (обратная совместимость)."""
         if not self.cameras:
             object.__setattr__(self, "cameras", [CameraConfig(camera_id=0)])
 
+    @property
+    def worker_configs(self) -> list[ProcessorWorkerConfig]:
+        """Список конфигов воркеров пула (пустой если worker_pool_size == 0)."""
+        return [ProcessorWorkerConfig(worker_index=i) for i in range(self.worker_pool_size)]
+
     def all_process_configs(self) -> list[ProcessLaunchConfig]:
-        """Все конфиги процессов: N камер + processor + renderer + robot + database + gui."""
-        return [
+        """Все конфиги процессов: N камер + processor + [renderer] + robot + database + gui + K воркеров.
+
+        Renderer исключается если display_enabled=False (headless-режим).
+        GUI процесс остаётся в любом режиме — он управляет pipeline-логикой.
+        """
+        configs = [
             *self.cameras,
             self.processor,
-            self.renderer,
+        ]
+        if self.display_enabled:
+            configs.append(self.renderer)
+        configs.extend([
             self.robot,
             self.database,
             self.gui,
-        ]
+            *self.worker_configs,
+        ])
+        return configs
 
 
 def build_cameras_from_profile(
