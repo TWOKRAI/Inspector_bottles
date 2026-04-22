@@ -44,6 +44,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 recipes_tab=ctx.get_recipes_tab_ui(),
                 processing_tab_ui=ctx.get_processing_tab_ui(),
                 touch_keyboard=tk,
+                settings_profile_manager=ctx.settings_profile_manager,
             )
         if widget_key == "processing":
             return ProcessingTabWidget(

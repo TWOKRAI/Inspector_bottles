@@ -72,6 +72,10 @@ class FrontendAppContext:
         """Optional processing tab UI dict for app-recipe aggregate (may be None if not in config)."""
         return self.config.get("processing_tab_ui")
 
+    def get_settings_profile_tab_ui(self) -> Any:
+        """Секция конфига панели профилей настроек (Phase 2)."""
+        return self.config.get("settings_profile_tab")
+
     def get_settings_profiles_path(self) -> Any:
         """Путь к YAML профилей настроек приложения (Phase 0)."""
         return self.config.get("settings_profiles_path")

@@ -124,6 +124,65 @@ Ring-buffer умножает расход SHM на K. Для высоких ра
 
 **UI:** индикатор статуса per-camera/per-region (green/yellow/red) + лог ошибок в отдельной панели.
 
+### AD-8: ProcessManager Router-Endpoint (динамическое управление процессами)
+**Проблема:** `ProcessManagerProcess` имеет runtime-команды (`process.create/start/stop/restart`) в `CommandManager`, но они доступны только программно. Другие процессы не могут запросить spawn/stop через Router-сообщения.
+
+**Решение:** ProcessManagerProcess при `initialize()` регистрирует Router message handler для входящих команд управления процессами.
+- Handler: `register_message_handler("process.command", self._handle_process_command)`.
+- Десериализует payload → вызывает `command_manager.handle_command(cmd, **kwargs)` → возвращает результат.
+- Формат запроса: `{"command": "process.command", "data": {"cmd": "process.start", "process_name": "camera_3", "config": {...}, "correlation_id": "uuid"}}`.
+- Формат ответа: `{"command": "process.command.response", "data": {"correlation_id": "uuid", "success": true, "result": {...}}}`.
+- `process.create` расширяется — принимает inline config dict (не только из `_process_configs`).
+- ACL: опциональный whitelist разрешённых команд per-source-process.
+- **Почему:** Замыкает контур управления — любой процесс может динамически создавать/останавливать другие. Критично для Phase 3 (spawn камер), Phase 5c (worker pool), Phase 3.5 (history on-demand).
+
+### AD-9: Frame History Buffer (2-минутный буфер с перемоткой)
+**Проблема:** Нужен реплей последних ~2 минут для анализа инцидентов и отладки. AD-6 ring-buffer (K=2-3 слота) предназначен для fan-out safety, а не для истории.
+
+**Анализ памяти (1080p, 30fps, 120с):**
+
+| Подход | Память/камера | Вердикт |
+|--------|---------------|---------|
+| Raw SHM (BGR) | ~21.6 GB | Невозможно |
+| JPEG compressed (deque, q=80) | ~288 MB (80KB/frame) | **Рекомендуется** |
+| JPEG + disk mmap | ~288 MB disk, ~30MB RAM | Масштабируемо, но сложнее |
+
+**Решение:** Отдельный `FrameHistoryProcess` (или worker) per camera, хранит JPEG-сжатые кадры в circular `collections.deque(maxlen=fps*duration)`.
+- Подписывается на `frame.camera_{id}` через Router (ещё один consumer в fan-out AD-6).
+- Получает raw frame из SHM → `cv2.imencode('.jpg', frame, [IMWRITE_JPEG_QUALITY, quality])` → deque.
+- Метаданные per-frame: `(seq_id, timestamp, jpeg_bytes, shape)`.
+- Commands API: `history.get_frame(camera_id, offset_sec)`, `history.get_range(camera_id, start, end)`, `history.get_stats(camera_id)`.
+- Drop-policy: при отставании — пропускает кадры (counter в StatsManager), не блокирует pipeline.
+- Budget: `max_history_memory_mb` per camera (default 400MB), при превышении — auto FPS subsampling.
+- Configurable: `history_duration_sec` (default 120), `history_jpeg_quality` (default 80), `history_enabled` (default false).
+- **Почему:** JPEG даёт сжатие ~60-75x (6MB→80KB), при 4 камерах ~1.2GB — укладывается в бюджет 16GB RAM системы. Отдельный процесс изолирует CPU-нагрузку encode.
+
+### AD-10: Video Recorder (запись видео в файл)
+**Проблема:** Нужна запись видеопотока в файл для аудита, обучающих данных нейросетей, разбора инцидентов. В старом App был `record_video: bool` в UI, но backend = 0 строк.
+
+**Решение:** `RecorderWorker` — worker-thread внутри `CameraProcess` (прямой доступ к SHM, минимум IPC).
+- Подписывается на `frame.camera_{id}` через внутренний Router.
+- `record_video=True` (из регистра) → открывает `cv2.VideoWriter(path, fourcc, fps, (w,h))`.
+- `record_video=False` → `writer.release()`.
+- Файл: `{recordings_dir}/{camera_id}_{YYYYMMDD_HHMMSS}.mp4`.
+- Codec: из регистра (`mp4v` default, `XVID` опция, `H264` если доступен).
+- Auto-split: `max_record_minutes` (default 30) → закрыть файл, открыть новый.
+- Auto-stop при shutdown: `writer.release()` в cleanup hook.
+- Stats: `recording_active`, `recording_file_size_mb`, `recording_duration_sec` в StatsManager.
+- **Почему:** VideoWriter в отдельном thread не блокирует capture loop. I/O на SSD справляется с 30fps 1080p (~5-10 MB/s в H264). AD-2 уже предусматривал Recorder как потребителя fan-out.
+
+### Критические пересечения AD-8/AD-9/AD-10
+
+Все три AD сходятся в трёх инфраструктурных узлах, которые проектируются **совместно**:
+
+1. **Router fan-out (AD-6 расширение):** 4+ потребителей на `frame.camera_{id}` (Processor, Display, History, Recorder). History и Recorder используют `drop_oldest` с counter, не блокируя pipeline. Processor и Display — приоритетные.
+
+2. **Динамическое управление (AD-8):** включение history/recording per camera → Router-команда → ProcessManager создаёт/останавливает FrameHistoryProcess/RecorderWorker. Без AD-8 — History и Recorder пришлось бы создавать статически при старте.
+
+3. **Camera registers:** поля для всех трёх AD добавляются в один `CameraRegisters` SchemaBase:
+   - AD-9: `history_enabled`, `history_duration_sec`, `history_jpeg_quality`
+   - AD-10: `record_video`, `record_path`, `record_codec`, `max_record_minutes`
+
 ---
 
 ## Фазы реализации
@@ -198,9 +257,9 @@ Ring-buffer умножает расход SHM на K. Для высоких ра
 
 ---
 
-### Phase 3: Мульти-камеры + Frame Router + Ring-buffer
-**Цель:** Динамическая оркестрация N камер + Router fan-out + SHM ring-buffer (AD-6).
-**Сложность:** XL | **Срок:** ~3-4 нед | **Зависимости:** Phase 0, Phase 2.5 | **Ветка:** `feat/phase-3-multi-camera-router`
+### Phase 3: Мульти-камеры + Frame Router + Ring-buffer + Оркестрация + Recorder
+**Цель:** Динамическая оркестрация N камер + Router fan-out + SHM ring-buffer (AD-6) + ProcessManager Router-Endpoint (AD-8) + Video Recorder (AD-10).
+**Сложность:** XL | **Срок:** ~4-5 нед | **Зависимости:** Phase 0, Phase 2.5 | **Ветка:** `feat/phase-3-multi-camera-router`
 
 **Задачи:**
 1. Параметризация `CameraProcess` — `camera_id`, output ring-buffer из K слотов.
@@ -210,18 +269,55 @@ Ring-buffer умножает расход SHM на K. Для высоких ра
 5. `CameraRegistry` (frontend): id, type, status, process_name, fps, last_frame_ts, drops_count.
 6. Enhanced Camera Tab: список + настройки + start/stop/restart + FPS + drops-индикатор.
 7. Webcam panel (MVP) + File-source panel (зациклить видео для тестов без железа).
-8. **Fan-out smoke-test:** 2 подписчика (Processor + тестовый Recorder) → verified что оба получают все кадры и писатель не обгоняет slowest consumer.
+8. **Fan-out smoke-test:** 4 подписчика (Processor + Display + History + Recorder) → verified что все получают кадры и писатель не обгоняет slowest consumer.
+9. **ProcessManager Router-Endpoint (AD-8):** `_handle_process_command()` в `ProcessManagerProcess` — мост Router → CommandManager. Регистрация `register_message_handler("process.command", ...)` при `initialize()`. Расширение `process.create` — inline config через Router. Request-response через `correlation_id`.
+   - L2 тест: отправить `process.start` через Router → ProcessManager выполняет → проверить через `process.list`.
+10. **RecorderWorker (AD-10):** `RecorderWorker` класс — cv2.VideoWriter lifecycle (start/stop/auto-split). Интеграция в `CameraProcess`: создание worker при `initialize()`. Register change `record_video` → RecorderWorker start/stop.
+    - L2 тест: toggle `record_video` → файл создан → содержит кадры → toggle off → файл закрыт корректно.
+11. **Camera Registers расширение:** добавить поля для Recorder и History в `CameraRegisters` (SchemaBase): `record_video`, `record_path`, `record_codec`, `max_record_minutes`, `history_enabled`, `history_duration_sec`, `history_jpeg_quality`. `FieldRouting` для новых полей.
 
-**Модули:** `process_module`, `worker_module`, `shared_resources_module`, `router_module`, `frontend_module`.
+**Модули:** `process_module`, `process_manager_module`, `worker_module`, `shared_resources_module`, `router_module`, `command_module`, `frontend_module`.
 **Файлы:**
-- Новые: `backend/routing/frame_router_setup.py`, `backend/shm/ring_buffer.py`, `frontend/managers/camera_registry.py`, `frontend/widgets/webcam_camera_mvp/`, `frontend/widgets/file_source_mvp/`.
-- Изменить: `backend/processes/camera/`, `config/app.py`, `registers/camera/`, `main.py`, `frontend/widgets/tabs_setting/camera_tab/`.
+- Новые: `backend/routing/frame_router_setup.py`, `backend/shm/ring_buffer.py`, `frontend/managers/camera_registry.py`, `frontend/widgets/webcam_camera_mvp/`, `frontend/widgets/file_source_mvp/`, `backend/workers/recorder_worker.py`.
+- Изменить: `backend/processes/camera/`, `config/app.py`, `registers/camera/`, `main.py`, `frontend/widgets/tabs_setting/camera_tab/`, `multiprocess_framework/.../process_manager_process.py`.
 
 **Критерий:**
 - Профили `{1 cam}`, `{3 cam}`, `{8 cam}` работают **без правки кода**.
 - **Ring-buffer stress-test:** медленный consumer (искусственный sleep) → drop-oldest срабатывает, writer не блокируется, fast consumer не теряет кадры.
 - **Seq_id verified:** каждый consumer видит монотонно возрастающий seq_id.
 - Per-camera start/stop, FPS и drops — в UI.
+- **Router-Endpoint verified:** Router-сообщение `process.start` → ProcessManager создаёт процесс → `process.list` подтверждает.
+- **Recorder verified:** toggle `record_video` → файл `.mp4` создаётся → 10с записи → toggle off → файл читаем через `cv2.VideoCapture`, кадры корректны.
+- **Fan-out 4 consumers:** Processor + Display + History-stub + Recorder → pipeline не деградирует > 10% FPS.
+
+---
+
+### Phase 3.5: Frame History Buffer (2-минутный буфер с перемоткой)
+**Цель:** JPEG-сжатый circular buffer на ~2 минуты per camera с API для перемотки (AD-9).
+**Сложность:** L | **Срок:** ~2 нед | **Зависимости:** Phase 3 | **Ветка:** `feat/phase-3_5-frame-history`
+
+**⚠️ Можно делать параллельно с Phase 4.**
+
+**Задачи:**
+1. `FrameHistoryBuffer` класс — circular `collections.deque(maxlen=fps*duration)` + JPEG encode/decode. Метаданные per-frame: `(seq_id, timestamp, jpeg_bytes, shape)`.
+2. `FrameHistoryProcess` (или worker) — подписка на `frame.camera_{id}` через Router, encode loop в отдельном потоке, drop-oldest при отставании (counter в StatsManager).
+3. Commands API через CommandManager: `history.get_frame(camera_id, offset_sec)` → JPEG bytes, `history.get_range(camera_id, start_sec, end_sec)` → список timestamps, `history.get_stats(camera_id)` → buffer fill %, memory usage, oldest frame ts.
+4. `HistoryRegisters` (SchemaBase) — `history_enabled: bool`, `history_duration_sec: int` (default 120), `history_jpeg_quality: int` (default 80). FieldRouting → camera + history process.
+5. Budget monitoring: `StatsManager` экспортит `history_memory_mb` per camera. `max_history_memory_mb` (default 400MB) — при превышении auto FPS subsampling (каждый 2-й кадр).
+6. Динамический старт/стоп через AD-8: `history_enabled` toggle → Router-команда → ProcessManager создаёт/останавливает FrameHistoryProcess.
+7. L2 тест: запуск с history → 5с работы → `history.get_frame(offset=3)` → кадр корректный (JPEG декодируется, размеры совпадают) → memory < budget.
+
+**Модули:** `process_module`, `worker_module`, `shared_resources_module`, `router_module`, `command_module`.
+**Файлы:**
+- Новые: `backend/history/frame_history_buffer.py`, `backend/history/frame_history_process.py`, `registers/history/`.
+- Изменить: `config/app.py`, `main.py`.
+
+**Критерий:**
+- 2 минуты кадров при 30fps → deque заполнен → oldest автоматически вытесняется.
+- `history.get_frame(offset=60)` → кадр минутной давности корректно декодируется.
+- Memory per camera ≤ `max_history_memory_mb` (проверка через StatsManager).
+- Toggle `history_enabled` → процесс стартует/останавливается через AD-8 endpoint.
+- Drop-oldest при отставании: counter > 0 в stats, pipeline FPS не деградирует.
 
 ---
 
@@ -296,9 +392,9 @@ Ring-buffer умножает расход SHM на K. Для высоких ра
 
 ---
 
-### Phase 6: Отображение (0..N окон)
-**Цель:** Гибкое число окон + lazy SHM + layout presets.
-**Сложность:** XL | **Срок:** ~2.5-3 нед | **Зависимости:** Phase 3, Phase 5a | **Ветка:** `feat/phase-6-display-windows`
+### Phase 6: Отображение (0..N окон) + Rewind + Recording UI
+**Цель:** Гибкое число окон + lazy SHM + layout presets + скруббер перемотки (AD-9) + индикатор записи (AD-10).
+**Сложность:** XL | **Срок:** ~3-3.5 нед | **Зависимости:** Phase 3, Phase 3.5, Phase 5a | **Ветка:** `feat/phase-6-display-windows`
 
 **Задачи:**
 1. `DisplaySubscription` (SchemaBase): `source_ref`, `window_id`, `transform` (resize, overlay, fps-limit).
@@ -308,15 +404,19 @@ Ring-buffer умножает расход SHM на K. Для высоких ра
 5. Headless mode (N=0) — pipeline работает, детекции в БД.
 6. `WindowManager` для lifecycle.
 7. `FrameThrottleMiddleware` — FPS-limit на display-каналах.
+8. **Rewind scrubber widget (AD-9):** QSlider + ImagePanel для просмотра истории per camera. Подключение к `history.get_frame(camera_id, offset_sec)` и `history.get_range(camera_id, start, end)`. Таймлайн с маркерами timestamps. Режим «пауза + перемотка» (display переключается с live на history).
+9. **Recording indicator (AD-10):** красная точка per camera при `recording_active=True`. Счётчик duration и file_size из StatsManager. Кнопка toggle записи прямо в display window.
 
 **Модули:** `shared_resources_module`, `router_module`, `frontend_module`.
-**Файлы:** `frontend/managers/display_router.py`, `frontend/widgets/display_window/`, `frontend/widgets/tabs_setting/display_tab/`, `backend/routing/throttle_middleware.py`.
+**Файлы:** `frontend/managers/display_router.py`, `frontend/widgets/display_window/`, `frontend/widgets/tabs_setting/display_tab/`, `backend/routing/throttle_middleware.py`, `frontend/widgets/rewind_scrubber/` (новый), `frontend/widgets/recording_indicator/` (новый).
 **Критерий:**
 - Пресеты 0/1/2/4 окон без рестарта.
 - Headless verified — детекции в БД без UI.
 - 100 create/destroy циклов — нет SHM leaks (audit через `MemoryManager`).
+- **Rewind verified:** пауза → перемотка на 30с назад → кадр отображается корректно → resume → live stream восстановлен.
+- **Recording indicator verified:** toggle `record_video` из display window → красная точка появляется → duration тикает → toggle off → индикатор исчезает.
 
-**⚠️ MVP-вариант Phase 6** (только 2 окна без пресетов/throttle/headless) **можно делать раньше** — после Phase 3 вместо Phase 5. Даёт раннюю визуальную валидацию.
+**⚠️ MVP-вариант Phase 6** (только 2 окна без пресетов/throttle/headless/rewind) **можно делать раньше** — после Phase 3 вместо Phase 5. Даёт раннюю визуальную валидацию.
 
 ---
 
@@ -395,16 +495,16 @@ Phase 0 (Settings) ──┐
                      │                                                            │
                      └────────────────────────────────────────────────────────────┤
                                                                                   │
-  Phase 2.5 ──→ Phase 3 (Multi-Camera + Ring-buffer) ──→ Phase 4 (Regions)        │
-                                                   │                    │         │
-                                                   │                    └─→ Phase 5a (Chain MVP)
-                                                   │                                 │
-                                                   │                              Phase 5b (Threads)
-                                                   │                                 │
-                                                   │                              Phase 5c (Worker pool)
-                                                   │                                 │
-                                                   └──────→ Phase 6 (Display) ←──────┘
-                                                                           │
+  Phase 2.5 ──→ Phase 3 (Multi-Camera + Router + AD-8 + AD-10) ──┬──→ Phase 4 (Regions)
+                                                                  │           │
+                                                            Phase 3.5 (AD-9)  └─→ Phase 5a (Chain MVP)
+                                                            [параллельно]              │
+                                                                  │            Phase 5b (Threads)
+                                                                  │                    │
+                                                                  │            Phase 5c (Worker pool)
+                                                                  │                    │
+                                                                  └──→ Phase 6 (Display + Rewind + Rec UI) ←──┘
+                                                                                │
                                     Phase 3-6 ─────────────→ Phase 7 (ActionBus full migration)
                                                                            │
                                                                    Phase 8 (Graph editor + DAG)
@@ -422,7 +522,13 @@ Camera_{id} → RingBuffer[K slots] + seq_id ──→ Router(frame.camera_{id})
                                                     │              Router(worker_pool_in)
                                                     │                        ↓
                                                     │              ProcessorWorker_k → SHM → обратно
-                                                    └─→ DisplayRouter → window (raw preview)
+                                                    ├─→ DisplayRouter → window (raw/processed preview)
+                                                    ├─→ FrameHistoryProcess (AD-9)       [JPEG encode → deque]
+                                                    │     └─→ history.get_frame() ──→ Rewind scrubber UI
+                                                    └─→ RecorderWorker (AD-10)           [cv2.VideoWriter → .mp4]
+                                                          └─→ toggle via record_video register
+
+ProcessManager (AD-8): любой процесс → Router("process.command") → spawn/stop/restart
 ```
 
 ---
@@ -504,6 +610,7 @@ Camera_{id} → RingBuffer[K slots] + seq_id ──→ Router(frame.camera_{id})
 | 2 | `feat/phase-2-settings-tab` | `main` (после 1) | squash | → main |
 | 2.5 | `feat/phase-2_5-actionbus-core` | `main` (после 2) | rebase | → main |
 | 3 | `feat/phase-3-multi-camera-router` | `main` (после 2.5) | rebase | → main |
+| 3.5 | `feat/phase-3_5-frame-history` | `main` (после 3, параллельно с 4) | rebase | → main |
 | 4 | `feat/phase-4-regions-per-camera` | `main` (после 3) | squash | → main |
 | 5a | `feat/phase-5a-chain-mvp` | `main` (после 4) | rebase | → main |
 | 5b | `feat/phase-5b-thread-workers` | `main` (после 5a) | rebase | → main |
@@ -520,37 +627,41 @@ Camera_{id} → RingBuffer[K slots] + seq_id ──→ Router(frame.camera_{id})
 | **1** | Заменить текстовое редактирование рецептов на `StructuredTableWidget`. Auto-save с debounce. |
 | **2** | Таб настроек (таблица + profile selector). Событие `profile_changed` для подписчиков. |
 | **2.5** | Ядро ActionBus, приватизация `set_field_value`, adapter-слой, миграция presenters Phase 0-2. |
-| **3** | Параметризация CameraProcess, ring-buffer, RouterManager fan-out, Camera Registry, Enhanced Camera Tab. Stress-тесты ring-buffer. |
+| **3** | Параметризация CameraProcess, ring-buffer, RouterManager fan-out, Camera Registry, Enhanced Camera Tab, **ProcessManager Router-Endpoint (AD-8)**, **RecorderWorker (AD-10)**, Camera Registers расширение. Stress-тесты ring-buffer + fan-out 4 consumers. |
+| **3.5** | `FrameHistoryBuffer` (AD-9) — JPEG circular deque, `FrameHistoryProcess`, history commands API, budget monitoring. Параллельно с Phase 4. |
 | **4** | Регионы per-camera, структура `{camera_id: {region_id: Region}}`, propagation в `Processor_{id}`. |
 | **5a** | Каталог операций (CRUD, без портов), `ProcessingNode` с inputs (auto-fill линейно в таблице), `GraphRunnableBuilder`, skip inactive, error handling `on_error: skip`. |
 | **5b** | `ThreadPoolExecutor` в `Processor_{id}`, parallel bundle detection, per-frame barrier. |
 | **5c** | `ProcessorWorker_{n}` pool, cross-process edges через Router+SHM, backpressure. |
-| **6** | `DisplayRouter`, 0..N окон, layout presets, headless mode, throttle middleware. |
+| **6** | `DisplayRouter`, 0..N окон, layout presets, headless mode, throttle middleware, **Rewind scrubber (AD-9)**, **Recording indicator (AD-10)**. |
 | **7** | Полная миграция presenters, удаление adapter'а, ActionBuilder'ы для доменных операций, SQL persistence, crash recovery. |
 | **8** | Порты в каталоге (`input_ports/output_ports`), графовый редактор (QGraphicsScene), view switch, undo для graph операций. Без миграции модели — `ProcessingNode` уже из Phase 5. |
 
 ---
 
-## Оценка трудоёмкости (финальная, после TeamLead-review)
+## Оценка трудоёмкости (обновлена — интеграция AD-8/AD-9/AD-10)
 
-| Phase | Сложность | Срок (senior full-time) | Файлов изменить | Новых файлов |
-|-------|-----------|-------------------------|------------------|---------------|
-| 0 | M | 1 нед | 5 | 4 |
-| 1 | M | 1.5 нед | 8 | 0 |
-| 2 | M | 1 нед | 5 | 6 |
-| 2.5 | M+ | 2 нед | 6 | 6 |
-| 3 | XL | 3-4 нед | 15 | 9 |
-| 4 | L | 1.5 нед | 6 | 0 |
-| 5a | XL | 3 нед | 8 | 10 |
-| 5b | M | 1.5 нед | 3 | 3 |
-| 5c | XL | 2-3 нед | 5 | 4 |
-| 6 | XL | 2.5-3 нед | 9 | 11 |
-| 7 | XL | 3-4 нед | 12 | 8 |
-| 8 | L | 2.5-3 нед | 5 | 8 |
-| **Итого без Phase 8** | | **22-27 нед** (~5.5-6.5 месяцев) | ~82 | ~61 |
-| **Итого с Phase 8** | | **24.5-30 нед** (~6-7 месяцев) | ~87 | ~69 |
+| Phase | Сложность | Срок (senior full-time) | Файлов изменить | Новых файлов | Дельта |
+|-------|-----------|-------------------------|------------------|---------------|--------|
+| 0 | M | 1 нед | 5 | 4 | — |
+| 1 | M | 1.5 нед | 8 | 0 | — |
+| 2 | M | 1 нед | 5 | 6 | — |
+| 2.5 | M+ | 2 нед | 6 | 6 | — |
+| 3 | XL | **4-5 нед** | **17** | **11** | **+1 нед** (AD-8 + AD-10) |
+| **3.5** | **L** | **2 нед** | **2** | **4** | **+2 нед** (AD-9, новая фаза) |
+| 4 | L | 1.5 нед | 6 | 0 | — |
+| 5a | XL | 3 нед | 8 | 10 | — |
+| 5b | M | 1.5 нед | 3 | 3 | — |
+| 5c | XL | 2-3 нед | 5 | 4 | — |
+| 6 | XL | **3-3.5 нед** | 9 | **13** | **+0.5 нед** (rewind + rec UI) |
+| 7 | XL | 3-4 нед | 12 | 8 | — |
+| 8 | L | 2.5-3 нед | 5 | 8 | — |
+| **Итого без Phase 8** | | **25.5-31.5 нед** (~6.5-8 месяцев) | ~86 | ~69 | **+3.5 нед** |
+| **Итого с Phase 8** | | **28-34.5 нед** (~7-8.5 месяцев) | ~91 | ~77 | **+3.5 нед** |
 
 *+ contingency 30% для неожиданных расширений фреймворка.*
+
+**Примечание:** Phase 3.5 выполняется параллельно с Phase 4, поэтому реальный critical path увеличивается на ~1 нед (а не на 2), если есть один разработчик.
 
 ---
 
@@ -600,6 +711,13 @@ Can-defer: Phase 1, 2, 5b, 5c, 7 (full), 8.
 | Schema evolution между профилями | Broken YAML | SchemaBase validation + migration |
 | Headless mode воспринимается как «сломано» | UX | Статус-индикатор в title-bar |
 | Комбинаторный пространство отладки (процессы×потоки×DAG) | Невоспроизводимые баги | L2 integration-тесты + timeout+watchdog на каждом уровне |
+| **History buffer memory pressure** (AD-9) | OOM при 4+ камерах | JPEG compression (~80KB/frame), budget guard `max_history_memory_mb`, auto FPS subsampling |
+| **JPEG encode latency** (AD-9) | Пропуск кадров в history | Encode в отдельном потоке, drop-oldest при отставании, counter в StatsManager |
+| **VideoWriter I/O блокировка** (AD-10) | Пропуск кадров записи | Worker-thread внутри CameraProcess, async queue, drop при переполнении |
+| **Codec недоступен** (AD-10) | Запись не стартует | Fallback chain: H264 → XVID → mp4v; проверка при старте, WARN в UI |
+| **Fan-out с 4+ consumers замедляет pipeline** | FPS degradation | Per-consumer drop-policy; History и Recorder — non-blocking (drop_oldest); Processor и Display — приоритетные |
+| **Несанкционированный spawn процессов через AD-8** | Безопасность | ACL whitelist per-source-process; логирование всех spawn/stop через ErrorManager |
+| **Disk space exhaustion при записи** (AD-10) | Потеря данных | Auto-split по `max_record_minutes`; StatsManager мониторинг `recording_file_size_mb`; опциональный disk quota |
 
 ---
 
@@ -607,11 +725,12 @@ Can-defer: Phase 1, 2, 5b, 5c, 7 (full), 8.
 
 1. **Phase 0-2:** Запуск → профиль → переключение рецепта/настроек обновляет UI+бэкенд.
 2. **Phase 2.5:** Ctrl+Z на рецептах/настройках работает. Coalescing слайдера verified.
-3. **Phase 3:** Профили `{1,3,8 cam}` работают без правки кода. Ring-buffer stress-test: slow consumer → drop-oldest, fast не теряет. Seq_id монотонен.
-4. **Phase 4:** Регион per camera, propagation в правильный `Processor_{id}`.
-5. **Phase 5a:** 3 шага в chain; skip inactive; каталог CRUD; `on_error: skip` работает.
-6. **Phase 5b:** 2 независимых шага параллельно; CPU > 1 core; per-frame barrier сохраняет порядок.
-7. **Phase 5c:** Heavy-шаг на worker_pool; drop-oldest при перегрузке; worker crash → supervisor restart.
-8. **Phase 6:** Пресеты 0/1/2/4 без рестарта; headless verified; 100 create/destroy — нет leaks.
-9. **Phase 7:** Ctrl+Z на всех mutations; recipe switch = 1 Action; kill -9 → state восстановлен; replay test pass; debug-guard 0 WARN.
-10. **Phase 8:** Миграция Step→Node без потерь; ветвление/merge исполняется DAG-scheduler'ом; view switch table⇄graph бесшовно; graph undoable.
+3. **Phase 3:** Профили `{1,3,8 cam}` работают без правки кода. Ring-buffer stress-test: slow consumer → drop-oldest, fast не теряет. Seq_id монотонен. **Router-Endpoint:** Router-сообщение `process.start` → ProcessManager создаёт процесс. **Recorder:** toggle `record_video` → файл создаётся → кадры записаны → toggle off → файл читаем. **Fan-out 4 consumers:** pipeline не деградирует > 10% FPS.
+4. **Phase 3.5:** History buffer заполняется за 2 минуты → `history.get_frame(offset=60)` → кадр корректен. Memory ≤ budget. Toggle `history_enabled` → процесс создаётся/останавливается через AD-8.
+5. **Phase 4:** Регион per camera, propagation в правильный `Processor_{id}`.
+6. **Phase 5a:** 3 шага в chain; skip inactive; каталог CRUD; `on_error: skip` работает.
+7. **Phase 5b:** 2 независимых шага параллельно; CPU > 1 core; per-frame barrier сохраняет порядок.
+8. **Phase 5c:** Heavy-шаг на worker_pool; drop-oldest при перегрузке; worker crash → supervisor restart.
+9. **Phase 6:** Пресеты 0/1/2/4 без рестарта; headless verified; 100 create/destroy — нет leaks. **Rewind:** пауза → перемотка → кадр отображается → resume → live восстановлен. **Recording UI:** toggle из display → индикатор появляется → duration тикает.
+10. **Phase 7:** Ctrl+Z на всех mutations; recipe switch = 1 Action; kill -9 → state восстановлен; replay test pass; debug-guard 0 WARN.
+11. **Phase 8:** Миграция Step→Node без потерь; ветвление/merge исполняется DAG-scheduler'ом; view switch table⇄graph бесшовно; graph undoable.
