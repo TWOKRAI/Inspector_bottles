@@ -22,3 +22,5 @@ class GuiConfig(ProcessLaunchConfig):
     settings_recipes_path: str | None = None
     recipe_access: dict[str, Any] | None = None
     touch_keyboard: dict[str, Any] | None = Field(default_factory=lambda: {"mode": "full"})
+    # Phase 3: информация о камерах для frontend (CameraRegistry)
+    camera_configs: list[dict[str, Any]] = Field(default_factory=list)

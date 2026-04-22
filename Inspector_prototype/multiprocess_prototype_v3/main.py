@@ -35,10 +35,22 @@ def main() -> int:
     from multiprocess_framework.modules.data_schema_module import process
     from multiprocess_framework.modules.process_manager_module import SystemLauncher
 
+    from multiprocess_prototype_v3.backend.processes.gui.config import GuiConfig
     from multiprocess_prototype_v3.config import AppConfig
 
     cameras = _load_cameras_from_profile()
-    app = AppConfig(cameras=cameras)
+
+    # Передаём информацию о камерах в GuiConfig для frontend CameraRegistry
+    camera_dicts = [
+        {"camera_id": c.camera_id, "camera_type": c.camera_type, "process_name": c.process_name}
+        for c in cameras
+    ]
+    gui = GuiConfig(
+        camera_type=cameras[0].camera_type if cameras else "simulator",
+        camera_configs=camera_dicts,
+    )
+
+    app = AppConfig(cameras=cameras, gui=gui)
     launcher = SystemLauncher(stop_timeout=app.stop_timeout)
     for cfg in app.all_process_configs():
         launcher.add_process(*process(cfg))
