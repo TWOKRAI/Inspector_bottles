@@ -227,6 +227,7 @@ class CameraService:
                 "shm_name": shm_result.get("shm_name", "camera_frame"),
                 "shm_index": shm_result.get("shm_index", 0),
                 "shm_actual_name": shm_result.get("shm_actual_name", ""),
+                "seq_id": shm_result.get("seq_id", self._frame_id),
                 "width": frame.shape[1],
                 "height": frame.shape[0],
             }

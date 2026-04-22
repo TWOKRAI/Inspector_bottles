@@ -15,6 +15,7 @@ from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 from multiprocess_prototype_v3.backend.helpers import apply_register_update, message_as_dict
+from multiprocess_prototype_v3.backend.shm.ring_buffer import RingBufferWriter
 from multiprocess_prototype_v3.registers import CAMERA_REGISTER
 from multiprocess_prototype_v3.services.camera.service import CameraService
 
@@ -36,7 +37,13 @@ class CameraProcess(ProcessModule):
         shm_owner = f"camera_{self._camera_id}"
         shm_slot = f"camera_{self._camera_id}_frame"
 
-        self._log_info(f"CameraProcess[{self._camera_id}] initializing...")
+        ring_buffer_size = app_cfg.get("ring_buffer_size", 3)
+        self._log_info(f"CameraProcess[{self._camera_id}] initializing (K={ring_buffer_size})...")
+
+        # Ring-buffer (AD-6) — round-robin по K SHM-слотам
+        self._ring_buffer = RingBufferWriter(
+            self.memory_manager, owner=shm_owner, slot_prefix=shm_slot, k=ring_buffer_size
+        )
 
         # SHM middleware для отправки кадров (camera → processor)
         self._frame_mw = FrameShmMiddleware(
@@ -44,8 +51,8 @@ class CameraProcess(ProcessModule):
         )
         self.router_manager.add_send_middleware(self._frame_mw.on_send)
 
-        # Создать сервис с адаптером для IPC (параметризован camera_id)
-        adapter = CameraAdapter(self, camera_id=self._camera_id)
+        # Создать сервис с адаптером для IPC (параметризован camera_id + ring-buffer)
+        adapter = CameraAdapter(self, camera_id=self._camera_id, ring_buffer=self._ring_buffer)
         self._service = CameraService(output=adapter, config=app_cfg)
 
         # Команды из таблицы
