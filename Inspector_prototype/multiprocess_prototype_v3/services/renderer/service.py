@@ -1,6 +1,7 @@
 """RendererService — бизнес-логика рендеринга кадров."""
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -84,6 +85,7 @@ class RendererService:
 
     def render_frame(self, original: np.ndarray, mask: np.ndarray, data: dict) -> None:
         """Отрендерить кадр: overlay → SHM → GUI + Robot."""
+        renderer_start_ts = time.time()
         width, height = data.get("width", 640), data.get("height", 480)
 
         # Resize при необходимости
@@ -103,6 +105,8 @@ class RendererService:
             save_frames=self._save_frames,
         )
 
+        renderer_end_ts = time.time()
+
         # Записать в SHM и уведомить GUI через порт
         shm_data = self._out.write_rendered_to_shm(rendered, mask)
         if shm_data:
@@ -115,6 +119,12 @@ class RendererService:
                 "show_original": self._show_original,
                 "show_mask": self._show_mask,
                 "draw_contours": self._overlay_state.draw_contours,
+                # Timestamps для e2e latency (прокидываем из data)
+                "capture_ts": data.get("capture_ts", 0.0),
+                "processor_start_ts": data.get("processor_start_ts", 0.0),
+                "processor_end_ts": data.get("processor_end_ts", 0.0),
+                "renderer_start_ts": renderer_start_ts,
+                "renderer_end_ts": renderer_end_ts,
                 **shm_data,
             }
             self._out.send_rendered_to_gui(notification)

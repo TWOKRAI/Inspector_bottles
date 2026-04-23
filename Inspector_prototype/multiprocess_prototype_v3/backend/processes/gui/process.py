@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import time
+
 from frontend_module.core.routed_command import RoutedCommandSender
 from multiprocess_framework.modules.message_module import MessageAdapter
 from multiprocess_framework.modules.process_module import ProcessModule
@@ -12,6 +14,7 @@ from multiprocess_framework.modules.router_module.middleware import FrameShmMidd
 from multiprocess_prototype_v3.registers.commands.catalog import GUI_COMMAND_CATALOG
 from multiprocess_prototype_v3.registers.commands.routing import resolve_command_targets
 from multiprocess_prototype_v3.services.gui.service import GuiService
+from multiprocess_prototype_v3.services.metrics import LatencyTracker
 
 from .handlers import (
     handle_camera_error,
@@ -49,6 +52,7 @@ class GuiProcess(ProcessModule):
 
         self._msg = MessageAdapter(sender=self.name)
         self._service = GuiService()
+        self._latency_tracker = LatencyTracker(log_interval_sec=10.0, buffer_size=1000)
 
         self._routed_command_sender = RoutedCommandSender(
             router=self,
@@ -130,6 +134,16 @@ class GuiProcess(ProcessModule):
             _no_fallback,
         )
 
+        # Расчёт e2e latency
+        gui_display_ts = time.time()
+        capture_ts = data.get("capture_ts", 0.0)
+        if capture_ts:
+            e2e_latency_ms = (gui_display_ts - capture_ts) * 1000
+        else:
+            e2e_latency_ms = 0.0
+        self._latency_tracker.record(e2e_latency_ms)
+        self._latency_tracker.maybe_log()
+
         if self._window:
             self._window.update_frame(
                 original,
@@ -138,6 +152,7 @@ class GuiProcess(ProcessModule):
                 show_original=data.get("show_original", True),
                 show_mask=data.get("show_mask", True),
             )
+            self._window.update_latency(e2e_latency_ms)
 
         # Phase 6: dispatch кадров в display-окна через DisplayRouter
         if hasattr(self, '_display_router') and self._display_router is not None:

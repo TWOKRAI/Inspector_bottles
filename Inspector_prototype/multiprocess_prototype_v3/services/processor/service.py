@@ -224,11 +224,13 @@ class ProcessorService:
     def _process_frame_via_chain(self, frame: np.ndarray, metadata: dict[str, Any]) -> None:
         """Обработать кадр через per-region chain runnables."""
         for region_id, runnable in self._runnables.items():
+            processor_start_ts = time.time()
             chain_result = runnable.execute(frame, {
                 "camera_id": metadata.get("camera_id", ""),
                 "region_id": region_id,
                 "seq_id": metadata.get("frame_id", 0),
             })
+            processor_end_ts = time.time()
 
             if chain_result.failed:
                 logger.warning(
@@ -254,6 +256,8 @@ class ProcessorService:
                 chain_result.processing_time,
                 mask_shm_name,
                 mask_shm_index,
+                processor_start_ts=processor_start_ts,
+                processor_end_ts=processor_end_ts,
             )
             self._out.send_detection_to_renderer(result_data)
 
@@ -269,16 +273,24 @@ class ProcessorService:
 
     def _process_frame_legacy(self, frame: np.ndarray, metadata: dict[str, Any]) -> None:
         """Legacy путь обработки: единый детектор (backward compat)."""
-        t_start = time.time()
+        processor_start_ts = time.time()
         detections, mask, contours = self._detector.detect(frame)
-        processing_time = time.time() - t_start
+        processor_end_ts = time.time()
+        processing_time = processor_end_ts - processor_start_ts
 
         # Записать маску в SHM через порт
         mask_shm_name, mask_shm_index = self._out.write_mask_to_shm(mask)
 
         # Построить и отправить результат рендереру
         result_data = self._build_detection_result(
-            metadata, detections, contours, processing_time, mask_shm_name, mask_shm_index
+            metadata,
+            detections,
+            contours,
+            processing_time,
+            mask_shm_name,
+            mask_shm_index,
+            processor_start_ts=processor_start_ts,
+            processor_end_ts=processor_end_ts,
         )
         self._out.send_detection_to_renderer(result_data)
 
@@ -298,6 +310,8 @@ class ProcessorService:
         processing_time: float,
         mask_shm_name: Optional[str],
         mask_shm_index: int,
+        processor_start_ts: float = 0.0,
+        processor_end_ts: float = 0.0,
     ) -> dict:
         """Построить словарь результата детекции."""
         result = {
@@ -311,6 +325,10 @@ class ProcessorService:
             "width": metadata.get("width", 640),
             "height": metadata.get("height", 480),
             "contours": contours,
+            # Timestamps для e2e latency (прокидываем из metadata)
+            "capture_ts": metadata.get("capture_ts", 0.0),
+            "processor_start_ts": processor_start_ts,
+            "processor_end_ts": processor_end_ts,
         }
         if mask_shm_name:
             result["mask_shm_name"] = "processor_mask"

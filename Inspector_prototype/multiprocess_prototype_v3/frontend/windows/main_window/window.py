@@ -11,13 +11,13 @@ from collections.abc import Callable
 from typing import Any
 
 from frontend_module.core.action_binding import connect_action_handlers
-from frontend_module.core.qt_imports import QMainWindow, QPushButton, QVBoxLayout, QWidget
+from frontend_module.core.qt_imports import QHBoxLayout, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 from frontend_module.widgets import HeaderWidget, TabWidget
 from frontend_module.widgets.header import HeaderConfig
 from frontend_module.widgets.header.button_style import create_header_button
 from frontend_module.widgets.image_panel import ImagePanelWidget
 from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import QShortcut
+from PyQt5.QtWidgets import QLabel, QShortcut
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
 
@@ -65,8 +65,10 @@ class MainWindow(QMainWindow):
         self._btn_undo: QPushButton | None = None
         self._btn_redo: QPushButton | None = None
         self._btn_history: QPushButton | None = None
+        self._latency_label: QLabel | None = None
         self._init_ui()
         self._setup_undo_redo_ui()
+        self._setup_latency_label()
 
     def _resolve_tab_factory(self) -> TabWidgetFactory:
         if self._tab_widget_factory is not None:
@@ -158,25 +160,33 @@ class MainWindow(QMainWindow):
         self._shortcut_redo_alt = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
         self._shortcut_redo_alt.activated.connect(self._on_redo)
 
-        # Кнопки undo/redo в header
+        # Компактный toolbar: [↩ ↪ История ▼] в одну строку
+        toolbar = QWidget()
+        toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(2)
+
         self._btn_undo = create_header_button("↩", tooltip="Отменить (Ctrl+Z)")
         self._btn_redo = create_header_button("↪", tooltip="Повторить (Ctrl+Y)")
+        self._btn_history = create_header_button("История ▼", tooltip="Последние действия")
+
         self._btn_undo.clicked.connect(self._on_undo)
         self._btn_redo.clicked.connect(self._on_redo)
+        self._btn_history.clicked.connect(self._show_history_menu)
+
         self._btn_undo.setEnabled(False)
         self._btn_redo.setEnabled(False)
-
-        # Кнопка «История»
-        self._btn_history = create_header_button("История ▼", tooltip="Последние действия")
-        self._btn_history.clicked.connect(self._show_history_menu)
         self._btn_history.setEnabled(False)
 
-        # Вставить кнопки в header layout
+        toolbar_layout.addWidget(self._btn_undo)
+        toolbar_layout.addWidget(self._btn_redo)
+        toolbar_layout.addWidget(self._btn_history)
+
+        # Вставить toolbar в header layout
         header_layout = self._header.layout()
         if header_layout is not None:
-            header_layout.addWidget(self._btn_undo)
-            header_layout.addWidget(self._btn_redo)
-            header_layout.addWidget(self._btn_history)
+            header_layout.addWidget(toolbar)
 
         # Подписаться на обновления bus
         if bus is not None:
@@ -222,6 +232,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Повторено: {desc}")
         else:
             self.statusBar().showMessage(f"Последнее действие: {desc}")
+
+    def _setup_latency_label(self) -> None:
+        """Добавить QLabel с latency в StatusBar как permanent widget."""
+        self._latency_label = QLabel("Latency: —")
+        self.statusBar().addPermanentWidget(self._latency_label)
 
     def _show_history_menu(self) -> None:
         """Показать dropdown с последними 20 Actions."""
@@ -293,6 +308,11 @@ class MainWindow(QMainWindow):
     def sync_camera_type(self, camera_type: str) -> None:
         if self._camera_tab:
             self._camera_tab.sync_camera_type(camera_type)
+
+    def update_latency(self, latency_ms: float) -> None:
+        """Обновить отображение e2e latency в StatusBar."""
+        if self._latency_label is not None:
+            self._latency_label.setText(f"Latency: {latency_ms:.0f}ms")
 
     def update_frame(
         self,

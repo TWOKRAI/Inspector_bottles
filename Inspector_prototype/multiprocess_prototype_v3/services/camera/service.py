@@ -75,6 +75,13 @@ class CameraService:
         self._fps = config.get("fps", 30)
         self._width = config.get("resolution_width", 640)
         self._height = config.get("resolution_height", 480)
+
+        # Native resolution mode (Task 2.2):
+        # True → SHM пересоздаётся под нативное разрешение камеры
+        # False → кадр resize'ится до _width x _height (текущее поведение)
+        self._shm_native_resolution: bool = config.get("shm_native_resolution", False)
+        # Флаг: ожидаем ответ shm_region_changed (resize запрошен, ещё не подтверждён)
+        self._shm_resize_pending: bool = False
         self._device_id = config.get("device_id", 0)
         self._camera_index = config.get("camera_index", 0)
         self._hikvision_width = config.get("hikvision_resolution_width", 1920)
@@ -221,8 +228,19 @@ class CameraService:
         self._frame_id = (self._frame_id + 1) % 121
         timestamp = time.time()
 
-        # Resize до размеров SHM-буфера (из конфига камеры, не из глобальных констант)
-        frame = _resize_frame_for_shm(frame, self._height, self._width)
+        # Native mode (Task 2.2): если frame не совпадает с SHM — запросить resize
+        if self._shm_native_resolution:
+            frame_h, frame_w = frame.shape[0], frame.shape[1]
+            if frame_h != self._height or frame_w != self._width:
+                if not self._shm_resize_pending:
+                    # Запросить пересоздание SHM под нативное разрешение
+                    self._out.request_shm_resize(frame_w, frame_h)
+                    self._shm_resize_pending = True
+                # Пока SHM не пересоздан — resize к текущим размерам (не блокируемся)
+                frame = _resize_frame_for_shm(frame, self._height, self._width)
+        else:
+            # Resize до размеров SHM-буфера (из конфига камеры, не из глобальных констант)
+            frame = _resize_frame_for_shm(frame, self._height, self._width)
 
         # Запись в SHM через порт
         shm_result = self._out.write_frame_to_shm(frame, self._frame_id, timestamp)
@@ -231,6 +249,7 @@ class CameraService:
             notification_data = {
                 "frame_id": self._frame_id,
                 "timestamp": timestamp,
+                "capture_ts": time.time(),  # метка времени захвата для e2e latency
                 "shm_name": shm_result.get("shm_name", "camera_frame"),
                 "shm_index": shm_result.get("shm_index", 0),
                 "shm_actual_name": shm_result.get("shm_actual_name", ""),
@@ -254,6 +273,23 @@ class CameraService:
                 time.sleep(sleep_time)
 
         return True
+
+    # --- Динамическое разрешение SHM (Task 2.2) ---
+
+    def handle_shm_resized(self, new_w: int, new_h: int) -> None:
+        """Обновить внутренние размеры после пересоздания SHM.
+
+        Вызывается при получении shm_region_changed от ProcessManager.
+        После этого capture_and_publish перестанет resize'ить кадры.
+        """
+        self._width = new_w
+        self._height = new_h
+        self._shm_resize_pending = False
+
+    @property
+    def shm_native_resolution(self) -> bool:
+        """Включён ли native resolution mode."""
+        return self._shm_native_resolution
 
     # --- Настройки параметров ---
 
