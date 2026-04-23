@@ -1,7 +1,7 @@
 # План: Phase 4 — Единое связанное хранилище данных (StateStore)
 
 **Дата:** 2026-04-23
-**Обновлён:** 2026-04-23 (v2 — после реализации 4a+4b, добавлены 4b+, 4g)
+**Обновлён:** 2026-04-23 (v3 — 4b+ DONE, начало 4c)
 **Статус:** IN PROGRESS
 **Дизайн:** [STATE_STORE_DESIGN.md](STATE_STORE_DESIGN.md)
 **Оценка:** ~35 файлов, 8 фаз, ~3200 строк нового кода
@@ -36,22 +36,22 @@ Phase 4a: Core (TreeStore + Delta + Subscriptions)                    ✅ DONE
     │
     ├──► Phase 4b: IPC-интеграция (StateStoreManager + StateProxy)    ✅ DONE
     │       │
-    │       ├──► Phase 4b+: Middleware + Throttle + Validation        ◄── NEW
+    │       ├──► Phase 4b+: Middleware + Throttle + Validation        ✅ DONE (97 тестов)
     │       │       │
-    │       │       ├──► Phase 4c: Backend-миграция (процессы → StateProxy)
+    │       │       ├──► Phase 4c: Backend-миграция                   ◄── NEXT
     │       │       │
-    │       │       └──► Phase 4d: GUI-миграция (RegistersManager → StateProxy)
+    │       │       └──► Phase 4d: GUI-миграция
     │       │
     │       └──► Phase 4e: Persistence + Recipes
     │
     └──► Phase 4f: Cleanup (удаление устаревших прослоек)
               │
-              └──► Phase 4g: Advanced (Selectors + DevTools + Health)  ◄── NEW
+              └──► Phase 4g: Advanced (Selectors + DevTools + Health)
 ```
 
-Phase 4a — фундамент. 4b зависит от 4a. **4b+ (NEW)** зависит от 4b — middleware перед миграцией.
+Phase 4a — фундамент. 4b зависит от 4a. 4b+ зависит от 4b — middleware перед миграцией.
 4c и 4d параллельны, оба зависят от 4b+. 4e может начаться после 4b. 4f — после 4c+4d.
-**4g (NEW)** — финальный слой, после стабилизации.
+4g — финальный слой, после стабилизации.
 
 ---
 
@@ -80,7 +80,9 @@ Phase 4a — фундамент. 4b зависит от 4a. **4b+ (NEW)** зав
 
 ---
 
-## Phase 4b+ — Middleware + Throttle + Validation (NEW)
+## Phase 4b+ — Middleware + Throttle + Validation ✅ DONE
+
+**Статус:** Выполнено. 97 тестов (313 total).
 
 **Цель:** Расширяемый pipeline обработки state-изменений. Каждый `set()`/`merge()` 
 проходит через цепочку middleware: validate → throttle → log → persist → notify.
@@ -870,10 +872,10 @@ class HealthMonitor:
 | 4b.1 | IPC | Senior+ | teamlead | 4a.4 | 4 | ~350 | ✅ |
 | 4b.2 | IPC | Middle+ | developer | 4b.1 | 4 | ~250 | ✅ |
 | 4b.3 | IPC | Middle+ | developer | 4b.1 | 2 | ~100 | ✅ |
-| **4b+.1** | **Middleware** | **Senior** | **teamlead** | **4b** | **3** | **~150** | 🔲 |
-| **4b+.2** | **Middleware** | **Middle+** | **developer** | **4b+.1** | **2** | **~100** | 🔲 |
-| **4b+.3** | **Middleware** | **Middle+** | **developer** | **4b+.1** | **2** | **~100** | 🔲 |
-| **4b+.4** | **Middleware** | **Middle** | **developer** | **4b+.1** | **3** | **~100** | 🔲 |
+| 4b+.1 | Middleware | Senior | teamlead | 4b | 3 | ~150 | ✅ |
+| 4b+.2 | Middleware | Middle+ | developer | 4b+.1 | 2 | ~100 | ✅ |
+| 4b+.3 | Middleware | Middle+ | developer | 4b+.1 | 2 | ~100 | ✅ |
+| 4b+.4 | Middleware | Middle | developer | 4b+.1 | 3 | ~100 | ✅ |
 | 4c.1 | Backend | Middle+ | developer | 4b+.2 | 3 | ~100 | 🔲 |
 | 4c.2 | Backend | Senior | teamlead | 4b+.2 | 3 | ~150 | 🔲 |
 | 4c.3 | Backend | Middle | developer | 4b+.2 | 3 | ~100 | 🔲 |
@@ -902,9 +904,9 @@ class HealthMonitor:
 ├── Task 4b.1 (StateStoreManager)                                  ✅
 ├── [параллельно] Task 4b.2 (StateProxy) + Task 4b.3 (Bootstrap)  ✅
 │
-НЕДЕЛЯ 2: Middleware + Persistence
-├── Task 4b+.1 (Middleware pipeline)
-├── [параллельно] Task 4b+.2 (Throttle) + Task 4b+.3 (Validation) + Task 4b+.4 (Logging+Metrics)
+НЕДЕЛЯ 2: Middleware + Persistence                                ✅ DONE (4b+)
+├── Task 4b+.1 (Middleware pipeline)                                ✅
+├── [параллельно] Task 4b+.2-4 (Throttle+Validation+Logging)       ✅ (97 тестов)
 ├── [параллельно] Task 4e.1 (PersistenceManager)
 │
 НЕДЕЛЯ 3: Миграция
