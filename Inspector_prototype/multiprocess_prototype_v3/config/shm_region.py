@@ -36,3 +36,17 @@ class ShmRegionSpec(SchemaBase):
     def shape(self) -> tuple[int, int, int]:
         """Shape в стиле numpy: (height, width, channels)."""
         return (self.height, self.width, self.channels)
+
+    def with_size(self, width: int, height: int) -> "ShmRegionSpec":
+        """Создать копию спецификации с новыми размерами.
+
+        Используется при динамическом пересоздании SHM под нативное
+        разрешение камеры (shm_native_resolution=True).
+        """
+        return ShmRegionSpec(
+            name=self.name,
+            width=width,
+            height=height,
+            channels=self.channels,
+            slots=self.slots,
+        )

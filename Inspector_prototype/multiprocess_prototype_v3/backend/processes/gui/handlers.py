@@ -57,3 +57,15 @@ def handle_recorder_stats(window: Any, data: dict) -> None:
     отправлять stats через IPC.
     """
     pass  # Реализация в Phase 6.9+, когда RecorderWorker stats IPC будет готов
+
+
+def handle_shm_region_changed(window: Any, data: dict) -> None:
+    """Обновить отображение разрешения камеры в StatusBar (Task 2.2).
+
+    Вызывается при пересоздании SHM-региона под новое разрешение.
+    """
+    camera_id = data.get("camera_id", 0)
+    new_w = data.get("new_width", 0)
+    new_h = data.get("new_height", 0)
+    if window and hasattr(window, "update_camera_resolution") and new_w > 0 and new_h > 0:
+        window.update_camera_resolution(camera_id, new_w, new_h)

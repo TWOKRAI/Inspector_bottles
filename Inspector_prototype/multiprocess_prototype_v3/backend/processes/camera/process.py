@@ -84,14 +84,37 @@ class CameraProcess(ProcessModule):
                 time.sleep(0.05)
                 continue
 
-            # Обработка register_update сообщений
+            # Обработка входящих сообщений
             msg = self.receive_message(timeout=0, channel_types=["data"])
             if msg:
                 msg_dict = message_as_dict(msg)
-                if msg_dict.get("data_type") == "register_update":
+                data_type = msg_dict.get("data_type")
+                if data_type == "register_update":
                     apply_register_update(
                         msg_dict.get("data") or {}, CAMERA_REGISTER, register_handlers
                     )
+                    continue
+                if data_type == "shm_region_changed":
+                    # ProcessManager подтвердил пересоздание SHM (Task 2.2)
+                    data = msg_dict.get("data") or {}
+                    new_w = data.get("new_width", 0)
+                    new_h = data.get("new_height", 0)
+                    if new_w > 0 and new_h > 0:
+                        # Пересоздать ring-buffer с новым shape
+                        self._ring_buffer = RingBufferWriter(
+                            self.memory_manager,
+                            owner=f"camera_{self._camera_id}",
+                            slot_prefix=f"camera_{self._camera_id}_frame",
+                            k=self._ring_buffer._k,
+                        )
+                        # Обновить адаптер: подменить ring_buffer
+                        if hasattr(self._service, '_out') and hasattr(self._service._out, '_ring_buffer'):
+                            self._service._out._ring_buffer = self._ring_buffer
+                        # Уведомить сервис о новых размерах
+                        self._service.handle_shm_resized(new_w, new_h)
+                        self._log_info(
+                            f"CameraProcess[{self._camera_id}] SHM resized to {new_w}x{new_h}"
+                        )
                     continue
 
             # Делегация захвата в сервис

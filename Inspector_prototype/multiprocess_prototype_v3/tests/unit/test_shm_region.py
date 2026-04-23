@@ -30,6 +30,22 @@ class TestShmRegionSpec:
         spec = ShmRegionSpec(name="test", width=640, height=480)
         assert spec.slots == 1
 
+    def test_with_size_creates_copy(self) -> None:
+        """with_size() создаёт новый spec с изменёнными размерами (Task 2.2)."""
+        original = ShmRegionSpec(name="cam_0", width=640, height=480, channels=3, slots=3)
+        resized = original.with_size(1920, 1080)
+        # Новый spec имеет новые размеры
+        assert resized.width == 1920
+        assert resized.height == 1080
+        assert resized.shape == (1080, 1920, 3)
+        # Остальные поля сохранены
+        assert resized.name == "cam_0"
+        assert resized.channels == 3
+        assert resized.slots == 3
+        # Оригинал не изменён
+        assert original.width == 640
+        assert original.height == 480
+
 
 class TestCameraConfigShmRegion:
     """CameraConfig.shm_region() — per-camera SHM spec."""
@@ -62,6 +78,16 @@ class TestCameraConfigShmRegion:
         assert r0.shape != r1.shape
         assert r0.shape == (480, 640, 3)
         assert r1.shape == (720, 1280, 3)
+
+    def test_shm_native_resolution_default_false(self) -> None:
+        """shm_native_resolution по умолчанию False (Task 2.2)."""
+        cfg = CameraConfig(camera_id=0)
+        assert cfg.shm_native_resolution is False
+
+    def test_shm_native_resolution_enabled(self) -> None:
+        """shm_native_resolution можно включить через конфиг (Task 2.2)."""
+        cfg = CameraConfig(camera_id=0, shm_native_resolution=True)
+        assert cfg.shm_native_resolution is True
 
     def test_memory_uses_resolution_not_constants(self) -> None:
         """memory property берёт размеры из resolution_width/height, не из констант."""

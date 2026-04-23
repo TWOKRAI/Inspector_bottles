@@ -36,6 +36,11 @@ class CameraConfig(ProcessLaunchConfig):
     resolution_width: int = 640
     resolution_height: int = 480
 
+    # --- Динамическое разрешение SHM (Task 2.2) ---
+    # True → SHM пересоздаётся под нативное разрешение камеры (без resize кадра)
+    # False (default) → кадр resize'ится до resolution_width x resolution_height
+    shm_native_resolution: bool = False
+
     # --- Webcam ---
     device_id: int = 0
 

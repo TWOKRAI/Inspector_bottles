@@ -19,3 +19,11 @@ class CameraOutputPort(Protocol):
     def write_frame_to_shm(self, frame: np.ndarray, frame_id: int, timestamp: float) -> Optional[dict]:
         """Записать кадр в SHM. Возвращает dict с shm_name, shm_index, shm_actual_name или None."""
         ...
+
+    def request_shm_resize(self, new_width: int, new_height: int) -> None:
+        """Запросить пересоздание SHM-региона под новое разрешение.
+
+        Отправляет shm_region_change_request в ProcessManager.
+        Camera продолжает resize к старым размерам до получения ответа.
+        """
+        ...

@@ -288,6 +288,26 @@ class MainWindow(QMainWindow):
     def display_frames(self, frames: dict[str, Any]) -> None:
         self._image_panel.display_frames(frames)
 
+    # --- Per-camera resolution tracking (Task 2.2) ---
+
+    def update_camera_resolution(self, camera_id: int, width: int, height: int) -> None:
+        """Обновить отображение разрешения для указанной камеры в StatusBar."""
+        if not hasattr(self, "_camera_resolutions"):
+            self._camera_resolutions: dict[int, tuple[int, int]] = {}
+        self._camera_resolutions[camera_id] = (width, height)
+        self._refresh_resolution_status()
+
+    def _refresh_resolution_status(self) -> None:
+        """Обновить StatusBar: показать разрешение каждой камеры."""
+        if not hasattr(self, "_camera_resolutions") or not self._camera_resolutions:
+            return
+        parts = []
+        for cam_id in sorted(self._camera_resolutions):
+            w, h = self._camera_resolutions[cam_id]
+            parts.append(f"Cam{cam_id}: {w}x{h}")
+        resolution_text = " | ".join(parts)
+        self.statusBar().showMessage(resolution_text)
+
     def update_camera_status(self, text: str) -> None:
         pass
 

@@ -24,6 +24,7 @@ from .handlers import (
     handle_fps_update,
     handle_parameters_response,
     handle_recorder_stats,
+    handle_shm_region_changed,
 )
 
 # Dispatch table: data_type → handler function
@@ -35,6 +36,7 @@ _HANDLER_MAP = {
     "camera_type_changed": handle_camera_type_changed,
     "fps_update": handle_fps_update,
     "recorder_stats": handle_recorder_stats,
+    "shm_region_changed": handle_shm_region_changed,
 }
 
 
