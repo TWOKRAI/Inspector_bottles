@@ -21,3 +21,5 @@ class DatabaseConfig(ProcessLaunchConfig):
     db_dialect: str = "sqlite"
     schema_module_path: str = "multiprocess_prototype_v3.services.database.schema"
     schema_class_name: str = "DetectionSchema"
+    batch_size: int = 50
+    flush_interval_sec: float = 1.0

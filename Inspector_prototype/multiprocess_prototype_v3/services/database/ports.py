@@ -10,6 +10,10 @@ class DatabaseOutputPort(Protocol):
         """Выполнить SQL-запрос."""
         ...
 
+    def execute_many(self, sql: str, params: list[dict]) -> None:
+        """Выполнить batch INSERT через executemany."""
+        ...
+
     def log_info(self, text: str) -> None:
         """Логирование информационного сообщения."""
         ...

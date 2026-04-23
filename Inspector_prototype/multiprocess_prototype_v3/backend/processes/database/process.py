@@ -60,9 +60,13 @@ class DatabaseProcess(ProcessModule):
         create_sql = DatabaseService.build_create_table_sql(self._detection_schema, mapper)
         self.sql_manager.execute(create_sql)
 
-        # Адаптер и сервис
+        # Адаптер и сервис (с параметрами буферизации из конфига)
         adapter = DatabaseAdapter(self)
-        self._service = DatabaseService(output=adapter)
+        self._service = DatabaseService(
+            output=adapter,
+            batch_size=app_cfg.get("batch_size", 50),
+            flush_interval_sec=app_cfg.get("flush_interval_sec", 1.0),
+        )
 
         # Команды из таблицы
         cmd_table = build_command_table(self._service, self.sql_manager)
@@ -72,6 +76,16 @@ class DatabaseProcess(ProcessModule):
         self._log_info("DatabaseProcess ready")
 
     def shutdown(self) -> bool:
+        # Flush буфера перед закрытием БД — гарантируем, что данные не потеряются
+        if self._service:
+            try:
+                result = self._service.flush()
+                if result.get("rows", 0) > 0:
+                    self._log_info(
+                        f"DatabaseProcess shutdown flush: {result['rows']} rows записано"
+                    )
+            except Exception as e:
+                self._log_error(f"DatabaseService flush on shutdown error: {e}")
         if self.sql_manager:
             try:
                 self.sql_manager.shutdown()
