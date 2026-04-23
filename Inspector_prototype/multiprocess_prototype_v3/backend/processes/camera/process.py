@@ -20,7 +20,7 @@ from multiprocess_prototype_v3.registers import CAMERA_REGISTER
 from multiprocess_prototype_v3.services.camera.service import CameraService
 
 from .adapter import CameraAdapter
-from .commands import build_command_table, build_register_handlers
+from .commands import build_command_table, build_register_handlers, build_state_config_handlers
 
 
 class CameraProcess(ProcessModule):
@@ -59,6 +59,30 @@ class CameraProcess(ProcessModule):
         cmd_table = build_command_table(self._service, self.worker_manager)
         for cmd, handler in cmd_table.items():
             self.command_manager.register_command(cmd, handler)
+
+        # StateProxy для чтения config / записи state
+        from state_store.proxy.state_proxy import StateProxy
+
+        self._state_proxy = StateProxy(f"camera_{self._camera_id}", router=self.router_manager)
+
+        # Регистрация обработчика state.changed
+        self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
+
+        # Подписка на config-ветвь — exclude_self, чтобы не реагировать на собственные записи
+        self._state_config_handlers = build_state_config_handlers(
+            self._service, cmd_table["set_camera_type"]
+        )
+        self._state_proxy.subscribe(
+            f"cameras.{self._camera_id}.config.*",
+            callback=self._on_config_changed,
+            exclude_self=True,
+        )
+
+        # Начальная запись state
+        self._state_proxy.set(f"cameras.{self._camera_id}.state.status", "initialized")
+        self._state_proxy.set(
+            f"cameras.{self._camera_id}.state.camera_type", self._service.current_type
+        )
 
         # Воркер захвата (стартует в паузе — ждёт start_capture)
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
@@ -120,6 +144,29 @@ class CameraProcess(ProcessModule):
             # Делегация захвата в сервис
             self._service.capture_and_publish()
 
+            # Запись метрик в StateStore (ThrottleMiddleware ограничит частоту на стороне менеджера)
+            if hasattr(self, "_state_proxy"):
+                self._state_proxy.set(
+                    f"cameras.{self._camera_id}.state.is_capturing", True
+                )
+
+    # --- StateProxy callback ---
+
+    def _on_config_changed(self, deltas: list) -> None:
+        """Callback StateProxy: config изменился → роутинг к обработчику.
+
+        Принимает список Delta от StateProxy (подписка cameras.{id}.config.*).
+        Суффикс пути после cameras.{id}.config. используется как ключ маппинга.
+        """
+        prefix = f"cameras.{self._camera_id}.config."
+        for delta in deltas:
+            if not delta.path.startswith(prefix):
+                continue
+            field = delta.path[len(prefix):]
+            handler = self._state_config_handlers.get(field)
+            if handler:
+                handler(delta.new_value)
+
     # --- Shutdown ---
 
     def shutdown(self) -> bool:
@@ -128,6 +175,11 @@ class CameraProcess(ProcessModule):
         if self.worker_manager:
             self.worker_manager.pause_worker("capture_worker")
         self._service.shutdown()
+        if hasattr(self, "_state_proxy"):
+            self._state_proxy.set(
+                f"cameras.{self._camera_id}.state.status", "shutdown"
+            )
+            self._state_proxy.shutdown()
         if self.memory_manager:
             self.memory_manager.close_all(f"camera_{self._camera_id}")
         self.is_initialized = False

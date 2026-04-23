@@ -1,0 +1,25 @@
+# multiprocess_prototype_v3/conftest.py
+"""Корневой conftest для multiprocess_prototype_v3: настройка sys.path.
+
+Загружается pytest раньше подпакетов (state_store, backend и т.д.),
+поэтому здесь безопасно добавлять пути до их импорта.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def _ensure_paths() -> None:
+    """Добавить корневые пути для плоских импортов state_store.* и framework."""
+    here = Path(__file__).resolve().parent  # multiprocess_prototype_v3/
+    inspector_root = here.parent             # Inspector_prototype/
+    modules = inspector_root / "multiprocess_framework" / "modules"
+    for p in (here, inspector_root, modules):
+        s = str(p)
+        if s not in sys.path:
+            sys.path.insert(0, s)
+
+
+_ensure_paths()
