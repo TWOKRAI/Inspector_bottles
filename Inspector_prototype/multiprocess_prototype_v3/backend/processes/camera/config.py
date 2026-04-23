@@ -12,10 +12,7 @@ from multiprocess_framework.modules.process_module import (
     ProcessPriorityLevel,
 )
 
-from multiprocess_prototype_v3.services.camera.constants import (
-    CAMERA_SHM_HEIGHT,
-    CAMERA_SHM_WIDTH,
-)
+from multiprocess_prototype_v3.services.camera.constants import CAMERA_SHM_HEIGHT, CAMERA_SHM_WIDTH
 
 
 @register_schema("CameraConfigV3")

@@ -53,6 +53,25 @@ class AppConfig(SchemaBase):
         """Список конфигов воркеров пула (пустой если worker_pool_size == 0)."""
         return [ProcessorWorkerConfig(worker_index=i) for i in range(self.worker_pool_size)]
 
+    def all_shm_names(self) -> list[str]:
+        """Собрать все базовые имена SHM из memory-свойств всех процессов.
+
+        Используется cleanup-ом при старте для очистки осиротевших сегментов.
+        Ключ "coll" в словаре memory — служебный (количество слотов), не имя сегмента.
+
+        Returns:
+            Список уникальных базовых имён SHM (без суффиксов _0, _1, ...).
+        """
+        names: list[str] = []
+        for cfg in self.all_process_configs():
+            mem = cfg.memory
+            if not isinstance(mem, dict):
+                continue
+            for key in mem:
+                if key != "coll" and key not in names:
+                    names.append(key)
+        return names
+
     def all_process_configs(self) -> list[ProcessLaunchConfig]:
         """Все конфиги процессов: N камер + processor + [renderer] + robot + database + gui + K воркеров.
 
@@ -65,12 +84,14 @@ class AppConfig(SchemaBase):
         ]
         if self.display_enabled:
             configs.append(self.renderer)
-        configs.extend([
-            self.robot,
-            self.database,
-            self.gui,
-            *self.worker_configs,
-        ])
+        configs.extend(
+            [
+                self.robot,
+                self.database,
+                self.gui,
+                *self.worker_configs,
+            ]
+        )
         return configs
 
 
