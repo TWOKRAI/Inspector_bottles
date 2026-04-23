@@ -39,3 +39,19 @@ def build_register_handlers(service) -> dict:
         return lambda v: setattr(service, flag, v)
 
     return {flag: make(flag) for flag in SERVICE_FLAGS}
+
+
+def build_state_config_handlers(service) -> dict:
+    """Маппинг config field suffix → handler для StateProxy callback.
+
+    Args:
+        service: RendererService instance.
+
+    Returns:
+        {flag: handler} для каждого флага из SERVICE_FLAGS.
+        handler(value) вызывает setattr(service, flag, value).
+    """
+    def make(flag: str):
+        return lambda v: setattr(service, flag, v)
+
+    return {flag: make(flag) for flag in SERVICE_FLAGS}

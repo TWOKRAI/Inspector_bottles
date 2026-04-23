@@ -39,6 +39,17 @@ class RobotProcess(ProcessModule):
         for cmd, handler in cmd_table.items():
             self.command_manager.register_command(cmd, handler)
 
+        # StateProxy для записи state (без подписок на config — Robot только команды)
+        from state_store.proxy.state_proxy import StateProxy
+
+        self._state_proxy = StateProxy("robot", router=self.router_manager)
+
+        # Регистрация обработчика state.changed
+        self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
+
+        # Начальная запись state
+        self._state_proxy.set("robot.state.status", "initialized")
+
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         self.worker_manager.create_worker(
             "robot_worker", self._robot_worker, cfg, auto_start=True
@@ -72,5 +83,9 @@ class RobotProcess(ProcessModule):
     def shutdown(self) -> bool:
         action_count = self._service.action_count if self._service else 0
         self._log_info(f"RobotProcess shutting down. Total actions: {action_count}")
+        if hasattr(self, "_state_proxy"):
+            self._state_proxy.set("robot.state.status", "shutdown")
+            self._state_proxy.set("robot.state.action_count", action_count)
+            self._state_proxy.shutdown()
         self.is_initialized = False
         return super().shutdown()

@@ -20,7 +20,7 @@ from multiprocess_prototype_v3.registers import RENDERER_REGISTER
 from multiprocess_prototype_v3.services.renderer.service import RendererService
 
 from .adapter import RendererAdapter
-from .commands import build_command_table, build_register_handlers
+from .commands import build_command_table, build_register_handlers, build_state_config_handlers
 
 
 class RendererProcess(ProcessModule):
@@ -49,6 +49,27 @@ class RendererProcess(ProcessModule):
         cmd_table = build_command_table(self._service)
         for cmd, handler in cmd_table.items():
             self.command_manager.register_command(cmd, handler)
+
+        # StateProxy для чтения config / записи state
+        from state_store.proxy.state_proxy import StateProxy
+
+        self._state_proxy = StateProxy("renderer", router=self.router_manager)
+
+        # Регистрация обработчика state.changed
+        self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
+
+        # Config handlers для StateProxy callback
+        self._state_config_handlers = build_state_config_handlers(self._service)
+
+        # Подписка на renderer config
+        self._state_proxy.subscribe(
+            "renderer.config.*",
+            callback=self._on_config_changed,
+            exclude_self=True,
+        )
+
+        # Начальная запись state
+        self._state_proxy.set("renderer.state.status", "initialized")
 
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         self.worker_manager.create_worker(
@@ -139,10 +160,30 @@ class RendererProcess(ProcessModule):
                 return images[0].copy()
         return np.zeros((height, width, 3), dtype=np.uint8)
 
+    # --- StateProxy callback ---
+
+    def _on_config_changed(self, deltas: list) -> None:
+        """Callback StateProxy: config изменился → роутинг к обработчику.
+
+        Принимает список Delta от StateProxy (подписка renderer.config.*).
+        Суффикс пути после renderer.config. используется как ключ маппинга.
+        """
+        prefix = "renderer.config."
+        for delta in deltas:
+            if not delta.path.startswith(prefix):
+                continue
+            field = delta.path[len(prefix):]
+            handler = self._state_config_handlers.get(field)
+            if handler:
+                handler(delta.new_value)
+
     # --- Shutdown ---
 
     def shutdown(self) -> bool:
         self._log_info("RendererProcess shutting down...")
+        if hasattr(self, "_state_proxy"):
+            self._state_proxy.set("renderer.state.status", "shutdown")
+            self._state_proxy.shutdown()
         if self.memory_manager:
             self.memory_manager.close_all("renderer")
         self.is_initialized = False

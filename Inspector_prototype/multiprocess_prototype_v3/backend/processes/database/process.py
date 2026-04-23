@@ -73,6 +73,17 @@ class DatabaseProcess(ProcessModule):
         for cmd, handler in cmd_table.items():
             self.command_manager.register_command(cmd, handler)
 
+        # StateProxy для записи state (без подписок на config — Database только команды)
+        from state_store.proxy.state_proxy import StateProxy
+
+        self._state_proxy = StateProxy("database", router=self.router_manager)
+
+        # Регистрация обработчика state.changed
+        self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
+
+        # Начальная запись state
+        self._state_proxy.set("database.state.status", "initialized")
+
         self._log_info("DatabaseProcess ready")
 
     def shutdown(self) -> bool:
@@ -86,6 +97,10 @@ class DatabaseProcess(ProcessModule):
                     )
             except Exception as e:
                 self._log_error(f"DatabaseService flush on shutdown error: {e}")
+        # StateProxy: записать статус до закрытия БД
+        if hasattr(self, "_state_proxy"):
+            self._state_proxy.set("database.state.status", "shutdown")
+            self._state_proxy.shutdown()
         if self.sql_manager:
             try:
                 self.sql_manager.shutdown()
