@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 
@@ -11,14 +11,23 @@ from .model import RegisterRecipeModel
 from .recipe_rows import build_recipe_rows, coerce_string_to_value, format_value_for_cell
 
 if TYPE_CHECKING:
+    from multiprocess_prototype_v3.frontend.actions.bus import ActionBus
+
     from .view import RegisterRecipePanelViewProtocol
 
 
 class RegisterRecipePresenter:
-    def __init__(self, *, view: RegisterRecipePanelViewProtocol, model: RegisterRecipeModel) -> None:
+    def __init__(
+        self,
+        *,
+        view: RegisterRecipePanelViewProtocol,
+        model: RegisterRecipeModel,
+        action_bus: ActionBus | None = None,
+    ) -> None:
         """view — панель; model — rm + recipe_manager."""
         self._view = view
         self._model = model
+        self._action_bus = action_bus
 
     def on_load_clicked(self) -> None:
         """YAML слот → регистры через recipe_manager; колбэк on_recipe_applied."""
@@ -64,8 +73,21 @@ class RegisterRecipePresenter:
         rm = self._model.rm
         if mgr is None:
             return
+
+        # Снимок до загрузки (для undo)
+        snapshot_before = rm.model_dump_all() if rm else {}
+
         mgr.set_current_register_recipe_number(idx)
         mgr.load_recipe_to_registers(rm, str(idx))
+
+        # Запись в ActionBus (record — без повторного apply, load уже выполнен)
+        if self._action_bus is not None and rm is not None:
+            from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+            snapshot_after = rm.model_dump_all()
+            action = ActionBuilder.recipe_switch(str(idx), snapshot_before, snapshot_after)
+            self._action_bus.record(action)
+
         self._view.refresh_table_rows()
         if self._model.on_recipe_applied:
             self._model.on_recipe_applied(idx)
@@ -87,8 +109,25 @@ class RegisterRecipePresenter:
         rm = self._model.rm
         if mgr is None:
             return
+
+        # Снимок до загрузки (для undo)
+        snapshot_before = rm.model_dump_all() if rm else {}
+
         if not mgr.load_recipe_to_registers(rm, DEFAULT_RECIPE_SLOT_ID):
             mgr.load_recipe_to_registers(rm, "default_value")
+
+        # Запись в ActionBus (record — без повторного apply, load уже выполнен)
+        if self._action_bus is not None and rm is not None:
+            from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+            snapshot_after = rm.model_dump_all()
+            action = ActionBuilder.recipe_switch(
+                DEFAULT_RECIPE_SLOT_ID,
+                snapshot_before,
+                snapshot_after,
+            )
+            self._action_bus.record(action)
+
         self._view.refresh_table_rows()
 
     def initial_slot(self) -> int:
@@ -122,7 +161,9 @@ class RegisterRecipePresenter:
         new_val = coerce_string_to_value(text, prev)
         ok, _err = self._model.rm.set_field_value(register_name, field_name, new_val)
         if not ok:
-            self._view.set_leaf_value_text(register_name, str(field_id), format_value_for_cell(prev))
+            self._view.set_leaf_value_text(
+                register_name, str(field_id), format_value_for_cell(prev)
+            )
             return
         self._view.set_leaf_value_text(
             register_name,

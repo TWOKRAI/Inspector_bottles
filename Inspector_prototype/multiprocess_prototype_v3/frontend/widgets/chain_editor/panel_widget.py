@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from frontend_module.core.qt_imports import (
     QCheckBox,
     QComboBox,
@@ -11,14 +9,13 @@ from frontend_module.core.qt_imports import (
     QHeaderView,
     QLabel,
     QPushButton,
+    Qt,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    Qt,
     pyqtSignal,
 )
-
 from registers.pipeline.processing_node import ProcessingNode
 from registers.processor.catalog.schemas import ProcessingOperationDef
 from services.processor.chain.autofill import autofill_inputs
@@ -50,8 +47,8 @@ class ChainEditorWidget(QWidget):
     def __init__(
         self,
         *,
-        ui: Optional[ChainEditorUiConfig] = None,
-        parent: Optional[QWidget] = None,
+        ui: ChainEditorUiConfig | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         """Инициализация: создать layout, таблицу и кнопки управления."""
         super().__init__(parent)
@@ -409,14 +406,14 @@ class ChainEditorWidget(QWidget):
         self._refresh_table()
         self.nodes_changed.emit()
 
-    def _get_selected_row(self) -> Optional[int]:
+    def _get_selected_row(self) -> int | None:
         """Вернуть индекс выделенной строки или None если ничего не выделено."""
         selected = self._table.selectedItems()
         if not selected:
             return None
         return selected[0].row()
 
-    def _get_node_id_by_row(self, row: int) -> Optional[str]:
+    def _get_node_id_by_row(self, row: int) -> str | None:
         """Получить node_id из UserRole колонки #."""
         item = self._table.item(row, _COL_ORDER)
         if item is None:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 RegionActionHandler — обработчик REGION_ADD / REGION_REMOVE действий.
 
@@ -7,6 +6,7 @@ revert(): записывает backward_patch["pipeline_before"] как vision_p
 
 Guard: если register_name отсутствует или ключ pipeline не найден — log warning, return.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +28,7 @@ class RegionActionHandler:
     - backward_patch["pipeline_before"] — состояние vision_pipeline до операции
     """
 
-    def apply(self, action: "Action", rm: "IRegistersManagerGui") -> None:
+    def apply(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Применить: записать pipeline_after в регистр как vision_pipeline."""
         if not self._validate(action, "apply"):
             return
@@ -43,7 +43,7 @@ class RegionActionHandler:
 
         rm.set_field_value(action.register_name, "vision_pipeline", pipeline_after)
 
-    def revert(self, action: "Action", rm: "IRegistersManagerGui") -> None:
+    def revert(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Откатить: записать pipeline_before в регистр как vision_pipeline."""
         if not self._validate(action, "revert"):
             return
@@ -59,7 +59,7 @@ class RegionActionHandler:
         rm.set_field_value(action.register_name, "vision_pipeline", pipeline_before)
 
     @staticmethod
-    def _validate(action: "Action", operation: str) -> bool:
+    def _validate(action: Action, operation: str) -> bool:
         """Проверить наличие register_name."""
         if not action.register_name:
             logger.warning(

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ProfileSwitchHandler — обработчик PROFILE_SWITCH действий.
 
@@ -8,10 +7,11 @@ revert(): применить backward_patch["snapshot"] — откатить к 
 Snapshot format: {register_name: {field_name: value}} или {field_name: value}
 (для profile используется один регистр SETTINGS_REGISTER, поэтому оба варианта поддержаны).
 """
+
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..bus import IRegistersManagerGui
@@ -27,7 +27,7 @@ class ProfileSwitchHandler:
     не вызывая switch_profile повторно (только при undo/redo).
     """
 
-    def apply(self, action: "Action", rm: "IRegistersManagerGui") -> None:
+    def apply(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Применить forward_patch["snapshot"] к регистрам."""
         snapshot = action.forward_patch.get("snapshot")
         if snapshot is None:
@@ -38,7 +38,7 @@ class ProfileSwitchHandler:
             return
         self._apply_snapshot(snapshot, rm, "apply", action.action_id)
 
-    def revert(self, action: "Action", rm: "IRegistersManagerGui") -> None:
+    def revert(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Откатить: применить backward_patch["snapshot"] к регистрам."""
         snapshot = action.backward_patch.get("snapshot")
         if snapshot is None:
@@ -52,7 +52,7 @@ class ProfileSwitchHandler:
     @staticmethod
     def _apply_snapshot(
         snapshot: Any,
-        rm: "IRegistersManagerGui",
+        rm: IRegistersManagerGui,
         operation: str,
         action_id: str,
     ) -> None:
@@ -79,12 +79,13 @@ class ProfileSwitchHandler:
         else:
             # {field_name: value} — плоский (один регистр settings)
             from multiprocess_prototype_v3.registers.constants import SETTINGS_REGISTER
+
             _apply_register_fields(SETTINGS_REGISTER, snapshot, rm, operation, action_id)
 
 
 def _apply_multi_register_snapshot(
-    snapshot: Dict[str, Any],
-    rm: "IRegistersManagerGui",
+    snapshot: dict[str, Any],
+    rm: IRegistersManagerGui,
     operation: str,
     action_id: str,
 ) -> None:
@@ -103,8 +104,8 @@ def _apply_multi_register_snapshot(
 
 def _apply_register_fields(
     register_name: str,
-    fields: Dict[str, Any],
-    rm: "IRegistersManagerGui",
+    fields: dict[str, Any],
+    rm: IRegistersManagerGui,
     operation: str,
     action_id: str,
 ) -> None:

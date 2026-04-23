@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from multiprocess_prototype_v3.registers.schemas.pipeline.widget_bridge import (
     apply_crop_nested_to_pipeline,
@@ -22,7 +22,8 @@ from .params import (
 )
 
 if TYPE_CHECKING:
-    from frontend.actions.bus import ActionBus
+    from multiprocess_prototype_v3.frontend.actions.bus import ActionBus
+
     from .view import CroppedRegionsPanelViewProtocol
 
 
@@ -33,9 +34,9 @@ class CroppedRegionsPresenter:
     def __init__(
         self,
         *,
-        view: "CroppedRegionsPanelViewProtocol",
+        view: CroppedRegionsPanelViewProtocol,
         model: CroppedRegionsModel,
-        action_bus: Optional["ActionBus"] = None,
+        action_bus: ActionBus | None = None,
     ) -> None:
         self._view = view
         self._model = model
@@ -45,7 +46,7 @@ class CroppedRegionsPresenter:
         ids = self._model.ui.camera_ids or []
         return ids[0] if ids else "default"
 
-    def _logical_ids_from_register(self) -> List[str]:
+    def _logical_ids_from_register(self) -> list[str]:
         rm = self._model.registers_manager
         if rm is None:
             return []
@@ -57,8 +58,8 @@ class CroppedRegionsPresenter:
             return [str(x) for x in raw]
         return []
 
-    def camera_ids_union(self) -> List[str]:
-        registry_ids: List[str] = []
+    def camera_ids_union(self) -> list[str]:
+        registry_ids: list[str] = []
         if self._model.camera_registry is not None:
             registry_ids = [str(e.camera_id) for e in self._model.camera_registry.all_entries()]
         cfg = list(self._model.ui.camera_ids or [])
@@ -111,7 +112,7 @@ class CroppedRegionsPresenter:
             return
         self._view.select_region(self._model.selected_camera, region_name)
 
-    def on_tree_selection(self, camera_id: Optional[str], region_key: Optional[str]) -> None:
+    def on_tree_selection(self, camera_id: str | None, region_key: str | None) -> None:
         """Выделение в дереве: камера и/или регион."""
         if camera_id is None:
             self._view.set_region_name_text("")
@@ -248,7 +249,7 @@ class CroppedRegionsPresenter:
         self._view.set_region_name_text("")
         self._view.apply_controls_params(DEFAULT_CROPPED_PARAMS)
         self._view.clear_table_selection()
-        self._push_register()
+        self._push_register_via_bus("remove", region_name=key, camera_id=cam)
         self._fill_region_combo()
         self.refresh_rect_label()
 
@@ -281,7 +282,7 @@ class CroppedRegionsPresenter:
         self._view.refresh_table()
         self._view.select_region(cam, new_name)
         self._view.set_region_name_text(new_name)
-        self._push_register()
+        self._push_register_via_bus("modify", region_name=new_name, camera_id=cam)
         self._fill_region_combo()
         self.refresh_rect_label()
 

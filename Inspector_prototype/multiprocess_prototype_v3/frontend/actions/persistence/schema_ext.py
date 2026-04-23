@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ActionLogRow — SQL-friendly проекция Action для хранения в таблице action_log.
 
@@ -9,10 +8,10 @@ ActionLogRow — SQL-friendly проекция Action для хранения в
 Конвертеры to_action_log_row / from_action_log_row обеспечивают round-trip:
     Action -> ActionLogRow -> Action (идентичный).
 """
+
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from data_schema_module import SchemaBase
 
@@ -34,11 +33,11 @@ class ActionLogRow(SchemaBase):
 
     action_id: str
     action_type: str
-    register_name: Optional[str] = None
-    field_name: Optional[str] = None
+    register_name: str | None = None
+    field_name: str | None = None
     forward_patch_json: str = "{}"
     backward_patch_json: str = "{}"
-    coalesce_key: Optional[str] = None
+    coalesce_key: str | None = None
     undoable: bool = True
     description: str = ""
     timestamp: float = 0.0

@@ -3,15 +3,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 from frontend_module.interfaces import IRegistersManagerGui
 
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
-from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import (
+    RecipeManagerProtocol,
+)
 
-from ..settings_recipe_widget.schemas import RecipesTabConfig
 from .._recipe_panel_base import RecipePanelBase
+from ..settings_recipe_widget.schemas import RecipesTabConfig
 from .model import RegisterRecipeModel
 from .presenter import RegisterRecipePresenter
 from .recipe_rows import group_rows_by_register
@@ -23,20 +26,22 @@ class RegisterRecipePanelWidget(RecipePanelBase[RegisterRecipeModel]):
     def __init__(
         self,
         *,
-        registers_manager: Optional[IRegistersManagerGui] = None,
-        rm: Optional[IRegistersManagerGui] = None,
-        ui: Optional[Union[RecipesTabConfig, dict]] = None,
-        recipe_manager: Optional[RecipeManagerProtocol] = None,
-        recipe_access: Optional[Union[AccessContext, dict]] = None,
-        on_recipe_applied: Optional[Callable[[int], None]] = None,
-        on_recipe_saved: Optional[Callable[[int], None]] = None,
+        registers_manager: IRegistersManagerGui | None = None,
+        rm: IRegistersManagerGui | None = None,
+        ui: RecipesTabConfig | dict | None = None,
+        recipe_manager: RecipeManagerProtocol | None = None,
+        recipe_access: AccessContext | dict | None = None,
+        on_recipe_applied: Callable[[int], None] | None = None,
+        on_recipe_saved: Callable[[int], None] | None = None,
         touch_keyboard: Any | None = None,
-        parent: Optional[Any] = None,
+        action_bus: Any | None = None,
+        parent: Any | None = None,
     ) -> None:
         resolved = rm if rm is not None else registers_manager
         if resolved is None:
             raise TypeError("RegisterRecipePanelWidget requires rm or registers_manager")
         self._touch_keyboard = touch_keyboard
+        self._action_bus = action_bus
         self._extra_recipe_manager = recipe_manager
         self._extra_access_ctx = (
             recipe_access
@@ -72,9 +77,9 @@ class RegisterRecipePanelWidget(RecipePanelBase[RegisterRecipeModel]):
             on_recipe_saved=self._on_recipe_saved_cb,
         )
 
-    def _create_presenter(self, model: Optional[RegisterRecipeModel]) -> RegisterRecipePresenter:
+    def _create_presenter(self, model: RegisterRecipeModel | None) -> RegisterRecipePresenter:
         assert model is not None
-        return RegisterRecipePresenter(view=self, model=model)
+        return RegisterRecipePresenter(view=self, model=model, action_bus=self._action_bus)
 
     def _on_presenter_ready(self, **kwargs: Any) -> None:
         self._presenter.refresh_from_registers()

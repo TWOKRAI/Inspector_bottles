@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ActionLogRepository — репозиторий для персистентного хранения Action.
 
@@ -8,9 +7,8 @@ ActionLogRepository — репозиторий для персистентног
 Конвертация Action <-> ActionLogRow происходит внутри репозитория,
 вызывающий код работает только с Action.
 """
-from __future__ import annotations
 
-from typing import List
+from __future__ import annotations
 
 from sql_module.core.base_repository import GenericRepository
 from sql_module.interfaces import ISyncEngineAdapter
@@ -48,37 +46,24 @@ class ActionLogRepository:
         row = to_action_log_row(action)
         self._repo.insert(row)
 
-    def find_recent(self, n: int = 200) -> List[Action]:
+    def find_recent(self, n: int = 200) -> list[Action]:
         """Получить n последних действий, отсортированных по timestamp DESC.
 
         Возвращает список Action (от новейшего к старейшему).
         """
-        sql = (
-            f'SELECT * FROM "{self._table}" '
-            f"ORDER BY \"timestamp\" DESC LIMIT :limit"
-        )
+        sql = f'SELECT * FROM "{self._table}" ORDER BY "timestamp" DESC LIMIT :limit'
         rows = self._adapter.query(sql, {"limit": n})
-        return [
-            from_action_log_row(ActionLogRow.model_validate(r))
-            for r in rows
-        ]
+        return [from_action_log_row(ActionLogRow.model_validate(r)) for r in rows]
 
-    def find_since(self, timestamp: float) -> List[Action]:
+    def find_since(self, timestamp: float) -> list[Action]:
         """Получить все действия с timestamp >= заданного.
 
         Используется для recovery: восстановление действий после определённого момента.
         Результат отсортирован по timestamp ASC (хронологический порядок).
         """
-        sql = (
-            f'SELECT * FROM "{self._table}" '
-            f"WHERE \"timestamp\" >= :ts "
-            f"ORDER BY \"timestamp\" ASC"
-        )
+        sql = f'SELECT * FROM "{self._table}" WHERE "timestamp" >= :ts ORDER BY "timestamp" ASC'
         rows = self._adapter.query(sql, {"ts": timestamp})
-        return [
-            from_action_log_row(ActionLogRow.model_validate(r))
-            for r in rows
-        ]
+        return [from_action_log_row(ActionLogRow.model_validate(r)) for r in rows]
 
     def count(self) -> int:
         """Получить общее количество записей в action_log."""

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ActionBus — шина выполнения действий с undo/redo и coalescing.
 
@@ -6,17 +5,14 @@ ActionBus — шина выполнения действий с undo/redo и coa
 Содержит undo/redo стеки, handler-реестр, callback-уведомления
 и coalescing для группировки последовательных однотипных изменений.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
     TYPE_CHECKING,
+    Any,
 )
 
 try:
@@ -36,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Протоколы
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class IRegistersManagerGui(Protocol):
     """Протокол для RegistersManager на стороне GUI."""
@@ -45,7 +42,7 @@ class IRegistersManagerGui(Protocol):
         register_name: str,
         field_name: str,
         value: Any,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Установить значение поля регистра. Возвращает (ok, error_msg)."""
         ...
 
@@ -67,6 +64,7 @@ class ActionHandler(Protocol):
 # ActionBus
 # ---------------------------------------------------------------------------
 
+
 class ActionBus:
     """
     Шина действий с undo/redo, coalescing и callback-уведомлениями.
@@ -83,17 +81,17 @@ class ActionBus:
         self._rm = rm
         self._max_history = max_history
 
-        self._undo_stack: List[Action] = []
-        self._redo_stack: List[Action] = []
-        self._handlers: Dict[ActionType, ActionHandler] = {}
-        self._change_callbacks: List[Callable[[], None]] = []
+        self._undo_stack: list[Action] = []
+        self._redo_stack: list[Action] = []
+        self._handlers: dict[ActionType, ActionHandler] = {}
+        self._change_callbacks: list[Callable[[], None]] = []
 
         # Последнее событие: ("execute" | "undo" | "redo", action)
         # Нужно для статус-бара (Task 7D.2)
-        self._last_event: Optional[Tuple[str, Action]] = None
+        self._last_event: tuple[str, Action] | None = None
 
         # Опциональный writer для персистентного логирования действий (Task 7C.2)
-        self._log_writer: Optional["ActionLogWriter"] = None
+        self._log_writer: ActionLogWriter | None = None
 
     # ------------------------------------------------------------------
     # Регистрация обработчиков
@@ -111,7 +109,7 @@ class ActionBus:
     # Log writer
     # ------------------------------------------------------------------
 
-    def set_log_writer(self, writer: Optional["ActionLogWriter"]) -> None:
+    def set_log_writer(self, writer: ActionLogWriter | None) -> None:
         """Установить ActionLogWriter для персистентного логирования действий.
 
         writer=None отключает логирование (полезно в тестах или при выключенной БД).
@@ -182,7 +180,49 @@ class ActionBus:
             logged_action = self._undo_stack[-1] if self._undo_stack else action
             self._log_writer.enqueue(logged_action)
 
-    def undo(self) -> Optional[Action]:
+    def record(self, action: Action) -> None:
+        """Записать действие, уже применённое извне, в undo-стек (без вызова handler.apply).
+
+        Используется для profile_switch / recipe_switch — когда switch уже выполнен,
+        но действие нужно зафиксировать для undo/redo.
+        """
+        # COMMAND — не попадает в undo-стек
+        if not action.undoable:
+            self._last_event = ("execute", action)
+            self._notify_callbacks()
+            return
+
+        # Coalescing
+        if (
+            action.coalesce_key is not None
+            and self._undo_stack
+            and self._undo_stack[-1].coalesce_key == action.coalesce_key
+        ):
+            prev = self._undo_stack[-1]
+            merged = action.model_copy(
+                update={"backward_patch": prev.backward_patch},
+            )
+            self._undo_stack[-1] = merged
+        else:
+            self._undo_stack.append(action)
+
+        # Ограничение размера стека
+        if len(self._undo_stack) > self._max_history:
+            overflow = len(self._undo_stack) - self._max_history
+            self._undo_stack = self._undo_stack[overflow:]
+
+        # Новое действие сбрасывает redo-стек
+        self._redo_stack.clear()
+
+        self._last_event = ("execute", action)
+        self._notify_callbacks()
+
+        # Логируем через writer (если установлен)
+        if self._log_writer is not None:
+            logged_action = self._undo_stack[-1] if self._undo_stack else action
+            self._log_writer.enqueue(logged_action)
+
+    def undo(self) -> Action | None:
         """
         Отменить последнее действие.
 
@@ -209,7 +249,7 @@ class ActionBus:
         self._notify_callbacks()
         return action
 
-    def redo(self) -> Optional[Action]:
+    def redo(self) -> Action | None:
         """
         Повторить последнее отменённое действие.
 
@@ -278,16 +318,16 @@ class ActionBus:
         """Есть ли действия для повтора."""
         return len(self._redo_stack) > 0
 
-    def history(self, n: int = 20) -> List[Action]:
+    def history(self, n: int = 20) -> list[Action]:
         """Последние n действий из undo-стека (от старых к новым)."""
         return list(self._undo_stack[-n:])
 
-    def last_action(self) -> Optional[Action]:
+    def last_action(self) -> Action | None:
         """Последний Action в undo-стеке или None."""
         return self._undo_stack[-1] if self._undo_stack else None
 
     @property
-    def last_event(self) -> Optional[Tuple[str, Action]]:
+    def last_event(self) -> tuple[str, Action] | None:
         """Последнее событие: ('execute'|'undo'|'redo', action)."""
         return self._last_event
 

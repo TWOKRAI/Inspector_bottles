@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 RecipeSwitchHandler — обработчик RECIPE_SWITCH действий.
 
@@ -9,10 +8,11 @@ Snapshot format: {register_name: {field_name: value}} — полный сним�
 
 Аналог ProfileSwitchHandler, но для рецептов (slot-based).
 """
+
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..bus import IRegistersManagerGui
@@ -28,7 +28,7 @@ class RecipeSwitchHandler:
     не вызывая switch-логику повторно (только при undo/redo).
     """
 
-    def apply(self, action: "Action", rm: "IRegistersManagerGui") -> None:
+    def apply(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Применить forward_patch["snapshot"] к регистрам."""
         snapshot = action.forward_patch.get("snapshot")
         if snapshot is None:
@@ -39,7 +39,7 @@ class RecipeSwitchHandler:
             return
         self._apply_snapshot(snapshot, rm, "apply", action.action_id)
 
-    def revert(self, action: "Action", rm: "IRegistersManagerGui") -> None:
+    def revert(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Откатить: применить backward_patch["snapshot"] к регистрам."""
         snapshot = action.backward_patch.get("snapshot")
         if snapshot is None:
@@ -53,7 +53,7 @@ class RecipeSwitchHandler:
     @staticmethod
     def _apply_snapshot(
         snapshot: Any,
-        rm: "IRegistersManagerGui",
+        rm: IRegistersManagerGui,
         operation: str,
         action_id: str,
     ) -> None:
@@ -87,8 +87,8 @@ class RecipeSwitchHandler:
 
 
 def _apply_multi_register_snapshot(
-    snapshot: Dict[str, Any],
-    rm: "IRegistersManagerGui",
+    snapshot: dict[str, Any],
+    rm: IRegistersManagerGui,
     operation: str,
     action_id: str,
 ) -> None:

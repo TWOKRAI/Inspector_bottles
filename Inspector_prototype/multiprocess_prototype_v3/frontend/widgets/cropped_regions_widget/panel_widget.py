@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 from frontend_module.core.qt_imports import (
     QComboBox,
@@ -22,17 +23,17 @@ from frontend_module.widgets.base_widget import BaseWidget
 from frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
 from frontend_module.widgets.tabs import callback_no_args
 
-from .controls import CroppedAreaControls
-from .model import CroppedRegionsModel
-from .presenter import CroppedRegionsPresenter
-from .schemas import CroppedRegionsTabUiConfig
-from .tree_adapter import CroppedRegionsTreeAdapter
-
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import (
     bind_touch_keyboard_line_edit,
     merge_touch_keyboard_dicts,
 )
 from multiprocess_prototype_v3.registers.schemas.processing_tab.names import PROCESSOR_REGISTER
+
+from .controls import CroppedAreaControls
+from .model import CroppedRegionsModel
+from .presenter import CroppedRegionsPresenter
+from .schemas import CroppedRegionsTabUiConfig
+from .tree_adapter import CroppedRegionsTreeAdapter
 
 CroppedControlsFactory = Callable[..., Any]
 
@@ -43,20 +44,22 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
     def __init__(
         self,
         *,
-        registers_manager: Optional[IRegistersManagerGui] = None,
-        ui: Optional[Union[CroppedRegionsTabUiConfig, dict]] = None,
-        controls_factory: Optional[CroppedControlsFactory] = None,
+        registers_manager: IRegistersManagerGui | None = None,
+        ui: CroppedRegionsTabUiConfig | dict | None = None,
+        controls_factory: CroppedControlsFactory | None = None,
         touch_keyboard: Any | None = None,
-        camera_registry: Optional[Any] = None,
-        parent: Optional[Any] = None,
+        camera_registry: Any | None = None,
+        action_bus: Any | None = None,
+        parent: Any | None = None,
     ) -> None:
         self._controls_factory = controls_factory
         self._rm_subscribe_cb = None
         self._touch_keyboard = touch_keyboard
         self._camera_registry = camera_registry
+        self._action_bus = action_bus
         super().__init__(registers_manager=registers_manager, ui=ui, parent=parent)
 
-    def _coerce_ui(self, ui: Optional[object]) -> CroppedRegionsTabUiConfig:
+    def _coerce_ui(self, ui: object | None) -> CroppedRegionsTabUiConfig:
         return coerce_schema_config(ui, CroppedRegionsTabUiConfig)
 
     def _create_model(self) -> CroppedRegionsModel:
@@ -71,8 +74,12 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
 
     def _init_ui(self) -> None:
         u = self._ui
-        tk_tree = merge_touch_keyboard_dicts(self._touch_keyboard, getattr(u, "touch_keyboard_tree", None))
-        tk_roi = merge_touch_keyboard_dicts(self._touch_keyboard, getattr(u, "touch_keyboard_roi", None))
+        tk_tree = merge_touch_keyboard_dicts(
+            self._touch_keyboard, getattr(u, "touch_keyboard_tree", None)
+        )
+        tk_roi = merge_touch_keyboard_dicts(
+            self._touch_keyboard, getattr(u, "touch_keyboard_roi", None)
+        )
         tk_name = merge_touch_keyboard_dicts(tk_roi, getattr(u, "touch_keyboard_name", None))
         layout = QVBoxLayout(self)
 
@@ -156,9 +163,9 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
             return CroppedAreaControls(**kwargs)
         return self._controls_factory(**kwargs)
 
-    def _create_presenter(self, model: Optional[CroppedRegionsModel]) -> CroppedRegionsPresenter:
+    def _create_presenter(self, model: CroppedRegionsModel | None) -> CroppedRegionsPresenter:
         assert model is not None
-        return CroppedRegionsPresenter(view=self, model=model)
+        return CroppedRegionsPresenter(view=self, model=model, action_bus=self._action_bus)
 
     def _connect_signals(self) -> None:
         _btn = callback_no_args
@@ -249,10 +256,10 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
     def show_information(self, title: str, text: str) -> None:
         QMessageBox.information(self, title, text)
 
-    def set_camera_options(self, camera_ids: List[str], selected: str) -> None:
+    def set_camera_options(self, camera_ids: list[str], selected: str) -> None:
         """Дерево строится из данных; слот сохранён для совместимости."""
 
-    def set_region_combo_options(self, names: List[str], selected: Optional[str]) -> None:
+    def set_region_combo_options(self, names: list[str], selected: str | None) -> None:
         if self._region_combo is None:
             return
         self._block_table = True
@@ -266,7 +273,7 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
         self._region_combo.blockSignals(False)
         self._block_table = False
 
-    def get_region_combo_selection(self) -> Optional[str]:
+    def get_region_combo_selection(self) -> str | None:
         if self._region_combo is None:
             return None
         i = self._region_combo.currentIndex()
@@ -291,17 +298,17 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
         self._tree.blockSignals(False)
         self._block_table = False
 
-    def get_tree_selection(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_tree_selection(self) -> tuple[str | None, str | None]:
         if self._tree is None:
             return (None, None)
         return self._tree.get_selection()
 
-    def read_leaf_row(self, camera_id: str, region_name: str) -> Optional[Dict[str, Any]]:
+    def read_leaf_row(self, camera_id: str, region_name: str) -> dict[str, Any] | None:
         if self._tree_adapter is None:
             return None
         return self._tree_adapter.read_leaf_row(camera_id, region_name)
 
-    def selected_region_key(self) -> Optional[str]:
+    def selected_region_key(self) -> str | None:
         _, r = self.get_tree_selection()
         return r
 
@@ -324,11 +331,11 @@ class CroppedRegionsPanelWidget(BaseWidget[CroppedRegionsModel]):
         if self._region_name_edit is not None:
             self._region_name_edit.setText(text)
 
-    def apply_controls_params(self, params: Dict[str, Any]) -> None:
+    def apply_controls_params(self, params: dict[str, Any]) -> None:
         if self._controls is not None:
             self._controls.apply_params(params)
 
-    def get_controls_params(self) -> Dict[str, Any]:
+    def get_controls_params(self) -> dict[str, Any]:
         if self._controls is None:
             return {}
         return self._controls.get_params()

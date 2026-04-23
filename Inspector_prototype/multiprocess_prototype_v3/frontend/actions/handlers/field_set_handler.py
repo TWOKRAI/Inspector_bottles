@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 FieldSetHandler — обработчик FIELD_SET действий.
 
@@ -7,6 +6,7 @@ revert(): устанавливает backward_patch["value"] через rm.set_f
 
 Guard: если register_name или field_name отсутствует — log warning, return.
 """
+
 from __future__ import annotations
 
 import logging

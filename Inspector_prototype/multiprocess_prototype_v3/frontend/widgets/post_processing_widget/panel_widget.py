@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from frontend_module.core.qt_imports import (
     QCheckBox,
@@ -24,16 +24,16 @@ from frontend_module.widgets.base_widget import BaseWidget
 from frontend_module.widgets.tables.tree_with_toolbar import TwoLevelTreeWithToolbar
 from frontend_module.widgets.tabs import callback_no_args
 
-from .model import PostProcessingModel
-from .params import regions_to_table_rows
-from .presenter import PostProcessingPresenter
-from .schemas import PostProcessingTabUiConfig
-
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import (
     bind_touch_keyboard_line_edit,
     merge_touch_keyboard_dicts,
 )
 from multiprocess_prototype_v3.registers.schemas.processing_tab.names import PROCESSOR_REGISTER
+
+from .model import PostProcessingModel
+from .params import regions_to_table_rows
+from .presenter import PostProcessingPresenter
+from .schemas import PostProcessingTabUiConfig
 
 
 class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
@@ -42,16 +42,18 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
     def __init__(
         self,
         *,
-        registers_manager: Optional[IRegistersManagerGui] = None,
-        ui: Optional[Union[PostProcessingTabUiConfig, dict]] = None,
+        registers_manager: IRegistersManagerGui | None = None,
+        ui: PostProcessingTabUiConfig | dict | None = None,
         touch_keyboard: Any | None = None,
-        parent: Optional[Any] = None,
+        action_bus: Any | None = None,
+        parent: Any | None = None,
     ) -> None:
         self._rm_subscribe_cb = None
         self._touch_keyboard = touch_keyboard
+        self._action_bus = action_bus
         super().__init__(registers_manager=registers_manager, ui=ui, parent=parent)
 
-    def _coerce_ui(self, ui: Optional[object]) -> PostProcessingTabUiConfig:
+    def _coerce_ui(self, ui: object | None) -> PostProcessingTabUiConfig:
         return coerce_schema_config(ui, PostProcessingTabUiConfig)
 
     def _create_model(self) -> PostProcessingModel:
@@ -65,8 +67,12 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
 
     def _init_ui(self) -> None:
         u = self._ui
-        tk_tree = merge_touch_keyboard_dicts(self._touch_keyboard, getattr(u, "touch_keyboard_tree", None))
-        tk_form = merge_touch_keyboard_dicts(self._touch_keyboard, getattr(u, "touch_keyboard_form", None))
+        tk_tree = merge_touch_keyboard_dicts(
+            self._touch_keyboard, getattr(u, "touch_keyboard_tree", None)
+        )
+        tk_form = merge_touch_keyboard_dicts(
+            self._touch_keyboard, getattr(u, "touch_keyboard_form", None)
+        )
         layout = QVBoxLayout(self)
 
         regions_box = QGroupBox(u.group_regions)
@@ -150,9 +156,9 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
         self._block_table = False
         self._block_form = False
 
-    def _create_presenter(self, model: Optional[PostProcessingModel]) -> PostProcessingPresenter:
+    def _create_presenter(self, model: PostProcessingModel | None) -> PostProcessingPresenter:
         assert model is not None
-        return PostProcessingPresenter(view=self, model=model)
+        return PostProcessingPresenter(view=self, model=model, action_bus=self._action_bus)
 
     def _connect_signals(self) -> None:
         _btn = callback_no_args
@@ -247,7 +253,7 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
         )
         return reply == QMessageBox.Yes
 
-    def get_tree_selection(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_tree_selection(self) -> tuple[str | None, str | None]:
         return self._regions_tree.tree.get_selection()
 
     def select_region(self, camera_id: str, region_name: str) -> None:
@@ -265,7 +271,7 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
             self._model.post_regions_by_camera.setdefault(cid, [])
         self._block_table = True
         tr.blockSignals(True)
-        groups: List[tuple[str, List[Dict[str, Any]]]] = []
+        groups: list[tuple[str, list[dict[str, Any]]]] = []
         for cid in ids:
             regions = self._model.post_regions_by_camera.get(cid, [])
             groups.append((cid, regions_to_table_rows(regions)))
@@ -277,7 +283,7 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
         tr.blockSignals(False)
         self._block_table = False
 
-    def apply_form_from_region(self, region: Optional[Dict[str, Any]]) -> None:
+    def apply_form_from_region(self, region: dict[str, Any] | None) -> None:
         self.block_form_signals(True)
         if not region:
             self._name_edit.clear()
@@ -299,7 +305,7 @@ class PostProcessingPanelWidget(BaseWidget[PostProcessingModel]):
             self._chk_processing.setChecked(bool(region.get("processing_enabled", True)))
         self.block_form_signals(False)
 
-    def read_form_region(self) -> Dict[str, Any]:
+    def read_form_region(self) -> dict[str, Any]:
         return {
             "name": self._name_edit.text().strip(),
             "x1": self._x1.value(),

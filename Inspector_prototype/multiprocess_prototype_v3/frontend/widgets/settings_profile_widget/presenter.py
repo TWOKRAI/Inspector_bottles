@@ -12,6 +12,8 @@ from ..recipes_widget.recipe_rows import coerce_string_to_value, format_value_fo
 from .model import SettingsProfileModel
 
 if TYPE_CHECKING:
+    from multiprocess_prototype_v3.frontend.actions.bus import ActionBus
+
     from .view import SettingsProfilePanelViewProtocol
 
 
@@ -23,9 +25,11 @@ class SettingsProfilePresenter:
         *,
         view: SettingsProfilePanelViewProtocol,
         model: SettingsProfileModel,
+        action_bus: ActionBus | None = None,
     ) -> None:
         self._view = view
         self._model = model
+        self._action_bus = action_bus
 
     def on_apply_clicked(self) -> bool:
         """Применить выбранный профиль в регистры.
@@ -34,14 +38,28 @@ class SettingsProfilePresenter:
             True — успешно применено, False — ошибка.
         """
         profile_id = self._view.current_profile_id()
+        rm = self._model.rm
+
+        # Снимок до переключения (для undo)
+        snapshot_before = rm.model_dump_all().get(SETTINGS_REGISTER, {}) if rm else {}
+
         try:
-            self._model.profile_manager.switch_profile(profile_id, self._model.rm)
+            self._model.profile_manager.switch_profile(profile_id, rm)
         except ShmBudgetError as e:
             self._view.show_error(str(e))
             return False
         except Exception as e:
             self._view.show_error(str(e))
             return False
+
+        # Запись в ActionBus (record — без повторного apply, switch уже выполнен)
+        if self._action_bus is not None and rm is not None:
+            from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+            snapshot_after = rm.model_dump_all().get(SETTINGS_REGISTER, {})
+            action = ActionBuilder.profile_switch(profile_id, snapshot_before, snapshot_after)
+            self._action_bus.record(action)
+
         self._view.refresh_table_rows()
         return True
 
@@ -61,14 +79,28 @@ class SettingsProfilePresenter:
         Returns:
             True — успешно применено, False — ошибка.
         """
+        rm = self._model.rm
+
+        # Снимок до переключения (для undo)
+        snapshot_before = rm.model_dump_all().get(SETTINGS_REGISTER, {}) if rm else {}
+
         try:
-            self._model.profile_manager.switch_profile("default", self._model.rm)
+            self._model.profile_manager.switch_profile("default", rm)
         except ShmBudgetError as e:
             self._view.show_error(str(e))
             return False
         except Exception as e:
             self._view.show_error(str(e))
             return False
+
+        # Запись в ActionBus (record — без повторного apply, switch уже выполнен)
+        if self._action_bus is not None and rm is not None:
+            from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+            snapshot_after = rm.model_dump_all().get(SETTINGS_REGISTER, {})
+            action = ActionBuilder.profile_switch("default", snapshot_before, snapshot_after)
+            self._action_bus.record(action)
+
         self._view.refresh_table_rows()
         return True
 
