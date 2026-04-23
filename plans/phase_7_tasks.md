@@ -1,7 +1,7 @@
 # Plan: Phase 7 — ActionBus: полная миграция presenters + persistence
 
 **Дата:** 2026-04-22
-**Статус:** DRAFT
+**Статус:** DONE
 **Ветка:** `feat/phase-7-actionbus-migration`
 **Зависимости:** Phase 2.5, Phase 3-6 завершены
 
@@ -21,27 +21,27 @@ SQL-логом и crash recovery. Все presenters переводятся с п
 ## Порядок выполнения
 
 ### Фаза 7A: ActionBus foundation (ядро)
-- Task 7A.1: Action schema + ActionBuilder base [PENDING]
-- Task 7A.2: ActionBus — execute, undo/redo, coalescing [PENDING]
-- Task 7A.3: ActionBus → FrontendAppContext + RegisterBindingContext адаптация [PENDING]
+- Task 7A.1: Action schema + ActionBuilder base [DONE]
+- Task 7A.2: ActionBus — execute, undo/redo, coalescing [DONE]
+- Task 7A.3: ActionBus → FrontendAppContext + RegisterBindingContext адаптация [DONE]
 
 ### Фаза 7B: ActionBuilder доменные операции
-- Task 7B.1: ActionBuilder для field mutations (camera_tab, processing_panel) [PENDING] (depends on 7A.1-7A.3)
-- Task 7B.2: ActionBuilder для регионов (region_add/remove) [PENDING] (depends on 7A.1-7A.3)
-- Task 7B.3: ActionBuilder для chain steps и display [PENDING] (depends on 7A.1-7A.3)
-- Task 7B.4: ActionBuilder для profile/recipe switch [PENDING] (depends on 7A.1-7A.3)
+- Task 7B.1: ActionBuilder для field mutations (camera_tab, processing_panel) [DONE] (depends on 7A.1-7A.3)
+- Task 7B.2: ActionBuilder для регионов (region_add/remove) [DONE] (depends on 7A.1-7A.3)
+- Task 7B.3: ActionBuilder для chain steps и display [DONE] (depends on 7A.1-7A.3)
+- Task 7B.4: ActionBuilder для profile/recipe switch [DONE] (depends on 7A.1-7A.3)
 
 ### Фаза 7C: Persistence + recovery
-- Task 7C.1: ActionLogSchema + ActionLogRepository (SQL) [PENDING] (depends on 7A.1)
-- Task 7C.2: Batched writes через UnitOfWork [PENDING] (depends on 7C.1)
-- Task 7C.3: Crash recovery — чтение + forward_patch при старте [PENDING] (depends on 7C.1-7C.2)
-- Task 7C.4: Rotation action_log → archive [PENDING] (depends on 7C.1)
+- Task 7C.1: ActionLogSchema + ActionLogRepository (SQL) [DONE] (depends on 7A.1)
+- Task 7C.2: Batched writes через UnitOfWork [DONE] (depends on 7C.1)
+- Task 7C.3: Crash recovery — чтение + forward_patch при старте [DONE] (depends on 7C.1-7C.2)
+- Task 7C.4: Rotation action_log → archive [DONE] (depends on 7C.1)
 
 ### Фаза 7D: UI финализация
-- Task 7D.1: Ctrl+Z/Ctrl+Y глобальные shortcuts + кнопки в header [PENDING] (depends on 7A.2)
-- Task 7D.2: Статус-бар с описанием последнего Action [PENDING] (depends on 7A.2)
-- Task 7D.3: Dropdown «История» — последние 20 Actions [PENDING] (depends on 7A.2, 7D.1)
-- Task 7D.4: Тесты Phase 7 [PENDING] (depends on all 7A-7C)
+- Task 7D.1: Ctrl+Z/Ctrl+Y глобальные shortcuts + кнопки в header [DONE] (depends on 7A.2)
+- Task 7D.2: Статус-бар с описанием последнего Action [DONE] (depends on 7A.2)
+- Task 7D.3: Dropdown «История» — последние 20 Actions [DONE] (depends on 7A.2, 7D.1)
+- Task 7D.4: Тесты Phase 7 [DONE] (depends on all 7A-7C)
 
 ---
 
