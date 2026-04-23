@@ -14,13 +14,12 @@ import time
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
-from multiprocess_prototype_v3.backend.helpers import apply_register_update, message_as_dict
+from multiprocess_prototype_v3.backend.helpers import message_as_dict
 from multiprocess_prototype_v3.backend.shm.ring_buffer import RingBufferWriter
-from multiprocess_prototype_v3.registers import CAMERA_REGISTER
 from multiprocess_prototype_v3.services.camera.service import CameraService
 
 from .adapter import CameraAdapter
-from .commands import build_command_table, build_register_handlers, build_state_config_handlers
+from .commands import build_command_table, build_state_config_handlers
 
 
 class CameraProcess(ProcessModule):
@@ -98,11 +97,7 @@ class CameraProcess(ProcessModule):
     # --- Воркер захвата ---
 
     def _capture_worker(self, stop_event, pause_event) -> None:
-        """Основной цикл захвата: register_update → capture_and_publish."""
-        cmd_table = build_command_table(self._service, self.worker_manager)
-        register_handlers = build_register_handlers(
-            self._service, cmd_table["set_camera_type"]
-        )
+        """Основной цикл захвата: capture_and_publish (config через StateProxy)."""
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.05)
@@ -113,11 +108,6 @@ class CameraProcess(ProcessModule):
             if msg:
                 msg_dict = message_as_dict(msg)
                 data_type = msg_dict.get("data_type")
-                if data_type == "register_update":
-                    apply_register_update(
-                        msg_dict.get("data") or {}, CAMERA_REGISTER, register_handlers
-                    )
-                    continue
                 if data_type == "shm_region_changed":
                     # ProcessManager подтвердил пересоздание SHM (Task 2.2)
                     data = msg_dict.get("data") or {}

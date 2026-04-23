@@ -1,4 +1,4 @@
-"""Команды и register-хендлеры для RobotProcess.
+"""Команды для RobotProcess.
 
 Фабричные функции получают зависимости как аргументы и возвращают dict.
 """
@@ -27,8 +27,3 @@ def build_command_table(service) -> dict:
     return {
         "reject_item": cmd_reject,
     }
-
-
-def build_register_handlers() -> dict:
-    """Возвращает {field_name: handler} для apply_register_update()."""
-    return {}

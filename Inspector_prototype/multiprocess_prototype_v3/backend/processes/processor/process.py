@@ -13,8 +13,7 @@ from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 
-from multiprocess_prototype_v3.backend.helpers import apply_register_update, message_as_dict
-from multiprocess_prototype_v3.registers import PROCESSOR_REGISTER
+from multiprocess_prototype_v3.backend.helpers import message_as_dict
 from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.processor.service import ProcessorService
@@ -23,7 +22,6 @@ from multiprocess_prototype_v3.services.processor.worker_pool.dispatcher import 
 from .adapter import ProcessorAdapter
 from .commands import (
     build_command_table,
-    build_register_handlers,
     build_state_config_handlers,
     _apply_vision_pipeline,
 )
@@ -160,8 +158,7 @@ class ProcessorProcess(ProcessModule):
     # --- Воркер обработки ---
 
     def _processing_worker(self, stop_event, pause_event) -> None:
-        """Воркер: receive → register_update → middleware frame → service.process_frame()."""
-        register_handlers = build_register_handlers(self._service)
+        """Воркер: receive → middleware frame → service.process_frame() (config через StateProxy)."""
         # Phase 5c: счётчик кадров для периодического экспорта stats
         frames_processed = 0
         while not stop_event.is_set():
@@ -174,13 +171,6 @@ class ProcessorProcess(ProcessModule):
             msg_dict = message_as_dict(msg)
 
             data_type = msg_dict.get("data_type")
-
-            # Инфраструктура: обработка register_update
-            if data_type == "register_update":
-                apply_register_update(
-                    msg_dict.get("data") or {}, PROCESSOR_REGISTER, register_handlers
-                )
-                continue
 
             # Task 2.2: SHM-регион камеры пересоздан — переоткрыть handle
             if data_type == "shm_region_changed":

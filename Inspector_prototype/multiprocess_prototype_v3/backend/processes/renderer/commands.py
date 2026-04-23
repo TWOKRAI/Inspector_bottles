@@ -1,10 +1,10 @@
-"""Команды и register-хендлеры для RendererProcess.
+"""Команды и state config хендлеры для RendererProcess.
 
 Все команды — flag-setter'ы, генерируемые из SERVICE_FLAGS.
 """
 from __future__ import annotations
 
-# Флаги сервиса, управляемые через команды и register_update
+# Флаги сервиса, управляемые через команды и StateProxy
 SERVICE_FLAGS: tuple[str, ...] = (
     "show_original",
     "show_mask",
@@ -27,18 +27,6 @@ def build_command_table(service) -> dict:
         return handler
 
     return {f"set_{flag}": make_setter(flag) for flag in SERVICE_FLAGS}
-
-
-def build_register_handlers(service) -> dict:
-    """Возвращает {field_name: handler} для apply_register_update().
-
-    Args:
-        service: RendererService instance.
-    """
-    def make(flag: str):
-        return lambda v: setattr(service, flag, v)
-
-    return {flag: make(flag) for flag in SERVICE_FLAGS}
 
 
 def build_state_config_handlers(service) -> dict:

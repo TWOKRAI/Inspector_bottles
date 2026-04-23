@@ -12,15 +12,11 @@ import numpy as np
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 
-from multiprocess_prototype_v3.backend.helpers import (
-    apply_register_update,
-    message_as_dict,
-)
-from multiprocess_prototype_v3.registers import RENDERER_REGISTER
+from multiprocess_prototype_v3.backend.helpers import message_as_dict
 from multiprocess_prototype_v3.services.renderer.service import RendererService
 
 from .adapter import RendererAdapter
-from .commands import build_command_table, build_register_handlers, build_state_config_handlers
+from .commands import build_command_table, build_state_config_handlers
 
 
 class RendererProcess(ProcessModule):
@@ -80,8 +76,7 @@ class RendererProcess(ProcessModule):
     # --- Воркер рендеринга ---
 
     def _render_worker(self, stop_event, pause_event) -> None:
-        """Воркер: receive → register_update → read SHM → service.render_frame()."""
-        register_handlers = build_register_handlers(self._service)
+        """Воркер: receive → read SHM → service.render_frame() (config через StateProxy)."""
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.05)
@@ -90,11 +85,6 @@ class RendererProcess(ProcessModule):
             msg = self.receive_message(timeout=0.1, channel_types=["data"])
             msg_dict = message_as_dict(msg)
             data_type = msg_dict.get("data_type")
-            if data_type == "register_update":
-                apply_register_update(
-                    msg_dict.get("data") or {}, RENDERER_REGISTER, register_handlers
-                )
-                continue
 
             # Task 2.2: SHM-регион камеры пересоздан — переоткрыть handle
             if data_type == "shm_region_changed":

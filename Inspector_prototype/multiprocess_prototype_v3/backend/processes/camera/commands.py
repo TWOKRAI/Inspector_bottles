@@ -1,7 +1,7 @@
-"""Команды и register-хендлеры для CameraProcess.
+"""Команды и state config хендлеры для CameraProcess.
 
 Фабричные функции получают зависимости как аргументы и возвращают dict.
-process.py вызывает build_command_table / build_register_handlers при инициализации.
+process.py вызывает build_command_table / build_state_config_handlers при инициализации.
 """
 from __future__ import annotations
 
@@ -88,41 +88,6 @@ def build_state_config_handlers(service, cmd_set_camera_type) -> dict:
     """Маппинг config field suffix → handler для StateProxy callback.
 
     Ключи = суффиксы после cameras.{id}.config., значения = callable(value).
-    Реюзает те же хендлеры что и build_register_handlers.
-
-    Args:
-        service: CameraService instance.
-        cmd_set_camera_type: wrapper-функция из build_command_table (нужна для
-            поля camera_type, т.к. переключение типа требует паузы воркера).
-    """
-    return {
-        "camera_type": lambda v: cmd_set_camera_type({"camera_type": v}),
-        "fps": lambda v: service.set_fps({"fps": v}),
-        "resolution_width": lambda v: service.set_resolution({"width": v}),
-        "resolution_height": lambda v: service.set_resolution({"height": v}),
-        "device_id": lambda v: service.set_device_id({"device_id": v}),
-        "camera_index": lambda v: service.set_camera_index({"camera_index": v}),
-        "hikvision_resolution_width": lambda v: service.set_hikvision_resolution(
-            {"width": v}
-        ),
-        "hikvision_resolution_height": lambda v: service.set_hikvision_resolution(
-            {"height": v}
-        ),
-        "hikvision_frame_rate": lambda v: service.patch_hikvision_params(
-            {"frame_rate": v}
-        ),
-        "hikvision_exposure_time": lambda v: service.patch_hikvision_params(
-            {"exposure_time": v}
-        ),
-        "hikvision_gain": lambda v: service.patch_hikvision_params({"gain": v}),
-    }
-
-
-def build_register_handlers(service, cmd_set_camera_type) -> dict:
-    """Возвращает {field_name: handler} для apply_register_update().
-
-    Маппинг полей регистра на обработчики. Имена полей не совпадают с именами
-    команд, payload — одно значение (а не dict).
 
     Args:
         service: CameraService instance.

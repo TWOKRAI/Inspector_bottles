@@ -1,4 +1,4 @@
-"""Команды и register-хендлеры для DatabaseProcess.
+"""Команды для DatabaseProcess.
 
 Фабричные функции получают зависимости как аргументы и возвращают dict.
 """
@@ -30,8 +30,3 @@ def build_command_table(service, sql_manager) -> dict:
         "db.save_detections": cmd_save_detections,
         "db.flush": cmd_flush,
     }
-
-
-def build_register_handlers() -> dict:
-    """Возвращает {field_name: handler} для apply_register_update()."""
-    return {}

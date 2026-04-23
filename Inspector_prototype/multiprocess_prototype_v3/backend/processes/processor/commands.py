@@ -156,18 +156,3 @@ def build_state_config_handlers(service) -> dict:
     }
 
 
-def build_register_handlers(service) -> dict:
-    """Возвращает {field_name: handler} для apply_register_update().
-
-    Args:
-        service: ProcessorService instance.
-    """
-    return {
-        "color_lower": lambda v: service.set_color_range(lower=v),
-        "color_upper": lambda v: service.set_color_range(upper=v),
-        "min_area": lambda v: service.set_min_area(v),
-        "max_area": lambda v: service.set_max_area(v),
-        "vision_pipeline": lambda v: _apply_vision_pipeline(service, v),
-        # Phase 5b: изменение размера пула потоков на лету через register_update
-        "workers_per_processor": lambda v: service.resize_pool(int(v)),
-    }

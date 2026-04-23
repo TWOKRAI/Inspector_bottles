@@ -12,8 +12,8 @@ import pytest
 from multiprocess_prototype_v3.registers.pipeline.region import Region
 from multiprocess_prototype_v3.registers.processor.schemas import ProcessorRegisters
 from multiprocess_prototype_v3.backend.processes.processor.commands import (
-    build_register_handlers,
     _apply_vision_pipeline,
+    build_state_config_handlers,
 )
 from multiprocess_prototype_v3.frontend.managers.camera_registry import (
     CameraEntry,
@@ -291,17 +291,17 @@ class TestPerCameraRegionCrud:
         assert "roi_b" in model.crop_regions_by_camera["1"]
 
 
-class TestBuildRegisterHandlers:
-    """Task 4.5: build_register_handlers содержит vision_pipeline."""
+class TestBuildStateConfigHandlers:
+    """Task 4.5: build_state_config_handlers содержит vision_pipeline."""
 
     def test_has_vision_pipeline_handler(self):
         service = MagicMock()
-        handlers = build_register_handlers(service)
+        handlers = build_state_config_handlers(service)
         assert "vision_pipeline" in handlers
 
     def test_has_existing_handlers(self):
         service = MagicMock()
-        handlers = build_register_handlers(service)
+        handlers = build_state_config_handlers(service)
         for key in ("color_lower", "color_upper", "min_area", "max_area"):
             assert key in handlers
 
