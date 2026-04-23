@@ -24,6 +24,15 @@ class NodeInput(SchemaBase):
         FieldMeta("Выходной порт", info="Имя выходного порта источника. Phase 8 — пока default 'out'."),
     ] = "out"
 
+    input_port: Annotated[
+        str,
+        FieldMeta(
+            "Входной порт",
+            info="В какой входной порт target-ноды подключается соединение. "
+            "Для линейных цепочек всегда 'in', для DAG — произвольный порт.",
+        ),
+    ] = "in"
+
 
 @register_schema("ProcessingNodeV3")
 class ProcessingNode(SchemaBase):

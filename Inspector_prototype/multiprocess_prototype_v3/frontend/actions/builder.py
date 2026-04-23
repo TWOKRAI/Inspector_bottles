@@ -7,6 +7,7 @@ ActionBuilder — фабрика для создания Action.
 - from_field() — то же, но принимает RegisterBinding
 - command() — side-effect без undo
 """
+
 from __future__ import annotations
 
 import uuid
@@ -156,7 +157,9 @@ class ActionBuilder:
         forward_patch содержит camera_id, region_data и pipeline_after (None — вычисляется при apply).
         backward_patch содержит pipeline_before для отката.
         """
-        region_name = region_data.get("name", "") if isinstance(region_data, dict) else str(region_data)
+        region_name = (
+            region_data.get("name", "") if isinstance(region_data, dict) else str(region_data)
+        )
         return Action(
             action_type=ActionType.REGION_ADD,
             register_name=register_name,
@@ -420,6 +423,169 @@ class ActionBuilder:
             backward_patch={},
             undoable=False,
             description=f"Отписать display-окно от источника {source_ref}",
+        )
+
+    # ------------------------------------------------------------------
+    # GRAPH_* — операции в графовом редакторе (Phase 8)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def graph_connect(
+        region_id: str,
+        source_node_id: str,
+        output_port: str,
+        target_node_id: str,
+        input_port: str,
+        nodes_before: Any,
+        nodes_after: Any,
+    ) -> "Action":
+        """
+        Создать Action для соединения двух узлов графа портами.
+
+        forward_patch содержит nodes_after — снимок после добавления связи.
+        backward_patch содержит nodes_before для отката (разрыв связи).
+
+        Args:
+            region_id: Идентификатор региона (register_name).
+            source_node_id: Идентификатор узла-источника.
+            output_port: Имя выходного порта источника.
+            target_node_id: Идентификатор узла-приёмника.
+            input_port: Имя входного порта приёмника.
+            nodes_before: Снимок узлов до создания связи.
+            nodes_after: Снимок узлов после создания связи.
+        """
+        return Action(
+            action_type=ActionType.GRAPH_CONNECT,
+            register_name=region_id,
+            field_name="nodes",
+            forward_patch={"nodes_after": nodes_after},
+            backward_patch={"nodes_before": nodes_before},
+            undoable=True,
+            description=f"Соединить {source_node_id}.{output_port} → {target_node_id}.{input_port}",
+        )
+
+    @staticmethod
+    def graph_disconnect(
+        region_id: str,
+        source_node_id: str,
+        output_port: str,
+        target_node_id: str,
+        input_port: str,
+        nodes_before: Any,
+        nodes_after: Any,
+    ) -> "Action":
+        """
+        Создать Action для разрыва связи между узлами графа.
+
+        forward_patch содержит nodes_after — снимок после удаления связи.
+        backward_patch содержит nodes_before для отката (восстановление связи).
+
+        Args:
+            region_id: Идентификатор региона (register_name).
+            source_node_id: Идентификатор узла-источника.
+            output_port: Имя выходного порта источника.
+            target_node_id: Идентификатор узла-приёмника.
+            input_port: Имя входного порта приёмника.
+            nodes_before: Снимок узлов до удаления связи.
+            nodes_after: Снимок узлов после удаления связи.
+        """
+        return Action(
+            action_type=ActionType.GRAPH_DISCONNECT,
+            register_name=region_id,
+            field_name="nodes",
+            forward_patch={"nodes_after": nodes_after},
+            backward_patch={"nodes_before": nodes_before},
+            undoable=True,
+            description=f"Разъединить {source_node_id}.{output_port} → {target_node_id}.{input_port}",
+        )
+
+    @staticmethod
+    def graph_node_add(
+        region_id: str,
+        node_data: Any,
+        nodes_before: Any,
+        nodes_after: Any,
+    ) -> "Action":
+        """
+        Создать Action для добавления узла в граф региона.
+
+        forward_patch содержит nodes_after и node_data нового узла.
+        backward_patch содержит nodes_before для отката (удаление узла).
+
+        Args:
+            region_id: Идентификатор региона (register_name).
+            node_data: Данные добавляемого узла (dict или объект).
+            nodes_before: Снимок узлов до добавления.
+            nodes_after: Снимок узлов после добавления.
+        """
+        return Action(
+            action_type=ActionType.GRAPH_NODE_ADD,
+            register_name=region_id,
+            field_name="nodes",
+            forward_patch={"nodes_after": nodes_after, "node_data": node_data},
+            backward_patch={"nodes_before": nodes_before},
+            undoable=True,
+            description=f"Добавить узел в граф региона {region_id}",
+        )
+
+    @staticmethod
+    def graph_node_remove(
+        region_id: str,
+        node_id: str,
+        nodes_before: Any,
+        nodes_after: Any,
+    ) -> "Action":
+        """
+        Создать Action для удаления узла из графа региона.
+
+        forward_patch содержит nodes_after — снимок после удаления.
+        backward_patch содержит nodes_before для отката (восстановление узла).
+
+        Args:
+            region_id: Идентификатор региона (register_name).
+            node_id: Идентификатор удаляемого узла.
+            nodes_before: Снимок узлов до удаления.
+            nodes_after: Снимок узлов после удаления.
+        """
+        return Action(
+            action_type=ActionType.GRAPH_NODE_REMOVE,
+            register_name=region_id,
+            field_name="nodes",
+            forward_patch={"nodes_after": nodes_after},
+            backward_patch={"nodes_before": nodes_before},
+            undoable=True,
+            description=f"Удалить узел {node_id} из графа региона {region_id}",
+        )
+
+    @staticmethod
+    def graph_node_move(
+        region_id: str,
+        node_id: str,
+        old_pos: "tuple[float, float] | None",
+        new_pos: "tuple[float, float]",
+    ) -> "Action":
+        """
+        Создать Action для перемещения узла графа.
+
+        coalesce_key группирует серию перемещений одного узла в одно действие
+        (аналогично слайдеру — перетаскивание = 1 Action в стеке).
+        Позиция хранится в patch-ах; presenter обновит UI при undo/redo.
+
+        Args:
+            region_id: Идентификатор региона (register_name).
+            node_id: Идентификатор перемещаемого узла.
+            old_pos: Координаты узла до перемещения (x, y) или None.
+            new_pos: Новые координаты узла (x, y).
+        """
+        return Action(
+            action_type=ActionType.GRAPH_NODE_MOVE,
+            register_name=region_id,
+            field_name="nodes",
+            forward_patch={"node_id": node_id, "new_pos": new_pos},
+            backward_patch={"node_id": node_id, "old_pos": old_pos},
+            coalesce_key=f"graph_move:{region_id}:{node_id}",
+            undoable=True,
+            description=f"Переместить узел {node_id}",
         )
 
     @staticmethod

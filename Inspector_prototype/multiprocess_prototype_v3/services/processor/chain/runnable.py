@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
-
 from registers.pipeline.processing_node import ProcessingNode
 from services.processor.operations.base import ChainContext, ProcessingOperation
 
@@ -37,6 +36,20 @@ class ChainResult:
     skipped_nodes: list[str] = field(default_factory=list)
     failed: bool = False
     fail_level: str | None = None  # "region" | "camera" | None
+
+
+class IRunnableChain(Protocol):
+    """Протокол исполняемой цепочки обработки.
+
+    Структурная типизация — ChainRunnable, ParallelChainRunnable, DagRunnable
+    реализуют этот протокол автоматически (без наследования).
+    """
+
+    def execute(
+        self,
+        frame: np.ndarray,
+        metadata: dict[str, Any] | None = None,
+    ) -> ChainResult: ...
 
 
 class ChainRunnable:
@@ -178,4 +191,4 @@ def _collect_side_results(operation: Any, result: ChainResult) -> None:
             result.contours.extend(contours)
 
 
-__all__ = ["ChainRunnable", "ChainResult", "RunnableStep"]
+__all__ = ["ChainRunnable", "ChainResult", "IRunnableChain", "RunnableStep"]
