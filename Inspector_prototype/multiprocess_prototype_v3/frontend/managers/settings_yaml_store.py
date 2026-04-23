@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
+from multiprocess_prototype_v3.config.settings_profile import SettingsProfile
 from multiprocess_prototype_v3.registers.settings import AppSettingsRegisters
 
 SETTINGS_FILE_VERSION = 1
@@ -65,6 +67,39 @@ class SettingsYamlStore:
             return None
         return data if isinstance(data, dict) else None
 
+    def read_profile(self, profile_id: str | None = None) -> SettingsProfile:
+        """Прочитать и валидировать профиль по ID.
+
+        Если profile_id не указан — используется current_profile из YAML.
+        При ошибке валидации или отсутствии файла — возвращает SettingsProfile() с defaults.
+
+        Args:
+            profile_id: ID профиля; None = взять current_profile из YAML.
+
+        Returns:
+            Валидированный SettingsProfile.
+        """
+        data = self.read_dict() or {}
+
+        # Определяем ID профиля
+        resolved_id = (
+            profile_id
+            if profile_id is not None
+            else data.get("current_profile", DEFAULT_PROFILE_ID)
+        )
+
+        profiles = data.get("profiles", {})
+        profile_dict = profiles.get(resolved_id, {})
+
+        try:
+            return SettingsProfile.model_validate(profile_dict)
+        except ValidationError as exc:
+            print(
+                f"WARNING: профиль '{resolved_id}' содержит невалидные значения, "
+                f"применяются defaults. Ошибки: {exc}"
+            )
+            return SettingsProfile()
+
     def save(
         self,
         *,
@@ -81,7 +116,9 @@ class SettingsYamlStore:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(payload, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                yaml.safe_dump(
+                    payload, f, allow_unicode=True, default_flow_style=False, sort_keys=False
+                )
             return True
         except OSError:
             return False

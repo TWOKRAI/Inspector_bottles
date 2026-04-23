@@ -6,13 +6,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from multiprocess_framework.modules.data_schema_module import register_schema
 from multiprocess_framework.modules.process_module import (
     ProcessLaunchConfig,
     ProcessPriorityLevel,
 )
 
-from multiprocess_prototype_v3.services.camera.constants import CAMERA_SHM_HEIGHT, CAMERA_SHM_WIDTH
+if TYPE_CHECKING:
+    from multiprocess_prototype_v3.config.shm_region import ShmRegionSpec
 
 
 @register_schema("CameraConfigV3")
@@ -58,9 +61,31 @@ class CameraConfig(ProcessLaunchConfig):
 
     @property
     def memory(self) -> dict:
-        """SHM layout: ring-buffer из K слотов для данной камеры."""
+        """SHM layout: ring-buffer из K слотов для данной камеры.
+
+        Размеры берутся из resolution_width/height — единый источник правды.
+        """
         slot_name = f"camera_{self.camera_id}_frame"
-        return {slot_name: (CAMERA_SHM_HEIGHT, CAMERA_SHM_WIDTH, 3), "coll": self.ring_buffer_size}
+        return {
+            slot_name: (self.resolution_height, self.resolution_width, 3),
+            "coll": self.ring_buffer_size,
+        }
+
+    def shm_region(self) -> ShmRegionSpec:
+        """Создать спецификацию SHM-региона для данной камеры.
+
+        Используется в AppConfig.all_shm_regions() для сборки
+        полного реестра всех SHM-регионов приложения.
+        """
+        from multiprocess_prototype_v3.config.shm_region import ShmRegionSpec
+
+        return ShmRegionSpec(
+            name=f"camera_{self.camera_id}_frame",
+            width=self.resolution_width,
+            height=self.resolution_height,
+            channels=3,
+            slots=self.ring_buffer_size,
+        )
 
     def build(self) -> tuple[str, dict]:
         name, proc_dict = super().build()

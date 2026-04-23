@@ -67,7 +67,26 @@ class ProcessManagerProcess(ProcessModule):
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatus(self._process_registry.os_processes)
-        self._process_monitor = ProcessMonitor(self, poll_interval=0.5)
+
+        # Настройки монитора из конфига ProcessManager
+        monitor_poll = float(self.get_config("monitor_poll_interval") or 0.5)
+        heartbeat_timeout = float(self.get_config("heartbeat_timeout") or 15.0)
+
+        # RestartPolicy из конфига (dict -> SchemaBase) или default
+        restart_cfg = self.get_config("restart_policy")
+        if isinstance(restart_cfg, dict):
+            from ..core.restart_policy import RestartPolicy
+
+            restart_policy = RestartPolicy(**restart_cfg)
+        else:
+            restart_policy = None
+
+        self._process_monitor = ProcessMonitor(
+            self,
+            poll_interval=monitor_poll,
+            heartbeat_timeout=heartbeat_timeout,
+            restart_policy=restart_policy,
+        )
         self._console_manager: ConsoleManager | None = None
 
     def _resolve_queue_registry(self):

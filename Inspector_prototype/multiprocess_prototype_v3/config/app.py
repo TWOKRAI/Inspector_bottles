@@ -10,6 +10,7 @@ from multiprocess_framework.modules.data_schema_module import SchemaBase
 from multiprocess_framework.modules.process_module import ProcessLaunchConfig
 
 from multiprocess_prototype_v3.backend.processes.camera.config import CameraConfig
+from .shm_region import ShmRegionSpec
 from multiprocess_prototype_v3.backend.processes.database.config import DatabaseConfig
 from multiprocess_prototype_v3.backend.processes.gui.config import GuiConfig
 from multiprocess_prototype_v3.backend.processes.processor.config import ProcessorConfig
@@ -52,6 +53,18 @@ class AppConfig(SchemaBase):
     def worker_configs(self) -> list[ProcessorWorkerConfig]:
         """Список конфигов воркеров пула (пустой если worker_pool_size == 0)."""
         return [ProcessorWorkerConfig(worker_index=i) for i in range(self.worker_pool_size)]
+
+    def all_shm_regions(self) -> list[ShmRegionSpec]:
+        """Собрать все SHM-регионы от всех процессов.
+
+        Каждый процесс с методом shm_region() предоставляет свою спецификацию.
+        Камеры возвращают per-camera регионы с разными разрешениями.
+        """
+        regions: list[ShmRegionSpec] = []
+        for cfg in self.all_process_configs():
+            if hasattr(cfg, "shm_region") and callable(cfg.shm_region):
+                regions.append(cfg.shm_region())
+        return regions
 
     def all_shm_names(self) -> list[str]:
         """Собрать все базовые имена SHM из memory-свойств всех процессов.

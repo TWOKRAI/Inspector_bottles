@@ -31,10 +31,6 @@ from multiprocess_prototype_v3.services.camera.backends import (
     CameraBackendParams,
     create_camera_backend,
 )
-from multiprocess_prototype_v3.services.camera.constants import (
-    CAMERA_SHM_HEIGHT,
-    CAMERA_SHM_WIDTH,
-)
 from Utils.fps_module import FrameFPS
 
 # Задержка после close() аппаратных камер (ОС отпускает устройство)
@@ -225,8 +221,8 @@ class CameraService:
         self._frame_id = (self._frame_id + 1) % 121
         timestamp = time.time()
 
-        # Resize до размеров SHM-буфера
-        frame = _resize_frame_for_shm(frame, CAMERA_SHM_HEIGHT, CAMERA_SHM_WIDTH)
+        # Resize до размеров SHM-буфера (из конфига камеры, не из глобальных констант)
+        frame = _resize_frame_for_shm(frame, self._height, self._width)
 
         # Запись в SHM через порт
         shm_result = self._out.write_frame_to_shm(frame, self._frame_id, timestamp)

@@ -1,4 +1,6 @@
-"""SHM buffer dimensions for camera frames."""
+"""Константы camera service.
 
-CAMERA_SHM_HEIGHT = 1080
-CAMERA_SHM_WIDTH = 1920
+CAMERA_SHM_WIDTH / CAMERA_SHM_HEIGHT удалены (Task 1.1, P8).
+SHM-размеры теперь определяются из CameraConfig.resolution_width/height —
+единый источник правды per-region.
+"""

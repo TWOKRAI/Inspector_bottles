@@ -1,26 +1,43 @@
-"""Мониторинг состояний процессов. Реестр: get_all_process_data() → ProcessData."""
+"""Мониторинг состояний процессов. Реестр: get_all_process_data() -> ProcessData.
+
+Расширено:
+- Приём heartbeat-сообщений от дочерних процессов
+- Определение статуса UNRESPONSIVE при отсутствии heartbeat
+- Авто-рестарт crashed / unresponsive процессов по RestartPolicy
+"""
+
+from __future__ import annotations
+
 import time
-from typing import Any, Dict, Optional
 from multiprocessing import Event
+from typing import Any
+
 from ...worker_module import ThreadConfig, ThreadPriority
+from ..core.restart_policy import RestartPolicy
+
+_CUSTOM_EXCLUDE_KEYS = frozenset(
+    {
+        "stop_event",
+        "pause_event",
+        "error_manager",
+    }
+)
 
 
-_CUSTOM_EXCLUDE_KEYS = frozenset({
-    "stop_event", "pause_event", "error_manager",
-})
-
-
-def _state_snapshot_from_process_data(process_data: Any) -> Optional[Dict[str, Any]]:
+def _state_snapshot_from_process_data(process_data: Any) -> dict[str, Any] | None:
     if not process_data:
         return None
     status = getattr(process_data, "status", None)
-    status_str = status.value if status is not None and hasattr(status, "value") else (
-        str(status) if status is not None else "unknown"
+    status_str = (
+        status.value
+        if status is not None and hasattr(status, "value")
+        else (str(status) if status is not None else "unknown")
     )
     meta = getattr(process_data, "metadata", None) or {}
     cust = getattr(process_data, "custom", None) or {}
     safe_custom = {
-        k: v for k, v in (dict(cust) if isinstance(cust, dict) else {}).items()
+        k: v
+        for k, v in (dict(cust) if isinstance(cust, dict) else {}).items()
         if k not in _CUSTOM_EXCLUDE_KEYS
     }
     return {
@@ -31,17 +48,45 @@ def _state_snapshot_from_process_data(process_data: Any) -> Optional[Dict[str, A
 
 
 class ProcessMonitor:
-    def __init__(self, process_manager_process, poll_interval: float = 0.5):
+    """Монитор процессов: отслеживание состояний, heartbeat, авто-рестарт.
+
+    Args:
+        process_manager_process: Ссылка на ProcessManagerProcess (оркестратор)
+        poll_interval: Интервал опроса состояний (секунды)
+        heartbeat_timeout: Таймаут heartbeat — если процесс не присылал
+            heartbeat дольше этого времени, он считается UNRESPONSIVE
+        restart_policy: Политика авто-рестарта (None = default RestartPolicy)
+    """
+
+    def __init__(
+        self,
+        process_manager_process,
+        poll_interval: float = 0.5,
+        heartbeat_timeout: float = 15.0,
+        restart_policy: RestartPolicy | None = None,
+    ):
         self.process = process_manager_process
         self.poll_interval = poll_interval
-        self.previous_states: Dict[str, Dict[str, Any]] = {}
+        self.heartbeat_timeout = heartbeat_timeout
+        self.restart_policy = restart_policy or RestartPolicy()
+        self.previous_states: dict[str, dict[str, Any]] = {}
         self._monitoring = False
+
+        # Heartbeat: время последнего heartbeat от каждого процесса
+        self._last_heartbeat: dict[str, float] = {}
+
+        # Авто-рестарт: счётчик попыток рестарта per process
+        self._restart_counts: dict[str, int] = {}
 
     def start(self):
         if self._monitoring:
             self.process._log_warning("Monitor already running")
             return
         self.process._log_info("Starting process state monitor")
+
+        # Регистрируем обработчик heartbeat-сообщений на роутере ProcessManager-а
+        self._register_heartbeat_handler()
+
         self.process.worker_manager.create_worker(
             "state_monitor",
             self._monitoring_loop,
@@ -55,6 +100,40 @@ class ProcessMonitor:
             return
         self.process._log_info("Stopping process state monitor")
         self._monitoring = False
+
+    # ----------------------------------------------------------------
+    # Heartbeat: приём сообщений
+    # ----------------------------------------------------------------
+
+    def _register_heartbeat_handler(self) -> None:
+        """Зарегистрировать обработчик heartbeat в роутере ProcessManager-а.
+
+        Сообщения с command='heartbeat' будут обработаны _on_heartbeat_received
+        через стандартный message_dispatcher (вызывается из SystemThreads._message_processing_loop).
+        """
+        if not self.process.router_manager:
+            self.process._log_warning(
+                "RouterManager недоступен — heartbeat handler не зарегистрирован"
+            )
+            return
+        self.process.router_manager.register_message_handler(
+            "heartbeat",
+            self._on_heartbeat_received,
+            expects_full_message=True,
+        )
+        self.process._log_debug("Heartbeat handler зарегистрирован в роутере")
+
+    def _on_heartbeat_received(self, msg: dict) -> None:
+        """Callback: вызывается при получении heartbeat-сообщения от дочернего процесса."""
+        sender = msg.get("sender")
+        ts = msg.get("timestamp")
+        if not sender:
+            return
+        self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
+
+    # ----------------------------------------------------------------
+    # Мониторинг: основной цикл
+    # ----------------------------------------------------------------
 
     def _monitoring_loop(self, stop_event: Event, pause_event: Event):
         self.process._log_info("Process monitor loop started")
@@ -71,7 +150,7 @@ class ProcessMonitor:
                     time.sleep(self.poll_interval)
                     continue
                 all_processes = reg.get_all_process_data()
-                all_states: Dict[str, Dict[str, Any]] = {}
+                all_states: dict[str, dict[str, Any]] = {}
                 for name, pd in all_processes.items():
                     snap = _state_snapshot_from_process_data(pd)
                     if snap is not None:
@@ -85,66 +164,228 @@ class ProcessMonitor:
                 for pname in set(self.previous_states.keys()) - cur_names:
                     self.process._log_info(f"Process removed: {pname}")
                     self.previous_states.pop(pname, None)
+
+                # Проверка OS-liveness + heartbeat timeout + авто-рестарт
                 self._check_heartbeats()
+
                 time.sleep(self.poll_interval)
             except Exception as e:
                 self.process._log_error(f"Error in monitoring loop: {e}")
                 time.sleep(self.poll_interval)
         self.process._log_info("Process monitor loop stopped")
 
+    # ----------------------------------------------------------------
+    # Проверка liveness: OS + heartbeat timeout
+    # ----------------------------------------------------------------
+
     def _check_heartbeats(self) -> None:
-        """Liveness: неживой OS-процесс без актуального state → stopped/crashed."""
+        """Liveness-проверка процессов.
+
+        1. OS-уровень: неживой процесс без актуального state -> stopped/crashed
+        2. Heartbeat-уровень: живой процесс без heartbeat дольше timeout -> UNRESPONSIVE
+        3. Авто-рестарт crashed / unresponsive процессов по RestartPolicy
+        """
         if not hasattr(self.process, "_process_registry"):
             return
+
+        now = time.time()
+
         for proc in self.process._process_registry.os_processes:
-            if proc.is_alive():
+            if not proc.is_alive():
+                self._handle_dead_process(proc)
                 continue
-            exitcode = proc.exitcode
-            prev = self.previous_states.get(proc.name)
-            prev_status = (prev or {}).get("status", "unknown")
-            if prev_status in ("stopped", "error", "crashed"):
-                continue
-            new_status = "stopped" if exitcode == 0 else "crashed"
-            if new_status == "crashed":
-                self.process._log_warning(
-                    f"Process '{proc.name}' crashed (exitcode={exitcode})"
-                )
+
+            # Процесс жив на OS-уровне — проверяем heartbeat
+            self._check_heartbeat_timeout(proc.name, now)
+
+    def _handle_dead_process(self, proc) -> None:
+        """Обработка мёртвого OS-процесса: обновить статус, запустить авто-рестарт."""
+        exitcode = proc.exitcode
+        prev = self.previous_states.get(proc.name)
+        prev_status = (prev or {}).get("status", "unknown")
+
+        # Не обрабатываем повторно уже зафиксированные терминальные статусы
+        if prev_status in ("stopped", "error", "crashed", "failed"):
+            return
+
+        new_status = "stopped" if exitcode == 0 else "crashed"
+
+        if new_status == "crashed":
+            self.process._log_warning(f"Process '{proc.name}' crashed (exitcode={exitcode})")
+
+        snap = {
+            "status": new_status,
+            "exitcode": exitcode,
+            "metadata": {},
+            "custom": {},
+        }
+        self._handle_state_change(proc.name, prev, snap)
+        self.previous_states[proc.name] = snap.copy()
+
+        # Обновить статус в shared_resources
+        if self.process.shared_resources:
+            try:
+                psr = self.process.shared_resources.process_state_registry
+                if psr is not None and hasattr(psr, "update_state"):
+                    psr.update_state(proc.name, status=new_status)
+            except Exception:
+                pass
+
+        # Авто-рестарт при crash
+        if new_status == "crashed" and self.restart_policy.restart_on_crash:
+            self._try_auto_restart(proc.name, reason="crashed")
+
+    def _check_heartbeat_timeout(self, process_name: str, now: float) -> None:
+        """Проверить heartbeat timeout для живого процесса."""
+        prev_status = (self.previous_states.get(process_name) or {}).get("status", "unknown")
+
+        # Не проверяем heartbeat для процессов, которые ещё не running
+        if prev_status not in ("running", "ready"):
+            return
+
+        last_hb = self._last_heartbeat.get(process_name)
+
+        # Если heartbeat ещё ни разу не приходил — даём grace period от начала мониторинга
+        if last_hb is None:
+            return
+
+        elapsed = now - last_hb
+        if elapsed <= self.heartbeat_timeout:
+            return
+
+        # Heartbeat timeout — процесс UNRESPONSIVE
+        # Не обрабатываем повторно если уже UNRESPONSIVE / failed
+        if prev_status in ("unresponsive", "failed"):
+            return
+
+        self.process._log_warning(
+            f"Process '{process_name}' не отвечает "
+            f"(heartbeat timeout: {elapsed:.1f}с > {self.heartbeat_timeout}с)"
+        )
+
+        snap = {
+            "status": "unresponsive",
+            "metadata": {},
+            "custom": {"heartbeat_elapsed": round(elapsed, 2)},
+        }
+        prev = self.previous_states.get(process_name)
+        self._handle_state_change(process_name, prev, snap)
+        self.previous_states[process_name] = snap.copy()
+
+        # Обновить статус в shared_resources
+        if self.process.shared_resources:
+            try:
+                psr = self.process.shared_resources.process_state_registry
+                if psr is not None and hasattr(psr, "update_state"):
+                    psr.update_state(process_name, status="unresponsive")
+            except Exception:
+                pass
+
+        # Авто-рестарт при unresponsive
+        if self.restart_policy.restart_on_unresponsive:
+            self._try_auto_restart(process_name, reason="unresponsive")
+
+    # ----------------------------------------------------------------
+    # Авто-рестарт
+    # ----------------------------------------------------------------
+
+    def _try_auto_restart(self, process_name: str, reason: str) -> None:
+        """Попытка авто-рестарта процесса с учётом RestartPolicy.
+
+        Args:
+            process_name: Имя процесса для рестарта
+            reason: Причина рестарта (crashed / unresponsive)
+        """
+        if not self.restart_policy.enabled:
+            return
+
+        count = self._restart_counts.get(process_name, 0)
+        max_retries = self.restart_policy.max_retries
+
+        if count >= max_retries:
+            # Исчерпаны попытки — статус FAILED, больше не пытаемся
+            self.process._log_error(
+                f"Process '{process_name}' превысил лимит рестартов "
+                f"({count}/{max_retries}), статус -> FAILED"
+            )
             snap = {
-                "status": new_status,
-                "exitcode": exitcode,
-                "metadata": {},
+                "status": "failed",
+                "metadata": {"restart_attempts": count, "last_reason": reason},
                 "custom": {},
             }
-            self._handle_state_change(proc.name, prev, snap)
-            self.previous_states[proc.name] = snap.copy()
+            prev = self.previous_states.get(process_name)
+            self._handle_state_change(process_name, prev, snap)
+            self.previous_states[process_name] = snap.copy()
+
             if self.process.shared_resources:
                 try:
                     psr = self.process.shared_resources.process_state_registry
                     if psr is not None and hasattr(psr, "update_state"):
-                        psr.update_state(proc.name, status=new_status)
+                        psr.update_state(process_name, status="failed")
                 except Exception:
                     pass
+            return
+
+        # Выполняем рестарт с backoff
+        attempt = count + 1
+        backoff = self.restart_policy.backoff_sec
+        self.process._log_info(
+            f"Авто-рестарт процесса '{process_name}' "
+            f"(причина: {reason}, попытка {attempt}/{max_retries}, "
+            f"backoff: {backoff}с)"
+        )
+        time.sleep(backoff)
+
+        # Очищаем heartbeat перед рестартом — новый процесс пришлёт свой
+        self._last_heartbeat.pop(process_name, None)
+
+        try:
+            success = self.process.restart_process(process_name)
+            if success:
+                self._restart_counts[process_name] = attempt
+                self.process._log_info(
+                    f"Process '{process_name}' успешно перезапущен (попытка {attempt}/{max_retries})"
+                )
+            else:
+                self._restart_counts[process_name] = attempt
+                self.process._log_error(
+                    f"Не удалось перезапустить процесс '{process_name}' "
+                    f"(попытка {attempt}/{max_retries})"
+                )
+        except Exception as exc:
+            self._restart_counts[process_name] = attempt
+            self.process._log_error(f"Ошибка при авто-рестарте '{process_name}': {exc}")
+
+    def reset_restart_count(self, process_name: str) -> None:
+        """Сбросить счётчик рестартов для процесса.
+
+        Вызывается когда процесс стабильно работает после рестарта,
+        или при ручном вмешательстве оператора.
+        """
+        self._restart_counts.pop(process_name, None)
+
+    # ----------------------------------------------------------------
+    # Обработка изменений состояния
+    # ----------------------------------------------------------------
 
     def _handle_state_change(
         self,
         process_name: str,
-        previous_state: Optional[Dict[str, Any]],
-        current_state: Dict[str, Any],
+        previous_state: dict[str, Any] | None,
+        current_state: dict[str, Any],
     ):
         cur_s = current_state.get("status", "unknown")
         prev_s = previous_state.get("status", "unknown") if previous_state else None
         if prev_s != cur_s:
-            self.process._log_info(
-                f"Process '{process_name}' status changed: {prev_s} -> {cur_s}"
-            )
+            self.process._log_info(f"Process '{process_name}' status changed: {prev_s} -> {cur_s}")
             self._broadcast_status_change(process_name, prev_s, cur_s, current_state)
 
     def _broadcast_status_change(
         self,
         process_name: str,
-        old_status: Optional[str],
+        old_status: str | None,
         new_status: str,
-        current_state: Dict[str, Any],
+        current_state: dict[str, Any],
     ):
         try:
             if not self.process.router_manager:
@@ -171,14 +412,28 @@ class ProcessMonitor:
         except Exception as e:
             self.process._log_error(f"Failed to broadcast status change: {e}")
 
-    def get_stats(self) -> Dict[str, Any]:
+    # ----------------------------------------------------------------
+    # Статистика
+    # ----------------------------------------------------------------
+
+    def get_stats(self) -> dict[str, Any]:
         return {
             "monitoring": self._monitoring,
             "tracked_processes": len(self.previous_states),
             "poll_interval": self.poll_interval,
+            "heartbeat_timeout": self.heartbeat_timeout,
+            "restart_policy": self.restart_policy.model_dump(),
+            "last_heartbeats": {
+                name: round(time.time() - ts, 1) for name, ts in self._last_heartbeat.items()
+            },
+            "restart_counts": dict(self._restart_counts),
             "crashed_processes": [
-                n
-                for n, st in self.previous_states.items()
-                if st.get("status") == "crashed"
+                n for n, st in self.previous_states.items() if st.get("status") == "crashed"
+            ],
+            "unresponsive_processes": [
+                n for n, st in self.previous_states.items() if st.get("status") == "unresponsive"
+            ],
+            "failed_processes": [
+                n for n, st in self.previous_states.items() if st.get("status") == "failed"
             ],
         }
