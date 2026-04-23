@@ -10,6 +10,7 @@ from .bus import ActionBus
 from .handlers.chain_handler import ChainActionHandler
 from .handlers.display_handler import DisplayActionHandler
 from .handlers.field_set_handler import FieldSetHandler
+from .handlers.graph_handler import GraphActionHandler
 from .handlers.profile_handler import ProfileSwitchHandler
 from .handlers.recipe_handler import RecipeSwitchHandler
 from .handlers.region_handler import RegionActionHandler
@@ -51,5 +52,13 @@ def create_default_action_bus(rm) -> ActionBus:
     # Профили и рецепты
     bus.register_handler(ActionType.PROFILE_SWITCH, ProfileSwitchHandler())
     bus.register_handler(ActionType.RECIPE_SWITCH, RecipeSwitchHandler())
+
+    # Графовый редактор (Phase 8): connect, disconnect, node_add, node_remove, node_move
+    graph_handler = GraphActionHandler()
+    bus.register_handler(ActionType.GRAPH_CONNECT, graph_handler)
+    bus.register_handler(ActionType.GRAPH_DISCONNECT, graph_handler)
+    bus.register_handler(ActionType.GRAPH_NODE_ADD, graph_handler)
+    bus.register_handler(ActionType.GRAPH_NODE_REMOVE, graph_handler)
+    bus.register_handler(ActionType.GRAPH_NODE_MOVE, graph_handler)
 
     return bus
