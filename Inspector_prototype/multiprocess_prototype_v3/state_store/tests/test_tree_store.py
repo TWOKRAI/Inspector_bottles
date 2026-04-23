@@ -20,7 +20,8 @@ from typing import Any
 
 import pytest
 
-from state_store.core.tree_store import Delta, TreeStore, _MISSING
+from state_store.core.delta import Delta, MISSING
+from state_store.core.tree_store import TreeStore
 
 
 # ===========================================================================
@@ -123,7 +124,7 @@ def test_set_returns_delta(empty_store: TreeStore) -> None:
     delta = empty_store.set("x.y", 10, source="test")
     assert isinstance(delta, Delta)
     assert delta.path == "x.y"
-    assert delta.old_value is None  # значения не было
+    assert delta.old_value is MISSING  # значения не было
     assert delta.new_value == 10
     assert delta.source == "test"
 
@@ -202,7 +203,7 @@ def test_delete_existing_node(camera_store: TreeStore) -> None:
     delta = camera_store.delete("cameras.1")
     assert delta is not None
     assert delta.path == "cameras.1"
-    assert delta.new_value is None
+    assert delta.new_value is MISSING
     assert not camera_store.has("cameras.1")
 
 

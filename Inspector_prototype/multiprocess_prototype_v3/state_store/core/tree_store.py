@@ -12,29 +12,13 @@ from __future__ import annotations
 
 import copy
 import threading
-import time
-import uuid
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# ВРЕМЕННЫЙ Delta — будет заменён на полный из delta.py в Task 4a.4
-# ---------------------------------------------------------------------------
+from state_store.core.delta import Delta, MISSING, Transaction
 
-_MISSING = object()  # сентинел для "значение отсутствует" (публичный, для тестов)
-_NOT_FOUND = object()  # приватный сентинел для внутренних проверок наличия ключа
-
-
-@dataclass(frozen=True)
-class Delta:
-    """Описание одного изменения в дереве состояний."""
-
-    path: str
-    old_value: Any
-    new_value: Any
-    source: str = ""
-    timestamp: float = field(default_factory=time.monotonic)
-    transaction_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+# Приватные сентинелы для внутренних проверок
+_SENTINEL = object()   # для get() default — отличить "default не задан" от None
+_NOT_FOUND = object()  # для _merge_recursive — проверка наличия ключа
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +117,7 @@ class TreeStore:
     # Чтение
     # -----------------------------------------------------------------------
 
-    def get(self, path: str, default: Any = _MISSING) -> Any:
+    def get(self, path: str, default: Any = _SENTINEL) -> Any:
         """Читает значение по пути.
 
         "cameras.0.config.fps" → 30.
@@ -156,7 +140,7 @@ class TreeStore:
                     raise KeyError(path)
                 return _deep_copy(parent[last_key])
             except (KeyError, TypeError):
-                if default is not _MISSING:
+                if default is not _SENTINEL:
                     return default
                 raise KeyError(f"Путь не существует: '{path}'")
 
@@ -240,10 +224,10 @@ class TreeStore:
             # создаём промежуточные узлы
             parent, last_key = self._navigate(keys, create=True)
 
-            # запоминаем старое значение (без deep_copy на sentinel)
-            raw_old = parent.get(last_key, _MISSING)
-            key_existed = raw_old is not _MISSING
-            old_value = _deep_copy(raw_old) if key_existed else None
+            # запоминаем старое значение
+            raw_old = parent.get(last_key, _SENTINEL)
+            key_existed = raw_old is not _SENTINEL
+            old_value = _deep_copy(raw_old) if key_existed else MISSING
             new_value_copy = _deep_copy(value)
 
             # проверяем, изменилось ли значение
@@ -254,7 +238,7 @@ class TreeStore:
 
             return Delta(
                 path=path,
-                old_value=old_value,  # None если ключа не было
+                old_value=old_value,  # MISSING если ключа не было
                 new_value=new_value_copy,
                 source=source,
             )
@@ -330,9 +314,24 @@ class TreeStore:
             return Delta(
                 path=path,
                 old_value=old_value,
-                new_value=None,
+                new_value=MISSING,
                 source=source,
             )
+
+    # -----------------------------------------------------------------------
+    # Транзакции
+    # -----------------------------------------------------------------------
+
+    def transaction(self, label: str = "") -> Transaction:
+        """Создаёт транзакцию для batch-операций.
+
+        Использование:
+            with store.transaction("recipe_load") as tx:
+                tx.set("cameras.0.config.fps", 30)
+                tx.set("cameras.0.config.type", "webcam")
+            # все дельты с одним transaction_id
+        """
+        return Transaction(self, label)
 
     # -----------------------------------------------------------------------
     # Снимки
@@ -471,17 +470,17 @@ class TreeStore:
 
             # заменяем поддерево
             parent, last_key = self._navigate(keys, create=True)
-            old_value = _deep_copy(parent.get(last_key, _MISSING))
+            old_value = _deep_copy(parent.get(last_key, _SENTINEL))
             new_value = _deep_copy(data)
 
-            if old_value is not _MISSING and _values_equal(old_value, new_value):
+            if old_value is not _SENTINEL and _values_equal(old_value, new_value):
                 return deltas  # без изменений
 
             parent[last_key] = new_value
             deltas.append(
                 Delta(
                     path=path,
-                    old_value=None if old_value is _MISSING else old_value,
+                    old_value=MISSING if old_value is _SENTINEL else old_value,
                     new_value=new_value,
                     source=source,
                 )

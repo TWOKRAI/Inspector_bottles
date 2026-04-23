@@ -1,0 +1,635 @@
+"""Тесты для StateProxy и GuiStateProxy.
+
+Все тесты работают без реального RouterManager — используется MockRouter.
+Интеграционные тесты используют StateStoreManager напрямую.
+GuiStateProxy тестируется без Qt через fallback-режим (signal_emitter=None).
+"""
+from __future__ import annotations
+
+from state_store.core.delta import MISSING, Delta
+from state_store.manager.state_store_manager import StateStoreManager
+from state_store.proxy.state_proxy import StateProxy
+from state_store.proxy.gui_state_proxy import GuiStateProxy
+
+
+# ---------------------------------------------------------------------------
+# MockRouter — мок RouterManager для тестов
+# ---------------------------------------------------------------------------
+
+class MockRouter:
+    """Мок RouterManager для тестов StateProxy."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+        self.handlers: dict[str, object] = {}
+        # Для синхронных ответов: command → ответный dict
+        self._sync_responses: dict[str, dict] = {}
+
+    def send_async(self, msg, priority="normal"):
+        """Сохраняет сообщение в списке sent."""
+        self.sent.append(msg if isinstance(msg, dict) else msg)
+
+    def send(self, msg) -> dict:
+        """Синхронная отправка. Возвращает настроенный ответ или success."""
+        self.sent.append(msg if isinstance(msg, dict) else msg)
+        command = msg.get("command", "")
+        if command in self._sync_responses:
+            return self._sync_responses[command]
+        return {"status": "success"}
+
+    def register_message_handler(self, key, handler, **kwargs):
+        """Регистрирует обработчик."""
+        self.handlers[key] = handler
+
+    def set_sync_response(self, command: str, response: dict) -> None:
+        """Настроить синхронный ответ для команды (для тестов)."""
+        self._sync_responses[command] = response
+
+    def last_sent(self, command: str | None = None) -> dict | None:
+        """Вернуть последнее отправленное сообщение (фильтр по command)."""
+        if command is None:
+            return self.sent[-1] if self.sent else None
+        for msg in reversed(self.sent):
+            if isinstance(msg, dict) and msg.get("command") == command:
+                return msg
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
+
+def _make_state_changed_msg(deltas: list[Delta]) -> dict:
+    """Создать IPC-сообщение state.changed из списка дельт."""
+    return {
+        "command": "state.changed",
+        "data": {
+            "deltas": [d.to_dict() for d in deltas],
+        },
+    }
+
+
+def _make_delta(path="cameras.0.config.fps", old=MISSING, new=30, source="gui") -> Delta:
+    """Создать тестовую Delta."""
+    return Delta(path=path, old_value=old, new_value=new, source=source)
+
+
+# ===========================================================================
+# Тесты StateProxy — инициализация
+# ===========================================================================
+
+class TestStateProxyInit:
+    """Инициализация и базовые свойства StateProxy."""
+
+    def test_init_default(self):
+        """Создание с настройками по умолчанию."""
+        proxy = StateProxy("camera_0")
+        assert proxy.process_name == "camera_0"
+        assert proxy.cache == {}
+
+    def test_init_with_router(self):
+        """Создание с router."""
+        router = MockRouter()
+        proxy = StateProxy("gui", router=router)
+        assert proxy.process_name == "gui"
+
+    def test_cache_empty_on_init(self):
+        """Кэш пуст после создания."""
+        proxy = StateProxy("test_process")
+        assert len(proxy.cache) == 0
+
+
+# ===========================================================================
+# Тесты StateProxy — запись (set, merge)
+# ===========================================================================
+
+class TestStateProxyWrite:
+    """Тесты методов set и merge."""
+
+    def test_set_sends_ipc_message(self):
+        """set() отправляет IPC-сообщение state.set через router."""
+        router = MockRouter()
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.set("cameras.0.state.fps", 28.5)
+
+        assert len(router.sent) == 1
+        msg = router.sent[0]
+        assert msg["command"] == "state.set"
+        assert msg["data"]["path"] == "cameras.0.state.fps"
+        assert msg["data"]["value"] == 28.5
+        assert msg["data"]["source"] == "camera_0"
+
+    def test_set_message_format(self):
+        """set() формирует корректный IPC-формат сообщения."""
+        router = MockRouter()
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.set("cameras.0.config.fps", 30)
+
+        msg = router.sent[0]
+        assert msg["type"] == "command"
+        assert msg["sender"] == "camera_0"
+        assert msg["targets"] == ["ProcessManager"]
+
+    def test_set_no_router_no_error(self):
+        """set() без router не бросает исключений."""
+        proxy = StateProxy("camera_0", router=None)
+        proxy.set("cameras.0.config.fps", 30)  # должно молча игнорироваться
+
+    def test_merge_sends_ipc_message(self):
+        """merge() отправляет IPC-сообщение state.merge через router."""
+        router = MockRouter()
+        proxy = StateProxy("recipe_engine", router=router)
+
+        proxy.merge("cameras.0.config", {"fps": 30, "type": "usb"})
+
+        assert len(router.sent) == 1
+        msg = router.sent[0]
+        assert msg["command"] == "state.merge"
+        assert msg["data"]["path"] == "cameras.0.config"
+        assert msg["data"]["data"] == {"fps": 30, "type": "usb"}
+        assert msg["data"]["source"] == "recipe_engine"
+
+    def test_merge_message_format(self):
+        """merge() формирует корректный IPC-формат."""
+        router = MockRouter()
+        proxy = StateProxy("gui", router=router)
+
+        proxy.merge("system", {"status": "ok"})
+
+        msg = router.sent[0]
+        assert msg["type"] == "command"
+        assert msg["targets"] == ["ProcessManager"]
+
+
+# ===========================================================================
+# Тесты StateProxy — чтение (get, get_subtree)
+# ===========================================================================
+
+class TestStateProxyRead:
+    """Тесты методов get и get_subtree."""
+
+    def test_get_from_cache(self):
+        """get() возвращает значение из кэша."""
+        proxy = StateProxy("camera_0")
+        # Наполняем кэш через on_state_changed
+        delta = _make_delta(path="cameras.0.config.fps", new=30)
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        result = proxy.get("cameras.0.config.fps")
+        assert result == 30
+
+    def test_get_default_when_not_in_cache_no_router(self):
+        """get() с default возвращает default если нет в кэше и router=None."""
+        proxy = StateProxy("camera_0", router=None)
+        result = proxy.get("cameras.0.config.fps", default=25)
+        assert result == 25
+
+    def test_get_raises_keyerror_no_cache_no_router(self):
+        """get() без default и без router бросает KeyError."""
+        proxy = StateProxy("camera_0", router=None)
+        try:
+            proxy.get("cameras.0.config.fps")
+            assert False, "Должна быть KeyError"
+        except KeyError:
+            pass
+
+    def test_get_ipc_fallback(self):
+        """get() при промахе кэша делает IPC-запрос state.get."""
+        router = MockRouter()
+        router.set_sync_response("state.get", {"status": "ok", "value": 42})
+        proxy = StateProxy("camera_0", router=router)
+
+        result = proxy.get("cameras.0.config.fps", default=0)
+
+        assert result == 42
+        # Проверяем что был отправлен запрос
+        msg = router.last_sent("state.get")
+        assert msg is not None
+        assert msg["data"]["path"] == "cameras.0.config.fps"
+
+    def test_get_ipc_fallback_uses_default_on_error(self):
+        """get() использует default при ошибочном IPC-ответе."""
+        router = MockRouter()
+        router.set_sync_response("state.get", {"status": "error", "error": "not found"})
+        proxy = StateProxy("camera_0", router=router)
+
+        result = proxy.get("cameras.0.config.fps", default=99)
+        assert result == 99
+
+    def test_get_subtree_ipc_call(self):
+        """get_subtree() отправляет IPC-запрос state.get_subtree."""
+        router = MockRouter()
+        router.set_sync_response(
+            "state.get_subtree",
+            {"status": "ok", "value": {"fps": 30, "type": "webcam"}},
+        )
+        proxy = StateProxy("gui", router=router)
+
+        result = proxy.get_subtree("cameras.0.config")
+
+        assert result == {"fps": 30, "type": "webcam"}
+        msg = router.last_sent("state.get_subtree")
+        assert msg is not None
+        assert msg["data"]["path"] == "cameras.0.config"
+
+    def test_get_subtree_no_router_returns_empty(self):
+        """get_subtree() без router возвращает пустой dict."""
+        proxy = StateProxy("camera_0", router=None)
+        result = proxy.get_subtree("cameras.0")
+        assert result == {}
+
+
+# ===========================================================================
+# Тесты StateProxy — подписки
+# ===========================================================================
+
+class TestStateProxySubscribe:
+    """Тесты методов subscribe и unsubscribe."""
+
+    def test_subscribe_sends_ipc(self):
+        """subscribe() отправляет state.subscribe в IPC."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "test-sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        callback = lambda deltas: None
+        sub_id = proxy.subscribe("cameras.0.config.*", callback)
+
+        assert sub_id == "test-sub-1"
+        msg = router.last_sent("state.subscribe")
+        assert msg is not None
+        assert msg["data"]["pattern"] == "cameras.0.config.*"
+        assert msg["data"]["subscriber"] == "camera_0"
+
+    def test_subscribe_exclude_self_true(self):
+        """subscribe(exclude_self=True) → exclude_sources содержит имя процесса."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.subscribe("cameras.**", lambda d: None, exclude_self=True)
+
+        msg = router.last_sent("state.subscribe")
+        assert "camera_0" in msg["data"]["exclude_sources"]
+
+    def test_subscribe_exclude_self_false(self):
+        """subscribe(exclude_self=False) → exclude_sources пуст."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.subscribe("cameras.**", lambda d: None, exclude_self=False)
+
+        msg = router.last_sent("state.subscribe")
+        assert msg["data"]["exclude_sources"] == []
+
+    def test_subscribe_returns_sub_id(self):
+        """subscribe() возвращает sub_id."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "my-sub-id"})
+        proxy = StateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("cameras.*", lambda d: None)
+        assert sub_id == "my-sub-id"
+
+    def test_subscribe_no_router_returns_local_id(self):
+        """subscribe() без router возвращает локально сгенерированный sub_id."""
+        proxy = StateProxy("camera_0", router=None)
+        sub_id = proxy.subscribe("cameras.*", lambda d: None)
+        assert isinstance(sub_id, str)
+        assert len(sub_id) > 0
+
+    def test_unsubscribe_sends_ipc(self):
+        """unsubscribe() отправляет state.unsubscribe в IPC."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.subscribe("cameras.*", lambda d: None)
+        router.sent.clear()
+
+        proxy.unsubscribe("sub-1")
+
+        msg = router.last_sent("state.unsubscribe")
+        assert msg is not None
+        assert msg["data"]["sub_id"] == "sub-1"
+
+    def test_unsubscribe_removes_local_callback(self):
+        """unsubscribe() удаляет локальный callback."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        called = []
+        proxy.subscribe("cameras.*", lambda d: called.append(d))
+
+        # Отписываемся
+        proxy.unsubscribe("sub-1")
+
+        # Имитируем state.changed — callback не должен вызваться
+        delta = _make_delta()
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+        assert called == []
+
+
+# ===========================================================================
+# Тесты StateProxy — обработка входящих
+# ===========================================================================
+
+class TestStateProxyOnStateChanged:
+    """Тесты on_state_changed: кэш + callbacks."""
+
+    def test_on_state_changed_updates_cache(self):
+        """on_state_changed() обновляет кэш из дельт."""
+        proxy = StateProxy("camera_0")
+        delta = _make_delta(path="cameras.0.config.fps", new=30)
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        assert proxy.cache["cameras.0.config.fps"] == 30
+
+    def test_on_state_changed_multiple_deltas(self):
+        """on_state_changed() обрабатывает несколько дельт."""
+        proxy = StateProxy("camera_0")
+        deltas = [
+            _make_delta(path="cameras.0.config.fps", new=30),
+            _make_delta(path="cameras.0.config.type", new="webcam"),
+        ]
+        proxy.on_state_changed(_make_state_changed_msg(deltas))
+
+        assert proxy.cache["cameras.0.config.fps"] == 30
+        assert proxy.cache["cameras.0.config.type"] == "webcam"
+
+    def test_on_state_changed_delete_removes_from_cache(self):
+        """on_state_changed() с MISSING new_value удаляет из кэша."""
+        proxy = StateProxy("camera_0")
+
+        # Сначала добавляем в кэш
+        create_delta = _make_delta(path="cameras.0.config.fps", new=30)
+        proxy.on_state_changed(_make_state_changed_msg([create_delta]))
+        assert "cameras.0.config.fps" in proxy.cache
+
+        # Теперь удаляем
+        delete_delta = Delta(
+            path="cameras.0.config.fps",
+            old_value=30,
+            new_value=MISSING,
+            source="gui",
+        )
+        proxy.on_state_changed(_make_state_changed_msg([delete_delta]))
+        assert "cameras.0.config.fps" not in proxy.cache
+
+    def test_on_state_changed_invokes_callback(self):
+        """on_state_changed() вызывает зарегистрированные callbacks."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        received: list[list[Delta]] = []
+        proxy.subscribe("cameras.**", lambda deltas: received.append(deltas))
+
+        delta = _make_delta()
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        assert len(received) == 1
+        assert received[0][0].path == "cameras.0.config.fps"
+
+    def test_on_state_changed_empty_msg_no_error(self):
+        """on_state_changed() с пустым/невалидным msg не бросает исключений."""
+        proxy = StateProxy("camera_0")
+        proxy.on_state_changed({})  # без data — молча игнорируется
+        proxy.on_state_changed({"data": {}})  # без deltas — молча игнорируется
+        proxy.on_state_changed({"data": {"deltas": []}})  # пустые deltas
+
+    def test_on_state_changed_callback_exception_no_crash(self):
+        """Исключение в callback не ломает обработку остальных."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        called_after = []
+
+        def bad_callback(deltas):
+            raise RuntimeError("плохой callback")
+
+        def good_callback(deltas):
+            called_after.append(deltas)
+
+        # Добавляем два callback
+        proxy._callbacks["sub-1"] = [bad_callback, good_callback]
+        proxy._sub_ids.append("sub-1")
+
+        delta = _make_delta()
+        # Не должно бросить исключение
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        # good_callback всё равно был вызван
+        assert len(called_after) == 1
+
+
+# ===========================================================================
+# Тесты StateProxy — lifecycle
+# ===========================================================================
+
+class TestStateProxyLifecycle:
+    """Тесты shutdown."""
+
+    def test_shutdown_sends_unsubscribe_all(self):
+        """shutdown() отправляет state.unsubscribe_all в IPC."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.subscribe("cameras.*", lambda d: None)
+        router.sent.clear()
+
+        proxy.shutdown()
+
+        msg = router.last_sent("state.unsubscribe_all")
+        assert msg is not None
+        assert msg["data"]["subscriber"] == "camera_0"
+
+    def test_shutdown_clears_callbacks(self):
+        """shutdown() очищает локальный реестр callbacks."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "sub-1"})
+        proxy = StateProxy("camera_0", router=router)
+
+        proxy.subscribe("cameras.*", lambda d: None)
+        assert len(proxy._callbacks) == 1
+
+        proxy.shutdown()
+        assert len(proxy._callbacks) == 0
+        assert len(proxy._sub_ids) == 0
+
+    def test_shutdown_no_router_no_error(self):
+        """shutdown() без router не бросает исключений."""
+        proxy = StateProxy("camera_0", router=None)
+        proxy.shutdown()  # должно молча работать
+
+
+# ===========================================================================
+# Тесты GuiStateProxy
+# ===========================================================================
+
+class TestGuiStateProxy:
+    """Тесты GuiStateProxy в fallback-режиме (без Qt)."""
+
+    def test_gui_proxy_init(self):
+        """GuiStateProxy создаётся без ошибок."""
+        proxy = GuiStateProxy("gui", router=None, signal_emitter=None)
+        assert proxy.process_name == "gui"
+
+    def test_gui_proxy_inherits_state_proxy(self):
+        """GuiStateProxy является подклассом StateProxy."""
+        proxy = GuiStateProxy("gui")
+        assert isinstance(proxy, StateProxy)
+
+    def test_gui_proxy_fallback_calls_callback(self):
+        """GuiStateProxy без signal_emitter вызывает callback напрямую (fallback)."""
+        proxy = GuiStateProxy("gui", router=None, signal_emitter=None)
+
+        received: list[list[Delta]] = []
+        # Добавляем callback вручную (без IPC subscribe)
+        proxy._callbacks["test-sub"] = [lambda d: received.append(d)]
+
+        delta = _make_delta()
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        assert len(received) == 1
+        assert received[0][0].path == "cameras.0.config.fps"
+
+    def test_gui_proxy_updates_cache(self):
+        """GuiStateProxy обновляет кэш в on_state_changed."""
+        proxy = GuiStateProxy("gui", router=None)
+
+        delta = _make_delta(path="system.status", new="running")
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        assert proxy.cache["system.status"] == "running"
+
+    def test_gui_proxy_set_inherited(self):
+        """GuiStateProxy наследует set() от StateProxy."""
+        router = MockRouter()
+        proxy = GuiStateProxy("gui", router=router)
+
+        proxy.set("cameras.0.config.fps", 30)
+
+        msg = router.last_sent("state.set")
+        assert msg is not None
+        assert msg["data"]["value"] == 30
+
+    def test_gui_proxy_subscribe_inherited(self):
+        """GuiStateProxy наследует subscribe() от StateProxy."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "gui-sub-1"})
+        proxy = GuiStateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("cameras.**", lambda d: None)
+        assert sub_id == "gui-sub-1"
+
+    def test_gui_proxy_shutdown_inherited(self):
+        """GuiStateProxy наследует shutdown() от StateProxy."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "gui-sub-1"})
+        proxy = GuiStateProxy("gui", router=router)
+
+        proxy.subscribe("cameras.*", lambda d: None)
+        router.sent.clear()
+
+        proxy.shutdown()
+
+        msg = router.last_sent("state.unsubscribe_all")
+        assert msg is not None
+
+
+# ===========================================================================
+# Интеграционные тесты: StateProxy + StateStoreManager
+# ===========================================================================
+
+class TestStateProxyIntegration:
+    """Интеграционные тесты: proxy <-> manager в одном процессе."""
+
+    def _build_pair(self):
+        """Создать связку proxy + manager с общим MockRouter."""
+        router = MockRouter()
+        mgr = StateStoreManager(router=router)
+        mgr.initialize()
+        proxy = StateProxy("camera_0", router=router)
+        return proxy, mgr, router
+
+    def test_proxy_set_reaches_manager(self):
+        """proxy.set() → manager.handle_state_set() → значение в TreeStore."""
+        proxy, mgr, router = self._build_pair()
+
+        proxy.set("cameras.0.config.fps", 30)
+
+        # Получаем сообщение и скармливаем менеджеру
+        msg = router.last_sent("state.set")
+        assert msg is not None
+        result = mgr.handle_state_set(msg)
+        assert result["status"] == "ok"
+        assert mgr.store.get("cameras.0.config.fps") == 30
+
+    def test_proxy_subscribe_and_receive_change(self):
+        """Полный цикл: subscribe → set → state.changed → on_state_changed."""
+        proxy, mgr, router = self._build_pair()
+
+        received: list[list[Delta]] = []
+
+        # Подписываемся через менеджер напрямую (симулируем IPC)
+        sub_result = mgr.handle_state_subscribe({
+            "data": {
+                "pattern": "cameras.**",
+                "subscriber": "camera_0",
+                "exclude_sources": [],
+            },
+        })
+        assert sub_result["status"] == "ok"
+        sub_id = sub_result["sub_id"]
+
+        # Регистрируем callback локально
+        proxy._callbacks[sub_id] = [lambda d: received.append(d)]
+        proxy._sub_ids.append(sub_id)
+
+        # Кто-то устанавливает значение
+        mgr.handle_state_set({
+            "data": {"path": "cameras.0.config.fps", "value": 28, "source": "gui"},
+        })
+
+        # Manager отправил state.changed — находим его и передаём proxy
+        state_changed_msg = router.last_sent("state.changed")
+        assert state_changed_msg is not None
+        assert state_changed_msg["targets"] == ["camera_0"]
+
+        proxy.on_state_changed(state_changed_msg)
+
+        # Проверяем что callback вызван и кэш обновлён
+        assert len(received) == 1
+        assert received[0][0].path == "cameras.0.config.fps"
+        assert proxy.cache["cameras.0.config.fps"] == 28
+
+    def test_proxy_cache_updated_on_state_changed(self):
+        """proxy.on_state_changed() обновляет кэш корректно."""
+        proxy, mgr, router = self._build_pair()
+
+        # Подписываем camera_0 через менеджер
+        mgr.handle_state_subscribe({
+            "data": {
+                "pattern": "system.**",
+                "subscriber": "camera_0",
+                "exclude_sources": [],
+            },
+        })
+
+        # Изменение состояния
+        mgr.handle_state_set({
+            "data": {"path": "system.status", "value": "running", "source": "manager"},
+        })
+
+        # Находим state.changed и передаём proxy
+        msg = router.last_sent("state.changed")
+        proxy.on_state_changed(msg)
+
+        assert proxy.cache["system.status"] == "running"
