@@ -21,7 +21,12 @@ from multiprocess_prototype_v3.services.processor.service import ProcessorServic
 from multiprocess_prototype_v3.services.processor.worker_pool.dispatcher import WorkerPoolDispatcher
 
 from .adapter import ProcessorAdapter
-from .commands import build_command_table, build_register_handlers
+from .commands import (
+    build_command_table,
+    build_register_handlers,
+    build_state_config_handlers,
+    _apply_vision_pipeline,
+)
 
 
 class ProcessorProcess(ProcessModule):
@@ -115,6 +120,36 @@ class ProcessorProcess(ProcessModule):
         for cmd, handler in cmd_table.items():
             self.command_manager.register_command(cmd, handler)
 
+        # StateProxy для чтения config / записи state
+        from state_store.proxy.state_proxy import StateProxy
+
+        self._state_proxy = StateProxy(f"processor_{self._camera_id}", router=self.router_manager)
+
+        # Регистрация обработчика state.changed
+        self.router_manager.register_message_handler(
+            "state.changed", self._state_proxy.on_state_changed
+        )
+
+        # Config handlers для StateProxy callback
+        self._state_config_handlers = build_state_config_handlers(self._service)
+
+        # Подписка на processor config (simple fields: color_lower, min_area, etc.)
+        self._state_proxy.subscribe(
+            f"processor.{self._camera_id}.config.*",
+            callback=self._on_config_changed,
+            exclude_self=True,
+        )
+
+        # Подписка на regions (deep changes → rebuild_runnables)
+        self._state_proxy.subscribe(
+            f"cameras.{self._camera_id}.regions.**",
+            callback=self._on_regions_changed,
+            exclude_self=True,
+        )
+
+        # Начальная запись state
+        self._state_proxy.set(f"processor.{self._camera_id}.state.status", "initialized")
+
         # Воркер
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         self.worker_manager.create_worker(
@@ -194,10 +229,47 @@ class ProcessorProcess(ProcessModule):
             # Делегация бизнес-логики в сервис
             self._service.process_frame(frame, data)
 
+            # Запись метрик в StateStore (ThrottleMiddleware ограничит частоту)
+            if hasattr(self, "_state_proxy"):
+                self._state_proxy.set(
+                    f"processor.{self._camera_id}.state.is_processing", True
+                )
+
             # Phase 5c: периодический экспорт worker pool stats
             frames_processed += 1
             if self._dispatcher is not None and frames_processed % 100 == 0:
                 self._export_worker_pool_stats()
+
+    # --- StateProxy callbacks ---
+
+    def _on_config_changed(self, deltas: list) -> None:
+        """Config fields (color_lower, min_area, etc.) → dispatch to handler.
+
+        Принимает список Delta от StateProxy (подписка processor.{id}.config.*).
+        Суффикс пути после processor.{id}.config. используется как ключ маппинга.
+        """
+        prefix = f"processor.{self._camera_id}.config."
+        for delta in deltas:
+            if not delta.path.startswith(prefix):
+                continue
+            field = delta.path[len(prefix):]
+            handler = self._state_config_handlers.get(field)
+            if handler:
+                handler(delta.new_value)
+
+    def _on_regions_changed(self, deltas: list) -> None:
+        """Regions tree changed → ONE rebuild_runnables().
+
+        Transaction batching: все дельты в одном callback = одна транзакция.
+        Не делаем rebuild для каждой дельты — читаем всё поддерево и rebuild один раз.
+        """
+        if not deltas:
+            return
+        regions = self._state_proxy.get_subtree(f"cameras.{self._camera_id}.regions")
+        if regions is not None:
+            # Оборачиваем в формат vision_pipeline для совместимости с rebuild_runnables
+            pipeline_data = {"cameras": {str(self._camera_id): {"regions": regions}}}
+            _apply_vision_pipeline(self._service, pipeline_data)
 
     # --- Phase 5c: worker pool stats ---
 
@@ -220,6 +292,10 @@ class ProcessorProcess(ProcessModule):
 
     def shutdown(self) -> bool:
         self._log_info("ProcessorProcess shutting down...")
+        # StateProxy: записать статус и отписаться
+        if hasattr(self, "_state_proxy"):
+            self._state_proxy.set(f"processor.{self._camera_id}.state.status", "shutdown")
+            self._state_proxy.shutdown()
         # Phase 5b: graceful shutdown пула потоков перед остановкой процесса
         if self._pool is not None:
             self._pool.shutdown(wait=True)

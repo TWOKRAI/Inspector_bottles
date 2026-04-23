@@ -137,6 +137,25 @@ def _apply_vision_pipeline(service, value: object) -> None:
     logger.info("vision_pipeline: %d камер, %d регионов", total_cameras, total_regions)
 
 
+def build_state_config_handlers(service) -> dict:
+    """Маппинг config field suffix → handler для StateProxy callback.
+
+    Ключи = суффиксы после processor.{id}.config.
+    Используется в ProcessorProcess._on_config_changed для роутинга дельт.
+
+    Args:
+        service: ProcessorService instance.
+    """
+    return {
+        "color_lower": lambda v: service.set_color_range(lower=v),
+        "color_upper": lambda v: service.set_color_range(upper=v),
+        "min_area": lambda v: service.set_min_area(v),
+        "max_area": lambda v: service.set_max_area(v),
+        "vision_pipeline": lambda v: _apply_vision_pipeline(service, v),
+        "workers_per_processor": lambda v: service.resize_pool(int(v)),
+    }
+
+
 def build_register_handlers(service) -> dict:
     """Возвращает {field_name: handler} для apply_register_update().
 
