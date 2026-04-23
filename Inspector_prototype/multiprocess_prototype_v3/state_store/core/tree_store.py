@@ -21,7 +21,8 @@ from typing import Any, Dict, List, Optional
 # ВРЕМЕННЫЙ Delta — будет заменён на полный из delta.py в Task 4a.4
 # ---------------------------------------------------------------------------
 
-_MISSING = object()  # сентинел для "значение отсутствует"
+_MISSING = object()  # сентинел для "значение отсутствует" (публичный, для тестов)
+_NOT_FOUND = object()  # приватный сентинел для внутренних проверок наличия ключа
 
 
 @dataclass(frozen=True)
@@ -288,8 +289,9 @@ class TreeStore:
             child_path = f"{path}.{key}" if path else key
             if isinstance(value, dict):
                 # если целевой узел тоже dict — рекурсивно мержим
-                existing = self.get(child_path, default=_MISSING)
-                if existing is not _MISSING and isinstance(existing, dict):
+                # используем _NOT_FOUND как сентинел чтобы не конфликтовать с _MISSING
+                existing = self.get(child_path, default=_NOT_FOUND)
+                if existing is not _NOT_FOUND and isinstance(existing, dict):
                     self._merge_recursive(child_path, value, source, deltas)
                 else:
                     # целевой узел не dict или не существует — перезаписываем
