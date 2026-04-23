@@ -1,7 +1,7 @@
 # План: Phase 4 — Единое связанное хранилище данных (StateStore)
 
 **Дата:** 2026-04-23
-**Обновлён:** 2026-04-23 (v3 — 4b+ DONE, начало 4c)
+**Обновлён:** 2026-04-23 (v4 — 4c DONE, начало 4d)
 **Статус:** IN PROGRESS
 **Дизайн:** [STATE_STORE_DESIGN.md](STATE_STORE_DESIGN.md)
 **Оценка:** ~35 файлов, 8 фаз, ~3200 строк нового кода
@@ -38,9 +38,9 @@ Phase 4a: Core (TreeStore + Delta + Subscriptions)                    ✅ DONE
     │       │
     │       ├──► Phase 4b+: Middleware + Throttle + Validation        ✅ DONE (97 тестов)
     │       │       │
-    │       │       ├──► Phase 4c: Backend-миграция                   ◄── NEXT
+    │       │       ├──► Phase 4c: Backend-миграция                   ✅ DONE (41 тест��в)
     │       │       │
-    │       │       └──► Phase 4d: GUI-миграция
+    │       │       └──► Phase 4d: GUI-миграция                       ◄── NEXT
     │       │
     │       └──► Phase 4e: Persistence + Recipes
     │
@@ -338,12 +338,20 @@ class MetricsMiddleware(StateMiddleware):
 
 ---
 
-## Phase 4c — Backend-миграция: процессы → StateProxy
+## Phase 4c — Backend-миграция: процессы → StateProxy ✅ DONE
 
-**Цель:** Процессы переходят с `apply_register_update` + ручного IPC на StateProxy.
+**Статус:** Выполнено. 41 тест (354 total).
+
+**Цель:** Процессы переходят с  + ручного IPC на StateProxy.
 Backend пишет state, подписывается на config.
 
 **Prerequisite:** Phase 4b+ (middleware+throttle должны быть на месте).
+
+| Task | Что | Тесты | Статус |
+|------|-----|-------|--------|
+| 4c.1 | CameraProcess → StateProxy (dual-mode) | 20 | ✅ |
+| 4c.2 | ProcessorProcess → StateProxy (regions + rebuild) | 26 | ✅ |
+| 4c.3 | Renderer + Robot + Database → StateProxy | 15 | ✅ |
 
 ---
 
