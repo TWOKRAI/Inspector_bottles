@@ -12,8 +12,13 @@ from state_store.core.subscription_manager import Subscription, SubscriptionMana
 from state_store.core.tree_store import TreeStore
 from state_store.manager.delta_dispatcher import DeltaDispatcher
 from state_store.manager.state_store_manager import StateStoreManager
-from state_store.proxy.state_proxy import StateProxy
+from state_store.middleware.base import MiddlewarePipeline, StateMiddleware
+from state_store.middleware.logging_mw import LoggingMiddleware
+from state_store.middleware.metrics import MetricsMiddleware
+from state_store.middleware.throttle import ThrottleMiddleware
+from state_store.middleware.validation import ValidationMiddleware
 from state_store.proxy.gui_state_proxy import GuiStateProxy
+from state_store.proxy.state_proxy import StateProxy
 
 __all__ = [
     "TreeStore",
@@ -26,4 +31,10 @@ __all__ = [
     "DeltaDispatcher",
     "StateProxy",
     "GuiStateProxy",
+    "StateMiddleware",
+    "MiddlewarePipeline",
+    "ThrottleMiddleware",
+    "ValidationMiddleware",
+    "LoggingMiddleware",
+    "MetricsMiddleware",
 ]

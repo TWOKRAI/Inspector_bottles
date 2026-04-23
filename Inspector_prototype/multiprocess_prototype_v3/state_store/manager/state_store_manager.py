@@ -5,6 +5,7 @@ IPC-сообщения от процессов: state.set, state.get, state.subs
 
 НЕ наследует ProcessModule — это компонент, встраиваемый в ProcessManagerProcess.
 """
+
 from __future__ import annotations
 
 import logging
@@ -13,6 +14,7 @@ from typing import Any
 from state_store.core.subscription_manager import SubscriptionManager
 from state_store.core.tree_store import TreeStore
 from state_store.manager.delta_dispatcher import DeltaDispatcher
+from state_store.middleware.base import MiddlewarePipeline, StateMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +50,23 @@ class StateStoreManager:
             router=router,
             sender_name="StateStore",
         )
+        self._pipeline = MiddlewarePipeline()
         self._router = router
         self._log = logger or logging.getLogger(__name__)
         self._initialized = False
+
+    @property
+    def pipeline(self) -> MiddlewarePipeline:
+        """Доступ к middleware pipeline (для тестов и конфигурации)."""
+        return self._pipeline
+
+    def use(self, middleware: StateMiddleware) -> None:
+        """Добавить middleware в pipeline.
+
+        Args:
+            middleware: экземпляр StateMiddleware.
+        """
+        self._pipeline.use(middleware)
 
     @property
     def store(self) -> TreeStore:
@@ -96,9 +112,7 @@ class StateStoreManager:
             total += count
 
         self._initialized = False
-        self._log.info(
-            "StateStoreManager остановлен, отписано подписок: %d", total
-        )
+        self._log.info("StateStoreManager остановлен, отписано подписок: %d", total)
         return True
 
     # -------------------------------------------------------------------
@@ -146,8 +160,19 @@ class StateStoreManager:
             return {"status": "error", "error": "Поле 'path' обязательно и должно быть строкой"}
 
         try:
+            # --- MIDDLEWARE BEFORE ---
+            proceed, value, context = self._pipeline.run_before_set(path, value, source)
+            if not proceed:
+                return {
+                    "status": "rejected",
+                    "path": path,
+                    "reason": context.get("rejection_reason", "middleware"),
+                }
+
             delta = self._store.set(path, value, source=source)
             if delta is not None:
+                # --- MIDDLEWARE AFTER ---
+                self._pipeline.run_after_set(delta, context)
                 # Рассылка дельт подписчикам
                 self._dispatcher.dispatch_single(delta)
                 return {"status": "ok", "path": path, "changed": True}
@@ -173,8 +198,19 @@ class StateStoreManager:
             return {"status": "error", "error": "Поле 'data' обязательно и должно быть dict"}
 
         try:
+            # --- MIDDLEWARE BEFORE ---
+            proceed, merge_data, context = self._pipeline.run_before_merge(path, merge_data, source)
+            if not proceed:
+                return {
+                    "status": "rejected",
+                    "path": path,
+                    "reason": context.get("rejection_reason", "middleware"),
+                }
+
             deltas = self._store.merge(path, merge_data, source=source)
             if deltas:
+                # --- MIDDLEWARE AFTER ---
+                self._pipeline.run_after_merge(deltas, context)
                 self._dispatcher.dispatch(deltas)
             return {
                 "status": "ok",
@@ -266,7 +302,9 @@ class StateStoreManager:
         )
         self._log.debug(
             "Подписка создана: sub_id=%s, subscriber=%s, pattern=%s",
-            sub_id, subscriber, pattern,
+            sub_id,
+            subscriber,
+            pattern,
         )
         return {"status": "ok", "sub_id": sub_id}
 
@@ -359,9 +397,7 @@ class StateStoreManager:
         }
 
         for key, handler in handlers.items():
-            router.register_message_handler(
-                key, handler, expects_full_message=True
-            )
+            router.register_message_handler(key, handler, expects_full_message=True)
 
         self._log.info(
             "StateStoreManager: зарегистрировано %d обработчиков в RouterManager",
