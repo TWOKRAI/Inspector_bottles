@@ -1,7 +1,7 @@
 # Plan: Phase 2 -- Performance & Scaling
 
 **Date:** 2026-04-23
-**Status:** DRAFT
+**Status:** DONE
 
 ## Overview
 
@@ -29,14 +29,14 @@ Task 2.4 (N processors) ---> зависит от 1.1 (DONE), наиболее с
 ## Порядок исполнения
 
 ### Параллельный блок A (независимые задачи)
-- Task 2.1: Метрики latency (end-to-end) [PENDING]
-- Task 2.3: Batch INSERT в БД [PENDING]
+- Task 2.1: Метрики latency (end-to-end) [DONE]
+- Task 2.3: Batch INSERT в БД [DONE]
 
 ### Параллельный блок B (зависят от блока A только организационно)
-- Task 2.2: Динамическое разрешение SHM per camera [PENDING]
+- Task 2.2: Динамическое разрешение SHM per camera [DONE]
 
 ### Последовательный блок C (самая сложная, архитектурная)
-- Task 2.4: Processor масштабирование (1 per Camera) [PENDING]
+- Task 2.4: Processor масштабирование (1 per Camera) [DONE]
 
 ---
 
