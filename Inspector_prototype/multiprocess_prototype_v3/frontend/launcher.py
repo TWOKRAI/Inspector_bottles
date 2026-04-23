@@ -172,6 +172,7 @@ class FrontendLauncher:
                 header_action_handlers={},
                 header_on_unmatched=header_on_unmatched if wm else None,
                 app_ctx=app_ctx,  # NEW — передать контекст с ActionBus
+                on_restart_requested=lambda: cmd.send_restart_all(),
             )
             process._ui_diagnostics = attach_ui_diagnostics(win, config)
             process._window = win

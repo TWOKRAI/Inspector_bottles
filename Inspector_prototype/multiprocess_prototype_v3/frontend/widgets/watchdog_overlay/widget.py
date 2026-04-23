@@ -1,0 +1,62 @@
+# multiprocess_prototype_v3/frontend/widgets/watchdog_overlay/widget.py
+"""
+WatchdogOverlay — полупрозрачный overlay поверх parent-виджета.
+
+Показывается при потере кадров от backend (жёлтый фон + текст по центру).
+"""
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+
+class WatchdogOverlay(QWidget):
+    """
+    Полупрозрачный жёлтый overlay поверх parent-виджета.
+
+    Используется для индикации задержки/отсутствия кадров от backend.
+    """
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setStyleSheet(
+            "background-color: rgba(255, 200, 0, 180);"
+            "border-radius: 8px;"
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+
+        self._label = QLabel("Ожидание backend...", self)
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setStyleSheet(
+            "font-size: 20px;"
+            "font-weight: bold;"
+            "color: #333333;"
+            "background: transparent;"
+        )
+        layout.addWidget(self._label)
+
+        # Изначально скрыт
+        self.hide()
+
+        # Подстраиваться под размер parent
+        if parent is not None:
+            self.resize(parent.size())
+
+    def show_warning(self, text: str = "Ожидание backend...") -> None:
+        """Показать overlay с указанным текстом."""
+        self._label.setText(text)
+        self.resize(self.parent().size())
+        self.raise_()
+        self.show()
+
+    def hide_overlay(self) -> None:
+        """Скрыть overlay."""
+        self.hide()
+
+    def resizeEvent(self, event) -> None:
+        """Растянуться на весь parent при его изменении."""
+        if self.parent() is not None:
+            self.resize(self.parent().size())
+        super().resizeEvent(event)

@@ -126,3 +126,7 @@ class GuiCommandHandler:
 
     def send_camera_type_changed(self, camera_type: str) -> bool:
         return self.execute("set_camera_type", camera_type=camera_type)
+
+    def send_restart_all(self) -> bool:
+        """Отправить команду перезапуска всех процессов в ProcessManager."""
+        return self._send("restart_all", args={}, data={})

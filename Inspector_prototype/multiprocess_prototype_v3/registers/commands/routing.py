@@ -28,6 +28,7 @@ COMMAND_TO_REGISTER_KEY: Dict[str, str] = {
 
 EXPLICIT_COMMAND_TARGETS: Dict[str, List[str]] = {
     "system.shutdown": ["ProcessManager"],
+    "restart_all": ["ProcessManager"],
 }
 
 

@@ -87,6 +87,7 @@ GUI_COMMAND_CATALOG: Dict[str, Callable[..., Dict[str, Any]]] = {
     "get_parameters": _args_empty,
     "set_parameters": _args_parameters,
     "set_camera_type": _args_camera_type,
+    "restart_all": _args_empty,
 }
 
 

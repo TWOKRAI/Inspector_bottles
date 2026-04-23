@@ -17,9 +17,11 @@ from frontend_module.widgets.header import HeaderConfig
 from frontend_module.widgets.header.button_style import create_header_button
 from frontend_module.widgets.image_panel import ImagePanelWidget
 from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import QLabel, QShortcut
+from PyQt5.QtWidgets import QLabel, QMessageBox, QShortcut
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
+from multiprocess_prototype_v3.frontend.utils import ensure_main_thread
+from multiprocess_prototype_v3.frontend.widgets.watchdog_overlay import WatchdogOverlay
 
 from .config import ImagePanelConfig
 from .tab_factory import TabWidgetFactory, create_tab_widget_factory
@@ -36,6 +38,7 @@ class MainWindow(QMainWindow):
         header_on_unmatched: fallback (например show_window только для имён из window_registry)
         show_window_callback: устар.; эквивалент header_on_unmatched для обратной совместимости
         app_ctx: FrontendAppContext — контекст с ActionBus для undo/redo (опционально)
+        on_restart_requested: callback, вызываемый при подтверждении перезапуска в watchdog-диалоге
     """
 
     def __init__(
@@ -50,6 +53,7 @@ class MainWindow(QMainWindow):
         header_action_handlers: dict[str, Callable[[], None]] | None = None,
         header_on_unmatched: Callable[[str], None] | None = None,
         app_ctx: FrontendAppContext | None = None,
+        on_restart_requested: Callable[[], None] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -61,6 +65,7 @@ class MainWindow(QMainWindow):
         self._header_action_handlers = header_action_handlers or {}
         self._header_on_unmatched = header_on_unmatched or show_window_callback
         self._app_ctx = app_ctx
+        self._on_restart_requested = on_restart_requested
         # Кнопки undo/redo/history — заполняются в _setup_undo_redo_ui
         self._btn_undo: QPushButton | None = None
         self._btn_redo: QPushButton | None = None
@@ -69,6 +74,8 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._setup_undo_redo_ui()
         self._setup_latency_label()
+        # Watchdog overlay поверх image_panel
+        self._watchdog_overlay = WatchdogOverlay(self._image_panel)
 
     def _resolve_tab_factory(self) -> TabWidgetFactory:
         if self._tab_widget_factory is not None:
@@ -290,6 +297,7 @@ class MainWindow(QMainWindow):
 
     # --- Per-camera resolution tracking (Task 2.2) ---
 
+    @ensure_main_thread
     def update_camera_resolution(self, camera_id: int, width: int, height: int) -> None:
         """Обновить отображение разрешения для указанной камеры в StatusBar."""
         if not hasattr(self, "_camera_resolutions"):
@@ -308,32 +316,40 @@ class MainWindow(QMainWindow):
         resolution_text = " | ".join(parts)
         self.statusBar().showMessage(resolution_text)
 
+    @ensure_main_thread
     def update_camera_status(self, text: str) -> None:
         pass
 
+    @ensure_main_thread
     def update_camera_error(self, text: str) -> None:
         pass
 
+    @ensure_main_thread
     def update_camera_fps(self, fps: float) -> None:
         pass
 
+    @ensure_main_thread
     def update_camera_devices(self, devices: list) -> None:
         if self._camera_tab:
             self._camera_tab.update_camera_devices(devices)
 
+    @ensure_main_thread
     def update_camera_parameters(self, params: dict) -> None:
         if self._camera_tab:
             self._camera_tab.update_camera_parameters(params)
 
+    @ensure_main_thread
     def sync_camera_type(self, camera_type: str) -> None:
         if self._camera_tab:
             self._camera_tab.sync_camera_type(camera_type)
 
+    @ensure_main_thread
     def update_latency(self, latency_ms: float) -> None:
         """Обновить отображение e2e latency в StatusBar."""
         if self._latency_label is not None:
             self._latency_label.setText(f"Latency: {latency_ms:.0f}ms")
 
+    @ensure_main_thread
     def update_frame(
         self,
         original_frame: Any,
@@ -348,3 +364,25 @@ class MainWindow(QMainWindow):
         if show_mask and mask_frame is not None:
             frames["mask"] = mask_frame
         self.display_frames(frames)
+
+    # --- Watchdog overlay методы (Task 3.1) ---
+
+    def show_watchdog_warning(self, text: str = "Ожидание backend...") -> None:
+        """Показать жёлтый overlay с предупреждением об отсутствии кадров."""
+        self._watchdog_overlay.show_warning(text)
+
+    def hide_watchdog(self) -> None:
+        """Скрыть watchdog overlay."""
+        self._watchdog_overlay.hide_overlay()
+
+    def show_watchdog_dialog(self) -> None:
+        """Показать диалог перезапуска при длительном отсутствии кадров."""
+        reply = QMessageBox.question(
+            self,
+            "Backend не отвечает",
+            "Backend не отвечает. Перезапустить?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Yes and self._on_restart_requested is not None:
+            self._on_restart_requested()

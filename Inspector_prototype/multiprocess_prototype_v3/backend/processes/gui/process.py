@@ -68,6 +68,9 @@ class GuiProcess(ProcessModule):
         self._camera_type = app_cfg.get("camera_type", "simulator")
         self._window = None
         self._gui_msg_count = 0
+        # Watchdog state
+        self._last_frame_time = 0.0
+        self._watchdog_state = "ok"
         self._log_info("GuiProcess ready")
 
     def _init_system_threads(self):
@@ -105,6 +108,8 @@ class GuiProcess(ProcessModule):
                     handler(self._window, data)
             elif data_type == "rendered_frame_ready":
                 self._handle_new_frame(data)
+
+        self._check_watchdog()
 
     # --- Сложный handler (зависит от memory_manager + service) ---
 
@@ -156,11 +161,37 @@ class GuiProcess(ProcessModule):
             )
             self._window.update_latency(e2e_latency_ms)
 
+        # Обновить время последнего кадра и сбросить watchdog
+        self._last_frame_time = time.time()
+        self._reset_watchdog()
+
         # Phase 6: dispatch кадров в display-окна через DisplayRouter
         if hasattr(self, '_display_router') and self._display_router is not None:
             for sub in self._display_router.get_active_subscriptions():
                 channel = f"display_{sub.window_id}"
                 self._display_router.dispatch_frame(channel, original)
+
+    def _reset_watchdog(self) -> None:
+        """Сбросить watchdog в состояние ok если он не в ok."""
+        if self._watchdog_state != "ok":
+            self._watchdog_state = "ok"
+            if self._window:
+                self._window.hide_watchdog()
+
+    def _check_watchdog(self) -> None:
+        """Проверить таймаут кадров и обновить состояние watchdog."""
+        if self._last_frame_time == 0.0:
+            # Ещё не получили ни одного кадра — не запускаем watchdog
+            return
+        elapsed = time.time() - self._last_frame_time
+        if elapsed > 15.0 and self._watchdog_state != "dialog_shown":
+            self._watchdog_state = "dialog_shown"
+            if self._window:
+                self._window.show_watchdog_dialog()
+        elif elapsed > 5.0 and self._watchdog_state == "ok":
+            self._watchdog_state = "warning"
+            if self._window:
+                self._window.show_watchdog_warning("Ожидание backend...")
 
     def gui_request_shutdown(self):
         """Вызывается Qt при aboutToQuit — запрашиваем остановку процесса."""
