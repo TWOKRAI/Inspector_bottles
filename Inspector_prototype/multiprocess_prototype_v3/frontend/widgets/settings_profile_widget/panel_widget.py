@@ -38,11 +38,13 @@ class SettingsProfilePanelWidget(BaseWidget[SettingsProfileModel]):
         registers_manager: Any | None = None,
         ui: Any | None = None,
         touch_keyboard: Any | None = None,
+        action_bus: Any | None = None,
         parent: Any | None = None,
     ) -> None:
         # Сохраняем до вызова super().__init__ — он вызывает lifecycle-методы
         self._profile_manager = profile_manager
         self._touch_keyboard = touch_keyboard
+        self._action_bus = action_bus
         super().__init__(registers_manager=registers_manager, ui=ui, parent=parent)
 
     # ------------------------------------------------------------------
@@ -108,7 +110,7 @@ class SettingsProfilePanelWidget(BaseWidget[SettingsProfileModel]):
 
     def _create_presenter(self, model: SettingsProfileModel | None) -> SettingsProfilePresenter:
         assert model is not None
-        return SettingsProfilePresenter(view=self, model=model)
+        return SettingsProfilePresenter(view=self, model=model, action_bus=self._action_bus)
 
     def _connect_signals(self) -> None:
         """Кнопки → presenter; изменение ячейки → presenter; смена профиля → model."""

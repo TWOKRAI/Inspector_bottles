@@ -4,15 +4,20 @@ MainWindow — главное окно приложения.
 
 Layout: Header + ImagePanel + TabWidget.
 Конфиг: window, header, image_panel, tabs. Сигналы шапки: action_triggered + connect_action_handlers.
+Undo/Redo: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z + кнопки в header (подключаются через ActionBus).
 """
 
-from typing import Any, Callable, Dict, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
+from frontend_module.core.action_binding import connect_action_handlers
+from frontend_module.core.qt_imports import QMainWindow, QPushButton, QVBoxLayout, QWidget
 from frontend_module.widgets import HeaderWidget, TabWidget
 from frontend_module.widgets.header import HeaderConfig
-from frontend_module.core.action_binding import connect_action_handlers
-from frontend_module.core.qt_imports import QMainWindow, QVBoxLayout, QWidget
+from frontend_module.widgets.header.button_style import create_header_button
 from frontend_module.widgets.image_panel import ImagePanelWidget
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import QShortcut
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
 
@@ -30,19 +35,21 @@ class MainWindow(QMainWindow):
         header_action_handlers: {action_id: callable} для HeaderWidget.action_triggered
         header_on_unmatched: fallback (например show_window только для имён из window_registry)
         show_window_callback: устар.; эквивалент header_on_unmatched для обратной совместимости
+        app_ctx: FrontendAppContext — контекст с ActionBus для undo/redo (опционально)
     """
 
     def __init__(
         self,
         *,
-        config: Optional[Dict[str, Any]] = None,
-        show_window_callback: Optional[Callable[[str], None]] = None,
-        registers_manager: Optional[Any] = None,
-        camera_callbacks_map: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
+        show_window_callback: Callable[[str], None] | None = None,
+        registers_manager: Any | None = None,
+        camera_callbacks_map: dict[str, Any] | None = None,
         camera_type: str = "simulator",
-        tab_widget_factory: Optional[TabWidgetFactory] = None,
-        header_action_handlers: Optional[Dict[str, Callable[[], None]]] = None,
-        header_on_unmatched: Optional[Callable[[str], None]] = None,
+        tab_widget_factory: TabWidgetFactory | None = None,
+        header_action_handlers: dict[str, Callable[[], None]] | None = None,
+        header_on_unmatched: Callable[[str], None] | None = None,
+        app_ctx: FrontendAppContext | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -53,7 +60,13 @@ class MainWindow(QMainWindow):
         self._tab_widget_factory = tab_widget_factory
         self._header_action_handlers = header_action_handlers or {}
         self._header_on_unmatched = header_on_unmatched or show_window_callback
+        self._app_ctx = app_ctx
+        # Кнопки undo/redo/history — заполняются в _setup_undo_redo_ui
+        self._btn_undo: QPushButton | None = None
+        self._btn_redo: QPushButton | None = None
+        self._btn_history: QPushButton | None = None
         self._init_ui()
+        self._setup_undo_redo_ui()
 
     def _resolve_tab_factory(self) -> TabWidgetFactory:
         if self._tab_widget_factory is not None:
@@ -68,7 +81,9 @@ class MainWindow(QMainWindow):
             )
         )
 
-    def _build_header_config(self, header_cfg: Union[HeaderConfig, Dict[str, Any], None]) -> Dict[str, Any]:
+    def _build_header_config(
+        self, header_cfg: HeaderConfig | dict[str, Any] | None
+    ) -> dict[str, Any]:
         """HeaderConfig | dict → dict для HeaderWidget. Legacy: logo_path → logo.path."""
         if header_cfg is None:
             return HeaderConfig().model_dump()
@@ -131,6 +146,122 @@ class MainWindow(QMainWindow):
                 self._camera_tab = w
                 break
 
+    def _setup_undo_redo_ui(self) -> None:
+        """Подключить Ctrl+Z / Ctrl+Y и кнопки undo/redo в header."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+
+        # Shortcuts работают всегда (no-op при отсутствии bus)
+        self._shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self._shortcut_undo.activated.connect(self._on_undo)
+        self._shortcut_redo = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self._shortcut_redo.activated.connect(self._on_redo)
+        self._shortcut_redo_alt = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self._shortcut_redo_alt.activated.connect(self._on_redo)
+
+        # Кнопки undo/redo в header
+        self._btn_undo = create_header_button("↩", tooltip="Отменить (Ctrl+Z)")
+        self._btn_redo = create_header_button("↪", tooltip="Повторить (Ctrl+Y)")
+        self._btn_undo.clicked.connect(self._on_undo)
+        self._btn_redo.clicked.connect(self._on_redo)
+        self._btn_undo.setEnabled(False)
+        self._btn_redo.setEnabled(False)
+
+        # Кнопка «История»
+        self._btn_history = create_header_button("История ▼", tooltip="Последние действия")
+        self._btn_history.clicked.connect(self._show_history_menu)
+        self._btn_history.setEnabled(False)
+
+        # Вставить кнопки в header layout
+        header_layout = self._header.layout()
+        if header_layout is not None:
+            header_layout.addWidget(self._btn_undo)
+            header_layout.addWidget(self._btn_redo)
+            header_layout.addWidget(self._btn_history)
+
+        # Подписаться на обновления bus
+        if bus is not None:
+            bus.add_change_callback(self._update_undo_redo_state)
+
+    def _on_undo(self) -> None:
+        """Обработчик Ctrl+Z / кнопки Undo."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is not None:
+            bus.undo()
+
+    def _on_redo(self) -> None:
+        """Обработчик Ctrl+Y / кнопки Redo."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is not None:
+            bus.redo()
+
+    def _update_undo_redo_state(self) -> None:
+        """Обновить enabled-состояние кнопок undo/redo и текст статус-бара."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is None:
+            return
+        if self._btn_undo is not None:
+            self._btn_undo.setEnabled(bus.can_undo())
+        if self._btn_redo is not None:
+            self._btn_redo.setEnabled(bus.can_redo())
+        if self._btn_history is not None:
+            self._btn_history.setEnabled(bus.can_undo())
+        # Статус-бар
+        self._update_status_bar(bus)
+
+    def _update_status_bar(self, bus) -> None:
+        """Обновить текст статус-бара по последнему событию bus."""
+        event = bus.last_event
+        if event is None:
+            self.statusBar().showMessage("Готово")
+            return
+        event_type, action = event
+        desc = action.description or action.action_type.value
+        if event_type == "undo":
+            self.statusBar().showMessage(f"Отменено: {desc}")
+        elif event_type == "redo":
+            self.statusBar().showMessage(f"Повторено: {desc}")
+        else:
+            self.statusBar().showMessage(f"Последнее действие: {desc}")
+
+    def _show_history_menu(self) -> None:
+        """Показать dropdown с последними 20 Actions."""
+        from PyQt5.QtWidgets import QMenu
+
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is None:
+            return
+
+        actions = bus.history(20)
+        if not actions:
+            return
+
+        menu = QMenu(self)
+        # Показываем от новых к старым
+        for i, action in enumerate(reversed(actions)):
+            desc = action.description or action.action_type.value
+            label = f"{i + 1}. {desc}"
+            # Маркер текущей позиции (top of stack)
+            if i == 0:
+                label = f"● {label}"
+            menu_action = menu.addAction(label)
+            aid = action.action_id
+            menu_action.triggered.connect(lambda checked, _aid=aid: self._undo_to(_aid))
+
+        menu.exec_(self._btn_history.mapToGlobal(self._btn_history.rect().bottomLeft()))
+
+    def _undo_to(self, action_id: str) -> None:
+        """Откатить до указанного action."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is not None:
+            bus.undo_to(action_id)
+
+    def closeEvent(self, event) -> None:
+        """Отписаться от bus при закрытии окна."""
+        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
+        if bus is not None:
+            bus.remove_change_callback(self._update_undo_redo_state)
+        super().closeEvent(event)
+
     @property
     def image_panel(self) -> ImagePanelWidget:
         return self._image_panel
@@ -139,7 +270,7 @@ class MainWindow(QMainWindow):
     def tab_widget(self) -> TabWidget:
         return self._tab_widget
 
-    def display_frames(self, frames: Dict[str, Any]) -> None:
+    def display_frames(self, frames: dict[str, Any]) -> None:
         self._image_panel.display_frames(frames)
 
     def update_camera_status(self, text: str) -> None:

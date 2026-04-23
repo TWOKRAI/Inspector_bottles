@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from multiprocess_prototype_v3.registers.schemas.pipeline.widget_bridge import (
     apply_post_list_to_pipeline,
@@ -20,19 +20,28 @@ from .params import (
 )
 
 if TYPE_CHECKING:
+    from multiprocess_prototype_v3.frontend.actions.bus import ActionBus
+
     from .view import PostProcessingPanelViewProtocol
 
 
 class PostProcessingPresenter:
-    def __init__(self, *, view: PostProcessingPanelViewProtocol, model: PostProcessingModel) -> None:
+    def __init__(
+        self,
+        *,
+        view: PostProcessingPanelViewProtocol,
+        model: PostProcessingModel,
+        action_bus: ActionBus | None = None,
+    ) -> None:
         self._view = view
         self._model = model
+        self._action_bus = action_bus
 
     def _default_camera_id(self) -> str:
         ids = self._model.ui.camera_ids or []
         return ids[0] if ids else "default"
 
-    def _logical_ids_from_register(self) -> List[str]:
+    def _logical_ids_from_register(self) -> list[str]:
         rm = self._model.registers_manager
         if rm is None:
             return []
@@ -44,7 +53,7 @@ class PostProcessingPresenter:
             return [str(x) for x in raw]
         return []
 
-    def camera_ids_union(self) -> List[str]:
+    def camera_ids_union(self) -> list[str]:
         cfg = list(self._model.ui.camera_ids or [])
         keys = list(self._model.post_regions_by_camera.keys())
         logical = self._logical_ids_from_register()
@@ -60,7 +69,7 @@ class PostProcessingPresenter:
                 return i
         return -1
 
-    def _current_selection(self) -> Tuple[Optional[str], Optional[str]]:
+    def _current_selection(self) -> tuple[str | None, str | None]:
         return self._view.get_tree_selection()
 
     def load_from_register(self) -> None:
@@ -81,7 +90,7 @@ class PostProcessingPresenter:
         self._view.refresh_table()
         self._view.apply_form_from_region(None)
 
-    def on_tree_selection(self, camera_id: Optional[str], region_name: Optional[str]) -> None:
+    def on_tree_selection(self, camera_id: str | None, region_name: str | None) -> None:
         if camera_id is None:
             self._view.apply_form_from_region(None)
             return
@@ -112,7 +121,11 @@ class PostProcessingPresenter:
             regions[row]["processing_enabled"] = bool(value)
         else:
             return
-        self._push_register()
+        self._push_register_via_bus(
+            "modify",
+            region_name=str(regions[row].get("name", "")),
+            camera_id=camera_id,
+        )
         self._view.block_form_signals(True)
         self._view.refresh_table()
         self._view.select_region(camera_id, region_name)
@@ -139,7 +152,7 @@ class PostProcessingPresenter:
                 self._view.apply_form_from_region(old)
                 return
         regions[row] = merged
-        self._push_register()
+        self._push_register_via_bus("modify", region_name=new_name, camera_id=cam)
         self._view.block_form_signals(True)
         self._view.refresh_table()
         self._view.select_region(cam, new_name)
@@ -156,9 +169,9 @@ class PostProcessingPresenter:
         regions = self._model.post_regions_by_camera.setdefault(cam, [])
         names = [str(r.get("name", "")) for r in regions]
         regions.append(default_new_region(names))
-        self._push_register()
-        self._view.refresh_table()
         new_name = str(regions[-1].get("name", ""))
+        self._push_register_via_bus("add", region_name=new_name, camera_id=cam)
+        self._view.refresh_table()
         self._view.select_region(cam, new_name)
         self._view.apply_form_from_region(regions[-1])
 
@@ -178,8 +191,9 @@ class PostProcessingPresenter:
             return
         if not self._view.confirm_delete(f"Удалить регион «{r.get('name', '')}»?"):
             return
+        removed_name = str(r.get("name", ""))
         regions.pop(row)
-        self._push_register()
+        self._push_register_via_bus("remove", region_name=removed_name, camera_id=cam)
         self._view.refresh_table()
         self._view.apply_form_from_region(None)
 
@@ -196,7 +210,11 @@ class PostProcessingPresenter:
         if j < 0 or j >= len(regions):
             return
         regions[row], regions[j] = regions[j], regions[row]
-        self._push_register()
+        self._push_register_via_bus(
+            "modify",
+            region_name=str(regions[j].get("name", "")),
+            camera_id=cam,
+        )
         self._view.block_form_signals(True)
         self._view.refresh_table()
         self._view.select_region(cam, str(regions[j].get("name", "")))
@@ -238,7 +256,7 @@ class PostProcessingPresenter:
             n += 1
         reg = normalize_region_entry({**src, "name": new_name})
         regions.append(reg)
-        self._push_register()
+        self._push_register_via_bus("add", region_name=new_name, camera_id=cam)
         self._view.refresh_table()
         self._view.select_region(cam, new_name)
         self._view.apply_form_from_region(regions[-1])
@@ -273,3 +291,81 @@ class PostProcessingPresenter:
             "vision_pipeline",
             cfg.model_dump(mode="python"),
         )
+
+    def _snapshot_pipeline(self) -> Any:
+        """Снять снимок текущего vision_pipeline из регистра (для backward_patch)."""
+        rm = self._model.registers_manager
+        if rm is None:
+            return None
+        reg = rm.get_register(PROCESSOR_REGISTER)
+        if reg is None:
+            return None
+        pipeline = getattr(reg, "vision_pipeline", None)
+        if pipeline is None:
+            return None
+        if hasattr(pipeline, "model_dump"):
+            return pipeline.model_dump(mode="python")
+        return pipeline
+
+    def _build_pipeline_after(self) -> Any:
+        """Построить новое значение vision_pipeline на основе текущего состояния model."""
+        rm = self._model.registers_manager
+        if rm is None:
+            return None
+        reg = rm.get_register(PROCESSOR_REGISTER)
+        if reg is None:
+            return None
+        cfg = apply_post_list_to_pipeline(
+            pipeline_config_from_register(reg),
+            self._model.post_regions_by_camera,
+        )
+        return cfg.model_dump(mode="python")
+
+    def _push_register_via_bus(
+        self,
+        operation_type: str,
+        region_name: str = "",
+        camera_id: str = "",
+    ) -> None:
+        """Записать vision_pipeline через ActionBus (если подключён) или fallback на _push_register()."""
+        if self._action_bus is None:
+            self._push_register()
+            return
+
+        from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+        pipeline_before = self._snapshot_pipeline()
+        pipeline_after = self._build_pipeline_after()
+        cam = camera_id or self._model.selected_camera or ""
+
+        if operation_type == "add":
+            action = ActionBuilder.region_add(
+                cam,
+                {"name": region_name},
+                pipeline_before,
+                register_name=PROCESSOR_REGISTER,
+            )
+            action = action.model_copy(
+                update={
+                    "forward_patch": {**action.forward_patch, "pipeline_after": pipeline_after}
+                },
+            )
+        elif operation_type == "remove":
+            action = ActionBuilder.region_remove(
+                cam,
+                region_name,
+                pipeline_before,
+                pipeline_after,
+                register_name=PROCESSOR_REGISTER,
+            )
+        else:
+            # "modify" и все остальные случаи
+            action = ActionBuilder.region_modify(
+                cam,
+                region_name,
+                pipeline_before,
+                pipeline_after,
+                register_name=PROCESSOR_REGISTER,
+            )
+
+        self._action_bus.execute(action)

@@ -1,7 +1,8 @@
 # multiprocess_prototype_v3/frontend/windows/main_window/tab_factory.py
 """Единая фабрика вкладок TabWidget для MainWindow и FrontendLauncher."""
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
 
@@ -35,6 +36,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 recipe_manager=recipe_manager,
                 recipe_access=ctx.get_recipe_access(),
                 touch_keyboard=tk,
+                action_bus=ctx.action_bus,
             )
         if widget_key == "settings":
             return SettingsTabWidget(
@@ -46,6 +48,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 processing_tab_ui=ctx.get_processing_tab_ui(),
                 touch_keyboard=tk,
                 settings_profile_manager=ctx.settings_profile_manager,
+                action_bus=ctx.action_bus,
             )
         if widget_key == "processing":
             return ProcessingTabWidget(
@@ -57,6 +60,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 registers_manager=registers_manager,
                 ui=ctx.get_post_processing_tab_ui(),
                 touch_keyboard=tk,
+                action_bus=ctx.action_bus,
             )
         if widget_key == "cropped_regions":
             return CroppedRegionsTabWidget(
@@ -64,6 +68,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 ui=ctx.get_cropped_regions_tab_ui(),
                 touch_keyboard=tk,
                 camera_registry=ctx.camera_registry,
+                action_bus=ctx.action_bus,
             )
         if widget_key == "camera":
             return CameraTabWidget(
@@ -81,6 +86,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
             camera_registry = ctx.camera_registry
             if window_manager is None or display_router is None or camera_registry is None:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "display tab: window_manager, display_router или camera_registry не переданы в ctx.extras"
                 )

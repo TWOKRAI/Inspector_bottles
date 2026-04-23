@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Фабрика панелей параметров операций для Chain Editor.
 
@@ -252,9 +251,7 @@ def collect_params_from_panel(panel: QWidget) -> dict:
         if isinstance(widget, list):
             # BGR: список из 3 QSpinBox → list[int]
             result[field_name] = [sb.value() for sb in widget]
-        elif isinstance(widget, QSpinBox):
-            result[field_name] = widget.value()
-        elif isinstance(widget, QDoubleSpinBox):
+        elif isinstance(widget, QSpinBox) or isinstance(widget, QDoubleSpinBox):
             result[field_name] = widget.value()
         elif isinstance(widget, QCheckBox):
             result[field_name] = widget.isChecked()

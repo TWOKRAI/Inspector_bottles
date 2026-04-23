@@ -47,11 +47,13 @@ class SettingsTabWidget(BaseTab):
         processing_tab_ui: dict[str, Any] | None = None,
         touch_keyboard: Any | None = None,
         settings_profile_manager: Any | None = None,
+        action_bus: Any | None = None,
         parent: QWidget | None = None,
     ):
         """AppRecipePanel (таблица UI-схем) или заглушка без rm."""
         super().__init__(parent)
         self._registers_manager = registers_manager
+        self._action_bus = action_bus
         self._config = coerce_schema_config(ui, SettingsTabConfig)
         self._recipe_manager = recipe_manager
         self._access_ctx = (
@@ -101,6 +103,7 @@ class SettingsTabWidget(BaseTab):
                 registers_manager=binding.rm,
                 ui=None,  # дефолтный SettingsProfileTabConfig
                 touch_keyboard=self._touch_keyboard,
+                action_bus=self._action_bus,
             )
             layout.addWidget(self._profile_panel)
 

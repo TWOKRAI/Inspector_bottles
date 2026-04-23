@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from frontend_module.interfaces import IRegistersManagerGui
 
+from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
 from multiprocess_prototype_v3.registers.schemas.camera_tab import CAMERA_REGISTER
 
 
@@ -16,6 +17,26 @@ def set_camera_type_field(
     """Записать строковый тип камеры в CAMERA_REGISTER.camera_type."""
     if rm is not None:
         rm.set_field_value(CAMERA_REGISTER, "camera_type", camera_type)
+
+
+def set_camera_type_via_bus(
+    bus: Optional[Any],
+    rm: Optional[IRegistersManagerGui],
+    camera_type: str,
+) -> None:
+    """Записать camera_type через ActionBus (undo-able) или fallback на rm."""
+    if bus is None:
+        set_camera_type_field(rm, camera_type)
+        return
+    old = rm.get_field_value(CAMERA_REGISTER, "camera_type") if rm else None
+    action = ActionBuilder.field_set(
+        CAMERA_REGISTER,
+        "camera_type",
+        camera_type,
+        old,
+        description=f"Тип камеры: {camera_type}",
+    )
+    bus.execute(action)
 
 
 def persist_camera_type(camera_type: str) -> None:
