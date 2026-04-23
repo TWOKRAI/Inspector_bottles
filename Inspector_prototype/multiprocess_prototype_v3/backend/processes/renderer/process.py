@@ -3,16 +3,15 @@
 Тонкий ProcessModule: управление воркерами, IPC, SHM.
 Команды и register-хендлеры — в commands.py, адаптер — в adapter.py.
 """
+
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 import numpy as np
-
 from multiprocess_framework.modules.process_module import ProcessModule
-from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
+
 from multiprocess_prototype_v3.backend.helpers import (
     apply_register_update,
     message_as_dict,
@@ -30,11 +29,10 @@ class RendererProcess(ProcessModule):
     def _init_application_threads(self) -> None:
         self._log_info("RendererProcess initializing...")
 
-        # SHM middleware: приём оригинальных кадров от камеры (camera/camera_frame)
-        self._recv_frame_mw = FrameShmMiddleware(
-            self.memory_manager, owner="camera", slot="camera_frame"
-        )
-        self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
+        # Task 2.4: НЕ регистрируем статический FrameShmMiddleware для camera frame.
+        # При N камерах owner/slot определяются динамически из camera_id в данных
+        # сообщения (см. _read_original_frame). Middleware не нужен — кадры читаются
+        # вручную из SHM по camera_id.
 
         adapter = RendererAdapter(self)
         self._service = RendererService(
@@ -70,21 +68,39 @@ class RendererProcess(ProcessModule):
 
             msg = self.receive_message(timeout=0.1, channel_types=["data"])
             msg_dict = message_as_dict(msg)
-            if msg_dict.get("data_type") == "register_update":
+            data_type = msg_dict.get("data_type")
+            if data_type == "register_update":
                 apply_register_update(
                     msg_dict.get("data") or {}, RENDERER_REGISTER, register_handlers
                 )
                 continue
 
-            if msg_dict.get("data_type") != "detection_result":
+            # Task 2.2: SHM-регион камеры пересоздан — переоткрыть handle
+            if data_type == "shm_region_changed":
+                change_data = msg_dict.get("data") or {}
+                region_name = change_data.get("region_name", "")
+                new_w = change_data.get("new_width", 0)
+                new_h = change_data.get("new_height", 0)
+                if region_name and new_w > 0 and new_h > 0:
+                    camera_id = change_data.get("camera_id", 0)
+                    owner = f"camera_{camera_id}"
+                    if self.memory_manager:
+                        self.memory_manager.close_all(owner)
+                    self._log_info(
+                        "RendererProcess: SHM region %s resized to %dx%d",
+                        region_name,
+                        new_w,
+                        new_h,
+                    )
+                continue
+
+            if data_type != "detection_result":
                 continue
             data = msg_dict.get("data", {})
 
-            # Оригинальный кадр уже прочитан receive middleware (FrameShmMiddleware.on_receive)
-            original = msg_dict.get("frame")
-            if original is None:
-                # Fallback: прямое чтение из SHM
-                original = self._read_original_frame(data)
+            # Task 2.4: кадр читается напрямую из SHM по camera_id из данных
+            # (middleware не используется — у каждой камеры свой owner/slot)
+            original = self._read_original_frame(data)
             if original is None:
                 continue
             mask = self._read_mask_frame(data, original.shape[1], original.shape[0])
@@ -92,23 +108,33 @@ class RendererProcess(ProcessModule):
             # Делегация бизнес-логики в сервис
             self._service.render_frame(original, mask, data)
 
-    def _read_original_frame(self, data: dict) -> Optional[np.ndarray]:
-        """Прочитать оригинальный кадр из SHM камеры через MemoryManager."""
+    def _read_original_frame(self, data: dict) -> np.ndarray | None:
+        """Прочитать оригинальный кадр из SHM камеры через MemoryManager.
+
+        Task 2.4: owner/slot определяются динамически по camera_id из данных.
+        """
         mm = self.memory_manager
         if not mm:
             return None
-        images = mm.read_images("camera", "camera_frame", data.get("shm_index", 0), n=1)
+        camera_id = data.get("camera_id", 0)
+        owner = f"camera_{camera_id}"
+        slot = f"camera_{camera_id}_frame"
+        images = mm.read_images(owner, slot, data.get("shm_index", 0), n=1)
         if images:
             return images[0].copy()
         return None
 
     def _read_mask_frame(self, data: dict, width: int, height: int) -> np.ndarray:
-        """Прочитать маску из SHM процессора через MemoryManager."""
+        """Прочитать маску из SHM процессора через MemoryManager.
+
+        Task 2.4: owner/slot определяются динамически по camera_id из данных.
+        """
         mm = self.memory_manager
+        camera_id = data.get("camera_id", 0)
+        mask_owner = f"processor_{camera_id}"
+        mask_slot = f"processor_{camera_id}_mask"
         if mm and data.get("mask_shm_actual_name"):
-            images = mm.read_images(
-                "processor", "processor_mask", data.get("mask_shm_index", 0), n=1
-            )
+            images = mm.read_images(mask_owner, mask_slot, data.get("mask_shm_index", 0), n=1)
             if images:
                 return images[0].copy()
         return np.zeros((height, width, 3), dtype=np.uint8)

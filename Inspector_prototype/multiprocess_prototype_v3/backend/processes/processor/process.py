@@ -3,6 +3,7 @@
 Тонкий ProcessModule: управление воркерами, IPC, SHM.
 Команды и register-хендлеры — в commands.py, адаптер — в adapter.py.
 """
+
 from __future__ import annotations
 
 import time
@@ -11,11 +12,12 @@ from pathlib import Path
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
+
 from multiprocess_prototype_v3.backend.helpers import apply_register_update, message_as_dict
 from multiprocess_prototype_v3.registers import PROCESSOR_REGISTER
+from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.processor.service import ProcessorService
-from multiprocess_prototype_v3.services.processor.chain.thread_pool import ChainThreadPool
 from multiprocess_prototype_v3.services.processor.worker_pool.dispatcher import WorkerPoolDispatcher
 
 from .adapter import ProcessorAdapter
@@ -29,20 +31,28 @@ class ProcessorProcess(ProcessModule):
         self._log_info("ProcessorProcess initializing...")
         app_cfg = self.get_config("config") or {}
 
-        # SHM middleware: приём кадров от камеры (camera/camera_frame)
+        # camera_id из конфига — определяет привязку к камере
+        camera_id = app_cfg.get("camera_id", 0)
+        self._camera_id = camera_id
+
+        # SHM middleware: приём кадров от конкретной камеры (camera_{id}/camera_{id}_frame)
         self._recv_frame_mw = FrameShmMiddleware(
-            self.memory_manager, owner="camera", slot="camera_frame"
+            self.memory_manager,
+            owner=f"camera_{camera_id}",
+            slot=f"camera_{camera_id}_frame",
         )
         self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
 
-        # SHM middleware: отправка масок (processor/processor_mask)
+        # SHM middleware: отправка масок (processor_{id}/processor_{id}_mask)
         self._send_mask_mw = FrameShmMiddleware(
-            self.memory_manager, owner=self.name, slot="processor_mask"
+            self.memory_manager,
+            owner=self.name,
+            slot=f"processor_{camera_id}_mask",
         )
         self.router_manager.add_send_middleware(self._send_mask_mw.on_send)
 
-        # Создаём адаптер (реализация порта)
-        adapter = ProcessorAdapter(self)
+        # Создаём адаптер (реализация порта), привязанный к camera_id
+        adapter = ProcessorAdapter(self, camera_id=camera_id)
 
         # Создаём детектор (бизнес-зависимость)
         detector = ColorBlobDetector(
@@ -128,11 +138,40 @@ class ProcessorProcess(ProcessModule):
             msg = self.receive_message(timeout=0.1, channel_types=["data"])
             msg_dict = message_as_dict(msg)
 
+            data_type = msg_dict.get("data_type")
+
             # Инфраструктура: обработка register_update
-            if msg_dict.get("data_type") == "register_update":
+            if data_type == "register_update":
                 apply_register_update(
                     msg_dict.get("data") or {}, PROCESSOR_REGISTER, register_handlers
                 )
+                continue
+
+            # Task 2.2: SHM-регион камеры пересоздан — переоткрыть handle
+            if data_type == "shm_region_changed":
+                change_data = msg_dict.get("data") or {}
+                region_name = change_data.get("region_name", "")
+                new_w = change_data.get("new_width", 0)
+                new_h = change_data.get("new_height", 0)
+                if region_name and new_w > 0 and new_h > 0:
+                    # Закрыть старый SHM handle и переоткрыть с новым shape
+                    camera_id = change_data.get("camera_id", 0)
+                    owner = f"camera_{camera_id}"
+                    if self.memory_manager:
+                        self.memory_manager.close_all(owner)
+                    # Обновить receive middleware shape (будет использовать новый handle)
+                    self._recv_frame_mw = FrameShmMiddleware(
+                        self.memory_manager, owner=owner, slot=region_name
+                    )
+                    # Обновить target_width/height в сервисе
+                    self._service._target_width = new_w
+                    self._service._target_height = new_h
+                    self._log_info(
+                        "ProcessorProcess: SHM region %s resized to %dx%d",
+                        region_name,
+                        new_w,
+                        new_h,
+                    )
                 continue
 
             # Phase 5c: ответ от worker-процесса → dispatcher

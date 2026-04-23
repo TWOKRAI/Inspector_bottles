@@ -4,12 +4,12 @@ Phase 3: параметризация по camera_id + ring-buffer (AD-6).
 Каждая камера пишет в свой ring-buffer из K SHM-слотов.
 frame_ready payload содержит camera_id, seq_id, slot_index.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
-
 from multiprocess_framework.modules.process_module import ProcessIO
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ class CameraAdapter:
         self,
         process,
         camera_id: int = 0,
-        ring_buffer: Optional["RingBufferWriter"] = None,
+        ring_buffer: RingBufferWriter | None = None,
     ) -> None:
         self._io = ProcessIO(process)
         self._camera_id = camera_id
@@ -38,8 +38,9 @@ class CameraAdapter:
 
     def send_frame_to_processor(self, data: dict) -> None:
         # camera_id в payload для маршрутизации
+        # Target — конкретный процессор, привязанный к данной камере
         data_with_id = {**data, "camera_id": self._camera_id}
-        self._io.send_data("processor", "frame_ready", data_with_id)
+        self._io.send_data(f"processor_{self._camera_id}", "frame_ready", data_with_id)
 
     def send_to_gui(self, msg_type: str, data: dict) -> None:
         data_with_id = {**data, "camera_id": self._camera_id}
@@ -47,7 +48,7 @@ class CameraAdapter:
 
     def write_frame_to_shm(
         self, frame: np.ndarray, frame_id: int, timestamp: float
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Записать кадр в SHM через ring-buffer (AD-6) или fallback ProcessIO."""
         if self._ring_buffer is not None:
             slot_index, seq_id = self._ring_buffer.write(frame)
@@ -58,3 +59,34 @@ class CameraAdapter:
             }
         # Fallback без ring-buffer (обратная совместимость)
         return self._io.write_frames_to_shm(self._shm_region, self._shm_slot, [frame])
+
+    def request_shm_resize(self, new_width: int, new_height: int) -> None:
+        """Запросить пересоздание SHM-региона под новое разрешение.
+
+        Отправляет shm_region_change_request в process_manager.
+        Camera продолжает работу (resize к старым размерам) до получения
+        shm_region_changed ответа.
+        """
+        import logging
+
+        # Warning для больших регионов (>50MB per slot, 3 channels, uint8)
+        region_bytes = new_width * new_height * 3
+        if region_bytes > 50 * 1024 * 1024:
+            logging.getLogger(__name__).warning(
+                "SHM region %s: %dx%d = %.1f MB per slot (>50MB)",
+                self._shm_slot,
+                new_width,
+                new_height,
+                region_bytes / (1024 * 1024),
+            )
+
+        self._io.send_data(
+            "process_manager",
+            "shm_region_change_request",
+            {
+                "camera_id": self._camera_id,
+                "region_name": f"camera_{self._camera_id}_frame",
+                "new_width": new_width,
+                "new_height": new_height,
+            },
+        )

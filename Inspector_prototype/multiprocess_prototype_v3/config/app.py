@@ -2,15 +2,19 @@
 
 Phase 3: поддержка гетерогенного списка камер (webcam + hikvision + simulator + file
 в одном запуске). Список камер приходит из рецепта или строится по settings profile.
+
+Phase 4 (Task 2.4): N процессоров (по одному на камеру). Каждый Processor привязан
+к своей камере через camera_id, все шлют detection_result в общий Renderer.
 """
 
 from __future__ import annotations
+
+import warnings
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase
 from multiprocess_framework.modules.process_module import ProcessLaunchConfig
 
 from multiprocess_prototype_v3.backend.processes.camera.config import CameraConfig
-from .shm_region import ShmRegionSpec
 from multiprocess_prototype_v3.backend.processes.database.config import DatabaseConfig
 from multiprocess_prototype_v3.backend.processes.gui.config import GuiConfig
 from multiprocess_prototype_v3.backend.processes.processor.config import ProcessorConfig
@@ -21,6 +25,7 @@ from multiprocess_prototype_v3.backend.processes.renderer.config import Renderer
 from multiprocess_prototype_v3.backend.processes.robot.config import RobotConfig
 
 from .logging import LoggingConfig
+from .shm_region import ShmRegionSpec
 
 
 class AppConfig(SchemaBase):
@@ -29,12 +34,15 @@ class AppConfig(SchemaBase):
     cameras — гетерогенный список: каждая камера может быть своего типа
     (webcam, hikvision, simulator, file). Если пуст — fallback на 1 симулятор.
 
+    processors — список процессоров (по одному на камеру). Если пуст —
+    автоматически создаётся N ProcessorConfig (один per camera) в model_post_init.
+
     worker_pool_size — количество ProcessorWorker-процессов в пуле (0 = пул отключён).
     """
 
     logging: LoggingConfig = LoggingConfig()
     cameras: list[CameraConfig] = []
-    processor: ProcessorConfig = ProcessorConfig()
+    processors: list[ProcessorConfig] = []
     renderer: RendererConfig = RendererConfig()
     robot: RobotConfig = RobotConfig()
     database: DatabaseConfig = DatabaseConfig()
@@ -45,9 +53,39 @@ class AppConfig(SchemaBase):
     display_enabled: bool = True
 
     def model_post_init(self, __context: object) -> None:
-        """Fallback: если cameras пуст — создаём 1 симулятор (обратная совместимость)."""
+        """Fallback: cameras и processors заполняются автоматически если пусты.
+
+        Если cameras пуст — создаём 1 симулятор (обратная совместимость).
+        Если processors пуст — создаём N ProcessorConfig (один per camera),
+        наследуя разрешение от соответствующей камеры.
+        """
         if not self.cameras:
             object.__setattr__(self, "cameras", [CameraConfig(camera_id=0)])
+
+        if not self.processors:
+            processors = []
+            for cam in self.cameras:
+                processors.append(
+                    ProcessorConfig(
+                        camera_id=cam.camera_id,
+                        resolution_width=cam.resolution_width,
+                        resolution_height=cam.resolution_height,
+                    )
+                )
+            object.__setattr__(self, "processors", processors)
+
+    @property
+    def processor(self) -> ProcessorConfig:
+        """Backward compat: доступ к первому процессору.
+
+        DEPRECATED: используйте processors[0] напрямую.
+        """
+        warnings.warn(
+            "AppConfig.processor deprecated, используйте processors[0]",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.processors[0]
 
     @property
     def worker_configs(self) -> list[ProcessorWorkerConfig]:
@@ -86,14 +124,14 @@ class AppConfig(SchemaBase):
         return names
 
     def all_process_configs(self) -> list[ProcessLaunchConfig]:
-        """Все конфиги процессов: N камер + processor + [renderer] + robot + database + gui + K воркеров.
+        """Все конфиги процессов: N камер + N процессоров + [renderer] + robot + database + gui + K воркеров.
 
         Renderer исключается если display_enabled=False (headless-режим).
         GUI процесс остаётся в любом режиме — он управляет pipeline-логикой.
         """
         configs = [
             *self.cameras,
-            self.processor,
+            *self.processors,
         ]
         if self.display_enabled:
             configs.append(self.renderer)
