@@ -15,6 +15,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from multiprocess_prototype_v3.frontend.utils import ensure_main_thread
+
 from .source_selector import SourceSelectorCombo
 
 
@@ -116,6 +118,7 @@ class DisplayWindow(QWidget):
         """Текущий выбранный source_ref."""
         return self._source_selector.current_source
 
+    @ensure_main_thread
     def update_frame(self, frame: np.ndarray) -> None:
         """Отобразить новый кадр в области просмотра.
 

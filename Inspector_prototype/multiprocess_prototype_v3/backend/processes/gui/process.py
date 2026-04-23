@@ -81,6 +81,9 @@ class GuiProcess(ProcessModule):
 
     def run(self):
         """Запустить FrontendLauncher (PyQt5 event loop)."""
+        # Базовый run(): статус RUNNING + запуск heartbeat воркера
+        super().run()
+
         from multiprocess_prototype_v3.frontend.launcher import FrontendLauncher
 
         app_cfg = self.get_config("config") or {}

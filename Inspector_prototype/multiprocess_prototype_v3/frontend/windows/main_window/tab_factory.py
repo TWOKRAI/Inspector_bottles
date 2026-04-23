@@ -15,6 +15,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
         CameraTabWidget,
         CroppedRegionsTabWidget,
         DisplayTabWidget,
+        GraphEditorTabWidget,
         PostProcessingTabWidget,
         ProcessingTabWidget,
         RecipesTabWidget,
@@ -95,6 +96,10 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 window_manager=window_manager,
                 display_router=display_router,
                 camera_registry=camera_registry,
+            )
+        if widget_key == "graph_editor":
+            return GraphEditorTabWidget(
+                action_bus=ctx.action_bus,
             )
         return None
 

@@ -52,6 +52,7 @@ def create_header_button(
     on_click: Optional[Callable[[], None]] = None,
     icon=None,
     parent: Optional[QWidget] = None,
+    tooltip: Optional[str] = None,
 ) -> QPushButton:
     """Создать кнопку в стиле header."""
     btn = QPushButton(parent)
@@ -59,6 +60,8 @@ def create_header_button(
         btn.setText(label)
     btn.setMinimumSize(HEADER_BUTTON_WIDTH, HEADER_BUTTON_HEIGHT)
     btn.setStyleSheet(HEADER_BUTTON_STYLESHEET)
+    if tooltip:
+        btn.setToolTip(tooltip)
     if on_click:
         btn.clicked.connect(on_click)
     if icon:
