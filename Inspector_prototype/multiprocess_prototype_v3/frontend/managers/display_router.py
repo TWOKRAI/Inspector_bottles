@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from backend.routing.frame_router_setup import subscribe_to_camera, unsubscribe_from_camera
 from registers.display.presets import LayoutPreset, preset_subscriptions
@@ -44,6 +45,7 @@ class DisplayRouter:
         memory_manager: object,
         throttle_middleware: FrameThrottleMiddleware,
         headless: bool = False,
+        action_bus: object | None = None,
     ) -> None:
         """Инициализация DisplayRouter.
 
@@ -53,12 +55,15 @@ class DisplayRouter:
             throttle_middleware: FrameThrottleMiddleware для ограничения FPS каналов.
             headless: Если True — headless-режим без display-окон (CI/headless pipeline).
                       В этом режиме все вызовы subscribe() — no-op, SHM не аллоцируется.
+            action_bus: ActionBus для записи LAYOUT_CHANGE действий (опционально).
         """
         self._router_manager = router_manager
         self._memory_manager = memory_manager
         self._throttle = throttle_middleware
         # Флаг headless-режима: подписки пропускаются, SHM не аллоцируется
         self._headless = headless
+        # ActionBus для записи display-действий (может быть None)
+        self._action_bus = action_bus
 
         # Активные подписки: subscription_id → DisplaySubscription
         self._active: dict[str, DisplaySubscription] = {}
@@ -188,7 +193,9 @@ class DisplayRouter:
             # Отписываем канал из frame_router fan-out
             if camera_id is not None:
                 ok = unsubscribe_from_camera(
-                    self._router_manager, camera_id, channel_name,
+                    self._router_manager,
+                    camera_id,
+                    channel_name,
                 )
                 if not ok:
                     logger.warning(
@@ -238,6 +245,11 @@ class DisplayRouter:
             preset: Пресет раскладки (SINGLE, DUAL, QUAD и т.д.).
             camera_ids: Список camera_id для формирования подписок.
         """
+        # Снимок подписок до смены (для undo)
+        subs_before = (
+            [s.model_dump() for s in self.get_active_subscriptions()] if self._action_bus else None
+        )
+
         # Отписываем все текущие подписки
         self.unsubscribe_all()
 
@@ -253,6 +265,14 @@ class DisplayRouter:
                     sub.window_id,
                     preset.value,
                 )
+
+        # Запись в bus (если подключён)
+        if self._action_bus is not None:
+            subs_after = [s.model_dump() for s in self.get_active_subscriptions()]
+            from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+            action = ActionBuilder.layout_change(preset.value, subs_before, subs_after)
+            self._action_bus.record(action)
 
     def add_frame_callback(self, window_id: str, callback: Callable) -> None:
         """Зарегистрировать callback для доставки кадров в окно.
@@ -289,7 +309,7 @@ class DisplayRouter:
             logger.warning("Неожиданный формат канала: '%s'", channel)
             return
 
-        window_id = channel[len(prefix):]
+        window_id = channel[len(prefix) :]
 
         with self._lock:
             callback = self._frame_callbacks.get(window_id)

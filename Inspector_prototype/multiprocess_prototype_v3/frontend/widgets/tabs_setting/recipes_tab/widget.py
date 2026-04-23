@@ -5,20 +5,26 @@ RecipesTabWidget — вкладка рецептов: только рецепт�
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
-from frontend_module.widgets.tabs import BaseTab
-from frontend_module.widgets.tabs import RegisterBindingContext, create_registers_placeholder
 from frontend_module.core.qt_imports import QScrollArea, QVBoxLayout, QWidget, pyqtSignal
 from frontend_module.core.schema_config import coerce_schema_config
 from frontend_module.interfaces import IRegistersManagerGui
+from frontend_module.widgets.tabs import (
+    BaseTab,
+    RegisterBindingContext,
+    create_registers_placeholder,
+)
 
-from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
-from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
+from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import (
+    RecipeManagerProtocol,
+)
+from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from ...settings_recipe_widget.schemas import RecipesTabConfig
 from ...recipes_widget import RegisterRecipePanelWidget as RegisterRecipePanel
+from ...settings_recipe_widget.schemas import RecipesTabConfig
 
 
 class RecipesTabWidget(BaseTab):
@@ -31,18 +37,20 @@ class RecipesTabWidget(BaseTab):
     def __init__(
         self,
         *,
-        registers_manager: Optional[IRegistersManagerGui] = None,
-        ui: Optional[Union[RecipesTabConfig, dict]] = None,
-        recipe_manager: Optional[RecipeManagerProtocol] = None,
-        recipe_access: Optional[Union[AccessContext, dict]] = None,
-        on_recipe_applied: Optional[Callable[[int], None]] = None,
-        on_recipe_saved: Optional[Callable[[int], None]] = None,
+        registers_manager: IRegistersManagerGui | None = None,
+        ui: RecipesTabConfig | dict | None = None,
+        recipe_manager: RecipeManagerProtocol | None = None,
+        recipe_access: AccessContext | dict | None = None,
+        on_recipe_applied: Callable[[int], None] | None = None,
+        on_recipe_saved: Callable[[int], None] | None = None,
         touch_keyboard: Any | None = None,
-        parent: Optional[QWidget] = None,
+        action_bus: Any | None = None,
+        parent: QWidget | None = None,
     ):
         """Панель рецептов регистров в QScrollArea или заглушка без rm."""
         super().__init__(parent)
         self._registers_manager = registers_manager
+        self._action_bus = action_bus
         self._ui = coerce_schema_config(ui, RecipesTabConfig)
         self._recipe_manager = recipe_manager
         self._access_ctx = (
@@ -55,11 +63,11 @@ class RecipesTabWidget(BaseTab):
         self._touch_keyboard = merge_touch_keyboard_dicts(
             touch_keyboard, getattr(self._ui, "touch_keyboard", None)
         )
-        self._register_panel: Optional[RegisterRecipePanel] = None
+        self._register_panel: RegisterRecipePanel | None = None
         self._init_ui()
 
     @property
-    def registers_manager(self) -> Optional[IRegistersManagerGui]:
+    def registers_manager(self) -> IRegistersManagerGui | None:
         """Rm для внешних обновлений."""
         return self._registers_manager
 
@@ -84,6 +92,7 @@ class RecipesTabWidget(BaseTab):
             recipe_manager=self._recipe_manager,
             recipe_access=self._access_ctx,
             touch_keyboard=self._touch_keyboard,
+            action_bus=self._action_bus,
             on_recipe_applied=self._on_recipe_applied,
             on_recipe_saved=self._on_recipe_saved,
         )

@@ -6,30 +6,32 @@ FrontendLauncher — конструктор frontend.
 GuiProcess делегирует run() в launcher.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from frontend_module import FrontendLaunchHooks, run_process_attached_frontend
+from frontend_module.core.schema_config import coerce_schema_config
 from frontend_module.windows import LoadingWindow
 
-from frontend_module.core.schema_config import coerce_schema_config
-
-from multiprocess_prototype_v3.registers import create_registers
+from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
+from multiprocess_prototype_v3.frontend.commands import GuiCommandHandler
+from multiprocess_prototype_v3.frontend.configs.frontend_config import build_frontend_config
+from multiprocess_prototype_v3.frontend.diagnostics import attach_ui_diagnostics
 from multiprocess_prototype_v3.frontend.managers import RecipeManager, SettingsProfileManager
-from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype_v3.frontend.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
     build_default_app_aggregate,
 )
-from multiprocess_prototype_v3.frontend.configs.frontend_config import build_frontend_config
-from multiprocess_prototype_v3.frontend.diagnostics import attach_ui_diagnostics
-from multiprocess_prototype_v3.frontend.commands import GuiCommandHandler
+from multiprocess_prototype_v3.frontend.managers.camera_registry import CameraRegistry
+from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype_v3.frontend.widgets import build_camera_tab_callbacks
 from multiprocess_prototype_v3.frontend.widgets.tabs_setting.camera_tab.schemas import (
     CameraTabUiConfig,
 )
-from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
-from multiprocess_prototype_v3.frontend.managers.camera_registry import CameraRegistry
-from multiprocess_prototype_v3.frontend.windows.main_window import MainWindow, create_tab_widget_factory
+from multiprocess_prototype_v3.frontend.windows.main_window import (
+    MainWindow,
+    create_tab_widget_factory,
+)
+from multiprocess_prototype_v3.registers import create_registers
 
 
 class FrontendLauncher:
@@ -39,7 +41,7 @@ class FrontendLauncher:
     run() создаёт FrontendManager, инициализирует, запускает приложение.
     """
 
-    def __init__(self, process_ref: Any, app_config: Dict[str, Any]):
+    def __init__(self, process_ref: Any, app_config: dict[str, Any]):
         """
         Args:
             process_ref: GuiProcess (ProcessModule: _msg, send_message, get_config).
@@ -48,7 +50,7 @@ class FrontendLauncher:
         self._process = process_ref
         self._app_config = app_config or {}
 
-    def build_config(self) -> Dict[str, Any]:
+    def build_config(self) -> dict[str, Any]:
         """Конфиг для FrontendManager (schema-driven, Dict at Boundary)."""
         return build_frontend_config(self._app_config)
 
@@ -60,7 +62,7 @@ class FrontendLauncher:
         self,
         window_manager: Any,
         frontend_manager: Any,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         sender: Any,
         app: Any,
         process_ref: Any,
@@ -103,7 +105,9 @@ class FrontendLauncher:
         camera_registry = CameraRegistry(config.get("camera_configs"))
 
         # --- Phase 6: Display Router + Window Manager ---
-        from multiprocess_prototype_v3.backend.routing.throttle_middleware import FrameThrottleMiddleware
+        from multiprocess_prototype_v3.backend.routing.throttle_middleware import (
+            FrameThrottleMiddleware,
+        )
         from multiprocess_prototype_v3.frontend.managers.display_router import DisplayRouter
         from multiprocess_prototype_v3.frontend.managers.window_manager import DisplayWindowManager
 
@@ -129,6 +133,10 @@ class FrontendLauncher:
         process._window_manager_display = window_manager_display
         process._throttle_mw = throttle_mw
 
+        from multiprocess_prototype_v3.frontend.actions.default_bus_factory import (
+            create_default_action_bus,
+        )
+
         app_ctx = FrontendAppContext(
             config=config,
             registers_manager=regs,
@@ -138,6 +146,7 @@ class FrontendLauncher:
             settings_profile_manager=settings_profile_manager,
             command_handler=cmd,
             camera_registry=camera_registry,
+            action_bus=create_default_action_bus(regs),
             extras={
                 "window_manager": window_manager_display,
                 "display_router": display_router,
@@ -162,6 +171,7 @@ class FrontendLauncher:
                 tab_widget_factory=tab_widget_factory,
                 header_action_handlers={},
                 header_on_unmatched=header_on_unmatched if wm else None,
+                app_ctx=app_ctx,  # NEW — передать контекст с ActionBus
             )
             process._ui_diagnostics = attach_ui_diagnostics(win, config)
             process._window = win
@@ -202,7 +212,7 @@ class FrontendLauncher:
             if key in factories:
                 wm.register(name, factories[key])
 
-    def _on_registers_boot(self, rm: Any, config: Dict[str, Any]) -> None:
+    def _on_registers_boot(self, rm: Any, config: dict[str, Any]) -> None:
         if rm and hasattr(rm, "set_field_value"):
             ct = config.get("camera_type", "simulator")
             rm.set_field_value("camera", "camera_type", ct)

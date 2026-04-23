@@ -19,9 +19,12 @@ class CroppedRegionsTabWidget(PanelTabBase[CroppedRegionsPanelWidget, CroppedReg
     _placeholder_name = "Области (ROI)"
 
     def _build_panel_kwargs(self) -> dict[str, Any]:
-        """Прокинуть camera_registry из tab kwargs в панель."""
+        """Прокинуть camera_registry и action_bus из tab kwargs в панель."""
         kw: dict[str, Any] = {}
         cr = self._extra_kwargs.get("camera_registry")
         if cr is not None:
             kw["camera_registry"] = cr
+        ab = self._extra_kwargs.get("action_bus")
+        if ab is not None:
+            kw["action_bus"] = ab
         return kw
