@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
 from registers.display.presets import LayoutPreset
 
 if TYPE_CHECKING:
-    from frontend.managers.camera_registry import CameraRegistry
+    from state_store.adapters.camera_state_adapter import CameraStateAdapter
     from frontend.managers.display_router import DisplayRouter
     from frontend.managers.window_manager import DisplayWindowManager
 
@@ -43,7 +43,7 @@ class DisplayTabWidget(QWidget):
         self,
         window_manager: DisplayWindowManager,
         display_router: DisplayRouter,
-        camera_registry: CameraRegistry,
+        camera_registry: "CameraStateAdapter",
         parent: Any | None = None,
     ) -> None:
         """Инициализация вкладки Display.
@@ -51,7 +51,7 @@ class DisplayTabWidget(QWidget):
         Args:
             window_manager: Менеджер lifecycle display-окон.
             display_router: Маршрутизатор display-подписок.
-            camera_registry: Реестр камер (для получения camera_ids).
+            camera_registry: Адаптер камер (для получения camera_ids).
             parent: Родительский QWidget.
         """
         super().__init__(parent)
@@ -250,9 +250,9 @@ class DisplayTabWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _get_camera_ids(self) -> list[int]:
-        """Получить список camera_ids из реестра камер.
+        """Получить список camera_ids из адаптера камер.
 
         Returns:
-            Список целочисленных camera_id из CameraRegistry.
+            Список целочисленных camera_id из CameraStateAdapter.
         """
-        return [entry.camera_id for entry in self._camera_registry.all_entries()]
+        return self._camera_registry.camera_ids()

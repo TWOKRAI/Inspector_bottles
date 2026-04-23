@@ -21,7 +21,7 @@ from multiprocess_prototype_v3.frontend.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
     build_default_app_aggregate,
 )
-from multiprocess_prototype_v3.frontend.managers.camera_registry import CameraRegistry
+from state_store.adapters.camera_state_adapter import CameraStateAdapter
 from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype_v3.frontend.widgets import build_camera_tab_callbacks
 from multiprocess_prototype_v3.frontend.widgets.tabs_setting.camera_tab.schemas import (
@@ -102,7 +102,37 @@ class FrontendLauncher:
             settings_profile_manager.ensure_default_profile(regs)
 
         camera_type = config.get("camera_type", "simulator")
-        camera_registry = CameraRegistry(config.get("camera_configs"))
+
+        # Phase 4d: StateProxy + RegistersStateAdapter
+        from state_store.adapters.registers_adapter import RegistersStateAdapter
+
+        state_proxy = getattr(process, "_state_proxy", None)
+
+        if state_proxy is not None and regs is not None:
+            # Построить маппинг (register_name, field_name) -> state_path по конвенции
+            path_mapping = self._build_path_mapping(regs, config)
+
+            registers_adapter = RegistersStateAdapter(
+                registers_manager=regs,
+                state_proxy=state_proxy,
+                path_mapping=path_mapping,
+            )
+            registers_adapter.connect()
+            # Сохраняем в process для lifecycle-управления
+            process._registers_adapter = registers_adapter
+
+        # Phase 4f: CameraStateAdapter вместо CameraRegistry
+        # num_cameras — из camera_configs (список конфигов) или дефолт 1
+        camera_configs = config.get("camera_configs") or []
+        num_cameras = len(camera_configs) if camera_configs else 1
+        camera_registry = CameraStateAdapter(
+            state_proxy=state_proxy,
+            num_cameras=num_cameras,
+        )
+        if state_proxy is not None:
+            camera_registry.connect()
+            # Сохраняем для lifecycle-управления
+            process._camera_state_adapter = camera_registry
 
         # --- Phase 6: Display Router + Window Manager ---
         from multiprocess_prototype_v3.backend.routing.throttle_middleware import (
@@ -212,6 +242,57 @@ class FrontendLauncher:
             key = entry.get("factory_key", name)
             if key in factories:
                 wm.register(name, factories[key])
+
+    def _build_path_mapping(
+        self, regs: Any, config: dict[str, Any]
+    ) -> dict[tuple[str, str], str]:
+        """Построить маппинг (register_name, field_name) -> state_path.
+
+        Маппинг основан на конвенции именования:
+        - camera register    → cameras.{camera_id}.config.{field}
+        - processor register → processor.{camera_id}.config.{field}
+        - renderer register  → renderer.config.{field}
+        - robot register     → robot.config.{field}
+        - database register  → database.config.{field}
+
+        Args:
+            regs: RegistersManager с методами register_names() и get_register().
+            config: конфиг приложения (содержит camera_id и пр.).
+
+        Returns:
+            Словарь (register_name, field_name) -> state_path.
+        """
+        mapping: dict[tuple[str, str], str] = {}
+        camera_id = config.get("camera_id", 0)
+
+        # Префиксы state_path по имени регистра
+        PREFIX_MAP = {
+            "camera": f"cameras.{camera_id}.config",
+            "processor": f"processor.{camera_id}.config",
+            "renderer": "renderer.config",
+            "robot": "robot.config",
+            "database": "database.config",
+        }
+
+        for reg_name in regs.register_names():
+            prefix = PREFIX_MAP.get(reg_name)
+            if prefix is None:
+                # Неизвестный регистр — пропускаем
+                continue
+            reg = regs.get_register(reg_name)
+            if reg is None:
+                continue
+            # Получаем поля из Pydantic-модели
+            if hasattr(reg, "model_fields"):
+                fields = reg.model_fields.keys()
+            elif hasattr(reg, "__fields__"):
+                fields = reg.__fields__.keys()
+            else:
+                continue
+            for field in fields:
+                mapping[(reg_name, field)] = f"{prefix}.{field}"
+
+        return mapping
 
     def _on_registers_boot(self, rm: Any, config: dict[str, Any]) -> None:
         if rm and hasattr(rm, "set_field_value"):
