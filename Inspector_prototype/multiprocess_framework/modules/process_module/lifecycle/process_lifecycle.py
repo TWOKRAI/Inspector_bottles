@@ -171,7 +171,7 @@ class ProcessLifecycle:
         """
         try:
             # 1. Устанавливаем флаг остановки
-            self.process.stop_process = True
+            self.process._stop_requested = True
 
             # 1b. Снять контекст логирования
             logger = self.process.get_manager("logger")

@@ -282,20 +282,17 @@ class TestOnConfigChanged:
 # Тест dual-mode: register_update НЕ удалён
 # ===========================================================================
 
-class TestDualMode:
-    """Проверяем что dual-mode сохранён: _capture_worker содержит register_update."""
+class TestStateProxyOnly:
+    """Проверяем что register_update удалён: только StateProxy путь (Phase 4f)."""
 
-    def test_capture_worker_has_register_update_handling(self):
-        """_capture_worker в process.py содержит обработку register_update (dual-mode)."""
+    def test_capture_worker_no_register_update(self):
+        """_capture_worker в process.py НЕ содержит register_update (убран в 4f.3)."""
         import inspect
         from multiprocess_prototype_v3.backend.processes.camera.process import CameraProcess
 
         source = inspect.getsource(CameraProcess._capture_worker)
-        assert "register_update" in source, (
-            "register_update должен присутствовать в _capture_worker (dual-mode не удалён)"
-        )
-        assert "apply_register_update" in source, (
-            "apply_register_update должен вызываться в _capture_worker"
+        assert "apply_register_update" not in source, (
+            "apply_register_update удалён в Phase 4f.3 — только StateProxy"
         )
 
     def test_process_has_on_config_changed_method(self):

@@ -59,7 +59,7 @@ class ProcessAdapter(BaseAdapter):
                 )
                 if state and "status" in state:
                     return state["status"]
-            if self.manager.stop_process:
+            if self.manager._stop_requested:
                 return ProcessStatus.STOPPED.value
             return ProcessStatus.RUNNING.value
         except Exception:

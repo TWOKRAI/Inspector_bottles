@@ -61,7 +61,10 @@ class CroppedRegionsPresenter:
     def camera_ids_union(self) -> list[str]:
         registry_ids: list[str] = []
         if self._model.camera_registry is not None:
-            registry_ids = [str(e.camera_id) for e in self._model.camera_registry.all_entries()]
+            if hasattr(self._model.camera_registry, "camera_ids"):
+                registry_ids = [str(cid) for cid in self._model.camera_registry.camera_ids()]
+            elif hasattr(self._model.camera_registry, "all_entries"):
+                registry_ids = [str(e.camera_id) for e in self._model.camera_registry.all_entries()]
         cfg = list(self._model.ui.camera_ids or [])
         keys = list(self._model.crop_regions_by_camera.keys())
         logical = self._logical_ids_from_register()

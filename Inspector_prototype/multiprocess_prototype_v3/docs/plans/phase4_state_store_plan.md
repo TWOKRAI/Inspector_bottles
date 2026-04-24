@@ -1,8 +1,9 @@
 # План: Phase 4 — Единое связанное хранилище данных (StateStore)
 
 **Дата:** 2026-04-23
-**Обновлён:** 2026-04-23 (v4 — 4c DONE, начало 4d)
-**Статус:** IN PROGRESS
+**Обновлён:** 2026-04-23 (v7 — ALL PHASES DONE, 497 тестов)
+**Статус:** ✅ COMPLETE
+**Статус:** ✅ COMPLETE
 **Дизайн:** [STATE_STORE_DESIGN.md](STATE_STORE_DESIGN.md)
 **Оценка:** ~35 файлов, 8 фаз, ~3200 строк нового кода
 
@@ -38,15 +39,15 @@ Phase 4a: Core (TreeStore + Delta + Subscriptions)                    ✅ DONE
     │       │
     │       ├──► Phase 4b+: Middleware + Throttle + Validation        ✅ DONE (97 тестов)
     │       │       │
-    │       │       ├──► Phase 4c: Backend-миграция                   ✅ DONE (41 тест��в)
+    │       │       ├──► Phase 4c: Backend-миграция                   ✅ DONE (41 тестов)
     │       │       │
-    │       │       └──► Phase 4d: GUI-миграция                       ◄── NEXT
+    │       │       └──► Phase 4d: GUI-миграция                       ✅ DONE (35 тестов)
     │       │
-    │       └──► Phase 4e: Persistence + Recipes
+    │       └──► Phase 4e: Persistence + Recipes                      ✅ DONE (36 тестов)
     │
-    └──► Phase 4f: Cleanup (удаление устаревших прослоек)
+    └──► Phase 4f: Cleanup (удаление устаревших прослоек)             ✅ DONE (42 теста)
               │
-              └──► Phase 4g: Advanced (Selectors + DevTools + Health)
+              └──► Phase 4g: Advanced (Selectors + DevTools + Health)  ✅ DONE (78 тестов)
 ```
 
 Phase 4a — фундамент. 4b зависит от 4a. 4b+ зависит от 4b — middleware перед миграцией.
@@ -473,7 +474,9 @@ def _on_regions_changed(self, deltas: list[Delta]):
 
 ---
 
-## Phase 4d — GUI-миграция: RegistersManager → StateProxy
+## Phase 4d — GUI-миграция: RegistersManager → StateProxy ✅ DONE
+
+**Статус:** Выполнено. 35 тестов (28 + 7).
 
 **Цель:** GUI использует StateProxy для чтения/записи. RegistersManager становится тонким адаптером.
 
@@ -556,7 +559,9 @@ class RegistersStateAdapter:
 
 ---
 
-## Phase 4e — Persistence + Recipes
+## Phase 4e — Persistence + Recipes ✅ DONE
+
+**Статус:** Выполнено. 36 тестов (12 + 24).
 
 **Цель:** Config-ветви сохраняются в YAML. Рецепты = snapshot/restore config-ветвей.
 
@@ -654,7 +659,9 @@ class RecipeEngine:
 
 ---
 
-## Phase 4f — Cleanup: удаление устаревших прослоек
+## Phase 4f — Cleanup: удаление устаревших прослоек ✅ DONE
+
+**Статус:** Выполнено. 42 теста (CameraStateAdapter 27 + RecipeAdapter 15 + обновлённые dual-mode → StateProxy-only).
 
 **Цель:** Убрать дублирование. Старые stores → удалить.
 **Prerequisite:** 4c + 4d + 4e полностью завершены и стабильны.
@@ -707,7 +714,9 @@ class RecipeEngine:
 
 ---
 
-## Phase 4g — Advanced: Selectors + DevTools + Health (NEW)
+## Phase 4g — Advanced: Selectors + DevTools + Health ✅ DONE
+
+**Статус:** Выполнено. 78 тестов (Selectors 24 + Inspector 29 + Health 25).
 
 **Цель:** Финальный слой — production-ready фичи для масштабирования и отладки.
 Аналоги: Redux DevTools, MobX computed, ROS diagnostics.
@@ -884,19 +893,19 @@ class HealthMonitor:
 | 4b+.2 | Middleware | Middle+ | developer | 4b+.1 | 2 | ~100 | ✅ |
 | 4b+.3 | Middleware | Middle+ | developer | 4b+.1 | 2 | ~100 | ✅ |
 | 4b+.4 | Middleware | Middle | developer | 4b+.1 | 3 | ~100 | ✅ |
-| 4c.1 | Backend | Middle+ | developer | 4b+.2 | 3 | ~100 | 🔲 |
-| 4c.2 | Backend | Senior | teamlead | 4b+.2 | 3 | ~150 | 🔲 |
-| 4c.3 | Backend | Middle | developer | 4b+.2 | 3 | ~100 | 🔲 |
-| 4d.1 | GUI | Senior | teamlead | 4b+ | 3 | ~200 | 🔲 |
-| 4d.2 | GUI | Middle+ | developer | 4d.1 | 3 | ~100 | 🔲 |
-| 4e.1 | Persist | Middle+ | developer | 4b+.1 | 3 | ~150 | 🔲 |
-| 4e.2 | Recipes | Senior | teamlead | 4e.1 | 3 | ~200 | 🔲 |
-| 4f.1 | Cleanup | Middle | developer | 4d.1 | 5+ | ~(-200) | 🔲 |
-| 4f.2 | Cleanup | Middle | developer | 4e.2 | 3 | ~(-100) | 🔲 |
-| 4f.3 | Cleanup | Senior | teamlead | 4c.*, 4d.* | 8+ | ~(-300) | 🔲 |
-| **4g.1** | **Advanced** | **Senior** | **teamlead** | **4f** | **3** | **~200** | 🔲 |
-| **4g.2** | **Advanced** | **Middle+** | **developer** | **4f** | **3** | **~150** | 🔲 |
-| **4g.3** | **Advanced** | **Middle+** | **developer** | **4f** | **3** | **~120** | 🔲 |
+| 4c.1 | Backend | Middle+ | developer | 4b+.2 | 3 | ~100 | ✅ |
+| 4c.2 | Backend | Senior | teamlead | 4b+.2 | 3 | ~150 | ✅ |
+| 4c.3 | Backend | Middle | developer | 4b+.2 | 3 | ~100 | ✅ |
+| 4d.1 | GUI | Senior | teamlead | 4b+ | 3 | ~200 | ✅ |
+| 4d.2 | GUI | Middle+ | developer | 4d.1 | 3 | ~100 | ✅ |
+| 4e.1 | Persist | Middle+ | developer | 4b+.1 | 3 | ~150 | ✅ |
+| 4e.2 | Recipes | Senior | teamlead | 4e.1 | 3 | ~200 | ✅ |
+| 4f.1 | Cleanup | Middle | developer | 4d.1 | 5+ | ~(-200) | ✅ |
+| 4f.2 | Cleanup | Middle | developer | 4e.2 | 3 | ~(-100) | ✅ |
+| 4f.3 | Cleanup | Senior | teamlead | 4c.*, 4d.* | 8+ | ~(-300) | ✅ |
+| **4g.1** | **Advanced** | **Senior** | **teamlead** | **4f** | **3** | **~200** | ✅ |
+| **4g.2** | **Advanced** | **Middle+** | **developer** | **4f** | **3** | **~150** | ✅ |
+| **4g.3** | **Advanced** | **Middle+** | **developer** | **4f** | **3** | **~120** | ✅ |
 
 **Итого:** ~3200 строк нового кода, ~600 строк удалённого, 24 задачи.
 
@@ -912,27 +921,28 @@ class HealthMonitor:
 ├── Task 4b.1 (StateStoreManager)                                  ✅
 ├── [параллельно] Task 4b.2 (StateProxy) + Task 4b.3 (Bootstrap)  ✅
 │
-НЕДЕЛЯ 2: Middleware + Persistence                                ✅ DONE (4b+)
+НЕДЕЛЯ 2: Middleware + Persistence                                ✅ DONE
 ├── Task 4b+.1 (Middleware pipeline)                                ✅
 ├── [параллельно] Task 4b+.2-4 (Throttle+Validation+Logging)       ✅ (97 тестов)
-├── [параллельно] Task 4e.1 (PersistenceManager)
+├── Task 4e.1 (PersistenceManager)                                  ✅ (12 тестов)
 │
-НЕДЕЛЯ 3: Миграция
-├── [параллельно] Task 4c.1 (Camera) + Task 4d.1 (RegistersAdapter)
-├── [параллельно] Task 4c.2 (Processor) + Task 4d.2 (GuiProcess)
-├── Task 4c.3 (остальные процессы)
-└── Task 4e.2 (RecipeEngine)
+НЕДЕЛЯ 3: Миграция                                                ✅ DONE
+├── [параллельно] Task 4c.1 (Camera) + Task 4d.1 (RegistersAdapter) ✅
+├── [параллельно] Task 4c.2 (Processor) + Task 4d.2 (GuiProcess)    ✅
+├── Task 4c.3 (остальные процессы)                                   ✅
+└── Task 4e.2 (RecipeEngine)                                         ✅ (24 теста)
 
-НЕДЕЛЯ 4: Cleanup + Стабилизация
-├── Task 4f.1 (убрать CameraRegistry)
-├── Task 4f.2 (убрать RecipeManager)
-├── Task 4f.3 (убрать register_update)
-└── Стабилизация: smoke tests, интеграционные тесты
+НЕДЕЛЯ 4: Cleanup + Стабилизация                                  ✅ DONE
+├── [параллельно] Task 4f.1 (CameraStateAdapter) + 4f.2 (RecipeAdapter) ✅ (27+15 тестов)
+├── Task 4f.3 (убрать register_update)                               ✅ (-155 строк)
+└── Стабилизация: dual-mode тесты → StateProxy-only                  ✅
 
-НЕДЕЛЯ 5: Advanced (после стабилизации)
-├── Task 4g.1 (Selectors — computed state)
-├── Task 4g.2 (StateInspector — DevTools)
-└── Task 4g.3 (HealthMonitor — watchdog)
+НЕДЕЛЯ 5: Advanced                                                ✅ DONE
+├── [параллельно] Task 4g.1 (Selectors) + 4g.2 (Inspector) + 4g.3 (Health) ✅ (78 тестов)
+
+═══════════════════════════════════════════════════════════════════
+PHASE 4 COMPLETE — 497 тестов, 24 задачи, все фазы 4a-4g завершены
+═══════════════════════════════════════════════════════════════════
 ```
 
 ---

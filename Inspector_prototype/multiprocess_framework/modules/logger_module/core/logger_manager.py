@@ -216,10 +216,16 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                 self._setup_module_channel(module_name, module_config)
 
     def _resolved_file_path(self, file_path: Optional[str], fallback: str) -> str:
+        # Каждый процесс пишет в свою подпапку: logs/{process_name}/
+        log_dir = self.config.log_directory
+        if self.process is not None and hasattr(self.process, "name"):
+            from pathlib import Path as _Path
+            base = _Path(log_dir) if log_dir else _Path("logs")
+            log_dir = str(base / self.process.name)
         return resolve_log_file_path(
             file_path,
             fallback=fallback,
-            log_directory=self.config.log_directory,
+            log_directory=log_dir,
         )
 
     def _setup_channel(self, channel_name: str, channel_config: LoggerChannelSchema):

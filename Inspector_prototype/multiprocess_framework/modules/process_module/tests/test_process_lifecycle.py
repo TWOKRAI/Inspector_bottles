@@ -29,7 +29,7 @@ class TestProcessModuleCreation:
         assert process.name == "test_proc"
         assert process.manager_name == "test_proc"
         assert process.is_initialized is False
-        assert process.stop_process is False
+        assert process._stop_requested is False
 
     def test_create_with_config(self):
         config = {"key": "value", "workers": {}}
@@ -138,7 +138,7 @@ class TestProcessModuleRunStop:
 
         process.stop()
 
-        assert process.stop_process is True
+        assert process._stop_requested is True
         process.update_process_state.assert_called_with(status=ProcessStatus.STOPPING.value)
 
     def test_should_stop_false_initially(self):
@@ -147,5 +147,5 @@ class TestProcessModuleRunStop:
 
     def test_should_stop_true_after_stop(self):
         process = ProcessModule("test_proc")
-        process.stop_process = True
+        process._stop_requested = True
         assert process.should_stop() is True

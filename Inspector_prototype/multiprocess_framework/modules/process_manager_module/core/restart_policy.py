@@ -21,7 +21,7 @@ class RestartPolicy(SchemaBase):
         restart_on_unresponsive: Рестартовать при отсутствии heartbeat
     """
 
-    enabled: bool = True
+    enabled: bool = False  # TODO: вернуть True после стабилизации запуска
     max_retries: int = 3
     backoff_sec: float = 2.0
     restart_on_crash: bool = True

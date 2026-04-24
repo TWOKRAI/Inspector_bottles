@@ -231,9 +231,15 @@ class ProcessMonitor:
             except Exception:
                 pass
 
-        # Авто-рестарт при crash
-        if new_status == "crashed" and self.restart_policy.restart_on_crash:
-            self._try_auto_restart(proc.name, reason="crashed")
+        # Авто-рестарт при crash или полная остановка
+        if new_status == "crashed":
+            if self.restart_policy.enabled and self.restart_policy.restart_on_crash:
+                self._try_auto_restart(proc.name, reason="crashed")
+            else:
+                self.process._log_error(
+                    f"Process '{proc.name}' crashed, авто-рестарт отключён — останавливаю систему"
+                )
+                self.process._stop_requested = True
 
     def _check_heartbeat_timeout(self, process_name: str, now: float) -> None:
         """Проверить heartbeat timeout для живого процесса."""
@@ -281,9 +287,14 @@ class ProcessMonitor:
             except Exception:
                 pass
 
-        # Авто-рестарт при unresponsive
-        if self.restart_policy.restart_on_unresponsive:
+        # Авто-рестарт при unresponsive или полная остановка
+        if self.restart_policy.enabled and self.restart_policy.restart_on_unresponsive:
             self._try_auto_restart(process_name, reason="unresponsive")
+        elif not self.restart_policy.enabled:
+            self.process._log_error(
+                f"Process '{process_name}' unresponsive, авто-рестарт отключён — останавливаю систему"
+            )
+            self.process._stop_requested = True
 
     # ----------------------------------------------------------------
     # Авто-рестарт

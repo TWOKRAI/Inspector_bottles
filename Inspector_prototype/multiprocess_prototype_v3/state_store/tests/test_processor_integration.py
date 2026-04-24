@@ -386,17 +386,14 @@ def _read_process_source() -> str:
     return process_file.read_text(encoding="utf-8")
 
 
-class TestDualMode:
-    """Проверяем что dual-mode сохранён: _processing_worker содержит register_update."""
+class TestStateProxyOnly:
+    """Проверяем что register_update удалён: только StateProxy путь (Phase 4f)."""
 
-    def test_processing_worker_has_register_update_handling(self):
-        """_processing_worker в process.py содержит обработку register_update (dual-mode)."""
+    def test_processing_worker_no_register_update(self):
+        """_processing_worker НЕ содержит register_update (убран в 4f.3)."""
         source = _read_process_source()
-        assert "register_update" in source, (
-            "register_update должен присутствовать в _processing_worker (dual-mode не удалён)"
-        )
-        assert "apply_register_update" in source, (
-            "apply_register_update должен вызываться в _processing_worker"
+        assert "apply_register_update" not in source, (
+            "apply_register_update удалён в Phase 4f.3 — только StateProxy"
         )
 
     def test_process_has_on_config_changed_method(self):

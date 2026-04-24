@@ -109,8 +109,12 @@ class SystemLauncher:
         self._log_info("ProcessManagerProcess started")
         self._log_info("System is running. Press Ctrl+C to stop.")
         try:
-            self._spawner.wait()
+            # Цикл с коротким join — Windows не прерывает .join() по Ctrl+C
+            while self._spawner.is_running():
+                self._spawner.get_process().join(timeout=0.5)
         except KeyboardInterrupt:
+            self._log_info("Ctrl+C received, stopping...")
+        finally:
             self.stop()
 
     def start(self) -> None:

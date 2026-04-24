@@ -565,7 +565,7 @@ class RouterManager(ChannelRoutingManager):
                 self._log_warning(f"broadcast: channels not found: {missing}")
             return resolved
 
-        self._log_warning(
+        self._log_debug(
             f"channel_dispatcher returned no route for "
             f"key_field={key_field!r} value={msg_dict.get(key_field)!r}"
         )

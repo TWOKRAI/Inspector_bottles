@@ -79,7 +79,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.queue_registry = None
         self.memory_manager = None
 
-        self.stop_process = False
+        self._stop_requested = False
 
         # Менеджеры (создаются в initialize())
         self.worker_manager = None
@@ -240,7 +240,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
     def should_stop(self) -> bool:
         """Проверка флага остановки."""
-        return self.stop_process
+        return self._stop_requested
 
     # ========================================================================
     # УДОБНЫЕ СВОЙСТВА ДЛЯ ДОСТУПА К КОМПОНЕНТАМ
@@ -528,7 +528,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.worker_manager.create_worker(
             "heartbeat_sender",
             self._heartbeat_loop,
-            ThreadConfig(priority=ThreadPriority.LOW),
+            ThreadConfig(priority=ThreadPriority.BACKGROUND),
             auto_start=True,
         )
         self._log_debug(
@@ -562,7 +562,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.update_process_state(status=ProcessStatus.STOPPING.value)
 
         self._log_info(f"Process '{self.name}' stopping", module="lifecycle")
-        self.stop_process = True
+        self._stop_requested = True
 
         if self.worker_manager:
             self.worker_manager.stop_all_workers()
@@ -587,7 +587,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         stats.update(
             {
                 "name": self.name,
-                "running": not self.stop_process,
+                "running": not self._stop_requested,
             }
         )
 

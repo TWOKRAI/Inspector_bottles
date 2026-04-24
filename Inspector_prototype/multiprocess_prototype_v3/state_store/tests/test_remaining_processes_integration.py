@@ -179,14 +179,11 @@ class TestBuildStateConfigHandlersRenderer:
             "подписка на renderer.config.* должна быть"
         )
 
-    def test_dual_mode_renderer(self):
-        """_render_worker содержит обработку register_update (dual-mode не удалён)."""
+    def test_no_register_update_renderer(self):
+        """_render_worker НЕ содержит register_update (убран в 4f.3)."""
         source = _read_process_source("renderer")
-        assert "register_update" in source, (
-            "register_update должен присутствовать в _render_worker (dual-mode не удалён)"
-        )
-        assert "apply_register_update" in source, (
-            "apply_register_update должен вызываться в _render_worker"
+        assert "apply_register_update" not in source, (
+            "apply_register_update удалён в Phase 4f.3 — только StateProxy"
         )
 
 

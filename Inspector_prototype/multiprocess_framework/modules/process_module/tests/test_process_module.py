@@ -48,7 +48,7 @@ class TestProcessModule:
         """Тест завершения процесса."""
         process = ProcessModule("test_process")
         process.is_initialized = True
-        process.stop_process = False
+        process._stop_requested = False
         
         # Мокируем компоненты
         process._stop_system_threads = Mock()
@@ -66,7 +66,7 @@ class TestProcessModule:
         
         assert result is True
         assert process.is_initialized is False
-        assert process.stop_process is True
+        assert process._stop_requested is True
     
     def test_run_stop(self):
         """Тест запуска и остановки процесса."""
@@ -83,13 +83,13 @@ class TestProcessModule:
         # Запуск
         process.run()
         
-        assert process.stop_process is False
+        assert process._stop_requested is False
         process.worker_manager.start_all_workers.assert_called_once()
         
         # Остановка
         process.stop()
         
-        assert process.stop_process is True
+        assert process._stop_requested is True
     
     def test_should_stop(self):
         """Тест проверки флага остановки."""
@@ -97,7 +97,7 @@ class TestProcessModule:
         
         assert process.should_stop() is False
         
-        process.stop_process = True
+        process._stop_requested = True
         
         assert process.should_stop() is True
     

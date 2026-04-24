@@ -3,7 +3,7 @@
 Полная техническая спецификация прототипа системы инспекции бутылок.
 Этот документ — эталонное описание: по нему можно воспроизвести систему с нуля.
 
-> **Версия:** 2026-04-23 | **Статус:** актуальная
+> **Версия:** 2026-04-24 | **Статус:** актуальная
 
 ---
 
@@ -22,6 +22,7 @@
 11. [Конфигурация и профили](#11-конфигурация-и-профили)
 12. [Запуск системы](#12-запуск-системы)
 13. [Найденные проблемы и несостыковки](#13-найденные-проблемы-и-несостыковки)
+14. [State Store (Phase 4 — реализован)](#14-state-store-phase-4--реализован)
 
 ---
 
@@ -54,15 +55,15 @@
 │                              │                                       │
 │    ┌─────────┬────────┬──────┴──────┬──────────┬──────────┬────────┐ │
 │    │         │        │             │          │          │        │ │
-│  Camera_0  Camera_1  Processor   Renderer    GUI     Database  Robot│ │
-│  (захват)  (захват)  (детекция)  (рисовка)  (PyQt5)  (SQLite) (отбр)│ │
+│  Camera_0  Camera_1  Proc_0      Proc_1    Renderer    GUI     DB  │ │
+│  (захват)  (захват)  (camera_0)  (camera_1) (рисовка) (PyQt5) (SQL)│ │
 │    │         │        │             │          │                   │ │
-│    │         │    Worker_0..K       │          │                   │ │
-│    │         │   (пул обработки)    │          │                   │ │
+│    │         │    Worker_0..K       │          │         Robot     │ │
+│    │         │   (пул обработки)    │          │         (отбр)   │ │
 │    └─────────┴────────┴─────────────┴──────────┴──────────┴────────┘ │
 │                                                                      │
 │  ════════════════ Shared Memory (SHM) ═══════════════════════════════│
-│  camera_0_frame[0..K]  processor_mask  rendered_frame  mask_frame    │
+│  camera_N_frame[0..K]  processor_N_mask  rendered_frame  mask_frame  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -76,6 +77,7 @@
 | **Frontend** | PyQt5 GUI, окна, виджеты | `frontend/` |
 | **Registers** | Схемы данных GUI ↔ Backend, роутинг команд | `registers/` |
 | **Config** | AppConfig, LoggingConfig, профили | `config/`, `data/` |
+| **State Store** | TreeStore, подписки, StateProxy, middleware | `state_store/` |
 
 ### 2.3 Зависимости между слоями
 
@@ -162,53 +164,22 @@ Frontend → Registers → Backend/Processes → Services
 | Рецепты | `settings_recipes.yaml` (диск) | Frontend-only, загрузка/сохранение по запросу |
 | Детекции | SQLite (`inspector.db`) | DatabaseProcess — запись, GUI — чтение |
 
-**Текущие разрывы связности (известные, будут закрываться):**
+**Реализованные решения (Phase 4 — StateStore):**
 
-1. **GUI RegistersManager ↔ ConfigStore** — два параллельных хранилища одних и тех же данных.
-   GUI не читает ConfigStore, ConfigStore не знает о RegistersManager
-2. **Backend → GUI обратная связь** — backend не подтверждает применение настройки.
-   GUI не знает, что fps реально изменился на камере
-3. **Профили ↔ SRM** — профиль влияет на систему только через `main.py` при старте.
-   Нет механизма «применить другой профиль в runtime»
-4. **Рецепты ↔ Backend** — рецепт = снимок GUI-регистров, не backend-состояния.
-   После применения рецепта backend может рассинхронизироваться
+State Store полностью реализован и интегрирован в систему. Подробности в разделе 14.
 
-**Целевое состояние (Phase 4 — StateStore):**
+Решённые проблемы:
+1. **GUI RegistersManager ↔ ConfigStore** — StateProxy обеспечивает синхронизацию через подписки
+2. **Backend → GUI обратная связь** — GuiStateProxy получает delta-уведомления через Qt-safe dispatch
+3. **Профили ↔ SRM** — State Store хранит config-ветви, профиль загружается как batch-транзакция
+4. **Рецепты ↔ Backend** — RecipeEngine работает через State Store, не только GUI-регистры
+
+**Оставшиеся разрывы:**
+1. **RegistersManager в frontend** — всё ещё существует параллельно со StateProxy; не все поля мигрированы
+2. **Runtime-переключение профиля** — пока не реализовано (только при старте)
 
 > Подробный дизайн: `docs/plans/STATE_STORE_DESIGN.md`
 > План реализации: `docs/plans/phase4_state_store_plan.md`
-
-Все данные проходят через единое реактивное дерево с подпиской на изменения:
-
-```
-Любой источник (GUI / Backend / Config / Recipe)
-  │
-  └──► StateStore (TreeStore + Subscriptions, в ProcessManager)
-        │
-        ├── Дерево: cameras.0.config.fps = 30
-        │           cameras.0.state.actual_fps = 28.5
-        │           cameras.0.regions.roi_left.processing.nodes.blur_1.params.kernel_size = 5
-        │
-        ├── Подписки (glob-style):
-        │   ├── CameraProcess  ← "cameras.0.config.*"
-        │   ├── ProcessorProcess ← "cameras.0.regions.**"
-        │   ├── GUI ← "cameras.*.state.*"
-        │   └── RecipeEngine ← "**.config.**"
-        │
-        ├── Dispatch: Delta(path, old, new, source, tx_id)
-        │   ├── CameraProcess.set_fps(30)
-        │   ├── GUI.update_fps_widget(28.5)  ← подтверждение через state
-        │   └── RecipeEngine.mark_dirty()
-        │
-        └── Persistence (debounced) → YAML
-```
-
-Ключевые решения:
-- **config / state разделение:** GUI пишет config, Backend пишет state — нет конфликтов
-- **Точечные пути:** `cameras.0.regions.roi_left.processing.nodes.blur_1.params.kernel_size`
-- **Транзакции:** загрузка рецепта = один batch, не 50 отдельных уведомлений
-- **StateProxy:** лёгкий клиент в каждом процессе (Dict at Boundary сохраняется)
-- **Рецепт = snapshot config-ветвей** реального состояния, не только GUI
 
 ---
 
@@ -404,7 +375,7 @@ Ctrl+C (SIGINT)
 | Процесс | Класс | Назначение | Кол-во экземпляров |
 |----------|-------|-----------|-------------------|
 | **camera_N** | `CameraProcess` | Захват кадров с устройства | N (по числу камер) |
-| **processor** | `ProcessorProcess` | Детекция дефектов на кадрах | 1 |
+| **processor_N** | `ProcessorProcess` | Детекция дефектов на кадрах | N (по числу камер) |
 | **processor_worker_K** | `ProcessorWorkerProcess` | Воркер пула обработки (Phase 5c) | 0..K (опционально) |
 | **renderer** | `RendererProcess` | Наложение масок и bbox'ов на кадр | 1 (или 0 в headless) |
 | **gui** | `GuiProcess` | PyQt5 интерфейс | 1 |
@@ -455,7 +426,7 @@ CameraProcess (ProcessModule)
 **Файлы:** `backend/processes/processor/`
 
 **Что делает:**
-1. Получает `frame_ready` от камеры
+1. Привязан к конкретной камере (camera_id). Получает `frame_ready` только от своей камеры
 2. Читает кадр из SHM через FrameShmMiddleware
 3. Запускает ColorBlobDetector → детекции + маска
 4. (Опционально) запускает цепочку обработки (Phase 5a/5b/5c)
@@ -1237,6 +1208,7 @@ run.py (venv detection)
 - ProcessMonitor проверяет `is_alive()` (жив ли OS-процесс)
 - Но НЕ проверяет: обрабатывает ли процесс сообщения, не завис ли в бесконечном цикле
 - **Рекомендация:** периодический heartbeat + watchdog таймер
+- **Статус: ЧАСТИЧНО РЕШЕНО** — heartbeat реализован в ProcessMonitor (каждые 5с, timeout 15с → UNRESPONSIVE), но не проверяет зависание в бесконечном цикле внутри логики
 
 **P3. Жёсткая привязка SHM-размеров**
 - `CAMERA_SHM_WIDTH = 640`, `CAMERA_SHM_HEIGHT = 480` — константы
@@ -1264,6 +1236,7 @@ run.py (venv detection)
 - Нет измерения end-to-end задержки (от захвата кадра до отображения)
 - FPS измеряется, но latency — нет
 - **Рекомендация:** timestamp в metadata кадра, измерение на каждом этапе
+- **Статус: РЕШЕНО** — реализовано в `services/metrics/latency.py` (LatencyTracker)
 
 ### 13.3 Конфигурация
 
@@ -1275,6 +1248,7 @@ run.py (venv detection)
 **P9. settings_profiles.yaml не валидируется при загрузке**
 - Если пользователь укажет `camera_count: -1` — поведение неопределено
 - **Рекомендация:** Pydantic-валидация при загрузке профиля
+- **Статус: РЕШЕНО** — `config/settings_profile.py` валидирует через Pydantic
 
 ### 13.4 Устойчивость
 
@@ -1283,12 +1257,14 @@ run.py (venv detection)
   - ProcessMonitor зафиксирует `is_alive() = False`
   - Но автоматический перезапуск не реализован
 - **Рекомендация:** auto-restart политика в ProcessManagerProcess
+- **Статус: РЕШЕНО** — ProcessMonitor реализует auto-restart с backoff (max 3 попытки)
 
 **P11. SHM cleanup при аварийном завершении**
 - Если процесс убит kill -9, SHM-сегменты остаются в ОС
 - На Linux: `/dev/shm/` захламляется
 - На Windows: cleanup при закрытии handle, но не гарантирован
 - **Рекомендация:** cleanup утилита при старте + atexit handler
+- **Статус: РЕШЕНО** — `backend/shm/cleanup.py` + `atexit` handler в main.py
 
 ### 13.5 GUI
 
@@ -1304,6 +1280,86 @@ run.py (venv detection)
 
 ---
 
+## 14. State Store (Phase 4 — реализован)
+
+### 14.1 Архитектура
+
+Реактивное дерево состояния с подписками на изменения. Живёт в ProcessManagerProcess.
+
+```
+StateStoreManager (в ProcessManager)
+├── TreeStore (RLock-protected nested dict)
+│   ├── set(path, value) → Delta
+│   ├── get(path) → value
+│   ├── merge(path, dict) → list[Delta]
+│   └── snapshot() / restore()
+├── SubscriptionManager
+│   ├── subscribe(pattern, callback) → sub_id
+│   └── match(delta) → list[Subscription]
+├── DeltaDispatcher
+│   └── dispatch(deltas) → deduplicated per subscriber
+├── MiddlewarePipeline
+│   ├── LoggingMiddleware
+│   ├── ValidationMiddleware
+│   ├── ThrottleMiddleware
+│   └── MetricsMiddleware
+└── PersistenceManager → YAML (debounced)
+```
+
+### 14.2 StateProxy (клиент в каждом процессе)
+
+```python
+# В CameraProcess:
+self._state_proxy = StateProxy(process_name, router)
+self._state_proxy.subscribe(
+    f"cameras.{camera_id}.config.*",
+    callback=self._on_config_changed
+)
+
+# Запись состояния:
+self._state_proxy.set(f"cameras.{camera_id}.state.actual_fps", measured_fps)
+```
+
+### 14.3 GuiStateProxy (Qt-safe вариант)
+
+Расширяет StateProxy для безопасного обновления GUI из IPC-потока:
+- Callback диспатч через `QMetaObject.invokeMethod(Qt.QueuedConnection)`
+- Fallback на прямой вызов если PyQt5 недоступен
+
+### 14.4 Паттерны подписок
+
+| Паттерн | Что матчит |
+|---------|-----------|
+| `cameras.0.config.*` | Любое поле конфига камеры 0 |
+| `cameras.*.state.*` | Состояние всех камер |
+| `cameras.0.regions.**` | Все регионы камеры 0 (любая глубина) |
+| `**.config.**` | Все конфиги во всём дереве |
+
+### 14.5 IPC-протокол
+
+Все операции — через команды ProcessManager (Dict at Boundary):
+
+```python
+# Proxy → StateStore:
+{"command": "state.set", "data": {"path": "cameras.0.config.fps", "value": 30}}
+
+# StateStore → Subscribers (event):
+{"command": "state.changed", "data": {"deltas": [{"path": "...", "old": 25, "new": 30}]}}
+```
+
+### 14.6 Транзакции
+
+Загрузка рецепта = один batch, не 50 отдельных уведомлений:
+- `Transaction.coalesce()` — сжимает несколько delta для одного path
+- Подписчики получают один callback с batch deltas
+
+### 14.7 Тесты
+
+24 теста покрывают: TreeStore, подписки, StateProxy, GuiStateProxy, DeltaDispatcher,
+middleware, persistence, рецепты, интеграцию с Camera/Processor/GUI.
+
+---
+
 ## Приложение A: Структура файлов
 
 ```
@@ -1315,12 +1371,16 @@ multiprocess_prototype_v3/
 │
 ├── config/
 │   ├── app.py                      # AppConfig: корневой конфиг
-│   └── logging.py                  # LoggingConfig: настройка логов
+│   ├── logging.py                  # LoggingConfig: настройка логов
+│   ├── settings_profile.py         # SettingsProfile: валидация профилей (Pydantic)
+│   └── shm_region.py               # ShmRegionSpec: спецификация SHM-регионов
 │
 ├── backend/
 │   ├── helpers.py                  # утилиты register_update + IPC
 │   ├── shm/
-│   │   └── ring_buffer.py          # RingBufferWriter/Reader (AD-6)
+│   │   ├── ring_buffer.py          # RingBufferWriter/Reader (AD-6)
+│   │   ├── cleanup.py              # Очистка stale SHM-сегментов
+│   │   └── registry.py             # Реестр SHM-регионов
 │   ├── routing/
 │   │   └── frame_router_setup.py   # маршрутизация кадров
 │   └── processes/
@@ -1384,9 +1444,25 @@ multiprocess_prototype_v3/
 │   ├── gui/
 │   │   ├── service.py              # GuiService (чтение кадров + palette)
 │   │   └── ports.py                # GuiOutputPort
-│   └── renderer/
-│       ├── service.py              # RendererService (overlay + bbox)
-│       └── ports.py                # RendererOutputPort
+│   ├── renderer/
+│   │   ├── service.py              # RendererService (overlay + bbox)
+│   │   └── ports.py                # RendererOutputPort
+│   └── metrics/
+│       └── latency.py              # LatencyTracker (e2e latency)
+│
+├── state_store/
+│   ├── core/                       # TreeStore, Delta, SubscriptionManager
+│   ├── manager/                    # StateStoreManager, DeltaDispatcher
+│   ├── proxy/                      # StateProxy, GuiStateProxy
+│   ├── adapters/                   # Интеграция с камерами, регистрами, рецептами
+│   ├── middleware/                 # Logging, validation, throttle, metrics
+│   ├── persistence/                # YAML-сериализация состояния
+│   ├── recipes/                    # RecipeEngine
+│   ├── selectors/                  # Query API для дерева
+│   ├── devtools/                   # Inspector (отладка)
+│   ├── health/                     # Мониторинг здоровья StateStore
+│   ├── bootstrap.py                # Инициализация
+│   └── tests/                      # 24 теста
 │
 ├── frontend/
 │   ├── launcher.py                 # FrontendLauncher (bootstrap GUI)
@@ -1411,7 +1487,16 @@ multiprocess_prototype_v3/
 │   ├── styles/
 │   │   ├── qss/                    # Qt stylesheets
 │   │   └── schemas/
-│   └── threads/
+│   ├── threads/
+│   ├── actions/                    # Action Bus (обработка GUI-действий)
+│   │   ├── handlers/               # field_set, graph, recipe, region, profile, display, chain
+│   │   ├── persistence/            # Сохранение/восстановление действий
+│   │   ├── schemas.py              # Схемы действий
+│   │   ├── builder.py              # Конструктор Action Bus
+│   │   └── default_bus_factory.py  # Фабрика по умолчанию
+│   └── coordinators/               # Координаторы логики
+│       ├── logical_cameras.py      # Управление логическими камерами
+│       └── recipe_slot.py          # Управление слотами рецептов
 │
 ├── registers/
 │   ├── constants.py                # имена регистров

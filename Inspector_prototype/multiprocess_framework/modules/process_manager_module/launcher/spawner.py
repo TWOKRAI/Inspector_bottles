@@ -84,27 +84,30 @@ class ProcessSpawner:
 
     def stop(self, timeout: Optional[float] = None) -> None:
         effective_timeout = timeout if timeout is not None else self._stop_timeout
-        graceful_timeout = min(effective_timeout, 3.0)
 
         if self._logger:
-            self._logger.info("Stopping ProcessManager...")
+            self._logger.info("Stopping system...")
 
+        # 1. Сигнал ProcessManager — он внутри shutdown() остановит дочерние
         if self._process and self._process.is_alive():
             self._stop_event.set()
-            self._process.join(timeout=graceful_timeout)
+            self._process.join(timeout=effective_timeout)
 
             if self._process.is_alive():
                 if self._logger:
                     self._logger.warning(
-                        f"Process did not stop in {graceful_timeout}s, terminating..."
+                        f"ProcessManager did not stop in {effective_timeout}s, terminating..."
                     )
                 self._process.terminate()
-                self._process.join(timeout=effective_timeout)
+                self._process.join(timeout=3.0)
 
             if self._process.is_alive():
                 if self._logger:
                     self._logger.warning("Force killing ProcessManager")
                 self._process.kill()
+
+        # 2. Убить все дочерние процессы-сироты (если ProcessManager не успел)
+        self._kill_orphan_children()
 
         if self._on_shutdown:
             try:
@@ -117,7 +120,36 @@ class ProcessSpawner:
             self._shared_resources.shutdown()
 
         if self._logger:
-            self._logger.info("ProcessManager stopped")
+            self._logger.info("System stopped")
+
+    def _kill_orphan_children(self) -> None:
+        """Убить дочерние процессы, которые не завершились вместе с ProcessManager."""
+        import psutil
+        import os
+
+        try:
+            current = psutil.Process(os.getpid())
+            children = current.children(recursive=True)
+            if not children:
+                return
+            if self._logger:
+                self._logger.warning(
+                    f"Killing {len(children)} orphan child process(es)..."
+                )
+            for child in children:
+                try:
+                    child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            _, alive = psutil.wait_procs(children, timeout=2.0)
+            for child in alive:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception as e:
+            if self._logger:
+                self._logger.warning(f"Orphan cleanup error: {e}")
 
     def wait(self) -> None:
         if self._process:

@@ -19,6 +19,8 @@ from state_store.middleware.throttle import ThrottleMiddleware
 from state_store.middleware.validation import ValidationMiddleware
 from state_store.proxy.gui_state_proxy import GuiStateProxy
 from state_store.proxy.state_proxy import StateProxy
+from state_store.recipes.recipe_engine import RecipeEngine
+from state_store.selectors.selector import Selector, SelectorRegistry
 
 __all__ = [
     "TreeStore",
@@ -37,4 +39,7 @@ __all__ = [
     "ValidationMiddleware",
     "LoggingMiddleware",
     "MetricsMiddleware",
+    "RecipeEngine",
+    "Selector",
+    "SelectorRegistry",
 ]

@@ -71,6 +71,20 @@ class GuiProcess(ProcessModule):
         # Watchdog state
         self._last_frame_time = 0.0
         self._watchdog_state = "ok"
+
+        # Phase 4d: GuiStateProxy — Qt-safe StateProxy для GUI-процесса
+        from state_store.proxy.gui_state_proxy import GuiStateProxy
+
+        self._state_proxy = GuiStateProxy("gui", router=self.router_manager)
+
+        # Регистрация обработчика state.changed
+        self.router_manager.register_message_handler(
+            "state.changed", self._state_proxy.on_state_changed
+        )
+
+        # Начальная запись состояния в StateStore
+        self._state_proxy.set("gui.state.status", "initialized")
+
         self._log_info("GuiProcess ready")
 
     def _init_system_threads(self):
@@ -199,9 +213,17 @@ class GuiProcess(ProcessModule):
     def gui_request_shutdown(self):
         """Вызывается Qt при aboutToQuit — запрашиваем остановку процесса."""
         self._log_info("GUI requested shutdown")
-        self.stop_process = True
+        self._stop_requested = True
 
     def _check_stop(self, app):
         """Завершить Qt приложение если процесс должен остановиться."""
         if self.should_stop():
             app.quit()
+
+    def shutdown(self):
+        """Остановка процесса: записываем статус и завершаем StateProxy."""
+        # Phase 4d: записать финальный статус перед отключением
+        if hasattr(self, "_state_proxy"):
+            self._state_proxy.set("gui.state.status", "shutdown")
+            self._state_proxy.shutdown()
+        return super().shutdown()

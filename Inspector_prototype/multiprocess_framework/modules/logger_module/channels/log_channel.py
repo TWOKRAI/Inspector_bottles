@@ -41,9 +41,24 @@ class LogChannel(ILogChannel):
         pass
 
 
+class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """RotatingFileHandler, устойчивый к WinError 32 при multiprocessing.
+
+    На Windows несколько процессов не могут одновременно переименовать файл.
+    При PermissionError пропускаем ротацию — запись продолжится в текущий файл.
+    """
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except PermissionError:
+            # Другой процесс уже ротирует или держит файл — пропускаем
+            pass
+
+
 class FileChannel(LogChannel):
     """Канал записи в файл"""
-    
+
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         self.file_path = Path(config.file_path or f"logs/{config.name}.log")
@@ -51,7 +66,7 @@ class FileChannel(LogChannel):
 
         formatter = logging.Formatter(config.format)
         if getattr(config, "rotate", True):
-            self.handler = logging.handlers.RotatingFileHandler(
+            self.handler = _SafeRotatingFileHandler(
                 filename=self.file_path,
                 maxBytes=config.max_size,
                 backupCount=config.backup_count,
