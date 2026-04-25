@@ -14,7 +14,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from frontend_module.schemas.register_binding import RegisterBinding
+    from multiprocess_framework.modules.frontend_module.schemas.register_binding import RegisterBinding
 
 from .schemas import Action, ActionType
 

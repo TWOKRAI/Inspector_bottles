@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from data_schema_module import SchemaBase
+from multiprocess_framework.modules.data_schema_module import SchemaBase
 
 from ..schemas import Action, ActionType
 

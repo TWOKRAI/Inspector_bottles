@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from frontend_module.widgets.tabs import TabPresenterBase
+from multiprocess_framework.modules.frontend_module.widgets.tabs import TabPresenterBase
 
 from .schemas import HikvisionCameraMvpUiConfig
 

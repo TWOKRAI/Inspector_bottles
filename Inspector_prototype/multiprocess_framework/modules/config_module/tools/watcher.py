@@ -7,7 +7,7 @@ ConfigFileWatcher — hot-reload конфигов при изменении фа
 
 Использование::
 
-    from config_module.tools import ConfigFileWatcher
+    from multiprocess_framework.modules.config_module.tools import ConfigFileWatcher
 
     cfg = Config(initial_data=load_my_config())
     watcher = ConfigFileWatcher(
@@ -30,7 +30,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 
 if TYPE_CHECKING:
-    from config_module.core.config import Config
+    from multiprocess_framework.modules.config_module.core.config import Config
 
 
 class _ConfigReloadHandler(FileSystemEventHandler):
@@ -68,7 +68,7 @@ class _ConfigReloadHandler(FileSystemEventHandler):
     def _reload(self) -> None:
         """Перезагрузить конфиг из файла."""
         try:
-            from data_schema_module.serialization.converter import DataConverter
+            from multiprocess_framework.modules.data_schema_module.serialization.converter import DataConverter
 
             data = DataConverter.load_from_file(self._target)
             if isinstance(data, dict):

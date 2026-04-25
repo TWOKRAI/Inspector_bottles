@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from frontend_module.core.qt_imports import QVBoxLayout, QWidget
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.interfaces import IRegistersManagerGui
-from frontend_module.widgets.tabs import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.widgets.tabs import (
     BaseTab,
     RegisterBindingContext,
     create_registers_placeholder,

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from frontend_module.core.qt_imports import QObject, QThread, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, QThread, pyqtSignal
 
 
 @dataclass

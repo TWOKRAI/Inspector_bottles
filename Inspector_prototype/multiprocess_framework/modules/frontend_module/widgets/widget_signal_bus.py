@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from frontend_module.core.qt_imports import QObject, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, pyqtSignal
 
 
 class WidgetSignalBus(QObject):

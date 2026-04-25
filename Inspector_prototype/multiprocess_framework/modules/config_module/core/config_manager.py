@@ -15,12 +15,12 @@ from __future__ import annotations
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from base_manager import BaseManager, ObservableMixin
-from config_module.interfaces import IConfigManager
-from config_module.core.config import Config
+from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.config_module.interfaces import IConfigManager
+from multiprocess_framework.modules.config_module.core.config import Config
 
 if TYPE_CHECKING:
-    from shared_resources_module.core.shared_resources_manager import SharedResourcesManager
+    from multiprocess_framework.modules.shared_resources_module.core.shared_resources_manager import SharedResourcesManager
 
 
 class ConfigManager(BaseManager, ObservableMixin, IConfigManager):

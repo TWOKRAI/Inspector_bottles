@@ -7,8 +7,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from config_module.tools.loader import ConfigLoader
-from config_module.core.config import Config
+from multiprocess_framework.modules.config_module.tools.loader import ConfigLoader
+from multiprocess_framework.modules.config_module.core.config import Config
 
 
 # ---------------------------------------------------------------------------

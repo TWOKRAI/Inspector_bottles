@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
-from frontend_module.core.widget_registry import WidgetRegistry
-from frontend_module.interfaces import IRegistersManager
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
+from multiprocess_framework.modules.frontend_module.core.widget_registry import WidgetRegistry
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManager
 
 
 def _slider_config_from_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,7 +74,7 @@ def _create_slider(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика NumericControl (slider)."""
-    from frontend_module.components import (
+    from multiprocess_framework.modules.frontend_module.components import (
         BindingConfig,
         NumericControl,
         NumericViewConfig,
@@ -105,7 +105,7 @@ def _create_checkbox(
     parent: Optional[Any],
 ) -> Optional[Any]:
     """Фабрика CheckboxControl."""
-    from frontend_module.components import (
+    from multiprocess_framework.modules.frontend_module.components import (
         BindingConfig,
         CheckboxControl,
         CheckboxViewConfig,

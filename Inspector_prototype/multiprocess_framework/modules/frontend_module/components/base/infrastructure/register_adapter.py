@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.components.base.interfaces import RegistersManagerLike
-from frontend_module.schemas.register_binding import (
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import RegistersManagerLike
+from multiprocess_framework.modules.frontend_module.schemas.register_binding import (
     RegisterFieldMeta,
     ResolvedMeta,
 )

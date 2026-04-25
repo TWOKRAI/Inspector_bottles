@@ -32,6 +32,7 @@ class ProcessSpawner:
         platform_adapter=None,
         stop_timeout: float = 5.0,
         on_shutdown: Optional[Callable[[], None]] = None,
+        system_ready_event: Optional[Event] = None,
     ) -> None:
         self._processes_config = processes_config or {}
         self._platform = platform_adapter or get_platform_adapter()
@@ -41,6 +42,9 @@ class ProcessSpawner:
         self._logger: Optional[_ProcessLogger] = None
         self._stop_timeout = stop_timeout
         self._on_shutdown = on_shutdown
+        # Event для сигнализации готовности системы (ADR-116).
+        # ProcessManagerProcess выставляет его после завершения initialize().
+        self._system_ready_event: Optional[Event] = system_ready_event
 
     def launch_orchestrator(self) -> bool:
         """SRM + Process(ProcessManager) + сигналы."""
@@ -51,10 +55,15 @@ class ProcessSpawner:
         self._logger = _ProcessLogger("spawner")
 
         process_config = {"processes_config": self._processes_config}
+        custom = {"process_config": process_config}
+        # Передаём system_ready_event в ProcessManagerProcess через bundle (ADR-116).
+        # multiprocessing.Event pickle-safe и безопасно пробрасывается через spawn.
+        if self._system_ready_event is not None:
+            custom["system_ready_event"] = self._system_ready_event
         bundle = {
             "queues": {},
             "config": process_config,
-            "custom": {"process_config": process_config},
+            "custom": custom,
         }
 
         self._process = Process(

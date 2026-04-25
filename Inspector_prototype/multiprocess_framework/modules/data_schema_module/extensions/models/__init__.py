@@ -6,8 +6,8 @@
 Зависят от pydantic и специфичны для фреймворка.
 
 Использование:
-    from data_schema_module.extensions.models import BaseComponentModel, BaseManagerModel
-    from data_schema_module.extensions.models import ComponentDNA, ComponentType
+    from multiprocess_framework.modules.data_schema_module.extensions.models import BaseComponentModel, BaseManagerModel
+    from multiprocess_framework.modules.data_schema_module.extensions.models import ComponentDNA, ComponentType
 """
 from ...models.base import BaseComponentModel, BaseManagerModel
 from ...models.types import ComponentType

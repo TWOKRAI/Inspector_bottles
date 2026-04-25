@@ -8,35 +8,32 @@ TabsConfig — список вкладок главного окна (компо
 
 from __future__ import annotations
 
-from typing import List
-
-from pydantic import Field
-
 from multiprocess_framework.modules.data_schema_module import SchemaBase, register_schema
+from pydantic import Field
 
 from .tab_item_config import TabItemConfig
 
 
-def _default_tabs() -> List[TabItemConfig]:
+def _default_tabs() -> list[TabItemConfig]:
     """Вкладки из feature-пакетов: recipes, settings, processing, post_processing, cropped_regions, camera, display."""
+    from ..cropped_regions_widget.schemas import default_tab_item as _crop
+    from ..settings_recipe_widget.schemas import default_tab_item as _rec
     from .camera_tab.schemas import default_tab_item as _cam
+    from .display_tab.schemas import default_tab_item as _disp
     from .graph_editor_tab.schemas import default_tab_item as _graph
     from .post_processing_tab.schemas import default_tab_item as _post
     from .processing_tab.schemas import default_tab_item as _proc
     from .recipes_settings_tab.schemas import default_tab_item as _set
-    from ..cropped_regions_widget.schemas import default_tab_item as _crop
-    from ..settings_recipe_widget.schemas import default_tab_item as _rec
-    from .display_tab.schemas import default_tab_item as _disp
 
-    return [_rec(), _set(), _proc(), _post(), _crop(), _graph(), _cam(), _disp()]
+    return [_set(), _rec(), _proc(), _post(), _crop(), _graph(), _cam(), _disp()]
 
 
 @register_schema("TabsConfig")
 class TabsConfig(SchemaBase):
     """Конфигурация списка вкладок MainWindow."""
 
-    tabs: List[TabItemConfig] = Field(default_factory=_default_tabs)
+    tabs: list[TabItemConfig] = Field(default_factory=_default_tabs)
 
-    def to_tabs_dict_list(self) -> List[dict]:
+    def to_tabs_dict_list(self) -> list[dict]:
         """Список dict для границы процесса / сериализации."""
         return [t.model_dump() for t in self.tabs]

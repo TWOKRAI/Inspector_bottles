@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 from typing import Annotated, Tuple
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     # Ядро
     SchemaBase,
     RegisterBase,
@@ -344,7 +344,7 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertEqual(container.old.speed, 10.0)
 
     def test_schema_manager_alias(self):
-        from data_schema_module import SchemaManager
+        from multiprocess_framework.modules.data_schema_module import SchemaManager
         self.assertIs(SchemaManager, SchemaRegistry)
 
 

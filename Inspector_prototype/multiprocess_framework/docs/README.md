@@ -1,55 +1,55 @@
-# Документация `multiprocess_framework`
+# `multiprocess_framework/docs/`
 
-**Корень пакета:** [../README.md](../README.md)  
-**Индекс:** [../DOCUMENTATION_INDEX.md](../DOCUMENTATION_INDEX.md)  
-**Глобальные ADR:** [../DECISIONS.md](../DECISIONS.md)  
-**Реестр модульных ADR:** [ADR_REGISTRY.md](./ADR_REGISTRY.md)
+Сборник справочников. Главный документ — [`../SPEC.md`](../SPEC.md).
 
 ---
 
-## Для нового разработчика
+## Для нового разработчика / агента — порядок чтения
 
-1. [QUICK_START.md](./QUICK_START.md) — минимальный запуск и термины.
-2. [EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md) — новый `ProcessModule` / менеджер.
-3. `modules/<name>/README.md` и `STATUS.md` — модульная глубина.
-
-## Для архитектора
-
-1. [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) — таблицы и матрицы.
-2. [../ARCHITECTURE.md](../ARCHITECTURE.md) — единый архитектурный документ.
-3. [../DECISIONS.md](../DECISIONS.md) + [ADR_REGISTRY.md](./ADR_REGISTRY.md) — решения и коды ADR.
-
-## Для AI-агента
-
-1. [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) — обзор и сценарии.
-2. [ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md) — процесс vs канал, регистры.
-3. [CONFIG_GUIDE.md](./CONFIG_GUIDE.md) — schema → dict → процессы.
-
-## Для тестировщика
-
-1. [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — типовые сбои.
-2. [../PROBLEMS.md](../PROBLEMS.md) — известные ограничения тестов.
-3. `modules/<name>/tests/` — pytest по модулю.
+1. [`../SPEC.md`](../SPEC.md) — что это, инварианты, слои, контракты.
+2. [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) — какой модуль за что отвечает.
+3. [`../modules/<X>/README.md`](../modules/) — детали модуля под задачу.
+4. [`DESIGN_RULES.md`](DESIGN_RULES.md) — что обязано / что запрещено.
 
 ---
 
 ## Карта документов
 
+### Спецификация
+
 | Файл | Назначение |
 |------|------------|
-| [FRAMEWORK_OVERVIEW.md](./FRAMEWORK_OVERVIEW.md) | Полный обзор, слои, принципы |
-| [CONFIG_GUIDE.md](./CONFIG_GUIDE.md) | Конфигурация (консолидация; архив: [archive/](./archive/)) |
-| [DIAGRAMS.md](./DIAGRAMS.md) | Шесть mermaid-диаграмм |
-| [QUICK_START.md](./QUICK_START.md) | Быстрый старт |
-| [EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md) | Расширение фреймворка |
-| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | FAQ и отладка |
-| [ADR_REGISTRY.md](./ADR_REGISTRY.md) | Коды модулей и миграция ADR |
-| [ARCHITECTURE_REFERENCE.md](./ARCHITECTURE_REFERENCE.md) | Справка |
-| [ARCHITECTURE_MODULE_CATALOG.md](./ARCHITECTURE_MODULE_CATALOG.md) | Каталог модулей и прототипа |
-| [ROUTING_GLOSSARY.md](./ROUTING_GLOSSARY.md) | Термины маршрутизации |
-| [MODULE_README_TEMPLATE.md](./MODULE_README_TEMPLATE.md) | Шаблон README модуля |
-| [FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) | Дорожная карта UI-команд |
+| [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) | **Навигатор по 19 модулям** — точка входа |
+| [`MODULE_CONTRACTS.md`](MODULE_CONTRACTS.md) | Контракт каждого модуля (API + инварианты) |
+| [`INTERACTION_FLOWS.md`](INTERACTION_FLOWS.md) | Цепочки вызовов (запуск, send, shutdown, FieldRouting…) |
+| [`DESIGN_RULES.md`](DESIGN_RULES.md) | Императивные правила |
+| [`GLOSSARY.md`](GLOSSARY.md) | Термины и сокращения |
+| [`ROUTING_GLOSSARY.md`](ROUTING_GLOSSARY.md) | Подробно: канал ≠ имя процесса |
+| [`DIAGRAMS.md`](DIAGRAMS.md) | Сводные mermaid-диаграммы |
 
----
+### Эксплуатация
 
-*Обновлено: 2026-04-10 — навигация по ролям, CONFIG_GUIDE, архив legacy config docs.*
+| Файл | Назначение |
+|------|------------|
+| [`QUICK_START.md`](QUICK_START.md) | Минимальный запуск |
+| [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Типичные проблемы |
+| [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) | Новый `ProcessModule` или менеджер |
+| [`MODULE_README_TEMPLATE.md`](MODULE_README_TEMPLATE.md) | Шаблон `README.md` для нового модуля |
+| [`CONFIG_GUIDE.md`](CONFIG_GUIDE.md) | Schema → dict → ConfigStore |
+
+### ADR
+
+| Файл | Назначение |
+|------|------------|
+| [`../DECISIONS.md`](../DECISIONS.md) | Глобальные ADR (`ADR-NNN`) |
+| [`ADR_REGISTRY.md`](ADR_REGISTRY.md) | Реестр кодов модульных ADR |
+| `../modules/<X>/DECISIONS.md` | Локальные ADR модуля |
+
+### Архив
+
+[`archive/`](archive/) — устаревшие документы, заменённые новой структурой:
+- `ARCHITECTURE_old.md`, `FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`, `ARCHITECTURE_MODULE_CATALOG.md` — заменены на корневой `SPEC.md` + `MODULES_OVERVIEW.md` + `MODULE_CONTRACTS.md`.
+- `CONFIG_PATHS.md`, `CONFIG_SCHEMA_DATA_FLOW.md`, `CONFIG_SCHEMA_REGISTERS.md`, `CONFIG_UNIFICATION_PLAN.md` — объединены в `CONFIG_GUIDE.md`.
+- `Deepseek.md` — экспериментальные заметки.
+
+Дорожная карта frontend-команд перемещена в [`../modules/frontend_module/ROADMAP.md`](../modules/frontend_module/ROADMAP.md).

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,

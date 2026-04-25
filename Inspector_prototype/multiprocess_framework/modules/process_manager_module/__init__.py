@@ -15,7 +15,8 @@ Process Manager Module (Refactored) — модуль управления про
     Core-компоненты:
         ProcessRegistry          — реестр + lifecycle
         ProcessPriority          — управление приоритетами
-        ProcessStatus            — статусы процессов
+        ProcessStatusMonitor     — мониторинг процессов ОС
+        ProcessStatus            — алиас ProcessStatusMonitor (backward compat)
         ProcessMonitor           — мониторинг состояний
 
     Адаптеры:
@@ -25,7 +26,7 @@ Process Manager Module (Refactored) — модуль управления про
 from .interfaces import ISystemLauncher, IProcessManagerProcess, IProcessRegistry
 from .process.process_manager_process import ProcessManagerProcess
 from .launcher import SystemLauncher, ProcessSpawner
-from .core import ProcessRegistry, ProcessPriority, ProcessStatus
+from .core import ProcessRegistry, ProcessPriority, ProcessStatus, ProcessStatusMonitor
 from .monitor import ProcessMonitor
 from .adapters.schema_adapter import ProcessSchemaAdapter
 
@@ -42,6 +43,7 @@ __all__ = [
     "ProcessRegistry",
     "ProcessPriority",
     "ProcessStatus",
+    "ProcessStatusMonitor",
     "ProcessMonitor",
     # Адаптеры
     "ProcessSchemaAdapter",

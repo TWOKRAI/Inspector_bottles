@@ -13,7 +13,7 @@ import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from data_schema_module import RegistersContainer
+from multiprocess_framework.modules.data_schema_module import RegistersContainer
 
 from .dispatch import resolve_dispatch_targets
 

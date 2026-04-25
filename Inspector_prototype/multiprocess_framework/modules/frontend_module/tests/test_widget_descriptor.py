@@ -2,7 +2,7 @@
 """Тесты WidgetDescriptor."""
 import pytest
 
-from frontend_module.schemas.widget_descriptor import (
+from multiprocess_framework.modules.frontend_module.schemas.widget_descriptor import (
     WidgetDescriptor,
     widget_descriptor_from_dict,
 )

@@ -9,7 +9,7 @@
 Пример использования в type hints:
     from typing import TYPE_CHECKING
     if TYPE_CHECKING:
-        from base_manager.interfaces import IBaseManager
+        from multiprocess_framework.modules.base_manager.interfaces import IBaseManager
 """
 
 from abc import ABC, abstractmethod

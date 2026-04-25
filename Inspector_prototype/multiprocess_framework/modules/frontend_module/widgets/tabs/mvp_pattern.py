@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Generic, Optional, TypeVar, Protocol
 
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 TView = TypeVar("TView")
 TUi = TypeVar("TUi")

@@ -201,7 +201,7 @@ class SchemaMixin:
     def get_visible_fields(self, access_level: int = 0) -> list[str]:
         """Имена полей, видимых пользователю с данным уровнем доступа."""
         result: list[str] = []
-        for name in self.model_fields:  # type: ignore[attr-defined]
+        for name in type(self).model_fields:
             meta = self.get_field_meta(name)
             if meta is None or meta.is_visible(access_level):
                 result.append(name)
@@ -210,7 +210,7 @@ class SchemaMixin:
     def get_editable_fields(self, access_level: int = 0) -> list[str]:
         """Имена полей, доступных для редактирования с данным уровнем доступа."""
         result: list[str] = []
-        for name in self.model_fields:  # type: ignore[attr-defined]
+        for name in type(self).model_fields:
             meta = self.get_field_meta(name)
             if meta is None or meta.can_modify(access_level):
                 result.append(name)

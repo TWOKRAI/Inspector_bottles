@@ -5,16 +5,20 @@
 - Получение статуса процессов
 - Мониторинг состояния
 - Статистика процессов
+
+Примечание (ADR-117): класс переименован в ProcessStatusMonitor,
+чтобы не конфликтовать с ProcessStatus enum из base_manager.
+ProcessStatus остаётся как алиас для backward compat.
 """
 
 from multiprocessing import Process
 from typing import Dict, Any, List
 
 
-class ProcessStatus:
+class ProcessStatusMonitor:
     """
     Мониторинг статуса процессов.
-    
+
     Инкапсулирует логику получения и мониторинга статуса процессов.
     """
     
@@ -100,4 +104,9 @@ class ProcessStatus:
             'dead': dead,
             'alive_percent': round((alive / total * 100) if total > 0 else 0, 2)
         }
+
+
+# Backward compat: алиас для кода, импортирующего ProcessStatus из этого модуля.
+# В будущем перейти на ProcessStatusMonitor (ADR-117).
+ProcessStatus = ProcessStatusMonitor
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 
-from frontend_module.core.routed_command import RoutedCommandSender
+from multiprocess_framework.modules.frontend_module.core.routed_command import RoutedCommandSender
 from multiprocess_framework.modules.message_module import MessageAdapter
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware

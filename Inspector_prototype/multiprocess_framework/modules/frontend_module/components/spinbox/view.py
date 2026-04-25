@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.components.base.infrastructure.signal_utils import (
+from multiprocess_framework.modules.frontend_module.components.base.infrastructure.signal_utils import (
     block_signals,
 )
-from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLineEdit,
@@ -40,7 +40,7 @@ class SpinBoxValueView(QWidget):
         )
         le = self._spinbox.lineEdit()
         if isinstance(le, QLineEdit):
-            from frontend_module.widgets.keyboard.touch_keyboard import (
+            from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import (
                 install_touch_keyboard_on_line_edit,
             )
 

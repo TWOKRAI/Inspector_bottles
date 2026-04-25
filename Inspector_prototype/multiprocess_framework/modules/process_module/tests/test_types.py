@@ -17,7 +17,17 @@ from ..types import (
 class TestProcessStatus:
     def test_all_values(self):
         values = {s.value for s in ProcessStatus}
-        assert values == {"initializing", "ready", "running", "stopping", "stopped", "error"}
+        assert values == {
+            "initializing",
+            "ready",
+            "running",
+            "stopping",
+            "stopped",
+            "error",
+            "crashed",
+            "unresponsive",
+            "failed",
+        }
 
     def test_string_comparison(self):
         assert ProcessStatus.RUNNING == "running"

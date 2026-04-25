@@ -8,23 +8,23 @@ from __future__ import annotations
 
 from typing import Optional
 
-from frontend_module.components.base.control_hooks import (
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlHooks,
     emit_access_denied,
     emit_write_committed,
     emit_write_rejected,
 )
-from frontend_module.components.base.interfaces import (
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import (
     IControlView,
     IFieldBinding,
     IRegisterPort,
 )
-from frontend_module.components.base.traits import (
+from multiprocess_framework.modules.frontend_module.components.base.traits import (
     AccessTrait,
     SchemaTrait,
     SyncTrait,
 )
-from frontend_module.components.checkbox.config import CheckboxViewConfig
+from multiprocess_framework.modules.frontend_module.components.checkbox.config import CheckboxViewConfig
 
 
 class CheckboxPresenter:

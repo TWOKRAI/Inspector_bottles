@@ -10,7 +10,7 @@ import importlib
 from typing import Any, get_args, get_origin
 
 try:
-    from frontend_module.core.qt_imports import (
+    from multiprocess_framework.modules.frontend_module.core.qt_imports import (
         QCheckBox,
         QDoubleSpinBox,
         QFormLayout,

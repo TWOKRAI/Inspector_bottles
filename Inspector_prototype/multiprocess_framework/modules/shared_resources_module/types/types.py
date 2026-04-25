@@ -2,7 +2,7 @@
 Типы и TypedDict для shared_resources_module.
 
 Центральное место для всех enum и typed-контрактов модуля.
-Не импортирует ничего из других модулей — zero-dependency leaf.
+ProcessStatus — re-export из base_manager (единый enum, ADR-117).
 """
 
 from enum import Enum
@@ -13,16 +13,9 @@ try:
 except ImportError:
     from typing_extensions import TypedDict
 
-
-class ProcessStatus(Enum):
-    """Жизненный цикл процесса."""
-    INITIALIZING = "initializing"
-    READY = "ready"
-    RUNNING = "running"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    ERROR = "error"
-    CRASHED = "crashed"
+# Единый ProcessStatus из base_manager (ADR-117).
+# Сохранён как re-export для backward compat.
+from ...base_manager.types.process_status import ProcessStatus
 
 
 class ResourceType(Enum):

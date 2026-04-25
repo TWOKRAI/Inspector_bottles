@@ -20,6 +20,7 @@ _CUSTOM_EXCLUDE_KEYS = frozenset(
         "stop_event",
         "pause_event",
         "error_manager",
+        "system_ready_event",
     }
 )
 

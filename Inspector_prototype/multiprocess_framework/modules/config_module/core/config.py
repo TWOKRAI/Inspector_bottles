@@ -12,7 +12,7 @@ import os
 from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from data_schema_module.core.helpers import merge_with_defaults
+from multiprocess_framework.modules.data_schema_module.core.helpers import merge_with_defaults
 
 
 class Config:
@@ -101,7 +101,7 @@ class Config:
 
     def section(self, section_key: str):
         """Вернуть ConfigSection для работы с частью конфигурации."""
-        from config_module.sections.config_section import ConfigSection
+        from multiprocess_framework.modules.config_module.sections.config_section import ConfigSection
         return ConfigSection(self, section_key)
 
     # -------------------------------------------------------------------------

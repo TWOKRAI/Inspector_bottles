@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Составной числовой контрол (BGR): схемы + адаптер."""
-from frontend_module.components._examples.compound_numeric.adapter import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_numeric.adapter import (
     coerce_ui,
     compound_numeric_binding,
     compound_numeric_view_config_from_ui,
     create_example_compound_numeric,
 )
-from frontend_module.components._examples.compound_numeric.schemas import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_numeric.schemas import (
     EXAMPLE_BGR_ROUTING,
     ExampleBgrTripletRegister,
     ExampleCompoundNumericUiConfig,

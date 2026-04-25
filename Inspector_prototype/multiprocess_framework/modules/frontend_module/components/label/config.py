@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from frontend_module.components.base.config import BaseControlConfig
+from multiprocess_framework.modules.frontend_module.components.base.config import BaseControlConfig
 
 
 @dataclass

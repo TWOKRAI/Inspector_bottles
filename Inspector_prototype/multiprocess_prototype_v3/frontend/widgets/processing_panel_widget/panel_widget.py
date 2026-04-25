@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Union
 
-from frontend_module.components import (
+from multiprocess_framework.modules.frontend_module.components import (
     BindingConfig,
     CheckboxControl,
     CheckboxViewConfig,
@@ -14,11 +14,11 @@ from frontend_module.components import (
     NumericControl,
     NumericViewConfig,
 )
-from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
-from frontend_module.core.qt_imports import QGroupBox, QLabel, QVBoxLayout
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.interfaces import IRegistersManagerGui
-from frontend_module.widgets.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QGroupBox, QLabel, QVBoxLayout
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
 
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 from multiprocess_prototype_v3.registers.schemas.processing_tab import (

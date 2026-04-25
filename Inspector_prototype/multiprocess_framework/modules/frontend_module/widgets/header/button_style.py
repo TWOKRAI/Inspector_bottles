@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from frontend_module.core.qt_imports import QPushButton, QSize, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QPushButton, QSize, QWidget
 
 
 class ButtonHeader:
@@ -65,7 +65,7 @@ def create_header_button(
     if on_click:
         btn.clicked.connect(on_click)
     if icon:
-        from frontend_module.core.qt_imports import QIcon
+        from multiprocess_framework.modules.frontend_module.core.qt_imports import QIcon
 
         btn.setIcon(QIcon(icon))
         btn.setIconSize(HEADER_ICON_SIZE)

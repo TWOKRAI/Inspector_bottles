@@ -19,8 +19,8 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
         PostProcessingTabWidget,
         ProcessingTabWidget,
         RecipesTabWidget,
-        SettingsTabWidget,
     )
+    from multiprocess_prototype_v3.frontend.widgets.settings_tab import SettingsContainerWidget
 
     registers_manager = ctx.registers_manager
     recipe_manager = ctx.recipe_manager
@@ -40,7 +40,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 action_bus=ctx.action_bus,
             )
         if widget_key == "settings":
-            return SettingsTabWidget(
+            return SettingsContainerWidget(
                 registers_manager=registers_manager,
                 ui=ctx.get_settings_tab_ui(),
                 recipe_manager=recipe_manager,

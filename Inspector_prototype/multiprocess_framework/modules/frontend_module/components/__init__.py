@@ -9,20 +9,20 @@
 **Presenter** (traits + порты ``IFieldBinding`` / ``IRegisterPort``) + **Facade** (``*.create``).
 См. ``ARCHITECTURE.md`` и ``base/README.md``.
 """
-from frontend_module.components.base.config import (
+from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
     BindingConfig,
     merge_config,
 )
-from frontend_module.components.base.control_hooks import (
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlAccessDeniedEvent,
     ControlHooks,
     ControlWriteCommittedEvent,
     ControlWriteRejectedEvent,
     emit_access_denied,
 )
-from frontend_module.components.base.traits import LegacySyncContext
-from frontend_module.components.checkbox import (
+from multiprocess_framework.modules.frontend_module.components.base.traits import LegacySyncContext
+from multiprocess_framework.modules.frontend_module.components.checkbox import (
     CheckboxControl,
     CheckboxControlResult,
     CheckboxPresenter,
@@ -31,7 +31,7 @@ from frontend_module.components.checkbox import (
     checkbox_left,
     checkbox_right,
 )
-from frontend_module.components.compound import (
+from multiprocess_framework.modules.frontend_module.components.compound import (
     CompoundControl,
     CompoundControlConfig,
     CompoundControlResult,
@@ -40,27 +40,27 @@ from frontend_module.components.compound import (
     CompoundNumericControlResult,
     ControlFactory,
 )
-from frontend_module.components.group import (
+from multiprocess_framework.modules.frontend_module.components.group import (
     GroupConfig,
     LabeledNumericGroupConfig,
     label_bgr_slider_default,
     label_slider_default,
     label_spinbox_default,
 )
-from frontend_module.components.label import LabelConfig
-from frontend_module.components.slider import (
+from multiprocess_framework.modules.frontend_module.components.label import LabelConfig
+from multiprocess_framework.modules.frontend_module.components.slider import (
     SliderConfig,
     SliderControl,
     SliderControlResult,
     SliderPresenter,
 )
-from frontend_module.components.spinbox import (
+from multiprocess_framework.modules.frontend_module.components.spinbox import (
     SpinBoxConfig,
     SpinBoxControl,
     SpinBoxControlResult,
     SpinBoxPresenter,
 )
-from frontend_module.components.numeric import (
+from multiprocess_framework.modules.frontend_module.components.numeric import (
     NumericControl,
     NumericControlResult,
     NumericPresenter,

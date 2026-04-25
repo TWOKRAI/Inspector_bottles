@@ -11,9 +11,9 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, Type, Union
 
-from base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 
-from sql_module.interfaces import (
+from multiprocess_framework.modules.sql_module.interfaces import (
     IAsyncEngineAdapter,
     IAsyncUnitOfWork,
     IRepository,
@@ -21,12 +21,12 @@ from sql_module.interfaces import (
     ISyncEngineAdapter,
     IUnitOfWork,
 )
-from sql_module.configs import SQLManagerConfig
-from sql_module.core.engine_factory import create_async_adapter, create_sync_adapter
-from sql_module.core.base_repository import GenericRepository
-from sql_module.core.ddl_builder import DDLBuilder
-from sql_module.core.queryset import AsyncQuerySet, QuerySet
-from sql_module.adapters.schema_mapper import SchemaBaseMapper
+from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
+from multiprocess_framework.modules.sql_module.core.engine_factory import create_async_adapter, create_sync_adapter
+from multiprocess_framework.modules.sql_module.core.base_repository import GenericRepository
+from multiprocess_framework.modules.sql_module.core.ddl_builder import DDLBuilder
+from multiprocess_framework.modules.sql_module.core.queryset import AsyncQuerySet, QuerySet
+from multiprocess_framework.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 
 
 class SQLManager(BaseManager, ObservableMixin):
@@ -159,7 +159,7 @@ class SQLManager(BaseManager, ObservableMixin):
 
     def uow(self) -> IUnitOfWork:
         """Контекстный менеджер для транзакций (sync)."""
-        from sql_module.core.unit_of_work import SQLAlchemyUnitOfWork
+        from multiprocess_framework.modules.sql_module.core.unit_of_work import SQLAlchemyUnitOfWork
 
         if not self._adapter:
             raise RuntimeError("SQLManager not initialized")
@@ -167,7 +167,7 @@ class SQLManager(BaseManager, ObservableMixin):
 
     def uow_async(self) -> IAsyncUnitOfWork:
         """Асинхронный Unit of Work. Адаптер создаётся лениво при первом вызове."""
-        from sql_module.core.unit_of_work import AsyncSQLAlchemyUnitOfWork
+        from multiprocess_framework.modules.sql_module.core.unit_of_work import AsyncSQLAlchemyUnitOfWork
 
         adapter = self._ensure_async_adapter()
         return AsyncSQLAlchemyUnitOfWork(adapter)
@@ -275,17 +275,17 @@ class SQLManager(BaseManager, ObservableMixin):
             cmd_flat = self._normalize_command(cmd)
             command = cmd_flat.get("command")
             if command == "db.query":
-                from sql_module.commands import DBQueryCommand
+                from multiprocess_framework.modules.sql_module.commands import DBQueryCommand
 
                 validated = DBQueryCommand.model_validate(cmd_flat)
                 return self._handle_query(validated)
             if command == "db.execute":
-                from sql_module.commands import DBExecuteCommand
+                from multiprocess_framework.modules.sql_module.commands import DBExecuteCommand
 
                 validated = DBExecuteCommand.model_validate(cmd_flat)
                 return self._handle_execute(validated)
             if command == "db.insert":
-                from sql_module.commands import DBInsertCommand
+                from multiprocess_framework.modules.sql_module.commands import DBInsertCommand
 
                 validated = DBInsertCommand.model_validate(cmd_flat)
                 return self._handle_insert(validated)

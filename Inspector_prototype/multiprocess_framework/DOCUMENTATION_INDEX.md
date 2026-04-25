@@ -1,67 +1,64 @@
-# Multiprocess Framework — индекс документации
+# Multiprocess Framework — Индекс документации
 
-**Корень:** [README.md](./README.md) · [DECISIONS.md](./DECISIONS.md) · [MODULES_STATUS.md](./MODULES_STATUS.md) · [PROBLEMS.md](./PROBLEMS.md)  
-**Папка docs:** [docs/README.md](./docs/README.md)
-
----
-
-## Главные документы
-
-| Документ | Для чего |
-|----------|----------|
-| [docs/QUICK_START.md](./docs/QUICK_START.md) | Минимальный запуск, термины, ссылки дальше |
-| [docs/FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) | Обзор архитектуры, модули, принципы, сценарии |
-| [docs/CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) | Конфиг: три слоя, schema→dict, ветки доставки (замена трёх legacy docs → [archive](./docs/archive/)) |
-| [docs/DIAGRAMS.md](./docs/DIAGRAMS.md) | Шесть mermaid-диаграмм (слои, IPC, lifecycle, config, граф, аналогия) |
-| [docs/EXTENSION_GUIDE.md](./docs/EXTENSION_GUIDE.md) | Новый ProcessModule / менеджер, чеклисты |
-| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | FAQ, отладка, тесты |
-| [docs/ADR_REGISTRY.md](./docs/ADR_REGISTRY.md) | Коды модулей ADR-{CODE}-NNN, маппинг старых номеров |
-| [docs/ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) | Таблицы, диаграммы, матрицы зависимостей |
-| [docs/ROUTING_GLOSSARY.md](./docs/ROUTING_GLOSSARY.md) | Термины маршрутизации и регистров |
-| [docs/ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md) | Каталог модулей и пакетов прототипа |
-| [docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md](./docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md) | Дорожная карта команд UI / лаунчера |
-| [DECISIONS.md](./DECISIONS.md) | Глобальные ADR (ADR-NNN); модульные — в `modules/*/DECISIONS.md` + реестр |
-| [docs/MODULE_README_TEMPLATE.md](./docs/MODULE_README_TEMPLATE.md) | Шаблон README нового модуля |
+**Обновлено:** 2026-04-25 — после миграции на каноничные импорты и наведения порядка.
 
 ---
 
-## Быстрая навигация
+## Корневые документы
 
-| Задача | Куда смотреть |
-|--------|----------------|
-| Понять систему целиком | [FRAMEWORK_OVERVIEW.md](./docs/FRAMEWORK_OVERVIEW.md) |
-| Цепочка схемы, dict, config, процессы | [CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) |
-| Диаграммы mermaid | [DIAGRAMS.md](./docs/DIAGRAMS.md) |
-| Найти таблицу / схему | [ARCHITECTURE_REFERENCE.md](./docs/ARCHITECTURE_REFERENCE.md) |
-| Понять «почему так» | [DECISIONS.md](./DECISIONS.md) |
-| Сообщения, Dict at Boundary | Overview + ADR-008 |
-| ChannelRoutingManager | Overview + глобальный ADR-013 / модульный ADR-CRM-001 |
-| Остановка процессов | Overview (Graceful Shutdown) + `process_manager_module` |
-| Новый модуль | Шаблон + `base_manager` README + тесты |
-| Запуск unit-тестов фреймворка | [README.md — Testing](./README.md#testing); из `Inspector_prototype`: `python scripts/run_framework_tests.py` |
+| Документ | Назначение |
+|----------|------------|
+| [`README.md`](./README.md) | Что это, как запустить, как тестировать |
+| [`SPEC.md`](./SPEC.md) | **Главное ТЗ** — спецификация фреймворка |
+| [`MODULES_STATUS.md`](./MODULES_STATUS.md) | Таблица 19 модулей: размер, статус, тесты |
+| [`PROBLEMS.md`](./PROBLEMS.md) | Известные ограничения и failing-тесты |
+| [`DECISIONS.md`](./DECISIONS.md) | Глобальные ADR (`ADR-NNN`) |
+| [`STRUCTURE.md`](./STRUCTURE.md) | Дерево пакета |
 
----
+## `docs/` — справочники
+
+| Документ | Назначение |
+|----------|------------|
+| [`docs/MODULES_OVERVIEW.md`](./docs/MODULES_OVERVIEW.md) | **Навигатор**: какой модуль за что отвечает |
+| [`docs/MODULE_CONTRACTS.md`](./docs/MODULE_CONTRACTS.md) | Контракт каждого из 19 модулей |
+| [`docs/INTERACTION_FLOWS.md`](./docs/INTERACTION_FLOWS.md) | Цепочки взаимодействия |
+| [`docs/DESIGN_RULES.md`](./docs/DESIGN_RULES.md) | Императивные правила |
+| [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) | Термины и сокращения |
+| [`docs/ROUTING_GLOSSARY.md`](./docs/ROUTING_GLOSSARY.md) | Канал vs имя процесса |
+| [`docs/DIAGRAMS.md`](./docs/DIAGRAMS.md) | Сводные mermaid-диаграммы |
+| [`docs/QUICK_START.md`](./docs/QUICK_START.md) | Минимальный запуск |
+| [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) | Типичные проблемы |
+| [`docs/EXTENSION_GUIDE.md`](./docs/EXTENSION_GUIDE.md) | Расширение: новый процесс / менеджер |
+| [`docs/CONFIG_GUIDE.md`](./docs/CONFIG_GUIDE.md) | Конфиги: schema → dict → ConfigStore |
+| [`docs/ADR_REGISTRY.md`](./docs/ADR_REGISTRY.md) | Реестр кодов модульных ADR |
+| [`docs/MODULE_README_TEMPLATE.md`](./docs/MODULE_README_TEMPLATE.md) | Шаблон README нового модуля |
+| [`docs/archive/`](./docs/archive/) | Устаревшие / объединённые документы |
 
 ## Документация по модулям
 
-В каждом пакете под [modules/](./modules/):
-
+В каждой папке `modules/<name>/`:
 - `README.md` — назначение и API
-- `STATUS.md` — этап и известные ограничения
+- `STATUS.md` — этап и ограничения
+- `DECISIONS.md` — локальные ADR
 - `interfaces.py` — публичный контракт
 - `tests/` — pytest
 
-Пакеты под `modules/`: **19** — см. [ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md), [DIAGRAMS.md](./docs/DIAGRAMS.md).
-
-Углублённые гайды внутри модулей (например `data_schema_module/docs/`, `config_module/docs/`) остаются частью актуального набора.
+Список модулей и краткая роль — [`docs/MODULES_OVERVIEW.md`](./docs/MODULES_OVERVIEW.md).
 
 ---
 
-## Отладка и проблемы
+## Быстрая навигация по задачам
 
-- [PROBLEMS.md](./PROBLEMS.md) — известные ограничения unit-тестов
-- [tests/integration/TEST_ISSUES.md](./tests/integration/TEST_ISSUES.md) — интеграционные тесты
-
----
-
-*Обновлено: 2026-04-10 — CONFIG_GUIDE, DIAGRAMS, ADR_REGISTRY, QUICK_START; legacy config docs → [docs/archive](./docs/archive/).*
+| Задача | Куда смотреть |
+|--------|----------------|
+| Понять идею фреймворка | [`SPEC.md`](./SPEC.md) §1–4 |
+| Найти подходящий модуль для своей задачи | [`docs/MODULES_OVERVIEW.md`](./docs/MODULES_OVERVIEW.md) |
+| Посмотреть контракт модуля | [`docs/MODULE_CONTRACTS.md`](./docs/MODULE_CONTRACTS.md) или `modules/<X>/interfaces.py` |
+| Цепочка вызовов сценария | [`docs/INTERACTION_FLOWS.md`](./docs/INTERACTION_FLOWS.md) |
+| Что обязано / что запрещено | [`docs/DESIGN_RULES.md`](./docs/DESIGN_RULES.md) |
+| Сообщения, Dict at Boundary | [`SPEC.md`](./SPEC.md) §6 + [`modules/message_module/README.md`](./modules/message_module/README.md) |
+| Маршрутизация (channel/target/Field) | [`docs/ROUTING_GLOSSARY.md`](./docs/ROUTING_GLOSSARY.md) |
+| Запуск и graceful shutdown | [`docs/INTERACTION_FLOWS.md`](./docs/INTERACTION_FLOWS.md) §1 и §4 |
+| Создать новый модуль | [`docs/EXTENSION_GUIDE.md`](./docs/EXTENSION_GUIDE.md) + [`docs/MODULE_README_TEMPLATE.md`](./docs/MODULE_README_TEMPLATE.md) |
+| Запуск тестов | `cd Inspector_prototype && python scripts/run_framework_tests.py` |
+| Известные проблемы | [`PROBLEMS.md`](./PROBLEMS.md) |

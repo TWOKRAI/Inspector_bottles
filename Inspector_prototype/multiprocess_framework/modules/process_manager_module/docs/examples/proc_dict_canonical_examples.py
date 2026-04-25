@@ -114,7 +114,7 @@ def demo_normalize_minimal() -> None:
         set PYTHONPATH=multiprocess_framework\\modules
         python multiprocess_framework/modules/process_manager_module/docs/examples/proc_dict_canonical_examples.py
     """
-    from data_schema_module import merge_with_defaults
+    from multiprocess_framework.modules.data_schema_module import merge_with_defaults
 
     out = merge_with_defaults(EXAMPLE_MINIMAL_INPUT, _DEFAULT_PROCESS_SCHEMA)
     assert out == EXAMPLE_MINIMAL_NORMALIZED, (out, EXAMPLE_MINIMAL_NORMALIZED)

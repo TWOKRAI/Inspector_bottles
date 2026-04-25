@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from registers_module import RegistersManager, build_connection_map_from_registers
+from multiprocess_framework.modules.registers_module import RegistersManager, build_connection_map_from_registers
 
 from .camera import GuiCameraRegisters
 from .commands import GUI_COMMAND_CATALOG

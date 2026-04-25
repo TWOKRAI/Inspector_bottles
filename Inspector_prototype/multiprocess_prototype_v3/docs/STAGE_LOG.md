@@ -16,8 +16,8 @@
 
 - **Модуль:** `process_manager_module` (`system_launcher.py`)
 - **Симптом:** интеграционные тесты используют `time.sleep(...)` вместо ожидания готовности дочерних процессов.
-- **Fix (желательно):** метод с ожиданием Event от `ProcessManagerProcess` или аналог.
-- **Статус:** открыто
+- **Fix:** добавлен `SystemLauncher.wait_until_ready(timeout)` — ожидает `multiprocessing.Event`, который `ProcessManagerProcess` выставляет после завершения `initialize()`. Harness обновлён.
+- **Статус:** закрыт (ADR-116)
 
 ### Framework Gap #3: `send_callback` + `multiprocessing.Queue` — pickle
 
@@ -38,4 +38,4 @@
 | Stage | Модуль | Симптом | Решение / issue |
 |-------|--------|---------|-----------------|
 | v3 review | spawner | сигналы из thread | проверка main thread в `_setup_signals` |
-| v3 review | system_launcher | sleep в тестах | Gap #2 — `wait_until_ready` |
+| v3 review | system_launcher | sleep в тестах | Gap #2 — `wait_until_ready` (ADR-116, закрыт) |

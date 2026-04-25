@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,
     QHBoxLayout,
@@ -22,8 +22,8 @@ from frontend_module.core.qt_imports import (
     QStackedWidget,
     QVBoxLayout,
 )
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.widgets.tabs import BaseTab
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTab
 
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 

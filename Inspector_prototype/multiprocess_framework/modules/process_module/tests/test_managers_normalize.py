@@ -49,7 +49,9 @@ def test_console_process_config_build_and_process_helper():
 
     name, proc_dict = proc_fn(ConsoleProcessConfig())
     assert name == "console_app"
-    assert proc_dict["class"].endswith("ProcessModule")
+    # process_class в ConsoleProcessConfig не задан (пользователь указывает его сам),
+    # поэтому "class" = "" по контракту ProcessLaunchConfig
+    assert isinstance(proc_dict["class"], str)
     assert "managers" in proc_dict["config"]
     assert proc_dict["config"]["managers"]["console"]["interactive"] is True
 

@@ -16,7 +16,7 @@ MessageAdapter — контекстно-зависимая фабрика соо
   - Не знает о каналах и маршрутах.
 
 Пример использования в процессе:
-    from message_module import MessageAdapter
+    from multiprocess_framework.modules.message_module import MessageAdapter
 
     class MyProcess:
         def __init__(self, name):

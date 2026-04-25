@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Generic, Optional, Type, TypeVar, Union
 
-from frontend_module.core.qt_imports import QVBoxLayout, QWidget
-from frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 
 from .binding_context import RegisterBindingContext
 from .placeholder_utils import create_registers_placeholder

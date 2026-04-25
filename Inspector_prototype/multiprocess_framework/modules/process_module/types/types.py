@@ -1,11 +1,16 @@
 """
 process_module — типы и перечисления.
 
-Все публичные типы модуля. Не импортирует из других модулей фреймворка.
+Все публичные типы модуля.
+ProcessStatus — re-export из base_manager (единый enum, ADR-117).
 """
 
 from enum import Enum
 from typing import Any, TypedDict
+
+# Единый ProcessStatus из base_manager (ADR-117).
+# Сохранён как re-export для backward compat.
+from ...base_manager.types.process_status import ProcessStatus
 
 
 class ProcessPriorityLevel(str, Enum):
@@ -15,20 +20,6 @@ class ProcessPriorityLevel(str, Enum):
     NORMAL = "normal"
     HIGH = "high"
     URGENT = "urgent"  # для будущего расширения
-
-
-class ProcessStatus(str, Enum):
-    """Статусы жизненного цикла процесса."""
-
-    INITIALIZING = "initializing"
-    READY = "ready"
-    RUNNING = "running"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    ERROR = "error"
-    CRASHED = "crashed"
-    UNRESPONSIVE = "unresponsive"
-    FAILED = "failed"
 
 
 class ManagerType(str, Enum):

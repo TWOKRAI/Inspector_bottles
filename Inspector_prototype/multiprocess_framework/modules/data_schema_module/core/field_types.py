@@ -8,7 +8,7 @@
 
 Пример:
 
-    from data_schema_module import SchemaBase, Percent, Pixels, HsvHue, HsvChannel
+    from multiprocess_framework.modules.data_schema_module import SchemaBase, Percent, Pixels, HsvHue, HsvChannel
 
     class ProcessingRegisters(SchemaBase):
         # Вместо повторного Annotated[int, FieldMeta(..., min=0, max=179)]
@@ -21,7 +21,7 @@
 
     # Для добавления description к готовому типу используй FieldMeta напрямую:
     from typing import Annotated
-    from data_schema_module import FieldMeta
+    from multiprocess_framework.modules.data_schema_module import FieldMeta
 
     Brightness = Annotated[int, FieldMeta("Яркость", unit="%", min=0, max=100, round_k=0)]
 """
@@ -111,7 +111,7 @@ def register_field_type(name: str, annotated_type: Any) -> None:
 
     Example:
         from typing import Annotated
-        from data_schema_module import FieldMeta, register_field_type
+        from multiprocess_framework.modules.data_schema_module import FieldMeta, register_field_type
 
         MyCustomRange = Annotated[float, FieldMeta("Диапазон", min=0, max=1)]
         register_field_type("MyCustomRange", MyCustomRange)

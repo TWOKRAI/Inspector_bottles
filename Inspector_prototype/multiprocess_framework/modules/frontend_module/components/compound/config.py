@@ -7,9 +7,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
 
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.checkbox.config import CheckboxViewConfig
-from frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.checkbox.config import CheckboxViewConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 
 ChildConfig = Union[NumericViewConfig, CheckboxViewConfig]
 CompoundItem = Tuple[BindingConfig, ChildConfig]

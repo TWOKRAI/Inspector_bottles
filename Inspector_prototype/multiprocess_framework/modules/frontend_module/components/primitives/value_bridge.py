@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from frontend_module.core.qt_imports import QTimer
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
 
 SLIDER_COMMIT_DELAY_MS = 100
 

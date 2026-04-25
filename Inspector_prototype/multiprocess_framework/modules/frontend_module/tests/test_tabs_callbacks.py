@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 
 import pytest
 
-from frontend_module.widgets.tabs import (
+from multiprocess_framework.modules.frontend_module.widgets.tabs import (
     callback_no_args,
     tab_callbacks_from_dict,
     tab_callbacks_to_dict,

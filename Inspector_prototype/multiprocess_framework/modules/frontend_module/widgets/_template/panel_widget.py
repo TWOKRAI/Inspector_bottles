@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from frontend_module.core.qt_imports import QLabel, QVBoxLayout
-from frontend_module.widgets.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLabel, QVBoxLayout
+from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
 
 from .model import TemplateModel
 from .presenter import TemplatePresenter

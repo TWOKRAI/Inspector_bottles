@@ -2,11 +2,11 @@
 """Тесты touch-клавиатуры (без Qt-приложения — только логика конфига)."""
 from __future__ import annotations
 
-from frontend_module.components.base.touch_keyboard_config import (
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import (
     TouchKeyboardConfig,
     coerce_touch_keyboard,
 )
-from frontend_module.widgets.keyboard.touch_keyboard import should_show
+from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import should_show
 
 
 def test_should_show_off() -> None:

@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from frontend_module.core.qt_imports import QLabel
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLabel
 
 
 def create_registers_placeholder(tab_name: str) -> QLabel:

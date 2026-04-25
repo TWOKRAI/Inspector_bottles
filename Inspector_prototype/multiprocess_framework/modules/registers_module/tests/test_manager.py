@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Dict, List
 
-from data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
+from multiprocess_framework.modules.data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
 
-from registers_module import RegistersManager
+from multiprocess_framework.modules.registers_module import RegistersManager
 
 
 class _Draw(SchemaBase):

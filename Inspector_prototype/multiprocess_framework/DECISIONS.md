@@ -131,6 +131,8 @@
 - ## ADR-110: Memory config — декларативно в конфиге, создание под капотом
 - ## ADR-111: Пути файлов логов — не от cwd пакета; pytest задаёт каталог
 - ## ADR-115: Публичный API пакета — lazy `ManagersConfig` / `SchemaBaseMapper`, реэкспорт схем шапки из `widgets`
+- ## ADR-116: SystemLauncher.wait_until_ready — детерминированное ожидание готовности системы
+- ## ADR-117: Единый ProcessStatus enum — унификация из трёх определений
 
 ---
 
@@ -1829,6 +1831,52 @@
   3. **`frontend_module.widgets`**: в **`__all__`** добавлены **`HeaderConfig`**, **`LogoConfig`**, **`AdminButtonConfig`**, **`HeaderButtonItem`** (импорт из подпакета **`header`**).
 - Причина: приложениям не нужно знать внутренние пути `configs/` и `adapters/` для типовых сборок; меньше «трения» при потреблении фреймворка.
 - Отклонённые альтернативы: только документировать глубокие импорты — отклонено (прототип всё равно копировал бы пути).
+
+---
+
+## ADR-116: SystemLauncher.wait_until_ready — детерминированное ожидание готовности системы
+- Дата: 2026-04-25
+- Статус: принято
+- Контекст: Интеграционные тесты прототипа v3 использовали `time.sleep()` для ожидания старта системы (Framework Gap #2 в STAGE_LOG). Это хрупко: на медленных машинах тесты падают, на быстрых — зря тратят время.
+- Решение:
+  1. `SystemLauncher` создаёт `multiprocessing.Event` (`_system_ready_event`).
+  2. Event передаётся в `ProcessSpawner` → bundle → `ProcessManagerProcess` через `custom`.
+  3. `ProcessManagerProcess.initialize()` выставляет event после завершения `_create_processes_from_config()` и запуска `ProcessMonitor`.
+  4. `SystemLauncher.wait_until_ready(timeout)` ждёт event с polling (50мс), проверяя `spawner.is_running()` для раннего выхода при crash.
+  5. Уровень готовности: «minimum+» — ProcessManager инициализирован, все дочерние OS-процессы spawned. Дочерние могут ещё выполнять свой `initialize()`.
+  6. `ISystemLauncher` расширен абстрактным методом `wait_until_ready(timeout)`.
+  7. Harness прототипа v3 обновлён: `time.sleep()` заменён на `wait_until_ready()`.
+- Причина: детерминированный, event-based механизм вместо магических sleep-значений.
+- Отклонённые альтернативы:
+  - `time.sleep()` в тестах — хрупко, зависит от скорости машины.
+  - Polling `get_running_processes()` из launcher — race conditions, нет cross-process видимости статусов.
+  - Polling `process_state_registry` из launcher — не работает: каждый дочерний процесс создаёт свою копию SRM из bundle, статусы не видны из launcher.
+  - «medium»-уровень (дочерние прошли initialize) — требует дополнительного IPC-протокола (process_ready msg), вынесено в будущую задачу.
+- Последствия: тесты становятся детерминированными и быстрыми; при добавлении medium-уровня готовности контракт `wait_until_ready()` не изменится.
+
+## ADR-117: Единый ProcessStatus enum — унификация из трёх определений
+- Дата: 2026-04-25
+- Статус: принято
+- Контекст: `ProcessStatus` был определён в трёх разных местах фреймворка с разным набором значений и даже разными типами:
+  - `process_module/types/types.py` — enum (str, Enum), 9 значений (INITIALIZING, READY, RUNNING, STOPPING, STOPPED, ERROR, CRASHED, UNRESPONSIVE, FAILED).
+  - `shared_resources_module/types/types.py` — enum (Enum без str), 7 значений (подмножество — без UNRESPONSIVE и FAILED).
+  - `process_manager_module/core/process_status.py` — обычный класс мониторинга ОС-процессов (не enum), совпадение имени случайно.
+  Разные enum-ы порождали риск: `ProcessStatus.RUNNING` из одного модуля `is not` `ProcessStatus.RUNNING` из другого, хотя оба описывают жизненный цикл процесса. При передаче через SRM границу сравнение могло дать False.
+- Решение:
+  1. Создан единый `ProcessStatus(str, Enum)` в `base_manager/types/process_status.py` — суперсет из 9 значений.
+  2. Старые определения в `process_module/types/types.py` и `shared_resources_module/types/types.py` заменены на re-export из `base_manager` (backward compat сохранён — все старые пути импорта работают).
+  3. Класс мониторинга в `process_manager_module/core/process_status.py` переименован в `ProcessStatusMonitor`. `ProcessStatus` сохранён как алиас для backward compat.
+  4. `base_manager/__init__.py` экспортирует `ProcessStatus`.
+  5. Корневой `multiprocess_framework/__init__.py` экспортирует `ProcessStatus` (enum из base_manager) и `ProcessStatusMonitor` (класс мониторинга).
+- Причина: один Python-объект для всех модулей — корректное `is`-сравнение, единый набор значений, нет риска расхождения.
+- Отклонённые альтернативы:
+  - Оставить как есть — растущий риск тонких багов при сравнении `ProcessStatus.RUNNING` из разных модулей.
+  - Разместить в `data_schema_module` — логически не подходит, т.к. ProcessStatus не связан с SchemaBase/FieldMeta.
+  - Разделить на два enum (`ProcessLifecycleStatus`, `PSRSlotStatus`) — семантически оба описывают одно и то же (жизненный цикл процесса), разделение не имеет смысла.
+- Последствия:
+  - R-12: изменён публичный контракт (новые значения UNRESPONSIVE, FAILED доступны через shared_resources_module). Backward compat сохранён через re-export.
+  - `process_manager_module.ProcessStatus` (класс мониторинга) теперь `ProcessStatusMonitor` с backward compat алиасом.
+  - Тест `test_types.py::TestProcessStatus::test_all_values_exist` в shared_resources_module обновлён: проверяет subset вместо exact set.
 
 ---
 

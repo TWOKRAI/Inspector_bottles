@@ -7,7 +7,7 @@
 Паттерн адаптера: ``coerce_ui`` (3 ветки: None / экземпляр / dict) и ``BindingConfig`` из
 ``BINDING_*`` на классе регистра — без отдельного ``adapter_common``. См. README.md.
 """
-from frontend_module.components._examples.checkbox import (
+from multiprocess_framework.modules.frontend_module.components._examples.checkbox import (
     EXAMPLE_CHECKBOX_ROUTING,
     ExampleCheckboxUiConfig,
     ExampleCheckboxValueRegister,
@@ -16,7 +16,7 @@ from frontend_module.components._examples.checkbox import (
     coerce_ui as checkbox_coerce_ui,
     create_example_checkbox,
 )
-from frontend_module.components._examples.compound_mixed import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_mixed import (
     EXAMPLE_MIXED_ROUTING,
     ExampleCompoundMixedUiConfig,
     ExampleMixedBoolRegister,
@@ -24,7 +24,7 @@ from frontend_module.components._examples.compound_mixed import (
     coerce_ui as compound_mixed_coerce_ui,
     create_example_compound_mixed,
 )
-from frontend_module.components._examples.compound_numeric import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_numeric import (
     EXAMPLE_BGR_ROUTING,
     ExampleBgrTripletRegister,
     ExampleCompoundNumericUiConfig,
@@ -33,20 +33,20 @@ from frontend_module.components._examples.compound_numeric import (
     compound_numeric_view_config_from_ui,
     create_example_compound_numeric,
 )
-from frontend_module.components._examples.group import (
+from multiprocess_framework.modules.frontend_module.components._examples.group import (
     ExampleGroupRowUiConfig,
     GroupRowExampleResult,
     coerce_ui as group_row_coerce_ui,
     create_example_group_row,
 )
-from frontend_module.components._examples.label import (
+from multiprocess_framework.modules.frontend_module.components._examples.label import (
     ExampleLabelUiConfig,
     LabelExampleResult,
     coerce_ui as label_coerce_ui,
     create_example_label,
     label_config_from_ui,
 )
-from frontend_module.components._examples.numeric import (
+from multiprocess_framework.modules.frontend_module.components._examples.numeric import (
     EXAMPLE_NUMERIC_ROUTING,
     ExampleNumericUiConfig,
     ExampleNumericValueRegister,
@@ -55,7 +55,7 @@ from frontend_module.components._examples.numeric import (
     numeric_binding,
     numeric_view_config_from_ui,
 )
-from frontend_module.components._examples.slider import (
+from multiprocess_framework.modules.frontend_module.components._examples.slider import (
     EXAMPLE_SLIDER_ROUTING,
     ExampleSliderUiConfig,
     ExampleSliderValueRegister,
@@ -64,7 +64,7 @@ from frontend_module.components._examples.slider import (
     slider_binding,
     slider_view_config_from_ui,
 )
-from frontend_module.components._examples.spinbox import (
+from multiprocess_framework.modules.frontend_module.components._examples.spinbox import (
     EXAMPLE_SPINBOX_ROUTING,
     ExampleSpinboxUiConfig,
     ExampleSpinboxValueRegister,

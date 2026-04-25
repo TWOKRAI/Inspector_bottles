@@ -54,7 +54,7 @@ class LegacySyncTrait:
         resolved_meta: Any | None,
     ) -> None:
         """Первичная регистрация в ui_elements/controls (при attach_view)."""
-        from frontend_module.components.common.legacy_sync import (
+        from multiprocess_framework.modules.frontend_module.components.common.legacy_sync import (
             publish_legacy_ui_refs,
         )
 
@@ -70,7 +70,7 @@ class LegacySyncTrait:
 
     def notify_after_write(self, value: Any) -> None:
         """Вызвать после каждой успешной записи: notify, ui_elements, controls, callback."""
-        from frontend_module.components.common.field_sync import (
+        from multiprocess_framework.modules.frontend_module.components.common.field_sync import (
             publish_control_value_to_observers,
         )
 

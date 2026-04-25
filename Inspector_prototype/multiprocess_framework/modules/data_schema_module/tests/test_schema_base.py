@@ -14,7 +14,7 @@
 import unittest
 from typing import Annotated
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     FieldRouting,
     SchemaBase,

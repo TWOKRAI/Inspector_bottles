@@ -16,17 +16,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from frontend_module.components.base import RegisterAdapter
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.control_hooks import ControlHooks
-from frontend_module.components.base.traits import LegacySyncContext
-from frontend_module.components.numeric.config import NumericViewConfig
-from frontend_module.components.group.labeled_numeric_factory import (
+from multiprocess_framework.modules.frontend_module.components.base import RegisterAdapter
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import ControlHooks
+from multiprocess_framework.modules.frontend_module.components.base.traits import LegacySyncContext
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.group.labeled_numeric_factory import (
     create_labeled_numeric_view,
 )
-from frontend_module.components.slider.config import SliderConfig
-from frontend_module.components.slider.presenter import SliderPresenter
-from frontend_module.core.qt_imports import QWidget
+from multiprocess_framework.modules.frontend_module.components.slider.config import SliderConfig
+from multiprocess_framework.modules.frontend_module.components.slider.presenter import SliderPresenter
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
 
 
 @dataclass

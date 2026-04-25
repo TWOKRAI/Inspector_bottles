@@ -11,7 +11,7 @@
 import unittest
 import time
 
-from data_schema_module.extensions.models import (
+from multiprocess_framework.modules.data_schema_module.extensions.models import (
     BaseComponentModel,
     BaseManagerModel,
     ComponentType,
@@ -173,7 +173,7 @@ class TestComponentDNA(unittest.TestCase):
 
     def setUp(self):
         try:
-            from data_schema_module.extensions.models import ComponentDNA
+            from multiprocess_framework.modules.data_schema_module.extensions.models import ComponentDNA
             self.ComponentDNA = ComponentDNA
             self.available = ComponentDNA is not None
         except (ImportError, AttributeError):

@@ -8,7 +8,7 @@ from __future__ import annotations
 import abc
 from typing import Dict, Optional
 
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QHBoxLayout,
     QPushButton,
     QScrollArea,
@@ -17,7 +17,7 @@ from frontend_module.core.qt_imports import (
     QWidget,
     Qt,
 )
-from frontend_module.widgets.widget_signal_bus import WidgetSignalBus
+from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
 class BaseTabMeta(type(QWidget), abc.ABCMeta):

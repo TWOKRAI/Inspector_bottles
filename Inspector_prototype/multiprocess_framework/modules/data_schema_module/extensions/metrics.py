@@ -6,7 +6,7 @@ MetricsCollector — сборщик метрик для data_schema_module.
 Не импортируется автоматически в основном __init__.py.
 
 Использование:
-    from data_schema_module.extensions.metrics import MetricsCollector, get_metrics_collector
+    from multiprocess_framework.modules.data_schema_module.extensions.metrics import MetricsCollector, get_metrics_collector
 """
 from ..core.metrics import (
     MetricsCollector,

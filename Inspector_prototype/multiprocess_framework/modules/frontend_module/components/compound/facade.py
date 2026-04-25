@@ -7,24 +7,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.control_hooks import ControlHooks
-from frontend_module.components.base.traits import LegacySyncContext
-from frontend_module.components.checkbox.config import CheckboxViewConfig
-from frontend_module.components.checkbox.facade import (
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import ControlHooks
+from multiprocess_framework.modules.frontend_module.components.base.traits import LegacySyncContext
+from multiprocess_framework.modules.frontend_module.components.checkbox.config import CheckboxViewConfig
+from multiprocess_framework.modules.frontend_module.components.checkbox.facade import (
     CheckboxControl,
     CheckboxControlResult,
 )
-from frontend_module.components.compound.config import (
+from multiprocess_framework.modules.frontend_module.components.compound.config import (
     CompoundControlConfig,
     CompoundNumericConfig,
 )
-from frontend_module.components.numeric.config import NumericViewConfig
-from frontend_module.components.numeric.facade import (
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.facade import (
     NumericControl,
     NumericControlResult,
 )
-from frontend_module.core.qt_imports import QHBoxLayout, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QVBoxLayout, QWidget
 
 
 @dataclass

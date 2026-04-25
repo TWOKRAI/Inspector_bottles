@@ -5,7 +5,7 @@ File I/O делегируется ``DataConverter`` (ADR-CFG-002: нет file I/
 
 Использование::
 
-    from config_module.tools import ConfigLoader
+    from multiprocess_framework.modules.config_module.tools import ConfigLoader
 
     cfg = (
         ConfigLoader()
@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
 
-from config_module.tools.merge import deep_merge
+from multiprocess_framework.modules.config_module.tools.merge import deep_merge
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -71,7 +71,7 @@ class ConfigLoader:
                 raise FileNotFoundError(f"Config file not found: {file_path}")
             return self
 
-        from data_schema_module.serialization.converter import DataConverter
+        from multiprocess_framework.modules.data_schema_module.serialization.converter import DataConverter
 
         data = DataConverter.load_from_file(file_path)
         if isinstance(data, dict):
@@ -118,7 +118,7 @@ class ConfigLoader:
 
     def build(self) -> "Config":
         """Объединить все слои и вернуть Config объект."""
-        from config_module.core.config import Config
+        from multiprocess_framework.modules.config_module.core.config import Config
 
         merged = self.build_dict()
         return Config(initial_data=merged, env_prefix=self._env_prefix)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
 
 @register_schema("dispatcher")

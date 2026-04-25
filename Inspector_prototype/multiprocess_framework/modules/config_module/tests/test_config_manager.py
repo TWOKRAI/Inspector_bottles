@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from config_module.core.config import Config
-from config_module.core.config_manager import ConfigManager
+from multiprocess_framework.modules.config_module.core.config import Config
+from multiprocess_framework.modules.config_module.core.config_manager import ConfigManager
 
 
 # ---------------------------------------------------------------------------

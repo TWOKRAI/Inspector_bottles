@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QAbstractItemView,
     QGroupBox,
     QHBoxLayout,
@@ -18,8 +18,8 @@ from frontend_module.core.qt_imports import (
     QVBoxLayout,
     QWidget,
 )
-from frontend_module.widgets.tabs import RegisterBindingContext
-from frontend_module.widgets.tabs.numeric_bind_or_lineedit import (
+from multiprocess_framework.modules.frontend_module.widgets.tabs import RegisterBindingContext
+from multiprocess_framework.modules.frontend_module.widgets.tabs.numeric_bind_or_lineedit import (
     append_spinbox_numeric_or_line_fallback,
 )
 

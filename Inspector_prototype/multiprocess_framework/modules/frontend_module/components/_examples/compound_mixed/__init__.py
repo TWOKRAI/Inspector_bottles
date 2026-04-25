@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Смешанный составной контрол: схемы + адаптер."""
-from frontend_module.components._examples.compound_mixed.adapter import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_mixed.adapter import (
     coerce_ui,
     create_example_compound_mixed,
 )
-from frontend_module.components._examples.compound_mixed.schemas import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_mixed.schemas import (
     EXAMPLE_MIXED_ROUTING,
     ExampleCompoundMixedUiConfig,
     ExampleMixedBoolRegister,

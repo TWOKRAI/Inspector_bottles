@@ -10,8 +10,8 @@ FileStorage — хранилище регистров в JSON-файлах.
 
 Пример использования:
 
-    from data_schema_module.serialization import FileStorage
-    from data_schema_module import RegistersContainer
+    from multiprocess_framework.modules.data_schema_module.serialization import FileStorage
+    from multiprocess_framework.modules.data_schema_module import RegistersContainer
 
     container = RegistersContainer({"draw": DrawRegisters, "proc": ProcRegisters})
     storage = FileStorage("data/registers")

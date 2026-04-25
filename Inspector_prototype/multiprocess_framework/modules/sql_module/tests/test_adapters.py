@@ -1,8 +1,8 @@
 """Тесты адаптеров."""
 import pytest
 
-from sql_module.core.engine_factory import create_sync_adapter, create_async_adapter
-from sql_module.configs import SQLManagerConfig
+from multiprocess_framework.modules.sql_module.core.engine_factory import create_sync_adapter, create_async_adapter
+from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
 
 try:
     import pytest_asyncio  # noqa: F401

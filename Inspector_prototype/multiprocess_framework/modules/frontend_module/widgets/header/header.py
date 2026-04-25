@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget, pyqtSignal
 
 from .admin_button_widget import AdminButtonConfig, AdminButtonWidget
 from .header_buttons_widget import HeaderButtonsWidget

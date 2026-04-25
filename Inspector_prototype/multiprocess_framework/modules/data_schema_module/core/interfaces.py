@@ -6,7 +6,7 @@ Backward-compatible re-export.
 Этот файл сохранён для обратной совместимости — все старые импорты работают.
 
 Используйте новый путь:
-    from data_schema_module.interfaces import ISchemaRegistry, ISchemaStorage, ...
+    from multiprocess_framework.modules.data_schema_module.interfaces import ISchemaRegistry, ISchemaStorage, ...
 """
 from ..interfaces import (
     ISchema,

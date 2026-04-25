@@ -11,13 +11,13 @@ from __future__ import annotations
 import sys
 from typing import Any, Dict, Optional
 
-from base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 
-from frontend_module.core.qt_imports import QApplication
-from registers_module import RegistersManager as RegistersManagerClass
-from frontend_module.application.thread_manager import ThreadManager
-from frontend_module.application.window_manager import WindowManager
-from frontend_module.core.registers_bridge import FrontendRegistersBridge
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QApplication
+from multiprocess_framework.modules.registers_module import RegistersManager as RegistersManagerClass
+from multiprocess_framework.modules.frontend_module.application.thread_manager import ThreadManager
+from multiprocess_framework.modules.frontend_module.application.window_manager import WindowManager
+from multiprocess_framework.modules.frontend_module.core.registers_bridge import FrontendRegistersBridge
 
 
 

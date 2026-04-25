@@ -17,8 +17,21 @@ from ..types import (
 
 class TestProcessStatus:
     def test_all_values_exist(self):
-        expected = {"initializing", "ready", "running", "stopping", "stopped", "error"}
-        assert {s.value for s in ProcessStatus} == expected
+        # После унификации (ADR-117) enum содержит суперсет всех значений.
+        # Проверяем, что минимально необходимые значения SRM присутствуют.
+        expected_srm_subset = {
+            "initializing",
+            "ready",
+            "running",
+            "stopping",
+            "stopped",
+            "error",
+            "crashed",
+        }
+        actual = {s.value for s in ProcessStatus}
+        assert expected_srm_subset.issubset(actual), (
+            f"Отсутствуют значения SRM: {expected_srm_subset - actual}"
+        )
 
     def test_from_string(self):
         assert ProcessStatus("running") == ProcessStatus.RUNNING

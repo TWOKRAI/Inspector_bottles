@@ -18,7 +18,7 @@ Frontend Module — модуль UI-фреймворка.
 - frontend_module.configs (FrontendManagerConfig, WindowManagerConfig, ...)
 """
 
-from frontend_module.application import (
+from multiprocess_framework.modules.frontend_module.application import (
     FrontendLaunchHooks,
     FrontendManager,
     RoutedCommandSender,

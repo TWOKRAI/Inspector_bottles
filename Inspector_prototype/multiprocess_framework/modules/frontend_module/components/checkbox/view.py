@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import Callable, Literal, Optional
 
-from frontend_module.components.base.infrastructure.signal_utils import (
+from multiprocess_framework.modules.frontend_module.components.base.infrastructure.signal_utils import (
     block_signals,
 )
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QCheckBox,
     QHBoxLayout,
     QLabel,

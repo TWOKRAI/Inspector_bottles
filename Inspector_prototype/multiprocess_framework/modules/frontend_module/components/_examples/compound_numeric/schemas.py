@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar, Literal
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     FieldRouting,
     RegisterDispatchMeta,

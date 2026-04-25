@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Optional, Union
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from sql_module.interfaces import ISyncEngineAdapter
-from sql_module.configs import SQLManagerConfig
-from sql_module.core.engine_factory import create_sync_engine
+from multiprocess_framework.modules.sql_module.interfaces import ISyncEngineAdapter
+from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
+from multiprocess_framework.modules.sql_module.core.engine_factory import create_sync_engine
 
 
 class BaseSyncAdapter:

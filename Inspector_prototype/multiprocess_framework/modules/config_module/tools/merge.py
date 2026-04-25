@@ -7,7 +7,7 @@
 
 Использование::
 
-    from config_module.tools import deep_merge, multi_merge
+    from multiprocess_framework.modules.config_module.tools import deep_merge, multi_merge
 
     result = deep_merge(defaults, user_overrides)
     result = multi_merge(defaults, env_config, user_config, cli_args)

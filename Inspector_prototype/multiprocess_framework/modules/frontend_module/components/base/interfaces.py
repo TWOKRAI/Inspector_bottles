@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, TypeVar
 
 if TYPE_CHECKING:
-    from frontend_module.schemas.register_binding import ResolvedMeta
+    from multiprocess_framework.modules.frontend_module.schemas.register_binding import ResolvedMeta
 
 T = TypeVar("T")
 
@@ -68,7 +68,7 @@ class IRegisterPort(Protocol):
 
 # --- Минимум RegistersManager для адаптера регистра ---
 
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 # Алиас для обратной совместимости; единый контракт для GUI (ADR-071).
 RegistersManagerLike = IRegistersManagerGui

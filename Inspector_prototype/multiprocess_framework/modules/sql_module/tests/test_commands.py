@@ -1,7 +1,7 @@
 """Тесты typed commands."""
 import pytest
 
-from sql_module.commands import DBQueryCommand, DBExecuteCommand, DBInsertCommand
+from multiprocess_framework.modules.sql_module.commands import DBQueryCommand, DBExecuteCommand, DBInsertCommand
 
 
 class TestDBCommands:

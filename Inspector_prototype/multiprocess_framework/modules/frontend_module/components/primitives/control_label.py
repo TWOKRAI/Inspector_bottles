@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from frontend_module.components.common.typography import label_font
-from frontend_module.core.qt_imports import QLabel
+from multiprocess_framework.modules.frontend_module.components.common.typography import label_font
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLabel
 
 
 def create_control_label(

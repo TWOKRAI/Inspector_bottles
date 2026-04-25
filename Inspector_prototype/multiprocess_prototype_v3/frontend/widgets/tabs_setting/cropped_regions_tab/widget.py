@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from frontend_module.widgets.tabs import PanelTabBase
+from multiprocess_framework.modules.frontend_module.widgets.tabs import PanelTabBase
 
 from ...cropped_regions_widget import CroppedRegionsPanelWidget
 from ...cropped_regions_widget.schemas import CroppedRegionsTabUiConfig

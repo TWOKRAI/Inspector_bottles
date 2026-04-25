@@ -6,7 +6,7 @@ VersionManager — менеджер версий конфигов в ProcessData
 Не импортируется автоматически в основном __init__.py.
 
 Использование:
-    from data_schema_module.extensions.versioning import VersionManager, VersionInfo
+    from multiprocess_framework.modules.data_schema_module.extensions.versioning import VersionManager, VersionInfo
 """
 from ..versioning.version_manager import VersionManager, VersionInfo
 

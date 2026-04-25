@@ -6,17 +6,17 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.interfaces import RegistersManagerLike
-from frontend_module.components._examples.numeric.schemas import (
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import RegistersManagerLike
+from multiprocess_framework.modules.frontend_module.components._examples.numeric.schemas import (
     ExampleNumericUiConfig,
     ExampleNumericValueRegister,
 )
-from frontend_module.components.numeric import (
+from multiprocess_framework.modules.frontend_module.components.numeric import (
     NumericControl,
     NumericControlResult,
 )
-from frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 
 
 def numeric_binding(access_level: int = 0) -> BindingConfig:

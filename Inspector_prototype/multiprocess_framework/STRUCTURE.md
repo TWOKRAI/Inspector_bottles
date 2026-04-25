@@ -1,28 +1,28 @@
 # Структура `multiprocess_framework`
 
-Документ отражает **фактическое** дерево пакета (нижний регистр, `snake_case`). Тесты лежат в **`modules/<name>/tests/`**, а не в отдельном корне `multiprocess_framework/tests/`. Отдельной папки **`examples/`** в пакете нет — примеры смотрите в `multiprocess_prototype/` и в `docs/QUICK_START.md`.
+Документ отражает фактическое дерево пакета. Тесты лежат в `modules/<name>/tests/`.
 
 ## Дерево каталогов
 
 ```
 multiprocess_framework/
-├── __init__.py                 # Публичный фасад (tiered re-exports)
+├── __init__.py                 # Публичный фасад (49 экспортов)
 ├── README.md
-├── DECISIONS.md                # Глобальные ADR (ADR-NNN)
-├── ARCHITECTURE.md
-├── STRUCTURE.md                # Этот файл
-├── MODULES_STATUS.md
+├── SPEC.md                     # Главное ТЗ
 ├── DOCUMENTATION_INDEX.md
+├── MODULES_STATUS.md
 ├── PROBLEMS.md
+├── DECISIONS.md                # Глобальные ADR (ADR-NNN)
+├── STRUCTURE.md                # Этот файл
 ├── modules/
 │   ├── __init__.py
-│   ├── conftest.py             # Общие фикстуры pytest для модулей
-│   ├── pytest.ini
+│   ├── conftest.py             # Общие фикстуры pytest
+│   ├── pytest.ini              # testpaths
 │   ├── base_manager/
 │   ├── channel_routing_module/
 │   ├── command_module/
 │   ├── config_module/
-│   ├── console_module/         # опционально; вне scope production core
+│   ├── console_module/
 │   ├── data_schema_module/
 │   ├── dispatch_module/
 │   ├── error_module/
@@ -37,45 +37,58 @@ multiprocess_framework/
 │   ├── sql_module/
 │   ├── statistics_module/
 │   └── worker_module/
-└── docs/
-    ├── README.md
-    ├── FRAMEWORK_OVERVIEW.md
-    ├── ARCHITECTURE_REFERENCE.md
-    ├── ARCHITECTURE_MODULE_CATALOG.md
-    ├── ROUTING_GLOSSARY.md
-    ├── DIAGRAMS.md             # Сводные mermaid-диаграммы
-    ├── QUICK_START.md
-    ├── EXTENSION_GUIDE.md
-    ├── CONFIG_GUIDE.md
-    ├── TROUBLESHOOTING.md
-    ├── ADR_REGISTRY.md
-    ├── MODULE_README_TEMPLATE.md
-    ├── FRONTEND_COMMAND_LAUNCHER_ROADMAP.md
-    └── archive/                # Устаревшие / объединённые документы
+├── docs/
+│   ├── README.md
+│   ├── MODULES_OVERVIEW.md     # Навигатор
+│   ├── MODULE_CONTRACTS.md
+│   ├── INTERACTION_FLOWS.md
+│   ├── DESIGN_RULES.md
+│   ├── GLOSSARY.md
+│   ├── ROUTING_GLOSSARY.md
+│   ├── DIAGRAMS.md
+│   ├── QUICK_START.md
+│   ├── TROUBLESHOOTING.md
+│   ├── EXTENSION_GUIDE.md
+│   ├── CONFIG_GUIDE.md
+│   ├── ADR_REGISTRY.md
+│   ├── MODULE_README_TEMPLATE.md
+│   └── archive/                # Устаревшие документы
+├── tests/                      # Интеграционные тесты
+│   ├── integration/
+│   ├── run_all_tests.py
+│   └── run_unit_tests.py
+└── tools/
+    ├── module_validator.py
+    └── validate_all_modules.py
 ```
 
-**Всего пакетов под `modules/`:** 19 (включая `console_module`, `sql_module`, `frontend_module`). В обзорах «ядро» иногда считают без опциональных UI/SQL/консоли — см. [docs/ARCHITECTURE_MODULE_CATALOG.md](./docs/ARCHITECTURE_MODULE_CATALOG.md).
+**Всего пакетов под `modules/`:** 19. Список и краткая роль — [`docs/MODULES_OVERVIEW.md`](docs/MODULES_OVERVIEW.md).
 
-## Принципы
+## Принципы организации
 
-1. **Один модуль — одна папка** в `modules/` с `interfaces.py`, `README.md`, `STATUS.md`, `tests/`.
-2. **Импорты между модулями** — через публичный API чужого модуля (обычно `interfaces.py`), без `sys.path` hacks.
+1. **Один модуль — одна папка** в `modules/` с обязательными файлами: `__init__.py`, `interfaces.py`, `README.md`, `STATUS.md`, `DECISIONS.md`, `tests/`.
+2. **Импорты между модулями** — каноничные: `from multiprocess_framework.modules.<X> import Y`. Никаких top-level импортов и `sys.path`-хаков.
 3. **Граница процессов** — только `dict` (Dict at Boundary); Pydantic — внутри процесса.
+4. **Публичный API** — только через `interfaces.py` чужого модуля.
 
-## Импорты (пользователи фреймворка)
+## Импорты для пользователей фреймворка
 
 ```python
+# С корневого фасада (рекомендуется):
 from multiprocess_framework import SystemLauncher, ProcessModule, SchemaBase, process
-# или явно:
+
+# Подробный путь (тоже корректно):
 from multiprocess_framework.modules.process_manager_module import SystemLauncher
 ```
 
 ## Импорты внутри фреймворка
 
-Между модулями — **абсолютные** импорты из `multiprocess_framework.modules.<name>`. Внутри модуля — относительные (`from ..interfaces import ...`).
+Между модулями — **абсолютные** импорты из `multiprocess_framework.modules.<name>`. Внутри одного модуля — **относительные** (`from ..interfaces import ...`).
 
 ## Добавление нового модуля
 
-1. Создать `modules/new_module/` с `__init__.py`, `interfaces.py`, `README.md`, `STATUS.md`, `tests/`.
-2. При необходимости добавить реэкспорт в `multiprocess_framework/__init__.py`.
-3. Обновить `MODULES_STATUS.md`, `docs/ARCHITECTURE_MODULE_CATALOG.md`, при архитектурных решениях — `DECISIONS.md` или `modules/new_module/DECISIONS.md` в формате **ADR-{CODE}-NNN** (см. `docs/ADR_REGISTRY.md`).
+1. Создать `modules/<new_module>/` с обязательными файлами (см. [`docs/MODULE_README_TEMPLATE.md`](docs/MODULE_README_TEMPLATE.md)).
+2. Добавить реэкспорт в `multiprocess_framework/__init__.py`.
+3. Обновить `MODULES_STATUS.md`, `docs/MODULES_OVERVIEW.md`, `docs/MODULE_CONTRACTS.md`.
+4. Архитектурные решения — `modules/<X>/DECISIONS.md` в формате `ADR-<КОД>-NNN` (реестр кодов — [`docs/ADR_REGISTRY.md`](docs/ADR_REGISTRY.md)).
+5. Прогнать тесты: `python scripts/run_framework_tests.py`.

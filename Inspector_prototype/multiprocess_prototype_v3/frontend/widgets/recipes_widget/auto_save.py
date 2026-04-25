@@ -172,7 +172,7 @@ class QtDebounceAdapter:
     """
 
     def __init__(self, parent: Any = None) -> None:
-        from frontend_module.core.qt_imports import QTimer
+        from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
 
         self._QTimer = QTimer  # cache класс, чтобы не импортировать повторно
         self._timer: Any = None

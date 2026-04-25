@@ -8,14 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from frontend_module.components.base.interfaces import (
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import (
     IFieldBinding,
     IRegisterPort,
 )
-from frontend_module.schemas.register_binding import ResolvedMeta
+from multiprocess_framework.modules.frontend_module.schemas.register_binding import ResolvedMeta
 
 if TYPE_CHECKING:
-    from frontend_module.components.base.config import LabelOverride
+    from multiprocess_framework.modules.frontend_module.components.base.config import LabelOverride
 
 
 class SchemaTrait:

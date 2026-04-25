@@ -10,12 +10,12 @@ Undo/Redo: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z + кнопки в header (подклю
 from collections.abc import Callable
 from typing import Any
 
-from frontend_module.core.action_binding import connect_action_handlers
-from frontend_module.core.qt_imports import QHBoxLayout, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
-from frontend_module.widgets import HeaderWidget, TabWidget
-from frontend_module.widgets.header import HeaderConfig
-from frontend_module.widgets.header.button_style import create_header_button
-from frontend_module.widgets.image_panel import ImagePanelWidget
+from multiprocess_framework.modules.frontend_module.core.action_binding import connect_action_handlers
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.widgets import HeaderWidget, TabWidget
+from multiprocess_framework.modules.frontend_module.widgets.header import HeaderConfig
+from multiprocess_framework.modules.frontend_module.widgets.header.button_style import create_header_button
+from multiprocess_framework.modules.frontend_module.widgets.image_panel import ImagePanelWidget
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QLabel, QMessageBox, QShortcut
 

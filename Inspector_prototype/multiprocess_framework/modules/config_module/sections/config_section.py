@@ -4,7 +4,7 @@
 Представление части конфигурации как отдельного объекта.
 """
 from typing import Dict, Any, Optional
-from config_module.core.config import Config
+from multiprocess_framework.modules.config_module.core.config import Config
 
 
 class ConfigSection:

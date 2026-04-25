@@ -3,8 +3,8 @@ Unit-тесты для класса ConfigSection.
 """
 import pytest
 
-from config_module.core.config import Config
-from config_module.sections.config_section import ConfigSection
+from multiprocess_framework.modules.config_module.core.config import Config
+from multiprocess_framework.modules.config_module.sections.config_section import ConfigSection
 
 
 # ---------------------------------------------------------------------------

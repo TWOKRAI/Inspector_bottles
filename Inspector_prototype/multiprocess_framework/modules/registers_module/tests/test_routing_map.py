@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Dict, List, Optional, Tuple
 
-from data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
+from multiprocess_framework.modules.data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
 
-from registers_module import (
+from multiprocess_framework.modules.registers_module import (
     MESSAGE_LOST,
     PROCESS_UNREACHABLE,
     ROUTING_NOT_FOUND,

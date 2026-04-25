@@ -17,9 +17,9 @@ from typing import Annotated, Optional
 import pytest
 from sqlalchemy import String
 
-from data_schema_module import SchemaBase, FieldMeta
-from sql_module.adapters.sql_meta import extract_sql_meta
-from sql_module.adapters.schema_mapper import SchemaBaseMapper
+from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta
+from multiprocess_framework.modules.sql_module.adapters.sql_meta import extract_sql_meta
+from multiprocess_framework.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 
 
 # ---------------------------------------------------------------------------

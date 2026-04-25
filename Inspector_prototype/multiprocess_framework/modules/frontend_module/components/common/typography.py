@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from frontend_module.core.qt_imports import QFont
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QFont
 
 
 LABEL_FONT_FAMILY = "Arial"

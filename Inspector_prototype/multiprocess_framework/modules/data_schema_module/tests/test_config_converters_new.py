@@ -11,7 +11,7 @@
 """
 import unittest
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     config_to_dict,
     configs_to_dicts,
     build_process_with_workers,

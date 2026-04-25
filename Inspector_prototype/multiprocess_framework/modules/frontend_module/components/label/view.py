@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from frontend_module.core.qt_imports import QHBoxLayout, QLabel, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QLabel, QWidget
 
 
 class LabelView(QWidget):

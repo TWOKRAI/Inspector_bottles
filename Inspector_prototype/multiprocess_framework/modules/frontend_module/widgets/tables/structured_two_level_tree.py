@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from frontend_module.components.base.touch_keyboard_config import (
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import (
     TouchKeyboardConfig,
     coerce_touch_keyboard,
 )
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QAbstractItemView,
     QCheckBox,
     QHeaderView,
@@ -27,7 +27,7 @@ from frontend_module.core.qt_imports import (
     pyqtSignal,
 )
 
-from frontend_module.widgets.tables.touch_line_edit_delegate import TouchLineEditItemDelegate
+from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import TouchLineEditItemDelegate
 
 
 ROLE_KIND = Qt.UserRole

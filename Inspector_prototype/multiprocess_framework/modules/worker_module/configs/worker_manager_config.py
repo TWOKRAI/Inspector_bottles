@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
 from .thread_worker_config import ThreadWorkerConfig
 

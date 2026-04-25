@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Type, TypeVar, Union
 
-from data_schema_module import SchemaBase
+from multiprocess_framework.modules.data_schema_module import SchemaBase
 
 T = TypeVar("T", bound=SchemaBase)
 

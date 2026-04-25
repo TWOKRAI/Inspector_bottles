@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
 from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol

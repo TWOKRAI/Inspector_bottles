@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.core.qt_imports import QLineEdit, QStyledItemDelegate, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLineEdit, QStyledItemDelegate, QWidget
 
 
 class TouchLineEditItemDelegate(QStyledItemDelegate):
@@ -30,7 +30,7 @@ class TouchLineEditItemDelegate(QStyledItemDelegate):
             cfg = self._host._keyboard_config_for_column(index.column())  # type: ignore[attr-defined]
         if cfg is None and self._keyboard_factory is None:
             return editor
-        from frontend_module.widgets.keyboard.touch_keyboard import (
+        from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import (
             install_touch_keyboard_on_line_edit,
         )
 

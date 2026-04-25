@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
 
-from sql_module.interfaces import ISchemaMapper, ISyncEngineAdapter
+from multiprocess_framework.modules.sql_module.interfaces import ISchemaMapper, ISyncEngineAdapter
 
 T = TypeVar("T")
 ID = TypeVar("ID", int, str)
@@ -122,6 +122,6 @@ class GenericRepository:
 
 
 def _default_mapper() -> ISchemaMapper:
-    from sql_module.adapters.schema_mapper import SchemaBaseMapper
+    from multiprocess_framework.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
 
     return SchemaBaseMapper()

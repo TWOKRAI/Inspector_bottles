@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from frontend_module.interfaces import IRegistersManagerGui
-from frontend_module.widgets.tabs import TabPresenterBase
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.widgets.tabs import TabPresenterBase
 
 from multiprocess_prototype_v3.frontend.coordinators.logical_cameras import (
     ensure_logical_camera_and_seed_roi,

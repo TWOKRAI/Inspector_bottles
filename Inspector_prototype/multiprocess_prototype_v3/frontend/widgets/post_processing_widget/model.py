@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 from .schemas import PostProcessingTabUiConfig
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.components.base.interfaces import (
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import (
     IFieldBinding,
     IRegisterPort,
 )

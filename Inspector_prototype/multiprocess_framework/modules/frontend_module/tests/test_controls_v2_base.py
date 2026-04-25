@@ -8,28 +8,28 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from frontend_module.components.base.config import (
+from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
     BindingConfig,
     LabelOverride,
     merge_config,
 )
-from frontend_module.components.base.infrastructure.register_adapter import (
+from multiprocess_framework.modules.frontend_module.components.base.infrastructure.register_adapter import (
     RegisterAdapter,
 )
-from frontend_module.components.base.infrastructure.signal_utils import (
+from multiprocess_framework.modules.frontend_module.components.base.infrastructure.signal_utils import (
     block_signals,
 )
-from frontend_module.components.base.infrastructure.value_transformer import (
+from multiprocess_framework.modules.frontend_module.components.base.infrastructure.value_transformer import (
     ValueTransformer,
 )
-from frontend_module.components.base.traits.access_trait import AccessTrait
-from frontend_module.components.base.traits.debounce_trait import (
+from multiprocess_framework.modules.frontend_module.components.base.traits.access_trait import AccessTrait
+from multiprocess_framework.modules.frontend_module.components.base.traits.debounce_trait import (
     DebounceTrait,
 )
-from frontend_module.components.base.traits.schema_trait import SchemaTrait
-from frontend_module.components.base.traits.sync_trait import SyncTrait
-from frontend_module.schemas.register_binding import RegisterFieldMeta, ResolvedMeta
+from multiprocess_framework.modules.frontend_module.components.base.traits.schema_trait import SchemaTrait
+from multiprocess_framework.modules.frontend_module.components.base.traits.sync_trait import SyncTrait
+from multiprocess_framework.modules.frontend_module.schemas.register_binding import RegisterFieldMeta, ResolvedMeta
 
 
 @dataclass

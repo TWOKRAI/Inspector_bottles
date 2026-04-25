@@ -5,16 +5,16 @@
 Переиспользуемые фабрики без зависимости от регистра.
 Стили — из common/typography, common/sizes, common/slider_styles.
 """
-from frontend_module.components.primitives.control_label import (
+from multiprocess_framework.modules.frontend_module.components.primitives.control_label import (
     create_control_label,
 )
-from frontend_module.components.primitives.numeric_line_edit import (
+from multiprocess_framework.modules.frontend_module.components.primitives.numeric_line_edit import (
     create_numeric_line_edit,
 )
-from frontend_module.components.primitives.styled_slider import (
+from multiprocess_framework.modules.frontend_module.components.primitives.styled_slider import (
     create_styled_horizontal_slider,
 )
-from frontend_module.components.primitives.value_bridge import (
+from multiprocess_framework.modules.frontend_module.components.primitives.value_bridge import (
     SLIDER_COMMIT_DELAY_MS,
     schedule_slider_value_commit,
 )

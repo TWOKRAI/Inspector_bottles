@@ -12,8 +12,8 @@ import time
 import unittest
 from typing import Any, Dict, Optional
 
-from data_schema_module.extensions.versioning import VersionManager, VersionInfo
-from data_schema_module.extensions.models import BaseManagerModel, ComponentType
+from multiprocess_framework.modules.data_schema_module.extensions.versioning import VersionManager, VersionInfo
+from multiprocess_framework.modules.data_schema_module.extensions.models import BaseManagerModel, ComponentType
 
 
 # =============================================================================

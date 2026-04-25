@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 from multiprocess_prototype_v3.registers.schemas.camera_tab import (
     CAMERA_REGISTER,

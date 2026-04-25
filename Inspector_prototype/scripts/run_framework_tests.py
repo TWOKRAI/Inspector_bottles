@@ -1,9 +1,9 @@
 """
 Запуск unit-тестов пакетов multiprocess_framework (каталог modules/).
 
-Модули импортируются в «плоском» виде (например data_schema_module), поэтому
-pytest должен стартовать с cwd = multiprocess_framework/modules, где лежит
-pytest.ini (pythonpath = .).
+После миграции на каноничные импорты (`multiprocess_framework.modules.<X>`) пакет
+доступен через editable installation Inspector_prototype. Скрипт оставлен как
+удобная точка входа: testpaths определены в `modules/pytest.ini`.
 
 Использование (из Inspector_prototype):
 

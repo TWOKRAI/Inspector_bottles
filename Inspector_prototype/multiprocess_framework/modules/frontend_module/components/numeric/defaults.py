@@ -2,7 +2,7 @@
 """
 Дефолтные конфиги числовых контролов.
 """
-from frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 
 # Числовые
 slider_default = NumericViewConfig(view_type="slider")

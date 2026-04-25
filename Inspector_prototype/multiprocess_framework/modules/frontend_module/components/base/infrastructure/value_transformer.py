@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from frontend_module.schemas.register_binding import ResolvedMeta
+from multiprocess_framework.modules.frontend_module.schemas.register_binding import ResolvedMeta
 
 
 class ValueTransformer:

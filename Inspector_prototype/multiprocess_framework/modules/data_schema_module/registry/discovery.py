@@ -179,7 +179,7 @@ class RegistersScanner:
         register_map = RegistersScanner.scan_directory(path, recursive=True)
 
         # Создать контейнер:
-        from data_schema_module import RegistersContainer
+        from multiprocess_framework.modules.data_schema_module import RegistersContainer
         container = RegistersContainer(register_map)
     """
 

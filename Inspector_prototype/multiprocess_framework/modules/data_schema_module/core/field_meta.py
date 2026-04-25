@@ -11,7 +11,7 @@ FieldMeta — дескриптор метаданных поля для Annotate
 Пример использования:
 
     from typing import Annotated
-    from data_schema_module import FieldMeta, SchemaBase
+    from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 
     class DrawRegisters(SchemaBase):
         dp: Annotated[float, FieldMeta(

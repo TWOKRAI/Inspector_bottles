@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Optional, Protocol, Sequence
 
-from frontend_module.components import BindingConfig, NumericControl, NumericViewConfig
-from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
-from frontend_module.core.qt_imports import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.components import BindingConfig, NumericControl, NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from .binding_context import RegisterBindingContext
 
@@ -63,7 +63,7 @@ def append_spinbox_numeric_or_line_fallback(
             layout.addWidget(result.widget)
         line_edits = [None] * len(row_specs)
     else:
-        from frontend_module.widgets.keyboard.touch_keyboard import (
+        from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import (
             install_touch_keyboard_on_line_edit,
         )
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from frontend_module.core.qt_imports import QWidget
-from frontend_module.widgets.widget_signal_bus import WidgetSignalBus
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
+from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
 def _parse_level(name: str) -> int:

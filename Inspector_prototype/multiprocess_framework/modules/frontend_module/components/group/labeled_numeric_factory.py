@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from frontend_module.components.group.view import LabeledNumericGroupView
-from frontend_module.components.label.view import LabelView
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
+from multiprocess_framework.modules.frontend_module.components.group.view import LabeledNumericGroupView
+from multiprocess_framework.modules.frontend_module.components.label.view import LabelView
 
 
 def _create_labeled_numeric_view(
@@ -28,7 +28,7 @@ def _create_labeled_numeric_view(
     touch_factory = getattr(value_config, "touch_keyboard_factory", None)
 
     if view_type == "slider":
-        from frontend_module.components.slider.view import SliderValueView
+        from multiprocess_framework.modules.frontend_module.components.slider.view import SliderValueView
 
         value_view = SliderValueView(
             show_ticks=bool(show_ticks),
@@ -37,7 +37,7 @@ def _create_labeled_numeric_view(
             touch_keyboard_factory=touch_factory,
         )
     elif view_type == "spinbox":
-        from frontend_module.components.spinbox.view import SpinBoxValueView
+        from multiprocess_framework.modules.frontend_module.components.spinbox.view import SpinBoxValueView
 
         value_view = SpinBoxValueView(
             touch_keyboard=touch_cfg,

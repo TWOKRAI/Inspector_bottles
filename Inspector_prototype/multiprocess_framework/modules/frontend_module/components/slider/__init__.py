@@ -4,17 +4,17 @@ Slider v2: SliderValueView (value), SliderControl.create (фасад).
 
 По аналогии с checkbox: SliderControl.create возвращает SliderControlResult(widget, presenter).
 """
-from frontend_module.components.slider.config import SliderConfig
-from frontend_module.components.slider.defaults import (
+from multiprocess_framework.modules.frontend_module.components.slider.config import SliderConfig
+from multiprocess_framework.modules.frontend_module.components.slider.defaults import (
     bgr_slider_default,
     slider_default,
 )
-from frontend_module.components.slider.facade import (
+from multiprocess_framework.modules.frontend_module.components.slider.facade import (
     SliderControl,
     SliderControlResult,
 )
-from frontend_module.components.slider.presenter import SliderPresenter
-from frontend_module.components.slider.view import SliderValueView
+from multiprocess_framework.modules.frontend_module.components.slider.presenter import SliderPresenter
+from multiprocess_framework.modules.frontend_module.components.slider.view import SliderValueView
 
 __all__ = [
     "SliderConfig",

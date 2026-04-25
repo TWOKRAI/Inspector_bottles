@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from frontend_module.interfaces import IRegistersManager
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManager
 
 
 def _build_send_callback(router: Any, process_name: str) -> Callable[[str, str, str, Any, Dict[str, Any]], None]:

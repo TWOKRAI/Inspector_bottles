@@ -87,7 +87,7 @@ class ProcessRegistry:
             )
             custom = dict(process_data.custom) if process_data and process_data.custom else {}
             custom.setdefault("process_config", process_config)
-            for key in ("stop_event", "error_manager", "pause_event"):
+            for key in ("stop_event", "error_manager", "pause_event", "system_ready_event"):
                 custom.pop(key, None)
 
             all_process_memory: Dict[str, Dict[str, Any]] = {}

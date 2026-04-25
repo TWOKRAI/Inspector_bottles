@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from frontend_module.widgets.tabs import TabPresenterBase
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.widgets.tabs import TabPresenterBase
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 from .schemas import SimWebcamUiConfig
 

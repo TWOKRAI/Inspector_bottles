@@ -26,7 +26,7 @@ def build_routing_map(registers: IRegistersManager) -> Dict[Tuple[str, str], Dic
         reg = registers.get_register(reg_name)
         if reg is None:
             continue
-        fields = getattr(reg, "model_fields", None)
+        fields = getattr(type(reg), "model_fields", None)
         if not fields:
             continue
         for field_name in fields.keys():

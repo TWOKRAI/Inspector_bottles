@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, pyqtSignal
-from frontend_module.widgets.tables.structured_table import StructuredTableWidget
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.widgets.tables.structured_table import StructuredTableWidget
 
 
 class TableWithToolbar(QWidget):

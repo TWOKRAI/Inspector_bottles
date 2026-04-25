@@ -9,13 +9,13 @@ import pytest
 from pathlib import Path
 
 try:
-    from config_module.tools.watcher import ConfigFileWatcher
+    from multiprocess_framework.modules.config_module.tools.watcher import ConfigFileWatcher
 
     HAS_WATCHDOG = True
 except ImportError:
     HAS_WATCHDOG = False
 
-from config_module.core.config import Config
+from multiprocess_framework.modules.config_module.core.config import Config
 
 pytestmark = pytest.mark.skipif(not HAS_WATCHDOG, reason="watchdog not installed")
 

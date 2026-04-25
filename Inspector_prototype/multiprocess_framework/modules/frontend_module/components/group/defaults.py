@@ -4,10 +4,10 @@
 
 Каждая схема включает конфиги дочерних компонентов + параметры группы.
 """
-from frontend_module.components.group.config import LabeledNumericGroupConfig
-from frontend_module.components.label.config import LabelConfig
-from frontend_module.components.slider.config import SliderConfig
-from frontend_module.components.spinbox.config import SpinBoxConfig
+from multiprocess_framework.modules.frontend_module.components.group.config import LabeledNumericGroupConfig
+from multiprocess_framework.modules.frontend_module.components.label.config import LabelConfig
+from multiprocess_framework.modules.frontend_module.components.slider.config import SliderConfig
+from multiprocess_framework.modules.frontend_module.components.spinbox.config import SpinBoxConfig
 
 # Группа: подпись слева + слайдер
 label_slider_default = LabeledNumericGroupConfig(

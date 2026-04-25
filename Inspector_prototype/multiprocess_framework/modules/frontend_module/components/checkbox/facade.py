@@ -16,14 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from frontend_module.components.base import RegisterAdapter
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.control_hooks import ControlHooks
-from frontend_module.components.base.interfaces import RegistersManagerLike
-from frontend_module.components.checkbox.config import CheckboxViewConfig
-from frontend_module.components.checkbox.presenter import CheckboxPresenter
-from frontend_module.components.checkbox.view import CheckboxView
-from frontend_module.core.qt_imports import QWidget
+from multiprocess_framework.modules.frontend_module.components.base import RegisterAdapter
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import ControlHooks
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import RegistersManagerLike
+from multiprocess_framework.modules.frontend_module.components.checkbox.config import CheckboxViewConfig
+from multiprocess_framework.modules.frontend_module.components.checkbox.presenter import CheckboxPresenter
+from multiprocess_framework.modules.frontend_module.components.checkbox.view import CheckboxView
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
 
 
 @dataclass

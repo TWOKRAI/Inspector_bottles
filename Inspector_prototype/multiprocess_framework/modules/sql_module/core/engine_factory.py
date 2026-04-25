@@ -14,8 +14,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
-from sql_module.interfaces import ISyncEngineAdapter
-from sql_module.configs import SQLManagerConfig
+from multiprocess_framework.modules.sql_module.interfaces import ISyncEngineAdapter
+from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
 
 
 def _should_use_null_pool(config: Union[SQLManagerConfig, Dict[str, Any]]) -> bool:
@@ -92,15 +92,15 @@ def create_sync_adapter(
     d = dialect or cfg.get("dialect", "sqlite")
 
     if d == "sqlite":
-        from sql_module.adapters.sqlite import SQLiteSyncAdapter
+        from multiprocess_framework.modules.sql_module.adapters.sqlite import SQLiteSyncAdapter
 
         return SQLiteSyncAdapter(config)
     if d in ("postgresql", "postgres"):
-        from sql_module.adapters.postgresql import PostgreSQLSyncAdapter
+        from multiprocess_framework.modules.sql_module.adapters.postgresql import PostgreSQLSyncAdapter
 
         return PostgreSQLSyncAdapter(config)
     if d == "mysql":
-        from sql_module.adapters.mysql import MySQLSyncAdapter
+        from multiprocess_framework.modules.sql_module.adapters.mysql import MySQLSyncAdapter
 
         return MySQLSyncAdapter(config)
 
@@ -112,21 +112,21 @@ def create_async_adapter(
     dialect: Optional[str] = None,
 ) -> "IAsyncEngineAdapter":
     """Создать IAsyncEngineAdapter по конфигу."""
-    from sql_module.interfaces import IAsyncEngineAdapter
+    from multiprocess_framework.modules.sql_module.interfaces import IAsyncEngineAdapter
 
     cfg = _config_to_dict(config)
     d = dialect or cfg.get("dialect", "sqlite")
 
     if d == "sqlite":
-        from sql_module.adapters.sqlite import SQLiteAsyncAdapter
+        from multiprocess_framework.modules.sql_module.adapters.sqlite import SQLiteAsyncAdapter
 
         return SQLiteAsyncAdapter(config)
     if d in ("postgresql", "postgres"):
-        from sql_module.adapters.postgresql import PostgreSQLAsyncAdapter
+        from multiprocess_framework.modules.sql_module.adapters.postgresql import PostgreSQLAsyncAdapter
 
         return PostgreSQLAsyncAdapter(config)
     if d == "mysql":
-        from sql_module.adapters.mysql import MySQLAsyncAdapter
+        from multiprocess_framework.modules.sql_module.adapters.mysql import MySQLAsyncAdapter
 
         return MySQLAsyncAdapter(config)
 

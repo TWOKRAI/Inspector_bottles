@@ -10,8 +10,8 @@ import pytest
 from typing import Annotated, Optional
 from pydantic import BaseModel
 
-from data_schema_module import SchemaBase, FieldMeta
-from sql_module import SQLManager, SQLManagerConfig
+from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta
+from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig
 
 
 class UserSchema(BaseModel):

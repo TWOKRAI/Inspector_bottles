@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional, Union
 
-from frontend_module.core.qt_imports import QVBoxLayout
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.widgets.base_widget import BaseWidget
-from frontend_module.widgets.tabs import callback_no_args
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QVBoxLayout
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.widgets.tabs import callback_no_args
 
 from multiprocess_prototype_v3.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
 

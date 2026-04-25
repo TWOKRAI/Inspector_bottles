@@ -7,9 +7,9 @@ Async: mysql+aiomysql://...
 """
 from typing import Any, Dict, Union
 
-from sql_module.adapters.sync_adapter import BaseSyncAdapter
-from sql_module.adapters.async_adapter import BaseAsyncAdapter
-from sql_module.configs import SQLManagerConfig
+from multiprocess_framework.modules.sql_module.adapters.sync_adapter import BaseSyncAdapter
+from multiprocess_framework.modules.sql_module.adapters.async_adapter import BaseAsyncAdapter
+from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
 
 
 class MySQLSyncAdapter(BaseSyncAdapter):

@@ -2,8 +2,8 @@
 """Тесты WindowRegistry и WindowConfig."""
 import pytest
 
-from frontend_module.core.window_registry import WindowRegistry
-from frontend_module.schemas.window_config import WindowConfig
+from multiprocess_framework.modules.frontend_module.core.window_registry import WindowRegistry
+from multiprocess_framework.modules.frontend_module.schemas.window_config import WindowConfig
 
 
 class TestWindowRegistry:

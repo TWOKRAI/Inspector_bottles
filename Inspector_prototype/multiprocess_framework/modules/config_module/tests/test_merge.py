@@ -3,7 +3,7 @@ Unit-тесты для config_module.tools.merge — deep_merge и multi_merge.
 """
 import pytest
 
-from config_module.tools.merge import deep_merge, multi_merge
+from multiprocess_framework.modules.config_module.tools.merge import deep_merge, multi_merge
 
 
 # ---------------------------------------------------------------------------

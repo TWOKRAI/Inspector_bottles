@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,
     QHBoxLayout,
@@ -14,10 +14,10 @@ from frontend_module.core.qt_imports import (
     QVBoxLayout,
     pyqtSignal,
 )
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.widgets.base_widget import BaseWidget
-from frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
-from frontend_module.widgets.tabs import callback_no_args
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
+from multiprocess_framework.modules.frontend_module.widgets.tabs import callback_no_args
 
 from .model import SettingsProfileModel
 from .presenter import SettingsProfilePresenter
@@ -152,7 +152,7 @@ class SettingsProfilePanelWidget(BaseWidget[SettingsProfileModel]):
 
     def show_error(self, message: str) -> None:
         """Показать диалог с сообщением об ошибке."""
-        from frontend_module.core.qt_imports import QMessageBox  # lazy import
+        from multiprocess_framework.modules.frontend_module.core.qt_imports import QMessageBox  # lazy import
 
         QMessageBox.warning(self, "Ошибка профиля", message)
 

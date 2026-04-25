@@ -31,14 +31,14 @@ from typing import Annotated
 
 import pytest
 
-from data_schema_module.registry.process_registry import (
+from multiprocess_framework.modules.data_schema_module.registry.process_registry import (
     ProcessRegistersRegistry,
     RegistersMeta,
 )
-from data_schema_module.container.registers_container import RegistersContainer
-from data_schema_module.core.schema_base import RegisterBase
-from data_schema_module.core.field_meta import FieldMeta
-from data_schema_module.core.field_routing import FieldRouting
+from multiprocess_framework.modules.data_schema_module.container.registers_container import RegistersContainer
+from multiprocess_framework.modules.data_schema_module.core.schema_base import RegisterBase
+from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+from multiprocess_framework.modules.data_schema_module.core.field_routing import FieldRouting
 
 
 # =============================================================================

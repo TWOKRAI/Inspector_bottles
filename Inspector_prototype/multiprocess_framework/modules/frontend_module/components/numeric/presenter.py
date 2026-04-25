@@ -8,17 +8,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from frontend_module.components.base import RegisterAdapter, ValueTransformer
-from frontend_module.components.base.control_hooks import (
+from multiprocess_framework.modules.frontend_module.components.base import RegisterAdapter, ValueTransformer
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlHooks,
     ControlKind,
     emit_access_denied,
     emit_write_committed,
     emit_write_rejected,
 )
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.interfaces import INumericView
-from frontend_module.components.base.traits import (
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import INumericView
+from multiprocess_framework.modules.frontend_module.components.base.traits import (
     AccessTrait,
     DebounceTrait,
     LegacySyncContext,
@@ -26,7 +26,7 @@ from frontend_module.components.base.traits import (
     SchemaTrait,
     SyncTrait,
 )
-from frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 
 
 class NumericPresenter:

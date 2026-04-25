@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional
 
-from frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
+from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
 
 from multiprocess_prototype_v3.registers.payloads.crop_regions import (
     regions_to_table_rows,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from frontend_module.core.qt_imports import QTimer
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
 
 
 class DebounceTrait:

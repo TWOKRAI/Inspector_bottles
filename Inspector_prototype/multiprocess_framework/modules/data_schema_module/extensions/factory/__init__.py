@@ -5,7 +5,7 @@
 Не импортируются автоматически в основном __init__.py.
 
 Использование:
-    from data_schema_module.extensions.factory import ModelFactory
+    from multiprocess_framework.modules.data_schema_module.extensions.factory import ModelFactory
 """
 from ...factory.model_factory import ModelFactory
 

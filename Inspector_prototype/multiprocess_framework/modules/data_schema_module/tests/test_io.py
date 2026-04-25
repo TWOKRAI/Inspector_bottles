@@ -13,7 +13,7 @@ import json
 import unittest
 from typing import Any, Dict
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     registers_to_dict,
     registers_from_dict,
     registers_to_json,

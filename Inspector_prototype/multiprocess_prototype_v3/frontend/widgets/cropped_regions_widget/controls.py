@@ -5,18 +5,18 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
-from frontend_module.components import (
+from multiprocess_framework.modules.frontend_module.components import (
     BindingConfig,
     ControlHooks,
     ControlWriteCommittedEvent,
     NumericControl,
     NumericViewConfig,
 )
-from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
-from frontend_module.core.qt_imports import QGroupBox, QVBoxLayout, QWidget
-from frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QGroupBox, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 
-from registers_module import RegistersManager
+from multiprocess_framework.modules.registers_module import RegistersManager
 
 from .params import CROPPED_PARAM_KEYS
 from .roi_panel_registers import (

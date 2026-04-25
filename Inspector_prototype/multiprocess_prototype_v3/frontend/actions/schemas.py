@@ -19,7 +19,7 @@ import uuid
 from enum import Enum
 from typing import Any, Dict, Optional
 
-from data_schema_module import SchemaBase
+from multiprocess_framework.modules.data_schema_module import SchemaBase
 from pydantic import ConfigDict, Field
 
 

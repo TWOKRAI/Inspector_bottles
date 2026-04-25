@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Составные контролы пакета control_v2 — CompoundNumericControl, CompoundControl, ControlFactory."""
-from frontend_module.components.compound.config import (
+from multiprocess_framework.modules.frontend_module.components.compound.config import (
     CompoundControlConfig,
     CompoundNumericConfig,
 )
-from frontend_module.components.compound.facade import (
+from multiprocess_framework.modules.frontend_module.components.compound.facade import (
     CompoundControl,
     CompoundControlResult,
     CompoundNumericControl,

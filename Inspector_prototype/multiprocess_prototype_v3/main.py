@@ -7,11 +7,11 @@ import atexit
 import sys
 from pathlib import Path
 
-_root = Path(__file__).resolve().parent.parent  # Inspector_prototype
-_modules = _root / "multiprocess_framework" / "modules"
-for _p in (_root, _modules):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+# Inspector_prototype в sys.path для плоских импортов multiprocess_prototype_v3.* —
+# проектный пакет не установлен через pip, поэтому путь добавляется явно.
+_inspector_root = Path(__file__).resolve().parent.parent
+if str(_inspector_root) not in sys.path:
+    sys.path.insert(0, str(_inspector_root))
 
 
 def _load_cameras_from_profile():

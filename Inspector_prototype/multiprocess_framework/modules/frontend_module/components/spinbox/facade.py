@@ -9,17 +9,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from frontend_module.components.base import RegisterAdapter
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.control_hooks import ControlHooks
-from frontend_module.components.base.traits import LegacySyncContext
-from frontend_module.components.group.labeled_numeric_factory import (
+from multiprocess_framework.modules.frontend_module.components.base import RegisterAdapter
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import ControlHooks
+from multiprocess_framework.modules.frontend_module.components.base.traits import LegacySyncContext
+from multiprocess_framework.modules.frontend_module.components.group.labeled_numeric_factory import (
     create_labeled_numeric_view,
 )
-from frontend_module.components.numeric.config import NumericViewConfig
-from frontend_module.components.spinbox.config import SpinBoxConfig
-from frontend_module.components.spinbox.presenter import SpinBoxPresenter
-from frontend_module.core.qt_imports import QWidget
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.spinbox.config import SpinBoxConfig
+from multiprocess_framework.modules.frontend_module.components.spinbox.presenter import SpinBoxPresenter
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
 
 
 @dataclass

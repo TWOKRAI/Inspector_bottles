@@ -37,9 +37,9 @@ def run_process_attached_frontend(
     Returns:
         Код выхода приложения (0 при штатном завершении).
     """
-    from frontend_module.core.qt_imports import QTimer
+    from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
 
-    from frontend_module.application.frontend_manager import FrontendManager
+    from multiprocess_framework.modules.frontend_module.application.frontend_manager import FrontendManager
 
     config = hooks.build_ui_config(process_ref)
     registers, connection_map = hooks.build_registers()

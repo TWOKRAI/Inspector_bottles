@@ -17,12 +17,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
-from frontend_module.widgets.base_widget import BaseWidget
-from frontend_module.widgets.tabs import RegisterBindingContext, callback_no_args
-from frontend_module.widgets.tabs.numeric_bind_or_lineedit import (
+from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.widgets.tabs import RegisterBindingContext, callback_no_args
+from multiprocess_framework.modules.frontend_module.widgets.tabs.numeric_bind_or_lineedit import (
     append_spinbox_numeric_or_line_fallback,
 )
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QAbstractItemView,
     QGroupBox,
     QHBoxLayout,
@@ -33,7 +33,7 @@ from frontend_module.core.qt_imports import (
     QVBoxLayout,
     QWidget,
 )
-from frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 from multiprocess_prototype_v3.registers.schemas.camera_tab import CAMERA_REGISTER

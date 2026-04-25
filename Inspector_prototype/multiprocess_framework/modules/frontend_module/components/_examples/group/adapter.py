@@ -7,12 +7,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from frontend_module.components._examples.group.schemas import (
+from multiprocess_framework.modules.frontend_module.components._examples.group.schemas import (
     ExampleGroupRowUiConfig,
 )
-from frontend_module.components.group import create_labeled_numeric_view
-from frontend_module.components.group.view import LabeledNumericGroupView
-from frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.group import create_labeled_numeric_view
+from multiprocess_framework.modules.frontend_module.components.group.view import LabeledNumericGroupView
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 
 
 @dataclass

@@ -10,8 +10,8 @@ from typing import Any, Callable, Optional
 
 from PyQt5.QtCore import QEvent, QObject, Qt
 
-from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from frontend_module.core.qt_imports import QApplication, QLineEdit, QWidget
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QApplication, QLineEdit, QWidget
 
 from .keyboard import VirtualKeyboard
 from .keyboard_mini import VirtualKeyboardMini

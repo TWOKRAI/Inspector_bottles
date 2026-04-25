@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional, Union
 
-from frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, pyqtSignal
-from frontend_module.core.window_registry import WindowEntry, WindowRegistry
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.window_registry import WindowEntry, WindowRegistry
 
 
 def _config_get(config: Any, key: str, default: Any = None) -> Any:

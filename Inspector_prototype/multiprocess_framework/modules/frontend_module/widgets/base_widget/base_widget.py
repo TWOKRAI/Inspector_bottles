@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from typing import Any, Generic, Optional, TypeVar
 
-from frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
-from frontend_module.widgets.tabs.tab_widget import BaseTab
+from multiprocess_framework.modules.frontend_module.widgets.tabs.tab_widget import BaseTab
 
 from ..widget_signal_bus import WidgetSignalBus
 

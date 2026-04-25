@@ -8,9 +8,9 @@ GuiProcess делегирует run() в launcher.
 
 from typing import Any
 
-from frontend_module import FrontendLaunchHooks, run_process_attached_frontend
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.windows import LoadingWindow
+from multiprocess_framework.modules.frontend_module import FrontendLaunchHooks, run_process_attached_frontend
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.windows import LoadingWindow
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
 from multiprocess_prototype_v3.frontend.commands import GuiCommandHandler
@@ -191,7 +191,7 @@ class FrontendLauncher:
                 wm.show_window(action_id)
 
         def create_main_window(**kwargs):
-            from frontend_module.core.qt_imports import QTimer
+            from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
 
             win = MainWindow(
                 config=config,

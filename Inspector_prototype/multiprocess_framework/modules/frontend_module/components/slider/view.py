@@ -6,16 +6,16 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.components.base.infrastructure.signal_utils import (
+from multiprocess_framework.modules.frontend_module.components.base.infrastructure.signal_utils import (
     block_signals,
 )
-from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from frontend_module.components.common.slider_styles import (
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
+from multiprocess_framework.modules.frontend_module.components.common.slider_styles import (
     LAYOUT_SPACING_PX,
     SLIDER_MIN_HEIGHT_PX,
     apply_slider_handle_style,
 )
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QDoubleValidator,
     QHBoxLayout,
     QIntValidator,
@@ -62,7 +62,7 @@ class SliderValueView(QWidget):
         self._slider.valueChanged.connect(self._on_slider_moved)
         self._line_edit.editingFinished.connect(self._on_input_finished)
 
-        from frontend_module.widgets.keyboard.touch_keyboard import (
+        from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import (
             install_touch_keyboard_on_line_edit,
         )
 

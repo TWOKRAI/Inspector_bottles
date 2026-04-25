@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from frontend_module.components.common.slider_styles import (
+from multiprocess_framework.modules.frontend_module.components.common.slider_styles import (
     SLIDER_MIN_HEIGHT_PX,
     apply_slider_handle_style,
 )
-from frontend_module.core.qt_imports import QSlider, Qt
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QSlider, Qt
 
 
 def create_styled_horizontal_slider(parent: Optional[Any]) -> QSlider:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from frontend_module.core.qt_imports import QLineEdit
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLineEdit
 
 from .schemas import HikvisionUiConfig
 

@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from frontend_module.core.qt_imports import QWidget
-from frontend_module.schemas.register_binding import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
+from multiprocess_framework.modules.frontend_module.schemas.register_binding import (
     RegisterFieldMeta,
     ResolvedMeta,
 )

@@ -2,7 +2,7 @@
 """Тесты RegisterBinding, RegisterFieldMeta, ResolvedMeta."""
 import pytest
 
-from frontend_module.schemas.register_binding import (
+from multiprocess_framework.modules.frontend_module.schemas.register_binding import (
     RegisterBinding,
     RegisterFieldMeta,
     ResolvedMeta,

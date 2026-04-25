@@ -23,8 +23,18 @@ def _recipe_and_processing_schema_classes() -> tuple[Type[SchemaBase], Type[Sche
     return (RecipesTabConfig, ProcessingTabUiConfig)
 
 
+def _ui_preferences_schema_class() -> type[SchemaBase]:
+    from multiprocess_prototype_v3.frontend.widgets.settings_tab.ui_preferences_schema import (
+        UiPreferencesConfig,
+    )
+
+    return UiPreferencesConfig
+
+
 def app_recipe_schema_names() -> List[str]:
-    return [cls.__name__ for cls in _recipe_and_processing_schema_classes()]
+    names = [cls.__name__ for cls in _recipe_and_processing_schema_classes()]
+    names.append(_ui_preferences_schema_class().__name__)
+    return names
 
 
 def build_default_app_aggregate(
@@ -34,9 +44,11 @@ def build_default_app_aggregate(
 ) -> Dict[str, SchemaBase]:
     """Собрать агрегат по умолчанию; словари — из build_dict конфига."""
     RecipesTabConfig, ProcessingTabUiConfig = _recipe_and_processing_schema_classes()
+    UiPreferencesConfig = _ui_preferences_schema_class()
     return {
         "RecipesTabConfig": RecipesTabConfig.model_validate(recipes_tab_dict or {}),
         "ProcessingTabUiConfig": ProcessingTabUiConfig.model_validate(processing_tab_ui_dict or {}),
+        "UiPreferencesConfig": UiPreferencesConfig.model_validate({}),
     }
 
 

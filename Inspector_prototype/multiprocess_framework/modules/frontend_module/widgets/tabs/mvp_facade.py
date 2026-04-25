@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from frontend_module.widgets.base_widget.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.widgets.base_widget.base_widget import BaseWidget
 
 
 class MvpTabBase(BaseWidget[Any]):

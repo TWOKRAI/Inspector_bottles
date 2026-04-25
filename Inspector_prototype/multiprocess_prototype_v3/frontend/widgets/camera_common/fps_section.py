@@ -8,13 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from frontend_module.components import (
+from multiprocess_framework.modules.frontend_module.components import (
     BindingConfig,
     NumericControl,
     NumericViewConfig,
 )
-from frontend_module.widgets.tabs import RegisterBindingContext
-from frontend_module.core.qt_imports import QLabel, QSlider, Qt
+from multiprocess_framework.modules.frontend_module.widgets.tabs import RegisterBindingContext
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLabel, QSlider, Qt
 
 from multiprocess_prototype_v3.registers.schemas.camera_tab import CAMERA_REGISTER
 
@@ -38,7 +38,7 @@ def add_fps_section_to_layout(
     touch_keyboard: Any | None = None,
 ) -> FpsFallbackWidgets:
     """Добавляет секцию FPS в layout (NumericControl или QLabel+QSlider)."""
-    from frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
+    from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
 
     tk_cfg = coerce_touch_keyboard(touch_keyboard)
     # Ветка с живым rm: один NumericControl на поле fps регистра камеры

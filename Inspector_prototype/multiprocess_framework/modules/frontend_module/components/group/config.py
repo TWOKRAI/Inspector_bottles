@@ -9,10 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional, Union
 
-from frontend_module.components.label.config import LabelConfig
-from frontend_module.components.numeric.config import NumericViewConfig
-from frontend_module.components.slider.config import SliderConfig
-from frontend_module.components.spinbox.config import SpinBoxConfig
+from multiprocess_framework.modules.frontend_module.components.label.config import LabelConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.slider.config import SliderConfig
+from multiprocess_framework.modules.frontend_module.components.spinbox.config import SpinBoxConfig
 
 # Типы дочерних конфигов (примитивы + view-конфиги)
 ChildConfig = Union[LabelConfig, SliderConfig, SpinBoxConfig, NumericViewConfig]

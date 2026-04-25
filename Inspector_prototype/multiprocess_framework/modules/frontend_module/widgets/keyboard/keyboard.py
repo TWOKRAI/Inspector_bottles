@@ -4,8 +4,8 @@ VirtualKeyboard — полноценная виртуальная клавиат
 """
 from __future__ import annotations
 
-from frontend_module.core.qt_imports import QApplication, QFont, QGridLayout, QPushButton, QSize, QWidget, Qt
-from frontend_module.widgets.widget_signal_bus import WidgetSignalBus
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QApplication, QFont, QGridLayout, QPushButton, QSize, QWidget, Qt
+from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
 class VirtualKeyboard(QWidget):

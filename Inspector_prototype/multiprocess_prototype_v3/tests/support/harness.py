@@ -41,10 +41,22 @@ class SystemTestHarness:
             self.add_process(name, proc_dict)
 
     def start_background(self, ready_wait_s: float = 3.0) -> None:
-        """launch_orchestrator в daemon-треде (без блокирующего wait)."""
+        """launch_orchestrator в daemon-треде, ожидание готовности через Event.
+
+        Использует SystemLauncher.wait_until_ready() вместо time.sleep() —
+        см. ADR-116. Если система не стартовала за ready_wait_s, выбрасывает
+        TimeoutError для быстрого обнаружения проблемы в тестах.
+        """
         self._thread = threading.Thread(target=self._launcher.start, daemon=True)
         self._thread.start()
-        time.sleep(ready_wait_s)
+        # Даём потоку время на вызов start() перед ожиданием Event
+        time.sleep(0.1)
+        if not self._launcher.wait_until_ready(timeout=ready_wait_s):
+            self.stop()
+            raise TimeoutError(
+                f"Система не стартовала за {ready_wait_s}с "
+                "(ProcessManagerProcess не завершил initialize)"
+            )
 
     def stop(self) -> None:
         self._launcher.stop()

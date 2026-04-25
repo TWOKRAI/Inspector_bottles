@@ -6,7 +6,7 @@ from __future__ import annotations
 import abc
 from typing import Any, TypeVar
 
-from frontend_module.core.qt_imports import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QComboBox,
     QGroupBox,
     QHBoxLayout,
@@ -15,10 +15,10 @@ from frontend_module.core.qt_imports import (
     QVBoxLayout,
     pyqtSignal,
 )
-from frontend_module.core.schema_config import coerce_schema_config
-from frontend_module.widgets.base_widget import BaseWidget
-from frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
-from frontend_module.widgets.tabs import callback_no_args
+from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
+from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
+from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
+from multiprocess_framework.modules.frontend_module.widgets.tabs import callback_no_args
 
 from multiprocess_prototype_v3.frontend.coordinators import parse_clamped_recipe_slot_text
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts

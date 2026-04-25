@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from frontend_module.widgets.tabs import TabViewProtocol
+from multiprocess_framework.modules.frontend_module.widgets.tabs import TabViewProtocol
 
 
 class CameraTabView(TabViewProtocol, Protocol):

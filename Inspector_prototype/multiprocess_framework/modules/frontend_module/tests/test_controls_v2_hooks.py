@@ -8,16 +8,16 @@ from typing import Any, Callable, Dict, List, Optional
 import pytest
 from unittest.mock import patch
 
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.control_hooks import (
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlAccessDeniedEvent,
     ControlHooks,
     ControlWriteCommittedEvent,
     ControlWriteRejectedEvent,
 )
-from frontend_module.components.checkbox import CheckboxControl
-from frontend_module.components.slider import SliderControl, SliderConfig
-from frontend_module.components.spinbox import SpinBoxControl, SpinBoxConfig
+from multiprocess_framework.modules.frontend_module.components.checkbox import CheckboxControl
+from multiprocess_framework.modules.frontend_module.components.slider import SliderControl, SliderConfig
+from multiprocess_framework.modules.frontend_module.components.spinbox import SpinBoxControl, SpinBoxConfig
 
 
 @dataclass
@@ -152,7 +152,7 @@ class TestCheckboxHooks:
             BindingConfig("processor", "flag"),
             hooks=ControlHooks(on_write_rejected=on_rejected),
         )
-        from frontend_module.components.checkbox.view import CheckboxView
+        from multiprocess_framework.modules.frontend_module.components.checkbox.view import CheckboxView
 
         assert isinstance(r.widget, CheckboxView)
         with patch(
@@ -187,7 +187,7 @@ class TestAccessDeniedHook:
             hooks=ControlHooks(on_access_denied=denied.append),
             current_access_level=0,
         )
-        from frontend_module.components.checkbox.view import CheckboxView
+        from multiprocess_framework.modules.frontend_module.components.checkbox.view import CheckboxView
 
         assert isinstance(r.widget, CheckboxView)
         r.widget._checkbox.setChecked(True)
@@ -221,7 +221,7 @@ class TestSliderSpinboxHooksAndTypes:
             SliderConfig(),
             hooks=ControlHooks(on_write_rejected=rejected.append),
         )
-        from frontend_module.components.slider.presenter import SliderPresenter
+        from multiprocess_framework.modules.frontend_module.components.slider.presenter import SliderPresenter
 
         assert isinstance(r.presenter, SliderPresenter)
         with patch(
@@ -238,6 +238,6 @@ class TestSliderSpinboxHooksAndTypes:
             BindingConfig("processor", "min_area"),
             SpinBoxConfig(),
         )
-        from frontend_module.components.spinbox.presenter import SpinBoxPresenter
+        from multiprocess_framework.modules.frontend_module.components.spinbox.presenter import SpinBoxPresenter
 
         assert isinstance(r.presenter, SpinBoxPresenter)

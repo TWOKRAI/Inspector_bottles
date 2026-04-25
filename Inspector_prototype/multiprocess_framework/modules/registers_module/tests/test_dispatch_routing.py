@@ -3,9 +3,9 @@
 
 from typing import Annotated, ClassVar
 
-from data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
+from multiprocess_framework.modules.data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
 
-from registers_module import RegistersManager, build_connection_map_from_registers
+from multiprocess_framework.modules.registers_module import RegistersManager, build_connection_map_from_registers
 
 
 class _RegA(SchemaBase):

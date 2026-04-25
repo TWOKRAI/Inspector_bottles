@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.widgets.tabs import RegisterBindingContext, callback_no_args
-from frontend_module.core.qt_imports import QGroupBox, QPushButton, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.widgets.tabs import RegisterBindingContext, callback_no_args
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QGroupBox, QPushButton, QVBoxLayout, QWidget
 
 from .callbacks import SimWebcamWidgetCallbacks
 from .fps_section import add_fps_section_to_layout

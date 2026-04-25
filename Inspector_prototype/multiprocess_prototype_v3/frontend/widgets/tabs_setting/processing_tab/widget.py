@@ -2,7 +2,7 @@
 """Вкладка обработки: оболочка — placeholder или ProcessingPanelWidget."""
 from __future__ import annotations
 
-from frontend_module.widgets.tabs import PanelTabBase
+from multiprocess_framework.modules.frontend_module.widgets.tabs import PanelTabBase
 
 from ...processing_panel_widget import ProcessingPanelWidget
 from ...processing_panel_widget.schemas import ProcessingTabUiConfig

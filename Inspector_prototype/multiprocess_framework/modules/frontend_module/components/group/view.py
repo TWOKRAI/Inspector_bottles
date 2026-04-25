@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Optional
 
-from frontend_module.components.label.view import LabelView
-from frontend_module.core.qt_imports import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.components.label.view import LabelView
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
-    from frontend_module.components.slider.view import SliderValueView
-    from frontend_module.components.spinbox.view import SpinBoxValueView
+    from multiprocess_framework.modules.frontend_module.components.slider.view import SliderValueView
+    from multiprocess_framework.modules.frontend_module.components.spinbox.view import SpinBoxValueView
 
 LAYOUT_SPACING_AFTER_LABEL_PX = 5
 LAYOUT_SPACING_BEFORE_VALUE_PX = 10

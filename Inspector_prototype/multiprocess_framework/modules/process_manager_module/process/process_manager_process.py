@@ -2,7 +2,7 @@
 ProcessManagerProcess — процесс-оркестратор (Refactored).
 
 Наследуется от ProcessModule. Использует композицию:
-    ProcessRegistry + ProcessPriority + ProcessStatus + ProcessMonitor.
+    ProcessRegistry + ProcessPriority + ProcessStatusMonitor + ProcessMonitor.
 
 Порядок shutdown:
     ProcessMonitor → ProcessRegistry.stop_all → WorkerManager → ConsoleManager → super
@@ -17,7 +17,7 @@ from ...process_module import ProcessModule
 from ...shared_resources_module import QueueRegistry
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
-from ..core.process_status import ProcessStatus
+from ..core.process_status import ProcessStatusMonitor
 from ..monitor import ProcessMonitor
 from ..platforms import get_platform_adapter
 
@@ -27,7 +27,7 @@ class ProcessManagerProcess(ProcessModule):
     Процесс-оркестратор: управляет всеми процессами системы.
 
     Реализует IProcessManagerProcess.
-    Композиция: ProcessRegistry + ProcessPriority + ProcessStatus + ProcessMonitor.
+    Композиция: ProcessRegistry + ProcessPriority + ProcessStatusMonitor + ProcessMonitor.
 
     Жизненный цикл:
         __init__  → _create_components()
@@ -54,6 +54,9 @@ class ProcessManagerProcess(ProcessModule):
         from multiprocessing import Event as _MpEvent
 
         self.stop_event = custom.get("stop_event") or _MpEvent()
+        # Event для сигнализации готовности системы (ADR-116).
+        # Выставляется в конце initialize() — SystemLauncher ждёт его в wait_until_ready().
+        self._system_ready_event = custom.get("system_ready_event")
 
         queue_registry = self._resolve_queue_registry()
 
@@ -66,7 +69,7 @@ class ProcessManagerProcess(ProcessModule):
             shared_resources=self.shared_resources,
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
-        self._status = ProcessStatus(self._process_registry.os_processes)
+        self._status = ProcessStatusMonitor(self._process_registry.os_processes)
 
         # Настройки монитора из конфига ProcessManager
         monitor_poll = float(self.get_config("monitor_poll_interval") or 0.5)
@@ -148,6 +151,13 @@ class ProcessManagerProcess(ProcessModule):
                 self.router_manager.register_message_handler(
                     "process.command", self._handle_process_command
                 )
+
+            # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
+            # К этому моменту: все дочерние процессы spawned и started,
+            # ProcessMonitor запущен.
+            if self._system_ready_event is not None:
+                self._system_ready_event.set()
+                self._log_info("system_ready_event выставлен — система готова")
 
             return True
         except Exception as exc:

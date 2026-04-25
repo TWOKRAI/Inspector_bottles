@@ -6,18 +6,18 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from frontend_module.components._examples.compound_numeric.schemas import (
+from multiprocess_framework.modules.frontend_module.components._examples.compound_numeric.schemas import (
     ExampleBgrTripletRegister,
     ExampleCompoundNumericUiConfig,
 )
-from frontend_module.components.base.config import BindingConfig
-from frontend_module.components.base.interfaces import RegistersManagerLike
-from frontend_module.components.compound.facade import (
+from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
+from multiprocess_framework.modules.frontend_module.components.base.interfaces import RegistersManagerLike
+from multiprocess_framework.modules.frontend_module.components.compound.facade import (
     CompoundNumericControl,
     CompoundNumericControlResult,
 )
-from frontend_module.components.compound.config import CompoundNumericConfig
-from frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.components.compound.config import CompoundNumericConfig
+from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 
 
 def compound_numeric_binding(access_level: int = 0) -> BindingConfig:

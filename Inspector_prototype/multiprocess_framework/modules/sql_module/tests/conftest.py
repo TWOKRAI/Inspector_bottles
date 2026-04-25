@@ -13,7 +13,7 @@ if str(_modules_dir) not in sys.path:
 
 
 import pytest
-from sql_module import SQLManager, SQLManagerConfig
+from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig
 
 
 @pytest.fixture

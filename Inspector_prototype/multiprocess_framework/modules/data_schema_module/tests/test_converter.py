@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
-from data_schema_module import DataConverter, FormatType
+from multiprocess_framework.modules.data_schema_module import DataConverter, FormatType
 
 
 # =============================================================================

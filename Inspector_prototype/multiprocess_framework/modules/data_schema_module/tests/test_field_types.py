@@ -10,7 +10,7 @@
 import unittest
 from typing import Annotated, get_args
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,
     FieldMeta,
     Percent,

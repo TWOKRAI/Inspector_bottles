@@ -11,7 +11,7 @@ from typing import List
 
 from pydantic import Field
 
-from data_schema_module import SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import SchemaBase, register_schema
 
 from .admin_button_widget import AdminButtonConfig
 from .header_buttons_widget import HeaderButtonItem

@@ -18,7 +18,7 @@ from typing import Annotated
 
 from pydantic import BaseModel
 
-from data_schema_module import (
+from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,
     FieldMeta,
     SchemaRegistry,
@@ -26,7 +26,7 @@ from data_schema_module import (
     register_schema,
     get_default_registry,
 )
-from data_schema_module.core.exceptions import (
+from multiprocess_framework.modules.data_schema_module.core.exceptions import (
     InvalidParameterError,
     SchemaNotFoundError,
     SchemaRegistrationError,

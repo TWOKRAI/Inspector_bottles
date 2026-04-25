@@ -37,11 +37,14 @@ class TestProcessManagerProcessInit:
             pmp.shared_resources = None
             pmp.config = {}
             pmp._console_manager = None
+            # config_handler инициализируется в ProcessModule.__init__; задаём None вручную
+            # т.к. __init__ подменён и атрибут не создаётся автоматически
+            pmp.config_handler = None
 
             # Проверяем что _create_components не падает без shared_resources
             with patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessRegistry") as mock_reg, \
                  patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessPriority"), \
-                 patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessStatus"), \
+                 patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessStatusMonitor"), \
                  patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessMonitor"), \
                  patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.QueueRegistry") as mock_qr:
                 mock_qr.return_value.initialize.return_value = None

@@ -18,19 +18,29 @@
 
 | Что | Путь |
 |-----|------|
+| **АКТИВНЫЙ прототип** | `Inspector_prototype/multiprocess_prototype_v3/` ← **только сюда вносить изменения** |
 | Фреймворк | `Inspector_prototype/multiprocess_framework/` |
 | Документация фреймворка | `multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`) |
-| Прототип | `Inspector_prototype/multiprocess_prototype/` |
-| Точка входа | `multiprocess_prototype/main.py` |
-| Регистры приложения | `multiprocess_prototype/registers/` |
+| Точка входа v3 | `multiprocess_prototype_v3/run.py` |
+| Регистры приложения v3 | `multiprocess_prototype_v3/registers/` |
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |
 | Нарратив «конструктор» | `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` |
 | Настройка qex | `docs/claude/qex/README.md` (quick-start), `docs/claude/qex/SETUP_GUIDE.md` (полный) |
 
+## АРХИВ — НЕ ТРОГАТЬ
+
+> **CRITICAL:** Директории ниже — архивные версии прототипа. Агентам запрещено вносить в них изменения. Для любой задачи использовать только `multiprocess_prototype_v3/`.
+
+| Директория | Статус |
+|-----------|--------|
+| `Inspector_prototype/multiprocess_prototype/` | АРХИВ v1 — только чтение |
+| `Inspector_prototype/multiprocess_prototype_v2/` | АРХИВ v2 — только чтение |
+
 ## Стек
 
-Python 3.9+ (см. `Inspector_prototype/pyproject.toml`), PyQt5, OpenCV, NumPy | SQLite/PostgreSQL, Qdrant
+Python 3.12 (см. корневой `pyproject.toml`), PyQt5 → PySide6 (Phase 2), OpenCV 4.13, NumPy 2.x | SQLite/PostgreSQL, Qdrant
 Docker, Ollama, pytest | Pydantic v2, loguru
+ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]` в pyproject
 
 ## Правила проекта
 

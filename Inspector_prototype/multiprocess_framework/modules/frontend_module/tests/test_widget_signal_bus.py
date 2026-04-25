@@ -3,8 +3,8 @@
 """Смоук: WidgetSignalBus, TabWidget.emit_widget_event без цикла импорта с BaseWidget."""
 from __future__ import annotations
 
-from frontend_module.widgets.tabs.tab_widget import TabWidget
-from frontend_module.widgets.widget_signal_bus import WidgetSignalBus
+from multiprocess_framework.modules.frontend_module.widgets.tabs.tab_widget import TabWidget
+from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
 def test_widget_signal_bus_importable() -> None:

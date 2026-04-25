@@ -4,7 +4,7 @@ Unit-тесты для класса Config.
 import os
 import pytest
 
-from config_module.core.config import Config
+from multiprocess_framework.modules.config_module.core.config import Config
 
 
 # ---------------------------------------------------------------------------

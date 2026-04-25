@@ -13,7 +13,7 @@ from pydantic import Field
 
 from ...channel_routing_module import ChannelRoutingConfig
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
-from ..core.log_enums import LogLevel
+from ..log_enums import LogLevel
 
 _STD_FMT = "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s"
 _FILE_MAX = 10 * 1024 * 1024

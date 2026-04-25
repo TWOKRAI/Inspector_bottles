@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from frontend_module.components.common.sizes import (
+from multiprocess_framework.modules.frontend_module.components.common.sizes import (
     VALUE_INPUT_HEIGHT_PX,
     VALUE_INPUT_WIDTH_PX,
 )
-from frontend_module.components.common.typography import value_input_font
-from frontend_module.core.qt_imports import QLineEdit, Qt
+from multiprocess_framework.modules.frontend_module.components.common.typography import value_input_font
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QLineEdit, Qt
 
 
 def create_numeric_line_edit(

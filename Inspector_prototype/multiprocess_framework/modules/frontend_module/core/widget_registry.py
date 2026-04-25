@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from frontend_module.interfaces import IRegistersManager, IWidgetFactory
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManager, IWidgetFactory
 
 WidgetFactoryFn = Callable[
     [str, Dict[str, Any], Optional[IRegistersManager], Optional[Any]],

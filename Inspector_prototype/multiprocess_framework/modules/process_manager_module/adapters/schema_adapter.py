@@ -20,7 +20,7 @@ ProcessSchemaAdapter — преобразование SchemaBase в конфиг
     - Добавить валидацию обязательных полей через опцию validate=True.
 
 Использование:
-    from process_manager_module.adapters.schema_adapter import ProcessSchemaAdapter
+    from multiprocess_framework.modules.process_manager_module.adapters.schema_adapter import ProcessSchemaAdapter
     from my_module.config import ProcessConfig, WorkerConfig
 
     adapter = ProcessSchemaAdapter()
@@ -31,7 +31,7 @@ ProcessSchemaAdapter — преобразование SchemaBase в конфиг
     launcher.add_process(process_name, {**process_dict, "workers": [(worker_name, worker_dict)]})
 
     # Вариант 2: через helper build_process_with_workers (из data_schema_module)
-    from data_schema_module import build_process_with_workers
+    from multiprocess_framework.modules.data_schema_module import build_process_with_workers
     launcher.add_process(*build_process_with_workers(ProcessConfig(), WorkerConfig()))
 """
 from __future__ import annotations
@@ -89,7 +89,7 @@ class ProcessSchemaAdapter:
         # HasBuild: делегировать в data_schema_module.config_to_dict (один источник правды)
         if hasattr(schema_instance, "build") and callable(schema_instance.build):
             try:
-                from data_schema_module import config_to_dict
+                from multiprocess_framework.modules.data_schema_module import config_to_dict
                 return config_to_dict(schema_instance)
             except Exception:
                 pass

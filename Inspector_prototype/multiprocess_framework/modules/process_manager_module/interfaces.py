@@ -50,6 +50,23 @@ class ISystemLauncher(ABC):
         ...
 
     @abstractmethod
+    def wait_until_ready(self, timeout: float) -> bool:
+        """
+        Блокирующее ожидание готовности системы.
+
+        Возвращает True, если ProcessManagerProcess завершил инициализацию
+        (все дочерние процессы spawned и запущены) в течение timeout секунд.
+        False — если истёк таймаут или ProcessManager упал.
+
+        Args:
+            timeout: Максимальное время ожидания (секунды).
+
+        Returns:
+            True если система готова, False если таймаут или ошибка.
+        """
+        ...
+
+    @abstractmethod
     def stop(self) -> None:
         """Остановить систему (graceful shutdown)."""
         ...

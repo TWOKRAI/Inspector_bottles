@@ -4,17 +4,17 @@
 
 Документация и схемы: `checkbox/README.md`.
 """
-from frontend_module.components.checkbox.config import CheckboxViewConfig
-from frontend_module.components.checkbox.defaults import (
+from multiprocess_framework.modules.frontend_module.components.checkbox.config import CheckboxViewConfig
+from multiprocess_framework.modules.frontend_module.components.checkbox.defaults import (
     checkbox_left,
     checkbox_right,
 )
-from frontend_module.components.checkbox.facade import (
+from multiprocess_framework.modules.frontend_module.components.checkbox.facade import (
     CheckboxControl,
     CheckboxControlResult,
 )
-from frontend_module.components.checkbox.presenter import CheckboxPresenter
-from frontend_module.components.checkbox.view import CheckboxView
+from multiprocess_framework.modules.frontend_module.components.checkbox.presenter import CheckboxPresenter
+from multiprocess_framework.modules.frontend_module.components.checkbox.view import CheckboxView
 
 __all__ = [
     "CheckboxView",

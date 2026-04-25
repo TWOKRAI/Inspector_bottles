@@ -1,9 +1,14 @@
 # Известные проблемы фреймворка
 
-**Дата:** 2026-03-15  
-**Проверка unit-тестов:** из `Inspector_prototype` — `python scripts/run_framework_tests.py` (см. [README.md — Testing](./README.md#testing)).
+**Обновлено:** 2026-04-25 — после миграции на каноничные импорты `multiprocess_framework.modules.<X>`.
 
-**Исправлено (2026-03-15):** MagicMock, console patch, config_handler, test_stop_with_alive, process_module log, data_schema импорты. MemoryManager — skip на macOS. **test_clear_queue** — учёт асинхронности multiprocessing.Queue на macOS в `clear_queue()`.
+**Прогон unit-тестов:**
+
+```bash
+cd Inspector_prototype && python scripts/run_framework_tests.py
+```
+
+Текущий результат: **1 877 passed / 30 skipped / 2 failed** (доимиграционные баги тестов, см. ниже).
 
 ---
 
@@ -11,43 +16,54 @@
 
 | Категория              | Статус |
 |------------------------|--------|
-| Unit-тесты              | ✅ OK (все проходят) |
-| Документация            | ✅ OK (19/19 модулей) |
-| MemoryManager на macOS | ⏭️ Пропуск (15 тестов) |
+| Каноничные импорты      | ✅ OK (688 правок применены, 460 битых top-level импортов мигрированы) |
+| Корневой фасад `multiprocess_framework` | ✅ OK (49 / 49 символов экспортируются) |
+| Unit-тесты              | ✅ 1 877 passed / 2 known-failing |
+| Документация            | ⏳ В процессе наведения порядка |
+| MemoryManager на macOS | ⏭️ Пропуск 15 тестов (платформенная особенность) |
+| Pydantic v2 deprecation | ✅ Исправлено (`type(self).model_fields` вместо `self.model_fields`) |
 
 ---
 
-## Прототип v3 и слой приложения
+## Доимиграционные failing-тесты (2 шт.)
 
-**Статус:** ожидаемое трение до выноса общего кода.
+Падали и до миграции — см. `git log` или прогон на `HEAD~1`.
 
-- **`multiprocess_prototype_v3`** по-прежнему тянет **`multiprocess_prototype_v2`** для **`app_registers`**, **`managers`**, **`utils`**, **`persistence`** (в v3 этих пакетов нет; данные и общий слой приложения пока общие с v2). Схемы **`backend`**, **`frontend`**, **`registers`** в v3 — свои; реэкспорты фреймворка для удобных импортов — **ADR-115**. Полная автономия v3 — перенос или общий пакет приложения вместо кросс-импорта v2.
+### 1. `test_process_manager_process.py::TestProcessManagerProcessInit::test_init_creates_components`
+
+```
+AttributeError: 'ProcessManagerProcess' object has no attribute 'config_handler'
+```
+
+**Где:** `process_manager_module/tests/test_process_manager_process.py:48`. Тест вызывает `pmp._create_components()` без полной `initialize()`, поэтому `config_handler` ещё не присвоен.
+
+**Решение:** обернуть `get_config()` в `_create_components()` в защиту от отсутствия handler'а **или** перевести тест на полноценную инициализацию через mock-fixture.
+
+### 2. `test_managers_normalize.py::test_console_process_config_build_and_process_helper`
+
+```
+AssertionError: assert ''.endswith('ProcessModule')
+```
+
+**Где:** `process_module/tests/test_managers_normalize.py:52`. Тест ожидает, что `proc_dict["class"]` не пустая строка, но фактически она пустая — изменился контракт `ConsoleProcessConfig.build()`.
+
+**Решение:** обновить тест под новый контракт `proc_dict`.
 
 ---
 
-## Оставшиеся ограничения
+## Платформенные ограничения
 
-### shared_resources_module — MemoryManager (15 тестов)
+### `MemoryManager` на macOS — 15 тестов skipped
 
-**Статус:** Пропуск на macOS (`pytest.mark.skipif platform.system() == "Darwin"`).
+`SharedMemory` на macOS (особенно на Apple Silicon) ведёт себя нестабильно: создание может вернуть `None`, освобождение даёт предупреждения. Тесты помечены `@pytest.mark.skipif(platform.system() == "Darwin")`.
 
-**Причина:** SharedMemory на macOS (особенно M1/M2) может возвращать None — платформенная особенность.
+**Решение:** проверить на Linux/Windows; код модуля корректен.
 
 ---
 
 ## Интеграционные тесты
 
-См. `tests/integration/TEST_ISSUES.md`:
-- Pickle на Windows (лямбда в LoggerPlugin)
-- Проблемы с инициализацией процессов
-- Разные точки входа pytest: unit-тесты модулей — `modules/pytest.ini` и `cwd` в `modules/` (или `scripts/run_framework_tests.py`); в корне `Inspector_prototype` — только наборы из `pyproject.toml`
+См. [`tests/integration/TEST_ISSUES.md`](./tests/integration/TEST_ISSUES.md):
 
----
-
-## Pydantic deprecation (предупреждения)
-
-**Файл:** `data_schema_module/core/schema_mixin.py:204, 213`
-
-**Предупреждение:** `Accessing the 'model_fields' attribute on the instance is deprecated` (Pydantic V2.11).
-
-**Решение:** Использовать `self.__class__.model_fields` вместо `self.model_fields`.
+- Pickle на Windows (лямбда в LoggerPlugin) — заменить на module-level функции.
+- Разные точки входа pytest: unit-тесты модулей — `modules/pytest.ini`; интеграционные — корневой `pyproject.toml` (testpaths).

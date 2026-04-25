@@ -9,11 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional
 
-from frontend_module.components.base.config import (
+from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
     LabelOverride,
 )
-from frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
+from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
 
 
 @dataclass

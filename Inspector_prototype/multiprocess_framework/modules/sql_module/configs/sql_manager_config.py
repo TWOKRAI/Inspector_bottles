@@ -6,7 +6,7 @@ SQLManagerConfig — конфигурационная схема SQLManager.
 """
 from typing import Annotated, Literal, Optional
 
-from data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
 
 @register_schema("sql_manager")
