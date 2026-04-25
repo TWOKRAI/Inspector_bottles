@@ -12,7 +12,7 @@ def test_widget_signal_bus_importable() -> None:
 
 
 def test_tab_widget_has_signal_bus() -> None:
-    from PyQt5.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is None:

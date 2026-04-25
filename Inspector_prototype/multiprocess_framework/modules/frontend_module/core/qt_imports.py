@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Central PyQt5 imports for frontend_module.
+Central Qt imports for frontend_module.
 
-Requires PyQt5. Fail-fast if not installed.
+Использует PySide6. Fail-fast если не установлен.
+
+Transitional aliases (Phase 2 миграции PyQt5 → PySide6):
+- ``pyqtSignal`` алиас для ``Signal``
+- ``pyqtSlot`` алиас для ``Slot``
+
+Алиасы убираются на Wave 5 после того как все callers перейдут на ``Signal``/``Slot``.
 """
-from PyQt5.QtCore import QObject, Qt, QSize, QTimer, QThread, pyqtSignal
-from PyQt5.QtGui import (
+from PySide6.QtCore import QEvent, QObject, Qt, QSize, QTimer, QThread, Signal, Slot
+from PySide6.QtGui import (
     QCloseEvent,
     QCursor,
     QDoubleValidator,
@@ -15,7 +21,7 @@ from PyQt5.QtGui import (
     QIntValidator,
     QPixmap,
 )
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QButtonGroup,
@@ -52,6 +58,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+# Transitional aliases — убрать на Wave 5
+pyqtSignal = Signal
+pyqtSlot = Slot
+
 __all__ = [
     "QAbstractItemView",
     "QButtonGroup",
@@ -62,6 +72,7 @@ __all__ = [
     "QComboBox",
     "QDoubleSpinBox",
     "QDoubleValidator",
+    "QEvent",
     "QFormLayout",
     "QFrame",
     "QGroupBox",
@@ -100,5 +111,8 @@ __all__ = [
     "Qt",
     "QCursor",
     "QFont",
+    "Signal",
+    "Slot",
     "pyqtSignal",
+    "pyqtSlot",
 ]

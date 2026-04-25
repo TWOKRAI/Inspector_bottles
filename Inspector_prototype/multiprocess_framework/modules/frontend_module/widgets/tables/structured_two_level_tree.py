@@ -176,8 +176,8 @@ class StructuredTwoLevelTreeWidget(QTreeWidget):
                         cb = QCheckBox()
                         cb.setChecked(bool(value))
                         cb.stateChanged.connect(
-                            lambda state, g=group_id, r=str(rid), k=key: self._on_leaf_checkbox(
-                                g, r, k, state == Qt.Checked
+                            lambda state, g=group_id, r=str(rid), k=key, _cb=cb: self._on_leaf_checkbox(
+                                g, r, k, _cb.isChecked()
                             )
                         )
                         self.setItemWidget(leaf, col_idx, cb)

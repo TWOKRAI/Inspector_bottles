@@ -189,7 +189,8 @@ class StructuredTableWidget(QTableWidget):
     def _on_cell_checkbox(self, row_index, column_key, state):
         if self._block_signals:
             return
-        value = state == Qt.Checked
+        # PySide6: stateChanged(int), Qt.Checked = enum — сравниваем через .value
+        value = state == Qt.Checked.value
         if 0 <= row_index < len(self._data_rows):
             self._data_rows[row_index][column_key] = value
         self.cell_changed.emit(row_index, column_key, value)

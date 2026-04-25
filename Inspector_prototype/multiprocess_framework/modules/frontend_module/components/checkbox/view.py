@@ -103,8 +103,10 @@ class CheckboxView(QWidget):
 
     def on_changed(self, callback: Callable[[bool], None]) -> None:
         """Подписка на смену состояния; в callback передаётся bool (отмечен / нет)."""
+        # PySide6: stateChanged(int) и Qt.Checked = Qt.CheckState.Checked (enum) — прямое
+        # сравнение int==enum даёт False. Читаем актуальное состояние через isChecked().
         self._checkbox.stateChanged.connect(
-            lambda state: callback(state == Qt.Checked)
+            lambda _state: callback(self._checkbox.isChecked())
         )
 
     def on_finished(self, callback: Callable[[bool], None]) -> None:

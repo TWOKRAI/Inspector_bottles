@@ -251,7 +251,7 @@ class TestAccessTrait:
 
 @pytest.fixture
 def qapp():
-    from PyQt5.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is None:

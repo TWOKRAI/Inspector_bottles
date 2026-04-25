@@ -11,38 +11,31 @@ dependencies = [
     "numpy>=2.4,<3",
     "PyYAML>=6.0",
     "psutil>=7.0",
-
     # GUI (Phase 2 заменим на PySide6)
     "PyQt5>=5.15,<5.16",
     "PyQt5-Qt5>=5.15.2",
     "QDarkStyle>=3.2",
-
     # Vision / image
     "opencv-python>=4.13,<5",
     "Pillow>=12.0",
-
     # Data / plotting
     "pandas>=2.2",
     "matplotlib>=3.9",
     "plotly>=5.24",
     "seaborn>=0.13",
     "openpyxl>=3.1",
-
     # Camera (GigE Vision) — нет ARM-колёс genicam, пропускаем на macOS ARM
     "harvesters>=1.4; sys_platform != 'darwin' or platform_machine != 'arm64'",
-
     # Logging
     "loguru>=0.7",
-
     # Network / utils
     "requests>=2.32",
     "environs>=11.0",
-
     # Simulation
     "pygame>=2.6",
-
     # Async testing — было в стейл inner pyproject
     "pytest-asyncio>=0.24",
+    "pyside6>=6.8,<6.11",
 ]
 
 [dependency-groups]
