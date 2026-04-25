@@ -2,29 +2,29 @@
 name = "inspector-bottles"
 version = "0.1.0"
 description = "Multiprocess framework for bottle inspection — camera-based defect detection"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     # Core framework
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
-    "sqlalchemy>=2.0",
-    "numpy>=2.0",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.49",  # asyncio extras = greenlet для async-адаптера
+    "numpy>=2.4,<3",
     "PyYAML>=6.0",
-    "psutil>=5.9",
+    "psutil>=7.0",
 
-    # GUI
+    # GUI (Phase 2 заменим на PySide6)
     "PyQt5>=5.15,<5.16",
     "PyQt5-Qt5>=5.15.2",
     "QDarkStyle>=3.2",
 
     # Vision / image
-    "opencv-python>=4.5",
-    "Pillow>=9.0",
+    "opencv-python>=4.13,<5",
+    "Pillow>=12.0",
 
     # Data / plotting
-    "pandas>=2.0",
-    "matplotlib>=3.7",
-    "plotly>=5.0",
+    "pandas>=2.2",
+    "matplotlib>=3.9",
+    "plotly>=5.24",
     "seaborn>=0.13",
     "openpyxl>=3.1",
 
@@ -35,18 +35,32 @@ dependencies = [
     "loguru>=0.7",
 
     # Network / utils
-    "requests>=2.28",
-    "environs>=9.5",
+    "requests>=2.32",
+    "environs>=11.0",
 
     # Simulation
     "pygame>=2.6",
+
+    # Async testing — было в стейл inner pyproject
+    "pytest-asyncio>=0.24",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0",
+    "pytest-asyncio>=0.24",
     "ipykernel>=6.29",
+    "aiosqlite>=0.20",  # для тестов async SQL-адаптера
 ]
+
+[project.optional-dependencies]
+# ML stack — добавится в Phase 1.5 после успешного перехода на 3.12
+# ml = [
+#     "torch>=2.11",
+#     "torchvision>=0.26",
+#     "ultralytics>=8.3",
+#     "onnxruntime>=1.20",
+# ]
 
 [tool.pytest.ini_options]
 testpaths = [
