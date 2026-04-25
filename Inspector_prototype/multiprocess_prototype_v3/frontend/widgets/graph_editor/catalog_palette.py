@@ -29,14 +29,14 @@ class _DragListWidget(QListWidget):
             return
 
         # Берём type_key, сохранённый в UserRole
-        type_key: str = item.data(Qt.UserRole)
+        type_key: str = item.data(Qt.ItemDataRole.UserRole)
 
         drag = QDrag(self)
         mime = QMimeData()
         mime.setData(MIME_TYPE, type_key.encode("utf-8"))
         drag.setMimeData(mime)
 
-        drag.exec_(Qt.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction)
 
 
 class CatalogPalette(QWidget):
@@ -96,14 +96,14 @@ class CatalogPalette(QWidget):
         if not catalog:
             # Placeholder при пустом каталоге
             placeholder = QListWidgetItem("Нет доступных операций")
-            placeholder.setFlags(placeholder.flags() & ~Qt.ItemIsEnabled)
+            placeholder.setFlags(placeholder.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             placeholder.setForeground(Qt.gray)
             self._list.addItem(placeholder)
             return
 
         for type_key, op_def in catalog.items():
             item = QListWidgetItem(op_def.name)
-            item.setData(Qt.UserRole, type_key)
+            item.setData(Qt.ItemDataRole.UserRole, type_key)
             item.setToolTip(op_def.description or type_key)
             self._list.addItem(item)
 
@@ -117,6 +117,6 @@ class CatalogPalette(QWidget):
         for i in range(self._list.count()):
             item = self._list.item(i)
             # Не скрываем disabled-placeholder
-            if not (item.flags() & Qt.ItemIsEnabled):
+            if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
                 continue
             item.setHidden(lowered not in item.text().lower())

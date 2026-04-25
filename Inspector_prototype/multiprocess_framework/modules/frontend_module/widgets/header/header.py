@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget, Signal
 
 from .admin_button_widget import AdminButtonConfig, AdminButtonWidget
 from .header_buttons_widget import HeaderButtonsWidget
@@ -26,8 +26,8 @@ class HeaderWidget(QWidget):
     Публичные атрибуты:
       logo: LogoWidget
       admin_button: AdminButtonWidget
-      buttons_widget: HeaderButtonsWidget (button_clicked = pyqtSignal(str))
-      action_triggered: pyqtSignal(str) — единый канал: id кнопок навигации + admin (action_id)
+      buttons_widget: HeaderButtonsWidget (button_clicked = Signal(str))
+      action_triggered: Signal(str) — единый канал: id кнопок навигации + admin (action_id)
 
     Привязка: connect_action_handlers(action_triggered, handlers=..., on_unmatched=...)
     или get_signal_map() для интроспекции (ISignalProvider).
@@ -35,7 +35,7 @@ class HeaderWidget(QWidget):
     Конфиг: {logo: {...}, admin_button: {...}, windows: [...]}
     """
 
-    action_triggered = pyqtSignal(str)
+    action_triggered = Signal(str)
 
     def __init__(
         self,

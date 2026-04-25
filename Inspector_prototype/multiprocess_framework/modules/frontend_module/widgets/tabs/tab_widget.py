@@ -5,7 +5,6 @@ BaseTab — абстрактный базовый класс для вкладо
 """
 from __future__ import annotations
 
-import abc
 from typing import Dict, Optional
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -20,14 +19,13 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
 from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
-class BaseTabMeta(type(QWidget), abc.ABCMeta):
-    pass
-
-
-class BaseTab(QWidget, metaclass=BaseTabMeta):
+# PySide6/Shiboken несовместим с abc.ABCMeta (mixin metaclass ломает _abc_impl).
+# Так как BaseTab не имеет @abstractmethod (только default-хуки), abc не нужен —
+# обычное наследование от QWidget.
+class BaseTab(QWidget):
     """
-    Абстрактный базовый класс для виджетов-вкладок.
-    Хуки: on_tab_selected(), on_tab_deselected().
+    Базовый класс для виджетов-вкладок с хуками.
+    Хуки: on_tab_selected(), on_tab_deselected() — переопределяются по необходимости.
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -74,7 +72,7 @@ class TabWidget(QWidget):
         corner_layout = QHBoxLayout(corner)
         corner_layout.setContentsMargins(0, 0, 0, 0)
         corner_layout.addWidget(self._toggle_btn)
-        self._tab_widget.setCornerWidget(corner, Qt.TopRightCorner)
+        self._tab_widget.setCornerWidget(corner, Qt.Corner.TopRightCorner)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tab_widget)

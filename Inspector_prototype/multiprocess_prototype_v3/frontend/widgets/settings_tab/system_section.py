@@ -13,6 +13,6 @@ class SystemSectionWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         lbl = QLabel("Настройки системы\n\n(Раздел в разработке)")
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl)
         layout.addStretch()

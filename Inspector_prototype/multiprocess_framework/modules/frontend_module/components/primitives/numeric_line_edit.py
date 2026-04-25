@@ -26,6 +26,6 @@ def create_numeric_line_edit(
     le = QLineEdit(parent)
     le.setFont(value_input_font())
     le.setFixedSize(VALUE_INPUT_WIDTH_PX, VALUE_INPUT_HEIGHT_PX)
-    le.setAlignment(Qt.AlignCenter)
+    le.setAlignment(Qt.AlignmentFlag.AlignCenter)
     le.editingFinished.connect(on_editing_finished)
     return le

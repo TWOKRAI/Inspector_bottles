@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Dict, List, Optional, Union
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QWidget, Signal
 
 from .button_style import create_header_button
 
@@ -62,7 +62,7 @@ class HeaderButtonsWidget(QWidget):
     Конфиг: [{"id": "main", "label": "Домой"}, ...] или HeaderButtonsConfig.
     """
 
-    button_clicked = pyqtSignal(str)
+    button_clicked = Signal(str)
 
     def __init__(
         self,

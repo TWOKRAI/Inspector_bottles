@@ -30,7 +30,7 @@ class GraphView(QGraphicsView):
         self._zoom_level = 1.0
 
         # Рендеринг
-        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
 
         # Режим выделения по умолчанию — rubber band
@@ -41,8 +41,8 @@ class GraphView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
 
         # Горизонтальная и вертикальная прокрутка
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # Разрешаем приём drag-drop событий (пробрасываются в scene автоматически)
         self.setAcceptDrops(True)
@@ -70,14 +70,15 @@ class GraphView(QGraphicsView):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """Переключение на ScrollHandDrag при нажатии средней кнопки."""
-        if event.button() == Qt.MiddleButton:
+        if event.button() == Qt.MouseButton.MiddleButton:
             self.setDragMode(QGraphicsView.ScrollHandDrag)
-            # Генерируем «нажатие» ЛКМ для активации ScrollHandDrag
+            # Qt6 QMouseEvent: 6-arg форма с globalPosition (5-arg deprecated)
             fake_event = event.__class__(
                 event.type(),
-                event.localPos(),
-                Qt.LeftButton,
-                Qt.LeftButton,
+                event.position(),
+                event.globalPosition(),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
                 event.modifiers(),
             )
             super().mousePressEvent(fake_event)
@@ -86,12 +87,13 @@ class GraphView(QGraphicsView):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         """Возврат к RubberBandDrag при отпускании средней кнопки."""
-        if event.button() == Qt.MiddleButton:
+        if event.button() == Qt.MouseButton.MiddleButton:
             fake_event = event.__class__(
                 event.type(),
-                event.localPos(),
-                Qt.LeftButton,
-                Qt.LeftButton,
+                event.position(),
+                event.globalPosition(),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
                 event.modifiers(),
             )
             super().mouseReleaseEvent(fake_event)
@@ -122,7 +124,7 @@ class GraphView(QGraphicsView):
         if not event.isAccepted():
             from .context_menu import show_scene_context_menu
 
-            show_scene_context_menu(self, event.globalPos())
+            show_scene_context_menu(self, event.globalPosition().toPoint())
 
     # ------------------------------------------------------------------
     # Удаление выделенных элементов

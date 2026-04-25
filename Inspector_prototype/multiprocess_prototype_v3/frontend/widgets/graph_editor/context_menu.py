@@ -35,7 +35,7 @@ def show_node_context_menu(
     # Удалить
     delete_action = menu.addAction("Удалить")
 
-    chosen = menu.exec_(screen_pos)
+    chosen = menu.exec(screen_pos)
 
     if chosen == toggle_action:
         new_enabled = not is_enabled
@@ -58,7 +58,7 @@ def show_edge_context_menu(
     menu = QMenu()
     delete_action = menu.addAction("Удалить соединение")
 
-    chosen = menu.exec_(screen_pos)
+    chosen = menu.exec(screen_pos)
 
     if chosen == delete_action:
         scene.remove_edge_with_signal(edge_item)
@@ -73,7 +73,7 @@ def show_scene_context_menu(
     fit_action = menu.addAction("Подогнать масштаб")
     select_all_action = menu.addAction("Выделить всё")
 
-    chosen = menu.exec_(screen_pos)
+    chosen = menu.exec(screen_pos)
 
     if chosen == fit_action:
         view.fit_all()

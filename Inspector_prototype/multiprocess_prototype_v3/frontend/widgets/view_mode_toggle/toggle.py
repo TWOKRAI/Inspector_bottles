@@ -45,7 +45,8 @@ class ViewModeToggle(QWidget):
         # По умолчанию -- карточки
         self._btn_cards.setChecked(True)
 
-        self._group.buttonClicked[int].connect(self._on_button_clicked)
+        # Qt6: buttonClicked(int) удалён, idClicked(int) — новое имя
+        self._group.idClicked.connect(self._on_button_clicked)
 
     def _on_button_clicked(self, button_id: int) -> None:
         self.mode_changed.emit(button_id)

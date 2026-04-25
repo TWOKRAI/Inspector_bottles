@@ -5,12 +5,12 @@ FPS, время обработки, размер изображения.
 """
 from __future__ import annotations
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, Signal
 
 
 class PerformanceMonitor(QObject):
     """Монитор производительности. Сигнал updated при изменении метрик."""
-    updated = pyqtSignal()
+    updated = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)

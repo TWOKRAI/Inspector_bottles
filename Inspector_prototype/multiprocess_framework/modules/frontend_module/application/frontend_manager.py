@@ -210,7 +210,7 @@ class FrontendManager(BaseManager, ObservableMixin):
             tm.start_all()
         if wm:
             wm.show_initial_window(initial_window)
-        return self._qt_app.exec_() if self._qt_app else 1
+        return self._qt_app.exec() if self._qt_app else 1
 
     def shutdown_app(self) -> None:
         """Остановка приложения: shutdown + stop_event."""

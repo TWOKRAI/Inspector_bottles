@@ -106,7 +106,7 @@ class HikvisionCameraMvpView(QWidget):
         dev_layout.addWidget(hint)
         self.list_devices = QListWidget()
         self.list_devices.setMinimumHeight(ui.device_list_min_height)
-        self.list_devices.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list_devices.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         dev_layout.addWidget(self.list_devices)
 
         self.btn_enum = QPushButton(ui.btn_enum_devices)

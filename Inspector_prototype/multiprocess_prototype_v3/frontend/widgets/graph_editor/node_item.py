@@ -62,7 +62,7 @@ class NodeItem(QGraphicsItem):
         self.operation_name = operation_name
 
         # Шрифт заголовка
-        self._header_font = QFont("Segoe UI", 9, QFont.Bold)
+        self._header_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
         self._header_metrics = QFontMetrics(self._header_font)
 
         # Вычисляем высоту ноды
@@ -77,9 +77,9 @@ class NodeItem(QGraphicsItem):
         )
 
         # Флаги: перетаскивание, выделение, уведомление об изменении геометрии
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
 
         # Список связанных рёбер (обновляются при перемещении)
         self._edges: list[EdgeItem] = []
@@ -170,7 +170,7 @@ class NodeItem(QGraphicsItem):
         widget: QWidget | None = None,
     ) -> None:
         """Отрисовка узла: фон, заголовок, рамка выделения."""
-        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         body_rect = QRectF(0, 0, self._width, self._height)
 
@@ -194,7 +194,7 @@ class NodeItem(QGraphicsItem):
         painter.setPen(QPen(NODE_TEXT_COLOR))
         painter.setFont(self._header_font)
         text_rect = QRectF(8, 0, self._width - 16, NODE_HEADER_HEIGHT)
-        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, self._display_name)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._display_name)
 
         # --- Рамка ---
         border_color = NODE_SELECTED_BORDER if self.isSelected() else NODE_BORDER_COLOR
@@ -212,7 +212,7 @@ class NodeItem(QGraphicsItem):
             py = port.pos().y()
             painter.drawText(
                 QRectF(PORT_RADIUS + 4, py - PORT_SPACING / 2, self._width / 2 - 16, PORT_SPACING),
-                Qt.AlignVCenter | Qt.AlignLeft,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                 port.port_name,
             )
 
@@ -225,7 +225,7 @@ class NodeItem(QGraphicsItem):
                     self._width / 2 - PORT_RADIUS - 4,
                     PORT_SPACING,
                 ),
-                Qt.AlignVCenter | Qt.AlignRight,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
                 port.port_name,
             )
 

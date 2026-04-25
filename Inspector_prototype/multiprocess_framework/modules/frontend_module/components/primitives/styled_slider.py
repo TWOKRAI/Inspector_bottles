@@ -17,7 +17,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import QSlid
 
 def create_styled_horizontal_slider(parent: Optional[Any]) -> QSlider:
     """Новый горизонтальный слайдер с применённым QSS и wheelEvent-заглушкой."""
-    slider = QSlider(Qt.Horizontal, parent)
+    slider = QSlider(Qt.Orientation.Horizontal, parent)
     slider.setMinimumHeight(SLIDER_MIN_HEIGHT_PX)
     slider.wheelEvent = lambda e: None  # type: ignore[assignment]
     apply_slider_handle_style(slider)

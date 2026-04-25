@@ -660,7 +660,7 @@ class GraphScene(QGraphicsScene):
             painter.setFont(QFont("Segoe UI", 14))
             painter.drawText(
                 rect,
-                Qt.AlignCenter,
+                Qt.AlignmentFlag.AlignCenter,
                 "Перетащите операцию из каталога",
             )
 

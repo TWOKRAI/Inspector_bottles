@@ -23,15 +23,15 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QSlider,
     QWidget,
     Qt,
-    pyqtSignal,
+    Signal,
 )
 
 
 class SliderValueView(QWidget):
     """Value: QLineEdit + QSlider. Сигналы value_changed, value_finished."""
 
-    value_changed = pyqtSignal(float)
-    value_finished = pyqtSignal(float)
+    value_changed = Signal(float)
+    value_finished = Signal(float)
 
     def __init__(
         self,
@@ -43,8 +43,8 @@ class SliderValueView(QWidget):
     ) -> None:
         super().__init__(parent)
         self._line_edit = QLineEdit()
-        self._line_edit.setAlignment(Qt.AlignCenter)
-        self._slider = QSlider(Qt.Horizontal)
+        self._line_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._slider = QSlider(Qt.Orientation.Horizontal)
         self._slider.setMinimumHeight(SLIDER_MIN_HEIGHT_PX)
         apply_slider_handle_style(self._slider)
         self._slider.wheelEvent = lambda e: None  # type: ignore[assignment]

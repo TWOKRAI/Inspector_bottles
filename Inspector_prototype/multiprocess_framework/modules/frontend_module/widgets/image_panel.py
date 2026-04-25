@@ -36,7 +36,7 @@ def _frame_to_pixmap(frame: Any, label_size: QSize) -> QPixmap:
     h, w, ch = frame.shape
     bytes_per_line = ch * w
     rgb = np.ascontiguousarray(frame[:, :, ::-1])
-    q_img = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
+    q_img = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
     pixmap = QPixmap.fromImage(q_img)
     return pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
@@ -78,7 +78,7 @@ class ImagePanelWidget(QWidget):
             self._visible[slot_id] = visible_default
 
             lbl = QLabel(f"{label_text} (waiting...)")
-            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setMinimumSize(self._min_slot_width, self._min_slot_height)
             lbl.setStyleSheet("background-color: #1e1e1e; color: white;")
             self._labels[slot_id] = lbl

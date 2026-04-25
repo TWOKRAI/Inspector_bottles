@@ -24,15 +24,15 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QTreeWidget,
     QTreeWidgetItem,
     Qt,
-    pyqtSignal,
+    Signal,
 )
 
 from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import TouchLineEditItemDelegate
 
 
-ROLE_KIND = Qt.UserRole
-ROLE_GROUP = Qt.UserRole + 1
-ROLE_LEAF = Qt.UserRole + 2
+ROLE_KIND = Qt.ItemDataRole.UserRole
+ROLE_GROUP = Qt.ItemDataRole.UserRole + 1
+ROLE_LEAF = Qt.ItemDataRole.UserRole + 2
 
 
 class StructuredTwoLevelTreeWidget(QTreeWidget):
@@ -44,7 +44,7 @@ class StructuredTwoLevelTreeWidget(QTreeWidget):
     leaf_cell_changed(str group_id, str row_id, str column_key, object value)
     """
 
-    leaf_cell_changed = pyqtSignal(str, str, str, object)
+    leaf_cell_changed = Signal(str, str, str, object)
 
     def __init__(
         self,
@@ -158,7 +158,7 @@ class StructuredTwoLevelTreeWidget(QTreeWidget):
             g_item.setText(0, str(group_id))
             for c in range(1, len(self._columns)):
                 g_item.setText(c, "")
-            g_item.setFlags(g_item.flags() & ~Qt.ItemIsEditable)
+            g_item.setFlags(g_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
 
             for row in rows:
                 leaf = QTreeWidgetItem(g_item)
@@ -188,9 +188,9 @@ class StructuredTwoLevelTreeWidget(QTreeWidget):
                             editable = bool(row["_value_editable"])
                         base = leaf.flags()
                         if editable:
-                            leaf.setFlags(base | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                            leaf.setFlags(base | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                         else:
-                            leaf.setFlags((base | Qt.ItemIsEnabled | Qt.ItemIsSelectable) & ~Qt.ItemIsEditable)
+                            leaf.setFlags((base | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable) & ~Qt.ItemFlag.ItemIsEditable)
 
             self.addTopLevelItem(g_item)
             g_item.setExpanded(True)

@@ -205,8 +205,8 @@ class ChainEditorWidget(QWidget):
         """Заполнить одну строку таблицы виджетами."""
         # Колонка #: номер строки (1-based), в UserRole — node_id
         order_item = QTableWidgetItem(str(row + 1))
-        order_item.setData(Qt.UserRole, node_id)
-        order_item.setTextAlignment(Qt.AlignCenter)
+        order_item.setData(Qt.ItemDataRole.UserRole, node_id)
+        order_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row, _COL_ORDER, order_item)
 
         # Колонка Операция: QComboBox из каталога
@@ -235,7 +235,7 @@ class ChainEditorWidget(QWidget):
 
         # Колонка Процесс: readonly QLabel
         process_label = QLabel(node.process_id)
-        process_label.setAlignment(Qt.AlignCenter)
+        process_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setCellWidget(row, _COL_PROCESS, process_label)
 
         # Колонка Worker: QComboBox — "auto" или worker_0..worker_N
@@ -418,7 +418,7 @@ class ChainEditorWidget(QWidget):
         item = self._table.item(row, _COL_ORDER)
         if item is None:
             return None
-        return item.data(Qt.UserRole)
+        return item.data(Qt.ItemDataRole.UserRole)
 
     def _swap_nodes_by_row(self, row_a: int, row_b: int) -> None:
         """Поменять местами два узла в self._nodes по номерам строк."""

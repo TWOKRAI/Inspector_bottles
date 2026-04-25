@@ -146,7 +146,7 @@ class LineEditTouchKeyboardFilter(QObject):
             return False
         et = event.type()
         if et == QEvent.MouseButtonPress:
-            if event.button() != Qt.LeftButton:
+            if event.button() != Qt.MouseButton.LeftButton:
                 return False
         elif et == QEvent.TouchBegin:
             pass
@@ -196,4 +196,4 @@ def install_touch_keyboard_on_line_edit(
     line_edit.installEventFilter(filt)
     setattr(host, "_touch_keyboard_filter", filt)
     # Иначе на части панелей TouchBegin не доходит до QLineEdit (только синтетическая мышь).
-    line_edit.setAttribute(Qt.WA_AcceptTouchEvents, True)
+    line_edit.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)

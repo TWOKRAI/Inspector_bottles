@@ -70,7 +70,7 @@ class LoadingWindow(QMainWindow):
         if logo_label.pixmap() is None or logo_label.pixmap().isNull():
             logo_label.setText("Inspector")
             logo_label.setStyleSheet("font-size: 24px; color: #333;")
-        logo_label.setAlignment(Qt.AlignCenter)
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo_label)
         layout.addStretch()
 
@@ -84,7 +84,7 @@ class LoadingWindow(QMainWindow):
 
         # Метка процентов
         self._percent_label = QLabel("0%")
-        self._percent_label.setAlignment(Qt.AlignCenter)
+        self._percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._percent_label.setStyleSheet("font-size: 14px; color: #555;")
         layout.addWidget(self._percent_label)
 

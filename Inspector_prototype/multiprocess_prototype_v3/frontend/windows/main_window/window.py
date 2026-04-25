@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
 
         # Компактный toolbar: [↩ ↪ История ▼] в одну строку
         toolbar = QWidget()
-        toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        toolbar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
         toolbar_layout.setSpacing(2)
@@ -269,7 +269,7 @@ class MainWindow(QMainWindow):
             aid = action.action_id
             menu_action.triggered.connect(lambda checked, _aid=aid: self._undo_to(_aid))
 
-        menu.exec_(self._btn_history.mapToGlobal(self._btn_history.rect().bottomLeft()))
+        menu.exec(self._btn_history.mapToGlobal(self._btn_history.rect().bottomLeft()))
 
     def _undo_to(self, action_id: str) -> None:
         """Откатить до указанного action."""

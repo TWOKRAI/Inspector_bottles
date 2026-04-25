@@ -2,7 +2,7 @@
 """
 Привязка обработчиков к сигналам с идентификатором действия (str).
 
-Паттерн для config-driven панелей: виджет эмитит один сигнал ``pyqtSignal(str)``
+Паттерн для config-driven панелей: виджет эмитит один сигнал ``Signal(str)``
 с ключом действия; приложение передаёт словарь ``{action_id: callable}`` и
 опционально fallback для неизвестных ключей (например навигация по window_registry).
 """
@@ -22,7 +22,7 @@ def connect_action_handlers(
     или on_unmatched(action_id).
 
     Args:
-        signal: pyqtSignal(str) или совместимый объект с .connect.
+        signal: Signal(str) или совместимый объект с .connect.
         handlers: Соответствие id действия → вызываемый без аргументов.
         on_unmatched: Вызывается для action_id, которого нет в handlers (например show_window).
     """

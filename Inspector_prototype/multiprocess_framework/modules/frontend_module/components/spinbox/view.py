@@ -15,15 +15,15 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QHBoxLayout,
     QLineEdit,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 
 
 class SpinBoxValueView(QWidget):
     """Value: QDoubleSpinBox. value_changed, value_finished при Enter."""
 
-    value_changed = pyqtSignal(float)
-    value_finished = pyqtSignal(float)
+    value_changed = Signal(float)
+    value_finished = Signal(float)
 
     def __init__(
         self,

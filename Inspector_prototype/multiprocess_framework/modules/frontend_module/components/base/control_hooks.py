@@ -4,7 +4,7 @@
 
 Не импортирует logger/error/statistics: приложение передаёт колбэки в ``ControlHooks``
 и подключает их к ``LoggerManager`` / ``ErrorManager`` / и т.д. При необходимости
-обёртка может пробрасывать события в ``pyqtSignal``.
+обёртка может пробрасывать события в ``Signal``.
 """
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ class ControlHooks:
     Сигнатуры намеренно простые, чтобы их можно было связать с Qt::
 
         class Bridge(QObject):
-            rejected = pyqtSignal(object)
+            rejected = Signal(object)
             def on_rejected(self, ev: ControlWriteRejectedEvent) -> None:
                 self.rejected.emit(ev)
     """

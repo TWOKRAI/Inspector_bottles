@@ -117,7 +117,7 @@ class HikvisionWidget(BaseWidget[HikvisionModel]):
         # ---- Секция «Устройство»: hint, list_devices, btn_enum, btn_open/close ----
         self._list_devices = QListWidget()
         self._list_devices.setMinimumHeight(u.device_list_min_height)
-        self._list_devices.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._list_devices.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         dev_layout.addWidget(self._list_devices)
 
         self._btn_enum = QPushButton(u.btn_enum_devices)

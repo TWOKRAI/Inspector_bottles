@@ -57,7 +57,7 @@ def add_fps_section_to_layout(
 
     # Без rm: подпись + горизонтальный QSlider, сигнал → on_slider_changed
     label = QLabel(f"{u.initial_fps}{u.fps_suffix}")
-    slider = QSlider(Qt.Horizontal)
+    slider = QSlider(Qt.Orientation.Horizontal)
     slider.setRange(u.fps_slider_min, u.fps_slider_max)
     slider.setValue(u.initial_fps)
     slider.valueChanged.connect(on_slider_changed)

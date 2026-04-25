@@ -11,9 +11,8 @@ dependencies = [
     "numpy>=2.4,<3",
     "PyYAML>=6.0",
     "psutil>=7.0",
-    # GUI (Phase 2 заменим на PySide6)
-    "PyQt5>=5.15,<5.16",
-    "PyQt5-Qt5>=5.15.2",
+    # GUI (Phase 2 завершена: миграция PyQt5 → PySide6)
+    "pyside6>=6.8,<6.11",
     "QDarkStyle>=3.2",
     # Vision / image
     "opencv-python>=4.13,<5",
@@ -35,7 +34,6 @@ dependencies = [
     "pygame>=2.6",
     # Async testing — было в стейл inner pyproject
     "pytest-asyncio>=0.24",
-    "pyside6>=6.8,<6.11",
 ]
 
 [dependency-groups]

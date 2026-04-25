@@ -51,7 +51,7 @@ class LogoWidget(QWidget):
         self._max_height = data.get("max_height", 80)
         self._visible = data.get("visible", True)
         self._label = QLabel(self)
-        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setScaledContents(False)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

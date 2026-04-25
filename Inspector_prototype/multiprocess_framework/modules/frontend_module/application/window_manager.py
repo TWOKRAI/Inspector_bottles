@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional, Union
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, Signal
 from multiprocess_framework.modules.frontend_module.core.window_registry import WindowEntry, WindowRegistry
 
 
@@ -39,8 +39,8 @@ class WindowManager(QObject):
     Управление окнами приложения.
     Сигналы: window_shown, window_hidden.
     """
-    window_shown = pyqtSignal(str)
-    window_hidden = pyqtSignal(str)
+    window_shown = Signal(str)
+    window_hidden = Signal(str)
 
     def __init__(
             self,

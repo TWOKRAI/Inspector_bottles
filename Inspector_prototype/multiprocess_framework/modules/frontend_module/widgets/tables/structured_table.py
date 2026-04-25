@@ -21,7 +21,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QTableWidget,
     QTableWidgetItem,
     Qt,
-    pyqtSignal,
+    Signal,
 )
 from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import TouchLineEditItemDelegate
 
@@ -33,8 +33,8 @@ class StructuredTableWidget(QTableWidget):
     data: list of dict (каждая строка — словарь с ключами как в columns).
     row_key: ключ в строке для идентификации (например "name" для регионов).
     """
-    cell_changed = pyqtSignal(int, str, object)  # row_index, column_key, value
-    row_selected = pyqtSignal(int)
+    cell_changed = Signal(int, str, object)  # row_index, column_key, value
+    row_selected = Signal(int)
 
     def __init__(
         self,
@@ -176,10 +176,10 @@ class StructuredTableWidget(QTableWidget):
                     if "_value_editable" in row:
                         editable = bool(row["_value_editable"])
                     item.setFlags(
-                        item.flags() | Qt.ItemIsEnabled
-                        if editable else item.flags() & ~Qt.ItemIsEditable
+                        item.flags() | Qt.ItemFlag.ItemIsEnabled
+                        if editable else item.flags() & ~Qt.ItemFlag.ItemIsEditable
                     )
-                    item.setData(Qt.UserRole, key)
+                    item.setData(Qt.ItemDataRole.UserRole, key)
                     self.setItem(row_idx, col_idx, item)
 
         self._block_signals = False

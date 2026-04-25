@@ -122,7 +122,7 @@ class DisplayTabWidget(QWidget):
         self._table.setColumnCount(5)
         self._table.setHorizontalHeaderLabels(["ID", "Источник", "FPS лимит", "Статус", ""])
         # Запрет редактирования ячеек
-        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         # Выделение строками
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         # Растягиваем колонки под содержимое

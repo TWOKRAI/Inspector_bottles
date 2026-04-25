@@ -7,19 +7,19 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, Signal
 from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
 
 
 class TwoLevelTreeWithToolbar(QWidget):
     """Тулбар + StructuredTwoLevelTreeWidget; те же сигналы, что у TableWithToolbar."""
 
-    add_clicked = pyqtSignal()
-    delete_clicked = pyqtSignal()
-    move_up_clicked = pyqtSignal()
-    move_down_clicked = pyqtSignal()
-    copy_clicked = pyqtSignal()
-    paste_clicked = pyqtSignal()
+    add_clicked = Signal()
+    delete_clicked = Signal()
+    move_up_clicked = Signal()
+    move_down_clicked = Signal()
+    copy_clicked = Signal()
+    paste_clicked = Signal()
 
     def __init__(
         self,

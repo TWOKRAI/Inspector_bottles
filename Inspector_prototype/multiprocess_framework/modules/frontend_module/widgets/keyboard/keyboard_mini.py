@@ -17,7 +17,7 @@ class VirtualKeyboardMini(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet("""
                 QPushButton {
                     background-color: #f0f0f0;

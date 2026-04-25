@@ -13,6 +13,6 @@ class AdminSectionWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         lbl = QLabel("Администрация\n\n(Раздел в разработке — логи, права пользователей)")
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl)
         layout.addStretch()

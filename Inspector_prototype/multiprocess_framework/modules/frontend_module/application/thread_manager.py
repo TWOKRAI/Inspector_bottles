@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, QThread, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, QThread, Signal
 
 
 @dataclass
@@ -25,10 +25,10 @@ class ThreadEntry:
 
 class ThreadManager(QObject):
     """Управление всеми потоками приложения (QThread-based)."""
-    thread_created = pyqtSignal(str)
-    thread_started = pyqtSignal(str)
-    thread_stopped = pyqtSignal(str)
-    all_stopped = pyqtSignal()
+    thread_created = Signal(str)
+    thread_started = Signal(str)
+    thread_stopped = Signal(str)
+    all_stopped = Signal()
 
     def __init__(
         self,

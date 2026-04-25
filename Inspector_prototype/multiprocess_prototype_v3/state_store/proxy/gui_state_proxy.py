@@ -108,7 +108,7 @@ class GuiStateProxy(StateProxy):
             QMetaObject.invokeMethod(
                 self._signal_emitter,
                 "_on_state_deltas",
-                Qt.QueuedConnection,
+                Qt.ConnectionType.QueuedConnection,
                 Q_ARG(list, deltas),
             )
         except ImportError:

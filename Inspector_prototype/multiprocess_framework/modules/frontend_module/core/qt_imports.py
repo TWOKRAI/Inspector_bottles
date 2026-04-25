@@ -4,11 +4,8 @@ Central Qt imports for frontend_module.
 
 Использует PySide6. Fail-fast если не установлен.
 
-Transitional aliases (Phase 2 миграции PyQt5 → PySide6):
-- ``pyqtSignal`` алиас для ``Signal``
-- ``pyqtSlot`` алиас для ``Slot``
-
-Алиасы убираются на Wave 5 после того как все callers перейдут на ``Signal``/``Slot``.
+Phase 2 миграции PyQt5 → PySide6 завершена (Wave 5): transitional aliases
+``pyqtSignal``/``pyqtSlot`` удалены, все callers используют ``Signal``/``Slot``.
 """
 from PySide6.QtCore import QEvent, QObject, Qt, QSize, QTimer, QThread, Signal, Slot
 from PySide6.QtGui import (
@@ -57,10 +54,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-# Transitional aliases — убрать на Wave 5
-pyqtSignal = Signal
-pyqtSlot = Slot
 
 __all__ = [
     "QAbstractItemView",
@@ -113,6 +106,4 @@ __all__ = [
     "QFont",
     "Signal",
     "Slot",
-    "pyqtSignal",
-    "pyqtSlot",
 ]

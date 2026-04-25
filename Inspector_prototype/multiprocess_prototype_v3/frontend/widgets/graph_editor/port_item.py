@@ -83,7 +83,7 @@ class PortItem(QGraphicsEllipseItem):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """Начать drag-создание связи если это output-порт (ЛКМ)."""
-        if not self.is_input and event.button() == Qt.LeftButton:
+        if not self.is_input and event.button() == Qt.MouseButton.LeftButton:
             scene = self.scene()
             if scene is not None and hasattr(scene, "start_edge_drag"):
                 scene.start_edge_drag(self)

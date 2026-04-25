@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import abc
 from typing import Any, TypeVar
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
@@ -32,7 +31,7 @@ _DEFAULT_AUTOSAVE_DEBOUNCE_MS = 1500
 TModel = TypeVar("TModel")
 
 
-class RecipePanelBase(BaseWidget[TModel], abc.ABC):
+class RecipePanelBase(BaseWidget[TModel]):
     """
     Базовый класс для RegisterRecipePanelWidget и AppRecipePanelWidget.
 
@@ -46,6 +45,11 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
     - _get_box_title() → str — заголовок QGroupBox
     - _get_table_title() → str — подпись над деревом
     - _build_tree_data() → list — данные для дерева
+
+    PySide6 + abc.ABCMeta несовместимы (Shiboken metaclass ломает _abc_impl).
+    Поэтому вместо @abstractmethod используется NotImplementedError —
+    instantiation базового класса не блокируется, но вызов абстрактного метода
+    падает с понятным сообщением. Подклассы обязаны переопределить методы ниже.
     """
 
     load_requested = Signal(int)
@@ -56,17 +60,17 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
     # Абстрактные методы — подкласс ОБЯЗАН реализовать
     # ------------------------------------------------------------------
 
-    @abc.abstractmethod
     def _get_box_title(self) -> str:
         """Заголовок QGroupBox (слот + кнопки)."""
+        raise NotImplementedError(f"{type(self).__name__}._get_box_title() must be implemented")
 
-    @abc.abstractmethod
     def _get_table_title(self) -> str:
         """Подпись над деревом полей."""
+        raise NotImplementedError(f"{type(self).__name__}._get_table_title() must be implemented")
 
-    @abc.abstractmethod
     def _build_tree_data(self) -> list:
         """Построить данные для дерева (groups для set_data)."""
+        raise NotImplementedError(f"{type(self).__name__}._build_tree_data() must be implemented")
 
     # ------------------------------------------------------------------
     # Общая реализация

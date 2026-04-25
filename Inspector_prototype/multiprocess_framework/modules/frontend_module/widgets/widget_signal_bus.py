@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QObject, Signal
 
 
 class WidgetSignalBus(QObject):
@@ -18,4 +18,4 @@ class WidgetSignalBus(QObject):
     event_emitted(str, object): event_id (строка), payload (dict, str, None и т.д.).
     """
 
-    event_emitted = pyqtSignal(str, object)
+    event_emitted = Signal(str, object)

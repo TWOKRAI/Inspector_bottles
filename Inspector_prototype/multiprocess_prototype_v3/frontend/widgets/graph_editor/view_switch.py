@@ -73,7 +73,7 @@ class ViewSwitchWidget(QWidget):
         self._stack.addWidget(self._table_widget)
 
         # Страница 1: граф (сплиттер: palette | graph_view)
-        self._graph_container = QSplitter(Qt.Horizontal)
+        self._graph_container = QSplitter(Qt.Orientation.Horizontal)
         self._catalog_palette = CatalogPalette()
         self._graph_scene = GraphScene()
         self._graph_view = GraphView(self._graph_scene)

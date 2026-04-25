@@ -48,15 +48,15 @@ def _frame_to_pixmap(frame: np.ndarray) -> QPixmap:
         if ch == 3:
             # BGR → RGB (OpenCV → Qt)
             rgb = frame[..., ::-1].copy()
-            img = QImage(rgb.data, w, h, w * 3, QImage.Format_RGB888)
+            img = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
         elif ch == 4:
-            img = QImage(frame.data, w, h, w * 4, QImage.Format_RGBA8888)
+            img = QImage(frame.data, w, h, w * 4, QImage.Format.Format_RGBA8888)
         else:
             # Неожиданный формат — как grayscale
-            img = QImage(frame.data, w, h, w, QImage.Format_Grayscale8)
+            img = QImage(frame.data, w, h, w, QImage.Format.Format_Grayscale8)
     else:
         # 2D массив — grayscale
-        img = QImage(frame.data, w, h, w, QImage.Format_Grayscale8)
+        img = QImage(frame.data, w, h, w, QImage.Format.Format_Grayscale8)
 
     return QPixmap.fromImage(img)
 
@@ -207,7 +207,7 @@ class DisplayWindow(QWidget):
         # Placeholder для RecordingIndicator (пустой, без размера)
         self._indicator_placeholder = QWidget()
         self._indicator_placeholder.setSizePolicy(
-            QSizePolicy.Fixed, QSizePolicy.Fixed
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
         self._indicator_placeholder.setFixedSize(0, 0)
         self._top_bar_layout.addWidget(self._indicator_placeholder)
@@ -221,7 +221,7 @@ class DisplayWindow(QWidget):
 
         # --- Область отображения кадров ---
         self._image_label = QLabel()
-        self._image_label.setAlignment(Qt.AlignCenter)
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_label.setMinimumSize(320, 240)
         self._image_label.setStyleSheet("background-color: black;")
         main_layout.addWidget(self._image_label)

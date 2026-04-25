@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Dict, Optional, Union
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QWidget, pyqtSignal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QWidget, Signal
 
 from .button_style import create_header_button
 
@@ -40,7 +40,7 @@ class AdminButtonConfig(SchemaBase):
 class AdminButtonWidget(QWidget):
     """Кнопка Admin. Эмитит clicked при нажатии."""
 
-    clicked = pyqtSignal()
+    clicked = Signal()
 
     def __init__(
         self,

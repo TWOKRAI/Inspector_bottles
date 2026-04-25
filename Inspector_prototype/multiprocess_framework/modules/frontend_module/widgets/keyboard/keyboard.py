@@ -13,7 +13,7 @@ class VirtualKeyboard(QWidget):
         super().__init__()
         self._signal_bus = WidgetSignalBus(parent=self)
         self.setWindowTitle("Виртуальная клавиатура")
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.state_show = False
         self.input = None
         self.enter = None
@@ -146,11 +146,11 @@ class VirtualKeyboard(QWidget):
         self.emit_widget_event("keyboard.full.shown", None)
 
     def toggle_float(self):
-        if self.windowFlags() & Qt.FramelessWindowHint:
-            self.setWindowFlags(self.windowFlags() & ~Qt.FramelessWindowHint)
+        if self.windowFlags() & Qt.WindowType.FramelessWindowHint:
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.FramelessWindowHint)
             self.showNormal()
         else:
-            self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
             self.show()
             self.apply_geometry_for_touch()
 
