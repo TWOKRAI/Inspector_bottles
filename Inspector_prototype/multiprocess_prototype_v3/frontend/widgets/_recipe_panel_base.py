@@ -13,7 +13,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QLabel,
     QPushButton,
     QVBoxLayout,
-    pyqtSignal,
+    Signal,
 )
 from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
@@ -48,9 +48,9 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
     - _build_tree_data() → list — данные для дерева
     """
 
-    load_requested = pyqtSignal(int)
-    save_requested = pyqtSignal(int)
-    default_requested = pyqtSignal()
+    load_requested = Signal(int)
+    save_requested = Signal(int)
+    default_requested = Signal()
 
     # ------------------------------------------------------------------
     # Абстрактные методы — подкласс ОБЯЗАН реализовать
@@ -137,7 +137,7 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
         layout.addWidget(self._tree, 1)
 
     def _connect_signals(self) -> None:
-        """Кнопки → презентер и/или pyqtSignal; изменение ячейки → презентер."""
+        """Кнопки → презентер и/или Signal; изменение ячейки → презентер."""
         _btn = callback_no_args
         mgr = self._model.recipe_manager if self._model else None
 
@@ -154,7 +154,7 @@ class RecipePanelBase(BaseWidget[TModel], abc.ABC):
         self._slot_combo.currentIndexChanged.connect(self._on_slot_index_changed)
 
     def _on_load_with_signal(self) -> None:
-        """load через презентер + pyqtSignal load_requested."""
+        """load через презентер + Signal load_requested."""
         self._presenter.on_load_clicked()
         self.load_requested.emit(self.parse_slot())
 

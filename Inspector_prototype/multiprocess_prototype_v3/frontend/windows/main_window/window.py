@@ -16,8 +16,8 @@ from multiprocess_framework.modules.frontend_module.widgets import HeaderWidget,
 from multiprocess_framework.modules.frontend_module.widgets.header import HeaderConfig
 from multiprocess_framework.modules.frontend_module.widgets.header.button_style import create_header_button
 from multiprocess_framework.modules.frontend_module.widgets.image_panel import ImagePanelWidget
-from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import QLabel, QMessageBox, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
 from multiprocess_prototype_v3.frontend.utils import ensure_main_thread
@@ -247,7 +247,7 @@ class MainWindow(QMainWindow):
 
     def _show_history_menu(self) -> None:
         """Показать dropdown с последними 20 Actions."""
-        from PyQt5.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
         bus = self._app_ctx.get_action_bus() if self._app_ctx else None
         if bus is None:

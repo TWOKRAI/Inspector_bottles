@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import QPoint
-from PyQt5.QtWidgets import QMenu
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QMenu
 
 if TYPE_CHECKING:
     from .edge_item import EdgeItem

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QImage, QPixmap
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QImage, QPixmap
+from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -81,9 +81,9 @@ class DisplayWindow(QWidget):
     """
 
     # Эмитируется при закрытии окна: передаёт window_id
-    closed = pyqtSignal(str)
+    closed = Signal(str)
     # Эмитируется при смене источника: передаёт (window_id, new_source_ref)
-    source_changed = pyqtSignal(str, str)
+    source_changed = Signal(str, str)
 
     def __init__(
         self,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import QRectF, Qt
-from PyQt5.QtGui import (
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
@@ -14,7 +14,7 @@ from PyQt5.QtGui import (
     QPainterPath,
     QPen,
 )
-from PyQt5.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
+from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from .constants import (
     GRID_SIZE,

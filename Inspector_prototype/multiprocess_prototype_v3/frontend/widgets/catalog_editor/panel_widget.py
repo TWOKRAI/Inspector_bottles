@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QMessageBox,
@@ -38,7 +38,7 @@ class CatalogEditorWidget(QWidget):
     """Таблица каталога операций с кнопками Add / Remove / Save."""
 
     # Сигнал: каталог изменён (после сохранения)
-    catalog_changed = pyqtSignal()
+    catalog_changed = Signal()
 
     def __init__(
         self,

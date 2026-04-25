@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt5.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from multiprocess_prototype_v3.frontend.widgets.graph_editor import ViewSwitchWidget
 

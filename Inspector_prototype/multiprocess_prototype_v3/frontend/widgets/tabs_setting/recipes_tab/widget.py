@@ -14,7 +14,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
@@ -41,9 +41,9 @@ from ...view_mode_toggle import ViewModeToggle
 class RecipesTabWidget(BaseTab):
     """Вкладка «Рецепты»: слот и таблица полей регистров."""
 
-    recipe_load_requested = pyqtSignal(int)
-    recipe_save_requested = pyqtSignal(int)
-    recipe_default_requested = pyqtSignal()
+    recipe_load_requested = Signal(int)
+    recipe_save_requested = Signal(int)
+    recipe_default_requested = Signal()
 
     def __init__(
         self,

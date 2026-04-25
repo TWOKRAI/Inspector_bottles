@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPainter
-from PyQt5.QtWidgets import QGraphicsView
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import QGraphicsView
 
 from .constants import ZOOM_MAX, ZOOM_MIN, ZOOM_STEP
 from .graph_scene import GraphScene

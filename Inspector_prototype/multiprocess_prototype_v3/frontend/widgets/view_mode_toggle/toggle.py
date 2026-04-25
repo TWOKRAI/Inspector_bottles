@@ -8,14 +8,14 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QHBoxLayout,
     QPushButton,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 
 
 class ViewModeToggle(QWidget):
     """Два чекабельных QPushButton: карточки и таблица."""
 
-    mode_changed = pyqtSignal(int)  # 0=карточки, 1=таблица
+    mode_changed = Signal(int)  # 0=карточки, 1=таблица
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from PyQt5.QtCore import QRectF, Qt, QTimeLine, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFont, QPainter, QPen
-from PyQt5.QtWidgets import QGraphicsScene
+from PySide6.QtCore import QRectF, Qt, QTimeLine, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtWidgets import QGraphicsScene
 
 from .catalog_palette import MIME_TYPE
 from .constants import (
@@ -39,16 +39,16 @@ class GraphScene(QGraphicsScene):
     """
 
     # Сигналы — базовые
-    node_moved = pyqtSignal(str, float, float)
-    node_selected = pyqtSignal(str)
-    selection_changed_ids = pyqtSignal(list)
-    node_added = pyqtSignal(dict)  # {node_id, operation_ref, position}
+    node_moved = Signal(str, float, float)
+    node_selected = Signal(str)
+    selection_changed_ids = Signal(list)
+    node_added = Signal(dict)  # {node_id, operation_ref, position}
 
     # Сигналы — интеракции (Task 8.4)
-    node_removed = pyqtSignal(str, dict)
-    node_toggled = pyqtSignal(str, bool)
-    edge_created = pyqtSignal(str, str, str, str)
-    edge_removed = pyqtSignal(str, str, str, str)
+    node_removed = Signal(str, dict)
+    node_toggled = Signal(str, bool)
+    edge_created = Signal(str, str, str, str)
+    edge_removed = Signal(str, str, str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -485,7 +485,7 @@ class GraphScene(QGraphicsScene):
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802
         """Показать контекстное меню в зависимости от элемента под курсором."""
-        from PyQt5.QtGui import QTransform
+        from PySide6.QtGui import QTransform
 
         from .context_menu import show_edge_context_menu, show_node_context_menu
 

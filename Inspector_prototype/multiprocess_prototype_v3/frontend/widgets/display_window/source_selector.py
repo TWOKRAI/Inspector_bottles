@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QComboBox
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QComboBox
 
 
 class SourceSelectorCombo(QComboBox):
@@ -18,7 +18,7 @@ class SourceSelectorCombo(QComboBox):
     """
 
     # Сигнал: новый source_ref при смене выбора
-    source_changed = pyqtSignal(str)
+    source_changed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

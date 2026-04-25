@@ -10,7 +10,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QPushButton,
     QTimer,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 
 # Debounce задержка ввода поиска (мс) -- чтобы не перерисовывать карточки на каждый символ
@@ -29,8 +29,8 @@ _SORT_OPTIONS: list[tuple[str, str, bool]] = [
 class SearchFilterBar(QWidget):
     """Панель поиска, фильтрации по категории и сортировки строк."""
 
-    filter_changed = pyqtSignal(str, str)  # (search_text, category), '' = сброс
-    sort_changed = pyqtSignal(str, bool)  # (sort_field, ascending)
+    filter_changed = Signal(str, str)  # (search_text, category), '' = сброс
+    sort_changed = Signal(str, bool)  # (sort_field, ascending)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

@@ -10,7 +10,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QScrollArea,
     QVBoxLayout,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 
 _COLS = 4  # фиксированное число колонок в сетке
@@ -26,8 +26,8 @@ _STYLE_NORMAL = ""
 class RecipesCardsView(QWidget):
     """Сетка карточек рецептов с кнопками load / save для каждого слота."""
 
-    load_requested = pyqtSignal(int)
-    save_requested = pyqtSignal(int)
+    load_requested = Signal(int)
+    save_requested = Signal(int)
 
     def __init__(
         self,

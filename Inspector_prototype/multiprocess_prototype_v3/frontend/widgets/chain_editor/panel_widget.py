@@ -14,7 +14,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 from registers.pipeline.processing_node import ProcessingNode
 from registers.processor.catalog.schemas import ProcessingOperationDef
@@ -42,7 +42,7 @@ class ChainEditorWidget(QWidget):
     """
 
     # Эмитируется после каждого изменения таблицы
-    nodes_changed = pyqtSignal()
+    nodes_changed = Signal()
 
     def __init__(
         self,

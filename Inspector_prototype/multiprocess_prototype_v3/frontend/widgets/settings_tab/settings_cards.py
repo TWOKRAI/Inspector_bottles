@@ -18,7 +18,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
-    pyqtSignal,
+    Signal,
 )
 
 from ..cards_field_factory import create_field_widget
@@ -27,7 +27,7 @@ from ..cards_field_factory import create_field_widget
 class SettingsCardsView(QWidget):
     """Карточное представление: группировка по schema_name / register_name."""
 
-    value_changed = pyqtSignal(str, object)  # (field_id, new_value)
+    value_changed = Signal(str, object)  # (field_id, new_value)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

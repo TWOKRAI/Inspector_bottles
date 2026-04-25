@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import QBrush, QPen
-from PyQt5.QtWidgets import QGraphicsEllipseItem
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QPen
+from PySide6.QtWidgets import QGraphicsEllipseItem
 
 from .constants import PORT_COLORS, PORT_HIGHLIGHT_COLOR, PORT_INCOMPATIBLE_OPACITY, PORT_RADIUS
 

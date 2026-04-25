@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     # PyQt5 импортируется только для аннотаций, чтобы не тянуть тяжёлый импорт
     # в контексте, где GUI ещё не инициализирован
-    from PyQt5.QtWidgets import QWidget
+    from PySide6.QtWidgets import QWidget
 
 from registers.display.schemas import DisplaySubscription
 from registers.display.transform import DisplayTransform

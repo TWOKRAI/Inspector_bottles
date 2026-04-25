@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
-from PyQt5.QtCore import QTimer, pyqtSignal
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import QTimer, Signal
 
 
 class RecordingIndicator(QWidget):
@@ -22,7 +22,7 @@ class RecordingIndicator(QWidget):
     """
 
     # Сигнал: (camera_id, start) — запрос переключения записи
-    record_toggled = pyqtSignal(int, bool)
+    record_toggled = Signal(int, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

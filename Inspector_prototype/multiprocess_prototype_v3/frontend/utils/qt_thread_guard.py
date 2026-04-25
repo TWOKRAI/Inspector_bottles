@@ -5,8 +5,8 @@
 
 import os
 import functools
-from PyQt5.QtCore import QThread
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QApplication
 
 _DEBUG_QT: bool = os.environ.get("INSPECTOR_DEBUG_QT", "0") == "1"
 

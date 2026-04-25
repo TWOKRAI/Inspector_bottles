@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QPointF, Qt
-from PyQt5.QtGui import QPainterPath, QPen
-from PyQt5.QtWidgets import QGraphicsPathItem
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QPainterPath, QPen
+from PySide6.QtWidgets import QGraphicsPathItem
 
 from .constants import (
     EDGE_COLOR,

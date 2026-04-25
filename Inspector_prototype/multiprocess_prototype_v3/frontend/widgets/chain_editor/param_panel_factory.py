@@ -21,7 +21,7 @@ try:
         QWidget,
     )
 except ImportError:
-    from PyQt5.QtWidgets import (  # type: ignore[no-reattr]
+    from PySide6.QtWidgets import (  # type: ignore[no-reattr]
         QCheckBox,
         QDoubleSpinBox,
         QFormLayout,

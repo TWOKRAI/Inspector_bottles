@@ -12,7 +12,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QLabel,
     QPushButton,
     QVBoxLayout,
-    pyqtSignal,
+    Signal,
 )
 from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
@@ -29,7 +29,7 @@ class SettingsProfilePanelWidget(BaseWidget[SettingsProfileModel]):
     """Панель профилей настроек: ComboBox + кнопки + таблица параметров приложения."""
 
     # Сигнал: profile_id после успешного switch
-    profile_changed = pyqtSignal(str)
+    profile_changed = Signal(str)
 
     def __init__(
         self,
