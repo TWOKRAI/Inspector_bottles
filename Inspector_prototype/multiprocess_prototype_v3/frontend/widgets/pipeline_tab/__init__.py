@@ -1,6 +1,7 @@
 # pipeline_tab — вкладка Pipeline Builder (Phase 9).
 # NodeGraphQtAdapter (Task 9.7), InspectorBaseNode + NodePreviewBridge (Task 9.8),
-# LibraryPalette + LibraryDropTarget (Task 9.9).
+# LibraryPalette + LibraryDropTarget (Task 9.9),
+# InspectorPanel + ParamsForm + ProcessIdCombo + DisplayTargetCombo (Task 9.10).
 
 from .library_palette import (
     CATEGORY_LABELS,
@@ -11,6 +12,10 @@ from .library_palette import (
     LibraryPalette,
     install_palette_drop_target,
 )
+from .display_target_combo import DisplayTargetCombo
+from .inspector_panel import InspectorPanel
+from .params_form import ParamsForm
+from .process_id_combo import ProcessIdCombo
 
 __all__ = [
     "MIME_TYPE",
@@ -20,4 +25,8 @@ __all__ = [
     "LibraryPalette",
     "LibraryDropTarget",
     "install_palette_drop_target",
+    "DisplayTargetCombo",
+    "InspectorPanel",
+    "ParamsForm",
+    "ProcessIdCombo",
 ]

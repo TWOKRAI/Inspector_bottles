@@ -222,6 +222,64 @@ class GraphEditorModel:
         new_inputs = deepcopy(target_node.inputs)
         return (old_inputs, new_inputs)
 
+    # Whitelist полей, допустимых для modify_node
+    _MODIFIABLE_FIELDS = frozenset({
+        "process_id", "worker_id", "enabled", "display_targets", "channel_prefix", "params",
+    })
+
+    def modify_node(
+        self,
+        node_id: str,
+        fields: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Изменить указанные поля ProcessingNode.
+
+        Для поля 'params' выполняет merge (current | new), для остальных — replace.
+        Возвращает (fields_before, fields_after) — только изменённые ключи.
+
+        Args:
+            node_id: Идентификатор узла.
+            fields: Словарь {имя_поля: новое_значение}.
+
+        Returns:
+            (fields_before, fields_after) — исходные и новые значения.
+
+        Raises:
+            KeyError: если node_id не найден.
+            ValueError: если поле не в whitelist допустимых полей.
+        """
+        if node_id not in self._nodes:
+            raise KeyError(f"Узел '{node_id}' не найден")
+
+        # Проверка whitelist
+        invalid = set(fields.keys()) - self._MODIFIABLE_FIELDS
+        if invalid:
+            raise ValueError(
+                f"Запрещённые поля для modify_node: {sorted(invalid)}. "
+                f"Допустимы: {sorted(self._MODIFIABLE_FIELDS)}"
+            )
+
+        node = self._nodes[node_id]
+        fields_before: dict[str, Any] = {}
+        fields_after: dict[str, Any] = {}
+
+        for key, new_value in fields.items():
+            old_value = getattr(node, key)
+
+            if key == "params":
+                # Merge: сохраняем текущие ключи, обновляем переданные
+                old_params = deepcopy(dict(old_value))
+                merged = dict(old_value) | dict(new_value)
+                setattr(node, key, merged)
+                fields_before[key] = old_params
+                fields_after[key] = deepcopy(merged)
+            else:
+                fields_before[key] = deepcopy(old_value)
+                setattr(node, key, new_value)
+                fields_after[key] = deepcopy(new_value)
+
+        return (fields_before, fields_after)
+
     def move_node(
         self,
         node_id: str,

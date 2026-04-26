@@ -273,9 +273,20 @@ Inspector_bottles прошёл Phase 0–8. На сегодня:
 **Reuse:** `params_schema` из `ProcessingOperationDef` (есть с Phase 5a). `DisplayWindowManager._windows` как источник списка дисплеев. **Не использовать встроенный NodeGraphQt PropertiesBinWidget** — у нас сложнее логика и риск Issue #491.
 
 **Acceptance:**
-- [ ] int/float/bool/choice виджеты генерируются автоматически.
-- [ ] Изменение → mutates `ProcessingNode.params` через ActionBus → reactive update topology.
-- [ ] Multi-select displays корректно сериализуется в `display_targets`.
+- [x] int/float/bool/choice виджеты генерируются автоматически.
+- [x] Изменение → mutates `ProcessingNode.params` через ActionBus → reactive update topology.
+- [x] Multi-select displays корректно сериализуется в `display_targets`.
+
+**Реализация (Task 9.10):**
+- Новый `ActionType.GRAPH_NODE_MODIFY` + `ActionBuilder.graph_node_modify()` с patch-форматом `{node_id, fields_before, fields_after, nodes_before/after}`.
+- `GraphEditorModel.modify_node(node_id, fields)` — whitelist полей, merge для `params`, replace для остальных.
+- `GraphActionHandler` расширен: apply/revert для GRAPH_NODE_MODIFY пишет `nodes_after/nodes_before` в register через `rm.set_field_value`.
+- `ParamsForm` — авто-генерация виджетов из Pydantic-модели: int→QSpinBox, float→QDoubleSpinBox, bool→QCheckBox, Literal→QComboBox, List[int] len=3→3 QSpinBox.
+- `ProcessIdCombo` — комбобокс с sentinel «+ Новый процесс...» + QInputDialog.
+- `DisplayTargetCombo` — QToolButton с popup QMenu + чекбоксы + sentinel «+ Новый дисплей...».
+- `InspectorPanel` — composition из 3 секций, подписка на ActionBus change_callback для undo/redo refresh.
+- Тесты: 31 кейс в `test_phase9_inspector_panel.py` — все зелёные.
+- `validate.py` зелёный, существующие Phase 9 тесты не сломаны.
 
 ---
 

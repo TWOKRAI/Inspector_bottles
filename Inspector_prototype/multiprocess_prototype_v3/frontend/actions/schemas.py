@@ -57,6 +57,7 @@ class ActionType(str, Enum):
     GRAPH_NODE_ADD = "graph_node_add"
     GRAPH_NODE_REMOVE = "graph_node_remove"
     GRAPH_NODE_MOVE = "graph_node_move"
+    GRAPH_NODE_MODIFY = "graph_node_modify"
 
 
 class Action(SchemaBase):

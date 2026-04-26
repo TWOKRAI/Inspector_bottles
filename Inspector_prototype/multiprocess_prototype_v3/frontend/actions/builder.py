@@ -589,6 +589,54 @@ class ActionBuilder:
         )
 
     @staticmethod
+    def graph_node_modify(
+        *,
+        region_id: str,
+        node_id: str,
+        fields_before: dict[str, Any],
+        fields_after: dict[str, Any],
+        nodes_before: Any,
+        nodes_after: Any,
+    ) -> "Action":
+        """
+        Создать Action для изменения полей ProcessingNode в графе.
+
+        Единый action для любых изменений полей (process_id, display_targets,
+        params, enabled, worker_id, channel_prefix), кроме position/inputs/outputs
+        (для них уже есть отдельные actions).
+
+        Args:
+            region_id: Идентификатор региона (register_name).
+            node_id: Идентификатор изменяемого узла.
+            fields_before: Словарь изменённых полей до модификации.
+            fields_after: Словарь изменённых полей после модификации.
+            nodes_before: Снимок всех узлов до изменения (для undo через register).
+            nodes_after: Снимок всех узлов после изменения (для redo через register).
+        """
+        changed_keys = sorted(fields_after.keys())
+        desc = f"node[{node_id[:8]}] изменён: {changed_keys}"
+        return Action(
+            action_type=ActionType.GRAPH_NODE_MODIFY,
+            register_name=region_id,
+            field_name="nodes",
+            forward_patch={
+                "node_id": node_id,
+                "fields_before": fields_before,
+                "fields_after": fields_after,
+                "nodes_after": nodes_after,
+            },
+            backward_patch={
+                "node_id": node_id,
+                "fields_before": fields_after,
+                "fields_after": fields_before,
+                "nodes_before": nodes_before,
+            },
+            coalesce_key=f"graph_modify:{region_id}:{node_id}:{','.join(changed_keys)}",
+            undoable=True,
+            description=desc,
+        )
+
+    @staticmethod
     def layout_change(
         preset_name: str,
         subscriptions_before: Any,

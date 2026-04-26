@@ -60,5 +60,6 @@ def create_default_action_bus(rm) -> ActionBus:
     bus.register_handler(ActionType.GRAPH_NODE_ADD, graph_handler)
     bus.register_handler(ActionType.GRAPH_NODE_REMOVE, graph_handler)
     bus.register_handler(ActionType.GRAPH_NODE_MOVE, graph_handler)
+    bus.register_handler(ActionType.GRAPH_NODE_MODIFY, graph_handler)
 
     return bus

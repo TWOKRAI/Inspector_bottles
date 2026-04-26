@@ -1,15 +1,16 @@
 """
 GraphActionHandler — обработчик GRAPH_* действий графового редактора.
 
-Поддерживает пять типов:
-  - GRAPH_CONNECT    — добавление связи между узлами
-  - GRAPH_DISCONNECT — удаление связи между узлами
-  - GRAPH_NODE_ADD   — добавление узла в граф
-  - GRAPH_NODE_REMOVE — удаление узла из графа
-  - GRAPH_NODE_MOVE  — перемещение узла (позиция)
+Поддерживает шесть типов:
+  - GRAPH_CONNECT      — добавление связи между узлами
+  - GRAPH_DISCONNECT   — удаление связи между узлами
+  - GRAPH_NODE_ADD     — добавление узла в граф
+  - GRAPH_NODE_REMOVE  — удаление узла из графа
+  - GRAPH_NODE_MOVE    — перемещение узла (позиция)
+  - GRAPH_NODE_MODIFY  — изменение полей узла (process_id, params, display_targets и т.д.)
 
 Паттерн аналогичен ChainActionHandler:
-  - apply/revert для CONNECT, DISCONNECT, NODE_ADD, NODE_REMOVE:
+  - apply/revert для CONNECT, DISCONNECT, NODE_ADD, NODE_REMOVE, NODE_MODIFY:
     записывают nodes_after/nodes_before через rm.set_field_value
   - apply/revert для GRAPH_NODE_MOVE: только логируют координаты;
     позиция ноды обновляется через модель, presenter обновит UI.
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class GraphActionHandler:
-    """Обработчик GRAPH_* действий: connect, disconnect, node_add, node_remove, node_move."""
+    """Обработчик GRAPH_* действий: connect, disconnect, node_add, node_remove, node_move, node_modify."""
 
     def apply(self, action: Action, rm: IRegistersManagerGui) -> None:
         """Применить действие: записать forward_patch в регистр.
@@ -49,7 +50,7 @@ class GraphActionHandler:
             )
             return
 
-        # GRAPH_CONNECT / GRAPH_DISCONNECT / GRAPH_NODE_ADD / GRAPH_NODE_REMOVE
+        # GRAPH_CONNECT / GRAPH_DISCONNECT / GRAPH_NODE_ADD / GRAPH_NODE_REMOVE / GRAPH_NODE_MODIFY
         nodes_after = fp.get("nodes_after")
         if nodes_after is not None and action.register_name:
             rm.set_field_value(action.register_name, "vision_pipeline", nodes_after)
@@ -78,7 +79,7 @@ class GraphActionHandler:
             )
             return
 
-        # GRAPH_CONNECT / GRAPH_DISCONNECT / GRAPH_NODE_ADD / GRAPH_NODE_REMOVE
+        # GRAPH_CONNECT / GRAPH_DISCONNECT / GRAPH_NODE_ADD / GRAPH_NODE_REMOVE / GRAPH_NODE_MODIFY
         nodes_before = bp.get("nodes_before")
         if nodes_before is not None and action.register_name:
             rm.set_field_value(action.register_name, "vision_pipeline", nodes_before)
