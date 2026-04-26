@@ -392,10 +392,17 @@ Inspector_bottles прошёл Phase 0–8. На сегодня:
 **Reuse:** `tests/frontend/test_graph_actions.py` (645 LOC) — пересмотреть, обновить импорты под новые пути, ожидать что **большая часть тестов работает без изменений** (мы сохранили GraphEditorModel и ActionBus).
 
 **Acceptance:**
-- [ ] E2E тест зелёный.
-- [ ] Все unit-тесты Phase 9 зелёные.
-- [ ] `python Inspector_prototype/scripts/validate.py` без warning'ов.
-- [ ] `python Inspector_prototype/scripts/run_framework_tests.py` зелёный.
+- [x] E2E тест зелёный.
+- [x] Все unit-тесты Phase 9 зелёные.
+- [x] `python Inspector_prototype/scripts/validate.py` без warning'ов.
+- [ ] `python Inspector_prototype/scripts/run_framework_tests.py` зелёный (отдельная сессия — не входит в smoke headless).
+
+**Реализация:**
+- `tests/integration/test_pipeline_e2e.py` (commit `453a379`) — 6 e2e-кейсов: SimulatorInput→Resize 20 кадров; chain_with_display_callback; ResizeParams ValidationError на width=0/height=0; SimulatorInput→ColorConvert(BGR→GRAY)→Resize (grayscale shape); Pipeline-pydantic.validate_graph для DAG с simulator_input→resize. Без QApplication/NodeGraphQt — runtime-уровень.
+- `pipeline_tab/README.md` (commit `b8eec65`, 230 строк) — архитектура (ASCII-диаграмма composition), таблица 13 компонентов с файлами/ответственностью, where-is-state, HOWTO «добавить операцию» (4 шага), кастомизация ноды (Issue #491 caveat), индекс тестов, известные ограничения, ссылки.
+- `tests/frontend/test_node_graphqt_adapter.py` из плана **уже покрыт** существующим `tests/unit/test_phase9_node_graphqt_adapter.py` (24 кейса, Task 9.7) — дублирование избыточно.
+- Phase 9 регрессия: **275 unit/integration тестов pass** (на коммитах `c875d67` + `b8eec65` + `453a379`).
+- 30-минутный smoke с реальной Hikvision-камерой — отложен (требует железо), отдельная сессия.
 
 ---
 
