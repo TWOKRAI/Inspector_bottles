@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Annotated, ClassVar, Dict, Literal, Optional, Union
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -36,27 +35,75 @@ CAMERAS_FIELD_ROUTING = FieldRouting(
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class GraphValidationError:
+@register_schema("GraphValidationErrorV3")
+class GraphValidationError(SchemaBase):
     """Структурированное описание ошибки валидации графа.
 
-    frozen=True — можно класть в set для дедупликации.
+    Доменный value object: видим в UI (Inspector panel — Task 9.7),
+    сериализуется при логировании в JSON, унифицирован с остальной схемой
+    проекта через data_schema_module.
+
+    frozen=True (через model_config) — экземпляры неизменяемы и хешируемы;
+    можно класть в set для дедупликации.
     """
 
-    kind: Literal[
-        "cycle",
-        "type_mismatch",
-        "unknown_source",
-        "unknown_port",
-        "unreachable",
-        "unknown_operation",
+    model_config = ConfigDict(
+        frozen=True,
+        validate_assignment=True,
+        populate_by_name=True,
+    )
+
+    kind: Annotated[
+        Literal[
+            "cycle",
+            "type_mismatch",
+            "unknown_source",
+            "unknown_port",
+            "unreachable",
+            "unknown_operation",
+        ],
+        FieldMeta(
+            "Вид ошибки",
+            info="Классификация: cycle, type_mismatch, unknown_source, "
+            "unknown_port, unreachable, unknown_operation.",
+        ),
     ]
-    message: str
-    camera_id: Optional[str] = None
-    region_id: Optional[str] = None
-    node_id: Optional[str] = None
-    source_id: Optional[str] = None  # для type_mismatch / unknown_source
-    port_name: Optional[str] = None  # для unknown_port / type_mismatch
+
+    message: Annotated[
+        str,
+        FieldMeta("Сообщение", info="Человекочитаемое описание для UI."),
+    ]
+
+    camera_id: Annotated[
+        Optional[str],
+        FieldMeta("Камера", info="ID камеры, в графе которой обнаружена ошибка."),
+    ] = None
+
+    region_id: Annotated[
+        Optional[str],
+        FieldMeta("Регион", info="ID региона."),
+    ] = None
+
+    node_id: Annotated[
+        Optional[str],
+        FieldMeta("Узел", info="ID узла-получателя."),
+    ] = None
+
+    source_id: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Источник",
+            info="ID источника (для type_mismatch / unknown_source).",
+        ),
+    ] = None
+
+    port_name: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Порт",
+            info="Имя порта (для unknown_port / type_mismatch).",
+        ),
+    ] = None
 
 
 # ---------------------------------------------------------------------------
