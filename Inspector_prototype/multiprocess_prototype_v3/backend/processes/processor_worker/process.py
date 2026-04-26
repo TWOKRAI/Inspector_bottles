@@ -34,6 +34,12 @@ class ProcessorWorkerProcess(ProcessModule):
         self._log_info("ProcessorWorkerProcess initializing...")
         app_cfg = self.get_config("config") or {}
 
+        # Идентификатор процесса из topology (Task 9.6).
+        # Используется для определения «сферы ответственности» воркера.
+        # TODO: фильтрация задач по process_id когда topology поддержит
+        #       прямую маршрутизацию задач к воркерам (Task 9.7+).
+        self._owner_process_id: str = app_cfg.get("process_id", "")
+
         # Индекс воркера — определяет имя SHM-слота результата
         self._worker_index: int = app_cfg.get("worker_index", 0)
         self._result_shm_slot = f"worker_{self._worker_index}_result"
@@ -62,8 +68,9 @@ class ProcessorWorkerProcess(ProcessModule):
         self.worker_manager.create_worker(
             "task_worker", self._task_worker, cfg, auto_start=True
         )
+        pid_info = f", process_id='{self._owner_process_id}'" if self._owner_process_id else ""
         self._log_info(
-            f"ProcessorWorkerProcess ready (worker_index={self._worker_index})"
+            f"ProcessorWorkerProcess ready (worker_index={self._worker_index}{pid_info})"
         )
 
     # --- Получение/создание операции из кэша ---

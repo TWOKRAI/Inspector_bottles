@@ -5,11 +5,15 @@ Phase 3: поддержка гетерогенного списка камер (
 
 Phase 4 (Task 2.4): N процессоров (по одному на камеру). Каждый Processor привязан
 к своей камере через camera_id, все шлют detection_result в общий Renderer.
+
+Phase 9 (Task 9.6): from_topology() — построение AppConfig из RouterTopology.
 """
 
 from __future__ import annotations
 
+import logging
 import warnings
+from typing import TYPE_CHECKING, Optional
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase
 from multiprocess_framework.modules.process_module import ProcessLaunchConfig
@@ -26,6 +30,11 @@ from multiprocess_prototype_v3.backend.processes.robot.config import RobotConfig
 
 from .logging import LoggingConfig
 from .shm_region import ShmRegionSpec
+
+if TYPE_CHECKING:
+    from multiprocess_prototype_v3.services.processor.topology.builder import RouterTopology
+
+logger = logging.getLogger(__name__)
 
 
 class AppConfig(SchemaBase):
@@ -49,6 +58,9 @@ class AppConfig(SchemaBase):
     gui: GuiConfig = GuiConfig()
     stop_timeout: float = 5.0
     worker_pool_size: int = 0
+    # Topology-driven воркеры (Task 9.6): process_id из RouterTopology.
+    # Хранятся отдельно от processors (ProcessorConfig привязан к camera_id).
+    topology_workers: list[ProcessorWorkerConfig] = []
     # Headless-режим: False — renderer не запускается, display SHM не аллоцируется
     display_enabled: bool = True
 
@@ -124,10 +136,11 @@ class AppConfig(SchemaBase):
         return names
 
     def all_process_configs(self) -> list[ProcessLaunchConfig]:
-        """Все конфиги процессов: N камер + N процессоров + [renderer] + robot + database + gui + K воркеров.
+        """Все конфиги процессов: N камер + N процессоров + [renderer] + robot + database + gui + K воркеров + topology_workers.
 
         Renderer исключается если display_enabled=False (headless-режим).
         GUI процесс остаётся в любом режиме — он управляет pipeline-логикой.
+        topology_workers добавляются после статических воркеров (Task 9.6).
         """
         configs = [
             *self.cameras,
@@ -141,9 +154,63 @@ class AppConfig(SchemaBase):
                 self.database,
                 self.gui,
                 *self.worker_configs,
+                *self.topology_workers,
             ]
         )
         return configs
+
+    @classmethod
+    def from_topology(
+        cls,
+        topology: "RouterTopology",
+        *,
+        base: Optional["AppConfig"] = None,
+    ) -> "AppConfig":
+        """Построить AppConfig из RouterTopology.
+
+        Уникальные topology.process_ids -> новые ProcessorWorkerConfig в topology_workers[].
+        base — опциональная статическая часть (cameras, gui, renderer, ...).
+
+        Topology-driven воркеры хранятся в topology_workers[] (не в processors[]),
+        потому что ProcessorConfig привязан к camera_id, а topology-воркеры —
+        универсальные operation runner'ы.
+
+        НЕ удаляет существующие конфиги — это ответственность caller'а.
+        Это снимает риск случайно удалить statically-configured процессы.
+        """
+        if base is not None:
+            config = base.model_copy(deep=True)
+        else:
+            config = cls()
+
+        # Имена уже существующих процессов — processors + topology_workers + pool workers
+        existing_names: set[str] = set()
+        existing_names.update(p.process_name for p in config.processors)
+        existing_names.update(w.process_name for w in config.topology_workers)
+        existing_names.update(w.process_name for w in config.worker_configs)
+
+        new_workers = list(config.topology_workers)
+
+        for pid in topology.process_ids:
+            if pid in existing_names:
+                logger.debug(
+                    "from_topology: процесс '%s' уже существует — пропуск", pid,
+                )
+                continue
+
+            worker_cfg = ProcessorWorkerConfig(
+                process_name=pid,
+                worker_index=0,  # Не используется для topology-driven процессов
+            )
+            # model_post_init переопределяет process_name на основе worker_index,
+            # но нам нужен именно pid. Перезаписываем.
+            object.__setattr__(worker_cfg, "process_name", pid)
+
+            new_workers.append(worker_cfg)
+            logger.debug("from_topology: добавлен ProcessorWorkerConfig '%s'", pid)
+
+        object.__setattr__(config, "topology_workers", new_workers)
+        return config
 
 
 def build_cameras_from_profile(

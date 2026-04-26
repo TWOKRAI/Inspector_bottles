@@ -149,6 +149,23 @@ class RouterTopology(SchemaBase):
         ),
     ] = []
 
+    process_groups: Annotated[
+        dict[str, list[str]],
+        FieldMeta(
+            "Группы процессов",
+            info="process_id → list[node_id]. Какие ноды выполняются в каком процессе.",
+        ),
+    ] = {}
+
+    process_channels: Annotated[
+        dict[str, list[str]],
+        FieldMeta(
+            "Каналы процессов",
+            info="process_id → list[channel_name]. Какие каналы принадлежат какому процессу. "
+            "Используется при настройке SHM middleware для cross-process рёбер.",
+        ),
+    ] = {}
+
 
 # ---------------------------------------------------------------------------
 # Часть B: чистая функция to_router_topology()
@@ -183,6 +200,11 @@ def to_router_topology(
     # node_id → ProcessingNode (для поиска process_id по source)
     all_nodes: dict[str, object] = {}
 
+    # process_id → list[node_id] — группировка нод по процессам
+    groups: dict[str, list[str]] = defaultdict(list)
+    # process_id → list[channel_name] — каналы каждого процесса
+    proc_channels: dict[str, list[str]] = defaultdict(list)
+
     for _cam_id, cam in pipeline.cameras.items():
         for _reg_id, reg in cam.regions.items():
             for node_id, node in reg.nodes.items():
@@ -192,6 +214,7 @@ def to_router_topology(
 
                 all_nodes[node_id] = node
                 process_ids_set.add(node.process_id)
+                groups[node.process_id].append(node_id)
 
                 # --- Каналы для output-портов ---
                 op_def = catalog.get(node.operation_ref)
@@ -207,6 +230,7 @@ def to_router_topology(
                             process_id=node.process_id,
                             payload_kind=port.data_type,
                         ))
+                        proc_channels[node.process_id].append(ch_name)
                 elif node.outputs:
                     # Динамический путь (multiplicity=dynamic, e.g. region_splitter):
                     # output_ports из каталога пустые, используем node.outputs
@@ -220,6 +244,7 @@ def to_router_topology(
                             process_id=node.process_id,
                             payload_kind="any",
                         ))
+                        proc_channels[node.process_id].append(ch_name)
 
                 # --- Рёбра для inputs ---
                 for inp in node.inputs:
@@ -289,6 +314,8 @@ def to_router_topology(
         edges=edges,
         broadcast_routes=broadcast_routes,
         process_ids=sorted(process_ids_set),
+        process_groups=dict(groups),
+        process_channels=dict(proc_channels),
     )
 
 
