@@ -90,6 +90,34 @@ class ProcessingOperationDef(SchemaBase):
         default_factory=lambda: [Port(name="out", data_type=PORT_TYPE_IMAGE)]
     )
 
+    # -----------------------------------------------------------------------
+    # Phase 9 / Task 9.2 — поля для Pipeline-tab
+    # -----------------------------------------------------------------------
+
+    category: Annotated[
+        Literal["Input", "ROI", "Preprocess", "Detect", "Measure", "Logic", "Output"] | None,
+        FieldMeta(
+            "Категория",
+            info="Группа в палитре операций: Input/ROI/Preprocess/Detect/Measure/Logic/Output. None — без категории.",
+        ),
+    ] = None
+
+    multiplicity: Annotated[
+        Literal["fixed", "dynamic"],
+        FieldMeta(
+            "Множественность портов",
+            info="fixed — фиксированное число портов; dynamic — переменное (e.g. 1→N region splitter).",
+        ),
+    ] = "fixed"
+
+    display_capable: Annotated[
+        bool,
+        FieldMeta(
+            "Поддерживает превью",
+            info="True — операция умеет публиковать кадр для thumbnail/DisplayWindow.",
+        ),
+    ] = False
+
     @model_validator(mode="after")
     def _validate_unique_port_names(self) -> ProcessingOperationDef:
         """Проверяет, что имена портов уникальны внутри input_ports и output_ports."""
@@ -106,4 +134,8 @@ class ProcessingOperationDef(SchemaBase):
         return self
 
 
-__all__ = ["Port", "ProcessingOperationDef"]
+# Публичный алиас для Phase 9 — импортировать как PortDef (используется в Task 9.7)
+PortDef = Port  # noqa: E305
+
+
+__all__ = ["Port", "PortDef", "ProcessingOperationDef"]

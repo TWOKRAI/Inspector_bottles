@@ -113,3 +113,21 @@ def test_load_catalog_preserves_type_key_as_dict_key(tmp_path: Path):
     loaded = load_catalog(path)
     assert "my_unique_key" in loaded
     assert loaded["my_unique_key"].type_key == "my_unique_key"
+
+
+# ===========================================================================
+# Phase 9 / Task 9.2 — проверка новых полей в seed-каталоге
+# ===========================================================================
+
+
+def test_seed_catalog_new_fields_loaded_correctly():
+    """Загрузка обновлённого processing_catalog.yaml: category и display_capable корректны."""
+    catalog = load_catalog(_SEED_CATALOG)
+
+    # color_detection — категория Detect, поддерживает превью
+    assert catalog["color_detection"].category == "Detect"
+    assert catalog["color_detection"].display_capable is True
+
+    # blob_detection — категория Detect, без превью
+    assert catalog["blob_detection"].category == "Detect"
+    assert catalog["blob_detection"].display_capable is False
