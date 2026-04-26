@@ -6,6 +6,7 @@ FrontendLauncher — конструктор frontend.
 GuiProcess делегирует run() в launcher.
 """
 
+from pathlib import Path
 from typing import Any
 
 from multiprocess_framework.modules.frontend_module import FrontendLaunchHooks, run_process_attached_frontend
@@ -32,6 +33,9 @@ from multiprocess_prototype_v3.frontend.windows.main_window import (
     create_tab_widget_factory,
 )
 from multiprocess_prototype_v3.registers import create_registers
+
+
+_THEME_PATH = Path(__file__).resolve().parent / "styles" / "innotech_theme.qss"
 
 
 class FrontendLauncher:
@@ -68,6 +72,7 @@ class FrontendLauncher:
         process_ref: Any,
     ) -> None:
         """Регистрация фабрик окон в WindowManager."""
+        self._apply_theme(app)
         wm = window_manager
         fm = frontend_manager
         process = process_ref
@@ -293,6 +298,15 @@ class FrontendLauncher:
                 mapping[(reg_name, field)] = f"{prefix}.{field}"
 
         return mapping
+
+    def _apply_theme(self, app: Any) -> None:
+        """Загрузить QSS-тему Silver Industrial и применить ко всему приложению."""
+        try:
+            qss = _THEME_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"[FrontendLauncher] theme load failed: {exc}")
+            return
+        app.setStyleSheet(qss)
 
     def _on_registers_boot(self, rm: Any, config: dict[str, Any]) -> None:
         if rm and hasattr(rm, "set_field_value"):

@@ -39,8 +39,9 @@ from ..settings_recipe_widget.schemas import RecipesTabConfig
 from ..tabs_setting.recipes_settings_tab.schemas import SettingsTabConfig
 from ..view_mode_toggle import ViewModeToggle
 from .admin_section import AdminSectionWidget
+from .history_section import HistorySectionWidget
 from .prefs_store import KEY_SETTINGS_MODE, get_view_mode, set_view_mode
-from .system_section import SystemSectionWidget
+from .system_section import SystemSettingsSectionWidget
 from .ui_section import UiSettingsSectionWidget
 
 
@@ -111,9 +112,13 @@ class SettingsContainerWidget(BaseTab):
 
         # --- Секции ---
         admin = AdminSectionWidget()
-        system = SystemSectionWidget()
+        system = SystemSettingsSectionWidget()
+        system.set_mode(initial_mode)
         ui_section = UiSettingsSectionWidget(app_panel, initial_mode=initial_mode)
+        history = HistorySectionWidget(action_bus=self._action_bus)
         self._ui_section = ui_section
+        self._system_section = system
+        self._history_section = history
 
         # --- Layout: слева список, справа содержимое ---
         h_layout = QHBoxLayout()
@@ -125,6 +130,7 @@ class SettingsContainerWidget(BaseTab):
         self._list.addItem("Администрация")
         self._list.addItem("Настройки системы")
         self._list.addItem("Настройка интерфейса")
+        self._list.addItem("История")
         h_layout.addWidget(self._list)
 
         # Правая часть: toolbar + stack
@@ -146,6 +152,7 @@ class SettingsContainerWidget(BaseTab):
         self._content_stack.addWidget(admin)      # 0
         self._content_stack.addWidget(system)      # 1
         self._content_stack.addWidget(ui_section)  # 2
+        self._content_stack.addWidget(history)     # 3
         right_layout.addWidget(self._content_stack, 1)
         h_layout.addWidget(right, 1)
 
@@ -155,7 +162,9 @@ class SettingsContainerWidget(BaseTab):
         self._list.setCurrentRow(2)
 
     def _on_mode_changed(self, mode: int) -> None:
-        """Переключить режим + persistence (QSettings)."""
+        """Переключить режим + persistence (QSettings) для всех секций со set_mode."""
         set_view_mode(KEY_SETTINGS_MODE, mode)
         if hasattr(self, "_ui_section"):
             self._ui_section.set_mode(mode)
+        if hasattr(self, "_system_section"):
+            self._system_section.set_mode(mode)

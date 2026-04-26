@@ -15,6 +15,7 @@ _APP = "ui_preferences"
 
 KEY_SETTINGS_MODE = "settings/view_mode"
 KEY_RECIPES_MODE = "recipes/view_mode"
+KEY_HEADER_MODE = "header/mode"
 
 
 def _settings() -> QSettings:

@@ -85,20 +85,26 @@ class ImagePanelConfig(SchemaBase):
 
 @register_schema("AppHeaderConfig")
 class AppHeaderConfig(HeaderConfig):
-    """Шапка прототипа: дефолты лого, кнопок и action_id для admin."""
+    """Шапка прототипа.
 
+    `brand_text` — надпись справа от кнопки-переключателя в AppHeaderWidget.
+    Поля `logo`/`admin_button` унаследованы от framework HeaderConfig для
+    обратной совместимости валидации, но AppHeaderWidget их не использует.
+    """
+
+    brand_text: str = "INNOTECH"
     logo: LogoConfig = Field(
         default_factory=lambda: LogoConfig(
             path="resources/logo.png",
             max_width=200,
             max_height=80,
-            visible=True,
+            visible=False,
         )
     )
     admin_button: AdminButtonConfig = Field(
         default_factory=lambda: AdminButtonConfig(
             label="Админ панель",
-            visible=True,
+            visible=False,
             action_id="admin",
         )
     )

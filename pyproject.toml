@@ -14,6 +14,9 @@ dependencies = [
     # GUI (Phase 2 завершена: миграция PyQt5 → PySide6)
     "pyside6>=6.8,<6.11",
     "QDarkStyle>=3.2",
+    # Node graph editor (Phase 9) — fork от C3RV1 для PySide6, гибридный режим
+    "NodeGraphQt",
+    "Qt.py>=1.4",  # транзитивная зависимость NodeGraphQt
     # Vision / image
     "opencv-python>=4.13,<5",
     "Pillow>=12.0",
@@ -34,6 +37,7 @@ dependencies = [
     "pygame>=2.6",
     # Async testing — было в стейл inner pyproject
     "pytest-asyncio>=0.24",
+    "setuptools>=82.0.1",
 ]
 
 [dependency-groups]
@@ -52,6 +56,11 @@ dev = [
 #     "ultralytics>=8.3",
 #     "onnxruntime>=1.20",
 # ]
+
+[tool.uv.sources]
+# NodeGraphQt-PySide6 — fork от C3RV1, не публикуется на PyPI.
+# Sha-pin для воспроизводимости (последний коммит на master 2023-01-08).
+NodeGraphQt = { git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git", rev = "7fa60017" }
 
 [tool.pytest.ini_options]
 testpaths = [

@@ -152,6 +152,59 @@ def build_recipe_rows(rm: Any, access_ctx: Optional[AccessContext] = None) -> Li
     return rows
 
 
+def build_recipe_rows_from_snapshot(
+    rm: Any,
+    snapshot: dict,
+    access_ctx: Optional[AccessContext] = None,
+) -> List[dict]:
+    """
+    Собрать строки таблицы из snapshot YAML.
+
+    Структура snapshot: {register_name: {field_name: value, ...}, ...}.
+    Метаданные (field_meta, info, editable, hidden) берутся из rm — схемы регистров
+    не зависят от конкретного слота. Значения — из snapshot.
+
+    Если в snapshot нет регистра/поля — пропускаем (таблица отображает только
+    то что есть в slot-снапшоте).
+    """
+    ctx = access_ctx or AccessContext()
+    rows: List[dict] = []
+    for register_name, fields in snapshot.items():
+        if not isinstance(fields, dict):
+            continue
+        reg = rm.get_register(register_name) if rm is not None else None
+        for field_name, value in fields.items():
+            # Hidden filter (если есть meta)
+            if reg is not None and hasattr(reg, "get_field_meta"):
+                fm = reg.get_field_meta(field_name)
+                if fm is not None and fm.hidden and not ctx.show_hidden:
+                    continue
+            elif rm is not None:
+                meta_h = rm.get_field_metadata(register_name, field_name)
+                if meta_h.get("hidden") and not ctx.show_hidden:
+                    continue
+            meta = rm.get_field_metadata(register_name, field_name) if rm is not None else {}
+            desc = ""
+            if meta:
+                desc = str(meta.get("description") or meta.get("info") or "")
+            field_id = f"{register_name}.{field_name}"
+            editable = _scalar_for_editing(value) and _register_field_editable(
+                rm, reg, register_name, field_name, ctx
+            )
+            rows.append(
+                {
+                    "field_id": field_id,
+                    "param": field_id,
+                    "value": value,
+                    "info": desc,
+                    "register_name": register_name,
+                    "field_name": field_name,
+                    "_value_editable": editable,
+                }
+            )
+    return rows
+
+
 def group_rows_by_register(rows: List[dict]) -> List[Tuple[str, List[dict]]]:
     """
     Сгруппировать строки рецепта по register_name для StructuredTwoLevelTreeWidget.

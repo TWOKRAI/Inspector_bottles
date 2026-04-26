@@ -89,3 +89,25 @@ class RegisterRecipePanelWidget(RecipePanelBase[RegisterRecipeModel]):
     def refresh_from_registers(self) -> None:
         """Обновить таблицу после внешней правки регистров."""
         self._presenter.refresh_from_registers()
+
+    def enter_preview(self, slot_id: int) -> bool:
+        """Показать в таблице snapshot слота из YAML (без записи в rm)."""
+        return self._presenter.enter_preview(slot_id)
+
+    def exit_preview(self) -> None:
+        """Выйти из preview — таблица снова показывает регистры."""
+        self._presenter.exit_preview()
+
+    def is_preview_mode(self) -> bool:
+        return self._presenter.is_preview_mode()
+
+    def preview_slot_id(self) -> int | None:
+        return self._presenter.preview_slot_id()
+
+    def apply_preview_to_registers(self) -> bool:
+        """Записать preview-snapshot в registers."""
+        return self._presenter.apply_preview_to_registers()
+
+    def save_preview_to_yaml(self) -> bool:
+        """Сохранить preview-snapshot в YAML через recipe_manager."""
+        return self._presenter.save_preview_to_yaml()

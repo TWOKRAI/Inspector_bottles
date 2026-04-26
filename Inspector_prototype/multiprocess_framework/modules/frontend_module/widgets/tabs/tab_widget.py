@@ -69,9 +69,10 @@ class TabWidget(QWidget):
         )
         self._toggle_btn.clicked.connect(self._toggle_tabs)
         corner = QWidget()
-        corner_layout = QHBoxLayout(corner)
-        corner_layout.setContentsMargins(0, 0, 0, 0)
-        corner_layout.addWidget(self._toggle_btn)
+        self._corner_layout = QHBoxLayout(corner)
+        self._corner_layout.setContentsMargins(0, 0, 0, 0)
+        self._corner_layout.setSpacing(2)
+        self._corner_layout.addWidget(self._toggle_btn)
         self._tab_widget.setCornerWidget(corner, Qt.Corner.TopRightCorner)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -145,3 +146,12 @@ class TabWidget(QWidget):
     @property
     def tab_widget(self) -> QTabWidget:
         return self._tab_widget
+
+    def add_corner_action(self, widget: QWidget) -> None:
+        """Добавить виджет в corner-полосу слева от кнопки скрыть/показать."""
+        # toggle всегда последний — вставляем перед ним
+        toggle_idx = self._corner_layout.indexOf(self._toggle_btn)
+        if toggle_idx < 0:
+            self._corner_layout.addWidget(widget)
+        else:
+            self._corner_layout.insertWidget(toggle_idx, widget)

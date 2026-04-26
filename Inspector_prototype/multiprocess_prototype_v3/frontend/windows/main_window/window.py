@@ -12,10 +12,13 @@ from typing import Any
 
 from multiprocess_framework.modules.frontend_module.core.action_binding import connect_action_handlers
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
-from multiprocess_framework.modules.frontend_module.widgets import HeaderWidget, TabWidget
+from multiprocess_framework.modules.frontend_module.widgets import TabWidget
 from multiprocess_framework.modules.frontend_module.widgets.header import HeaderConfig
 from multiprocess_framework.modules.frontend_module.widgets.header.button_style import create_header_button
 from multiprocess_framework.modules.frontend_module.widgets.image_panel import ImagePanelWidget
+
+from multiprocess_prototype_v3.frontend.widgets.app_header import AppHeaderWidget
+from multiprocess_prototype_v3.frontend.widgets.side_panels import CollapsibleSidePanel
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QLabel, QMessageBox
 
@@ -66,10 +69,9 @@ class MainWindow(QMainWindow):
         self._header_on_unmatched = header_on_unmatched or show_window_callback
         self._app_ctx = app_ctx
         self._on_restart_requested = on_restart_requested
-        # Кнопки undo/redo/history — заполняются в _setup_undo_redo_ui
+        # Кнопки undo/redo — заполняются в _setup_undo_redo_ui
         self._btn_undo: QPushButton | None = None
         self._btn_redo: QPushButton | None = None
-        self._btn_history: QPushButton | None = None
         self._latency_label: QLabel | None = None
         self._init_ui()
         self._setup_undo_redo_ui()
@@ -120,7 +122,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         header_dict = self._build_header_config(header_cfg)
-        self._header = HeaderWidget(config=header_dict)
+        self._header = AppHeaderWidget(config=header_dict)
         if self._header_action_handlers or self._header_on_unmatched is not None:
             connect_action_handlers(
                 self._header.action_triggered,
@@ -133,7 +135,20 @@ class MainWindow(QMainWindow):
         if not slots:
             slots = ImagePanelConfig().model_dump()["slots"]
         self._image_panel = ImagePanelWidget(image_slots=slots)
-        layout.addWidget(self._image_panel, 1)
+
+        # Боковые сворачиваемые панели вокруг ImagePanel (каркас, логика — позже)
+        self._left_side_panel = CollapsibleSidePanel(side="left", title="Дисплеи")
+        self._right_side_panel = CollapsibleSidePanel(side="right", title="Статусы")
+        self._left_side_panel.set_content(QLabel("TODO: переключение дисплеев"))
+        self._right_side_panel.set_content(QLabel("TODO: статусы / информация"))
+
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(0)
+        content_row.addWidget(self._left_side_panel)
+        content_row.addWidget(self._image_panel, 1)
+        content_row.addWidget(self._right_side_panel)
+        layout.addLayout(content_row, 1)
 
         tab_factory = self._resolve_tab_factory()
         self._tab_widget = TabWidget()
@@ -156,7 +171,7 @@ class MainWindow(QMainWindow):
                 break
 
     def _setup_undo_redo_ui(self) -> None:
-        """Подключить Ctrl+Z / Ctrl+Y и кнопки undo/redo в header."""
+        """Подключить Ctrl+Z / Ctrl+Y и поставить undo/redo в corner TabWidget."""
         bus = self._app_ctx.get_action_bus() if self._app_ctx else None
 
         # Shortcuts работают всегда (no-op при отсутствии bus)
@@ -167,33 +182,27 @@ class MainWindow(QMainWindow):
         self._shortcut_redo_alt = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
         self._shortcut_redo_alt.activated.connect(self._on_redo)
 
-        # Компактный toolbar: [↩ ↪ История ▼] в одну строку
-        toolbar = QWidget()
-        toolbar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(2)
-
+        # Кнопки undo/redo — слева от кнопки «Скрыть/Показать» в corner TabWidget.
+        # «История» переехала в Настройки → секция «История».
         self._btn_undo = create_header_button("↩", tooltip="Отменить (Ctrl+Z)")
         self._btn_redo = create_header_button("↪", tooltip="Повторить (Ctrl+Y)")
-        self._btn_history = create_header_button("История ▼", tooltip="Последние действия")
-
+        # Подгоняем под высоту corner-полосы (35px у toggle-кнопки TabWidget)
+        for btn in (self._btn_undo, self._btn_redo):
+            btn.setFixedHeight(35)
+            btn.setFixedWidth(40)
         self._btn_undo.clicked.connect(self._on_undo)
         self._btn_redo.clicked.connect(self._on_redo)
-        self._btn_history.clicked.connect(self._show_history_menu)
-
         self._btn_undo.setEnabled(False)
         self._btn_redo.setEnabled(False)
-        self._btn_history.setEnabled(False)
 
-        toolbar_layout.addWidget(self._btn_undo)
-        toolbar_layout.addWidget(self._btn_redo)
-        toolbar_layout.addWidget(self._btn_history)
-
-        # Вставить toolbar в header layout
-        header_layout = self._header.layout()
-        if header_layout is not None:
-            header_layout.addWidget(toolbar)
+        if hasattr(self._tab_widget, "add_corner_action"):
+            self._tab_widget.add_corner_action(self._btn_undo)
+            self._tab_widget.add_corner_action(self._btn_redo)
+        else:
+            # Fallback: если фреймворк старый — кладём в шапку, как было
+            if hasattr(self._header, "add_left_action_widget"):
+                self._header.add_left_action_widget(self._btn_undo)
+                self._header.add_left_action_widget(self._btn_redo)
 
         # Подписаться на обновления bus
         if bus is not None:
@@ -220,8 +229,6 @@ class MainWindow(QMainWindow):
             self._btn_undo.setEnabled(bus.can_undo())
         if self._btn_redo is not None:
             self._btn_redo.setEnabled(bus.can_redo())
-        if self._btn_history is not None:
-            self._btn_history.setEnabled(bus.can_undo())
         # Статус-бар
         self._update_status_bar(bus)
 
@@ -245,34 +252,8 @@ class MainWindow(QMainWindow):
         self._latency_label = QLabel("Latency: —")
         self.statusBar().addPermanentWidget(self._latency_label)
 
-    def _show_history_menu(self) -> None:
-        """Показать dropdown с последними 20 Actions."""
-        from PySide6.QtWidgets import QMenu
-
-        bus = self._app_ctx.get_action_bus() if self._app_ctx else None
-        if bus is None:
-            return
-
-        actions = bus.history(20)
-        if not actions:
-            return
-
-        menu = QMenu(self)
-        # Показываем от новых к старым
-        for i, action in enumerate(reversed(actions)):
-            desc = action.description or action.action_type.value
-            label = f"{i + 1}. {desc}"
-            # Маркер текущей позиции (top of stack)
-            if i == 0:
-                label = f"● {label}"
-            menu_action = menu.addAction(label)
-            aid = action.action_id
-            menu_action.triggered.connect(lambda checked, _aid=aid: self._undo_to(_aid))
-
-        menu.exec(self._btn_history.mapToGlobal(self._btn_history.rect().bottomLeft()))
-
     def _undo_to(self, action_id: str) -> None:
-        """Откатить до указанного action."""
+        """Откатить до указанного action (вызывается из History-секции в Settings)."""
         bus = self._app_ctx.get_action_bus() if self._app_ctx else None
         if bus is not None:
             bus.undo_to(action_id)

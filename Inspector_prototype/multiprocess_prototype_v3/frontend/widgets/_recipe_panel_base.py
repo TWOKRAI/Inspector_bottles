@@ -173,6 +173,19 @@ class RecipePanelBase(BaseWidget[TModel]):
         self._presenter.on_default_clicked()
         self.default_requested.emit()
 
+    def set_slot_index(self, slot_id: int) -> None:
+        """Внешнее переключение слота — синхронизирует ComboBox.
+
+        Меняет currentIndex в `_slot_combo`; через `currentIndexChanged` это
+        триггерит `_on_slot_index_changed` → `presenter.on_load_clicked()`.
+        Используется панелью кнопок-сортов вместо клика по ComboBox.
+        """
+        if self._slot_combo_model is None:
+            return
+        idx = self._slot_combo_model.index_for_slot_id(str(slot_id))
+        if 0 <= idx < self._slot_combo.count():
+            self._slot_combo.setCurrentIndex(idx)
+
     def parse_slot(self) -> int:
         """Номер слота из QComboBox (min/max из UI).
 
@@ -243,12 +256,17 @@ class RecipePanelBase(BaseWidget[TModel]):
     def _on_leaf_value_changed_slot(
         self, group_id: str, field_id: str, column_key: str, value: Any
     ) -> None:
-        """Редактирование колонки «значение» → презентер + auto-save (Task 1.4)."""
+        """Редактирование «значение» → презентер. Auto-save пропускается в preview."""
         if self._block_table or self._tree is None:
             return
         if column_key != "value":
             return
         self._presenter.on_leaf_value_changed(group_id, field_id, column_key, str(value))
+        # Autosave пишет рецепт в YAML по таймеру — в preview-режиме это нежелательно
+        # (там есть отдельные кнопки «Сохранить» и «Применить» с подтверждением).
+        in_preview = bool(getattr(self._presenter, "is_preview_mode", lambda: False)())
+        if in_preview:
+            return
         if self._auto_save_debouncer is not None and self._auto_save is not None:
             self._auto_save_debouncer.schedule(
                 delay_ms=_DEFAULT_AUTOSAVE_DEBOUNCE_MS,

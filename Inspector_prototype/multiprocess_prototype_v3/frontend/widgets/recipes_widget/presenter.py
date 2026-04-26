@@ -3,12 +3,18 @@
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any
 
 from multiprocess_prototype_v3.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 
 from .model import RegisterRecipeModel
-from .recipe_rows import build_recipe_rows, coerce_string_to_value, format_value_for_cell
+from .recipe_rows import (
+    build_recipe_rows,
+    build_recipe_rows_from_snapshot,
+    coerce_string_to_value,
+    format_value_for_cell,
+)
 
 if TYPE_CHECKING:
     from multiprocess_prototype_v3.frontend.actions.bus import ActionBus
@@ -28,6 +34,101 @@ class RegisterRecipePresenter:
         self._view = view
         self._model = model
         self._action_bus = action_bus
+        # Preview-режим: snapshot YAML слота, отображается в таблице вместо rm.
+        # Редактирование в таблице пишет в snapshot. Apply копирует в rm,
+        # Save — в YAML через recipe_manager.save_slot.
+        self._preview_snapshot: dict[str, Any] | None = None
+        self._preview_slot_id: int | None = None
+
+    # ------------------------------------------------------------------
+    # Preview API
+    # ------------------------------------------------------------------
+
+    def is_preview_mode(self) -> bool:
+        return self._preview_snapshot is not None
+
+    def preview_slot_id(self) -> int | None:
+        return self._preview_slot_id
+
+    def enter_preview(self, slot_id: int) -> bool:
+        """Загрузить snapshot слота из YAML и показать в таблице (без записи в rm)."""
+        mgr = self._model.recipe_manager
+        if mgr is None or not hasattr(mgr, "get_slot"):
+            return False
+        try:
+            snapshot = mgr.get_slot(str(slot_id))
+        except Exception:  # noqa: BLE001
+            snapshot = None
+        if snapshot is None:
+            # Слот пуст — отображаем пустую таблицу с пометкой
+            self._preview_snapshot = {}
+            self._preview_slot_id = slot_id
+            self._view.refresh_table_rows()
+            return False
+        self._preview_snapshot = copy.deepcopy(snapshot)
+        self._preview_slot_id = slot_id
+        self._view.refresh_table_rows()
+        return True
+
+    def exit_preview(self) -> None:
+        """Сбросить preview-режим — таблица снова показывает rm."""
+        self._preview_snapshot = None
+        self._preview_slot_id = None
+        self._view.refresh_table_rows()
+
+    def apply_preview_to_registers(self) -> bool:
+        """Записать текущий preview-snapshot в registers (как load_recipe_to_registers)."""
+        if self._preview_snapshot is None or self._preview_slot_id is None:
+            return False
+        mgr = self._model.recipe_manager
+        rm = self._model.rm
+        if mgr is None or rm is None:
+            return False
+
+        # Сохраняем preview в YAML временно через save_slot, потом load_recipe_to_registers
+        # (используем существующий механизм load_recipe_to_registers, чтобы получить
+        # снимок до/после и запись в ActionBus).
+        # NB: write to YAML — это побочный эффект apply. Если пользователь хочет
+        # apply без save — нужен отдельный путь без save_slot. Сейчас Apply подразумевает
+        # «текущий snapshot становится истиной» — это согласовано с расширенной save-семантикой.
+        if hasattr(mgr, "save_slot"):
+            mgr.save_slot(str(self._preview_slot_id), self._preview_snapshot)
+
+        snapshot_before = rm.model_dump_all() if rm else {}
+        mgr.set_current_register_recipe_number(self._preview_slot_id)
+        ok = mgr.load_recipe_to_registers(rm, str(self._preview_slot_id))
+        if not ok:
+            return False
+
+        if self._action_bus is not None and rm is not None:
+            from multiprocess_prototype_v3.frontend.actions.builder import ActionBuilder
+
+            snapshot_after = rm.model_dump_all()
+            action = ActionBuilder.recipe_switch(
+                str(self._preview_slot_id), snapshot_before, snapshot_after
+            )
+            self._action_bus.record(action)
+
+        applied_slot = self._preview_slot_id
+        # Выходим из preview — теперь registers и snapshot совпадают
+        self._preview_snapshot = None
+        self._preview_slot_id = None
+        self._view.refresh_table_rows()
+        if self._model.on_recipe_applied:
+            self._model.on_recipe_applied(applied_slot)
+        return True
+
+    def save_preview_to_yaml(self) -> bool:
+        """Сохранить текущий preview-snapshot в YAML (recipe_manager.save_slot)."""
+        if self._preview_snapshot is None or self._preview_slot_id is None:
+            return False
+        mgr = self._model.recipe_manager
+        if mgr is None or not hasattr(mgr, "save_slot"):
+            return False
+        ok = bool(mgr.save_slot(str(self._preview_slot_id), self._preview_snapshot))
+        if ok and self._model.on_recipe_saved:
+            self._model.on_recipe_saved(self._preview_slot_id)
+        return ok
 
     def on_load_clicked(self) -> None:
         """YAML слот → регистры через recipe_manager; колбэк on_recipe_applied."""
@@ -135,8 +236,13 @@ class RegisterRecipePresenter:
         return self._model.compute_initial_slot()
 
     def build_rows(self) -> list:
-        """Строки из rm; форматирование value для ячеек."""
-        rows = build_recipe_rows(self._model.rm, self._model.access_ctx)
+        """Строки из preview-snapshot если активен, иначе из rm. Форматирование value."""
+        if self._preview_snapshot is not None:
+            rows = build_recipe_rows_from_snapshot(
+                self._model.rm, self._preview_snapshot, self._model.access_ctx
+            )
+        else:
+            rows = build_recipe_rows(self._model.rm, self._model.access_ctx)
         for r in rows:
             r["value"] = format_value_for_cell(r.get("value"))
         return rows
@@ -151,12 +257,23 @@ class RegisterRecipePresenter:
         return getattr(reg, field_name, None)
 
     def apply_value_cell(self, row: dict, text: str) -> None:
-        """Парсинг строки, set_field_value, откат текста ячейки при неуспехе."""
+        """Парсинг строки → set_field_value (rm) или запись в preview-snapshot."""
         register_name = row.get("register_name")
         field_name = row.get("field_name")
         field_id = row.get("field_id")
         if not register_name or not field_name or not field_id:
             return
+
+        if self._preview_snapshot is not None:
+            # В preview-режиме редактирование пишет в snapshot, не в rm
+            prev = self._preview_field_value(register_name, field_name)
+            new_val = coerce_string_to_value(text, prev)
+            self._preview_snapshot.setdefault(register_name, {})[field_name] = new_val
+            self._view.set_leaf_value_text(
+                register_name, str(field_id), format_value_for_cell(new_val)
+            )
+            return
+
         prev = self.current_field_value(register_name, field_name)
         new_val = coerce_string_to_value(text, prev)
         ok, _err = self._model.rm.set_field_value(register_name, field_name, new_val)
@@ -170,3 +287,12 @@ class RegisterRecipePresenter:
             str(field_id),
             format_value_for_cell(self.current_field_value(register_name, field_name)),
         )
+
+    def _preview_field_value(self, register_name: str, field_name: str) -> Any:
+        """Текущее значение поля в preview-snapshot (либо None если ещё не задано)."""
+        if self._preview_snapshot is None:
+            return None
+        reg_data = self._preview_snapshot.get(register_name)
+        if not isinstance(reg_data, dict):
+            return None
+        return reg_data.get(field_name)
