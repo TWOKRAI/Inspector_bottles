@@ -2,11 +2,20 @@
 
 Рецепт = snapshot config-ветвей + regions, сохранённый в YAML.
 При load() все изменения применяются через Transaction → один batch подписчикам.
+
+Версионирование:
+    v1 (legacy): regions содержат processing_blocks (Phase 0-4).
+    v2 (current): regions содержат nodes (Phase 5a+).
+
+При load() legacy-рецепта (v1) автоматически выполняется миграция v1→v2:
+    - создаётся backup .bak рядом с файлом,
+    - основной файл перезаписывается с meta.version=2 и nodes в regions.
 """
 from __future__ import annotations
 
 import copy
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +23,7 @@ from typing import Any
 import yaml
 
 from state_store.core.tree_store import TreeStore
+from .migrations import RECIPE_VERSION_V2, migrate_recipe_data, needs_migration
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +141,7 @@ class RecipeEngine:
                 "name": name,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "description": "",
+                "version": RECIPE_VERSION_V2,
             },
             "data": data,
         }
@@ -167,6 +178,35 @@ class RecipeEngine:
             recipe = yaml.safe_load(f)
 
         data = recipe.get("data", {})
+
+        # --- Проверка версии и миграция v1 → v2 ---
+        meta = recipe.get("meta", {}) or {}
+        version = meta.get("version", 1)  # отсутствие поля = считаем v1
+
+        if version < RECIPE_VERSION_V2 or needs_migration(data):
+            bak_path = file_path.with_suffix(".yaml.bak")
+            shutil.copy2(file_path, bak_path)
+            logger.info(
+                "Рецепт '%s': обнаружен legacy-формат v1, создан backup: %s",
+                name,
+                bak_path,
+            )
+
+            migrated_data = migrate_recipe_data(data)
+
+            # Обновляем meta и перезаписываем файл
+            recipe["meta"] = dict(meta)
+            recipe["meta"]["version"] = RECIPE_VERSION_V2
+            recipe["meta"]["migrated_from_v1"] = True
+            recipe["data"] = migrated_data
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(recipe, f, default_flow_style=False, allow_unicode=True)
+
+            logger.info(
+                "Рецепт '%s' мигрирован v1→v2, backup: %s", name, bak_path
+            )
+            data = migrated_data
 
         # Разворачиваем в плоские пути
         flat = _flatten(data)

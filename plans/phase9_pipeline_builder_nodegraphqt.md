@@ -327,8 +327,20 @@ Inspector_bottles прошёл Phase 0–8. На сегодня:
 **Reuse:** `RecipeEngine` snapshot/restore (state_store/recipes/recipe_engine.py:78-100).
 
 **Acceptance:**
-- [ ] Сохранение/загрузка рецепта с DAG round-trip.
-- [ ] Старый рецепт автоматически мигрируется при load, backup `.bak` создаётся.
+- [x] Сохранение/загрузка рецепта с DAG round-trip.
+- [x] Старый рецепт автоматически мигрируется при load, backup `.bak` создаётся.
+
+**Реализация (commit 9.12)**
+
+Уточнение по сравнению с исходным планом: `pipeline_graph` как отдельная ветка **не добавлялась** в `DEFAULT_CONFIG_PATHS` — DAG (cameras.*.regions.*.nodes) уже сохраняется автоматически через ветку `cameras`. Вместо этого добавлен integration-тест round-trip Pipeline через cameras-ветку.
+
+Что сделано:
+- Новый пакет `state_store/recipes/migrations/` с модулем `v1_to_v2.py` — чистые функции `needs_migration`, `migrate_recipe_data` (без I/O).
+- `migrate_recipe_data` конвертирует `processing_blocks` → `nodes` с linear chain: первая нода читает из `"frame"`, каждая следующая ссылается на предыдущую (`inputs=[{source: prev_id, ...}]`).
+- `RecipeEngine.load()` проверяет `meta.version` (отсутствие = v1): при v1 создаёт `.bak` через `shutil.copy2`, применяет миграцию, перезаписывает файл с `meta.version=2, meta.migrated_from_v1=True`.
+- `RecipeEngine.save()` всегда пишет `meta.version=2`.
+- Повторный load мигрированного рецепта (version=2, нет processing_blocks) пропускает миграцию и не перезаписывает `.bak`.
+- 24 новых теста в `test_recipe_migration_v1_to_v2.py`, все зелёные.
 
 ---
 
