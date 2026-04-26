@@ -34,6 +34,24 @@ class NodeInput(SchemaBase):
     ] = "in"
 
 
+@register_schema("NodeOutputV3")
+class NodeOutput(SchemaBase):
+    """Описывает выходное соединение узла: куда направлять данные."""
+
+    port_name: Annotated[
+        str,
+        FieldMeta("Порт", info="Имя выходного порта операции (e.g. 'out', 'mask')."),
+    ]
+
+    display_target: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Display target",
+            info="id окна DisplayWindow для публикации. None = не публиковать.",
+        ),
+    ] = None
+
+
 @register_schema("ProcessingNodeV3")
 class ProcessingNode(SchemaBase):
     """Узел обработки внутри региона. Часть графа обработки (Phase 5a — линейная цепочка)."""
@@ -81,5 +99,35 @@ class ProcessingNode(SchemaBase):
         FieldMeta("Позиция", info="Координаты узла на графе (Phase 8). Пока не используется."),
     ] = None
 
+    # --- Phase 9 / Task 9.3 — выходной роутинг и display ---
 
-__all__ = ["NodeInput", "ProcessingNode"]
+    outputs: Annotated[
+        List[NodeOutput],
+        FieldMeta(
+            "Выходы",
+            info="Пер-портовые настройки роутинга выходов. "
+            "Пустой список = дефолтное поведение (broadcast в каналы по имени).",
+        ),
+    ] = Field(default_factory=list)
+
+    display_targets: Annotated[
+        List[str],
+        FieldMeta(
+            "Display targets",
+            info="Список display-window id, куда публикуется главный (display_capable) выход ноды. "
+            "Используется в Task 9.8 (thumbnail) и в DisplayRouter.",
+        ),
+    ] = Field(default_factory=list)
+
+    channel_prefix: Annotated[
+        Optional[str],
+        FieldMeta(
+            "Префикс канала",
+            info="Опциональный префикс канала. None → используется node_id. "
+            "Иначе — {channel_prefix}.{port_name}. "
+            "Полезно когда нужны человекочитаемые имена каналов.",
+        ),
+    ] = None
+
+
+__all__ = ["NodeInput", "NodeOutput", "ProcessingNode"]

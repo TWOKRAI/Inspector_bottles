@@ -1,4 +1,4 @@
-"""Unit-тесты для ProcessingNode, NodeInput, RegionNode (Phase 5a)."""
+"""Unit-тесты для ProcessingNode, NodeInput, NodeOutput, RegionNode (Phase 5a + Task 9.3)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import pytest
 
 from multiprocess_prototype_v3.registers.pipeline.processing_node import (
     NodeInput,
+    NodeOutput,
     ProcessingNode,
 )
 from multiprocess_prototype_v3.registers.pipeline.schemas import RegionNode
@@ -129,3 +130,56 @@ def test_region_node_default_nodes_is_empty():
     """Дефолтный nodes в RegionNode должен быть пустым словарём."""
     rn = RegionNode()
     assert rn.nodes == {}
+
+
+# ---------------------------------------------------------------------------
+# Task 9.3 — NodeOutput + новые поля ProcessingNode
+# ---------------------------------------------------------------------------
+
+
+def test_node_output_default_display_target_is_none():
+    """NodeOutput.display_target по умолчанию None."""
+    out = NodeOutput(port_name="out")
+    assert out.display_target is None
+
+
+def test_processing_node_default_outputs_is_empty():
+    """ProcessingNode.outputs по умолчанию — пустой список."""
+    node = ProcessingNode(operation_ref="color_detection")
+    assert node.outputs == []
+
+
+def test_processing_node_default_display_targets_is_empty():
+    """ProcessingNode.display_targets по умолчанию — пустой список."""
+    node = ProcessingNode(operation_ref="color_detection")
+    assert node.display_targets == []
+
+
+def test_processing_node_default_channel_prefix_is_none():
+    """ProcessingNode.channel_prefix по умолчанию None."""
+    node = ProcessingNode(operation_ref="color_detection")
+    assert node.channel_prefix is None
+
+
+def test_round_trip_with_new_fields():
+    """Round-trip: model_dump → model_validate сохраняет outputs/display_targets/channel_prefix."""
+    original = ProcessingNode(
+        operation_ref="blob_detection",
+        params={"threshold": 0.5},
+        outputs=[
+            NodeOutput(port_name="out", display_target="window_1"),
+            NodeOutput(port_name="mask"),
+        ],
+        display_targets=["win_main", "win_debug"],
+        channel_prefix="blob",
+    )
+    dumped = original.model_dump()
+    restored = ProcessingNode.model_validate(dumped)
+
+    assert len(restored.outputs) == 2
+    assert restored.outputs[0].port_name == "out"
+    assert restored.outputs[0].display_target == "window_1"
+    assert restored.outputs[1].port_name == "mask"
+    assert restored.outputs[1].display_target is None
+    assert restored.display_targets == ["win_main", "win_debug"]
+    assert restored.channel_prefix == "blob"
