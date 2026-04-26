@@ -129,7 +129,10 @@ class ProcessorProcess(ProcessModule):
         )
 
         # Config handlers для StateProxy callback
-        self._state_config_handlers = build_state_config_handlers(self._service)
+        # Phase 9 / Task 9.5: передаём router для пересчёта router-топологии
+        self._state_config_handlers = build_state_config_handlers(
+            self._service, router=self.router_manager,
+        )
 
         # Подписка на processor config (simple fields: color_lower, min_area, etc.)
         self._state_proxy.subscribe(
@@ -252,6 +255,8 @@ class ProcessorProcess(ProcessModule):
 
         Transaction batching: все дельты в одном callback = одна транзакция.
         Не делаем rebuild для каждой дельты — читаем всё поддерево и rebuild один раз.
+
+        Phase 9 / Task 9.5: передаём router_manager для пересчёта router-топологии.
         """
         if not deltas:
             return
@@ -259,7 +264,7 @@ class ProcessorProcess(ProcessModule):
         if regions is not None:
             # Оборачиваем в формат vision_pipeline для совместимости с rebuild_runnables
             pipeline_data = {"cameras": {str(self._camera_id): {"regions": regions}}}
-            _apply_vision_pipeline(self._service, pipeline_data)
+            _apply_vision_pipeline(self._service, pipeline_data, router=self.router_manager)
 
     # --- Phase 5c: worker pool stats ---
 

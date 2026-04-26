@@ -1,4 +1,4 @@
-"""ProcessorService — бизнес-логика обработки кадров."""
+"""ProcessorService — бизнес-логика обраб��тки кадров."""
 from __future__ import annotations
 
 import logging
@@ -12,7 +12,9 @@ except ImportError:
 
 if TYPE_CHECKING:
     import numpy as np
+    from multiprocess_framework.modules.router_module.interfaces import IRouterManager
     from multiprocess_prototype_v3.services.processor.ports import ProcessorOutputPort
+    from multiprocess_prototype_v3.services.processor.topology.builder import RouterTopology
 
 from multiprocess_prototype_v3.services.processor.detection import ColorBlobDetector
 from multiprocess_prototype_v3.services.database.schema import DetectionSchema
@@ -61,6 +63,9 @@ class ProcessorService:
         self._runnables: dict[str, ChainRunnable] = {}
         self._catalog_path: str | None = None
 
+        # Phase 9 / Task 9.5: последняя применённая router-топология (для diff)
+        self._last_topology: RouterTopology | None = None
+
     @property
     def detector(self) -> ColorBlobDetector:
         return self._detector
@@ -89,11 +94,19 @@ class ProcessorService:
             catalog_path,
         )
 
-    def rebuild_runnables(self, pipeline_data: dict) -> None:
+    def rebuild_runnables(
+        self,
+        pipeline_data: dict,
+        router: IRouterManager | None = None,
+    ) -> None:
         """Построить per-region ChainRunnable из pipeline dict (cameras → regions → nodes).
 
         Для каждого региона: если есть непустой nodes → строим chain через GraphRunnableBuilder.
         Если nodes нет или пуст, но есть processing_blocks → регион остаётся на legacy пути.
+
+        Если router передан — пересчитываем topology через to_router_topology(pipeline)
+        и вызываем apply_topology(router, topology, previous=self._last_topology).
+        Сохраняем self._last_topology для следующего diff.
 
         Атомарный swap: собираем новый dict целиком, затем присваиваем одним statement.
         """
@@ -164,6 +177,39 @@ class ProcessorService:
         # Атомарный swap — один assignment
         self._runnables = new_runnables
         logger.info("Runnables обновлены: %d регионов с chain", len(new_runnables))
+
+        # Phase 9 / Task 9.5: пересчёт и применение router-топологии
+        if router is not None and self._catalog:
+            self._apply_router_topology(pipeline_data, router)
+
+    def _apply_router_topology(self, pipeline_data: dict, router: IRouterManager) -> None:
+        """Пересчитать router-топологию и применить diff к router.
+
+        Вызывается из rebuild_runnables() при наличии router.
+        Внутренний метод — не вызывайте напрямую.
+        """
+        from multiprocess_prototype_v3.registers.pipeline.schemas import Pipeline
+        from multiprocess_prototype_v3.services.processor.topology.builder import to_router_topology
+        from multiprocess_prototype_v3.services.processor.topology.registrar import apply_topology
+
+        try:
+            pipeline = Pipeline.model_validate(pipeline_data)
+            topology = to_router_topology(pipeline, self._catalog)
+            result = apply_topology(
+                router,
+                topology,
+                previous=self._last_topology,
+            )
+            self._last_topology = topology
+            logger.info(
+                "Router-топология применена: channels +%d/-%d, routes +%d, broadcasts +%d",
+                result.channels_added,
+                result.channels_removed,
+                result.routes_added,
+                result.broadcast_routes_added,
+            )
+        except Exception as exc:
+            logger.error("Ошибка применения router-топологии: %s", exc, exc_info=True)
 
     def resize_pool(self, max_workers: int) -> None:
         """Изменить размер пула потоков на лету.

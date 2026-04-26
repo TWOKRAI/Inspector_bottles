@@ -167,3 +167,68 @@ def test_catalog_categories_are_correct():
         assert catalog[key].category == "Preprocess", f"{key}: ожидалась категория Preprocess"
     for key in detect_ops:
         assert catalog[key].category == "Detect", f"{key}: ожидалась категория Detect"
+
+
+# ---------------------------------------------------------------------------
+# Тест 6 (Task 9.5): Smoke topology — реальный Pipeline + каталог
+# ---------------------------------------------------------------------------
+
+
+def test_smoke_topology_from_real_pipeline():
+    """Реальный Pipeline webcam_input → resize → clahe + реальный каталог →
+    to_router_topology возвращает 3 канала + 2 edge. Без apply (router не создаём)."""
+    from multiprocess_prototype_v3.services.processor.topology.builder import to_router_topology
+
+    catalog = load_catalog(_CATALOG_PATH)
+
+    webcam_node = ProcessingNode(
+        node_id="webcam",
+        operation_ref="webcam_input",
+        channel_prefix="cam0",
+        inputs=[],
+    )
+    resize_node = ProcessingNode(
+        node_id="resize",
+        operation_ref="resize",
+        channel_prefix="resize0",
+        inputs=[NodeInput(source="webcam", output_port="out", input_port="in")],
+    )
+    clahe_node = ProcessingNode(
+        node_id="clahe",
+        operation_ref="clahe",
+        channel_prefix="clahe0",
+        inputs=[NodeInput(source="resize", output_port="out", input_port="in")],
+    )
+
+    nodes = {
+        "webcam": webcam_node,
+        "resize": resize_node,
+        "clahe": clahe_node,
+    }
+    region = RegionNode(nodes=nodes)
+    camera = CameraNode(regions={"reg1": region})
+    pipeline = Pipeline(cameras={"cam1": camera})
+
+    # Сначала валидируем граф
+    errors = pipeline.validate_graph(catalog)
+    assert errors == [], f"Ошибки валидации: {[e.model_dump() for e in errors]}"
+
+    # Затем строим топологию
+    topo = to_router_topology(pipeline, catalog)
+
+    # 3 ноды × 1 output = 3 канала
+    assert len(topo.channels) == 3
+
+    channel_names = {ch.channel_name for ch in topo.channels}
+    assert "cam0.out" in channel_names  # webcam с channel_prefix="cam0"
+    assert "resize0.out" in channel_names
+    assert "clahe0.out" in channel_names
+
+    # 2 edge: cam0.out → resize, resize0.out → clahe
+    assert len(topo.edges) == 2
+
+    # Нет broadcast
+    assert topo.broadcast_routes == {}
+
+    # process_ids
+    assert topo.process_ids == ["processor"]

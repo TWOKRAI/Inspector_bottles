@@ -58,12 +58,17 @@ def _has_any_nodes(pipeline_data: dict) -> bool:
     return False
 
 
-def _apply_vision_pipeline(service, value: object) -> None:
+def _apply_vision_pipeline(service, value: object, router=None) -> None:
     """Применить vision_pipeline dict к ProcessorService.
 
     Phase 5a: если хотя бы один регион содержит непустой nodes —
     вызываем service.rebuild_runnables() (per-region chain).
     Иначе — legacy поведение: извлекаем параметры из первого processing_block.
+
+    Args:
+        service: ProcessorService instance.
+        value: pipeline dict.
+        router: IRouterManager для Phase 9 router-топологии (None = без topology).
     """
     if not isinstance(value, dict):
         logger.warning("vision_pipeline: ожидался dict, получен %s", type(value).__name__)
@@ -72,7 +77,7 @@ def _apply_vision_pipeline(service, value: object) -> None:
     # Phase 5a: новый формат с nodes → per-region chain runnables
     if _has_any_nodes(value):
         logger.info("vision_pipeline: обнаружены nodes — переход на chain runnables")
-        service.rebuild_runnables(value)
+        service.rebuild_runnables(value, router=router)
         return
 
     # Legacy путь: единый детектор, параметры из первого processing_block
@@ -137,7 +142,7 @@ def _apply_vision_pipeline(service, value: object) -> None:
     logger.info("vision_pipeline: %d камер, %d регионов", total_cameras, total_regions)
 
 
-def build_state_config_handlers(service) -> dict:
+def build_state_config_handlers(service, router=None) -> dict:
     """Маппинг config field suffix → handler для StateProxy callback.
 
     Ключи = суффиксы после processor.{id}.config.
@@ -145,13 +150,14 @@ def build_state_config_handlers(service) -> dict:
 
     Args:
         service: ProcessorService instance.
+        router: IRouterManager для Phase 9 router-топологии (None = без topology).
     """
     return {
         "color_lower": lambda v: service.set_color_range(lower=v),
         "color_upper": lambda v: service.set_color_range(upper=v),
         "min_area": lambda v: service.set_min_area(v),
         "max_area": lambda v: service.set_max_area(v),
-        "vision_pipeline": lambda v: _apply_vision_pipeline(service, v),
+        "vision_pipeline": lambda v: _apply_vision_pipeline(service, v, router=router),
         "workers_per_processor": lambda v: service.resize_pool(int(v)),
     }
 
