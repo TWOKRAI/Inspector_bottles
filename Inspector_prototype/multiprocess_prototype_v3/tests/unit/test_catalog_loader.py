@@ -18,10 +18,10 @@ from multiprocess_prototype_v3.registers.processor.catalog.schemas import (
 _SEED_CATALOG = Path(__file__).resolve().parents[2] / "data" / "processing_catalog.yaml"
 
 
-def test_load_catalog_seed_returns_two_operations():
-    """Загрузка реального seed-файла processing_catalog.yaml → ровно 2 записи."""
+def test_load_catalog_seed_returns_twelve_operations():
+    """Загрузка реального seed-файла processing_catalog.yaml → ровно 12 записей (2 legacy + 10 новых из Task 9.4)."""
     catalog = load_catalog(_SEED_CATALOG)
-    assert len(catalog) == 2
+    assert len(catalog) == 12
 
 
 def test_load_catalog_seed_contains_color_detection():

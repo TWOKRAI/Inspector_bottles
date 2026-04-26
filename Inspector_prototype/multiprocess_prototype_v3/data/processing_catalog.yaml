@@ -25,3 +25,138 @@ operations:
     output_ports:
       - { name: "detections", data_type: "detections" }
     display_capable: false
+
+  - type_key: webcam_input
+    name: "Веб-камера"
+    category: "Input"
+    params_schema: "registers.processor.processings.webcam_input_params.WebcamInputParams"
+    module_path: "services.processor.operations.input.webcam_input_op.WebcamInputOp"
+    on_error: skip
+    description: "Захват кадра с веб-камеры через OpenCV/DirectShow."
+    input_ports: []
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: hikvision_input
+    name: "Камера Hikvision"
+    category: "Input"
+    params_schema: "registers.processor.processings.hikvision_input_params.HikvisionInputParams"
+    module_path: "services.processor.operations.input.hikvision_input_op.HikvisionInputOp"
+    on_error: skip
+    description: "Захват кадра с промышленной камеры Hikvision через SDK."
+    input_ports: []
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: file_input
+    name: "Видеофайл"
+    category: "Input"
+    params_schema: "registers.processor.processings.file_input_params.FileInputParams"
+    module_path: "services.processor.operations.input.file_input_op.FileInputOp"
+    on_error: skip
+    description: "Чтение кадров из видеофайла с зацикливанием при EOF."
+    input_ports: []
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: simulator_input
+    name: "Симулятор кадров"
+    category: "Input"
+    params_schema: "registers.processor.processings.simulator_input_params.SimulatorInputParams"
+    module_path: "services.processor.operations.input.simulator_input_op.SimulatorInputOp"
+    on_error: skip
+    description: "Генерация тестовых кадров без реальной камеры."
+    input_ports: []
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: region_splitter
+    name: "Разделитель регионов"
+    category: "ROI"
+    params_schema: "registers.processor.processings.region_splitter_params.RegionSplitterParams"
+    module_path: "services.processor.operations.roi.region_splitter_op.RegionSplitterOp"
+    on_error: skip
+    description: "Разделение входного кадра на N именованных регионов (ROI)."
+    input_ports:
+      - { name: "in", data_type: "image" }
+    output_ports: []
+    multiplicity: dynamic
+    display_capable: false
+
+  - type_key: resize
+    name: "Изменение размера"
+    category: "Preprocess"
+    params_schema: "registers.processor.processings.resize_params.ResizeParams"
+    module_path: "services.processor.operations.preprocess.resize_op.ResizeOp"
+    on_error: skip
+    description: "Изменение размера кадра до заданных ширины и высоты."
+    input_ports:
+      - { name: "in", data_type: "image" }
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: color_convert
+    name: "Конвертация цвета"
+    category: "Preprocess"
+    params_schema: "registers.processor.processings.color_convert_params.ColorConvertParams"
+    module_path: "services.processor.operations.preprocess.color_convert_op.ColorConvertOp"
+    on_error: skip
+    description: "Преобразование цветового пространства кадра (BGR, HSV, grayscale)."
+    input_ports:
+      - { name: "in", data_type: "image" }
+    output_ports:
+      - { name: "out", data_type: "any" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: clahe
+    name: "CLAHE"
+    category: "Preprocess"
+    params_schema: "registers.processor.processings.clahe_params.ClaheParams"
+    module_path: "services.processor.operations.preprocess.clahe_op.ClaheOp"
+    on_error: skip
+    description: "Выравнивание гистограммы CLAHE. Для grayscale напрямую, для BGR — по L-каналу LAB."
+    input_ports:
+      - { name: "in", data_type: "image" }
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: blur
+    name: "Размытие"
+    category: "Preprocess"
+    params_schema: "registers.processor.processings.blur_params.BlurParams"
+    module_path: "services.processor.operations.preprocess.blur_op.BlurOp"
+    on_error: skip
+    description: "Гауссово размытие кадра. Чётный kernel_size автоматически увеличивается на 1."
+    input_ports:
+      - { name: "in", data_type: "image" }
+    output_ports:
+      - { name: "out", data_type: "image" }
+    multiplicity: fixed
+    display_capable: true
+
+  - type_key: threshold
+    name: "Бинаризация"
+    category: "Preprocess"
+    params_schema: "registers.processor.processings.threshold_params.ThresholdParams"
+    module_path: "services.processor.operations.preprocess.threshold_op.ThresholdOp"
+    on_error: skip
+    description: "Пороговая бинаризация grayscale-кадра в бинарную маску."
+    input_ports:
+      - { name: "in", data_type: "mask" }
+    output_ports:
+      - { name: "out", data_type: "mask" }
+    multiplicity: fixed
+    display_capable: true
