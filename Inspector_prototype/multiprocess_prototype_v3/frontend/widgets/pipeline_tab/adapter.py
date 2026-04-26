@@ -8,7 +8,7 @@ NodeGraphQt отвечает за визуализацию графа (ноды,
 Ключевые паттерны:
 - _suppress_graph_signals / _block_signals() — предотвращение бесконечного цикла
   (programmatic update → signal → action → update → ...).
-- Identity маппинг node_id (наш UUID) <-> BaseNode (NodeGraphQt) через _node_map.
+- Identity маппинг node_id (наш UUID) <-> InspectorBaseNode (NodeGraphQt) через _node_map.
 - Type-validation при коннекте: несовместимые порты отменяются ДО создания edge.
 - Coalescing для moved_nodes (не требуется — viewer emits один раз на drop).
 
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from frontend.actions.bus import ActionBus
     from frontend.widgets.graph_editor.model import GraphEditorModel
+    from frontend.widgets.pipeline_tab.inspector_node import InspectorBaseNode
     from registers.processor.catalog.schemas import ProcessingOperationDef
 
 logger = logging.getLogger(__name__)
@@ -93,8 +94,9 @@ class NodeGraphQtAdapter(QtCore.QObject):
         self._catalog = catalog
         self._region_id = region_id
 
-        # Identity маппинг: наш node_id (UUID str) -> BaseNode (NodeGraphQt)
-        self._node_map: dict[str, BaseNode] = {}
+        # Identity маппинг: наш node_id (UUID str) -> InspectorBaseNode (NodeGraphQt)
+        # После Task 9.8 все ноды — InspectorBaseNode (subclass BaseNode).
+        self._node_map: dict[str, InspectorBaseNode] = {}
 
         # Обратный маппинг: NodeGraphQt node.id -> наш node_id
         self._reverse_map: dict[str, str] = {}
@@ -753,6 +755,10 @@ class NodeGraphQtAdapter(QtCore.QObject):
 
         # Создаём порты из определения операции
         self._setup_ports(qt_node, op_def)
+
+        # Устанавливаем display_capable из каталога (Task 9.8)
+        if hasattr(qt_node, "set_display_capable") and hasattr(op_def, "display_capable"):
+            qt_node.set_display_capable(op_def.display_capable)
 
         # Регистрируем маппинг
         self._node_map[node_id] = qt_node

@@ -72,6 +72,10 @@ class DisplayRouter:
         # Callback-функции доставки кадров: window_id → callback
         self._frame_callbacks: dict[str, Callable] = {}
 
+        # Preview-подписки: channel → callback (для node thumbnail preview, Task 9.8)
+        # channel формат: "node_preview.{node_id}"
+        self._preview_subscribers: dict[str, Callable] = {}
+
         # Единый лок для потокобезопасного доступа к изменяемым структурам
         self._lock = threading.Lock()
 
@@ -315,6 +319,81 @@ class DisplayRouter:
             callback = self._frame_callbacks.get(window_id)
 
         # Вызываем callback вне лока, чтобы не блокировать другие операции
+        if callback is not None:
+            callback(frame)
+
+    # ------------------------------------------------------------------
+    # Preview-подписки (Task 9.8 — node thumbnail live-preview)
+    # ------------------------------------------------------------------
+
+    def subscribe_preview(self, channel: str, callback: Callable) -> None:
+        """Подписаться на preview-канал для получения кадров node thumbnail.
+
+        Потокобезопасно — может вызываться из UI thread.
+
+        Args:
+            channel: Имя канала (например, "node_preview.{node_id}").
+            callback: Функция обратного вызова: callback(frame).
+        """
+        with self._lock:
+            self._preview_subscribers[channel] = callback
+        logger.debug("Preview подписка создана: channel=%s", channel)
+
+    def unsubscribe_preview(self, channel: str) -> None:
+        """Отписаться от preview-канала.
+
+        Идемпотентно: отписка несуществующего канала — no-op.
+
+        Args:
+            channel: Имя канала для отписки.
+        """
+        with self._lock:
+            removed = self._preview_subscribers.pop(channel, None)
+        if removed is not None:
+            logger.debug("Preview подписка удалена: channel=%s", channel)
+
+    def is_anyone_subscribed(self, channel: str) -> bool:
+        """Проверить, есть ли подписчики на preview-канал.
+
+        Потокобезопасно — вызывается из operation thread (processor)
+        для оптимизации: если подписчиков нет, encode можно пропустить.
+
+        Работает как с точным совпадением channel, так и с prefix-матчингом:
+        - ``is_anyone_subscribed("node_preview.abc123")`` — точное совпадение.
+        - Для display-окон проверяет ``_frame_callbacks`` по window_id.
+
+        Args:
+            channel: Имя канала для проверки.
+
+        Returns:
+            True если хотя бы один подписчик зарегистрирован.
+        """
+        with self._lock:
+            # Проверяем preview-подписки (node thumbnails)
+            if channel in self._preview_subscribers:
+                return True
+
+            # Проверяем display-окна (window callbacks)
+            # channel "display_{window_id}" → ищем window_id в _frame_callbacks
+            prefix = "display_"
+            if channel.startswith(prefix):
+                window_id = channel[len(prefix):]
+                return window_id in self._frame_callbacks
+
+            return False
+
+    def dispatch_preview_frame(self, channel: str, frame: object) -> None:
+        """Доставить preview-кадр подписчику (node thumbnail).
+
+        Извлекает callback из preview_subscribers и вызывает его.
+
+        Args:
+            channel: Имя канала (например, "node_preview.{node_id}").
+            frame: Объект кадра (numpy ndarray).
+        """
+        with self._lock:
+            callback = self._preview_subscribers.get(channel)
+
         if callback is not None:
             callback(frame)
 
