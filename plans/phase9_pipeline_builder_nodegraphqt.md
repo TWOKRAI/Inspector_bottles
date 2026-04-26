@@ -302,9 +302,16 @@ Inspector_bottles прошёл Phase 0–8. На сегодня:
 **Reuse:** существующий `view_switch.py` (172 LOC), `linearity_check.py` (предупреждение для нелинейного графа в табличном виде).
 
 **Acceptance:**
-- [ ] Изменение в graph → отражается в table.
-- [ ] Bulk-edit `process_id` в таблице → обновляет graph.
-- [ ] Переключение view не теряет выделение узла.
+- [x] Изменение в graph → отражается в table (через ActionBus change_callback → refresh).
+- [x] Bulk-edit `process_id` в таблице → обновляет graph (N GRAPH_NODE_MODIFY actions).
+- [x] Переключение view не теряет выделение узла (_selected_node_id синхронизируется).
+
+**Реализация (Task 9.11, commit pending):**
+- `pipeline_tab/table_view.py` — `PipelineTableView` (QTreeView flat, 6 колонок, bulk-edit enabled/process_id через N GRAPH_NODE_MODIFY actions, linearity warning, ActionBus change_callback → refresh, selection sync).
+- `pipeline_tab/view_switch.py` — `PipelineViewSwitch` (QToolButton toggle, QStackedWidget graph/table, selection_changed unified signal, sync при switch_to через adapter.node_map и table.select_node).
+- `pipeline_tab/__init__.py` — добавлены `PipelineTableView`, `PipelineViewSwitch` в публичный API.
+- Тесты: 30 кейсов в `test_phase9_two_view.py` — все зелёные.
+- `validate.py` зелёный, регрессия Phase 9 не сломана (70/70).
 
 ---
 

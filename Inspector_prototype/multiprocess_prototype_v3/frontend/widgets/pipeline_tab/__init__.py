@@ -2,6 +2,7 @@
 # NodeGraphQtAdapter (Task 9.7), InspectorBaseNode + NodePreviewBridge (Task 9.8),
 # LibraryPalette + LibraryDropTarget (Task 9.9),
 # InspectorPanel + ParamsForm + ProcessIdCombo + DisplayTargetCombo (Task 9.10).
+# PipelineTableView + PipelineViewSwitch (Task 9.11).
 
 from .library_palette import (
     CATEGORY_LABELS,
@@ -16,6 +17,8 @@ from .display_target_combo import DisplayTargetCombo
 from .inspector_panel import InspectorPanel
 from .params_form import ParamsForm
 from .process_id_combo import ProcessIdCombo
+from .table_view import PipelineTableView
+from .view_switch import PipelineViewSwitch
 
 __all__ = [
     "MIME_TYPE",
@@ -29,4 +32,6 @@ __all__ = [
     "InspectorPanel",
     "ParamsForm",
     "ProcessIdCombo",
+    "PipelineTableView",
+    "PipelineViewSwitch",
 ]
