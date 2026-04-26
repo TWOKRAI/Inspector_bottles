@@ -4,13 +4,20 @@
 императивным API RouterManager (register_channel, register_route, register_broadcast_route).
 
 Часть B (Task 9.6): cross-process интеграция — SHM middleware для image-каналов,
-динамический запуск/остановка процессов через IProcessRegistry.
+динамический запуск/остановка процессов **через router-команды** в адрес
+ProcessManagerProcess (`process.command` → `process.create` / `process.stop`).
+
+Архитектурное правило: ProcessRegistry живёт ВНУТРИ ProcessManagerProcess.
+Другие процессы (включая ProcessorProcess, в котором обычно вызывается apply_topology)
+не могут дёргать его напрямую — должны слать команды через router. Framework
+предоставляет endpoint `process.command` (см. process_manager_process.py:151,267).
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from multiprocess_framework.modules.router_module.channels import QueueChannel
@@ -19,6 +26,9 @@ from multiprocess_framework.modules.router_module.interfaces import IRouterManag
 from .builder import ChannelSpec, EdgeSpec, RouterTopology
 
 logger = logging.getLogger(__name__)
+
+# Имя команды для ProcessManagerProcess router-endpoint (см. process_manager_process.py)
+_PROCESS_COMMAND = "process.command"
 
 
 # ---------------------------------------------------------------------------
@@ -229,25 +239,67 @@ def _attach_shm_middlewares(
     return count
 
 
+def _send_process_command(
+    router: IRouterManager,
+    cmd: str,
+    payload: Dict[str, Any],
+) -> bool:
+    """Отправить команду в ProcessManagerProcess через router-endpoint.
+
+    Wrapper над `router.send_async`: формирует сообщение в формате, который
+    ProcessManagerProcess._handle_process_command ожидает (см.
+    framework/process_manager_module/process/process_manager_process.py:267-336).
+
+    Используется fire-and-forget (send_async, priority='high'): создание/остановка
+    процесса асинхронны, статус подтверждается через ProcessMonitor — нет смысла
+    блокировать topology rebuild ожиданием ack'а.
+
+    Args:
+        router: IRouterManager экземпляр (обычно из вызывающего процесса).
+        cmd: имя команды для CommandManager — 'process.create' / 'process.stop' / ...
+        payload: kwargs для команды (process_name, class_path, config, priority, ...).
+
+    Returns:
+        True если send_async вызов успешен (это не означает что команда выполнена —
+        только что отправлена). False при исключении.
+    """
+    message = {
+        "command": _PROCESS_COMMAND,
+        "data": {
+            "cmd": cmd,
+            "correlation_id": str(uuid.uuid4()),
+            **payload,
+        },
+    }
+    try:
+        router.send_async(message, priority="high")
+        return True
+    except Exception as exc:
+        logger.error("Не удалось отправить '%s' в ProcessManager: %s", cmd, exc)
+        return False
+
+
 def _manage_dynamic_processes(
+    router: IRouterManager,
     topology: RouterTopology,
     previous: Optional[RouterTopology],
-    process_registry: Optional[Any],
     process_class_path: str,
     base_worker_config: Optional[Dict[str, Any]],
 ) -> tuple[int, int]:
-    """Создать новые и остановить устаревшие процессы через ProcessRegistry.
+    """Создать новые и остановить устаревшие процессы через router-команды.
+
+    Отправляет `process.create` / `process.stop` команды в адрес
+    ProcessManagerProcess через router. ProcessRegistry дёргается ВНУТРИ
+    менеджера, не отсюда (архитектурное правило framework).
 
     Returns:
-        (processes_created, processes_stopped)
+        (processes_created, processes_stopped) — кол-во отправленных команд
+        (фактическое создание/остановка асинхронно подтверждается ProcessMonitor).
     """
-    if process_registry is None:
-        return 0, 0
-
     new_pids = set(topology.process_ids)
     old_pids = set(previous.process_ids) if previous is not None else set()
 
-    # --- Создание новых процессов ---
+    # --- Создание новых процессов через process.create ---
     to_create = new_pids - old_pids
     created = 0
 
@@ -256,30 +308,47 @@ def _manage_dynamic_processes(
         config = dict(base_worker_config) if base_worker_config else {}
         config["process_id"] = pid
 
-        result = process_registry.create_and_register(
-            name=pid,
-            class_path=process_class_path,
-            config=config,
-            priority="normal",
+        ok = _send_process_command(
+            router,
+            cmd="process.create",
+            payload={
+                "process_name": pid,
+                "class_path": process_class_path,
+                "config": config,
+                "priority": "normal",
+            },
         )
-        if result is not None:
+        if ok:
             created += 1
-            logger.info("Динамический процесс '%s' создан", pid)
-        else:
-            logger.error("Не удалось создать процесс '%s'", pid)
+            logger.info(
+                "Запрошено создание динамического процесса '%s' (process.create отправлено)",
+                pid,
+            )
 
-    # --- Остановка устаревших процессов ---
+        # После create нужно явно стартовать (см. ProcessManagerProcess.create_process —
+        # он только регистрирует в registry, но НЕ стартует Process ОС)
+        _send_process_command(
+            router,
+            cmd="process.start",
+            payload={"process_name": pid},
+        )
+
+    # --- Остановка устаревших процессов через process.stop ---
     to_stop = old_pids - new_pids
     stopped = 0
 
     for pid in sorted(to_stop):
-        try:
-            process_registry.stop_one(pid, timeout=5.0)
-            process_registry.remove_process(pid)
+        ok = _send_process_command(
+            router,
+            cmd="process.stop",
+            payload={"process_name": pid},
+        )
+        if ok:
             stopped += 1
-            logger.info("Устаревший процесс '%s' остановлен и удалён", pid)
-        except Exception as exc:
-            logger.error("Ошибка при остановке процесса '%s': %s", pid, exc)
+            logger.info(
+                "Запрошена остановка устаревшего процесса '%s' (process.stop отправлено)",
+                pid,
+            )
 
     return created, stopped
 
@@ -295,7 +364,7 @@ def apply_topology(
     *,
     previous: Optional[RouterTopology] = None,
     memory_manager: Optional[Any] = None,
-    process_registry: Optional[Any] = None,
+    manage_processes: bool = False,
     process_class_path: str = (
         "multiprocess_prototype_v3.backend.processes.processor_worker"
         ".process.ProcessorWorkerProcess"
@@ -311,17 +380,33 @@ def apply_topology(
 
     Cross-process расширения (Task 9.6):
         - Для cross-process edges с payload_kind='image' — подключить FrameShmMiddleware.
-        - Если process_registry передан и в topology.process_ids появился новый id —
-          create_and_register нового ProcessorWorker.
-        - Если process_id ушёл из topology — stop_one + remove_process.
+        - Если manage_processes=True и в topology.process_ids появился новый id —
+          отправить router-команду `process.create` + `process.start` в
+          ProcessManagerProcess.
+        - Если process_id ушёл из topology — отправить `process.stop`.
+
+    **Архитектурное правило:** управление lifecycle процессов идёт ИСКЛЮЧИТЕЛЬНО
+    через router-команды в адрес ProcessManagerProcess (он один владеет
+    ProcessRegistry). См. _send_process_command().
 
     Note: RouterManager не предоставляет unregister_route() напрямую.
     Для обновления маршрутов используем replacement-подход: register_route()
-    при повторном вызове перезаписывает handler в dispatcher'е (register_handler
-    заменяет существующий handler для того же key). Для broadcast аналогично —
-    register_broadcast_route() заменяет handler.
+    при повторном вызове перезаписывает handler в dispatcher'е.
     Для удалённых каналов — unregister_channel() убирает канал, и маршруты
     к нему становятся «мёртвыми» (router вернёт ошибку при отправке).
+
+    Args:
+        router: IRouterManager. Используется ДВУХ ролями: (а) регистрация
+            каналов/маршрутов; (б) отправка `process.command` в адрес
+            ProcessManagerProcess (если manage_processes=True).
+        topology: целевое состояние.
+        previous: предыдущее состояние для diff (None = первичный apply).
+        memory_manager: для FrameShmMiddleware (None = in-process only,
+            cross-process image edges работают без SHM с warning).
+        manage_processes: если True — отправлять `process.create`/`process.stop`
+            команды для динамического разворота процессов. По умолчанию False
+            (топология применяется в одном процессе без вмешательства в lifecycle
+            других процессов — это ответственность caller'а).
 
     Returns:
         ApplyResult — статистика операции.
@@ -350,14 +435,17 @@ def apply_topology(
     # Cross-process: SHM middleware для image-каналов
     shm_added = _attach_shm_middlewares(router, topology, memory_manager)
 
-    # Cross-process: динамические процессы
-    processes_created, processes_stopped = _manage_dynamic_processes(
-        topology=topology,
-        previous=previous,
-        process_registry=process_registry,
-        process_class_path=process_class_path,
-        base_worker_config=base_worker_config,
-    )
+    # Cross-process: динамические процессы через router-команды (НЕ прямой ProcessRegistry)
+    if manage_processes:
+        processes_created, processes_stopped = _manage_dynamic_processes(
+            router=router,
+            topology=topology,
+            previous=previous,
+            process_class_path=process_class_path,
+            base_worker_config=base_worker_config,
+        )
+    else:
+        processes_created, processes_stopped = 0, 0
 
     result = ApplyResult(
         channels_added=channels_added,

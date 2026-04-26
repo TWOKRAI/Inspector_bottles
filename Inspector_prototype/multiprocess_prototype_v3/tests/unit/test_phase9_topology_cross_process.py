@@ -13,7 +13,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock, call
 
 from multiprocess_framework.modules.router_module.interfaces import IRouterManager
-from multiprocess_framework.modules.process_manager_module.interfaces import IProcessRegistry
+# IProcessRegistry больше НЕ дёргается напрямую из registrar (Task 9.6 refactor):
+# управление lifecycle процессов идёт через router-команду `process.command`
+# в адрес ProcessManagerProcess. Тесты проверяют router.send_async вызовы.
 
 from multiprocess_prototype_v3.registers.pipeline.processing_node import (
     NodeInput,
@@ -101,13 +103,23 @@ def _mock_memory_manager() -> MagicMock:
     return mm
 
 
-def _mock_process_registry() -> MagicMock:
-    """Мок IProcessRegistry."""
-    registry = MagicMock(spec=IProcessRegistry)
-    registry.create_and_register.return_value = MagicMock()  # Успешное создание
-    registry.stop_one.return_value = True
-    registry.remove_process.return_value = None
-    return registry
+def _extract_process_commands(router_mock: MagicMock) -> list[dict]:
+    """Извлечь все process.command сообщения, отправленные через router.send_async.
+
+    Возвращает list inner-data dict'ов для удобного assert'а:
+    [{"cmd": "process.create", "process_name": "proc_A", ...}, ...]
+    """
+    commands: list[dict] = []
+    for call in router_mock.send_async.call_args_list:
+        # send_async(message, priority="...") — message в args[0] либо kwargs["message"]
+        msg = call.args[0] if call.args else call.kwargs.get("message")
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("command") != "process.command":
+            continue
+        data = msg.get("data") or {}
+        commands.append(data)
+    return commands
 
 
 # ---------------------------------------------------------------------------
@@ -306,12 +318,14 @@ def test_shm_middleware_cache_prevents_duplicates():
 # ---------------------------------------------------------------------------
 
 
-def test_apply_topology_creates_new_processes():
-    """Topology с 2 process_id, previous пустая -> 2 create_and_register вызова."""
-    _reset_shm_middleware_cache()
+def test_apply_topology_sends_process_create_commands():
+    """Topology с 2 новыми process_id → 2 router-команды process.create + 2 process.start.
 
+    Архитектура: registrar НЕ дёргает ProcessRegistry напрямую — только шлёт
+    команды в ProcessManagerProcess через router.send_async с command='process.command'.
+    """
+    _reset_shm_middleware_cache()
     router = _mock_router()
-    registry = _mock_process_registry()
 
     topo = RouterTopology(
         channels=[],
@@ -320,26 +334,34 @@ def test_apply_topology_creates_new_processes():
         process_ids=["proc_A", "proc_B"],
     )
 
-    result = apply_topology(
-        router, topo,
-        process_registry=registry,
-    )
+    result = apply_topology(router, topo, manage_processes=True)
 
+    # processes_created считает только успешно отправленные `process.create` команды
     assert result.processes_created == 2
-    assert registry.create_and_register.call_count == 2
 
-    # Проверяем что process_id передан в конфиг
-    call_args_list = registry.create_and_register.call_args_list
-    created_names = {c.kwargs.get("name") or c[0][0] for c in call_args_list}
+    commands = _extract_process_commands(router)
+    create_cmds = [c for c in commands if c.get("cmd") == "process.create"]
+    start_cmds = [c for c in commands if c.get("cmd") == "process.start"]
+
+    # На каждый pid: одна process.create + одна process.start
+    assert len(create_cmds) == 2
+    assert len(start_cmds) == 2
+
+    created_names = {c["process_name"] for c in create_cmds}
     assert created_names == {"proc_A", "proc_B"}
 
+    # process_id прокидывается в config
+    for cmd in create_cmds:
+        assert cmd["config"]["process_id"] == cmd["process_name"]
+        assert cmd["priority"] == "normal"
+        assert "class_path" in cmd
+        assert "correlation_id" in cmd  # для будущего ack-tracking
 
-def test_apply_topology_stops_obsolete_processes():
-    """previous={p0, p1}, new={p0} -> stop_one(p1) + remove_process(p1)."""
+
+def test_apply_topology_sends_process_stop_commands_for_obsolete():
+    """previous={A, B}, new={A} → router-команда process.stop для B."""
     _reset_shm_middleware_cache()
-
     router = _mock_router()
-    registry = _mock_process_registry()
 
     previous = RouterTopology(
         channels=[], edges=[], broadcast_routes={},
@@ -350,37 +372,52 @@ def test_apply_topology_stops_obsolete_processes():
         process_ids=["proc_A"],
     )
 
-    result = apply_topology(
-        router, current,
-        previous=previous,
-        process_registry=registry,
-    )
+    result = apply_topology(router, current, previous=previous, manage_processes=True)
 
     assert result.processes_stopped == 1
     assert result.processes_created == 0
-    registry.stop_one.assert_called_once_with("proc_B", timeout=5.0)
-    registry.remove_process.assert_called_once_with("proc_B")
+
+    commands = _extract_process_commands(router)
+    stop_cmds = [c for c in commands if c.get("cmd") == "process.stop"]
+    assert len(stop_cmds) == 1
+    assert stop_cmds[0]["process_name"] == "proc_B"
+
+    # Никаких process.create — для proc_A не нужно
+    create_cmds = [c for c in commands if c.get("cmd") == "process.create"]
+    assert create_cmds == []
 
 
-def test_apply_topology_no_op_when_process_set_unchanged():
-    """Одинаковый набор process_id -> 0 create, 0 stop."""
+def test_apply_topology_no_process_commands_when_set_unchanged():
+    """Одинаковый набор process_id → ни одной router-команды по lifecycle."""
     _reset_shm_middleware_cache()
-
     router = _mock_router()
-    registry = _mock_process_registry()
 
     topo = RouterTopology(
         channels=[], edges=[], broadcast_routes={},
         process_ids=["proc_A", "proc_B"],
     )
 
-    result = apply_topology(
-        router, topo,
-        previous=topo,
-        process_registry=registry,
-    )
+    result = apply_topology(router, topo, previous=topo, manage_processes=True)
 
     assert result.processes_created == 0
     assert result.processes_stopped == 0
-    registry.create_and_register.assert_not_called()
-    registry.stop_one.assert_not_called()
+
+    commands = _extract_process_commands(router)
+    assert commands == []
+
+
+def test_apply_topology_does_not_manage_processes_by_default():
+    """manage_processes=False (default) → никаких lifecycle-команд даже при изменении process_ids."""
+    _reset_shm_middleware_cache()
+    router = _mock_router()
+
+    topo = RouterTopology(
+        channels=[], edges=[], broadcast_routes={},
+        process_ids=["proc_A", "proc_B"],
+    )
+
+    result = apply_topology(router, topo)  # manage_processes не указан → False
+
+    assert result.processes_created == 0
+    assert result.processes_stopped == 0
+    assert _extract_process_commands(router) == []

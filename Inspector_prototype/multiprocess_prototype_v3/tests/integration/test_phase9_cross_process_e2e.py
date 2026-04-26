@@ -16,7 +16,8 @@ import numpy as np
 import pytest
 
 from multiprocess_framework.modules.router_module import RouterManager, QueueChannel
-from multiprocess_framework.modules.process_manager_module.interfaces import IProcessRegistry
+# IProcessRegistry больше не используется — registrar шлёт router-команды
+# в адрес ProcessManagerProcess (Task 9.6 refactor).
 
 from multiprocess_prototype_v3.registers.pipeline.processing_node import (
     NodeInput,
@@ -231,30 +232,34 @@ def test_e2e_graph_rebuild_adds_process():
     router.register_broadcast_route.return_value = True
     router.unregister_channel.return_value = True
 
-    registry = MagicMock(spec=IProcessRegistry)
-    registry.create_and_register.return_value = MagicMock()
+    # Через router.send_async ловим process.command сообщения
+    sent_commands: list[dict] = []
+    router.send_async.side_effect = lambda msg, **kw: sent_commands.append(msg)
 
     # apply v1 (initial)
-    result_v1 = apply_topology(
-        router, topo_v1,
-        process_registry=registry,
-    )
+    result_v1 = apply_topology(router, topo_v1, manage_processes=True)
     assert result_v1.processes_created == 2  # proc_A, proc_B
 
-    # apply v2 с previous=v1 (rebuild)
+    # apply v2 с previous=v1 (rebuild) — добавляется proc_C
     result_v2 = apply_topology(
         router, topo_v2,
         previous=topo_v1,
-        process_registry=registry,
+        manage_processes=True,
     )
 
     # Только proc_C — новый
     assert result_v2.processes_created == 1
     assert result_v2.processes_stopped == 0
 
-    # Проверяем что create_and_register вызван с name='proc_C'
-    last_call = registry.create_and_register.call_args_list[-1]
-    assert last_call.kwargs.get("name") or last_call[0][0] == "proc_C"
+    # Проверяем что router получил process.create для proc_C
+    create_data = [
+        m["data"] for m in sent_commands
+        if m.get("command") == "process.command"
+        and m["data"].get("cmd") == "process.create"
+        and m["data"].get("process_name") == "proc_C"
+    ]
+    assert len(create_data) == 1
+    assert create_data[0]["config"]["process_id"] == "proc_C"
 
 
 def test_e2e_graph_rebuild_removes_process():
@@ -293,17 +298,23 @@ def test_e2e_graph_rebuild_removes_process():
     router.register_broadcast_route.return_value = True
     router.unregister_channel.return_value = True
 
-    registry = MagicMock(spec=IProcessRegistry)
-    registry.create_and_register.return_value = MagicMock()
-    registry.stop_one.return_value = True
+    sent_commands: list[dict] = []
+    router.send_async.side_effect = lambda msg, **kw: sent_commands.append(msg)
 
-    # Rebuild: v1 -> v2
+    # Rebuild: v1 -> v2 (proc_C удаляется)
     result = apply_topology(
         router, topo_v2,
         previous=topo_v1,
-        process_registry=registry,
+        manage_processes=True,
     )
 
     assert result.processes_stopped == 1
-    registry.stop_one.assert_called_once_with("proc_C", timeout=5.0)
-    registry.remove_process.assert_called_once_with("proc_C")
+
+    # Проверяем что router получил process.stop для proc_C
+    stop_data = [
+        m["data"] for m in sent_commands
+        if m.get("command") == "process.command"
+        and m["data"].get("cmd") == "process.stop"
+    ]
+    assert len(stop_data) == 1
+    assert stop_data[0]["process_name"] == "proc_C"
