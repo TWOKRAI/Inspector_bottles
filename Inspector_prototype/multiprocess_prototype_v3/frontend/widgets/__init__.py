@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover — только для type-checkers
+    from .pipeline_tab.widget import PipelineTabWidget
     from .tabs_setting import (
         CameraTabUiConfig,
         CameraTabWidget,
@@ -21,8 +22,6 @@ if TYPE_CHECKING:  # pragma: no cover — только для type-checkers
         CroppedRegionsTabWidget,
         DisplayTabConfig,
         DisplayTabWidget,
-        GraphEditorTabConfig,
-        GraphEditorTabWidget,
         PostProcessingTabUiConfig,
         PostProcessingTabWidget,
         ProcessingTabUiConfig,
@@ -45,8 +44,6 @@ _LAZY_NAMES = {
     "CroppedRegionsTabWidget",
     "DisplayTabConfig",
     "DisplayTabWidget",
-    "GraphEditorTabConfig",
-    "GraphEditorTabWidget",
     "PostProcessingTabUiConfig",
     "PostProcessingTabWidget",
     "ProcessingTabUiConfig",
@@ -58,14 +55,19 @@ _LAZY_NAMES = {
     "TabItemConfig",
     "TabsConfig",
     "build_camera_tab_callbacks",
+    "PipelineTabWidget",
 }
 
 
 def __getattr__(name: str) -> Any:
     if name not in _LAZY_NAMES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from importlib import import_module
 
+    if name == "PipelineTabWidget":
+        from .pipeline_tab.widget import PipelineTabWidget
+        return PipelineTabWidget
+
+    from importlib import import_module
     mod = import_module(".tabs_setting", package=__name__)
     return getattr(mod, name)
 
@@ -89,6 +91,5 @@ __all__ = [
     "TabsConfig",
     "DisplayTabConfig",
     "DisplayTabWidget",
-    "GraphEditorTabConfig",
-    "GraphEditorTabWidget",
+    "PipelineTabWidget",
 ]

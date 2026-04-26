@@ -364,10 +364,19 @@ Inspector_bottles прошёл Phase 0–8. На сегодня:
 **Сохранить и переместить в `pipeline_tab/`:** `model.py`, `linearity_check.py`, `auto_layout.py`, `constants.py`, `context_menu.py`. Каталог `graph_editor/` удалить после миграции.
 
 **Acceptance:**
-- [ ] Вкладки Settings и Recipes не тронуты.
-- [ ] Вкладка Pipeline функциональна end-to-end.
-- [ ] Старые вкладки удалены, нет orphan-кода.
-- [ ] Всё ещё проходит `python Inspector_prototype/scripts/validate.py`.
+- [x] Вкладки Settings и Recipes не тронуты.
+- [x] Вкладка Pipeline функциональна end-to-end.
+- [x] Старые вкладки удалены, нет orphan-кода.
+- [x] Всё ещё проходит `python Inspector_prototype/scripts/validate.py`.
+
+**Реализация (Task 9.13, commit e????):**
+- Перенесены: model.py, linearity_check.py, auto_layout.py, constants.py (-> _layout_constants.py), context_menu.py из graph_editor/ в pipeline_tab/.
+- Удалены: graph_editor/ целиком (14 файлов), tabs_setting/graph_editor_tab/ (3 файла).
+- Создан: pipeline_tab/widget.py (PipelineTabWidget).
+- Обновлены импорты: adapter.py, inspector_panel.py, table_view.py, 5 тестов, tab_factory.py, widgets/__init__.py, tabs_setting/__init__.py, tabs_config.py.
+- tab_factory: widget_key="graph_editor" -> widget_key="pipeline".
+- 16 новых тестов в test_phase9_pipeline_tab_widget.py, все зелёные.
+- validate.py зелёный. 175 Phase 9 тестов зелёные.
 
 ---
 

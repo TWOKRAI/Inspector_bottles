@@ -19,8 +19,8 @@ from PySide6.QtCore import Qt
 
 from frontend.actions.builder import ActionBuilder
 from frontend.actions.bus import ActionBus
-from frontend.widgets.graph_editor.linearity_check import get_linearity_warning
-from frontend.widgets.graph_editor.model import GraphEditorModel
+from frontend.widgets.pipeline_tab.linearity_check import get_linearity_warning
+from frontend.widgets.pipeline_tab.model import GraphEditorModel
 from registers.processor.catalog.schemas import ProcessingOperationDef
 
 logger = logging.getLogger(__name__)

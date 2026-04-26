@@ -15,7 +15,6 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
         CameraTabWidget,
         CroppedRegionsTabWidget,
         DisplayTabWidget,
-        GraphEditorTabWidget,
         PostProcessingTabWidget,
         ProcessingTabWidget,
         RecipesTabWidget,
@@ -97,9 +96,28 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 display_router=display_router,
                 camera_registry=camera_registry,
             )
-        if widget_key == "graph_editor":
-            return GraphEditorTabWidget(
+        if widget_key == "pipeline":
+            from multiprocess_prototype_v3.frontend.widgets.pipeline_tab.widget import (
+                PipelineTabWidget,
+            )
+
+            # TODO: загружать processing_catalog через app_context (Phase 10+).
+            # Сейчас используем extras fallback или пустой dict.
+            catalog = ctx.extras.get("processing_catalog", {}) or {}
+            return PipelineTabWidget(
                 action_bus=ctx.action_bus,
+                catalog=catalog,
+                region_id="default",
+                known_processes_provider=lambda: list(
+                    ctx.extras.get("known_processes", []),
+                ),
+                known_displays_provider=lambda: list(
+                    (
+                        ctx.extras.get("window_manager")
+                        and ctx.extras["window_manager"]._windows.keys()
+                    )
+                    or [],
+                ),
             )
         return None
 

@@ -20,7 +20,8 @@ def _default_tabs() -> list[TabItemConfig]:
     from ..settings_recipe_widget.schemas import default_tab_item as _rec
     from .camera_tab.schemas import default_tab_item as _cam
     from .display_tab.schemas import default_tab_item as _disp
-    from .graph_editor_tab.schemas import default_tab_item as _graph
+    # pipeline_tab заменил graph_editor_tab (Task 9.13)
+    _graph = lambda: TabItemConfig(id="pipeline", widget="pipeline", title="Pipeline")
     from .post_processing_tab.schemas import default_tab_item as _post
     from .processing_tab.schemas import default_tab_item as _proc
     from .recipes_settings_tab.schemas import default_tab_item as _set

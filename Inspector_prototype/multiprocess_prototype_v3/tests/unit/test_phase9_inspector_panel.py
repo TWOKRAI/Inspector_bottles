@@ -30,7 +30,7 @@ from frontend.actions.builder import ActionBuilder  # noqa: E402
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
 from frontend.actions.handlers.graph_handler import GraphActionHandler  # noqa: E402
 from frontend.actions.schemas import ActionType  # noqa: E402
-from frontend.widgets.graph_editor.model import GraphEditorModel  # noqa: E402
+from frontend.widgets.pipeline_tab.model import GraphEditorModel  # noqa: E402
 from frontend.widgets.pipeline_tab.display_target_combo import DisplayTargetCombo  # noqa: E402
 from frontend.widgets.pipeline_tab.inspector_panel import InspectorPanel  # noqa: E402
 from frontend.widgets.pipeline_tab.params_form import ParamsForm  # noqa: E402

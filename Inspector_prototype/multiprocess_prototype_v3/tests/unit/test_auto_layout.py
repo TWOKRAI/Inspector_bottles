@@ -21,8 +21,8 @@ if "PyQt5" not in sys.modules:
     sys.modules["PyQt5.QtCore"] = MagicMock()
     sys.modules["PyQt5.QtWidgets"] = MagicMock()
 
-from frontend.widgets.graph_editor.auto_layout import auto_layout  # noqa: E402, I001
-from frontend.widgets.graph_editor.constants import GRID_SIZE  # noqa: E402
+from frontend.widgets.pipeline_tab.auto_layout import auto_layout  # noqa: E402, I001
+from frontend.widgets.pipeline_tab._layout_constants import GRID_SIZE  # noqa: E402
 from registers.pipeline.processing_node import NodeInput, ProcessingNode  # noqa: E402
 
 

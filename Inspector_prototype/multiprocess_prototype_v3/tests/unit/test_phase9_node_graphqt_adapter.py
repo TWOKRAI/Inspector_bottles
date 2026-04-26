@@ -33,7 +33,7 @@ if str(_V3_ROOT) not in sys.path:
 from frontend.actions.builder import ActionBuilder  # noqa: E402
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
 from frontend.actions.schemas import ActionType  # noqa: E402
-from frontend.widgets.graph_editor.model import GraphEditorModel  # noqa: E402
+from frontend.widgets.pipeline_tab.model import GraphEditorModel  # noqa: E402
 from registers.pipeline.processing_node import NodeInput, ProcessingNode  # noqa: E402
 from registers.processor.catalog.port_types import (  # noqa: E402
     PORT_TYPE_DETECTIONS,

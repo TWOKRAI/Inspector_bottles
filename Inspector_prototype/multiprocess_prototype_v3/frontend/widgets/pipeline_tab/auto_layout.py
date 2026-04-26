@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from .constants import GRID_SIZE
+from ._layout_constants import GRID_SIZE
 
 if TYPE_CHECKING:
     from registers.pipeline.processing_node import ProcessingNode

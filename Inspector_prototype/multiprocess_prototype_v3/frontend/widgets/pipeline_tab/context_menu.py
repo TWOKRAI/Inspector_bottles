@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QMenu
 
-if TYPE_CHECKING:
-    from .edge_item import EdgeItem
-    from .graph_scene import GraphScene
-    from .graph_view import GraphView
-    from .node_item import NodeItem
-
 
 def show_node_context_menu(
-    scene: GraphScene,
-    node_item: NodeItem,
+    scene: Any,
+    node_item: Any,
     screen_pos: QPoint,
 ) -> None:
     """Контекстное меню для узла: включить/отключить, дублировать, удалить."""
@@ -50,8 +44,8 @@ def show_node_context_menu(
 
 
 def show_edge_context_menu(
-    scene: GraphScene,
-    edge_item: EdgeItem,
+    scene: Any,
+    edge_item: Any,
     screen_pos: QPoint,
 ) -> None:
     """Контекстное меню для ребра: удалить соединение."""
@@ -65,7 +59,7 @@ def show_edge_context_menu(
 
 
 def show_scene_context_menu(
-    view: GraphView,
+    view: Any,
     screen_pos: QPoint,
 ) -> None:
     """Контекстное меню для пустого места: подогнать масштаб, выделить всё."""

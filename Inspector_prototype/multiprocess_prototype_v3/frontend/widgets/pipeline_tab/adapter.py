@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from NodeGraphQt import BaseNode, NodeGraph
 
     from frontend.actions.bus import ActionBus
-    from frontend.widgets.graph_editor.model import GraphEditorModel
+    from frontend.widgets.pipeline_tab.model import GraphEditorModel
     from frontend.widgets.pipeline_tab.inspector_node import InspectorBaseNode
     from registers.processor.catalog.schemas import ProcessingOperationDef
 
