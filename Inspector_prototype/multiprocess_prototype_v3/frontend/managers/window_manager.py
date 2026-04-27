@@ -82,7 +82,7 @@ class DisplayWindowManager:
 
         # Lazy import DisplayWindow: виджет создаётся в Task 6.5,
         # поэтому импортируем внутри метода, а не на уровне модуля
-        from frontend.widgets.display_window.widget import DisplayWindow  # noqa: PLC0415
+        from frontend.widgets.sources.display_window.widget import DisplayWindow  # noqa: PLC0415
 
         # Создаём виджет окна
         widget = DisplayWindow(window_id=window_id)

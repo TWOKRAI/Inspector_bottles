@@ -24,7 +24,7 @@ def build_camera_tab_callbacks(
     ``CameraTabUiConfig.webcam_enum_max_index`` во вкладке.
     """
     _ = webcam_enum_max_index
-    from ...camera_common import build_sim_webcam_callbacks
+    from ...sources.camera_common import build_sim_webcam_callbacks
 
     sim_web = build_sim_webcam_callbacks(cmd)
     return {

@@ -27,8 +27,8 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTab
 
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from ...camera_common import SimWebcamWidget
-from ...hikvision_camera_mvp import HikvisionCameraMvpWidget
+from ...sources.camera_common import SimWebcamWidget
+from ...sources.hikvision_camera_mvp import HikvisionCameraMvpWidget
 from .presenter import CameraTabPresenter
 from .schemas import CameraTabUiConfig
 

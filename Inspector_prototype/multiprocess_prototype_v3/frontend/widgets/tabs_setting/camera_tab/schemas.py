@@ -22,7 +22,7 @@ from multiprocess_framework.modules.data_schema_module import (
     register_schema,
 )
 
-from multiprocess_prototype_v3.frontend.widgets.hikvision_camera_mvp.schemas import (
+from multiprocess_prototype_v3.frontend.widgets.sources.hikvision_camera_mvp.schemas import (
     HikvisionCameraMvpUiConfig,
 )
 
