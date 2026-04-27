@@ -94,7 +94,7 @@ class GuiProcess(ProcessModule):
         pass
 
     def run(self):
-        """Запустить FrontendLauncher (PyQt5 event loop)."""
+        """Запустить FrontendLauncher (PySide6 event loop)."""
         # Базовый run(): статус RUNNING + запуск heartbeat воркера
         super().run()
 

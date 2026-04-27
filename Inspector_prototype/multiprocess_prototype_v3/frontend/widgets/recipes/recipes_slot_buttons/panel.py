@@ -18,7 +18,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     Signal,
 )
 
-from ..._base.navigation_panel_base import NavigationPanelBase
+from ...base.navigation_panel_base import NavigationPanelBase
 
 
 class RecipesSlotButtonsPanel(NavigationPanelBase):

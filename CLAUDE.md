@@ -3,7 +3,7 @@
 ## Проект
 
 Фреймворк для приложений с **многопроцессной архитектурой** (процессы-воркеры, разделяемая память, очередь задач).
-На его основе — **прототип** системы инспекции дефектов через камеру (PyQt5, OpenCV, детекция брака).
+На его основе — **прототип** системы инспекции дефектов через камеру (PySide6, OpenCV, детекция брака).
 
 ## Архитектура
 
@@ -11,7 +11,7 @@
 - **IPC:** `Message` / `MessageAdapter` → `RouterManager` → `shared_resources_module` (pickle-safe)
 - **Внутри процесса:** `CommandManager`, `worker_module`, `LoggerManager` / `ErrorManager` / `StatsManager` (база `channel_routing_module`), `RouterManager`
 - **Данные/конфиг:** `data_schema_module` (`SchemaBase`), `config_module` + `ConfigStore`
-- **GUI:** `frontend_module` (PyQt5), схемы регистров в приложении
+- **GUI:** `frontend_module` (PySide6), схемы регистров в приложении. Виджеты v3 сгруппированы по доменам (`chrome/`, `sources/`, `recipes/`, `processing/`, `settings/`, `pipeline/`, `tabs_setting/`, `base/`) — детали в [`docs/refactors/2026-04_widgets_reorg.md`](Inspector_prototype/docs/refactors/2026-04_widgets_reorg.md).
 - **Роутинг:** НЕ путать **имя процесса** (`targets`, `send_message`) и **канал Router** (`FieldRouting.channel`, `msg["channel"]`). См. `ROUTING_GLOSSARY.md`
 
 ## Ключевые пути
@@ -38,8 +38,8 @@
 
 ## Стек
 
-Python 3.12 (см. корневой `pyproject.toml`), PyQt5 → PySide6 (Phase 2), OpenCV 4.13, NumPy 2.x | SQLite/PostgreSQL, Qdrant
-Docker, Ollama, pytest | Pydantic v2, loguru
+Python 3.12 (см. корневой `pyproject.toml`), PySide6 6.10 (Phase 2 завершена 2026-04), OpenCV 4.13, NumPy 2.x | SQLite/PostgreSQL, Qdrant
+Docker, Ollama, pytest + pytest-qt (`qt_api = pyside6`) | Pydantic v2, loguru
 ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]` в pyproject
 
 ## Правила проекта

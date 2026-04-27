@@ -40,7 +40,7 @@ from multiprocess_prototype_v3.registers import create_registers
 from multiprocess_prototype_v3.registers.constants import SETTINGS_REGISTER
 
 # ---------------------------------------------------------------------------
-# FakeView — заменяет Qt-виджет без зависимости от PyQt5
+# FakeView — заменяет Qt-виджет без зависимости от PySide6
 # ---------------------------------------------------------------------------
 
 

@@ -2,7 +2,7 @@
 """Unit-тесты SettingsProfilePresenter — логика без Qt (Phase 2, Task 2.3).
 
 Проверяет on_apply_clicked, on_save_clicked, on_default_clicked, on_leaf_value_changed
-без каких-либо зависимостей от PyQt5.
+без каких-либо зависимостей от PySide6.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.
 
 
 class FakeView:
-    """Реализует SettingsProfilePanelViewProtocol без PyQt5."""
+    """Реализует SettingsProfilePanelViewProtocol без PySide6."""
 
     def __init__(self, current_id: str = "default") -> None:
         self._current_id = current_id

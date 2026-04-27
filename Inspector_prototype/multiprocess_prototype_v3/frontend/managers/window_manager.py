@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    # PyQt5 импортируется только для аннотаций, чтобы не тянуть тяжёлый импорт
+    # PySide6 импортируется только для аннотаций, чтобы не тянуть тяжёлый импорт
     # в контексте, где GUI ещё не инициализирован
     from PySide6.QtWidgets import QWidget
 

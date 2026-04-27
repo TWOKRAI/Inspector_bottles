@@ -4,7 +4,7 @@ GuiStateProxy переопределяет on_state_changed():
   - обновление кэша происходит в текущем потоке (IO/worker thread, безопасно)
   - вызов callbacks маршрутизируется в Qt main thread через QMetaObject.invokeMethod
 
-PyQt5 НЕ импортируется на верхнем уровне — только lazily внутри методов.
+PySide6 НЕ импортируется на верхнем уровне — только lazily внутри методов.
 Это позволяет тестировать GuiStateProxy без установленного Qt.
 
 Пример использования в GuiProcess:
@@ -112,9 +112,9 @@ class GuiStateProxy(StateProxy):
                 Q_ARG(list, deltas),
             )
         except ImportError:
-            # PyQt5 не установлен — прямой fallback
+            # PySide6 не установлен — прямой fallback
             logger.warning(
-                "GuiStateProxy '%s': PyQt5 недоступен, прямой вызов callbacks",
+                "GuiStateProxy '%s': PySide6 недоступен, прямой вызов callbacks",
                 self._process_name,
             )
             self._invoke_callbacks(deltas)

@@ -2,8 +2,8 @@
 """Unit-тесты `RegisterRecipePresenter` — логика без Qt (Phase 1, Task 1.5).
 
 Presenter импортируется через цепочку `.model` → `frontend_module.interfaces` →
-`frontend_module/__init__.py` → Qt. Поэтому тест требует установленного PyQt5
-(в venv без PyQt5 — skip через importorskip, как в test_frontend_config_settings_path.py).
+`frontend_module/__init__.py` → Qt. Поэтому тест требует установленного PySide6
+(в venv без PySide6 — skip через importorskip, как в test_frontend_config_settings_path.py).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("PyQt5", reason="presenter импортирует frontend_module.interfaces (тянет PyQt5)")
+pytest.importorskip("PySide6", reason="presenter импортирует frontend_module.interfaces (тянет PySide6)")
 
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext  # noqa: E402
 from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.model import (

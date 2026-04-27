@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -30,14 +29,9 @@ for _p in (_INSPECTOR_ROOT, _V3_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-# ---------------------------------------------------------------------------
-# PyQt5 mock: auto_layout и linearity_check используют constants.py с QColor
-# ---------------------------------------------------------------------------
-if "PyQt5" not in sys.modules:
-    sys.modules["PyQt5"] = MagicMock()
-    sys.modules["PyQt5.QtGui"] = MagicMock()
-    sys.modules["PyQt5.QtCore"] = MagicMock()
-    sys.modules["PyQt5.QtWidgets"] = MagicMock()
+# constants.py использует QColor → PySide6 нужен транзитивно (берётся из venv).
+# Если PySide6 не установлен — пропускаем весь модуль.
+pytest.importorskip("PySide6", reason="constants.py использует QColor из PySide6")
 
 from frontend.actions.builder import ActionBuilder  # noqa: E402, I001
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402

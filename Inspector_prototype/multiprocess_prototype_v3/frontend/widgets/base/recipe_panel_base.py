@@ -1,4 +1,4 @@
-# multiprocess_prototype_v3/frontend/widgets/_recipe_panel_base.py
+# multiprocess_prototype_v3/frontend/widgets/base/recipe_panel_base.py
 """Базовый класс для панелей рецептов: общий UI (слот + кнопки + дерево)."""
 
 from __future__ import annotations

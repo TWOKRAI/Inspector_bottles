@@ -1,7 +1,11 @@
 # План: Реорганизация frontend/widgets/
 
+> **STATUS: COMPLETED 2026-04-27** — выполнено в рамках ветки `feat/widgets-reorg`
+> (8 коммитов). Архивный документ. Дальнейшие follow-up: см.
+> [`2026-04_widgets_phase2.md`](2026-04_widgets_phase2.md).
+
 **Дата:** 2026-04-27
-**Статус:** DRAFT
+**Статус:** COMPLETED
 **Область:** `multiprocess_prototype_v3/frontend/widgets/`
 
 ---

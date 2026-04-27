@@ -67,7 +67,7 @@ except Exception:
 needs_presenter = pytest.mark.skipif(not _HAS_PRESENTER, reason="frontend imports not available")
 
 
-# --- Фейковый View для presenter тестов (только при наличии PyQt5) ---
+# --- Фейковый View для presenter тестов (только при наличии PySide6) ---
 
 if _HAS_PRESENTER:
 

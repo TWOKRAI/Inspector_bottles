@@ -1,6 +1,6 @@
 # multiprocess_prototype_v3/tests/unit/test_settings_profile_combo_model.py
 """Unit-тесты profile_combo_model — from_profile_manager / sync_current / profile_id_from_model
-(Phase 2, Task 2.2). Без PyQt5.
+(Phase 2, Task 2.2). Без PySide6.
 """
 
 from __future__ import annotations

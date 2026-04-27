@@ -1,25 +1,18 @@
 """Тесты для auto_layout — алгоритм Sugiyama layered layout.
 
-Тестируется чистая функция, PyQt не требуется.
+Тестируется чистая функция. PySide6 нужен только транзитивно
+(constants.py импортирует QColor) — берётся из venv.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Добавляем multiprocess_prototype_v3/ в sys.path для коротких импортов
 _V3_ROOT = Path(__file__).resolve().parents[2]
 if str(_V3_ROOT) not in sys.path:
     sys.path.insert(0, str(_V3_ROOT))
-
-# Подменяем PyQt5 заглушкой, чтобы тесты работали без GUI
-if "PyQt5" not in sys.modules:
-    sys.modules["PyQt5"] = MagicMock()
-    sys.modules["PyQt5.QtGui"] = MagicMock()
-    sys.modules["PyQt5.QtCore"] = MagicMock()
-    sys.modules["PyQt5.QtWidgets"] = MagicMock()
 
 from frontend.widgets.pipeline.pipeline_tab.canvas.auto_layout import auto_layout  # noqa: E402, I001
 from frontend.widgets.pipeline.pipeline_tab.views._layout_constants import GRID_SIZE  # noqa: E402

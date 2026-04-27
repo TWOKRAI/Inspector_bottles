@@ -2,7 +2,7 @@
 
 Все тесты без Qt — используют Mock для изоляции от GUI-зависимостей.
 FrontendLauncher импортируется через sys.modules-патч, чтобы избежать
-тяжёлых транзитивных импортов (PyQt5, pydantic, frontend_module).
+тяжёлых транзитивных импортов (PySide6, pydantic, frontend_module).
 """
 from __future__ import annotations
 

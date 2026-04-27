@@ -1,4 +1,4 @@
-# multiprocess_prototype_v3/frontend/widgets/_navigation_panel_base.py
+# multiprocess_prototype_v3/frontend/widgets/base/navigation_panel_base.py
 """Базовый класс для левых навигационных панелей (QListWidget + общие стили)."""
 
 from __future__ import annotations

@@ -1,14 +1,14 @@
 # multiprocess_prototype_v3/tests/unit/test_frontend_config_settings_path.py
 """Unit-тесты FrontendConfig.settings_profiles_path (Phase 0, Task 0.5).
 
-Пропускается в CI без PyQt5 (FrontendConfig → MainWindowConfig → widgets.header).
+Пропускается в CI без PySide6 (FrontendConfig → MainWindowConfig → widgets.header).
 """
 
 from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("PyQt5", reason="FrontendConfig зависит от PyQt5 через widgets.header")
+pytest.importorskip("PySide6", reason="FrontendConfig зависит от PySide6 через widgets.header")
 
 from multiprocess_prototype_v3.frontend.configs.frontend_config import (  # noqa: E402
     FrontendConfig,

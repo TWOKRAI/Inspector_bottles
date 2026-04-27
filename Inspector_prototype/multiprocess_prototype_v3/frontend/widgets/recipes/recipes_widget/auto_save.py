@@ -1,6 +1,6 @@
 """RecipeAutoSave — debounce-запись рецепта в YAML с ротацией версий (Phase 1, Task 1.3).
 
-Pure-Python: использует `threading.Timer`, тестируется без PyQt5. Qt-адаптер живёт в
+Pure-Python: использует `threading.Timer`, тестируется без PySide6. Qt-адаптер живёт в
 `_recipe_panel_base.py` (Task 1.4) как отдельный класс `QtDebounceAdapter`.
 
 Контракт:

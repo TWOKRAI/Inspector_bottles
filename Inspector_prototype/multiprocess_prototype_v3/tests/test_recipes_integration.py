@@ -6,8 +6,8 @@
   значение отражается в RegistersManager и видно, на какой канал IPC оно должно уйти.
 
 Тест использует настоящий RegistersManager (create_registers) + FakeRecipeManager
-с реальным YAML через tempfile. PyQt5 требуется (presenter импортирует frontend_module);
-в dev-venv без PyQt5 тест пропускается.
+с реальным YAML через tempfile. PySide6 требуется (presenter импортирует frontend_module);
+в dev-venv без PySide6 тест пропускается.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("PyQt5", reason="presenter импортирует frontend_module.interfaces (тянет PyQt5)")
+pytest.importorskip("PySide6", reason="presenter импортирует frontend_module.interfaces (тянет PySide6)")
 
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext  # noqa: E402
 from multiprocess_prototype_v3.frontend.managers.recipe_manager import RecipeManager  # noqa: E402

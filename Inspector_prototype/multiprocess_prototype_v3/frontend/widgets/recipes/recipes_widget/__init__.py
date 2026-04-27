@@ -4,7 +4,7 @@
 Публичный API доступен через import, но Qt-зависимые сущности
 (`RegisterRecipePanelWidget`, `RegisterRecipePresenter`, `RegisterRecipeModel`)
 подгружаются лениво — это позволяет тестировать pure-Python ядро
-(`RecipeSlotComboModel`, `recipe_rows`, `RecipeSlotComboModel`) без PyQt5.
+(`RecipeSlotComboModel`, `recipe_rows`, `RecipeSlotComboModel`) без PySide6.
 """
 
 from __future__ import annotations

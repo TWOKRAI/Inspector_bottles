@@ -5,7 +5,7 @@
 Полоса табов: `tabs_setting` (TabItemConfig, TabsConfig, оболочки `recipes_tab/`,
 `recipes_settings_tab/`, …). Реэкспорт Qt-классов вкладок — **ленивый** (через
 `__getattr__`), чтобы pure-Python тестам (напр. `recipes_widget/slot_combo_model`)
-не требовать PyQt5 в окружении.
+не требовать PySide6 в окружении.
 """
 
 from __future__ import annotations

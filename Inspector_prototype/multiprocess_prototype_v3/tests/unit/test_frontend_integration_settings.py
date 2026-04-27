@@ -2,7 +2,7 @@
 """Unit-тесты FrontendAppContext.settings_profile_manager (Phase 0, Task 0.5).
 
 FrontendConfig.settings_profiles_path — в `test_frontend_config_settings_path.py`
-(требует PyQt5 из-за транзитивного импорта).
+(требует PySide6 из-за транзитивного импорта).
 """
 
 from __future__ import annotations

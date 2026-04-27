@@ -133,6 +133,7 @@
 - ## ADR-115: Публичный API пакета — lazy `ManagersConfig` / `SchemaBaseMapper`, реэкспорт схем шапки из `widgets`
 - ## ADR-116: SystemLauncher.wait_until_ready — детерминированное ожидание готовности системы
 - ## ADR-117: Единый ProcessStatus enum — унификация из трёх определений
+- ## ADR-118: `tabs_setting/` — оболочки вкладок vs. доменные группы (обсуждение)
 
 ---
 
@@ -1877,6 +1878,22 @@
   - R-12: изменён публичный контракт (новые значения UNRESPONSIVE, FAILED доступны через shared_resources_module). Backward compat сохранён через re-export.
   - `process_manager_module.ProcessStatus` (класс мониторинга) теперь `ProcessStatusMonitor` с backward compat алиасом.
   - Тест `test_types.py::TestProcessStatus::test_all_values_exist` в shared_resources_module обновлён: проверяет subset вместо exact set.
+
+---
+
+## ADR-118: `tabs_setting/` — оболочки вкладок vs. доменные группы (обсуждение)
+- Дата: 2026-04-27
+- Статус: обсуждение
+- Контекст: После реорганизации `frontend/widgets/` (Phase 1 widgets-reorg, см. [`docs/refactors/2026-04_widgets_reorg.md`](../../docs/refactors/2026-04_widgets_reorg.md)) виджеты сгруппированы по доменам: `chrome/`, `sources/`, `recipes/`, `processing/`, `settings/`, `pipeline/`. При этом сохранён плоский пакет **`tabs_setting/`** с подпакетами `recipes_tab/`, `recipes_settings_tab/`, `camera_tab/`, `processing_tab/`, `cropped_regions_tab/`, `post_processing_tab/`, `display_tab/`, `sources_tab/`. Доменная папка содержит фиче-виджет (`recipes_widget/`), а `tabs_setting/recipes_tab/` — тонкую оболочку вкладки, которая встраивает фиче-виджет. Возникает кажущийся дубликат «домен ↔ tabs_setting/X_tab/», и плоская структура `tabs_setting/` параллельна доменной.
+- Решение: **не принято**. Требуется выбор пользователя (см. варианты ниже). Текущая структура (плоский `tabs_setting/` с подпакетами оболочек) сохраняется до решения.
+- Альтернативы:
+  - **(A) Затянуть `tabs_setting/X_tab/` в соответствующий домен.** Например, `recipes/recipes_tab_shell/` рядом с `recipes/recipes_widget/`. **Pros:** одна папка = один домен, нет параллельной плоской структуры; **Cons:** `tabs_setting/` теряет роль агрегатора, фабрика вкладок (`tab_factory`) ссылается на 7+ доменных пакетов; `TabsConfig` становится «знающим» о всех доменах.
+  - **(B) Переименовать `tabs_setting/` → `tabs_registry/` + минимизировать содержимое — оставить только `tab_item_config.py`, `tabs_config.py`, `tab_factory.py`, реэкспорт.** Подпакеты-оболочки переезжают в домены (как в варианте A), но название передаёт смысл «реестр вкладок, а не их реализация». **Pros:** ясные роли; **Cons:** объём миграции = (A) + переименование пакета, нужно править все внешние импорты `from frontend.widgets.tabs_setting import ...`.
+  - **(C) Оставить как есть.** Зафиксировать в README (`tabs_setting/README.md` уже описывает) что плоская структура — осознанный выбор: оболочки вкладок ≠ фиче-виджеты, разные жизненные циклы, разные зависимости от `RegistersManager`. **Pros:** ноль работы, нет рисков регрессии; **Cons:** дубликат «recipes ↔ recipes_tab» остаётся когнитивной нагрузкой при первом знакомстве.
+- Причина отложить решение: оба «активных» варианта (A и B) — большой рефакторинг 4-8 часов, который не приносит функциональной ценности. Цена ошибки высока (затронет фабрику и каждую вкладку), а текущая структура работает. Варинт (C) — дешёвый, но требует фиксации в README/ADR. Решение — за пользователем после оценки ROI.
+- Связанные документы:
+  - [`docs/refactors/2026-04_widgets_reorg.md`](../../docs/refactors/2026-04_widgets_reorg.md) — Phase 1 widgets-reorg (выполнено).
+  - [`multiprocess_prototype_v3/plans/widgets_phase2_pyside6_cleanup.md`](../../multiprocess_prototype_v3/plans/widgets_phase2_pyside6_cleanup.md) — Phase 2 (текущая). Task 2.10 = этот ADR.
 
 ---
 

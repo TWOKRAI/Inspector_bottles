@@ -44,6 +44,7 @@ dependencies = [
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.24",
+    "pytest-qt>=4.4",   # qt_api = "pyside6", фикстура qtbot
     "ipykernel>=6.29",
     "aiosqlite>=0.20",  # для тестов async SQL-адаптера
 ]
@@ -66,8 +67,11 @@ NodeGraphQt = { git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git", rev = 
 testpaths = [
     "Inspector_prototype/multiprocess_framework/refactored",
     "Inspector_prototype/multiprocess_prototype/tests",
+    "Inspector_prototype/multiprocess_prototype_v3/tests",
+    "Inspector_prototype/multiprocess_prototype_v3/state_store/tests",
 ]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+qt_api = "pyside6"
