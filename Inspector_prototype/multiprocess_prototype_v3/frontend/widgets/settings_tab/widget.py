@@ -15,7 +15,6 @@ from typing import Any
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QFrame,
     QHBoxLayout,
-    QListWidget,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -39,6 +38,7 @@ from ..settings_recipe_widget.schemas import RecipesTabConfig
 from ..tabs_setting.recipes_settings_tab.schemas import SettingsTabConfig
 from ..view_mode_toggle import ViewModeToggle
 from .admin_section import AdminSectionWidget
+from .settings_nav_panel import SettingsNavigationPanel
 from .history_section import HistorySectionWidget
 from .prefs_store import KEY_SETTINGS_MODE, get_view_mode, set_view_mode
 from .system_section import SystemSettingsSectionWidget
@@ -124,14 +124,9 @@ class SettingsContainerWidget(BaseTab):
         h_layout = QHBoxLayout()
         layout.addLayout(h_layout)
 
-        # Список секций
-        self._list = QListWidget()
-        self._list.setFixedWidth(185)
-        self._list.addItem("Администрация")
-        self._list.addItem("Настройки системы")
-        self._list.addItem("Настройка интерфейса")
-        self._list.addItem("История")
-        h_layout.addWidget(self._list)
+        # Навигационная панель секций
+        self._nav = SettingsNavigationPanel()
+        h_layout.addWidget(self._nav)
 
         # Правая часть: toolbar + stack
         right = QFrame()
@@ -156,10 +151,8 @@ class SettingsContainerWidget(BaseTab):
         right_layout.addWidget(self._content_stack, 1)
         h_layout.addWidget(right, 1)
 
-        # Связи
-        self._list.currentRowChanged.connect(self._content_stack.setCurrentIndex)
-        # По умолчанию: "Настройка интерфейса"
-        self._list.setCurrentRow(2)
+        # Связи — DEFAULT_INDEX=2 уже установлен в SettingsNavigationPanel
+        self._nav.selection_changed.connect(self._content_stack.setCurrentIndex)
 
     def _on_mode_changed(self, mode: int) -> None:
         """Переключить режим + persistence (QSettings) для всех секций со set_mode."""
