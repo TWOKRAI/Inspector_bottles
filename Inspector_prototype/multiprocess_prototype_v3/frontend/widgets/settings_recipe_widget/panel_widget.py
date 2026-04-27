@@ -10,7 +10,7 @@ from multiprocess_prototype_v3.frontend.managers.app_recipe_aggregate import bui
 from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import RecipeManagerProtocol
 
 from .schemas import RecipesTabConfig
-from .._recipe_panel_base import RecipePanelBase
+from .._base.recipe_panel_base import RecipePanelBase
 from .model import AppRecipeModel
 from .presenter import AppRecipePresenter
 

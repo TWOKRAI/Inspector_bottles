@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
 
-from .._navigation_panel_base import NavigationPanelBase
+from .._base.navigation_panel_base import NavigationPanelBase
 
 
 class SettingsNavigationPanel(NavigationPanelBase):
