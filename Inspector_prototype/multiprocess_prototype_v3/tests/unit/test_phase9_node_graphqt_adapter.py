@@ -33,7 +33,7 @@ if str(_V3_ROOT) not in sys.path:
 from frontend.actions.builder import ActionBuilder  # noqa: E402
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
 from frontend.actions.schemas import ActionType  # noqa: E402
-from frontend.widgets.pipeline_tab.model import GraphEditorModel  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.canvas.model import GraphEditorModel  # noqa: E402
 from registers.pipeline.processing_node import NodeInput, ProcessingNode  # noqa: E402
 from registers.processor.catalog.port_types import (  # noqa: E402
     PORT_TYPE_DETECTIONS,
@@ -234,10 +234,10 @@ def _create_adapter(
 
     # Patch QObject.__init__ чтобы не требовать QApplication
     with patch(
-        "frontend.widgets.pipeline_tab.adapter.QtCore.QObject.__init__",
+        "frontend.widgets.pipeline.pipeline_tab.canvas.adapter.QtCore.QObject.__init__",
         return_value=None,
     ):
-        from frontend.widgets.pipeline_tab.adapter import NodeGraphQtAdapter
+        from frontend.widgets.pipeline.pipeline_tab.canvas.adapter import NodeGraphQtAdapter
 
         adapter = NodeGraphQtAdapter(
             graph=graph,

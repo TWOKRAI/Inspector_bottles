@@ -41,10 +41,10 @@ if "PyQt5" not in sys.modules:
 
 from frontend.actions.builder import ActionBuilder  # noqa: E402, I001
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
-from multiprocess_prototype_v3.frontend.widgets.pipeline_tab.auto_layout import (  # noqa: E402
+from multiprocess_prototype_v3.frontend.widgets.pipeline.pipeline_tab.canvas.auto_layout import (  # noqa: E402
     auto_layout,
 )
-from multiprocess_prototype_v3.frontend.widgets.pipeline_tab.linearity_check import (  # noqa: E402
+from multiprocess_prototype_v3.frontend.widgets.pipeline.pipeline_tab.canvas.linearity_check import (  # noqa: E402
     get_linearity_warning,
     is_linear,
 )

@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore, QtWidgets
 
 if TYPE_CHECKING:
-    from frontend.widgets.pipeline_tab.adapter import NodeGraphQtAdapter
-    from frontend.widgets.pipeline_tab.table_view import PipelineTableView
+    from frontend.widgets.pipeline.pipeline_tab.canvas.adapter import NodeGraphQtAdapter
+    from frontend.widgets.pipeline.pipeline_tab.views.table_view import PipelineTableView
 
 logger = logging.getLogger(__name__)
 

@@ -18,18 +18,18 @@ from typing import Any
 from PySide6 import QtWidgets
 
 from frontend.actions.bus import ActionBus
-from frontend.widgets.pipeline_tab.adapter import (
+from .canvas.adapter import (
     INSPECTOR_NODE_TYPE,
     NodeGraphQtAdapter,
 )
-from frontend.widgets.pipeline_tab.inspector_panel import InspectorPanel
-from frontend.widgets.pipeline_tab.library_palette import (
+from .inspector.inspector_panel import InspectorPanel
+from .library.library_palette import (
     LibraryPalette,
     install_palette_drop_target,
 )
-from frontend.widgets.pipeline_tab.model import GraphEditorModel
-from frontend.widgets.pipeline_tab.table_view import PipelineTableView
-from frontend.widgets.pipeline_tab.view_switch import PipelineViewSwitch
+from .canvas.model import GraphEditorModel
+from .views.table_view import PipelineTableView
+from .views.view_switch import PipelineViewSwitch
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class PipelineTabWidget(QtWidgets.QWidget):
         # 2. NodeGraph + регистрация InspectorBaseNode
         from NodeGraphQt import NodeGraph
 
-        from frontend.widgets.pipeline_tab.inspector_node import InspectorBaseNode
+        from .inspector.inspector_node import InspectorBaseNode
 
         self._graph = NodeGraph()
         self._graph.register_node(InspectorBaseNode)

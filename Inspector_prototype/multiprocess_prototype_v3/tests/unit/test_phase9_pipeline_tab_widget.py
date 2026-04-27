@@ -26,8 +26,8 @@ if str(_V3_ROOT) not in sys.path:
 from PySide6 import QtCore, QtWidgets  # noqa: E402
 
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
-from frontend.widgets.pipeline_tab.library_palette import MIME_TYPE  # noqa: E402
-from frontend.widgets.pipeline_tab.model import GraphEditorModel  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.library.library_palette import MIME_TYPE  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.canvas.model import GraphEditorModel  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -220,11 +220,11 @@ def pipeline_tab(qapp: QtWidgets.QApplication):
     with (
         patch("NodeGraphQt.NodeGraph", return_value=mock_graph),
         patch(
-            "frontend.widgets.pipeline_tab.inspector_node.InspectorBaseNode",
+            "frontend.widgets.pipeline.pipeline_tab.inspector.inspector_node.InspectorBaseNode",
             mock_inspector_node_cls,
         ),
     ):
-        from frontend.widgets.pipeline_tab.widget import PipelineTabWidget
+        from frontend.widgets.pipeline.pipeline_tab.widget import PipelineTabWidget
 
         tab = PipelineTabWidget(
             action_bus=bus,
@@ -252,21 +252,21 @@ class TestPipelineTabWidgetCreation:
 
     def test_palette_is_child(self, pipeline_tab):
         """LibraryPalette присутствует как дочерний виджет."""
-        from frontend.widgets.pipeline_tab.library_palette import LibraryPalette
+        from frontend.widgets.pipeline.pipeline_tab.library.library_palette import LibraryPalette
 
         children = pipeline_tab.findChildren(LibraryPalette)
         assert len(children) == 1, f"Ожидалась 1 LibraryPalette, найдено {len(children)}"
 
     def test_view_switch_is_child(self, pipeline_tab):
         """PipelineViewSwitch присутствует как дочерний виджет."""
-        from frontend.widgets.pipeline_tab.view_switch import PipelineViewSwitch
+        from frontend.widgets.pipeline.pipeline_tab.views.view_switch import PipelineViewSwitch
 
         children = pipeline_tab.findChildren(PipelineViewSwitch)
         assert len(children) == 1, f"Ожидался 1 PipelineViewSwitch, найдено {len(children)}"
 
     def test_inspector_is_child(self, pipeline_tab):
         """InspectorPanel присутствует как дочерний виджет."""
-        from frontend.widgets.pipeline_tab.inspector_panel import InspectorPanel
+        from frontend.widgets.pipeline.pipeline_tab.inspector.inspector_panel import InspectorPanel
 
         children = pipeline_tab.findChildren(InspectorPanel)
         assert len(children) == 1, f"Ожидался 1 InspectorPanel, найдено {len(children)}"
@@ -400,7 +400,7 @@ class TestDropTarget:
 
     def test_drop_target_accepts_correct_mime(self, pipeline_tab):
         """Drop target должен принимать MIME_TYPE."""
-        from frontend.widgets.pipeline_tab.library_palette import LibraryDropTarget
+        from frontend.widgets.pipeline.pipeline_tab.library.library_palette import LibraryDropTarget
 
         assert isinstance(pipeline_tab._drop_target, LibraryDropTarget)
         # Проверяем что drop target установлен как event filter на viewport

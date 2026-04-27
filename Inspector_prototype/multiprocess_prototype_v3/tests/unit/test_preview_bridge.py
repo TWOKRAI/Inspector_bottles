@@ -89,10 +89,10 @@ def _create_bridge(
 
     # Патчим QObject.__init__ и QTimer чтобы не требовать QApplication
     with patch(
-        "frontend.widgets.pipeline_tab.preview_bridge.QtCore.QObject.__init__",
+        "frontend.widgets.pipeline.pipeline_tab.bridges.preview_bridge.QtCore.QObject.__init__",
         return_value=None,
     ), patch(
-        "frontend.widgets.pipeline_tab.preview_bridge.QtCore.QTimer",
+        "frontend.widgets.pipeline.pipeline_tab.bridges.preview_bridge.QtCore.QTimer",
     ) as MockTimer:
         # QTimer mock — возвращает мок с start/stop/setInterval/timeout/connect
         timer_instances = []
@@ -106,7 +106,7 @@ def _create_bridge(
 
         MockTimer.side_effect = timer_factory
 
-        from frontend.widgets.pipeline_tab.preview_bridge import NodePreviewBridge
+        from frontend.widgets.pipeline.pipeline_tab.bridges.preview_bridge import NodePreviewBridge
 
         bridge = NodePreviewBridge(
             node=node,

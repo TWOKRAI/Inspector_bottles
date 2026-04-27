@@ -24,7 +24,7 @@ if str(_V3_ROOT) not in sys.path:
 
 from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
 
-from frontend.widgets.pipeline_tab.library_palette import (  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.library.library_palette import (  # noqa: E402
     CATEGORY_LABELS,
     CATEGORY_ORDER,
     MIME_TYPE,

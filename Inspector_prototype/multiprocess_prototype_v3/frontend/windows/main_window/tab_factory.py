@@ -80,7 +80,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 camera_registry=camera_registry,
             )
         if widget_key == "pipeline":
-            from multiprocess_prototype_v3.frontend.widgets.pipeline_tab.widget import (
+            from multiprocess_prototype_v3.frontend.widgets.pipeline.pipeline_tab.widget import (
                 PipelineTabWidget,
             )
 

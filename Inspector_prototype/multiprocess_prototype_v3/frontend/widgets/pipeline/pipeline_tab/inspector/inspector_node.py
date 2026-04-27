@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from NodeGraphQt import BaseNode
 from NodeGraphQt.qgraphics.node_base import NodeItem
 
-from frontend.widgets.pipeline_tab.constants import (
+from ..constants import (
     THUMBNAIL_HEIGHT,
     THUMBNAIL_WIDTH,
     THUMBNAIL_Z_OFFSET,

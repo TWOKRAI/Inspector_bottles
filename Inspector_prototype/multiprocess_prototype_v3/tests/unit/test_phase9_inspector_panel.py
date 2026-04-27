@@ -30,11 +30,11 @@ from frontend.actions.builder import ActionBuilder  # noqa: E402
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
 from frontend.actions.handlers.graph_handler import GraphActionHandler  # noqa: E402
 from frontend.actions.schemas import ActionType  # noqa: E402
-from frontend.widgets.pipeline_tab.model import GraphEditorModel  # noqa: E402
-from frontend.widgets.pipeline_tab.display_target_combo import DisplayTargetCombo  # noqa: E402
-from frontend.widgets.pipeline_tab.inspector_panel import InspectorPanel  # noqa: E402
-from frontend.widgets.pipeline_tab.params_form import ParamsForm  # noqa: E402
-from frontend.widgets.pipeline_tab.process_id_combo import ProcessIdCombo  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.canvas.model import GraphEditorModel  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.bridges.display_target_combo import DisplayTargetCombo  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.inspector.inspector_panel import InspectorPanel  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.inspector.params_form import ParamsForm  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.bridges.process_id_combo import ProcessIdCombo  # noqa: E402
 from multiprocess_framework.modules.data_schema_module import (  # noqa: E402
     FieldMeta,
     SchemaBase,
@@ -389,7 +389,7 @@ class TestProcessIdCombo:
 
         # Мокаем QInputDialog.getText
         monkeypatch.setattr(
-            "frontend.widgets.pipeline_tab.process_id_combo.QInputDialog.getText",
+            "frontend.widgets.pipeline.pipeline_tab.bridges.process_id_combo.QInputDialog.getText",
             lambda *args, **kwargs: ("new_proc", True),
         )
 
@@ -412,7 +412,7 @@ class TestProcessIdCombo:
         combo.process_id_changed.connect(lambda v: received.append(v))
 
         monkeypatch.setattr(
-            "frontend.widgets.pipeline_tab.process_id_combo.QInputDialog.getText",
+            "frontend.widgets.pipeline.pipeline_tab.bridges.process_id_combo.QInputDialog.getText",
             lambda *args, **kwargs: ("", False),
         )
 
@@ -484,7 +484,7 @@ class TestDisplayTargetCombo:
         combo.display_targets_changed.connect(lambda v: received.append(v))
 
         monkeypatch.setattr(
-            "frontend.widgets.pipeline_tab.display_target_combo.QInputDialog.getText",
+            "frontend.widgets.pipeline.pipeline_tab.bridges.display_target_combo.QInputDialog.getText",
             lambda *args, **kwargs: ("w_new", True),
         )
 

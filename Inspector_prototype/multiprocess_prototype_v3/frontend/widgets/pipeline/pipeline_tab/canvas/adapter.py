@@ -30,8 +30,8 @@ if TYPE_CHECKING:
     from NodeGraphQt import BaseNode, NodeGraph
 
     from frontend.actions.bus import ActionBus
-    from frontend.widgets.pipeline_tab.model import GraphEditorModel
-    from frontend.widgets.pipeline_tab.inspector_node import InspectorBaseNode
+    from frontend.widgets.pipeline.pipeline_tab.canvas.model import GraphEditorModel
+    from frontend.widgets.pipeline.pipeline_tab.inspector.inspector_node import InspectorBaseNode
     from registers.processor.catalog.schemas import ProcessingOperationDef
 
 logger = logging.getLogger(__name__)

@@ -80,10 +80,10 @@ def _make_inspector_node():
 
     # Создаём InspectorBaseNode с патчем NodeObject.__init__
     with patch(
-        "frontend.widgets.pipeline_tab.inspector_node.BaseNode.__init__",
+        "frontend.widgets.pipeline.pipeline_tab.inspector.inspector_node.BaseNode.__init__",
         return_value=None,
     ):
-        from frontend.widgets.pipeline_tab.inspector_node import InspectorBaseNode
+        from frontend.widgets.pipeline.pipeline_tab.inspector.inspector_node import InspectorBaseNode
 
         node = InspectorBaseNode()
 

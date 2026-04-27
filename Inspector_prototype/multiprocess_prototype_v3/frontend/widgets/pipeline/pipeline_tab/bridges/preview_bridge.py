@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtGui
 
-from frontend.widgets.pipeline_tab.constants import (
+from ..constants import (
     THUMBNAIL_HEIGHT,
     THUMBNAIL_UPDATE_INTERVAL_MS,
     THUMBNAIL_WIDTH,
@@ -37,7 +37,7 @@ from frontend.widgets.pipeline_tab.constants import (
 
 if TYPE_CHECKING:
     from frontend.managers.display_router import DisplayRouter
-    from frontend.widgets.pipeline_tab.inspector_node import InspectorBaseNode
+    from frontend.widgets.pipeline.pipeline_tab.inspector.inspector_node import InspectorBaseNode
 
 logger = logging.getLogger(__name__)
 

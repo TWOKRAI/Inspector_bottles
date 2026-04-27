@@ -41,8 +41,8 @@ from PySide6.QtCore import Qt  # noqa: E402
 from frontend.actions.builder import ActionBuilder  # noqa: E402
 from frontend.actions.default_bus_factory import create_default_action_bus  # noqa: E402
 from frontend.actions.schemas import ActionType  # noqa: E402
-from frontend.widgets.pipeline_tab.model import GraphEditorModel  # noqa: E402
-from frontend.widgets.pipeline_tab.table_view import (  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.canvas.model import GraphEditorModel  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.views.table_view import (  # noqa: E402
     COL_ENABLED,
     COL_HEADERS,
     COL_NAME,
@@ -51,7 +51,7 @@ from frontend.widgets.pipeline_tab.table_view import (  # noqa: E402
     COL_PROCESS_ID,
     PipelineTableView,
 )
-from frontend.widgets.pipeline_tab.view_switch import (  # noqa: E402
+from frontend.widgets.pipeline.pipeline_tab.views.view_switch import (  # noqa: E402
     MODE_GRAPH,
     MODE_TABLE,
     PipelineViewSwitch,

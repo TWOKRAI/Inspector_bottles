@@ -27,11 +27,11 @@ from PySide6.QtWidgets import (
 from frontend.actions.builder import ActionBuilder
 from frontend.actions.bus import ActionBus
 from frontend.actions.schemas import ActionType
-from frontend.widgets.pipeline_tab.model import GraphEditorModel
+from ..canvas.model import GraphEditorModel
 
-from .display_target_combo import DisplayTargetCombo
+from ..bridges.display_target_combo import DisplayTargetCombo
 from .params_form import ParamsForm
-from .process_id_combo import ProcessIdCombo
+from ..bridges.process_id_combo import ProcessIdCombo
 
 logger = logging.getLogger(__name__)
 

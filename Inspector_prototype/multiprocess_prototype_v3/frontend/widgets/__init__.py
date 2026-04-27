@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover — только для type-checkers
-    from .pipeline_tab.widget import PipelineTabWidget
+    from .pipeline.pipeline_tab.widget import PipelineTabWidget
     from .tabs_setting import (
         CameraTabUiConfig,
         CameraTabWidget,
@@ -64,7 +64,7 @@ def __getattr__(name: str) -> Any:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
     if name == "PipelineTabWidget":
-        from .pipeline_tab.widget import PipelineTabWidget
+        from .pipeline.pipeline_tab.widget import PipelineTabWidget
         return PipelineTabWidget
 
     from importlib import import_module
