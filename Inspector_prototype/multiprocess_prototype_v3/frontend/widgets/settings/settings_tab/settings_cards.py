@@ -21,7 +21,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     Signal,
 )
 
-from .._base.cards_field_factory import create_field_widget
+from ..._base.cards_field_factory import create_field_widget
 
 
 class SettingsCardsView(QWidget):

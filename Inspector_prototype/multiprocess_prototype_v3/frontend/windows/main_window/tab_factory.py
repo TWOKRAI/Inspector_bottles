@@ -15,7 +15,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
         DisplayTabWidget,
         RecipesTabWidget,
     )
-    from multiprocess_prototype_v3.frontend.widgets.settings_tab import SettingsContainerWidget
+    from multiprocess_prototype_v3.frontend.widgets.settings.settings_tab import SettingsContainerWidget
 
     registers_manager = ctx.registers_manager
     recipe_manager = ctx.recipe_manager

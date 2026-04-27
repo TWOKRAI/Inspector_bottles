@@ -24,7 +24,7 @@ def _recipe_and_processing_schema_classes() -> tuple[Type[SchemaBase], Type[Sche
 
 
 def _ui_preferences_schema_class() -> type[SchemaBase]:
-    from multiprocess_prototype_v3.frontend.widgets.settings_tab.ui_preferences_schema import (
+    from multiprocess_prototype_v3.frontend.widgets.settings.settings_tab.ui_preferences_schema import (
         UiPreferencesConfig,
     )
 

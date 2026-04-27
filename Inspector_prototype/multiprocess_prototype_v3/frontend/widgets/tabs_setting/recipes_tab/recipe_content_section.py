@@ -21,7 +21,7 @@ from ...recipes.recipes_widget.recipe_rows import (
     build_recipe_rows_from_snapshot,
 )
 from ...chrome.search_filter_bar import SearchFilterBar, apply_filter
-from ...settings_tab.settings_cards import SettingsCardsView
+from ...settings.settings_tab.settings_cards import SettingsCardsView
 
 
 class RecipeTableWrapper(QWidget):

@@ -20,7 +20,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QWidget,
 )
 
-from ..chrome.search_filter_bar import SearchFilterBar, apply_filter
+from ...chrome.search_filter_bar import SearchFilterBar, apply_filter
 from .settings_cards import SettingsCardsView
 
 
