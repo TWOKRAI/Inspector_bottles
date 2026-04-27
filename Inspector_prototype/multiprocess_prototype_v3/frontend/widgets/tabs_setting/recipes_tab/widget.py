@@ -2,21 +2,22 @@
 """
 RecipesTabWidget — вкладка рецептов.
 
-Левая полоса — кнопки сортов (визуальный выбор) + Сохранить / Применить /
-Копировать / Вставить.
-Справа — основная таблица регистров.
+Layout:
+  Слева  — RecipesSlotButtonsPanel (навигация по слотам)
+  Справа — GroupBox «Рецепт регистров»:
+             Row: Название + QLineEdit + кнопки действий + ViewModeToggle
+             RecipeContentSection (SearchFilterBar + Cards/Table)
 
 Поведение:
-- Клик по кнопке слота: register_panel.enter_preview(slot_id) — таблица
-  показывает snapshot YAML слота. Регистры не трогаются.
-- Редактирование в таблице: пишет в snapshot (presenter.apply_value_cell в
-  preview-режиме). Auto-save отключён — нужно явное «Сохранить».
-- Сохранить: confirm-диалог → recipe_manager.save_slot.
-- Применить: confirm-диалог → save_slot + load_recipe_to_registers; после
-  apply подсветка applied переезжает на этот слот, preview сбрасывается.
-- Копировать: snapshot текущего слота → JSON → системный clipboard.
-- Вставить: clipboard JSON → recipe_manager.save_slot(selected) → перечитать
-  preview.
+- Клик по слоту в левой панели → preview из YAML (или live для #0).
+- Название редактируется в QLineEdit → обновляет label в левой панели.
+- Сохранить: confirm → recipe_manager.save_slot.
+- Применить: confirm → save + load_recipe_to_registers.
+- Копировать/Вставить: clipboard JSON.
+
+Reparenting-хак удалён. Вместо него — _BareRegisterRecipePanel,
+который переопределяет _arrange_default_layout() и не строит
+QGroupBox. Виджеты доступны через self._tree, self._btn_save и т.д.
 """
 
 from __future__ import annotations
@@ -26,14 +27,22 @@ from collections.abc import Callable
 from typing import Any
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QGroupBox,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
     Signal,
 )
-from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
-from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
+from multiprocess_framework.modules.frontend_module.core.schema_config import (
+    coerce_schema_config,
+)
+from multiprocess_framework.modules.frontend_module.interfaces import (
+    IRegistersManagerGui,
+)
 from multiprocess_framework.modules.frontend_module.widgets.tabs import (
     BaseTab,
     RegisterBindingContext,
@@ -42,22 +51,43 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import (
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QMessageBox
 
-from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext
+from multiprocess_prototype_v3.frontend.managers.access_context import (
+    AccessContext,
+)
 from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import (
     RecipeManagerProtocol,
 )
-from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
+from multiprocess_prototype_v3.frontend.touch_keyboard_bind import (
+    merge_touch_keyboard_dicts,
+)
 
 from ...recipes_slot_buttons import RecipesSlotButtonsPanel
 from ...recipes_widget import RegisterRecipePanelWidget as RegisterRecipePanel
-from ...search_filter_bar import SearchFilterBar
 from ...settings_recipe_widget.schemas import RecipesTabConfig
+from ...settings_tab.prefs_store import (
+    KEY_RECIPES_MODE,
+    get_view_mode,
+    set_view_mode,
+)
+from ...view_mode_toggle import ViewModeToggle
+from .recipe_content_section import RecipeContentSection
 
-_SLOT_PANEL_WIDTH = 170
+_SLOT_PANEL_WIDTH = 200
+
+
+class _BareRegisterRecipePanel(RegisterRecipePanel):
+    """Режим без auto-layout — виджеты создаются, но layout
+    строит RecipesTabWidget. Все виджеты доступны как self._tree,
+    self._btn_save, self._btn_load, self._btn_default, self._slot_combo.
+    """
+
+    def _arrange_default_layout(self) -> None:
+        # Не строим QGroupBox — пустой layout
+        QVBoxLayout(self)
 
 
 class RecipesTabWidget(BaseTab):
-    """Вкладка «Рецепты»: слот-кнопки + таблица параметров (preview слота)."""
+    """Вкладка «Рецепты»: список слотов + GroupBox с таблицей и кнопками."""
 
     recipe_load_requested = Signal(int)
     recipe_save_requested = Signal(int)
@@ -84,15 +114,21 @@ class RecipesTabWidget(BaseTab):
         self._access_ctx = (
             recipe_access
             if isinstance(recipe_access, AccessContext)
-            else AccessContext.from_dict(recipe_access if isinstance(recipe_access, dict) else None)
+            else AccessContext.from_dict(
+                recipe_access
+                if isinstance(recipe_access, dict)
+                else None,
+            )
         )
         self._on_recipe_applied = on_recipe_applied
         self._on_recipe_saved = on_recipe_saved
         self._touch_keyboard = merge_touch_keyboard_dicts(
-            touch_keyboard, getattr(self._ui, "touch_keyboard", None)
+            touch_keyboard,
+            getattr(self._ui, "touch_keyboard", None),
         )
-        self._register_panel: RegisterRecipePanel | None = None
+        self._register_panel: _BareRegisterRecipePanel | None = None
         self._slot_panel: RecipesSlotButtonsPanel | None = None
+        self._content_section: RecipeContentSection | None = None
         self._init_ui()
 
     @property
@@ -104,19 +140,17 @@ class RecipesTabWidget(BaseTab):
         binding = RegisterBindingContext(rm=self._registers_manager)
 
         if not binding.can_bind:
-            layout.addWidget(create_registers_placeholder("Рецепты"))
+            layout.addWidget(
+                create_registers_placeholder("Рецепты"),
+            )
             layout.addStretch()
             return
 
         rm = binding.rm
         assert rm is not None
 
-        self._search_bar = SearchFilterBar()
-        self._search_bar.filter_changed.connect(self._on_filter_changed)
-        self._search_bar.sort_changed.connect(self._on_sort_changed)
-        layout.addWidget(self._search_bar)
-
-        self._register_panel = RegisterRecipePanel(
+        # --- Создаём _BareRegisterRecipePanel (виджеты без auto-layout) ---
+        self._register_panel = _BareRegisterRecipePanel(
             rm=rm,
             ui=self._ui,
             recipe_manager=self._recipe_manager,
@@ -126,27 +160,100 @@ class RecipesTabWidget(BaseTab):
             on_recipe_applied=self._on_recipe_applied,
             on_recipe_saved=self._on_recipe_saved,
         )
-        self._register_panel.load_requested.connect(self.recipe_load_requested.emit)
-        self._register_panel.save_requested.connect(self.recipe_save_requested.emit)
-        self._register_panel.default_requested.connect(self.recipe_default_requested.emit)
+        self._register_panel.load_requested.connect(
+            self.recipe_load_requested.emit,
+        )
+        self._register_panel.save_requested.connect(
+            self.recipe_save_requested.emit,
+        )
+        self._register_panel.default_requested.connect(
+            self.recipe_default_requested.emit,
+        )
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        inner = QWidget()
-        scroll.setWidget(inner)
-        v = QVBoxLayout(inner)
-        v.addWidget(self._register_panel, 1)
+        # Скрываем элементы, нужные только presenter'у
+        self._register_panel._btn_load.hide()
+        self._register_panel._slot_combo.hide()
 
+        # --- Строим GroupBox «Рецепт регистров» ---
+        box = QGroupBox("Рецепт регистров")
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(8, 12, 8, 8)
+        box_layout.setSpacing(6)
+
+        # Row 1: Название + QLineEdit + кнопки действий + ViewModeToggle
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        row1.addWidget(QLabel("Название:"))
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("Название рецепта")
+        self._name_edit.setMinimumWidth(140)
+        self._name_edit.textChanged.connect(self._on_name_changed)
+        row1.addWidget(self._name_edit, 1)
+        row1.addSpacing(12)
+
+        # Кнопки действий
+        self._btn_apply = QPushButton("Применить")
+        self._btn_apply.setToolTip(
+            "Применить параметры к текущим регистрам",
+        )
+        self._btn_apply.clicked.connect(self._on_apply_clicked)
+        row1.addWidget(self._btn_apply)
+
+        btn_save = self._register_panel._btn_save
+        btn_save.setText("Сохранить")
+        row1.addWidget(btn_save)
+
+        row1.addWidget(self._register_panel._btn_default)
+
+        self._btn_copy = QPushButton("Копир.")
+        self._btn_copy.setToolTip("Копировать параметры в буфер")
+        self._btn_copy.clicked.connect(self._on_copy_clicked)
+        row1.addWidget(self._btn_copy)
+
+        self._btn_paste = QPushButton("Вставить")
+        self._btn_paste.setToolTip("Вставить параметры из буфера")
+        self._btn_paste.clicked.connect(self._on_paste_clicked)
+        row1.addWidget(self._btn_paste)
+
+        # ViewModeToggle — справа в toolbar
+        initial_mode = get_view_mode(KEY_RECIPES_MODE, default=1)
+        self._view_toggle = ViewModeToggle()
+        self._view_toggle.set_mode(initial_mode)
+        self._view_toggle.mode_changed.connect(self._on_mode_changed)
+        row1.addWidget(self._view_toggle)
+
+        box_layout.addLayout(row1)
+
+        # RecipeContentSection (SearchFilterBar + Cards/Table)
+        self._content_section = RecipeContentSection(
+            register_panel=self._register_panel,
+            initial_mode=initial_mode,
+        )
+        box_layout.addWidget(self._content_section, 1)
+
+        # Скрытые виджеты в layout панели (чтобы presenter работал)
+        panel_layout = self._register_panel.layout()
+        if panel_layout is not None:
+            panel_layout.addWidget(box)
+            panel_layout.addWidget(self._register_panel._slot_combo)
+            panel_layout.addWidget(self._register_panel._btn_load)
+
+        # --- Левая панель: список слотов ---
         self._slot_panel = RecipesSlotButtonsPanel(
             slot_min=self._ui.recipe_index_min,
             slot_max=self._ui.recipe_index_max,
         )
         self._slot_panel.setFixedWidth(_SLOT_PANEL_WIDTH)
         self._slot_panel.slot_selected.connect(self._on_slot_selected)
-        self._slot_panel.slot_apply_requested.connect(self._on_slot_apply)
-        self._slot_panel.slot_save_requested.connect(self._on_slot_save)
-        self._slot_panel.slot_copy_requested.connect(self._on_slot_copy)
-        self._slot_panel.slot_paste_requested.connect(self._on_slot_paste)
+
+        # --- Общий layout: слева список, справа scroll с панелью ---
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(self._register_panel, 1)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -155,83 +262,132 @@ class RecipesTabWidget(BaseTab):
         body.addWidget(scroll, 1)
         layout.addLayout(body, 1)
 
-        # Подсветить applied + сразу зайти в preview этого слота
+        # --- Начальное состояние ---
         rm_obj = self._recipe_manager
-        if rm_obj is not None and hasattr(rm_obj, "get_current_register_recipe_number"):
+        if rm_obj is not None and hasattr(
+            rm_obj, "get_current_register_recipe_number",
+        ):
             try:
-                applied = int(rm_obj.get_current_register_recipe_number())
+                applied = int(
+                    rm_obj.get_current_register_recipe_number(),
+                )
                 self._slot_panel.set_applied_slot(applied)
                 self._slot_panel.set_selected_slot(applied)
-                self._register_panel.enter_preview(applied)
+                self._sync_combo_to_slot(applied)
+                if applied == 0:
+                    self._register_panel.refresh_from_registers()
+                else:
+                    self._register_panel.enter_preview(applied)
+                self._update_name_edit(applied)
             except (TypeError, ValueError):
                 pass
 
-        self._filter_text = ""
-        self._filter_category = ""
-        self._sort_field = ""
-        self._sort_asc = True
+    # --------------------------------------------------------------
+    # ViewModeToggle
+    # --------------------------------------------------------------
+
+    def _on_mode_changed(self, mode: int) -> None:
+        """Переключение cards/table через ViewModeToggle."""
+        set_view_mode(KEY_RECIPES_MODE, mode)
+        if self._content_section is not None:
+            self._content_section.set_mode(mode)
 
     # --------------------------------------------------------------
     # Slot panel handlers
     # --------------------------------------------------------------
 
     def _on_slot_selected(self, slot_id: int) -> None:
-        """Клик по слоту → таблица показывает snapshot слота (preview)."""
+        """Клик по слоту → показать параметры.
+        #0 — живые регистры, остальные — preview из YAML."""
         if self._register_panel is not None:
-            self._register_panel.enter_preview(slot_id)
+            self._sync_combo_to_slot(slot_id)
+            if slot_id == 0:
+                self._register_panel.exit_preview()
+                self._register_panel.refresh_from_registers()
+            else:
+                self._register_panel.enter_preview(slot_id)
+        self._update_name_edit(slot_id)
 
-    def _on_slot_apply(self, slot_id: int) -> None:
-        """Применить slot к registers (с подтверждением)."""
-        if self._register_panel is None:
+    def _sync_combo_to_slot(self, slot_id: int) -> None:
+        """Синхронизировать скрытый ComboBox с выбранным слотом
+        (для presenter)."""
+        if self._register_panel is not None:
+            self._register_panel.set_slot_index(slot_id)
+
+    def _update_name_edit(self, slot_id: int) -> None:
+        """Обновить QLineEdit «Название» при смене слота."""
+        if not hasattr(self, "_name_edit") or self._slot_panel is None:
             return
-        # Гарантируем preview активен (если пользователь не кликал по слоту — войдём)
+        name = self._slot_panel.get_slot_name(slot_id)
+        self._name_edit.blockSignals(True)
+        self._name_edit.setText(name)
+        self._name_edit.blockSignals(False)
+
+    def _on_name_changed(self, text: str) -> None:
+        """Пользователь редактирует название → обновить левую панель."""
+        if self._slot_panel is None:
+            return
+        slot_id = self._slot_panel.selected_slot()
+        if slot_id is not None:
+            self._slot_panel.set_slot_name(slot_id, text)
+
+    # --------------------------------------------------------------
+    # Action button handlers
+    # --------------------------------------------------------------
+
+    def _on_apply_clicked(self) -> None:
+        """Применить выбранный рецепт к регистрам."""
+        if self._slot_panel is None or self._register_panel is None:
+            return
+        slot_id = self._slot_panel.selected_slot()
+        if slot_id is None:
+            return
+        if slot_id == 0:
+            return  # #0 уже отражает текущие регистры
         if self._register_panel.preview_slot_id() != slot_id:
             self._register_panel.enter_preview(slot_id)
         if not self._confirm(
             "Применить рецепт",
-            f"Применить параметры слота #{slot_id} к текущим регистрам?\n"
-            "Это перезапишет YAML файл слота отредактированным snapshot.",
+            f"Применить параметры слота #{slot_id} к текущим "
+            "регистрам?\nЭто перезапишет YAML файл слота "
+            "отредактированным snapshot.",
         ):
             return
         ok = self._register_panel.apply_preview_to_registers()
         if not ok:
-            self._warn(f"Не удалось применить слот #{slot_id}.")
+            self._warn(
+                f"Не удалось применить слот #{slot_id}.",
+            )
             return
-        if self._slot_panel is not None:
-            self._slot_panel.set_applied_slot(slot_id)
-            # После apply мы вышли из preview — снова войдём, чтобы таблица
-            # показывала ту же картину (registers == snapshot).
-            self._register_panel.enter_preview(slot_id)
+        self._slot_panel.set_applied_slot(slot_id)
+        self._register_panel.enter_preview(slot_id)
         self.recipe_load_requested.emit(slot_id)
 
-    def _on_slot_save(self, slot_id: int) -> None:
-        """Сохранить отредактированный snapshot в YAML (с подтверждением)."""
-        if self._register_panel is None:
+    def _on_copy_clicked(self) -> None:
+        if self._slot_panel is None:
             return
-        if self._register_panel.preview_slot_id() != slot_id:
-            self._register_panel.enter_preview(slot_id)
-        if not self._confirm(
-            "Сохранить рецепт",
-            f"Сохранить отредактированные параметры в YAML слота #{slot_id}?",
-        ):
+        slot_id = self._slot_panel.selected_slot()
+        if slot_id is None:
             return
-        ok = self._register_panel.save_preview_to_yaml()
-        if not ok:
-            self._warn(f"Не удалось сохранить слот #{slot_id}.")
-            return
-        self.recipe_save_requested.emit(slot_id)
-
-    def _on_slot_copy(self, slot_id: int) -> None:
         snapshot = self._read_snapshot(slot_id)
         if snapshot is None:
-            self._warn(f"Слот #{slot_id} пуст — нечего копировать.")
+            self._warn(
+                f"Слот #{slot_id} пуст — нечего копировать.",
+            )
             return
-        text = json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)
+        text = json.dumps(
+            snapshot, ensure_ascii=False, indent=2, default=str,
+        )
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(text)
 
-    def _on_slot_paste(self, slot_id: int) -> None:
+    def _on_paste_clicked(self) -> None:
+        if self._slot_panel is None:
+            return
+        slot_id = self._slot_panel.selected_slot()
+        if slot_id is None:
+            return
         clipboard = QGuiApplication.clipboard()
         if clipboard is None:
             return
@@ -242,19 +398,24 @@ class RecipesTabWidget(BaseTab):
         try:
             data = json.loads(text)
         except (TypeError, ValueError) as exc:
-            self._warn(f"Буфер не содержит валидный JSON-снапшот:\n{exc}")
+            self._warn(
+                f"Буфер не содержит валидный JSON-снапшот:\n{exc}",
+            )
             return
         if not isinstance(data, dict):
             self._warn("Снапшот должен быть объектом (dict).")
             return
         rm_obj = self._recipe_manager
         if rm_obj is None or not hasattr(rm_obj, "save_slot"):
-            self._warn("recipe_manager не поддерживает save_slot.")
+            self._warn(
+                "recipe_manager не поддерживает save_slot.",
+            )
             return
         if not rm_obj.save_slot(str(slot_id), data):
-            self._warn(f"Не удалось сохранить слот #{slot_id}.")
+            self._warn(
+                f"Не удалось сохранить слот #{slot_id}.",
+            )
             return
-        # Перечитать preview после вставки
         if self._register_panel is not None:
             self._register_panel.enter_preview(slot_id)
 
@@ -262,7 +423,9 @@ class RecipesTabWidget(BaseTab):
     # Helpers
     # --------------------------------------------------------------
 
-    def _read_snapshot(self, slot_id: int) -> dict[str, Any] | None:
+    def _read_snapshot(
+        self, slot_id: int,
+    ) -> dict[str, Any] | None:
         rm_obj = self._recipe_manager
         if rm_obj is None or not hasattr(rm_obj, "get_slot"):
             return None
@@ -276,7 +439,8 @@ class RecipesTabWidget(BaseTab):
             self,
             title,
             text,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         return reply == QMessageBox.StandardButton.Yes
@@ -285,49 +449,8 @@ class RecipesTabWidget(BaseTab):
         QMessageBox.warning(self, "Рецепты", text)
 
     # --------------------------------------------------------------
-    # Filter
+    # Public API
     # --------------------------------------------------------------
-
-    def _on_filter_changed(self, text: str, category: str) -> None:
-        self._filter_text = text
-        self._filter_category = category
-        if self._register_panel is not None:
-            tree = getattr(self._register_panel, "_tree", None)
-            if tree is not None:
-                self._apply_tree_filter(tree, text, category)
-
-    def _on_sort_changed(self, sort_field: str, asc: bool) -> None:
-        self._sort_field = sort_field
-        self._sort_asc = asc
-
-    def _apply_tree_filter(self, tree: QWidget, text: str, category: str) -> None:
-        root = tree.invisibleRootItem()
-        text_lower = text.lower()
-
-        for gi in range(root.childCount()):
-            group_item = root.child(gi)
-            group_name = group_item.text(0)
-
-            if category and group_name != category:
-                group_item.setHidden(True)
-                continue
-
-            visible_children = 0
-            for ci in range(group_item.childCount()):
-                child = group_item.child(ci)
-                if not text:
-                    child.setHidden(False)
-                    visible_children += 1
-                    continue
-
-                col0 = child.text(0).lower()
-                col2 = child.text(2).lower() if child.columnCount() > 2 else ""
-                matches = text_lower in col0 or text_lower in col2
-                child.setHidden(not matches)
-                if matches:
-                    visible_children += 1
-
-            group_item.setHidden(visible_children == 0)
 
     def refresh_from_registers(self) -> None:
         if self._register_panel is not None:

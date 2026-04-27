@@ -15,18 +15,18 @@ from .tab_item_config import TabItemConfig
 
 
 def _default_tabs() -> list[TabItemConfig]:
-    """Вкладки из feature-пакетов: recipes, settings, processing, post_processing, cropped_regions, camera, display."""
-    from ..cropped_regions_widget.schemas import default_tab_item as _crop
+    """Вкладки: settings, recipes, sources (camera+regions), pipeline, display."""
     from ..settings_recipe_widget.schemas import default_tab_item as _rec
-    from .camera_tab.schemas import default_tab_item as _cam
     from .display_tab.schemas import default_tab_item as _disp
-    # pipeline_tab заменил graph_editor_tab (Task 9.13)
-    _graph = lambda: TabItemConfig(id="pipeline", widget="pipeline", title="Pipeline")
-    from .post_processing_tab.schemas import default_tab_item as _post
-    from .processing_tab.schemas import default_tab_item as _proc
     from .recipes_settings_tab.schemas import default_tab_item as _set
 
-    return [_set(), _rec(), _proc(), _post(), _crop(), _graph(), _cam(), _disp()]
+    def _sources() -> TabItemConfig:
+        return TabItemConfig(id="sources", widget="sources", title="Источники")
+
+    def _graph() -> TabItemConfig:
+        return TabItemConfig(id="pipeline", widget="pipeline", title="Pipeline")
+
+    return [_set(), _rec(), _sources(), _graph(), _disp()]
 
 
 @register_schema("TabsConfig")

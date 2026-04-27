@@ -168,9 +168,14 @@ class FrontendLauncher:
         process._window_manager_display = window_manager_display
         process._throttle_mw = throttle_mw
 
+        from registers.processor.catalog.loader import load_catalog as _load_catalog
+
         from multiprocess_prototype_v3.frontend.actions.default_bus_factory import (
             create_default_action_bus,
         )
+
+        _catalog_path = Path(__file__).resolve().parent.parent / "data" / "processing_catalog.yaml"
+        processing_catalog = _load_catalog(_catalog_path)
 
         app_ctx = FrontendAppContext(
             config=config,
@@ -185,6 +190,7 @@ class FrontendLauncher:
             extras={
                 "window_manager": window_manager_display,
                 "display_router": display_router,
+                "processing_catalog": processing_catalog,
             },
         )
         tab_widget_factory = create_tab_widget_factory(app_ctx)

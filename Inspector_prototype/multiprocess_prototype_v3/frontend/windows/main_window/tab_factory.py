@@ -12,11 +12,7 @@ TabWidgetFactory = Callable[[str, dict], Any]
 def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
     """Собрать фабрику вкладок из явного контекста (config + регистры + рецепты + камера)."""
     from multiprocess_prototype_v3.frontend.widgets import (
-        CameraTabWidget,
-        CroppedRegionsTabWidget,
         DisplayTabWidget,
-        PostProcessingTabWidget,
-        ProcessingTabWidget,
         RecipesTabWidget,
     )
     from multiprocess_prototype_v3.frontend.widgets.settings_tab import SettingsContainerWidget
@@ -50,34 +46,21 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 settings_profile_manager=ctx.settings_profile_manager,
                 action_bus=ctx.action_bus,
             )
-        if widget_key == "processing":
-            return ProcessingTabWidget(
-                registers_manager=registers_manager,
-                touch_keyboard=tk,
+        if widget_key == "sources":
+            from multiprocess_prototype_v3.frontend.widgets.tabs_setting.sources_tab.widget import (
+                SourcesTabWidget,
             )
-        if widget_key == "post_processing":
-            return PostProcessingTabWidget(
-                registers_manager=registers_manager,
-                ui=ctx.get_post_processing_tab_ui(),
-                touch_keyboard=tk,
-                action_bus=ctx.action_bus,
-            )
-        if widget_key == "cropped_regions":
-            return CroppedRegionsTabWidget(
-                registers_manager=registers_manager,
-                ui=ctx.get_cropped_regions_tab_ui(),
-                touch_keyboard=tk,
-                camera_registry=ctx.camera_registry,
-                action_bus=ctx.action_bus,
-            )
-        if widget_key == "camera":
-            return CameraTabWidget(
+
+            return SourcesTabWidget(
                 camera_type=camera_type,
                 registers_manager=registers_manager,
                 callbacks_map=camera_callbacks_map,
                 command_handler=ctx.command_handler,
-                ui=ctx.get_camera_tab_ui(),
+                camera_tab_ui=ctx.get_camera_tab_ui(),
+                post_processing_ui=ctx.get_post_processing_tab_ui(),
                 touch_keyboard=tk,
+                camera_registry=ctx.camera_registry,
+                action_bus=ctx.action_bus,
             )
         if widget_key == "display":
             # Менеджеры display доступны через extras контекста
@@ -101,8 +84,7 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 PipelineTabWidget,
             )
 
-            # TODO: загружать processing_catalog через app_context (Phase 10+).
-            # Сейчас используем extras fallback или пустой dict.
+            # Каталог загружается в launcher.py и передаётся через extras
             catalog = ctx.extras.get("processing_catalog", {}) or {}
             return PipelineTabWidget(
                 action_bus=ctx.action_bus,

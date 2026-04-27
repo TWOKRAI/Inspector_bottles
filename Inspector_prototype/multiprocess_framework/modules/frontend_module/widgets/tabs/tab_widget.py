@@ -30,6 +30,10 @@ class BaseTab(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        # QSS-стилизация фона: TabWidget.add_tab() оборачивает вкладку в QScrollArea
+        # с transparent background. Без WA_StyledBackground вкладка наследует
+        # прозрачность и QSS-правила не могут закрасить фон.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
     def on_tab_selected(self) -> None:
         pass
@@ -53,7 +57,11 @@ class TabWidget(QWidget):
         self._tab_widget = QTabWidget()
         self._tab_widget.setStyleSheet(
             "QTabBar::tab { height: 35px; width: 95px; }"
-            "QTabWidget::pane { border: 1px solid #ccc; }"
+            "QTabWidget::pane {"
+            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            "    stop:0 #3b414d, stop:1 #333844);"
+            "  border: 1px solid rgba(0, 0, 0, 0.5);"
+            "}"
         )
         self._toggle_btn = QPushButton("Скрыть")
         self._toggle_btn.setFixedHeight(35)
@@ -94,7 +102,12 @@ class TabWidget(QWidget):
         if wrap_scroll:
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
-            scroll.setStyleSheet("QScrollBar:vertical { width: 40px; }")
+            scroll.setStyleSheet(
+                "QScrollArea { background: transparent; border: none; }"
+                "QScrollBar:vertical { width: 40px; }"
+            )
+            scroll.viewport().setAutoFillBackground(False)
+            widget.setAutoFillBackground(False)  # контент не рисует белый фон поверх pane
             scroll.setWidget(widget)
             content_widget = scroll
         else:

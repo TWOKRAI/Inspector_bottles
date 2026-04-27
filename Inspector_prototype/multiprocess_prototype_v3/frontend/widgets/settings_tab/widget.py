@@ -38,9 +38,9 @@ from ..settings_recipe_widget.schemas import RecipesTabConfig
 from ..tabs_setting.recipes_settings_tab.schemas import SettingsTabConfig
 from ..view_mode_toggle import ViewModeToggle
 from .admin_section import AdminSectionWidget
-from .settings_nav_panel import SettingsNavigationPanel
 from .history_section import HistorySectionWidget
 from .prefs_store import KEY_SETTINGS_MODE, get_view_mode, set_view_mode
+from .settings_nav_panel import SettingsNavigationPanel
 from .system_section import SystemSettingsSectionWidget
 from .ui_section import UiSettingsSectionWidget
 

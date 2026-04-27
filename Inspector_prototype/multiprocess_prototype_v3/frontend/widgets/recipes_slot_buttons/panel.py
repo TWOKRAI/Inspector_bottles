@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QSize
-
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QWidget,
     Signal,
@@ -52,9 +50,6 @@ class RecipesSlotButtonsPanel(NavigationPanelBase):
         # Пользовательские имена слотов (slot_id → str)
         self._custom_names: dict[int, str] = {}
 
-        # Применяем расширенный стиль поверх базового
-        self._list.setStyleSheet(self._STYLE)
-
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -64,8 +59,7 @@ class RecipesSlotButtonsPanel(NavigationPanelBase):
         self._row_by_slot_id: dict[int, int] = {}
 
         for row_idx, slot_id in enumerate(range(self._slot_min, self._slot_max + 1)):
-            item = self._add_item(self._display_label(slot_id))
-            item.setSizeHint(QSize(0, 40))
+            self._add_item(self._display_label(slot_id))
             self._slot_id_by_row[row_idx] = slot_id
             self._row_by_slot_id[slot_id] = row_idx
 

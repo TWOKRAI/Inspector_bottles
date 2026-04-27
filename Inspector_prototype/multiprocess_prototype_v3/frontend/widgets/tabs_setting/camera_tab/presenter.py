@@ -137,13 +137,12 @@ class CameraTabPresenter(TabPresenterBase[CameraTabView, CameraTabUiConfig]):
     # ------------------------------------------------------------------
 
     def _populate_camera_selector(self) -> None:
-        """Заполнить ComboBox камер из реестра."""
+        """Заполнить ComboBox камер из реестра (CameraStateAdapter)."""
         if self._camera_registry is None:
             return
 
-        entries = self._camera_registry.all_entries()
-        self._camera_id_list = [e.camera_id for e in entries]
-        items = [f"camera_{e.camera_id}: {e.camera_type}" for e in entries]
+        self._camera_id_list = self._camera_registry.camera_ids()
+        items = [f"camera_{cid}" for cid in self._camera_id_list]
         self._view.populate_camera_selector(items, block_signals=True)
 
     def _refresh_camera_info(self) -> None:
@@ -151,25 +150,28 @@ class CameraTabPresenter(TabPresenterBase[CameraTabView, CameraTabUiConfig]):
         if self._camera_registry is None or self._selected_camera_id < 0:
             return
 
-        entry = self._camera_registry.get_entry(self._selected_camera_id)
-        if entry is None:
+        state = self._camera_registry.get_camera_state(self._selected_camera_id)
+        if not state:
             return
 
-        color = _STATUS_COLORS.get(entry.status, "gray")
-        self._view.set_camera_status_text(entry.status.capitalize(), color)
-        self._view.set_camera_fps_text(f"FPS: {entry.fps:.1f}")
-        self._view.set_camera_drops_text(f"Drops: {entry.drops_count}")
+        status = str(state.get("status", "stopped"))
+        fps = float(state.get("actual_fps", 0.0))
+        drops = int(state.get("drops_count", 0))
+
+        color = _STATUS_COLORS.get(status, "gray")
+        self._view.set_camera_status_text(status.capitalize(), color)
+        self._view.set_camera_fps_text(f"FPS: {fps:.1f}")
+        self._view.set_camera_drops_text(f"Drops: {drops}")
 
     def _on_registry_changed(self, camera_id: int, field: str, value: Any) -> None:
-        """Callback из CameraRegistry — обновить UI, если изменилась выбранная камера."""
+        """Callback из CameraStateAdapter — обновить UI, если изменилась выбранная камера."""
         if camera_id != self._selected_camera_id:
             return
 
-        # Обновляем только изменившееся поле для производительности
         if field == "status":
             color = _STATUS_COLORS.get(str(value), "gray")
             self._view.set_camera_status_text(str(value).capitalize(), color)
-        elif field == "fps":
+        elif field == "actual_fps":
             self._view.set_camera_fps_text(f"FPS: {float(value):.1f}")
         elif field == "drops_count":
             self._view.set_camera_drops_text(f"Drops: {int(value)}")

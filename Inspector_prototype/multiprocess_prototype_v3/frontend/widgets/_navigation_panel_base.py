@@ -3,15 +3,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QListWidgetItem
-
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QListWidget,
     QVBoxLayout,
     QWidget,
     Signal,
 )
+from PySide6.QtCore import QSize
+from PySide6.QtWidgets import QListWidgetItem
 
 
 class NavigationPanelBase(QWidget):

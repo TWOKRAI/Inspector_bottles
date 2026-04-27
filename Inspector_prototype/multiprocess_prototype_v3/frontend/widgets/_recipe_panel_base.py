@@ -16,7 +16,9 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
 )
 from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
-from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
+from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import (
+    StructuredTwoLevelTreeWidget,
+)
 from multiprocess_framework.modules.frontend_module.widgets.tabs import callback_no_args
 
 from multiprocess_prototype_v3.frontend.coordinators import parse_clamped_recipe_slot_text
@@ -81,16 +83,24 @@ class RecipePanelBase(BaseWidget[TModel]):
         return coerce_schema_config(ui, RecipesTabConfig)
 
     def _init_ui(self) -> None:
-        """QGroupBox со слотом и кнопками; заголовок; дерево полей."""
+        """Создать виджеты и расположить в layout по умолчанию."""
+        self._create_core_widgets()
+        self._arrange_default_layout()
+
+    def _create_core_widgets(self) -> None:
+        """Создать все виджеты как self._* атрибуты (без добавления в layout).
+
+        Подкласс может вызвать только _create_core_widgets() и расположить
+        виджеты в собственном layout, минуя _arrange_default_layout().
+        """
         m = self._model
         assert m is not None
         u = self._ui
         tk_tree = merge_touch_keyboard_dicts(
             self._touch_keyboard, getattr(u, "touch_keyboard_tree", None)
         )
-        layout = QVBoxLayout(self)
 
-        # --- Блок: слот (ComboBox) + Загрузить / Сохранить / По умолчанию ---
+        # --- Слот-модель ---
         self._slot_combo_model = RecipeSlotComboModel.from_manager(
             m.recipe_manager,
             u.recipe_index_min,
@@ -99,24 +109,16 @@ class RecipePanelBase(BaseWidget[TModel]):
         initial_slot = str(m.compute_initial_slot())
         self._slot_combo_model.current_index = self._slot_combo_model.index_for_slot_id(initial_slot)
 
-        box = QGroupBox(self._get_box_title())
-        ctrl = QHBoxLayout(box)
-        ctrl.addWidget(QLabel(u.label_slot))
+        # --- Виджеты управления ---
         self._slot_combo = QComboBox()
         self._slot_combo.setMinimumWidth(96)
         self._slot_combo.addItems(self._slot_combo_model.labels)
         self._slot_combo.setCurrentIndex(self._slot_combo_model.current_index)
-        ctrl.addWidget(self._slot_combo)
         self._btn_load = QPushButton(u.btn_load)
         self._btn_save = QPushButton(u.btn_save)
         self._btn_default = QPushButton(u.btn_default)
-        ctrl.addWidget(self._btn_load)
-        ctrl.addWidget(self._btn_save)
-        ctrl.addWidget(self._btn_default)
-        ctrl.addStretch()
-        layout.addWidget(box)
 
-        # --- Auto-save с debounce + версионированием (Task 1.4) ---
+        # --- Auto-save с debounce + версионированием ---
         self._auto_save: RecipeAutoSave | None = None
         self._auto_save_debouncer: QtDebounceAdapter | None = None
         if m.recipe_manager is not None:
@@ -128,8 +130,7 @@ class RecipePanelBase(BaseWidget[TModel]):
             )
             self._auto_save_debouncer = QtDebounceAdapter(parent=self)
 
-        # --- Блок: заголовок и дерево (параметр / значение / описание) ---
-        layout.addWidget(QLabel(self._get_table_title()))
+        # --- Дерево (параметр / значение / описание) ---
         columns = [
             {"key": "param", "label": u.col_param, "type": "text", "editable": False},
             {"key": "value", "label": u.col_value, "type": "text", "editable": True},
@@ -138,6 +139,28 @@ class RecipePanelBase(BaseWidget[TModel]):
         self._tree = StructuredTwoLevelTreeWidget(columns=columns, touch_keyboard=tk_tree)
         self._tree.set_row_key("field_id")
         self._block_table = False
+
+    def _arrange_default_layout(self) -> None:
+        """Расположить виджеты в layout по умолчанию: QGroupBox + дерево.
+
+        Подкласс может переопределить для другого layout.
+        """
+        u = self._ui
+        layout = QVBoxLayout(self)
+
+        # --- Блок: слот (ComboBox) + Загрузить / Сохранить / По умолчанию ---
+        box = QGroupBox(self._get_box_title())
+        ctrl = QHBoxLayout(box)
+        ctrl.addWidget(QLabel(u.label_slot))
+        ctrl.addWidget(self._slot_combo)
+        ctrl.addWidget(self._btn_load)
+        ctrl.addWidget(self._btn_save)
+        ctrl.addWidget(self._btn_default)
+        ctrl.addStretch()
+        layout.addWidget(box)
+
+        # --- Заголовок + дерево ---
+        layout.addWidget(QLabel(self._get_table_title()))
         layout.addWidget(self._tree, 1)
 
     def _connect_signals(self) -> None:

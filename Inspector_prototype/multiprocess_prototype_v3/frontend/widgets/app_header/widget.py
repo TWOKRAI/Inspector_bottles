@@ -16,10 +16,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QFont,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -35,6 +39,61 @@ from .mode_toggle import HeaderModeToggle
 from .status_strip import StatusStripWidget
 
 _BRAND_DEFAULT = "INNOTECH"
+_BRAND_COLOR = QColor("#0096DB")
+_OUTLINE_COLOR = QColor(0, 0, 0)
+_SHADOW_COLOR = QColor(0, 0, 0, 100)
+_FONT_PT = 28
+_OUTLINE_WIDTH = 1
+_SHADOW_OFFSETS = [(1, 1), (2, 3)]
+
+
+class BrandLabel(QWidget):
+    """Логотип с QPainterPath: заливка #0096DB + чёрная обводка + тёмные тени."""
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._text = text
+        font = QFont()
+        font.setPointSize(_FONT_PT)
+        font.setBold(True)
+        font.setStretch(115)
+        self.setFont(font)
+        self.setAutoFillBackground(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._update_size()
+
+    def _update_size(self) -> None:
+        fm = self.fontMetrics()
+        w = fm.horizontalAdvance(self._text) + _OUTLINE_WIDTH * 2 + _SHADOW_OFFSETS[-1][0] + 4
+        h = fm.height() + _OUTLINE_WIDTH * 2 + _SHADOW_OFFSETS[-1][1] + 4
+        self.setFixedSize(w, h)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        fm = self.fontMetrics()
+        x = float(_OUTLINE_WIDTH + 1)
+        y = float(fm.ascent() + _OUTLINE_WIDTH + 1)
+
+        # Тёмные тени (несколько слоёв для объёма)
+        for dx, dy in _SHADOW_OFFSETS:
+            shadow = QPainterPath()
+            shadow.addText(x + dx, y + dy, self.font(), self._text)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(_SHADOW_COLOR)
+            painter.drawPath(shadow)
+
+        # Основной текст: чёрная обводка + синяя заливка
+        path = QPainterPath()
+        path.addText(x, y, self.font(), self._text)
+        pen = QPen(_OUTLINE_COLOR, _OUTLINE_WIDTH)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(_BRAND_COLOR)
+        painter.drawPath(path)
+        painter.end()
 
 
 class AppHeaderWidget(QWidget):
@@ -49,13 +108,13 @@ class AppHeaderWidget(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("AppHeader")
         cfg = config or {}
         windows_list = cfg.get("windows", [])
         brand_text = cfg.get("brand_text") or _BRAND_DEFAULT
 
         self._mode_toggle = HeaderModeToggle(initial=get_view_mode(KEY_HEADER_MODE, default=0))
-        self._brand_label = QLabel(brand_text)
-        self._brand_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #ddd;")
+        self._brand_label = BrandLabel(brand_text)
 
         # Режим A: бегущая строка + строка статусов
         self._info_ticker = InfoTickerWidget("")
