@@ -7,8 +7,8 @@ from typing import Any
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import PanelTabBase
 
-from ...post_processing_widget import PostProcessingPanelWidget
-from ...post_processing_widget.schemas import PostProcessingTabUiConfig
+from ...processing.post_processing_widget import PostProcessingPanelWidget
+from ...processing.post_processing_widget.schemas import PostProcessingTabUiConfig
 
 
 class PostProcessingTabWidget(PanelTabBase[PostProcessingPanelWidget, PostProcessingTabUiConfig]):

@@ -27,10 +27,10 @@ from multiprocess_framework.modules.data_schema_module import (
 from multiprocess_prototype_v3.frontend.windows.loading import LoadingWindowConfig
 from multiprocess_prototype_v3.frontend.windows.main_window import MainWindowConfig
 from multiprocess_prototype_v3.frontend.widgets.tabs_setting import SettingsTabConfig, TabsConfig
-from multiprocess_prototype_v3.frontend.widgets.cropped_regions_widget.schemas import (
+from multiprocess_prototype_v3.frontend.widgets.processing.cropped_regions_widget.schemas import (
     CroppedRegionsTabUiConfig,
 )
-from multiprocess_prototype_v3.frontend.widgets.post_processing_widget.schemas import (
+from multiprocess_prototype_v3.frontend.widgets.processing.post_processing_widget.schemas import (
     PostProcessingTabUiConfig,
 )
 from multiprocess_prototype_v3.frontend.widgets.recipes.settings_recipe_widget.schemas import RecipesTabConfig

@@ -9,7 +9,7 @@ from pydantic import Field
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
-from ..tabs_setting.tab_item_config import TabItemConfig
+from ...tabs_setting.tab_item_config import TabItemConfig
 
 
 @register_schema("CroppedRegionsTabUiConfig")

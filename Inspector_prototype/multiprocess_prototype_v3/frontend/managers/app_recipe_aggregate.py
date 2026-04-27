@@ -15,7 +15,7 @@ from multiprocess_framework.modules.data_schema_module import SchemaBase, get_de
 
 
 def _recipe_and_processing_schema_classes() -> tuple[Type[SchemaBase], Type[SchemaBase]]:
-    from multiprocess_prototype_v3.frontend.widgets.processing_panel_widget.schemas import (
+    from multiprocess_prototype_v3.frontend.widgets.processing.processing_panel_widget.schemas import (
         ProcessingTabUiConfig,
     )
     from multiprocess_prototype_v3.frontend.widgets.recipes.settings_recipe_widget.schemas import RecipesTabConfig

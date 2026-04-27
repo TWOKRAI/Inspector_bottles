@@ -26,7 +26,7 @@ import importlib.util
 from pathlib import Path
 
 _WIDGET_DIR = (
-    Path(__file__).resolve().parents[2] / "frontend" / "widgets" / "cropped_regions_widget"
+    Path(__file__).resolve().parents[2] / "frontend" / "widgets" / "processing" / "cropped_regions_widget"
 )
 
 
@@ -43,19 +43,19 @@ def _load_module_from_file(name: str, file_path: Path):
 
 try:
     _schemas_mod = _load_module_from_file(
-        "multiprocess_prototype_v3.frontend.widgets.cropped_regions_widget.schemas",
+        "multiprocess_prototype_v3.frontend.widgets.processing.cropped_regions_widget.schemas",
         _WIDGET_DIR / "schemas.py",
     )
     CroppedRegionsTabUiConfig = _schemas_mod.CroppedRegionsTabUiConfig
 
     _model_mod = _load_module_from_file(
-        "multiprocess_prototype_v3.frontend.widgets.cropped_regions_widget.model",
+        "multiprocess_prototype_v3.frontend.widgets.processing.cropped_regions_widget.model",
         _WIDGET_DIR / "model.py",
     )
     CroppedRegionsModel = _model_mod.CroppedRegionsModel
 
     _presenter_mod = _load_module_from_file(
-        "multiprocess_prototype_v3.frontend.widgets.cropped_regions_widget.presenter",
+        "multiprocess_prototype_v3.frontend.widgets.processing.cropped_regions_widget.presenter",
         _WIDGET_DIR / "presenter.py",
     )
     CroppedRegionsPresenter = _presenter_mod.CroppedRegionsPresenter

@@ -5,7 +5,7 @@
 Фиче-виджет: processing_panel_widget.
 """
 
-from ...processing_panel_widget import ProcessingPanelWidget, ProcessingTabUiConfig
+from ...processing.processing_panel_widget import ProcessingPanelWidget, ProcessingTabUiConfig
 from .widget import ProcessingTabWidget
 
 __all__ = ["ProcessingPanelWidget", "ProcessingTabUiConfig", "ProcessingTabWidget"]

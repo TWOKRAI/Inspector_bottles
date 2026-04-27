@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import PanelTabBase
 
-from ...processing_panel_widget import ProcessingPanelWidget
-from ...processing_panel_widget.schemas import ProcessingTabUiConfig
+from ...processing.processing_panel_widget import ProcessingPanelWidget
+from ...processing.processing_panel_widget.schemas import ProcessingTabUiConfig
 
 
 class ProcessingTabWidget(PanelTabBase[ProcessingPanelWidget, ProcessingTabUiConfig]):

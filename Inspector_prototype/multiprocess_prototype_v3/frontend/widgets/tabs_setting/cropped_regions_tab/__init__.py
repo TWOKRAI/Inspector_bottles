@@ -5,7 +5,7 @@
 Фиче-виджет: cropped_regions_widget.
 """
 
-from ...cropped_regions_widget import (
+from ...processing.cropped_regions_widget import (
     CROPPED_PARAM_KEYS,
     CROPPED_ROI_PANEL_REGISTER,
     CroppedParamKey,

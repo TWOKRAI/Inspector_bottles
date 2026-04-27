@@ -7,8 +7,8 @@ from typing import Any
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import PanelTabBase
 
-from ...cropped_regions_widget import CroppedRegionsPanelWidget
-from ...cropped_regions_widget.schemas import CroppedRegionsTabUiConfig
+from ...processing.cropped_regions_widget import CroppedRegionsPanelWidget
+from ...processing.cropped_regions_widget.schemas import CroppedRegionsTabUiConfig
 
 
 class CroppedRegionsTabWidget(PanelTabBase[CroppedRegionsPanelWidget, CroppedRegionsTabUiConfig]):
