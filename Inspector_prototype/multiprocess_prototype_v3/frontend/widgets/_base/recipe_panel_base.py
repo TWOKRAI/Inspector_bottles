@@ -24,9 +24,9 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import callback
 from multiprocess_prototype_v3.frontend.coordinators import parse_clamped_recipe_slot_text
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from ..recipes_widget.auto_save import AutoSaveConfig, QtDebounceAdapter, RecipeAutoSave
-from ..recipes_widget.slot_combo_model import RecipeSlotComboModel
-from ..settings_recipe_widget.schemas import RecipesTabConfig
+from ..recipes.recipes_widget.auto_save import AutoSaveConfig, QtDebounceAdapter, RecipeAutoSave
+from ..recipes.recipes_widget.slot_combo_model import RecipeSlotComboModel
+from ..recipes.settings_recipe_widget.schemas import RecipesTabConfig
 
 _DEFAULT_AUTOSAVE_DEBOUNCE_MS = 1500
 

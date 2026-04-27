@@ -33,7 +33,7 @@ from multiprocess_prototype_v3.frontend.widgets.cropped_regions_widget.schemas i
 from multiprocess_prototype_v3.frontend.widgets.post_processing_widget.schemas import (
     PostProcessingTabUiConfig,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_recipe_widget.schemas import RecipesTabConfig
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_recipe_widget.schemas import RecipesTabConfig
 
 
 @register_schema("WindowRegistryEntry")

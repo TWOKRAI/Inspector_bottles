@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.slot_combo_model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.slot_combo_model import (
     RecipeSlotComboModel,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.profile_combo_model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.profile_combo_model import (
     from_profile_manager,
     profile_id_from_model,
     sync_current,

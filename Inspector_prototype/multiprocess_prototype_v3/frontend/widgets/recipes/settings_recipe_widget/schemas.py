@@ -92,6 +92,6 @@ class RecipesTabConfig(SchemaBase):
 
 def default_tab_item():
     """TabItemConfig вкладки «Рецепты» для TabsConfig."""
-    from ..tabs_setting.tab_item_config import TabItemConfig
+    from ...tabs_setting.tab_item_config import TabItemConfig
 
     return TabItemConfig(id="recipes", title="Рецепты", widget="recipes")

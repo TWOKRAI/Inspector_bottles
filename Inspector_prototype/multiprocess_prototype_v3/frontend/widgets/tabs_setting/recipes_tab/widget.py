@@ -61,9 +61,9 @@ from multiprocess_prototype_v3.frontend.touch_keyboard_bind import (
     merge_touch_keyboard_dicts,
 )
 
-from ...recipes_slot_buttons import RecipesSlotButtonsPanel
-from ...recipes_widget import RegisterRecipePanelWidget as RegisterRecipePanel
-from ...settings_recipe_widget.schemas import RecipesTabConfig
+from ...recipes.recipes_slot_buttons import RecipesSlotButtonsPanel
+from ...recipes.recipes_widget import RegisterRecipePanelWidget as RegisterRecipePanel
+from ...recipes.settings_recipe_widget.schemas import RecipesTabConfig
 from ...settings_tab.prefs_store import (
     KEY_RECIPES_MODE,
     get_view_mode,

@@ -12,16 +12,16 @@ from typing import Any
 import pytest
 
 from multiprocess_prototype_v3.frontend.managers.settings_profile_manager import ShmBudgetError
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.slot_combo_model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.slot_combo_model import (
     RecipeSlotComboModel,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.model import (
     SettingsProfileModel,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.presenter import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.presenter import (
     SettingsProfilePresenter,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.schemas import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.schemas import (
     SettingsProfileTabConfig,
 )
 

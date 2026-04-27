@@ -15,13 +15,13 @@ import pytest
 pytest.importorskip("PyQt5", reason="presenter импортирует frontend_module.interfaces (тянет PyQt5)")
 
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext  # noqa: E402
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.model import (
     RegisterRecipeModel,  # noqa: E402
 )
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.presenter import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.presenter import (
     RegisterRecipePresenter,  # noqa: E402
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_recipe_widget.schemas import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_recipe_widget.schemas import (
     RecipesTabConfig,  # noqa: E402
 )
 

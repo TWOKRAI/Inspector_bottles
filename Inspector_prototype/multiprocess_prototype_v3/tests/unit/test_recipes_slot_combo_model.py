@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.slot_combo_model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.slot_combo_model import (
     RecipeSlotComboModel,
 )
 

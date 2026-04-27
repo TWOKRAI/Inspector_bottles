@@ -16,7 +16,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     Signal,
 )
 
-from ...recipes_widget.recipe_rows import (
+from ...recipes.recipes_widget.recipe_rows import (
     build_recipe_rows,
     build_recipe_rows_from_snapshot,
 )

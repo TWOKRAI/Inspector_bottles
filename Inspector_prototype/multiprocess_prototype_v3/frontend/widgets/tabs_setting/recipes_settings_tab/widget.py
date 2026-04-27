@@ -28,8 +28,8 @@ from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import 
 )
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from ...settings_recipe_widget import AppRecipePanelWidget as AppRecipePanel
-from ...settings_recipe_widget.schemas import RecipesTabConfig
+from ...recipes.settings_recipe_widget import AppRecipePanelWidget as AppRecipePanel
+from ...recipes.settings_recipe_widget.schemas import RecipesTabConfig
 from .schemas import SettingsTabConfig
 
 
@@ -96,7 +96,7 @@ class SettingsTabWidget(BaseTab):
 
         # --- Панель профилей настроек (только если менеджер передан) ---
         if self._settings_profile_manager is not None:
-            from ...settings_profile_widget.panel_widget import SettingsProfilePanelWidget
+            from ...recipes.settings_profile_widget.panel_widget import SettingsProfilePanelWidget
 
             self._profile_panel = SettingsProfilePanelWidget(
                 profile_manager=self._settings_profile_manager,

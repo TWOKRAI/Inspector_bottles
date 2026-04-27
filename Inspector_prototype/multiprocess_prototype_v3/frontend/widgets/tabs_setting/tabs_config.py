@@ -16,7 +16,7 @@ from .tab_item_config import TabItemConfig
 
 def _default_tabs() -> list[TabItemConfig]:
     """Вкладки: settings, recipes, sources (camera+regions), pipeline, display."""
-    from ..settings_recipe_widget.schemas import default_tab_item as _rec
+    from ..recipes.settings_recipe_widget.schemas import default_tab_item as _rec
     from .display_tab.schemas import default_tab_item as _disp
     from .recipes_settings_tab.schemas import default_tab_item as _set
 

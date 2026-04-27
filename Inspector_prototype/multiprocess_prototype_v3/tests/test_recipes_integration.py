@@ -20,13 +20,13 @@ pytest.importorskip("PyQt5", reason="presenter импортирует frontend_m
 
 from multiprocess_prototype_v3.frontend.managers.access_context import AccessContext  # noqa: E402
 from multiprocess_prototype_v3.frontend.managers.recipe_manager import RecipeManager  # noqa: E402
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.model import (
     RegisterRecipeModel,  # noqa: E402
 )
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.presenter import (  # noqa: E402
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.presenter import (  # noqa: E402
     RegisterRecipePresenter,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_recipe_widget.schemas import (  # noqa: E402
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_recipe_widget.schemas import (  # noqa: E402
     RecipesTabConfig,
 )
 from multiprocess_prototype_v3.registers import (  # noqa: E402
@@ -184,7 +184,7 @@ class TestComboModelFromRecipeManager:
     def test_uses_list_slots_after_saves(
         self, registers_manager, recipe_manager, presenter_factory
     ) -> None:
-        from multiprocess_prototype_v3.frontend.widgets.recipes_widget import RecipeSlotComboModel
+        from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget import RecipeSlotComboModel
 
         # Сохраняем 2 слота через presenter.
         presenter_a, _ = presenter_factory(registers_manager, recipe_manager, view_slot=1)

@@ -33,8 +33,8 @@ from multiprocess_prototype_v3.frontend.managers.recipe_manager_protocol import 
 )
 from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
 
-from ..settings_recipe_widget import AppRecipePanelWidget as AppRecipePanel
-from ..settings_recipe_widget.schemas import RecipesTabConfig
+from ..recipes.settings_recipe_widget import AppRecipePanelWidget as AppRecipePanel
+from ..recipes.settings_recipe_widget.schemas import RecipesTabConfig
 from ..tabs_setting.recipes_settings_tab.schemas import SettingsTabConfig
 from ..chrome.view_mode_toggle import ViewModeToggle
 from .admin_section import AdminSectionWidget

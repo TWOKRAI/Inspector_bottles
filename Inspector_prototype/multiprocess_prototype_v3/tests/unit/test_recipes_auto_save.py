@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import yaml
 
-from multiprocess_prototype_v3.frontend.widgets.recipes_widget.auto_save import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.recipes_widget.auto_save import (
     AutoSaveConfig,
     RecipeAutoSave,
 )

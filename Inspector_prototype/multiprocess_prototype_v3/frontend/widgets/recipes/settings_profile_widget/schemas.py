@@ -65,7 +65,7 @@ class SettingsProfileTabConfig(SchemaBase):
 
 def default_settings_profile_tab_item():
     """TabItemConfig для встраивания в TabsConfig (будущая интеграция)."""
-    from ..tabs_setting.tab_item_config import TabItemConfig
+    from ...tabs_setting.tab_item_config import TabItemConfig
 
     return TabItemConfig(
         id="settings_profile",

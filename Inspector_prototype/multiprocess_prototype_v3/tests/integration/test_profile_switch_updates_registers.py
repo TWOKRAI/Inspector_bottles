@@ -23,17 +23,17 @@ from multiprocess_prototype_v3.frontend.managers.settings_profile_manager import
 from multiprocess_prototype_v3.frontend.managers.settings_yaml_store import (
     default_profile_snapshot,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.model import (
     SettingsProfileModel,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.presenter import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.presenter import (
     SettingsProfilePresenter,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.profile_combo_model import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.profile_combo_model import (
     from_profile_manager,
     sync_current,
 )
-from multiprocess_prototype_v3.frontend.widgets.settings_profile_widget.schemas import (
+from multiprocess_prototype_v3.frontend.widgets.recipes.settings_profile_widget.schemas import (
     SettingsProfileTabConfig,
 )
 from multiprocess_prototype_v3.registers import create_registers
