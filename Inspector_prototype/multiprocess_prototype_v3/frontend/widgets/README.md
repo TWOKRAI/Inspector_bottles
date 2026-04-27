@@ -1,5 +1,7 @@
 # Виджеты прототипа (frontend)
 
+> **Полная карта пакетов, паттернов, потребителей и проблем — в [`../../docs/FRONTEND_WIDGETS_MAP.md`](../../docs/FRONTEND_WIDGETS_MAP.md).** Этот README — короткий операционный обзор основных кластеров; для аудита, рефакторинга и понимания «что к чему относится» используйте полный документ.
+
 Именование пакетов согласовано с вкладками **`recipes`** / **`settings`**: оболочки — `tabs_setting/recipes_tab/`, `tabs_setting/recipes_settings_tab/`; фиче-панели — `recipes_widget/` (регистры), `settings_recipe_widget/` (app/UI и **`settings_recipe_widget/schemas.py`**: `RecipesTabConfig`, `default_tab_item`).  
 В **`FrontendConfig`** и в дампе конфига ключи секций по-прежнему **`recipes_tab`** и **`settings_tab`** (не переименовывались).
 
@@ -76,7 +78,7 @@ flowchart LR
 - **[`managers/`](../../managers/README.md)** — домен (YAML, доступ к полям), не оркестрация отдельных кнопок.
 - Переиспользуемые чистые хелперы для нескольких панелей — [`../coordinators/README.md`](../coordinators/README.md).
 
-Подробная карта и поток запуска: [`docs/FRONTEND_MAP.md`](../../docs/FRONTEND_MAP.md).
+Подробная карта и поток запуска: [`docs/FRONTEND_WIDGETS_MAP.md`](../../docs/FRONTEND_WIDGETS_MAP.md).
 
 ## Документация фреймворка
 
