@@ -33,7 +33,7 @@ from multiprocess_framework.modules.frontend_module.widgets.header.header_button
     HeaderButtonsWidget,
 )
 
-from ..settings_tab.prefs_store import KEY_HEADER_MODE, get_view_mode, set_view_mode
+from ...settings_tab.prefs_store import KEY_HEADER_MODE, get_view_mode, set_view_mode
 from .info_ticker import InfoTickerWidget
 from .mode_toggle import HeaderModeToggle
 from .status_strip import StatusStripWidget

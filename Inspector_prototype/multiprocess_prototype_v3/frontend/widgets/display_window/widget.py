@@ -145,7 +145,7 @@ class DisplayWindow(QWidget):
         Args:
             camera_id: Идентификатор камеры для привязки индикатора.
         """
-        from multiprocess_prototype_v3.frontend.widgets.recording_indicator.widget import RecordingIndicator
+        from multiprocess_prototype_v3.frontend.widgets.chrome.recording_indicator.widget import RecordingIndicator
 
         indicator = RecordingIndicator(self)
         indicator.set_camera_id(camera_id)

@@ -36,7 +36,7 @@ from multiprocess_prototype_v3.frontend.touch_keyboard_bind import merge_touch_k
 from ..settings_recipe_widget import AppRecipePanelWidget as AppRecipePanel
 from ..settings_recipe_widget.schemas import RecipesTabConfig
 from ..tabs_setting.recipes_settings_tab.schemas import SettingsTabConfig
-from ..view_mode_toggle import ViewModeToggle
+from ..chrome.view_mode_toggle import ViewModeToggle
 from .admin_section import AdminSectionWidget
 from .history_section import HistorySectionWidget
 from .prefs_store import KEY_SETTINGS_MODE, get_view_mode, set_view_mode

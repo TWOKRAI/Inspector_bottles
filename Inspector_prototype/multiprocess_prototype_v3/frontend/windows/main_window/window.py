@@ -17,14 +17,14 @@ from multiprocess_framework.modules.frontend_module.widgets.header import Header
 from multiprocess_framework.modules.frontend_module.widgets.header.button_style import create_header_button
 from multiprocess_framework.modules.frontend_module.widgets.image_panel import ImagePanelWidget
 
-from multiprocess_prototype_v3.frontend.widgets.app_header import AppHeaderWidget
-from multiprocess_prototype_v3.frontend.widgets.side_panels import CollapsibleSidePanel
+from multiprocess_prototype_v3.frontend.widgets.chrome.app_header import AppHeaderWidget
+from multiprocess_prototype_v3.frontend.widgets.chrome.side_panels import CollapsibleSidePanel
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QLabel, QMessageBox
 
 from multiprocess_prototype_v3.frontend.app_context import FrontendAppContext
 from multiprocess_prototype_v3.frontend.utils import ensure_main_thread
-from multiprocess_prototype_v3.frontend.widgets.watchdog_overlay import WatchdogOverlay
+from multiprocess_prototype_v3.frontend.widgets.chrome.watchdog_overlay import WatchdogOverlay
 
 from .config import ImagePanelConfig
 from .tab_factory import TabWidgetFactory, create_tab_widget_factory

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QStackedWidget, QVBoxLayout, QWidget
 
-from ..search_filter_bar import SearchFilterBar, apply_filter
+from ..chrome.search_filter_bar import SearchFilterBar, apply_filter
 from ..settings_recipe_widget.app_recipe_rows import build_app_recipe_rows
 from .settings_cards import SettingsCardsView
 from .settings_table import SettingsTableWrapper

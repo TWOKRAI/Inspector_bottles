@@ -69,7 +69,7 @@ from ...settings_tab.prefs_store import (
     get_view_mode,
     set_view_mode,
 )
-from ...view_mode_toggle import ViewModeToggle
+from ...chrome.view_mode_toggle import ViewModeToggle
 from .recipe_content_section import RecipeContentSection
 
 _SLOT_PANEL_WIDTH = 200
