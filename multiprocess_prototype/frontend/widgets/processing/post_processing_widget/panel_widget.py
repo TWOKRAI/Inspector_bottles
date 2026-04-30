@@ -28,7 +28,7 @@ from multiprocess_prototype.frontend.touch_keyboard_bind import (
     bind_touch_keyboard_line_edit,
     merge_touch_keyboard_dicts,
 )
-from multiprocess_prototype.registers.schemas.processing_tab.names import PROCESSOR_REGISTER
+from multiprocess_prototype.registers.constants import PROCESSOR_REGISTER
 
 from .model import PostProcessingModel
 from .params import regions_to_table_rows

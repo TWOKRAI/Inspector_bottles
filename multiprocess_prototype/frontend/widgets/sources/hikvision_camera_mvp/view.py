@@ -24,10 +24,8 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs.numeric_bind_or
 )
 
 from multiprocess_prototype.frontend.touch_keyboard_bind import merge_touch_keyboard_dicts
-from multiprocess_prototype.registers.schemas.camera_tab import (
-    CAMERA_REGISTER,
-    HikvisionParamRow,
-)
+from multiprocess_prototype.registers.camera import HikvisionParamRow
+from multiprocess_prototype.registers.constants import CAMERA_REGISTER
 
 from .schemas import HikvisionCameraMvpUiConfig
 

@@ -7,11 +7,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
-from multiprocess_prototype.registers.schemas.camera_tab import (
-    CAMERA_REGISTER,
-    HikvisionParamRow,
-    build_hikvision_param_rows,
-)
+from multiprocess_prototype.registers.camera import HikvisionParamRow, build_hikvision_param_rows
+from multiprocess_prototype.registers.constants import CAMERA_REGISTER
 
 from .schemas import HikvisionCameraMvpUiConfig
 

@@ -8,7 +8,7 @@ from typing import Any, Optional
 from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 from multiprocess_prototype.frontend.actions.builder import ActionBuilder
-from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER
+from multiprocess_prototype.registers.constants import CAMERA_REGISTER
 
 
 def set_camera_type_field(

@@ -6,12 +6,12 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING, Any
 
-from multiprocess_prototype.registers.schemas.pipeline.widget_bridge import (
+from multiprocess_prototype.registers.pipeline.widget_bridge import (
     apply_post_list_to_pipeline,
     pipeline_config_from_register,
     post_list_from_pipeline,
 )
-from multiprocess_prototype.registers.schemas.processing_tab import PROCESSOR_REGISTER
+from multiprocess_prototype.registers.constants import PROCESSOR_REGISTER
 
 from .model import PostProcessingModel
 from .params import (

@@ -16,7 +16,7 @@ from multiprocess_framework.modules.frontend_module.components import (
 from multiprocess_framework.modules.frontend_module.widgets.tabs import RegisterBindingContext
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QLabel, QSlider, Qt
 
-from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER
+from multiprocess_prototype.registers.constants import CAMERA_REGISTER
 
 from .schemas import SimWebcamUiConfig
 

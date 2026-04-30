@@ -7,13 +7,13 @@ from typing import List, Optional
 
 from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
-from multiprocess_prototype.registers.schemas.camera_tab import CAMERA_REGISTER
-from multiprocess_prototype.registers.schemas.pipeline.widget_bridge import (
+from multiprocess_prototype.registers.constants import CAMERA_REGISTER
+from multiprocess_prototype.registers.pipeline.widget_bridge import (
     apply_crop_nested_to_pipeline,
     crop_nested_from_pipeline,
     pipeline_config_from_register,
 )
-from multiprocess_prototype.registers.schemas.processing_tab import PROCESSOR_REGISTER
+from multiprocess_prototype.registers.constants import PROCESSOR_REGISTER
 
 DEFAULT_FULL_REGION_NAME = "full"
 
