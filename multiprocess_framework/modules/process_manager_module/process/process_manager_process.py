@@ -93,6 +93,7 @@ class ProcessManagerProcess(ProcessModule):
         )
         self._console_manager: ConsoleManager | None = None
         self._topology_manager: TopologyManager | None = None
+        self._state_store_manager = None
 
     def _resolve_queue_registry(self):
         """Получить QueueRegistry из shared_resources или создать новый."""
@@ -141,6 +142,7 @@ class ProcessManagerProcess(ProcessModule):
 
             self._setup_console_manager()
             self._setup_topology_manager()
+            self._setup_state_store()
             self._register_builtin_commands()
 
             processes_config = self.get_config("processes_config") or {}
@@ -166,6 +168,10 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:
             self._handle_critical_error(exc, "initialize")
             return False
+
+    def _setup_state_store(self) -> None:
+        """Хук: создать StateStoreManager. Переопределяется в прототипе."""
+        pass
 
     def _setup_topology_manager(self) -> None:
         """Создать TopologyManager с callback'ами в PM."""
