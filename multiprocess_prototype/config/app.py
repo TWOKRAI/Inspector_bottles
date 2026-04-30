@@ -12,7 +12,6 @@ Phase 9 (Task 9.6): from_topology() — построение AppConfig из Rout
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import TYPE_CHECKING, Optional
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase
@@ -85,19 +84,6 @@ class AppConfig(SchemaBase):
                     )
                 )
             object.__setattr__(self, "processors", processors)
-
-    @property
-    def processor(self) -> ProcessorConfig:
-        """Backward compat: доступ к первому процессору.
-
-        DEPRECATED: используйте processors[0] напрямую.
-        """
-        warnings.warn(
-            "AppConfig.processor deprecated, используйте processors[0]",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.processors[0]
 
     @property
     def worker_configs(self) -> list[ProcessorWorkerConfig]:
