@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
-from multiprocess_prototype.camera_policy import (
+from multiprocess_prototype.registers.camera import (
     DEFAULT_CAMERA_TYPE,
     WEBCAM_ENUM_DEFAULT_MAX_INDEX,
     WEBCAM_ENUM_HARD_CAP,
@@ -29,13 +29,13 @@ from multiprocess_prototype.frontend.widgets.sources.hikvision_camera_mvp.schema
 
 def _default_camera_type_ids() -> List[str]:
     """Идентификаторы типов камеры (ключи регистра / стека)."""
-    from multiprocess_prototype.camera_policy import CAMERA_TYPES
+    from multiprocess_prototype.registers.camera import CAMERA_TYPES
     return list(CAMERA_TYPES)
 
 
 def _default_camera_type_labels() -> List[str]:
     """Подписи для QComboBox в том же порядке, что и camera_type_register_ids."""
-    from multiprocess_prototype.camera_policy import CAMERA_TYPE_LABELS
+    from multiprocess_prototype.registers.camera import CAMERA_TYPE_LABELS
     return list(CAMERA_TYPE_LABELS)
 
 

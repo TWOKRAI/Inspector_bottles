@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from multiprocess_prototype.camera_policy import (
+from multiprocess_prototype.registers.camera import (
     WEBCAM_ENUM_DEFAULT_MAX_INDEX,
     WEBCAM_ENUM_HARD_CAP,
 )

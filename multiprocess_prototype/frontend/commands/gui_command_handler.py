@@ -10,7 +10,7 @@ GuiCommandHandler — единый слой отправки GUI-команд.
 
 from typing import Any, Dict, Optional
 
-from multiprocess_prototype.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
+from multiprocess_prototype.registers.camera import WEBCAM_ENUM_DEFAULT_MAX_INDEX
 from multiprocess_prototype.registers.commands.catalog import GUI_COMMAND_CATALOG
 
 

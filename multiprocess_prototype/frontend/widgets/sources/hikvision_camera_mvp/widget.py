@@ -10,7 +10,7 @@ from multiprocess_framework.modules.frontend_module.core.schema_config import co
 from multiprocess_framework.modules.frontend_module.widgets.base_widget import BaseWidget
 from multiprocess_framework.modules.frontend_module.widgets.tabs import callback_no_args
 
-from multiprocess_prototype.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
+from multiprocess_prototype.registers.camera import WEBCAM_ENUM_DEFAULT_MAX_INDEX
 
 from .model import HikvisionCameraMvpModel
 from .presenter import HikvisionCameraMvpPresenter

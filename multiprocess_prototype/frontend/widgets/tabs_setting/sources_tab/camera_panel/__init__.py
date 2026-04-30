@@ -5,7 +5,7 @@
 camera_common (SimWebcamWidget) и hikvision_widget; callbacks_map через build_camera_tab_callbacks.
 """
 
-from multiprocess_prototype.camera_policy import WEBCAM_ENUM_DEFAULT_MAX_INDEX
+from multiprocess_prototype.registers.camera import WEBCAM_ENUM_DEFAULT_MAX_INDEX
 
 from .schemas import CameraTabUiConfig
 from .widget import CameraTabWidget
