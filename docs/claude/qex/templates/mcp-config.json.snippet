@@ -1,0 +1,37 @@
+// ============================================================================
+// qex MCP-конфиг — snippet для .mcp.json в корне проекта
+// ============================================================================
+//
+// КАК ПРИМЕНИТЬ:
+// 1. Скопируй этот файл как .mcp.json в корень проекта.
+// 2. Замени два плейсхолдера:
+//    - <QEX_BINARY_PATH>        путь к бинарнику qex
+//                               macOS default:  /Users/<USER>/.cargo/bin/qex
+//                               Windows default: C:\\Users\\<USER>\\.cargo\\bin\\qex.exe
+//    - <PROJECT_ABSOLUTE_PATH>  абсолютный путь к проекту
+// 3. Сохрани файл и перезапусти Claude Code (Ctrl/Cmd+Shift+P → Developer: Reload Window).
+//
+// ПРИМЕЧАНИЕ: QEX_OPENAI_MODEL должен совпадать с тем, что установлен в Ollama.
+// Если меняешь модель — нужно очистить индекс (clear_index) и переиндексировать.
+//
+// Зависимости: только Ollama. Docker/Qdrant не нужны (qex 0.0.2, feature vector).
+//
+// ============================================================================
+
+{
+  "mcpServers": {
+    "qex": {
+      "command": "<QEX_BINARY_PATH>",
+      "args": [],
+      "env": {
+        "RUST_LOG": "info",
+        "WORKSPACE_PATH": "<PROJECT_ABSOLUTE_PATH>",
+        "QEX_EMBEDDING_PROVIDER": "openai",
+        "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
+        "QEX_OPENAI_API_KEY": "ollama",
+        "QEX_OPENAI_MODEL": "qwen3-embedding:4b",
+        "QEX_OPENAI_DIMENSIONS": "2560"
+      }
+    }
+  }
+}

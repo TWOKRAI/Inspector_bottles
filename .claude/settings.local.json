@@ -1,0 +1,75 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__qex__index_codebase",
+      "mcp__qex__search_code",
+      "mcp__qex__get_indexing_status",
+      "mcp__qex__clear_index",
+      "mcp__qex__download_model",
+
+      "Bash(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(rm -rf *..*)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rmdir /s*)",
+      "Bash(del /s*)",
+      "Bash(del /f*)",
+
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -fd*)",
+      "Bash(git clean -fx*)",
+      "Bash(git filter-branch*)",
+      "Bash(git update-ref -d*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore --source*)",
+
+      "Bash(sudo *)",
+      "Bash(su -*)",
+      "Bash(chmod -R 777*)",
+      "Bash(chown -R*)",
+
+      "Bash(curl * | sh*)",
+      "Bash(curl * | bash*)",
+      "Bash(wget * | sh*)",
+      "Bash(wget * | bash*)",
+      "Bash(*| sudo*)",
+
+      "Bash(pip install*)",
+      "Bash(pip uninstall*)",
+      "Bash(pip3 install*)",
+      "Bash(python -m pip install*)",
+      "Bash(python3 -m pip install*)",
+      "Bash(.venv/Scripts/pip install*)",
+      "Bash(.venv/bin/pip install*)",
+      "Bash(npm install*)",
+      "Bash(npm i *)",
+      "Bash(npm uninstall*)",
+      "Bash(npx *)",
+      "Bash(yarn add*)",
+      "Bash(pnpm add*)",
+
+      "Bash(dd if=*)",
+      "Bash(mkfs*)",
+      "Bash(format *)",
+      "Bash(shutdown*)",
+      "Bash(reboot*)",
+
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(rsync *)",
+
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker system prune*)",
+      "Bash(docker volume rm*)"
+    ]
+  }
+}

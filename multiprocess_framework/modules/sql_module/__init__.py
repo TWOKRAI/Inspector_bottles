@@ -1,0 +1,52 @@
+# -*- coding: utf-8 -*-
+"""
+sql_module — универсальный SQL-менеджер для multiprocess framework.
+
+Поддерживает PostgreSQL, MySQL, SQLite на базе SQLAlchemy 2.0.
+Dual sync/async через адаптеры, Unit of Work, fork-safety, typed commands.
+
+Импорты:
+    from multiprocess_framework.modules.sql_module import SQLManagerConfig, DBQueryCommand, SchemaBaseMapper, ExportFormat
+    from multiprocess_framework.modules.sql_module.interfaces import ISQLManager, IRepository
+    from multiprocess_framework.modules.sql_module.commands import DBQueryCommand, DBExecuteCommand
+"""
+from .adapters.schema_mapper import SchemaBaseMapper
+from .configs import SQLManagerConfig
+from .commands import DBExecuteCommand, DBInsertCommand, DBQueryCommand
+from .core import SQLManager, GenericRepository, SQLAlchemyUnitOfWork, AsyncSQLAlchemyUnitOfWork, DDLBuilder, AsyncQuerySet, QuerySet
+from .export import TableExporter, ExportFormat
+from .interfaces import (
+    IAsyncEngineAdapter,
+    IAsyncUnitOfWork,
+    IEngineAdapter,
+    IRepository,
+    ISchemaMapper,
+    ISQLManager,
+    ISyncEngineAdapter,
+    IUnitOfWork,
+)
+
+__all__ = [
+    "SQLManager",
+    "GenericRepository",
+    "TableExporter",
+    "ExportFormat",
+    "SchemaBaseMapper",
+    "SQLAlchemyUnitOfWork",
+    "AsyncSQLAlchemyUnitOfWork",
+    "SQLManagerConfig",
+    "DBQueryCommand",
+    "DBExecuteCommand",
+    "DBInsertCommand",
+    "DDLBuilder",
+    "AsyncQuerySet",
+    "QuerySet",
+    "ISQLManager",
+    "IRepository",
+    "IUnitOfWork",
+    "IAsyncUnitOfWork",
+    "IEngineAdapter",
+    "ISyncEngineAdapter",
+    "IAsyncEngineAdapter",
+    "ISchemaMapper",
+]

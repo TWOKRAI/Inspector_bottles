@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "qex": {
+      "command": "C:\\Users\\INNOTECH\\.cargo\\bin\\qex.exe",
+      "args": [],
+      "env": {
+        "RUST_LOG": "info",
+        "WORKSPACE_PATH": "C:\\Users\\INNOTECH\\Desktop\\PROJECT_INNOTECH\\obsidian",
+        "QEX_EMBEDDING_PROVIDER": "openai",
+        "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
+        "QEX_OPENAI_API_KEY": "ollama",
+        "QEX_OPENAI_MODEL": "qwen3-embedding:4b",
+        "QEX_OPENAI_DIMENSIONS": "2560"
+      }
+    }
+  }
+}

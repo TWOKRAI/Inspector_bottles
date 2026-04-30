@@ -1,0 +1,21 @@
+/* 09_utilities — MutedLabel, HintLabel, PlaceholderLabel, SectionTitle,
+   PanelTitle, WarningBar, DisplayImageLabel, CameraStatus */
+
+QLabel#MutedLabel { color: @text_2; }
+QLabel#HintLabel { font-size: 10px; color: @text_2; }
+QLabel#HintLabelLg { font-size: 11px; color: @text_2; }
+QLabel#PlaceholderLabel { color: @text_2; font-size: 13px; }
+QLabel#SectionTitle { font-weight: bold; font-size: 14px; }
+QLabel#PanelTitle { font-weight: bold; font-size: 12px; }
+QLabel#PanelTitleLg { font-weight: bold; font-size: 13px; }
+QLabel#WarningBar {
+    background-color: #FFF3CD;
+    color: #856404;
+    border: 1px solid #FFE69C;
+    border-radius: 3px;
+    padding: 4px;
+}
+
+/* ---- Источники ---- */
+QLabel#DisplayImageLabel { background-color: black; }
+QLabel#CameraStatus { font-weight: bold; color: @text_2; }

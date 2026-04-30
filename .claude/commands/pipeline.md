@@ -1,0 +1,77 @@
+---
+description: Полный цикл разработки одной командой — plan → implement → test → review → ship (с failure-recovery через debugger)
+---
+
+Автоматический полный цикл. Director управляет каждым этапом. Явные петли failure-recovery через `debugger` и эскалация в `teamlead`.
+
+## Алгоритм
+
+### 1. Планирование
+Запусти агента **manager** (Sonnet):
+- Передай задачу: $ARGUMENTS
+- Получи план с Task X.Y в `plans/`
+- Покажи пользователю краткое резюме плана и спроси подтверждение
+
+### 2. Реализация
+Для каждой Task X.Y из плана (по порядку, с учётом зависимостей):
+- Если уровень Senior/Senior+ → запусти **teamlead** (Opus)
+- Если уровень Middle/Middle+ → запусти **developer** (Sonnet)
+- Передай полное ТЗ задачи, пути файлов, acceptance criteria
+- Убедись что агент сделал коммит
+- Обнови статус задачи в плане: `[PENDING]` → `[DONE]`
+
+### 3. Тестирование
+Запусти агента **tester** (Sonnet):
+- Передай: какие модули/файлы были изменены + acceptance criteria из плана
+- Если тесты PASS → шаг 4 (ревью)
+- Если тесты FAIL:
+  - **Итерация 1 (FAIL)**: запусти **debugger** (Sonnet) с failing-тестом и стеком → либо debugger фиксит в scope, либо выдаёт диагноз → `developer`/`teamlead` применяет фикс → tester retry
+  - **Итерация 2 (повторный FAIL)**: снова debugger + developer → tester retry
+  - **Итерация 3 (всё ещё FAIL)**: **СТОП**, эскалируй в **teamlead** (Opus) — либо ТЗ неадекватно, либо нужен пересмотр архитектуры
+
+### 4. Ревью
+Запусти агента **reviewer** (Opus):
+- Передай: `git diff main...HEAD` + план + acceptance criteria
+- Если APPROVED → шаг 5 (ship)
+- Если CHANGES REQUESTED:
+  - **Итерация 1**: `developer`/`teamlead` применяет правки → reviewer повторный review
+  - **Итерация 2** (последняя): `developer`/`teamlead` финальный шанс → reviewer
+  - **Итерация 3**: **СТОП**, эскалация в **teamlead** (Opus) для пересмотра ТЗ или архитектуры
+
+### 5. Документация (опционально)
+Если задача затрагивает архитектуру:
+- Обычная документация (docstrings, README) → **docs-writer** (Haiku)
+- ADR / ARCHITECTURE.md / migration guide → **tech-writer** (Sonnet)
+
+### 6. Ship
+Выполни `/ship`:
+- validate → тесты → линтер
+- Покажи итоговый diff
+- Предложи commit message
+- Спроси разрешение на push
+
+## Failure-recovery граф
+
+```
+plan → implement → test → [PASS] → review → [APPROVED] → docs? → ship
+                        ↓ FAIL
+                        debugger → implement [fix] → test (retry)
+                            ↓ FAIL (итерация 2)
+                            debugger → implement → test
+                                ↓ FAIL (итерация 3)
+                                ESCALATE → teamlead (пересмотр)
+
+                  review → [CHANGES] → implement → test → review (итерация 2)
+                            ↓ CHANGES (итерация 3)
+                            ESCALATE → teamlead (пересмотр ТЗ/архитектуры)
+```
+
+## Правила
+
+- Между этапами показывай пользователю краткий статус
+- **Максимум 2 итерации** на каждой петле (test-fix-test, review-fix-review) — на 3-й эскалация в **teamlead**
+- debugger вызывается автоматически на первом FAIL от tester (не ждать ручного /debug)
+- Если задача явно Senior+ → сразу teamlead на implementation (не developer)
+- Если архитектурное изменение — reviewer проверяет, что есть запись в `DECISIONS.md` (или вызван tech-writer)
+
+Задача: $ARGUMENTS

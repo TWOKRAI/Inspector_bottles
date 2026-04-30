@@ -1,0 +1,77 @@
+[project]
+name = "inspector-bottles"
+version = "0.1.0"
+description = "Multiprocess framework for bottle inspection — camera-based defect detection"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Core framework
+    "pydantic>=2.13",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.49",  # asyncio extras = greenlet для async-адаптера
+    "numpy>=2.4,<3",
+    "PyYAML>=6.0",
+    "psutil>=7.0",
+    # GUI (Phase 2 завершена: миграция PyQt5 → PySide6)
+    "pyside6>=6.8,<6.11",
+    "QDarkStyle>=3.2",
+    # Node graph editor (Phase 9) — fork от C3RV1 для PySide6, гибридный режим
+    "NodeGraphQt",
+    "Qt.py>=1.4",  # транзитивная зависимость NodeGraphQt
+    # Vision / image
+    "opencv-python>=4.13,<5",
+    "Pillow>=12.0",
+    # Data / plotting
+    "pandas>=2.2",
+    "matplotlib>=3.9",
+    "plotly>=5.24",
+    "seaborn>=0.13",
+    "openpyxl>=3.1",
+    # Camera (GigE Vision) — нет ARM-колёс genicam, пропускаем на macOS ARM
+    "harvesters>=1.4; sys_platform != 'darwin' or platform_machine != 'arm64'",
+    # Logging
+    "loguru>=0.7",
+    # Network / utils
+    "requests>=2.32",
+    "environs>=11.0",
+    # Simulation
+    "pygame>=2.6",
+    # Async testing — было в стейл inner pyproject
+    "pytest-asyncio>=0.24",
+    "setuptools>=82.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.24",
+    "pytest-qt>=4.4",   # qt_api = "pyside6", фикстура qtbot
+    "ipykernel>=6.29",
+    "aiosqlite>=0.20",  # для тестов async SQL-адаптера
+]
+
+[project.optional-dependencies]
+# ML stack — добавится в Phase 1.5 после успешного перехода на 3.12
+# ml = [
+#     "torch>=2.11",
+#     "torchvision>=0.26",
+#     "ultralytics>=8.3",
+#     "onnxruntime>=1.20",
+# ]
+
+[tool.uv.sources]
+# NodeGraphQt-PySide6 — fork от C3RV1, не публикуется на PyPI.
+# Sha-pin для воспроизводимости (последний коммит на master 2023-01-08).
+NodeGraphQt = { git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git", rev = "7fa60017" }
+
+[tool.pytest.ini_options]
+testpaths = [
+    "multiprocess_framework/refactored",
+    "multiprocess_prototype/tests",
+    "multiprocess_prototype/tests",
+    "multiprocess_prototype/state_store/tests",
+]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+qt_api = "pyside6"

@@ -1,0 +1,42 @@
+/* =============================================================
+   INNOTECH · Silver Industrial Theme · v3.1
+   01_base — базовые стили: QWidget, QLabel, QMainWindow, QToolTip
+
+   Палитра (THEME_SPEC.md):
+     bg-deep   #1a1f28   bg-mid   #2d3440   bg-hi    #4a5362   bg-hi2  #5c6573
+     surf-0    #3a414e   surf-1   #5a6370   surf-2   #6e7886   surf-deep #252a33
+     silver-hi #c8ccd4   silver   #9ea6b2   silver-lo #6a7280
+     text-0    #f2f5fa   text-1   #c0c7d2   text-2   #8a93a1   text-3  #5e6674
+     accent    #2b7fff   accent-hi #4a95ff  accent-lo #1f5fcc  accent-deep #153f8a
+     danger    #e54863   success  #2ecc8f   warn     #f0a23a
+   ============================================================= */
+
+/* НЕ ставим background: transparent для QWidget — каскадирует на
+   все дочерние виджеты и ломает фон. Прозрачность задаём точечно. */
+QWidget {
+    color: @text_0;
+    font-family: "@font_family", "Segoe UI", sans-serif;
+    font-size: 13px;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+}
+
+QLabel {
+    background: transparent;
+}
+
+QMainWindow,
+QDialog {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:0.45 #3e4552, stop:1 #2a303b);
+}
+
+QToolTip {
+    color: @text_0;
+    background-color: @bg_deep;
+    border: 1px solid @accent;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: "@font_family_mono", monospace;
+    font-size: 11px;
+}

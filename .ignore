@@ -1,0 +1,31 @@
+# .ignore — правила для qex (crate `ignore`, как у ripgrep)
+# Стратегия: whitelist — индексируем ТОЛЬКО активные рабочие области.
+#
+# В индексе:
+#   multiprocess_framework/   — ядро фреймворка
+#   multiprocess_prototype/   — активный прототип
+#   scripts/                  — тулинг (validate.py, тесты)
+#   docs/                     — документация
+
+# === Корень: исключить всё... ===
+/*
+
+# ... кроме активных директорий.
+!/multiprocess_framework/
+!/multiprocess_prototype/
+!/scripts/
+!/docs/
+!/hikvision_camera_module/
+!/Services/
+
+# === Исключить не-код ===
+**/plans/
+
+# === Исключить мусор внутри разрешённых папок ===
+**/*.log
+**/*.log.*
+**/logs/
+**/archive/
+**/*.pyc
+**/__pycache__/
+**/.pytest_cache/
