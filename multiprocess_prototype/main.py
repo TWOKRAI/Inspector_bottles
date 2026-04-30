@@ -84,6 +84,9 @@ def main() -> int:
     )
 
     app = AppConfig(cameras=cameras, gui=gui, worker_pool_size=worker_pool_size)
+    # Dict at Boundary: сериализуем AppConfig один раз и передаём оркестратору
+    # через orchestrator_config. StateStoreManager читает через self.get_config("app_config").
+    app_config_dict = app.model_dump()
 
     # P11: очистка осиротевших SHM-сегментов от предыдущих аварийных запусков
     shm_names = app.all_shm_names()
@@ -99,6 +102,7 @@ def main() -> int:
     launcher = SystemLauncher(
         stop_timeout=app.stop_timeout,
         orchestrator_class_path=PROCESS_MANAGER_APP_CLASS_PATH,
+        orchestrator_config={"app_config": app_config_dict},
     )
     for cfg in app.all_process_configs():
         launcher.add_process(*process(cfg))

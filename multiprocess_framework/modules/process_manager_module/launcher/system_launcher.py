@@ -37,6 +37,7 @@ class SystemLauncher:
         stop_timeout: float = 5.0,
         on_shutdown: Optional[Callable[[], None]] = None,
         orchestrator_class_path: Optional[str] = None,
+        orchestrator_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._config = config
         self._processes: List[Tuple[str, Dict[str, Any]]] = []
@@ -45,6 +46,10 @@ class SystemLauncher:
         self._on_shutdown = on_shutdown
         # Путь к классу оркестратора (None = default ProcessManagerProcess).
         self._orchestrator_class_path = orchestrator_class_path
+        # Дополнительный конфиг для оркестратора (Dict at Boundary).
+        # Ключи попадают напрямую в process_config оркестратора и доступны
+        # через self.get_config(key) внутри ProcessManagerProcess.
+        self._orchestrator_config: Dict[str, Any] = orchestrator_config or {}
         # Event, который ProcessManagerProcess выставляет после завершения
         # своего initialize() (все дочерние процессы spawned и запущены).
         self._system_ready_event: _MpEvent = _MpEvent()
@@ -102,6 +107,8 @@ class SystemLauncher:
         )
         if self._orchestrator_class_path is not None:
             spawner_kwargs["orchestrator_class_path"] = self._orchestrator_class_path
+        if self._orchestrator_config:
+            spawner_kwargs["orchestrator_config"] = self._orchestrator_config
         return ProcessSpawner(**spawner_kwargs)
 
     def run(self) -> None:

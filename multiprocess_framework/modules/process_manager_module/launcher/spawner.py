@@ -34,6 +34,7 @@ class ProcessSpawner:
         on_shutdown: Optional[Callable[[], None]] = None,
         system_ready_event: Optional[Event] = None,
         orchestrator_class_path: str = PROCESS_MANAGER_CLASS_PATH,
+        orchestrator_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._processes_config = processes_config or {}
         self._platform = platform_adapter or get_platform_adapter()
@@ -49,6 +50,9 @@ class ProcessSpawner:
         # Путь к классу оркестратора (по умолчанию ProcessManagerProcess).
         # Прототип может подставить свой подкласс.
         self._orchestrator_class_path = orchestrator_class_path
+        # Дополнительный конфиг оркестратора (Dict at Boundary).
+        # Ключи мёржатся в process_config и доступны через self.get_config(key).
+        self._orchestrator_config: Dict[str, Any] = orchestrator_config or {}
 
     def launch_orchestrator(self) -> bool:
         """SRM + Process(ProcessManager) + сигналы."""
@@ -59,6 +63,11 @@ class ProcessSpawner:
         self._logger = _ProcessLogger("spawner")
 
         process_config = {"processes_config": self._processes_config}
+        # Мёрджим дополнительный конфиг оркестратора поверх process_config.
+        # Это позволяет прототипу передавать app_config и другие данные
+        # без изменения внутренней структуры processes_config.
+        if self._orchestrator_config:
+            process_config.update(self._orchestrator_config)
         custom = {"process_config": process_config}
         # Передаём system_ready_event в ProcessManagerProcess через bundle (ADR-116).
         # multiprocessing.Event pickle-safe и безопасно пробрасывается через spawn.
