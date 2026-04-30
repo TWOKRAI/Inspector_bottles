@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from registers.display.presets import LayoutPreset
 
 if TYPE_CHECKING:
-    from state_store.adapters.camera_state_adapter import CameraStateAdapter
+    from multiprocess_prototype.state_store.adapters.camera_state_adapter import CameraStateAdapter
     from frontend.managers.display_router import DisplayRouter
     from frontend.managers.window_manager import DisplayWindowManager
 

@@ -110,7 +110,7 @@ class FrontendLauncher:
         camera_type = config.get("camera_type", "simulator")
 
         # Phase 4d: StateProxy + RegistersStateAdapter
-        from state_store.adapters.registers_adapter import RegistersStateAdapter
+        from multiprocess_prototype.state_store.adapters.registers_adapter import RegistersStateAdapter
 
         state_proxy = getattr(process, "_state_proxy", None)
 

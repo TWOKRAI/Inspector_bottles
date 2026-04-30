@@ -60,7 +60,7 @@ class CameraProcess(ProcessModule):
             self.command_manager.register_command(cmd, handler)
 
         # StateProxy для чтения config / записи state
-        from state_store.proxy.state_proxy import StateProxy
+        from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
 
         self._state_proxy = StateProxy(f"camera_{self._camera_id}", router=self.router_manager)
 

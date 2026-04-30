@@ -74,7 +74,7 @@ class DatabaseProcess(ProcessModule):
             self.command_manager.register_command(cmd, handler)
 
         # StateProxy для записи state (без подписок на config — Database только команды)
-        from state_store.proxy.state_proxy import StateProxy
+        from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
 
         self._state_proxy = StateProxy("database", router=self.router_manager)
 

@@ -170,8 +170,14 @@ def test_snapshot_after_transaction():
 
 
 def test_import_from_package():
-    """Импорт из пакета state_store работает."""
-    from state_store import (
+    """Импорт из пакета state_store работает.
+
+    Тест проверяет обратную совместимость: conftest.py добавляет
+    multiprocess_prototype/ в sys.path, что позволяет использовать
+    короткий путь `from state_store import ...` наряду с каноническим
+    `from multiprocess_prototype.state_store import ...`.
+    """
+    from multiprocess_prototype.state_store import (
         Delta,
         MISSING,
         Subscription,

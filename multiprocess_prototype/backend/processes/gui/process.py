@@ -73,7 +73,7 @@ class GuiProcess(ProcessModule):
         self._watchdog_state = "ok"
 
         # Phase 4d: GuiStateProxy — Qt-safe StateProxy для GUI-процесса
-        from state_store.proxy.gui_state_proxy import GuiStateProxy
+        from multiprocess_prototype.state_store.proxy.gui_state_proxy import GuiStateProxy
 
         self._state_proxy = GuiStateProxy("gui", router=self.router_manager)
 

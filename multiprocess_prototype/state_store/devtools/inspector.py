@@ -18,7 +18,7 @@ from multiprocess_prototype.state_store.core.tree_store import TreeStore
 from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
 
 if TYPE_CHECKING:
-    from state_store.middleware.metrics import MetricsMiddleware
+    from multiprocess_prototype.state_store.middleware.metrics import MetricsMiddleware
 
 
 # Маркер для сериализации MISSING в dict
