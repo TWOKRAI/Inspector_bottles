@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from state_store import (
+from multiprocess_prototype.state_store import (
     Delta,
     MISSING,
     Subscription,

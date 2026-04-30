@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Any, Callable, TYPE_CHECKING
 
-from state_store.core.delta import MISSING, Delta
+from multiprocess_prototype.state_store.core.delta import MISSING, Delta
 
 if TYPE_CHECKING:
     pass

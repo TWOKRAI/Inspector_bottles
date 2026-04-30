@@ -11,11 +11,11 @@
 """
 import pytest
 
-from state_store.core.tree_store import TreeStore
-from state_store.core.delta import Delta, MISSING
-from state_store.core.subscription_manager import SubscriptionManager
-from state_store.middleware.metrics import MetricsMiddleware
-from state_store.devtools.inspector import StateInspector
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING
+from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
+from multiprocess_prototype.state_store.middleware.metrics import MetricsMiddleware
+from multiprocess_prototype.state_store.devtools.inspector import StateInspector
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,6 @@
     manager.use(persistence_manager.middleware)
 """
 
-from state_store.persistence.persistence_manager import PersistenceManager
+from multiprocess_prototype.state_store.persistence.persistence_manager import PersistenceManager
 
 __all__ = ["PersistenceManager"]

@@ -19,9 +19,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from state_store.core.delta import Delta, MISSING
-from state_store.core.tree_store import TreeStore
-from state_store.persistence.persistence_manager import PersistenceManager
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.persistence.persistence_manager import PersistenceManager
 
 
 # ---------------------------------------------------------------------------

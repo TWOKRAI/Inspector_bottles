@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from state_store.bootstrap import build_initial_state
+from multiprocess_prototype.state_store.bootstrap import build_initial_state
 
 # ---------------------------------------------------------------------------
 # Вспомогательные фабрики тестовых данных

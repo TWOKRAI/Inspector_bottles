@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from state_store.recipes.recipe_engine import RecipeEngine
+from multiprocess_prototype.state_store.recipes.recipe_engine import RecipeEngine
 
 logger = logging.getLogger(__name__)
 

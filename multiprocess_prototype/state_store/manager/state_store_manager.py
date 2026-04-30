@@ -11,10 +11,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from state_store.core.subscription_manager import SubscriptionManager
-from state_store.core.tree_store import TreeStore
-from state_store.manager.delta_dispatcher import DeltaDispatcher
-from state_store.middleware.base import MiddlewarePipeline, StateMiddleware
+from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.manager.delta_dispatcher import DeltaDispatcher
+from multiprocess_prototype.state_store.middleware.base import MiddlewarePipeline, StateMiddleware
 
 logger = logging.getLogger(__name__)
 

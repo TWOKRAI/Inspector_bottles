@@ -10,8 +10,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from state_store.core.delta import Delta
-from state_store.middleware.base import StateMiddleware
+from multiprocess_prototype.state_store.core.delta import Delta
+from multiprocess_prototype.state_store.middleware.base import StateMiddleware
 
 
 class MetricsMiddleware(StateMiddleware):

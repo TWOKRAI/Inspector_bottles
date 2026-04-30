@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from state_store.core.delta import Delta
-from state_store.core.subscription_manager import SubscriptionManager
+from multiprocess_prototype.state_store.core.delta import Delta
+from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
 
 logger = logging.getLogger(__name__)
 

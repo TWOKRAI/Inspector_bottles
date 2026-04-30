@@ -11,13 +11,13 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
-from state_store.core.delta import Delta
-from state_store.core.subscription_manager import (
+from multiprocess_prototype.state_store.core.delta import Delta
+from multiprocess_prototype.state_store.core.subscription_manager import (
     SubscriptionManager,
     _match_pattern,
     _split_pattern,
 )
-from state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
 
 
 # ---------------------------------------------------------------------------

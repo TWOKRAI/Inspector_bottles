@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from state_store.core.delta import Delta, MISSING
-from state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
 
 
 # ===========================================================================

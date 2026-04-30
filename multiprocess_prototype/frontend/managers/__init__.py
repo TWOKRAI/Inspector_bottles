@@ -4,7 +4,7 @@ from .display_router import DisplayRouter
 from .window_manager import DisplayWindowManager
 from .recipe_manager import DEFAULT_RECIPE_SLOT_ID, RecipeManager
 from .recipe_manager_protocol import RecipeManagerProtocol
-from state_store.adapters.recipe_adapter import RecipeAdapter
+from multiprocess_prototype.state_store.adapters.recipe_adapter import RecipeAdapter
 from .settings_profile_manager import (
     SettingsProfileManager,
     ShmBudgetError,

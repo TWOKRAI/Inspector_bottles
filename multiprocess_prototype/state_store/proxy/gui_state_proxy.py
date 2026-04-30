@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
-from state_store.proxy.state_proxy import StateProxy
+from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
 
 if TYPE_CHECKING:
     from PySide6.QtCore import QObject

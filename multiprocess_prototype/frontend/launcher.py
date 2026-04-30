@@ -23,7 +23,7 @@ from multiprocess_prototype.frontend.managers.app_recipe_aggregate import (
     aggregate_to_snapshot,
     build_default_app_aggregate,
 )
-from state_store.adapters.camera_state_adapter import CameraStateAdapter
+from multiprocess_prototype.state_store.adapters.camera_state_adapter import CameraStateAdapter
 from multiprocess_prototype.frontend.managers.recipe_manager import DEFAULT_RECIPE_SLOT_ID
 from multiprocess_prototype.frontend.widgets import build_camera_tab_callbacks
 from multiprocess_prototype.frontend.widgets.tabs_setting.sources_tab.camera_panel.schemas import (

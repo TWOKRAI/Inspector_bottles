@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, call
 
-from state_store.core.delta import MISSING, Delta
+from multiprocess_prototype.state_store.core.delta import MISSING, Delta
 from multiprocess_prototype.backend.processes.camera.commands import (
     build_state_config_handlers,
 )

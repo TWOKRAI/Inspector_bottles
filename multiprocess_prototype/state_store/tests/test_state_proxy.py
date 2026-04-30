@@ -6,10 +6,10 @@ GuiStateProxy тестируется без Qt через fallback-режим (s
 """
 from __future__ import annotations
 
-from state_store.core.delta import MISSING, Delta
-from state_store.manager.state_store_manager import StateStoreManager
-from state_store.proxy.state_proxy import StateProxy
-from state_store.proxy.gui_state_proxy import GuiStateProxy
+from multiprocess_prototype.state_store.core.delta import MISSING, Delta
+from multiprocess_prototype.state_store.manager.state_store_manager import StateStoreManager
+from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
+from multiprocess_prototype.state_store.proxy.gui_state_proxy import GuiStateProxy
 
 
 # ---------------------------------------------------------------------------

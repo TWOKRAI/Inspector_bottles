@@ -12,8 +12,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from state_store.core.subscription_manager import _match_pattern, _split_pattern
-from state_store.middleware.base import StateMiddleware
+from multiprocess_prototype.state_store.core.subscription_manager import _match_pattern, _split_pattern
+from multiprocess_prototype.state_store.middleware.base import StateMiddleware
 
 
 class ThrottleMiddleware(StateMiddleware):

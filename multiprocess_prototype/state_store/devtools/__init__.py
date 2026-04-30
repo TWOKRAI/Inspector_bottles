@@ -7,6 +7,6 @@
 - stats() — метрики из MetricsMiddleware
 - summary() — краткая сводка
 """
-from state_store.devtools.inspector import StateInspector
+from multiprocess_prototype.state_store.devtools.inspector import StateInspector
 
 __all__ = ["StateInspector"]

@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
 from .migrations import RECIPE_VERSION_V2, migrate_recipe_data, needs_migration
 
 logger = logging.getLogger(__name__)

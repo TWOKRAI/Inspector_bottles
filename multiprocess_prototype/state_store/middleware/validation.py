@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from state_store.middleware.base import StateMiddleware
-from state_store.core.subscription_manager import _split_pattern, _match_pattern
+from multiprocess_prototype.state_store.middleware.base import StateMiddleware
+from multiprocess_prototype.state_store.core.subscription_manager import _split_pattern, _match_pattern
 
 
 class ValidationMiddleware(StateMiddleware):

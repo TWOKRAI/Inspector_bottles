@@ -4,10 +4,10 @@
 """
 from __future__ import annotations
 
-from state_store.core.delta import MISSING, Delta
-from state_store.core.subscription_manager import SubscriptionManager
-from state_store.manager.delta_dispatcher import DeltaDispatcher
-from state_store.manager.state_store_manager import StateStoreManager
+from multiprocess_prototype.state_store.core.delta import MISSING, Delta
+from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
+from multiprocess_prototype.state_store.manager.delta_dispatcher import DeltaDispatcher
+from multiprocess_prototype.state_store.manager.state_store_manager import StateStoreManager
 
 # ---------------------------------------------------------------------------
 # MockRouter — мок RouterManager для тестов

@@ -15,9 +15,9 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict
 
-from state_store.core.tree_store import TreeStore
-from state_store.recipes.recipe_engine import RecipeEngine
-from state_store.adapters.recipe_adapter import RecipeAdapter
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.recipes.recipe_engine import RecipeEngine
+from multiprocess_prototype.state_store.adapters.recipe_adapter import RecipeAdapter
 
 
 # =====================================================================

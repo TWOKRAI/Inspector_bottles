@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from functools import lru_cache
 
-from state_store.core.delta import Delta
+from multiprocess_prototype.state_store.core.delta import Delta
 
 # ---------------------------------------------------------------------------
 # Subscription — описание одной подписки

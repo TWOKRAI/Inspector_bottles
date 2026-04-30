@@ -12,9 +12,9 @@ import time
 from unittest.mock import MagicMock
 
 import pytest
-from state_store.core.delta import Delta, MISSING
-from state_store.middleware.logging_mw import LoggingMiddleware
-from state_store.middleware.metrics import MetricsMiddleware
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING
+from multiprocess_prototype.state_store.middleware.logging_mw import LoggingMiddleware
+from multiprocess_prototype.state_store.middleware.metrics import MetricsMiddleware
 
 
 # ---------------------------------------------------------------------------

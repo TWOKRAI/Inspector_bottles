@@ -12,8 +12,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from state_store.core.tree_store import TreeStore
-from state_store.core.subscription_manager import _match_pattern, _split_pattern
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.core.subscription_manager import _match_pattern, _split_pattern
 
 
 # ---------------------------------------------------------------------------

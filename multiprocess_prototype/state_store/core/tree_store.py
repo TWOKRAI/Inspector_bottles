@@ -14,7 +14,7 @@ import copy
 import threading
 from typing import Any, Dict, List, Optional
 
-from state_store.core.delta import Delta, MISSING, Transaction
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING, Transaction
 
 # Приватные сентинелы для внутренних проверок
 _SENTINEL = object()   # для get() default — отличить "default не задан" от None

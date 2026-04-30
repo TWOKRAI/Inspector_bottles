@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from state_store.adapters.registers_adapter import RegistersStateAdapter
-from state_store.core.delta import Delta, MISSING
+from multiprocess_prototype.state_store.adapters.registers_adapter import RegistersStateAdapter
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING
 
 
 # ---------------------------------------------------------------------------

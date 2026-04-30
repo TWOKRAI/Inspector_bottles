@@ -26,9 +26,9 @@ from typing import Any
 
 import yaml
 
-from state_store.core.delta import Delta
-from state_store.core.tree_store import TreeStore
-from state_store.middleware.base import StateMiddleware
+from multiprocess_prototype.state_store.core.delta import Delta
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.middleware.base import StateMiddleware
 
 logger = logging.getLogger(__name__)
 

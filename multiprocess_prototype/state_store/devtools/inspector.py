@@ -13,9 +13,9 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from state_store.core.delta import Delta, MISSING
-from state_store.core.tree_store import TreeStore
-from state_store.core.subscription_manager import SubscriptionManager
+from multiprocess_prototype.state_store.core.delta import Delta, MISSING
+from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
 
 if TYPE_CHECKING:
     from state_store.middleware.metrics import MetricsMiddleware
