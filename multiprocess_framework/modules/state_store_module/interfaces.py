@@ -158,30 +158,9 @@ class IStateStore(ABC):
         """
         ...
 
-    @abstractmethod
-    def subscribe(self, pattern: str, callback: Callable) -> str:
-        """Подписаться на изменения по glob-паттерну.
-
-        Примечание: этот метод — на уровне TreeStore. В StateProxy используется
-        SubscriptionManager через IPC (не напрямую TreeStore.subscribe).
-
-        Args:
-            pattern: glob-паттерн пути.
-            callback: функция, вызываемая при изменении.
-
-        Returns:
-            subscription_id — строка-идентификатор подписки.
-        """
-        ...
-
-    @abstractmethod
-    def unsubscribe(self, subscription_id: str) -> None:
-        """Отписаться по subscription_id.
-
-        Args:
-            subscription_id: идентификатор, полученный из subscribe().
-        """
-        ...
+    # Примечание: TreeStore не имеет subscribe/unsubscribe на уровне дерева.
+    # Управление подписками — ответственность SubscriptionManager.
+    # StateProxy использует SubscriptionManager через IPC (state.subscribe команда).
 
 
 class IStateProxy(ABC):
