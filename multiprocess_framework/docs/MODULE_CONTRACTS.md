@@ -269,6 +269,37 @@
 
 ---
 
+### `state_store_module`
+
+**Цель:** Реактивное иерархическое дерево состояния с server/client разделением между процессами.
+
+**Контракт:**
+- `IRouter` (Protocol) — `register_message_handler`, `send_async`, `send`; RouterManager реализует без изменений (ADR-SS-001).
+- `IStateStore` (ABC) — `get`, `get_subtree`, `set`, `merge`, `delete`.
+- `IStateProxy` (ABC) — `get`, `set`, `merge`, `subscribe`, `unsubscribe`, `on_state_changed`.
+- `IStateStoreManager` (ABC) — `initialize`, `shutdown`, `use`, `register_commands`, `register_message_handlers`.
+- `StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager)` — серверный фасад, живёт в `ProcessManagerProcess`. Содержит `TreeStore + SubscriptionManager + DeltaDispatcher`.
+- `StateProxy(BaseManager, ObservableMixin, IStateProxy)` — клиентский прокси в каждом `ProcessModule`. Кэширует подписанные пути.
+- `GuiStateProxy(StateProxy)` — Qt-safe вариант: callbacks через `QMetaObject.invokeMethod` (QueuedConnection).
+- `TreeStore` — иерархический dict с dot-notation путями и delta-генерацией.
+- `Delta` — `path`, `old_value`, `new_value`, `source`, `timestamp`.
+- `DeltaDispatcher` — batch рассылка дельт подписчикам с дедупликацией.
+- `SubscriptionManager` — glob-паттерны + `match(delta) -> list[Subscription]`.
+- `StateMiddleware` (ABC) — `before_set/after_set`, `before_merge/after_merge`, `before_delete/after_delete`.
+- `MiddlewarePipeline` — цепочка middleware (пустой pipeline — нулевой overhead).
+- `InMemoryRouter` — тестовый router без IPC (синхронная диспатч).
+
+**Инварианты:**
+1. `IRouter` — Protocol (не конкретный `RouterManager`); внешняя зависимость через утиную типизацию.
+2. `StateStoreManager` (сервер) живёт в `ProcessManagerProcess`; `StateProxy` (клиент) — в каждом рабочем процессе.
+3. Доставка только delta-only: полный snapshot **не** рассылается, только изменившиеся узлы.
+4. `GuiStateProxy` импортирует `PySide6` лениво — тестируется без Qt.
+
+**Зависимости:** `base_manager`. Внешние: опционально `PySide6`.
+**Тестов:** ~415+
+
+---
+
 ## L6 — Command & Work
 
 ### `command_module`
@@ -316,6 +347,35 @@
 
 **Зависимости:** `base_manager`.
 **Тестов:** 49
+
+---
+
+### `chain_module`
+
+**Цель:** DAG/Chain execution engine для pipeline-операций обработки кадров.
+
+**Контракт:**
+- `IChainRunnable` (Protocol) — `execute(frame, metadata) -> ChainResult`.
+- `ChainRunnable` — последовательный исполнитель списка `RunnableStep`.
+- `DagRunnable` — исполнитель DAG (ветвления 1→N и слияния N→1 через именованные порты).
+- `ParallelChainRunnable` — параллельные бандлы через `ChainThreadPool`.
+- `ChainContext` — контекст выполнения: `camera_id`, `region_id`, `seq_id`, `warnings`, `errors`, `timeouts`, `logger`.
+- `ChainResult` — результат: `frame`, `detections`, `skipped_nodes`, `failed`, `fail_level`, `processing_time`.
+- `RunnableStep` — шаг: `node`, `operation`, `on_error`, опционально `execute_remote` для cross-process.
+- `WorkerPoolDispatcher` — round-robin маршрутизация задач в worker pool через IPC+SHM.
+- `WorkerTaskRequest / WorkerTaskResponse` — протокол обмена с worker-процессом.
+- `ChainThreadPool(BaseManager, ObservableMixin)` — обёртка над `ThreadPoolExecutor` с timeout и graceful shutdown.
+- `topological_sort`, `detect_parallel_bundles`, `is_nonlinear_graph` — graph utilities.
+- `LatencyTracker` — измерение end-to-end latency (p50/p95/p99).
+
+**Инварианты:**
+1. Execution objects (`ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`) — **не** менеджеры; не наследуют `BaseManager`.
+2. Logger передаётся через `ChainContext.logger` (duck-typed: методы `_log_info/warning/error`); если не задан — тихо.
+3. Граница фреймворк/прототип: builder.py и конкретные операции остаются в прототипе.
+4. `ChainThreadPool` — единственный компонент с `BaseManager`; управляет пулом потоков.
+
+**Зависимости:** `base_manager`. Внешние: `numpy`.
+**Тестов:** ~60+
 
 ---
 
@@ -466,7 +526,7 @@
 
 ### `frontend_module`
 
-**Цель:** PyQt5-фреймворк виджетов с привязкой к регистрам.
+**Цель:** PySide6-фреймворк виджетов с привязкой к регистрам.
 
 **Контракт:**
 - `IFrontendManager` — управление окнами/виджетами, привязка к `RegistersManager`.
@@ -481,9 +541,9 @@
 1. Виджет не знает про IPC — координатор делегирует.
 2. Конфиг рядом с виджетом (ADR-044): `components/<name>/config.py`.
 3. Hot-reload через `ConfigManager.subscribe()` (ADR-036).
-4. PyQt5-импорты — через `core/qt_imports.py` (точка стабилизации).
+4. PySide6-импорты — через `core/qt_imports.py` (точка стабилизации).
 
-**Зависимости:** `process_module`, `router_module`, `data_schema_module`, `logger_module`. Внешние: `PyQt5`.
+**Зависимости:** `process_module`, `router_module`, `data_schema_module`, `logger_module`. Внешние: `PySide6`.
 **Тестов:** ~150+
 
 ---

@@ -23,10 +23,18 @@
 ## Зависимости
 
 - `numpy` — ChainResult.frame, ChainThreadPool.submit_bundle
-- `loguru` — LatencyTracker
+- `base_manager` — ChainThreadPool (BaseManager, ObservableMixin)
 - Стандартная библиотека: `concurrent.futures`, `threading`, `dataclasses`, `uuid`
 - Нет зависимостей от прототипа (`multiprocess_prototype.*`)
 
 ## Тесты
 
-`tests/` — заглушка, тесты планируются в Phase 3.
+Написаны и проходят (~60+):
+
+| Файл | Покрытие |
+|------|---------|
+| `test_chain_runnable.py` | ChainRunnable: sequential execution, on_error policies |
+| `test_dag_runnable.py` | DagRunnable: branching, merge, port routing |
+| `test_latency_tracker.py` | LatencyTracker: percentiles, maybe_log |
+| `test_thread_pool.py` | ChainThreadPool: submit_bundle, collect_results, timeout, resize |
+| `test_topology.py` | topological_sort, detect_parallel_bundles, is_nonlinear_graph |

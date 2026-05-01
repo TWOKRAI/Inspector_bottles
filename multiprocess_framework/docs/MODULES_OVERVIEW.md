@@ -1,6 +1,6 @@
 # Modules Overview — Из чего собирать приложение
 
-**Назначение документа:** короткая карта 19 модулей фреймворка. Помогает разработчику и агенту понять, какой модуль закрывает какую задачу. Подробности — в `modules/<имя>/README.md`.
+**Назначение документа:** короткая карта 21 модуля фреймворка. Помогает разработчику и агенту понять, какой модуль закрывает какую задачу. Подробности — в `modules/<имя>/README.md`.
 
 > **Формат:** для каждого модуля указано: роль, импорт с корня, ключевые классы, типичные применения, зависимости, ссылка на детали.
 
@@ -17,9 +17,9 @@ Messaging          L3   message_module  router_module
                                          │
 Observability      L4   logger_module  error_module  statistics_module
                                          │
-Resources & Config L5   shared_resources_module  config_module
+Resources & Config L5   shared_resources_module  config_module  state_store_module
                                          │
-Command & Work     L6   command_module  worker_module
+Command & Work     L6   command_module  worker_module  chain_module
                                          │
 Process            L7   process_module  console_module
                                          │
@@ -29,7 +29,7 @@ Storage            L9   sql_module
                                          │
 Application kit    L10  registers_module
                                          │
-UI (опционально)   L11  frontend_module (PyQt5)
+UI (опционально)   L11  frontend_module (PySide6)
 ```
 
 ---
@@ -129,6 +129,28 @@ UI (опционально)   L11  frontend_module (PyQt5)
 **Зависимости:** `base_manager`, `data_schema_module`.
 **Подробно:** [`modules/config_module/README.md`](../modules/config_module/README.md)
 
+### `state_store_module` — реактивное дерево состояния
+**Импорт:** `from multiprocess_framework.modules.state_store_module import StateStoreManager, StateProxy, TreeStore`
+**Когда применять:** нужно глобальное состояние, видимое всем процессам — с подписками, дельтами и кэшированием. Server живёт в `ProcessManagerProcess`, клиенты — `StateProxy` в каждом рабочем процессе.
+
+**Ключевое:**
+
+- `StateStoreManager` — серверный фасад (TreeStore + SubscriptionManager + DeltaDispatcher). Регистрирует 7 IPC-команд: `state.set/merge/get/get_subtree/subscribe/unsubscribe/unsubscribe_all`.
+- `TreeStore` — иерархическое дерево (`get/get_subtree/set/merge/delete`). Dot-path навигация.
+- `StateProxy` — клиентский прокси с локальным кэшем и подписками на glob-паттерны (`cameras.*.config.*`).
+- `GuiStateProxy` — вариант StateProxy для PySide6 GUI (ленивый импорт PySide6).
+- `Delta` — единица изменения (path, old/new value, source, timestamp).
+- Middleware pipeline: `ThrottleMiddleware`, `ValidationMiddleware`, `LoggingMiddleware`, `MetricsMiddleware`.
+- `Selector` / `SelectorRegistry` — вычисляемые представления состояния.
+- `StateInspector` — devtool: `inspect(pattern)`, `subscriptions()`, `history()`, `stats()`.
+- `HealthMonitor` — watchdog по обновлениям путей.
+- `PersistenceManager` — сохранение/загрузка состояния в YAML с debounce.
+- `RecipeEngine` — снимки (snapshot) и восстановление (restore) с поддержкой миграций.
+- `InMemoryRouter` — встроенный mock `IRouter` для unit-тестов.
+
+**Зависимости:** только stdlib + опционально PySide6. **Не зависит от RouterManager** — использует Protocol `IRouter`.
+**Подробно:** [`modules/state_store_module/README.md`](../modules/state_store_module/README.md)
+
 ---
 
 ## L6 — Command & Work
@@ -146,6 +168,27 @@ UI (опционально)   L11  frontend_module (PyQt5)
 **Ключевое:** `WorkerManager` (lifecycle), `WorkerRegistry`, `WorkerLifecycle`, `ThreadConfig` (runtime), `ThreadWorkerConfig` (`SchemaBase`).
 **Зависимости:** `base_manager`.
 **Подробно:** [`modules/worker_module/README.md`](../modules/worker_module/README.md)
+
+### `chain_module` — DAG/Chain execution engine
+
+**Импорт:** `from multiprocess_framework.modules.chain_module import ChainRunnable, DagRunnable, ParallelChainRunnable, WorkerPoolDispatcher`
+**Когда применять:** нужен pipeline обработки данных внутри процесса: последовательная цепочка шагов, DAG с ветвлениями, параллельные бандлы через пул потоков, или маршрутизация задач на worker-процессы.
+
+**Ключевое:**
+
+- `ChainRunnable` — последовательная цепочка. Принимает список `RunnableStep`, применяет по порядку.
+- `DagRunnable` — DAG с ветвлениями 1→N и слияниями N→1 через именованные порты. Исполняет в топологическом порядке.
+- `ParallelChainRunnable` — параллельные бандлы через `ChainThreadPool`. Бандлы — последовательно (barrier), шаги внутри бандла — параллельно.
+- `ChainContext` — контекст выполнения (camera_id, seq_id, warnings, errors, timeout).
+- `ChainResult` — результат цепочки (frame, detections, timing).
+- `RunnableStep` — шаг: нода + операция + `on_error` политика.
+- `ChainThreadPool` — `ThreadPoolExecutor` с timeout и graceful shutdown.
+- Graph utilities: `topological_sort` (алгоритм Кана), `is_nonlinear_graph`, `detect_parallel_bundles`.
+- Worker pool: `WorkerPoolDispatcher` (round-robin, backpressure, timeout), `WorkerTaskRequest`/`WorkerTaskResponse` (Dict at Boundary IPC-протокол).
+- `LatencyTracker` — накапливает измерения, вычисляет p50/p95/p99.
+
+**Зависимости:** `numpy`, `loguru`, stdlib (`concurrent.futures`, `threading`). **Не зависит от других модулей фреймворка** — standalone.
+**Подробно:** [`modules/chain_module/README.md`](../modules/chain_module/README.md)
 
 ---
 
@@ -209,11 +252,11 @@ UI (опционально)   L11  frontend_module (PyQt5)
 
 ## L11 — UI (опционально)
 
-### `frontend_module` — PyQt5-виджеты с привязкой к регистрам
+### `frontend_module` — PySide6-виджеты с привязкой к регистрам
 **Импорт:** `from multiprocess_framework.modules.frontend_module import FrontendManager`
 **Когда применять:** GUI-процесс приложения. Виджет → `FrontendRegistersBridge` → регистр → `RouterManager`. Конфиг рядом с виджетом (`config.py` в каждой папке `components/<name>/`).
 **Ключевое:** `FrontendManager` (`BaseManager`), `FrontendRegistersBridge`, координаторы, `FrontendAppContext`, библиотека готовых компонентов (numeric, slider, spinbox, compound, table…).
-**Зависимости:** `process_module`, `router_module`, `data_schema_module`. PyQt5.
+**Зависимости:** `process_module`, `router_module`, `data_schema_module`. PySide6.
 **Подробно:** [`modules/frontend_module/README.md`](../modules/frontend_module/README.md), [`modules/frontend_module/WIDGET_COOKBOOK.md`](../modules/frontend_module/WIDGET_COOKBOOK.md)
 
 ---

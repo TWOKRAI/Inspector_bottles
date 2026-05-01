@@ -1,8 +1,8 @@
 # Статус модулей — MODULES_STATUS.md
 
-Сводка по 19 модулям фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
+Сводка по 21 модулю фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
 
-**Обновлено:** 2026-04-25 — после миграции на каноничные импорты `multiprocess_framework.modules.<X>` и наведения порядка в `__init__.py` фасада.
+**Обновлено:** 2026-05-01 — добавлены `state_store_module` (Phase 2.1) и `chain_module` (Phase 2.3).
 
 | Модуль | Готовность | LOC | Тестов | Комментарий |
 |--------|-----------|-----|-------:|-------------|
@@ -14,11 +14,13 @@
 | `logger_module` | production | 1 705 | + | Scope-based routing, BatchBuffer |
 | `error_module` | production | 1 026 | + | Severity routing, наследник Logger |
 | `config_module` | production | 2 393 | + | Тонкая обёртка над data_schema |
+| `state_store_module` | stable | 2 500 | + | Реактивное дерево состояния; StateStoreManager, StateProxy, TreeStore |
 | `console_module` | production | 2 877 | + | Три уровня: passive/active/God mode |
 | `shared_resources_module` | production | 5 233 | + | PSR, ConfigStore, MemoryManager, Handle API |
 | `router_module` | production | 3 225 | + | AsyncSender + AsyncReceiver, CRM-наследник |
 | `command_module` | production | 1 220 | + | Тонкий фасад над dispatch |
 | `worker_module` | production | 2 356 | + | LOOP/TASK режимы, lifecycle потоков |
+| `chain_module` | stable | 1 135 | заглушка | DAG/Chain execution engine; ChainRunnable, DagRunnable, WorkerPoolDispatcher |
 | `process_module` | production | 3 965 | + | ProcessModule — база дочернего процесса |
 | `process_manager_module` | production | 4 612 | + | SystemLauncher, ProcessRegistry, Monitor |
 | `registers_module` | production | 1 169 | + | Runtime вокруг экземпляров регистров |
@@ -26,7 +28,7 @@
 | `sql_module` | production | 3 775 | + | SQLManager, Repository, UoW, QuerySet |
 | `frontend_module` | production | 12 039 | + | PySide6-виджеты с привязкой к регистрам |
 
-**Итого:** 19 пакетов, 73 634 LOC (с тестами), 670 файлов `.py`.
+**Итого:** 21 пакет, ~77 269 LOC (с тестами), 670+ файлов `.py`.
 
 **Тесты:** 1 877 passed / 30 skipped / 2 known-failing (см. PROBLEMS.md). Полный прогон:
 
