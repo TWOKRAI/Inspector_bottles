@@ -1,4 +1,4 @@
-"""SHM utilities: ring-buffer для безопасного fan-out кадров (AD-6), cleanup осиротевших сегментов."""
+"""SHM utilities — re-export из shared_resources_module (Phase 2.4)."""
 
 from .cleanup import cleanup_stale_shm
 from .registry import ShmRegistry
