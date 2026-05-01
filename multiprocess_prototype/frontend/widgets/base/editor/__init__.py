@@ -1,21 +1,24 @@
-"""editor — базовые классы редакторов (модели, деревья, формы)."""
+"""Реэкспорт из фреймворка + доменные компоненты.
 
-from .base_editor_toolbar import BaseEditorToolbar
-from .base_editor_tree import BaseEditorTreeView
+Generic-редактор живёт в frontend_module.widgets.entity_editor.
+Здесь — только доменные расширения для Inspector Bottles.
+"""
+from multiprocess_framework.modules.frontend_module.widgets.entity_editor import (
+    EntityTreeConfig, EntityLevel, ParamDef,
+    EntityTreeWidget,
+    BaseEditorModel,
+    BaseEditorTreeView,
+    BaseEditorToolbar,
+    ParamsForm,
+    SchemaInspectorPanel,
+)
+# Доменные компоненты (остаются здесь):
 from .cross_tab_combo import CrossTabComboBox
-from .entity_tree_config import EntityLevel, EntityTreeConfig, ParamDef
-from .entity_tree_widget import EntityTreeWidget
-from .schema_inspector_panel import SchemaInspectorPanel
 from .topology_editor_model import TopologyEditorModel
 
 __all__ = [
-    "BaseEditorToolbar",
-    "BaseEditorTreeView",
-    "CrossTabComboBox",
-    "EntityLevel",
-    "EntityTreeConfig",
-    "EntityTreeWidget",
-    "ParamDef",
-    "SchemaInspectorPanel",
-    "TopologyEditorModel",
+    "EntityTreeConfig", "EntityLevel", "ParamDef",
+    "EntityTreeWidget", "BaseEditorModel", "BaseEditorTreeView",
+    "BaseEditorToolbar", "ParamsForm", "SchemaInspectorPanel",
+    "CrossTabComboBox", "TopologyEditorModel",
 ]

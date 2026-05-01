@@ -97,3 +97,11 @@ try:
     __all__.append("PerformanceMonitor")
 except ImportError:
     pass
+
+# --- entity_editor ---
+try:
+    from . import entity_editor
+
+    __all__.append("entity_editor")
+except ImportError:
+    pass
