@@ -2,22 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+# ChainContext перемещён во фреймворк (Phase 2.3, ADR-CM-002)
+from multiprocess_framework.modules.chain_module import ChainContext
 
-@dataclass
-class ChainContext:
-    """Контекст, передаваемый между операциями в цепочке обработки."""
-
-    camera_id: str = ""
-    region_id: str = ""
-    seq_id: int = 0
-    warnings: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-    timeouts: list[str] = field(default_factory=list)  # node_id зависших нод
+__all__ = ["ChainContext", "ProcessingOperation", "should_emit_preview", "execute_dag_default"]
 
 
 @runtime_checkable
