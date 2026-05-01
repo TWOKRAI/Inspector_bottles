@@ -105,3 +105,11 @@ try:
     __all__.append("entity_editor")
 except ImportError:
     pass
+
+# --- chrome ---
+try:
+    from . import chrome
+
+    __all__.append("chrome")
+except ImportError:
+    pass
