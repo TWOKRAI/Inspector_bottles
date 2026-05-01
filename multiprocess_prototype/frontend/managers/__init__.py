@@ -1,7 +1,7 @@
 """Менеджеры уровня frontend-приложения."""
 
 from .display_router import DisplayRouter
-from .window_manager import DisplayWindowManager
+from .display_window_manager import DisplayWindowManager
 from .recipe_manager import DEFAULT_RECIPE_SLOT_ID, RecipeManager
 from .recipe_manager_protocol import RecipeManagerProtocol
 from multiprocess_prototype.state_store.adapters.recipe_adapter import RecipeAdapter
