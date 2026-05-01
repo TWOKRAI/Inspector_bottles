@@ -134,11 +134,11 @@ def test_gui_process_creates_state_proxy():
     mock_proxy = _make_mock_state_proxy()
 
     with patch(
-        "state_store.proxy.gui_state_proxy.GuiStateProxy",
+        "multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy.GuiStateProxy",
         return_value=mock_proxy,
     ) as MockProxy:
         # Симулируем инициализацию: создаём proxy вручную (как в _init_application_threads)
-        from state_store.proxy.gui_state_proxy import GuiStateProxy
+        from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import GuiStateProxy
 
         router = MagicMock()
         proxy = GuiStateProxy("gui", router=router)
@@ -161,10 +161,10 @@ def test_gui_process_registers_handler():
     mock_proxy = _make_mock_state_proxy()
 
     with patch(
-        "state_store.proxy.gui_state_proxy.GuiStateProxy",
+        "multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy.GuiStateProxy",
         return_value=mock_proxy,
     ):
-        from state_store.proxy.gui_state_proxy import GuiStateProxy
+        from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import GuiStateProxy
 
         proxy = GuiStateProxy("gui", router=router)
 
@@ -308,7 +308,7 @@ def test_build_path_mapping_unknown_register_skipped():
 
 def test_registers_adapter_connected():
     """adapter.is_connected == True после вызова connect()."""
-    from state_store.adapters.registers_adapter import RegistersStateAdapter
+    from multiprocess_prototype.state_store.adapters.registers_adapter import RegistersStateAdapter
 
     mock_rm = MagicMock()
     mock_rm.subscribe_all = MagicMock()

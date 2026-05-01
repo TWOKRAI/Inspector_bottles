@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from multiprocess_prototype.state_store import (
+from multiprocess_framework.modules.state_store_module import (
     Delta,
     MISSING,
     Subscription,
@@ -175,9 +175,9 @@ def test_import_from_package():
     Тест проверяет обратную совместимость: conftest.py добавляет
     multiprocess_prototype/ в sys.path, что позволяет использовать
     короткий путь `from state_store import ...` наряду с каноническим
-    `from multiprocess_prototype.state_store import ...`.
+    `from multiprocess_framework.modules.state_store_module import ...`.
     """
-    from multiprocess_prototype.state_store import (
+    from multiprocess_framework.modules.state_store_module import (
         Delta,
         MISSING,
         Subscription,

@@ -18,7 +18,7 @@ import logging
 import re
 from typing import Any, Callable
 
-from multiprocess_prototype.state_store.core.delta import Delta
+from multiprocess_framework.modules.state_store_module import Delta
 
 logger = logging.getLogger(__name__)
 

@@ -24,8 +24,10 @@ from multiprocess_prototype.backend.processes.process_manager.state_store_config
     build_throttle_rules,
     build_validation_rules,
 )
-from multiprocess_prototype.state_store.middleware.throttle import ThrottleMiddleware
-from multiprocess_prototype.state_store.middleware.validation import ValidationMiddleware
+from multiprocess_framework.modules.state_store_module import (
+    ThrottleMiddleware,
+    ValidationMiddleware,
+)
 
 
 # ---------------------------------------------------------------------------

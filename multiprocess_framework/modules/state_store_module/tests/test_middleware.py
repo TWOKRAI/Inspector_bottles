@@ -13,9 +13,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from multiprocess_prototype.state_store.core.delta import Delta
-from multiprocess_prototype.state_store.manager.state_store_manager import StateStoreManager
-from multiprocess_prototype.state_store.middleware.base import MiddlewarePipeline, StateMiddleware
+from multiprocess_framework.modules.state_store_module.core.delta import Delta
+from multiprocess_framework.modules.state_store_module.manager.state_store_manager import StateStoreManager
+from multiprocess_framework.modules.state_store_module.middleware.base import MiddlewarePipeline, StateMiddleware
 
 # ---------------------------------------------------------------------------
 # Тестовые middleware

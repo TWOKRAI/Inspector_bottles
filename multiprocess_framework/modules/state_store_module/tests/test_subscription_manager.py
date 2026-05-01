@@ -17,8 +17,8 @@ import threading
 import time
 
 import pytest
-from multiprocess_prototype.state_store.core.delta import Delta
-from multiprocess_prototype.state_store.core.subscription_manager import (
+from multiprocess_framework.modules.state_store_module.core.delta import Delta
+from multiprocess_framework.modules.state_store_module.core.subscription_manager import (
     Subscription,
     SubscriptionManager,
     _match_pattern,

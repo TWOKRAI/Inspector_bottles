@@ -16,10 +16,13 @@ from typing import Any
 
 import pytest
 
+from multiprocess_framework.modules.state_store_module import (
+    Delta,
+    StateProxy,
+    StateStoreManager,
+)
+
 from multiprocess_prototype.state_store.bootstrap import build_initial_state
-from multiprocess_prototype.state_store.core.delta import Delta
-from multiprocess_prototype.state_store.manager.state_store_manager import StateStoreManager
-from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
 
 
 # ---------------------------------------------------------------------------

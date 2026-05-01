@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from multiprocess_prototype.state_store.core.delta import Delta
-from multiprocess_prototype.state_store.core.subscription_manager import SubscriptionManager
-from multiprocess_prototype.state_store.core.tree_store import TreeStore
-from multiprocess_prototype.state_store.selectors.selector import (
+from multiprocess_framework.modules.state_store_module.core.delta import Delta
+from multiprocess_framework.modules.state_store_module.core.subscription_manager import SubscriptionManager
+from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
+from multiprocess_framework.modules.state_store_module.selectors.selector import (
     Selector,
     SelectorRegistry,
     _collect_values_by_pattern,

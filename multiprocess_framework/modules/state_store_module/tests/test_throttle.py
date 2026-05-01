@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from multiprocess_prototype.state_store.middleware.throttle import ThrottleMiddleware
+from multiprocess_framework.modules.state_store_module.middleware.throttle import ThrottleMiddleware
 
 
 # ---------------------------------------------------------------------------

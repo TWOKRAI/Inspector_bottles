@@ -56,12 +56,12 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
             return
 
         # Ленивые импорты для изоляции от циклических зависимостей
-        from multiprocess_prototype.state_store.manager.state_store_manager import (
+        from multiprocess_framework.modules.state_store_module import (
             StateStoreManager,
+            ValidationMiddleware,
+            ThrottleMiddleware,
         )
         from multiprocess_prototype.state_store.bootstrap import build_initial_state
-        from multiprocess_prototype.state_store.middleware.validation import ValidationMiddleware
-        from multiprocess_prototype.state_store.middleware.throttle import ThrottleMiddleware
         from multiprocess_prototype.backend.processes.process_manager.state_store_config import (
             build_validation_rules,
             build_throttle_rules,

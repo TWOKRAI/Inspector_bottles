@@ -47,9 +47,13 @@ class RendererProcess(ProcessModule):
             self.command_manager.register_command(cmd, handler)
 
         # StateProxy для чтения config / записи state
-        from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
+        from multiprocess_framework.modules.state_store_module import StateProxy
 
-        self._state_proxy = StateProxy("renderer", router=self.router_manager)
+        self._state_proxy = StateProxy(
+            "renderer",
+            router=self.router_manager,
+            server_target="ProcessManager",
+        )
 
         # Регистрация обработчика state.changed
         self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)

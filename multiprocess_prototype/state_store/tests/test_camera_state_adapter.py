@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from multiprocess_prototype.state_store.adapters.camera_state_adapter import CameraStateAdapter
-from multiprocess_prototype.state_store.core.delta import Delta, MISSING
+from multiprocess_framework.modules.state_store_module import Delta, MISSING
 
 
 # ---------------------------------------------------------------------------

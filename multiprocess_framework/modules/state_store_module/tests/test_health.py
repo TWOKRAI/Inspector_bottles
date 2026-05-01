@@ -16,8 +16,8 @@ import time
 
 import pytest
 
-from multiprocess_prototype.state_store.core.tree_store import TreeStore
-from multiprocess_prototype.state_store.health.monitor import (
+from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
+from multiprocess_framework.modules.state_store_module.health.monitor import (
     HealthMonitor,
     WatchedProcess,
     STATUS_RUNNING,

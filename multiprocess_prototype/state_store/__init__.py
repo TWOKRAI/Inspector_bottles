@@ -1,26 +1,39 @@
-# state_store — реактивное хранилище данных для Inspector
-#
-# Публичный API:
-#   TreeStore — иерархическое dict-хранилище с путевым доступом
-#   Delta — единица изменения (иммутабельный dataclass)
-#   Transaction — группировка нескольких Delta в batch
-#   MISSING — sentinel для отсутствующего значения
-#   SubscriptionManager — управление подписками с glob-style matching
-#   Subscription — описание одной подписки
-from multiprocess_prototype.state_store.core.delta import MISSING, Delta, Transaction
-from multiprocess_prototype.state_store.core.subscription_manager import Subscription, SubscriptionManager
-from multiprocess_prototype.state_store.core.tree_store import TreeStore
-from multiprocess_prototype.state_store.manager.delta_dispatcher import DeltaDispatcher
-from multiprocess_prototype.state_store.manager.state_store_manager import StateStoreManager
-from multiprocess_prototype.state_store.middleware.base import MiddlewarePipeline, StateMiddleware
-from multiprocess_prototype.state_store.middleware.logging_mw import LoggingMiddleware
-from multiprocess_prototype.state_store.middleware.metrics import MetricsMiddleware
-from multiprocess_prototype.state_store.middleware.throttle import ThrottleMiddleware
-from multiprocess_prototype.state_store.middleware.validation import ValidationMiddleware
-from multiprocess_prototype.state_store.proxy.gui_state_proxy import GuiStateProxy
-from multiprocess_prototype.state_store.proxy.state_proxy import StateProxy
+"""state_store — доменная точка входа для прикладного слоя.
+
+Реализация перенесена в `multiprocess_framework.modules.state_store_module`.
+Здесь оставлены только доменные компоненты:
+    bootstrap.py        — построение начального дерева состояния из AppConfig
+    adapters/           — доменные адаптеры (camera_state, registers, recipe)
+    recipes/recipe_engine — wrapper над generic-RecipeEngine с подключением
+                            доменных миграций v1→v2 (см. recipes/migrations/)
+
+Публичный API generic-классов реэкспортирован из фреймворка для
+обратной совместимости (адаптеры и прикладной код прототипа используют
+короткие импорты из `multiprocess_prototype.state_store`).
+"""
+from multiprocess_framework.modules.state_store_module import (
+    TreeStore,
+    Delta,
+    Transaction,
+    MISSING,
+    SubscriptionManager,
+    Subscription,
+    StateStoreManager,
+    DeltaDispatcher,
+    StateProxy,
+    GuiStateProxy,
+    StateMiddleware,
+    MiddlewarePipeline,
+    ThrottleMiddleware,
+    ValidationMiddleware,
+    LoggingMiddleware,
+    MetricsMiddleware,
+    Selector,
+    SelectorRegistry,
+)
+
+# Доменный wrapper RecipeEngine (подключает миграцию v1→v2 автоматически)
 from multiprocess_prototype.state_store.recipes.recipe_engine import RecipeEngine
-from multiprocess_prototype.state_store.selectors.selector import Selector, SelectorRegistry
 
 __all__ = [
     "TreeStore",

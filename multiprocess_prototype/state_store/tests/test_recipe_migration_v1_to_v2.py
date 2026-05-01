@@ -14,7 +14,7 @@ import pytest
 import yaml
 from pathlib import Path
 
-from multiprocess_prototype.state_store.core.tree_store import TreeStore
+from multiprocess_framework.modules.state_store_module import TreeStore
 from multiprocess_prototype.state_store.recipes.recipe_engine import RecipeEngine
 from multiprocess_prototype.state_store.recipes.migrations import (
     RECIPE_VERSION_V1,

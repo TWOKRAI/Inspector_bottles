@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from multiprocess_prototype.state_store.core.delta import Delta
+from multiprocess_framework.modules.state_store_module import Delta
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from multiprocess_prototype.state_store.core.delta import MISSING, Delta, Transaction, _MissingSentinel, StateWriter
+from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta, Transaction, _MissingSentinel, StateWriter
 
 
 # ---------------------------------------------------------------------------

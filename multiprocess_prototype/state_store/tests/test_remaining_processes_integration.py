@@ -169,7 +169,8 @@ class TestBuildStateConfigHandlersRenderer:
         """RendererProcess инициализирует StateProxy с именем 'renderer' и подпиской на config."""
         source = _read_process_source("renderer")
 
-        assert 'StateProxy("renderer"' in source, (
+        # StateProxy(...) может быть многострочным — проверяем обе сигнатуры
+        assert "StateProxy(" in source and '"renderer"' in source, (
             'StateProxy должен создаваться с именем "renderer"'
         )
         assert '"renderer.state.status"' in source, (

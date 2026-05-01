@@ -66,7 +66,7 @@ NodeGraphQt = { git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git", rev = 
 [tool.pytest.ini_options]
 testpaths = [
     "multiprocess_framework/refactored",
-    "multiprocess_prototype/tests",
+    "multiprocess_framework/modules/state_store_module/tests",
     "multiprocess_prototype/tests",
     "multiprocess_prototype/state_store/tests",
 ]

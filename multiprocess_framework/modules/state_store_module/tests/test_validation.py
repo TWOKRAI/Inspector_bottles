@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import pytest
-from multiprocess_prototype.state_store.middleware.validation import ValidationMiddleware
+from multiprocess_framework.modules.state_store_module.middleware.validation import ValidationMiddleware
 
 
 # ---------------------------------------------------------------------------
