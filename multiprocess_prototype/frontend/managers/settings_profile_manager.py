@@ -64,7 +64,8 @@ class SettingsProfileManager:
     """YAML-backed менеджер профилей настроек + мост в `RegistersManager`."""
 
     def __init__(self, data_path: str | None = None) -> None:
-        self._store = SettingsYamlStore(data_path=data_path)
+        from pathlib import Path
+        self._store = SettingsYamlStore(file_path=Path(data_path) if data_path else None)
         self._profiles: dict[str, dict[str, Any]] = {}
         self._current_profile_id: str = DEFAULT_PROFILE_ID
         self._load()

@@ -29,6 +29,7 @@ class CameraAdapter:
         camera_id: int = 0,
         ring_buffer: RingBufferWriter | None = None,
     ) -> None:
+        self._process = process
         self._io = ProcessIO(process)
         self._camera_id = camera_id
         self._ring_buffer = ring_buffer
@@ -67,17 +68,12 @@ class CameraAdapter:
         Camera продолжает работу (resize к старым размерам) до получения
         shm_region_changed ответа.
         """
-        import logging
-
         # Warning для больших регионов (>50MB per slot, 3 channels, uint8)
         region_bytes = new_width * new_height * 3
         if region_bytes > 50 * 1024 * 1024:
-            logging.getLogger(__name__).warning(
-                "SHM region %s: %dx%d = %.1f MB per slot (>50MB)",
-                self._shm_slot,
-                new_width,
-                new_height,
-                region_bytes / (1024 * 1024),
+            self._process._log_warning(
+                f"SHM region {self._shm_slot}: {new_width}x{new_height} = "
+                f"{region_bytes / (1024 * 1024):.1f} MB per slot (>50MB)"
             )
 
         self._io.send_data(

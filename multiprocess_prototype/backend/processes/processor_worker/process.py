@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import logging
 import time
 from pathlib import Path
 
@@ -23,8 +22,6 @@ from multiprocess_prototype.services.processor.operations.loader import load_ope
 
 from .adapter import WorkerAdapter
 from .commands import build_command_table
-
-logger = logging.getLogger(__name__)
 
 
 class ProcessorWorkerProcess(ProcessModule):
