@@ -8,6 +8,10 @@ from typing import Any, Callable, Generic, TypeVar
 
 import yaml
 
+from ...logger_module.utils import FallbackLogger
+
+_logger = FallbackLogger(__name__)
+
 T = TypeVar("T")
 
 STORE_FILE_VERSION = 1
@@ -107,9 +111,9 @@ class YamlPersistenceStore(Generic[T]):
             try:
                 return self._from_dict(profile_dict)
             except Exception as exc:
-                print(
-                    f"WARNING: профиль '{resolved_id}' содержит невалидные значения, "
-                    f"применяются defaults. Ошибки: {exc}"
+                _logger.warning(
+                    "Профиль '%s' содержит невалидные значения, применяются defaults. Ошибки: %s",
+                    resolved_id, exc
                 )
                 try:
                     return self._from_dict(self._default_snapshot_factory())

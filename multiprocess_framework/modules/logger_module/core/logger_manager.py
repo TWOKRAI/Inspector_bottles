@@ -8,9 +8,12 @@ LoggerManager (Refactored) — наследник ChannelRoutingManager.
   - Батчинг через self._buffer (BatchBuffer из CRM)
   - Публичный API не изменён (info, error, log, flush, get_stats и т.д.)
 """
+import logging as _stdlib_logging
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from contextvars import ContextVar
+
+_fallback_logger = _stdlib_logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from multiprocessing import Process
@@ -529,7 +532,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     def _fallback_log(self, level: str, message: str, module: str = "system"):
         try:
-            print(f"[{level}] [{module}] {message}")
+            _fallback_logger.warning("[%s] [%s] %s", level, module, message)
         except Exception:
             pass
 

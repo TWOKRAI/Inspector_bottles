@@ -4,8 +4,11 @@ Phase 3: поддержка N гетерогенных камер из settings 
 """
 
 import atexit
+import logging
 import sys
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 # Корень проекта (Inspector_bottles/) в sys.path для плоских импортов multiprocess_prototype.* —
 # проектный пакет не установлен через pip, поэтому путь добавляется явно.
@@ -45,9 +48,9 @@ def _load_cameras_from_profile():
     try:
         profile = SettingsProfile.model_validate(profile_dict)
     except ValidationError as exc:
-        print(
-            f"WARNING: профиль '{current_id}' содержит невалидные значения, "
-            f"применяются defaults. Ошибки: {exc}"
+        _logger.warning(
+            "Профиль '%s' содержит невалидные значения, применяются defaults. Ошибки: %s",
+            current_id, exc
         )
         profile = SettingsProfile()
 

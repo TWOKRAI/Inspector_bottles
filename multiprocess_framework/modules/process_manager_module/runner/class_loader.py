@@ -4,6 +4,10 @@ import importlib
 import traceback
 from typing import Any, Optional, Type
 
+from ...logger_module.utils import FallbackLogger
+
+_logger = FallbackLogger(__name__)
+
 
 class _ProcessLogger:
     """Лёгкий логгер: LoggerManager если доступен, иначе print."""
@@ -16,19 +20,19 @@ class _ProcessLogger:
         if self._lm:
             self._lm.info(msg, module=self._name)
         else:
-            print(f"[{self._name}] {msg}", flush=True)
+            _logger.info("[%s] %s", self._name, msg)
 
     def warning(self, msg: str) -> None:
         if self._lm:
             self._lm.warning(msg, module=self._name)
         else:
-            print(f"[{self._name}] WARNING: {msg}", flush=True)
+            _logger.warning("[%s] %s", self._name, msg)
 
     def error(self, msg: str) -> None:
         if self._lm:
             self._lm.error(msg, module=self._name)
         else:
-            print(f"[{self._name}] ERROR: {msg}", flush=True)
+            _logger.error("[%s] %s", self._name, msg)
 
 
 def _load_process_class(class_path: str, log: _ProcessLogger) -> Optional[Type[Any]]:

@@ -229,7 +229,7 @@ class ProcessManagerProcess(ProcessModule):
         # Вместо формирования ответа (он всё равно теряется в Router) —
         # запускаем немедленный broadcast через ProcessMonitor.
         # GUI получит данные через существующий push-канал process_full_status.
-        if self._process_monitor:
+        if getattr(self, "_process_monitor", None):
             self._process_monitor._broadcast_full_status()
         return {"success": True, "triggered_broadcast": True}
 

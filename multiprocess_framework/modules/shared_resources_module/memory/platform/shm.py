@@ -12,6 +12,10 @@ import platform
 from multiprocessing import shared_memory
 from typing import List, Optional
 
+from ....logger_module.utils import FallbackLogger
+
+_logger = FallbackLogger(__name__)
+
 # Тип для SharedMemory (Any для избежания прямого импорта в интерфейсах)
 ShmType = shared_memory.SharedMemory
 
@@ -173,8 +177,5 @@ def create_shm_blocks(
     except Exception as e:
         for created in shm_list:
             close_shm(created, unlink=True)
-        print(
-            f"[MemoryManager] SharedMemory create failed for '{base_name}': {e}",
-            flush=True,
-        )
+        _logger.error("[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e)
         return None

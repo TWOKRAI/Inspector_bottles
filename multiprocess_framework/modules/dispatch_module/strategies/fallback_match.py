@@ -46,7 +46,7 @@ class FallbackMatchStrategy(BaseStrategy):
             handlers_storage[key].sort(key=lambda h: h.efficiency, reverse=True)
             return True
         except Exception as e:
-            print(f"FallbackMatchStrategy {self.dispatcher_name}: Failed to register handler '{key}': {e}")
+            self._err_log(f"FallbackMatchStrategy {self.dispatcher_name}: Failed to register handler '{key}': {e}")
             return False
     
     def find_handler(self, key: str, handlers_storage: Dict[str, List[HandlerInfo]]) -> Optional[HandlerInfo]:

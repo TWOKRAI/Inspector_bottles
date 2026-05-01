@@ -229,14 +229,12 @@ class BaseManager(IBaseManager):
         return info
 
     def print_debug_info(self) -> None:
-        """Вывести диагностическую информацию в консоль."""
+        """Вывести диагностическую информацию через логгер."""
         import json
         info = self.get_debug_info()
-        print("=" * 60)
-        print(f"Debug Info: {self.__class__.__name__}")
-        print("=" * 60)
-        print(json.dumps(info, indent=2, ensure_ascii=False))
-        print("=" * 60)
+        self._log_debug(
+            f"Debug Info: {self.__class__.__name__}\n{json.dumps(info, indent=2, ensure_ascii=False)}"
+        )
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(name={self.manager_name!r}, initialized={self.is_initialized})"

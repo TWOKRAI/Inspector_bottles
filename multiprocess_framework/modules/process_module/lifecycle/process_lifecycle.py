@@ -133,7 +133,6 @@ class ProcessLifecycle:
             error_trace = traceback.format_exc()
             self.process._log_error(f"Failed to initialize process '{self.process.name}': {e}")
             self.process._log_error(f"Traceback: {error_trace}")
-            print(f"[ProcessLifecycle] Init failed: {e}\n{error_trace}")
             return False
     
     def _register_commands_with_router(self) -> None:
@@ -193,7 +192,6 @@ class ProcessLifecycle:
                     self.process.shared_resources.shutdown()
                 except Exception as e:
                     self.process._log_error(f"SRM shutdown error: {e}")
-                    print(f"[ProcessLifecycle] SRM shutdown error: {e}", flush=True)
 
             # 4. Завершаем менеджеры
             if self.process.console_manager:

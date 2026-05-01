@@ -10,21 +10,28 @@ from ..types.types import HandlerInfo
 class BaseStrategy(ABC):
     """
     Базовый класс для стратегий диспетчеризации.
-    
+
     Каждая стратегия инкапсулирует логику:
     - Регистрации обработчиков
     - Поиска обработчиков
     - Управления обработчиками
     """
-    
-    def __init__(self, dispatcher_name: str):
+
+    def __init__(
+        self,
+        dispatcher_name: str,
+        warn_log: Optional[Callable[[str], None]] = None,
+        err_log: Optional[Callable[[str], None]] = None,
+    ):
         """
-        Инициализация стратегии.
-        
         Args:
-            dispatcher_name: Имя диспетчера для логирования
+            dispatcher_name: Имя диспетчера для логирования.
+            warn_log: Callable для предупреждений (от Dispatcher._log_warning).
+            err_log: Callable для ошибок (от Dispatcher._log_error).
         """
         self.dispatcher_name = dispatcher_name
+        self._warn_log: Callable[[str], None] = warn_log or (lambda msg: None)
+        self._err_log: Callable[[str], None] = err_log or (lambda msg: None)
     
     @abstractmethod
     def register_handler(

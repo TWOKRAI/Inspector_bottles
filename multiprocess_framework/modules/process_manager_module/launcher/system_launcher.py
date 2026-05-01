@@ -12,6 +12,10 @@ import time as _time
 from multiprocessing import Event as _MpEvent
 from typing import Optional, Dict, Any, List, Tuple, Callable
 
+from ...logger_module.utils import FallbackLogger
+
+_logger = FallbackLogger(__name__)
+
 from ...data_schema_module import merge_with_defaults
 from .schema import DEFAULT_PROCESS_SCHEMA
 from .spawner import ProcessSpawner
@@ -55,10 +59,10 @@ class SystemLauncher:
         self._system_ready_event: _MpEvent = _MpEvent()
 
     def _log_info(self, message: str) -> None:
-        print(f"[SystemLauncher] {message}")
+        _logger.info("[SystemLauncher] %s", message)
 
     def _log_warning(self, message: str) -> None:
-        print(f"[SystemLauncher] WARNING: {message}")
+        _logger.warning("[SystemLauncher] %s", message)
 
     def add_process(
         self,

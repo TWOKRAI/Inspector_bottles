@@ -272,14 +272,12 @@ class ObservableMixin(IObservableMixin):
         return methods
 
     def print_available_methods(self) -> None:
-        """Вывести список доступных методов в консоль (для отладки)."""
+        """Вывести список доступных методов через логгер (для отладки)."""
         import json
         methods = self.get_available_methods()
-        print("=" * 60)
-        print("Доступные методы и менеджеры:")
-        print("=" * 60)
-        print(json.dumps(methods, indent=2, ensure_ascii=False))
-        print("=" * 60)
+        self._log_debug(
+            f"Доступные методы и менеджеры:\n{json.dumps(methods, indent=2, ensure_ascii=False)}"
+        )
 
     # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ

@@ -15,9 +15,12 @@ API:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
+
+_logger = logging.getLogger(__name__)
 
 
 # Путь по умолчанию: multiprocess_prototype/data/theme_presets.yaml
@@ -59,7 +62,7 @@ class ThemePresetsManager:
             else:
                 self._cache = {}
         except Exception as exc:
-            print(f"[ThemePresetsManager] ошибка чтения {self._file}: {exc}")
+            _logger.error("[ThemePresetsManager] ошибка чтения %s: %s", self._file, exc)
             self._cache = {}
 
         return self._cache
@@ -77,7 +80,7 @@ class ThemePresetsManager:
                     sort_keys=False,
                 )
         except Exception as exc:
-            print(f"[ThemePresetsManager] ошибка записи {self._file}: {exc}")
+            _logger.error("[ThemePresetsManager] ошибка записи %s: %s", self._file, exc)
 
     def _invalidate(self) -> None:
         """Сбросить кэш (для принудительной перечитки)."""

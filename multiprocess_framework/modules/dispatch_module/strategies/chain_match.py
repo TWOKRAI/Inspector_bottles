@@ -10,13 +10,13 @@ from ..types.types import HandlerInfo, Scenario
 class ChainMatchStrategy(BaseStrategy):
     """
     Стратегия цепочек выполнения (сценариев).
-    
+
     Позволяет создавать сценарии - цепочки обработчиков, которые выполняются последовательно.
     """
-    
-    def __init__(self, dispatcher_name: str):
+
+    def __init__(self, dispatcher_name: str, **kwargs):
         """Инициализация стратегии с хранилищем сценариев."""
-        super().__init__(dispatcher_name)
+        super().__init__(dispatcher_name, **kwargs)
         self.scenarios: Dict[str, Scenario] = {}
     
     def register_handler(
@@ -91,7 +91,7 @@ class ChainMatchStrategy(BaseStrategy):
     ) -> bool:
         """Создать новый сценарий."""
         if name in self.scenarios:
-            print(f"ChainMatchStrategy {self.dispatcher_name}: Scenario '{name}' already exists.")
+            self._warn_log(f"ChainMatchStrategy {self.dispatcher_name}: Scenario '{name}' already exists.")
             return False
         
         self.scenarios[name] = Scenario(
@@ -130,7 +130,7 @@ class ChainMatchStrategy(BaseStrategy):
     ) -> bool:
         """Добавить обработчик в сценарий."""
         if scenario_name not in self.scenarios:
-            print(f"ChainMatchStrategy {self.dispatcher_name}: Scenario '{scenario_name}' not found.")
+            self._warn_log(f"ChainMatchStrategy {self.dispatcher_name}: Scenario '{scenario_name}' not found.")
             return False
         
         handler_info = HandlerInfo(

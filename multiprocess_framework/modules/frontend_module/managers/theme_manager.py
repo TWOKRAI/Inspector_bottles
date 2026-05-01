@@ -21,9 +21,11 @@ from typing import Callable
 import yaml
 
 from PySide6.QtWidgets import QApplication
+from ...logger_module.utils import FallbackLogger
 
 _THEMES_SUBDIR = "themes"
 _DEFAULT_THEME = "default"
+_logger = FallbackLogger(__name__)
 
 
 class ThemeManager:
@@ -161,7 +163,7 @@ class ThemeManager:
                         {k: str(v) for k, v in loaded.items() if k in defaults}
                     )
             except Exception as exc:
-                print(f"[ThemeManager] ошибка чтения {yaml_path}: {exc}")
+                _logger.error("[ThemeManager] ошибка чтения %s: %s", yaml_path, exc)
 
         return defaults
 
@@ -171,12 +173,12 @@ class ThemeManager:
         """Применить тему с кастомными переменными к QApplication."""
         template = self.read_theme(name)
         if template is None:
-            print(f"[ThemeManager] тема '{name}' не найдена")
+            _logger.warning("[ThemeManager] тема '%s' не найдена", name)
             return False
 
         app = QApplication.instance()
         if app is None:
-            print("[ThemeManager] QApplication не создан")
+            _logger.error("[ThemeManager] QApplication не создан")
             return False
 
         qss = self.resolve_qss(template, variables)

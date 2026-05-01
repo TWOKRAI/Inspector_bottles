@@ -8,6 +8,7 @@
 - run_process_function: bundle mode, SRM mode, ошибка загрузки класса, ошибка инициализации
 """
 
+import logging
 import time
 import pytest
 from multiprocessing import Event
@@ -27,15 +28,17 @@ from ..runner.process_runner import (
 # ---------------------------------------------------------------------------
 
 class TestProcessLogger:
-    def test_log_without_manager_does_not_raise(self, capsys) -> None:
+    def test_log_without_manager_does_not_raise(self, caplog, monkeypatch) -> None:
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        monkeypatch.setattr(LoggerManager, "_instance", None)
         log = _ProcessLogger("TestProcess")
-        log.info("info message")
-        log.warning("warn message")
-        log.error("error message")
-        captured = capsys.readouterr()
-        assert "info message" in captured.out
-        assert "warn message" in captured.out
-        assert "error message" in captured.out
+        with caplog.at_level(logging.INFO):
+            log.info("info message")
+            log.warning("warn message")
+            log.error("error message")
+        assert "info message" in caplog.text
+        assert "warn message" in caplog.text
+        assert "error message" in caplog.text
 
     def test_log_with_manager_calls_manager(self) -> None:
         mock_lm = MagicMock()

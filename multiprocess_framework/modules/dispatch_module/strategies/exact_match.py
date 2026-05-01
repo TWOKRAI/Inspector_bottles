@@ -30,9 +30,9 @@ class ExactMatchStrategy(BaseStrategy):
             handlers_storage = {}
         
         if key in handlers_storage:
-            print(f"ExactMatchStrategy {self.dispatcher_name}: Handler '{key}' already exists. Use overwrite_handler() to replace it.")
+            self._warn_log(f"ExactMatchStrategy {self.dispatcher_name}: Handler '{key}' already exists. Use overwrite_handler() to replace it.")
             return False
-        
+
         try:
             handler_info = HandlerInfo(
                 key=key,
@@ -45,7 +45,7 @@ class ExactMatchStrategy(BaseStrategy):
             handlers_storage[key] = handler_info
             return True
         except Exception as e:
-            print(f"ExactMatchStrategy {self.dispatcher_name}: Failed to register handler '{key}': {e}")
+            self._err_log(f"ExactMatchStrategy {self.dispatcher_name}: Failed to register handler '{key}': {e}")
             return False
     
     def find_handler(self, key: str, handlers_storage: Dict[str, HandlerInfo]) -> Optional[HandlerInfo]:

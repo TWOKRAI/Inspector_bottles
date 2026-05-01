@@ -369,8 +369,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ========================================================================
 
     def _fallback_log(self, level: str, msg: str, ctx: str = None):
-        """Fallback логирование если ObservableMixin не доступен."""
-        print(f"[{level}] {ctx or self.name}: {msg}")
+        """Fallback логирование через ObservableMixin."""
+        log_fn = getattr(self, f"_log_{level.lower()}", self._log_info)
+        log_fn(f"{ctx or self.name}: {msg}")
 
     def get_config(self, key: str, default: Any = None) -> Any:
         """Получить значение конфигурации."""

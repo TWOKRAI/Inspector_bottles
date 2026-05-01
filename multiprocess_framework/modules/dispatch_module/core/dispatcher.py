@@ -100,12 +100,13 @@ class Dispatcher(BaseManager, ObservableMixin):
         
         self._default_strategy = default_strategy
         
-        # Инициализация всех стратегий одновременно
+        # Инициализация всех стратегий с DI логгера от ObservableMixin
+        _kw = dict(warn_log=self._log_warning, err_log=self._log_error)
         self._strategies: Dict[DispatchStrategy, BaseStrategy] = {
-            DispatchStrategy.EXACT_MATCH: ExactMatchStrategy(manager_name),
-            DispatchStrategy.PATTERN_MATCH: PatternMatchStrategy(manager_name),
-            DispatchStrategy.FALLBACK_MATCH: FallbackMatchStrategy(manager_name),
-            DispatchStrategy.CHAIN_MATCH: ChainMatchStrategy(manager_name),
+            DispatchStrategy.EXACT_MATCH: ExactMatchStrategy(manager_name, **_kw),
+            DispatchStrategy.PATTERN_MATCH: PatternMatchStrategy(manager_name, **_kw),
+            DispatchStrategy.FALLBACK_MATCH: FallbackMatchStrategy(manager_name, **_kw),
+            DispatchStrategy.CHAIN_MATCH: ChainMatchStrategy(manager_name, **_kw),
         }
         
         # Хранилища для каждой стратегии

@@ -8,6 +8,10 @@ import signal
 from multiprocessing import Event, Process
 from typing import Any, Callable, Dict, Optional, Union
 
+from ...logger_module.utils import FallbackLogger
+
+_logger = FallbackLogger(__name__)
+
 from ..runner.class_loader import _ProcessLogger
 from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
@@ -101,7 +105,7 @@ class ProcessSpawner:
         if self._logger:
             self._logger.warning(f"Received signal {signum}, shutting down...")
         else:
-            print(f"\n[*] Received signal {signum}, shutting down...")
+            _logger.warning("Received signal %s, shutting down...", signum)
         self.stop()
 
     def stop(self, timeout: Optional[float] = None) -> None:

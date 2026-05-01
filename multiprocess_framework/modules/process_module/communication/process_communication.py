@@ -11,6 +11,9 @@ from multiprocessing import Queue
 
 from ...router_module import QueueChannel
 from ..interfaces import IProcessCommunication
+from ...logger_module.utils import FallbackLogger
+
+_logger = FallbackLogger(__name__)
 
 
 class ProcessCommunication(IProcessCommunication):
@@ -43,7 +46,7 @@ class ProcessCommunication(IProcessCommunication):
         self.queues = queues or {}
         self.router_manager = router_manager
         self.shared_resources = shared_resources
-        self.logger_callback = logger_callback or (lambda level, msg, ctx: print(f"[{level}] {ctx}: {msg}"))
+        self.logger_callback = logger_callback or (lambda level, msg, ctx: _logger.warning("[%s] %s: %s", level, ctx, msg))
     
     def register_process_queues(self):
         """Регистрация очередей процесса в queue_registry."""

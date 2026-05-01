@@ -7,6 +7,10 @@
 from typing import Any, Optional, Dict
 from abc import ABC, abstractmethod
 
+from ..._fallback import FallbackLogger
+
+_logger = FallbackLogger(__name__)
+
 
 class BaseAdapter(ABC):
     """
@@ -162,8 +166,8 @@ class BaseAdapter(ABC):
             except Exception:
                 pass
         
-        # Fallback: обычный print (только если логирование включено)
-        print(f"[{level.upper()}] {self.adapter_name}: {message}")
+        # Fallback: stdlib logging
+        getattr(_logger, level.lower(), _logger.warning)("[%s] %s: %s", level.upper(), self.adapter_name, message)
     
     # ========================================================================
     # ПУБЛИЧНЫЙ API - СТАТИСТИКА

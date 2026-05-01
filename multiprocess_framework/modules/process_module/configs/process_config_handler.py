@@ -7,10 +7,14 @@
 
 from typing import Dict, Any, Optional
 
+from ...logger_module.utils import FallbackLogger
+
 # Импорт из refactored config_module
 from ...config_module import Config
 
 from .managers_normalize import normalize_managers_view
+
+_logger = FallbackLogger(__name__)
 
 
 class _CustomProcessConfig:
@@ -232,5 +236,5 @@ class ProcessConfigHandler(Config):
             
             return True
         except Exception as e:
-            print(f"ProcessConfigHandler: Failed to update config: {e}")
+            _logger.error("ProcessConfigHandler: Failed to update config: %s", e)
             return False

@@ -34,9 +34,9 @@ class PatternMatchStrategy(BaseStrategy):
         try:
             re.compile(key)
         except re.error:
-            print(f"PatternMatchStrategy {self.dispatcher_name}: Invalid regex pattern '{key}'")
+            self._warn_log(f"PatternMatchStrategy {self.dispatcher_name}: Invalid regex pattern '{key}'")
             return False
-        
+
         try:
             handler_info = HandlerInfo(
                 key=key,
@@ -49,7 +49,7 @@ class PatternMatchStrategy(BaseStrategy):
             handlers_storage.append(handler_info)
             return True
         except Exception as e:
-            print(f"PatternMatchStrategy {self.dispatcher_name}: Failed to register handler '{key}': {e}")
+            self._err_log(f"PatternMatchStrategy {self.dispatcher_name}: Failed to register handler '{key}': {e}")
             return False
     
     def find_handler(self, key: str, handlers_storage: List[HandlerInfo]) -> Optional[HandlerInfo]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from multiprocessing import shared_memory
 
 import pytest
@@ -62,6 +63,37 @@ class TestShmRegistry:
         reg1.register("persistent_shm")
         reg2 = ShmRegistry(path=reg_path)
         assert "persistent_shm" in reg2.all_names()
+
+    def test_concurrent_register_no_lost_entries(self, tmp_path):
+        """Конкурентный register() из N потоков не должен терять записи."""
+        reg_path = tmp_path / ".shm_registry.json"
+        reg = ShmRegistry(path=reg_path)
+        n = 20
+        names = [f"shm_thread_{i}" for i in range(n)]
+
+        threads = [threading.Thread(target=reg.register, args=(name,)) for name in names]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        result = reg.all_names()
+        assert len(result) == n
+        for name in names:
+            assert name in result
+
+    def test_concurrent_register_deduplicates(self, tmp_path):
+        """Конкурентный register() одного имени не создаёт дубликатов."""
+        reg_path = tmp_path / ".shm_registry.json"
+        reg = ShmRegistry(path=reg_path)
+
+        threads = [threading.Thread(target=reg.register, args=("shared_name",)) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert reg.all_names().count("shared_name") == 1
 
 
 class TestCleanupStaleShmEmpty:

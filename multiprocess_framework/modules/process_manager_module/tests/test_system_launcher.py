@@ -4,6 +4,8 @@
 Dict at Boundary: add_process(name, proc_dict) — только dict.
 """
 
+import logging
+
 import pytest
 
 from ..launcher.system_launcher import SystemLauncher
@@ -18,13 +20,15 @@ class TestSystemLauncher:
         assert launcher._processes == []
         assert launcher._spawner is None
 
-    def test_log_fallback_without_spawner(self, capsys) -> None:
-        """_log_info/_log_warning без spawner — print с префиксом SystemLauncher."""
+    def test_log_fallback_without_spawner(self, caplog, monkeypatch) -> None:
+        """_log_info/_log_warning без spawner — логируется через stdlib logging."""
+        from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+        monkeypatch.setattr(LoggerManager, "_instance", None)
         launcher = SystemLauncher()
-        launcher._log_info("test info")
-        launcher._log_warning("test warning")
-        out = capsys.readouterr().out
-        assert "[SystemLauncher]" in out
+        with caplog.at_level(logging.INFO):
+            launcher._log_info("test info")
+            launcher._log_warning("test warning")
+        assert "[SystemLauncher]" in caplog.text
 
     def test_add_process_name_and_dict(self) -> None:
         """add_process(name, proc_dict)."""
