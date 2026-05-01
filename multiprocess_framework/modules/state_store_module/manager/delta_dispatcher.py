@@ -6,13 +6,11 @@ DeltaDispatcher получает список дельт, матчит их по
 """
 from __future__ import annotations
 
-import logging
+from typing import Any
 
 from ..core.delta import Delta
 from ..core.subscription_manager import SubscriptionManager
 from ..interfaces import IRouter
-
-logger = logging.getLogger(__name__)
 
 
 class DeltaDispatcher:
@@ -28,16 +26,19 @@ class DeltaDispatcher:
         subscription_mgr: SubscriptionManager,
         router: IRouter | None = None,
         sender_name: str = "StateStore",
+        logger: Any = None,
     ) -> None:
         """
         Args:
             subscription_mgr: менеджер подписок для матчинга дельт.
             router: реализация IRouter для отправки IPC-сообщений (None для тестов).
             sender_name: имя отправителя в IPC-сообщениях.
+            logger: ObservableMixin-совместимый объект с методами _log_*.
         """
         self._subs = subscription_mgr
         self._router = router
         self._sender = sender_name
+        self._log = logger
 
     def dispatch(self, deltas: list[Delta]) -> dict[str, int]:
         """Сгруппировать дельты по подписчику, отправить state.changed.
@@ -117,13 +118,11 @@ class DeltaDispatcher:
         if self._router is not None:
             try:
                 self._router.send_async(message, priority="normal")
-            except Exception:
-                logger.exception(
-                    "Ошибка отправки state.changed подписчику '%s'", subscriber
-                )
+            except Exception as exc:
+                if self._log is not None:
+                    self._log._log_error(f"Ошибка отправки state.changed подписчику '{subscriber}': {exc}")
         else:
-            logger.debug(
-                "Рассылка state.changed для '%s': %d дельт (router=None, пропуск)",
-                subscriber,
-                len(deltas),
-            )
+            if self._log is not None:
+                self._log._log_debug(
+                    f"Рассылка state.changed для '{subscriber}': {len(deltas)} дельт (router=None, пропуск)"
+                )

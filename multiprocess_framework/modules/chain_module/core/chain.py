@@ -1,7 +1,6 @@
 """ChainRunnable — последовательный исполнитель цепочки шагов обработки."""
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any, Protocol
 
@@ -9,8 +8,6 @@ import numpy as np
 
 from .context import ChainContext
 from .result import ChainResult, RunnableStep, _collect_side_results, _is_cross_process
-
-logger = logging.getLogger(__name__)
 
 
 class IRunnableChain(Protocol):
@@ -82,13 +79,15 @@ class ChainRunnable:
                 output = step.operation.execute(current_frame, context)
 
             except Exception as exc:
+                _log = context.logger
                 if step.on_error == "skip":
                     msg = (
                         f"Операция '{step.node.operation_ref}' "
                         f"(node={step.node.node_id}) упала: {exc}. "
                         f"on_error=skip — пропускаем."
                     )
-                    logger.warning(msg)
+                    if _log is not None:
+                        _log._log_warning(msg)
                     context.warnings.append(msg)
                     result.skipped_nodes.append(step.node.node_id)
                     continue
@@ -99,7 +98,8 @@ class ChainRunnable:
                         f"(node={step.node.node_id}) упала: {exc}. "
                         f"on_error=fail_region — прерываем."
                     )
-                    logger.error(msg)
+                    if _log is not None:
+                        _log._log_error(msg)
                     context.errors.append(msg)
                     result.failed = True
                     result.fail_level = "region"
@@ -111,7 +111,8 @@ class ChainRunnable:
                         f"(node={step.node.node_id}) упала: {exc}. "
                         f"on_error={step.on_error} — прерываем (camera)."
                     )
-                    logger.error(msg)
+                    if _log is not None:
+                        _log._log_error(msg)
                     context.errors.append(msg)
                     result.failed = True
                     result.fail_level = "camera"

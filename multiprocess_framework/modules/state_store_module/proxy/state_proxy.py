@@ -13,20 +13,18 @@ ADR-SS-002: server_target — конфигурируемое имя процес
 """
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any, Callable
 
+from ...base_manager import BaseManager, ObservableMixin
 from ..core.delta import MISSING, Delta
 from ..interfaces import IRouter, IStateProxy
-
-logger = logging.getLogger(__name__)
 
 # Sentinel для отличия "default не передан" от None
 _SENTINEL = object()
 
 
-class StateProxy(IStateProxy):
+class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     """Клиент StateStore. Создаётся в каждом ProcessModule.
 
     Общается с StateStoreManager через IPC (любой IRouter).
@@ -51,6 +49,8 @@ class StateProxy(IStateProxy):
         process_name: str,
         router: IRouter | None = None,
         server_target: str = "ProcessManager",
+        manager_name: str | None = None,
+        logger: Any = None,
     ) -> None:
         """
         Args:
@@ -58,8 +58,11 @@ class StateProxy(IStateProxy):
             router: реализация IRouter для IPC (None допустимо для тестов).
             server_target: имя процесса, в котором живёт StateStoreManager.
                 По умолчанию "ProcessManager" (обратная совместимость, ADR-SS-002).
-                В Фазе 4 default уйдёт — server_target станет обязательным.
+            manager_name: имя для BaseManager (по умолчанию StateProxy:<process_name>).
+            logger: LoggerManager или ObservableMixin-совместимый объект.
         """
+        BaseManager.__init__(self, manager_name=manager_name or f"StateProxy:{process_name}")
+        ObservableMixin.__init__(self, managers={"logger": logger})
         self._process_name = process_name
         self._router = router
         self._server_target = server_target
@@ -69,6 +72,10 @@ class StateProxy(IStateProxy):
         self._callbacks: dict[str, list[Callable]] = {}
         # Список активных sub_id для shutdown cleanup
         self._sub_ids: list[str] = []
+
+    def initialize(self) -> bool:
+        self.is_initialized = True
+        return True
 
     # -------------------------------------------------------------------
     # Свойства
@@ -250,21 +257,16 @@ class StateProxy(IStateProxy):
                 if server_sub_id:
                     local_sub_id = server_sub_id
         else:
-            # Без router — просто логируем
-            logger.debug(
-                "StateProxy.subscribe: router=None, подписка '%s' только локальная",
-                pattern,
+            self._log_debug(
+                f"StateProxy.subscribe: router=None, подписка '{pattern}' только локальная"
             )
 
         # Регистрируем callback локально
         self._callbacks[local_sub_id] = [callback]
         self._sub_ids.append(local_sub_id)
 
-        logger.debug(
-            "StateProxy '%s': подписка sub_id=%s, pattern=%s",
-            self._process_name,
-            local_sub_id,
-            pattern,
+        self._log_debug(
+            f"StateProxy '{self._process_name}': подписка sub_id={local_sub_id}, pattern={pattern}"
         )
         return local_sub_id
 
@@ -318,7 +320,7 @@ class StateProxy(IStateProxy):
     # Lifecycle
     # -------------------------------------------------------------------
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> bool:
         """Отписать все активные подписки.
 
         Отправляет state.unsubscribe_all в StateStoreManager и
@@ -336,7 +338,9 @@ class StateProxy(IStateProxy):
 
         self._callbacks.clear()
         self._sub_ids.clear()
-        logger.debug("StateProxy '%s': shutdown, все подписки удалены", self._process_name)
+        self.is_initialized = False
+        self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
+        return True
 
     # -------------------------------------------------------------------
     # Вспомогательные методы (используются в GuiStateProxy)
@@ -355,11 +359,9 @@ class StateProxy(IStateProxy):
             data = msg.get("data", {})
             raw_deltas = data.get("deltas", [])
             return [Delta.from_dict(d) for d in raw_deltas]
-        except Exception:
-            logger.exception(
-                "StateProxy '%s': ошибка десериализации дельт из msg=%r",
-                self._process_name,
-                msg,
+        except Exception as exc:
+            self._log_error(
+                f"StateProxy '{self._process_name}': ошибка десериализации дельт: {exc}"
             )
             return []
 
@@ -393,11 +395,9 @@ class StateProxy(IStateProxy):
             for cb in cbs:
                 try:
                     cb(deltas)
-                except Exception:
-                    logger.exception(
-                        "StateProxy '%s': ошибка в callback sub_id=%s",
-                        self._process_name,
-                        sub_id,
+                except Exception as exc:
+                    self._log_error(
+                        f"StateProxy '{self._process_name}': ошибка в callback sub_id={sub_id}: {exc}"
                     )
 
     # -------------------------------------------------------------------
@@ -415,17 +415,13 @@ class StateProxy(IStateProxy):
         if self._router is not None:
             try:
                 self._router.send_async(msg, priority="normal")
-            except Exception:
-                logger.exception(
-                    "StateProxy '%s': ошибка отправки команды '%s'",
-                    self._process_name,
-                    msg.get("command"),
+            except Exception as exc:
+                self._log_error(
+                    f"StateProxy '{self._process_name}': ошибка отправки команды '{msg.get('command')}': {exc}"
                 )
         else:
-            logger.debug(
-                "StateProxy '%s': router=None, команда '%s' не отправлена",
-                self._process_name,
-                msg.get("command"),
+            self._log_debug(
+                f"StateProxy '{self._process_name}': router=None, команда '{msg.get('command')}' не отправлена"
             )
 
     def _send_sync(self, msg: dict) -> dict | None:
@@ -443,10 +439,8 @@ class StateProxy(IStateProxy):
             return None
         try:
             return self._router.send(msg)
-        except Exception:
-            logger.exception(
-                "StateProxy '%s': ошибка синхронной отправки команды '%s'",
-                self._process_name,
-                msg.get("command"),
+        except Exception as exc:
+            self._log_error(
+                f"StateProxy '{self._process_name}': ошибка синхронной отправки '{msg.get('command')}': {exc}"
             )
             return None

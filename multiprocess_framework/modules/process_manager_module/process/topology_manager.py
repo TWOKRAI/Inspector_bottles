@@ -16,10 +16,7 @@ TopologyManager НЕ знает про конкретные типы проце�
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable, Dict, List, Optional
-
-logger = logging.getLogger(__name__)
 
 # Тип callback'ов
 DiffFn = Callable[[Optional[Dict], Dict], Dict]
@@ -51,6 +48,7 @@ class TopologyManager:
         allocate_shm_fn: Callable[[str, dict, int], None] | None = None,
         diff_fn: DiffFn | None = None,
         commands_fn: CommandsFn | None = None,
+        logger: Any = None,
     ) -> None:
         self._create_process = create_process_fn
         self._stop_process = stop_process_fn
@@ -58,6 +56,7 @@ class TopologyManager:
         self._diff_fn = diff_fn
         self._commands_fn = commands_fn
         self._current_topology: dict | None = None
+        self._log = logger
 
     @property
     def current_topology(self) -> dict | None:
@@ -100,7 +99,8 @@ class TopologyManager:
 
             self._current_topology = topology_dict
 
-            logger.info("Topology applied: %d commands", len(commands))
+            if self._log is not None:
+                self._log._log_info(f"Topology applied: {len(commands)} commands")
             return {
                 "success": True,
                 "applied": len(commands),
@@ -108,7 +108,8 @@ class TopologyManager:
                 "results": results,
             }
         except Exception as e:
-            logger.exception("Topology apply error")
+            if self._log is not None:
+                self._log._log_error(f"Topology apply error: {e}")
             return {"success": False, "error": str(e)}
 
     def get(self) -> dict:
@@ -161,12 +162,11 @@ class TopologyManager:
                         coll = memory.get("coll", 2)
                         if mem_names:
                             self._allocate_shm(process_name, mem_names, coll)
-                            logger.info(
-                                "SHM allocated for %s: %s (coll=%d)",
-                                process_name, list(mem_names.keys()), coll,
-                            )
+                            if self._log is not None:
+                                self._log._log_info(f"SHM allocated for {process_name}: {list(mem_names.keys())} (coll={coll})")
                     except Exception as e:
-                        logger.warning("SHM allocation failed for %s: %s", process_name, e)
+                        if self._log is not None:
+                            self._log._log_warning(f"SHM allocation failed for {process_name}: {e}")
 
                 result = self._create_process(
                     process_name=process_name,
@@ -188,7 +188,8 @@ class TopologyManager:
                 return {"cmd": cmd_type, "success": False, "error": f"Unknown: {cmd_type}"}
 
         except Exception as e:
-            logger.exception("Topology command error: %s", cmd)
+            if self._log is not None:
+                self._log._log_error(f"Topology command error: {cmd}: {e}")
             return {
                 "cmd": cmd_type,
                 "process_name": process_name,

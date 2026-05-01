@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -19,6 +19,7 @@ class ChainContext:
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     timeouts: list[str] = field(default_factory=list)  # node_id зависших нод
+    logger: Any = None  # ObservableMixin-совместимый объект с методами _log_*
 
 
 @runtime_checkable

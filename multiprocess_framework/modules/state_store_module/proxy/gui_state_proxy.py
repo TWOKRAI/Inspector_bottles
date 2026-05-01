@@ -22,16 +22,13 @@ PySide6 НЕ импортируется на верхнем уровне — т�
 """
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..interfaces import IRouter
 from .state_proxy import StateProxy
 
 if TYPE_CHECKING:
     from PySide6.QtCore import QObject
-
-logger = logging.getLogger(__name__)
 
 
 class GuiStateProxy(StateProxy):
@@ -50,6 +47,8 @@ class GuiStateProxy(StateProxy):
         router: IRouter | None = None,
         signal_emitter: "QObject | None" = None,
         server_target: str = "ProcessManager",
+        manager_name: str | None = None,
+        logger: Any = None,
     ) -> None:
         """
         Args:
@@ -58,8 +57,16 @@ class GuiStateProxy(StateProxy):
             signal_emitter: QObject с методом _on_state_deltas(deltas: list).
                             Должен быть создан в Qt main thread.
             server_target: имя процесса-сервера StateStore (ADR-SS-002).
+            manager_name: имя для BaseManager.
+            logger: LoggerManager или ObservableMixin-совместимый объект.
         """
-        super().__init__(process_name, router, server_target=server_target)
+        super().__init__(
+            process_name,
+            router,
+            server_target=server_target,
+            manager_name=manager_name,
+            logger=logger,
+        )
         self._signal_emitter = signal_emitter
 
     # -------------------------------------------------------------------
@@ -115,15 +122,12 @@ class GuiStateProxy(StateProxy):
                 Q_ARG(list, deltas),
             )
         except ImportError:
-            # PySide6 не установлен — прямой fallback
-            logger.warning(
-                "GuiStateProxy '%s': PySide6 недоступен, прямой вызов callbacks",
-                self._process_name,
+            self._log_warning(
+                f"GuiStateProxy '{self._process_name}': PySide6 недоступен, прямой вызов callbacks"
             )
             self._invoke_callbacks(deltas)
-        except Exception:
-            logger.exception(
-                "GuiStateProxy '%s': ошибка invokeMethod, прямой вызов callbacks",
-                self._process_name,
+        except Exception as exc:
+            self._log_error(
+                f"GuiStateProxy '{self._process_name}': ошибка invokeMethod, прямой вызов callbacks: {exc}"
             )
             self._invoke_callbacks(deltas)

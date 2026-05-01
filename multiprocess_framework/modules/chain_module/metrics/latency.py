@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import collections
 import time
-
-from loguru import logger
+from typing import Any
 
 
 class LatencyTracker:
@@ -17,10 +16,16 @@ class LatencyTracker:
     Каждые log_interval_sec секунд выводит p50/p95/p99 в лог.
     """
 
-    def __init__(self, log_interval_sec: float = 10.0, buffer_size: int = 1000) -> None:
+    def __init__(
+        self,
+        log_interval_sec: float = 10.0,
+        buffer_size: int = 1000,
+        logger: Any = None,
+    ) -> None:
         self._buffer: collections.deque[float] = collections.deque(maxlen=buffer_size)
         self._log_interval = log_interval_sec
         self._last_log_time = time.time()
+        self._log = logger
 
     def record(self, e2e_ms: float) -> None:
         """Записать новое измерение latency в буфер."""
@@ -43,12 +48,10 @@ class LatencyTracker:
         now = time.time()
         if now - self._last_log_time >= self._log_interval:
             p = self.percentiles()
-            logger.info(
-                "Latency p50={p50:.1f}ms p95={p95:.1f}ms p99={p99:.1f}ms",
-                p50=p["p50"],
-                p95=p["p95"],
-                p99=p["p99"],
-            )
+            if self._log is not None:
+                self._log._log_info(
+                    f"Latency p50={p['p50']:.1f}ms p95={p['p95']:.1f}ms p99={p['p99']:.1f}ms"
+                )
             self._last_log_time = now
 
 

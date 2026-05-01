@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
@@ -13,8 +12,6 @@ import numpy as np
 
 from .context import ChainContext
 from .result import ChainResult, RunnableStep, _collect_side_results
-
-logger = logging.getLogger(__name__)
 
 
 class ParallelChainRunnable:
@@ -136,12 +133,14 @@ class ParallelChainRunnable:
         context: ChainContext,
         result: ChainResult,
     ) -> tuple[np.ndarray, bool]:
+        _log = context.logger
         if step.on_error == "skip":
             msg = (
                 f"Операция '{step.node.operation_ref}' "
                 f"(node={step.node.node_id}) упала: {exc}. on_error=skip."
             )
-            logger.warning(msg)
+            if _log is not None:
+                _log._log_warning(msg)
             context.warnings.append(msg)
             result.skipped_nodes.append(step.node.node_id)
             return current_frame, False
@@ -151,7 +150,8 @@ class ParallelChainRunnable:
                 f"Операция '{step.node.operation_ref}' "
                 f"(node={step.node.node_id}) упала: {exc}. on_error=fail_region."
             )
-            logger.error(msg)
+            if _log is not None:
+                _log._log_error(msg)
             context.errors.append(msg)
             result.failed = True
             result.fail_level = "region"
@@ -163,7 +163,8 @@ class ParallelChainRunnable:
                 f"(node={step.node.node_id}) упала: {exc}. "
                 f"on_error={step.on_error} (camera)."
             )
-            logger.error(msg)
+            if _log is not None:
+                _log._log_error(msg)
             context.errors.append(msg)
             result.failed = True
             result.fail_level = "camera"

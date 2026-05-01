@@ -10,10 +10,8 @@ cleanup-ом для попытки очистки.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
+from typing import Any
 
 
 class ShmRegistry:
@@ -24,10 +22,12 @@ class ShmRegistry:
 
     Args:
         path: путь к файлу реестра. Передавать явно из конфига приложения.
+        logger: ObservableMixin-совместимый объект с методами _log_*.
     """
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, logger: Any = None) -> None:
         self._path = Path(path)
+        self._log = logger
 
     def _read(self) -> list[str]:
         """Прочитать список имён из файла реестра."""
@@ -37,7 +37,8 @@ class ShmRegistry:
                 if isinstance(data, list):
                     return [str(n) for n in data]
         except Exception as exc:
-            logger.warning("ShmRegistry: не удалось прочитать '%s': %s", self._path, exc)
+            if self._log is not None:
+                self._log._log_warning(f"ShmRegistry: не удалось прочитать '{self._path}': {exc}")
         return []
 
     def _write(self, names: list[str]) -> None:
@@ -46,7 +47,8 @@ class ShmRegistry:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._path.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
-            logger.warning("ShmRegistry: не удалось записать '%s': %s", self._path, exc)
+            if self._log is not None:
+                self._log._log_warning(f"ShmRegistry: не удалось записать '{self._path}': {exc}")
 
     def register(self, name: str) -> None:
         """Добавить имя SHM в реестр."""
@@ -72,4 +74,5 @@ class ShmRegistry:
             if self._path.exists():
                 self._path.unlink()
         except Exception as exc:
-            logger.warning("ShmRegistry: не удалось удалить '%s': %s", self._path, exc)
+            if self._log is not None:
+                self._log._log_warning(f"ShmRegistry: не удалось удалить '{self._path}': {exc}")

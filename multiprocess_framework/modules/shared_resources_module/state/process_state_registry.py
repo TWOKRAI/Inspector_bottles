@@ -7,15 +7,12 @@ Queue и Event из multiprocessing pickle-safe нативно.
 Перенесён из process_module для устранения циклической зависимости.
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 from multiprocessing import Queue, Event
 
 from .process_data import ProcessData
 from ..types import ProcessStatus, ProcessDataDict
 from .interfaces import IProcessStateRegistry
-
-_logger = logging.getLogger(__name__)
 
 
 class ProcessStateRegistry(IProcessStateRegistry):
@@ -29,18 +26,21 @@ class ProcessStateRegistry(IProcessStateRegistry):
     def __init__(
         self,
         event_manager: Optional[Any] = None,
-        logger: Optional[logging.Logger] = None,
+        logger: Any = None,
     ) -> None:
         self.states: Dict[str, ProcessData] = {}
         self.event_manager = event_manager
-        self._logger = logger or _logger
+        self._logger = logger
 
     # ------------------------------------------------------------------
     # Внутренние утилиты
     # ------------------------------------------------------------------
 
     def _log(self, level: str, msg: str) -> None:
-        getattr(self._logger, level, self._logger.debug)(msg)
+        if self._logger is not None:
+            method = getattr(self._logger, f"_log_{level}", None)
+            if callable(method):
+                method(msg)
 
     def _emit(self, event_type_name: str, **kwargs: Any) -> None:
         """Отправить событие через EventManager (если подключён)."""

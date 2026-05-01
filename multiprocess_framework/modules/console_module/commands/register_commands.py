@@ -13,10 +13,7 @@ Standalone-класс. Зависимости -- через конструкто
 """
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional
-
-logger = logging.getLogger(__name__)
 
 
 class RegisterCommandHandler:
@@ -43,9 +40,11 @@ class RegisterCommandHandler:
         self,
         registers_manager: Optional[Any] = None,
         router_manager: Optional[Any] = None,
+        logger: Any = None,
     ) -> None:
         self._registers = registers_manager
         self._router = router_manager
+        self._log = logger
 
     # -- public setters (для позднего связывания) ----------------------------
 
@@ -97,7 +96,8 @@ class RegisterCommandHandler:
         try:
             return handler(args[1:])
         except Exception as exc:
-            logger.error("RegisterCommandHandler error: %s", exc, exc_info=True)
+            if self._log is not None:
+                self._log._log_error(f"RegisterCommandHandler error: {exc}")
             return f"Error: {exc}"
 
     # =========================================================================

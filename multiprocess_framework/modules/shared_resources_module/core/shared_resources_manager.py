@@ -87,6 +87,7 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
         )
         self._process_state_registry = ProcessStateRegistry(
             event_manager=self._event_manager,
+            logger=self,
         )
         self._queue_registry = QueueRegistry(
             manager_name=f"{manager_name}_QueueRegistry",

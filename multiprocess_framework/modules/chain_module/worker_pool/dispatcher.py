@@ -6,14 +6,12 @@ Thread-safe: dispatch() может вызываться из разных пот
 """
 from __future__ import annotations
 
-import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .protocol import WorkerTaskRequest, WorkerTaskResponse
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -45,10 +43,12 @@ class WorkerPoolDispatcher:
         worker_count: int,
         timeout: float = 5.0,
         input_queue_size: int = 4,
+        logger: Any = None,
     ) -> None:
         self._send_fn = send_fn
         self._timeout = timeout
         self._input_queue_size = max(1, input_queue_size)
+        self._log = logger
 
         self._worker_names: list[str] = [
             f"processor_worker_{i}" for i in range(worker_count)
@@ -107,12 +107,10 @@ class WorkerPoolDispatcher:
             data_type="worker_task_request",
         )
 
-        logger.debug(
-            "Задача %s отправлена worker=%s, operation=%s",
-            request.task_id,
-            worker_name,
-            operation_ref,
-        )
+        if self._log is not None:
+            self._log._log_debug(
+                f"Задача {request.task_id} отправлена worker={worker_name}, operation={operation_ref}"
+            )
 
         signaled = pending.event.wait(timeout=self._timeout)
 
@@ -121,12 +119,10 @@ class WorkerPoolDispatcher:
                 self._pending.pop(request.task_id, None)
                 self._timeout_total += 1
 
-            logger.warning(
-                "Timeout задачи %s (%.1fs), operation=%s",
-                request.task_id,
-                self._timeout,
-                operation_ref,
-            )
+            if self._log is not None:
+                self._log._log_warning(
+                    f"Timeout задачи {request.task_id} ({self._timeout:.1f}s), operation={operation_ref}"
+                )
             return WorkerTaskResponse.error_response(
                 task_id=request.task_id,
                 error="timeout",
@@ -155,21 +151,20 @@ class WorkerPoolDispatcher:
             pending = self._pending.get(response.task_id)
 
         if pending is None:
-            logger.warning(
-                "Late response для task_id=%s (нет в pending), игнорируем",
-                response.task_id,
-            )
+            if self._log is not None:
+                self._log._log_warning(
+                    f"Late response для task_id={response.task_id} (нет в pending), игнорируем"
+                )
             return
 
         pending.response = response
         pending.event.set()
 
-        logger.debug(
-            "Ответ получен для task_id=%s, success=%s, time=%.3fs",
-            response.task_id,
-            response.success,
-            response.processing_time,
-        )
+        if self._log is not None:
+            self._log._log_debug(
+                f"Ответ получен для task_id={response.task_id},"
+                f" success={response.success}, time={response.processing_time:.3f}s"
+            )
 
     def _enforce_backpressure(self) -> None:
         """Drop oldest: если pending >= input_queue_size, удалить самую старую задачу.
@@ -181,12 +176,11 @@ class WorkerPoolDispatcher:
             oldest = self._pending.pop(oldest_task_id)
             self._drops_total += 1
 
-            logger.warning(
-                "Backpressure: drop task_id=%s (pending=%d >= limit=%d)",
-                oldest_task_id,
-                len(self._pending) + 1,
-                self._input_queue_size,
-            )
+            if self._log is not None:
+                self._log._log_warning(
+                    f"Backpressure: drop task_id={oldest_task_id}"
+                    f" (pending={len(self._pending) + 1} >= limit={self._input_queue_size})"
+                )
 
             oldest.response = WorkerTaskResponse.error_response(
                 task_id=oldest_task_id,

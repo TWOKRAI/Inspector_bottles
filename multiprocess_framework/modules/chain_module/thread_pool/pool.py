@@ -2,29 +2,45 @@
 from __future__ import annotations
 
 import concurrent.futures
-import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from ...base_manager import BaseManager, ObservableMixin
 
 
-class ChainThreadPool:
+class ChainThreadPool(BaseManager, ObservableMixin):
     """Обёртка над ThreadPoolExecutor с timeout и graceful shutdown.
 
     Args:
         max_workers: Количество рабочих потоков.
         step_timeout: Максимальное время ожидания одного шага (секунды).
+        logger: LoggerManager или любой ObservableMixin-совместимый объект.
     """
 
-    def __init__(self, max_workers: int = 2, step_timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        max_workers: int = 2,
+        step_timeout: float = 10.0,
+        logger: Any = None,
+    ) -> None:
+        BaseManager.__init__(self, manager_name="ChainThreadPool")
+        ObservableMixin.__init__(self, managers={"logger": logger})
         self._max_workers = max_workers
         self._step_timeout = step_timeout
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._lock = threading.Lock()
+
+    def initialize(self) -> bool:
+        self.is_initialized = True
+        return True
+
+    def shutdown(self) -> bool:
+        self._executor.shutdown(wait=True)
+        self.is_initialized = False
+        return True
 
     @property
     def max_workers(self) -> int:
@@ -73,11 +89,9 @@ class ChainThreadPool:
                 except Exception as exc:
                     results.append((step, exc))
             else:
-                logger.warning(
-                    "Операция '%s' (node=%s) превысила timeout %ss",
-                    step.node.operation_ref,
-                    step.node.node_id,
-                    actual_timeout,
+                self._log_warning(
+                    f"Операция '{step.node.operation_ref}' (node={step.node.node_id})"
+                    f" превысила timeout {actual_timeout}s"
                 )
                 fut.cancel()
                 results.append(
@@ -97,10 +111,6 @@ class ChainThreadPool:
             self._executor.shutdown(wait=True)
             self._max_workers = max_workers
             self._executor = ThreadPoolExecutor(max_workers=max_workers)
-
-    def shutdown(self, wait: bool = True) -> None:
-        """Graceful shutdown пула потоков."""
-        self._executor.shutdown(wait=wait)
 
 
 __all__ = ["ChainThreadPool"]

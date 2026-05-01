@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
@@ -13,8 +12,6 @@ import numpy as np
 
 from .context import ChainContext
 from .result import ChainResult, RunnableStep, _collect_side_results, _is_cross_process
-
-logger = logging.getLogger(__name__)
 
 
 class DagRunnable:
@@ -112,12 +109,14 @@ class DagRunnable:
                 outputs = _execute_dag_default(step.operation, inputs, context)
 
             except Exception as exc:
+                _log = context.logger
                 if step.on_error == "skip":
                     msg = (
                         f"Операция '{step.node.operation_ref}' "
                         f"(node={node_id}) упала: {exc}. on_error=skip — пропускаем."
                     )
-                    logger.warning(msg)
+                    if _log is not None:
+                        _log._log_warning(msg)
                     context.warnings.append(msg)
                     result.skipped_nodes.append(node_id)
                     port_data[node_id] = {}
@@ -128,7 +127,8 @@ class DagRunnable:
                         f"Операция '{step.node.operation_ref}' "
                         f"(node={node_id}) упала: {exc}. on_error=fail_region."
                     )
-                    logger.error(msg)
+                    if _log is not None:
+                        _log._log_error(msg)
                     context.errors.append(msg)
                     result.failed = True
                     result.fail_level = "region"
@@ -140,7 +140,8 @@ class DagRunnable:
                         f"(node={node_id}) упала: {exc}. "
                         f"on_error={step.on_error} (camera)."
                     )
-                    logger.error(msg)
+                    if _log is not None:
+                        _log._log_error(msg)
                     context.errors.append(msg)
                     result.failed = True
                     result.fail_level = "camera"

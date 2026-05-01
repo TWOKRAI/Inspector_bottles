@@ -9,18 +9,16 @@
 """
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from multiprocess_framework.modules.data_schema_module import RegistersContainer
+from ...base_manager import BaseManager, ObservableMixin
+from ...data_schema_module import RegistersContainer
 
 from .dispatch import resolve_dispatch_targets
 
-logger = logging.getLogger(__name__)
 
-
-class RegistersManager:
+class RegistersManager(BaseManager, ObservableMixin):
     """
     Менеджер регистров: ``{имя: экземпляр модели}``. Типы моделей определяет приложение;
     сериализация и метаданные — через ``RegistersContainer`` / ``SchemaMixin``.
@@ -35,18 +33,34 @@ class RegistersManager:
         registers: Optional[Dict[str, Any]] = None,
         connection_map: Optional[Dict[str, str]] = None,
         send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = None,
+        logger: Any = None,
+        stats: Any = None,
     ):
         """
         Args:
             registers: Словарь {имя_регистра: экземпляр_модели}. Если None — пустой менеджер.
             connection_map: {register_name: process_name} — fallback для send_callback (см. ROUTING_GLOSSARY.md).
             send_callback: (channel, register_name, field_name, value, snapshot) — вызов при изменении.
+            logger: LoggerManager или любой ObservableMixin-совместимый объект.
+            stats: StatsManager или любой ObservableMixin-совместимый объект.
         """
+        BaseManager.__init__(self, manager_name="RegistersManager")
+        ObservableMixin.__init__(self, managers={"logger": logger, "stats": stats})
         self._container = RegistersContainer(registers or {})
         self._connection_map: Dict[str, str] = dict(connection_map) if connection_map else {}
         self._send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = send_callback
         self._global_observers: List[Callable[[str, str, Any], None]] = []
         self._field_observers: Dict[Tuple[str, str], List[Callable[[Any], None]]] = defaultdict(list)
+
+    def initialize(self) -> bool:
+        self.is_initialized = True
+        return True
+
+    def shutdown(self) -> bool:
+        self._global_observers.clear()
+        self._field_observers.clear()
+        self.is_initialized = False
+        return True
 
     def get_register(self, name: str) -> Optional[Any]:
         """Получить экземпляр регистра по имени."""
@@ -118,12 +132,7 @@ class RegistersManager:
             setattr(reg, field_name, value)
         except Exception as exc:
             return False, str(exc)
-        logger.debug(
-            "set_field_value: %s.%s = %r",
-            register_name,
-            field_name,
-            value,
-        )
+        self._log_debug(f"set_field_value: {register_name}.{field_name} = {value!r}")
         self._notify_observers(register_name, field_name, value)
         if self._send_callback:
             targets = resolve_dispatch_targets(
@@ -148,13 +157,8 @@ class RegistersManager:
                             full_channel, register_name, field_name, value, snapshot
                         )
                     except Exception as e:
-                        logger.error(
-                            "send_callback failed for %s.%s → %s: %s",
-                            register_name,
-                            field_name,
-                            full_channel,
-                            e,
-                            exc_info=True,
+                        self._log_error(
+                            f"send_callback failed for {register_name}.{field_name} → {full_channel}: {e}"
                         )
         return True, None
 
@@ -172,12 +176,8 @@ class RegistersManager:
             try:
                 cb(value)
             except Exception as e:
-                logger.warning(
-                    "notify_field_changed observer failed for %s.%s: %s",
-                    register_name,
-                    field_name,
-                    e,
-                    exc_info=True,
+                self._log_warning(
+                    f"notify_field_changed observer failed for {register_name}.{field_name}: {e}"
                 )
 
     def _notify_observers(self, register_name: str, field_name: str, value: Any) -> None:
@@ -186,24 +186,12 @@ class RegistersManager:
             try:
                 cb(value)
             except Exception as e:
-                logger.warning(
-                    "field observer failed for %s.%s: %s",
-                    register_name,
-                    field_name,
-                    e,
-                    exc_info=True,
-                )
+                self._log_warning(f"field observer failed for {register_name}.{field_name}: {e}")
         for cb in list(self._global_observers):
             try:
                 cb(register_name, field_name, value)
             except Exception as e:
-                logger.warning(
-                    "global observer failed for %s.%s: %s",
-                    register_name,
-                    field_name,
-                    e,
-                    exc_info=True,
-                )
+                self._log_warning(f"global observer failed for {register_name}.{field_name}: {e}")
 
     def register_names(self) -> List[str]:
         """Список имён зарегистрированных регистров."""

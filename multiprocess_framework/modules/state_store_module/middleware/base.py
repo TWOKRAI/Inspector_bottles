@@ -11,13 +11,10 @@ Middleware вставляется между IPC-обработчиком и Tre
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 from ..core.delta import Delta
-
-logger = logging.getLogger(__name__)
 
 
 class StateMiddleware(ABC):

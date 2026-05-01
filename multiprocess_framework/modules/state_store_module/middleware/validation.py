@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from ..core import match_pattern, split_pattern
@@ -36,10 +35,10 @@ class ValidationMiddleware(StateMiddleware):
     def name(self) -> str:
         return "validation"
 
-    def __init__(self, rules: dict[str, dict]) -> None:
+    def __init__(self, rules: dict[str, dict], logger: Any = None) -> None:
         # rules: паттерн -> {"type": ..., "min": ..., "max": ..., "enum": [...]}
         self._rules = rules
-        self._log = logging.getLogger(__name__)
+        self._log = logger
 
     def add_rule(self, pattern: str, rule: dict) -> None:
         """Добавить правило валидации в runtime."""
@@ -70,9 +69,8 @@ class ValidationMiddleware(StateMiddleware):
         if error is not None:
             context["validation_error"] = error
             context["rejection_reason"] = "validation"
-            self._log.warning(
-                "Validation rejected set('%s', %r): %s", path, value, error
-            )
+            if self._log is not None:
+                self._log._log_warning(f"Validation rejected set('{path}', {value!r}): {error}")
             return False, value
 
         return True, value

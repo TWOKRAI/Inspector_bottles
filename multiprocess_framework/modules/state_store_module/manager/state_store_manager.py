@@ -8,8 +8,9 @@ IPC-сообщения от процессов: state.set, state.get, state.subs
 
 from __future__ import annotations
 
-import logging
 from typing import Any
+
+from ...base_manager import BaseManager, ObservableMixin
 
 from ..core.subscription_manager import SubscriptionManager
 from ..core.tree_store import TreeStore
@@ -17,10 +18,8 @@ from ..interfaces import IRouter, IStateStoreManager
 from ..middleware.base import MiddlewarePipeline, StateMiddleware
 from .delta_dispatcher import DeltaDispatcher
 
-logger = logging.getLogger(__name__)
 
-
-class StateStoreManager(IStateStoreManager):
+class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
     """Серверная часть StateStore. Живёт в ProcessManagerProcess.
 
     Содержит TreeStore + SubscriptionManager + DeltaDispatcher.
@@ -36,25 +35,30 @@ class StateStoreManager(IStateStoreManager):
         self,
         router: IRouter | None = None,
         initial_state: dict[str, Any] | None = None,
+        manager_name: str = "StateStoreManager",
         logger: Any = None,
+        stats: Any = None,
     ) -> None:
         """
         Args:
             router: реализация IRouter для IPC (None допустимо для тестов).
             initial_state: начальное состояние дерева.
-            logger: пользовательский логгер (если None — используем модульный).
+            manager_name: имя менеджера для BaseManager.
+            logger: LoggerManager или ObservableMixin-совместимый объект.
+            stats: StatsManager или ObservableMixin-совместимый объект.
         """
+        BaseManager.__init__(self, manager_name=manager_name)
+        ObservableMixin.__init__(self, managers={"logger": logger, "stats": stats})
         self._store = TreeStore(initial=initial_state)
         self._subs = SubscriptionManager()
         self._dispatcher = DeltaDispatcher(
             subscription_mgr=self._subs,
             router=router,
             sender_name="StateStore",
+            logger=self,
         )
         self._pipeline = MiddlewarePipeline()
         self._router = router
-        self._log = logger or logging.getLogger(__name__)
-        self._initialized = False
 
     @property
     def pipeline(self) -> MiddlewarePipeline:
@@ -93,8 +97,8 @@ class StateStoreManager(IStateStoreManager):
         if self._router is not None:
             self.register_message_handlers(self._router)
 
-        self._initialized = True
-        self._log.info("StateStoreManager инициализирован")
+        self.is_initialized = True
+        self._log_info("StateStoreManager инициализирован")
         return True
 
     def shutdown(self) -> bool:
@@ -103,7 +107,6 @@ class StateStoreManager(IStateStoreManager):
         Returns:
             True если остановка успешна.
         """
-        # Собираем всех подписчиков и отписываем
         with self._subs._lock:
             subscribers = list(self._subs._by_subscriber.keys())
 
@@ -112,8 +115,8 @@ class StateStoreManager(IStateStoreManager):
             count = self._subs.unsubscribe_all(subscriber)
             total += count
 
-        self._initialized = False
-        self._log.info("StateStoreManager остановлен, отписано подписок: %d", total)
+        self.is_initialized = False
+        self._log_info(f"StateStoreManager остановлен, отписано подписок: {total}")
         return True
 
     # -------------------------------------------------------------------
@@ -179,7 +182,7 @@ class StateStoreManager(IStateStoreManager):
                 return {"status": "ok", "path": path, "changed": True}
             return {"status": "ok", "path": path, "changed": False}
         except (ValueError, TypeError) as exc:
-            self._log.warning("state.set ошибка: %s", exc)
+            self._log_warning(f"state.set ошибка: {exc}")
             return {"status": "error", "error": str(exc)}
 
     def handle_state_merge(self, msg: dict) -> dict | None:
@@ -219,7 +222,7 @@ class StateStoreManager(IStateStoreManager):
                 "changes_count": len(deltas),
             }
         except (ValueError, TypeError) as exc:
-            self._log.warning("state.merge ошибка: %s", exc)
+            self._log_warning(f"state.merge ошибка: {exc}")
             return {"status": "error", "error": str(exc)}
 
     def handle_state_get(self, msg: dict) -> dict:
@@ -301,12 +304,7 @@ class StateStoreManager(IStateStoreManager):
             subscriber=subscriber,
             exclude_sources=exclude_sources,
         )
-        self._log.debug(
-            "Подписка создана: sub_id=%s, subscriber=%s, pattern=%s",
-            sub_id,
-            subscriber,
-            pattern,
-        )
+        self._log_debug(f"Подписка создана: sub_id={sub_id}, subscriber={subscriber}, pattern={pattern}")
         return {"status": "ok", "sub_id": sub_id}
 
     def handle_state_unsubscribe(self, msg: dict) -> dict:
@@ -376,10 +374,7 @@ class StateStoreManager(IStateStoreManager):
                 tags=["state_store"],
             )
 
-        self._log.info(
-            "StateStoreManager: зарегистрировано %d команд в CommandManager",
-            len(commands),
-        )
+        self._log_info(f"StateStoreManager: зарегистрировано {len(commands)} команд в CommandManager")
 
     def register_message_handlers(self, router: IRouter) -> None:
         """Регистрирует message handlers в Router.
@@ -400,7 +395,4 @@ class StateStoreManager(IStateStoreManager):
         for key, handler in handlers.items():
             router.register_message_handler(key, handler, expects_full_message=True)
 
-        self._log.info(
-            "StateStoreManager: зарегистрировано %d обработчиков в Router",
-            len(handlers),
-        )
+        self._log_info(f"StateStoreManager: зарегистрировано {len(handlers)} обработчиков в Router")

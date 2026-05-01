@@ -50,6 +50,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         name: str,
         shared_resources: ISharedResources | None = None,
         config: dict | None = None,
+        state_proxy: Any | None = None,
     ):
         """
         Инициализация процесса.
@@ -58,6 +59,8 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             name: Имя процесса
             shared_resources: ISharedResources (DI — передаётся снаружи, не импортируется)
             config: Локальная конфигурация процесса (опционально)
+            state_proxy: IStateProxy (ADR-SS-006) — если передан, handler state.changed
+                         регистрируется автоматически после initialize().
         """
         BaseManager.__init__(self, manager_name=name, process=None)
 
@@ -71,6 +74,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.name = name
         self.shared_resources: ISharedResources | None = shared_resources
         self.config = config or {}
+        self.state_proxy = state_proxy
 
         # Компоненты (настраиваются в initialize())
         self.config_handler = None
@@ -113,11 +117,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         - Создание очередей
         - Инициализация менеджеров через ObservableMixin
         - Настройка коммуникации
+        - Регистрация state.changed handler (ADR-SS-006), если state_proxy задан
 
         Returns:
             bool: True если инициализация успешна
         """
-        return self._lifecycle.initialize()
+        result = self._lifecycle.initialize()
+        self._init_state_proxy()
+        return result
 
     def shutdown(self) -> bool:
         """
@@ -162,6 +169,28 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Регистрация очередей
         self.communication.register_process_queues()
         self.communication.register_router_channels()
+
+    def _init_state_proxy(self) -> None:
+        """Авто-регистрация handler'а state.changed (ADR-SS-006).
+
+        Вызывается в конце initialize(). Если state_proxy задан и router_manager
+        доступен — регистрирует on_state_changed как обработчик IPC-сообщений.
+        """
+        if self.state_proxy is None or self.router_manager is None:
+            return
+        try:
+            self.router_manager.register_message_handler(
+                "state.changed", self.state_proxy.on_state_changed
+            )
+            self._log_debug(
+                f"ProcessModule '{self.name}': state_proxy handler state.changed зарегистрирован",
+                module="state",
+            )
+        except Exception as exc:
+            self._log_warning(
+                f"ProcessModule '{self.name}': не удалось зарегистрировать state_proxy handler: {exc}",
+                module="state",
+            )
 
     def _register_process_state(self):
         """Регистрация состояния процесса."""
