@@ -1,21 +1,43 @@
 """
-Frontend Module — модуль UI-фреймворка.
+Frontend Module — модуль UI-фреймворка (конструктор PySide6-приложений).
 
-Предоставляет систему виджетов-конструктор:
-- Базовые компоненты (слайдеры, чекбоксы, таблицы)
-- Доменные виджеты (сборка компонентов + привязка к регистрам)
-- Окна верхнего уровня
+## Основные подсистемы
 
-Использует data_schema_module и config_module для схем и конфигов.
-Конкретные классы регистров задаёт приложение (наследники SchemaBase);
-см. multiprocess_prototype/registers/schemas.
+**Приложение:**
+- frontend_module.application — FrontendManager, WindowManager, ThreadManager
 
-Остальные символы доступны через подпакеты:
-- frontend_module.core (qt_imports, WidgetRegistry, WindowRegistry, FrontendRegistersBridge, ...)
-- frontend_module.components (SliderControl, CheckboxControl, NumericControl, ...)
-- frontend_module.widgets (BaseWidget, HeaderWidget, TabWidget, ImagePanelWidget, ...)
-- frontend_module.schemas (WidgetDescriptor, WindowConfig, ...)
-- frontend_module.configs (FrontendManagerConfig, WindowManagerConfig, ...)
+**Компоненты (primitives):**
+- frontend_module.components — SliderControl, CheckboxControl, NumericControl, ...
+
+**Виджеты:**
+- frontend_module.widgets.entity_editor — EntityTreeWidget, ParamsForm, BaseEditorModel, ...
+- frontend_module.widgets.chrome — AppHeaderWidget, RecordingIndicator, SearchFilterBar, ...
+- frontend_module.widgets — BaseWidget, TabWidget, TableWidget, ...
+
+**Action Bus (undo/redo):**
+- frontend_module.actions — Action, ActionBuilder, ActionBus, ActionHandler
+
+**Менеджеры:**
+- frontend_module.managers — ThemeManager, ConfigSnapshotManager, YamlPersistenceStore[T],
+  AccessContext, RecipeManagerProtocol, SettingsProfileManagerProtocol
+
+**Ядро:**
+- frontend_module.core — qt_imports, qt_thread_guard, app_context, diagnostics, ...
+- frontend_module.schemas — WidgetDescriptor, WindowConfig, RegisterBinding
+- frontend_module.configs — FrontendManagerConfig, WindowManagerConfig
+
+## Правило границы
+
+Этот модуль НЕ импортирует из прototипа. Доменные расширения — через наследование:
+
+    from multiprocess_framework.modules.frontend_module.managers import ThemeManager
+    class MyThemeManager(ThemeManager):
+        def __init__(self): super().__init__(styles_dir=..., default_variables_provider=...)
+
+    from multiprocess_framework.modules.frontend_module.actions import ActionBuilder
+    class AppActionBuilder(ActionBuilder):
+        @staticmethod
+        def domain_action(...) -> Action: ...
 """
 
 from multiprocess_framework.modules.frontend_module.application import (
@@ -34,4 +56,4 @@ __all__ = [
     "run_process_attached_frontend",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"  # Phase 2.2: actions, entity_editor, chrome, managers, core extensions

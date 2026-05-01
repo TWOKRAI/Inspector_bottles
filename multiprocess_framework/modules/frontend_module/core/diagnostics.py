@@ -62,7 +62,7 @@ def attach_ui_diagnostics(main_window: QWidget, config: Dict[str, Any]) -> Optio
     config["ui_diagnostics"] — dict:
       - enabled: bool (обязательно True для активации)
       - log_level: str, по умолчанию INFO
-      - logger_name: str, по умолчанию multiprocess_prototype.ui
+      - logger_name: str, по умолчанию frontend.ui
       - include_prefixes: list[str] | None — если задано, только event_id с таким префиксом
       - buffer_max: int — если > 0, последние события хранятся в session.recent_events (отладка/тесты)
 
@@ -74,7 +74,7 @@ def attach_ui_diagnostics(main_window: QWidget, config: Dict[str, Any]) -> Optio
         return None
 
     level = _parse_level(raw.get("log_level", "INFO"))
-    log_name = str(raw.get("logger_name") or "multiprocess_prototype.ui")
+    log_name = str(raw.get("logger_name") or "frontend.ui")
     log = logging.getLogger(log_name)
     prefixes_raw = raw.get("include_prefixes")
     include_prefixes: Optional[Tuple[str, ...]] = None
