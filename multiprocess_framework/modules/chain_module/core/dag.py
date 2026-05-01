@@ -176,7 +176,9 @@ def _execute_dag_default(
     if hasattr(operation, "execute_dag"):
         return operation.execute_dag(inputs, context)
 
-    primary_input = inputs.get("in") or inputs.get("frame")
+    primary_input = inputs.get("in")
+    if primary_input is None:
+        primary_input = inputs.get("frame")
     if primary_input is None and inputs:
         primary_input = next(iter(inputs.values()))
 
