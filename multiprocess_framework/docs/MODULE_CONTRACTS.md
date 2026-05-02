@@ -1,6 +1,8 @@
 # Module Contracts — Контракты модулей
 
-**Назначение:** для каждого из 19 модулей указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть».
+**Назначение:** для каждого из 21 модуля указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть».
+
+**Обновлено:** 2026-05-02 — добавлены контракты `state_store_module` (L5) и `chain_module` (L6).
 
 > **Формат записи модуля:**
 > - **Цель** — одно предложение
@@ -554,17 +556,19 @@
 |--------|----:|------|-------------|-------:|
 | `base_manager` | 2 188 | L1 | — | 30+ |
 | `data_schema_module` | 16 168 | L1 | — | 80+ |
+| `message_module` | 2 616 | L1/L3* | schema | 50+ |
 | `dispatch_module` | 3 447 | L2 | base | 56 |
 | `channel_routing_module` | 2 093 | L2 | base, schema, dispatch | 58 |
-| `message_module` | 2 616 | L3 | schema | 50+ |
 | `router_module` | 3 225 | L3 | crm, message, dispatch | 80+ |
 | `logger_module` | 1 705 | L4 | crm | 40+ |
 | `error_module` | 1 026 | L4 | logger | 25+ |
 | `statistics_module` | 1 500 | L4 | crm | 40+ |
 | `shared_resources_module` | 5 233 | L5 | base | 50+ |
 | `config_module` | 2 393 | L5 | base, schema | 49 |
+| `state_store_module` | ~2 500 | L5 | base | 415+ |
 | `command_module` | 1 220 | L6 | dispatch, base | 34 |
 | `worker_module` | 2 356 | L6 | base | 49 |
+| `chain_module` | ~1 135 | L6 | base | 60+ |
 | `process_module` | 3 965 | L7 | worker, router, logger, srm, schema | 60+ |
 | `console_module` | 2 877 | L7 | base, schema, logger | 40+ |
 | `process_manager_module` | 4 612 | L8 | process, command | 80+ |
@@ -572,4 +576,6 @@
 | `registers_module` | 1 169 | L10 | schema | 30+ |
 | `frontend_module` | 12 039 | L11 | process, router, schema, logger | 150+ |
 
-**Итого:** 19 модулей, ~73 634 LOC (с тестами), 670 файлов.
+**Итого:** 21 модуль, ~80 000 LOC (с тестами), 670+ файлов.
+
+\* `message_module` в SPEC.md классифицируется как L3 (Messaging), в карте слоёв `MODULES_OVERVIEW.md` — как L1-foundation для message-данных. Обе классификации валидны; зависит только от `data_schema_module`.
