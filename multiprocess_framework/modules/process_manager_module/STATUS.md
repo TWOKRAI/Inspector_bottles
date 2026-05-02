@@ -82,7 +82,7 @@
 
 ### __init__.py
 - Экспортируются: ISystemLauncher, IProcessManagerProcess, IProcessRegistry
-- Экспортируются: ProcessRegistry, ProcessPriority, ProcessStatus, ProcessMonitor, ProcessSchemaAdapter
+- Экспортируются: ProcessRegistry, ProcessPriority, ProcessStatusMonitor, ProcessMonitor, ProcessSchemaAdapter (алиас ProcessStatus → ProcessStatusMonitor удалён 2026-05-02, Tier-1 п.1.3)
 
 ## Конфигурация (2026-03-17)
 

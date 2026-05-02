@@ -1866,7 +1866,7 @@
 - Решение:
   1. Создан единый `ProcessStatus(str, Enum)` в `base_manager/types/process_status.py` — суперсет из 9 значений.
   2. Старые определения в `process_module/types/types.py` и `shared_resources_module/types/types.py` заменены на re-export из `base_manager` (backward compat сохранён — все старые пути импорта работают).
-  3. Класс мониторинга в `process_manager_module/core/process_status.py` переименован в `ProcessStatusMonitor`. `ProcessStatus` сохранён как алиас для backward compat.
+  3. Класс мониторинга в `process_manager_module/core/process_status.py` переименован в `ProcessStatusMonitor`. `ProcessStatus` сохранён как алиас для backward compat (**удалён 2026-05-02**, см. ниже).
   4. `base_manager/__init__.py` экспортирует `ProcessStatus`.
   5. Корневой `multiprocess_framework/__init__.py` экспортирует `ProcessStatus` (enum из base_manager) и `ProcessStatusMonitor` (класс мониторинга).
 - Причина: один Python-объект для всех модулей — корректное `is`-сравнение, единый набор значений, нет риска расхождения.
@@ -1876,8 +1876,13 @@
   - Разделить на два enum (`ProcessLifecycleStatus`, `PSRSlotStatus`) — семантически оба описывают одно и то же (жизненный цикл процесса), разделение не имеет смысла.
 - Последствия:
   - R-12: изменён публичный контракт (новые значения UNRESPONSIVE, FAILED доступны через shared_resources_module). Backward compat сохранён через re-export.
-  - `process_manager_module.ProcessStatus` (класс мониторинга) теперь `ProcessStatusMonitor` с backward compat алиасом.
+  - `process_manager_module.ProcessStatus` (класс мониторинга) теперь `ProcessStatusMonitor` (алиас удалён 2026-05-02).
   - Тест `test_types.py::TestProcessStatus::test_all_values_exist` в shared_resources_module обновлён: проверяет subset вместо exact set.
+- **Дополнение 2026-05-02 (Tier-1 IMPROVEMENT_PLAN, пункт 1.3):**
+  - Алиас `ProcessStatus = ProcessStatusMonitor` в `process_manager_module/core/process_status.py` удалён (R-12: backward-compat снят согласно I-11).
+  - `process_manager_module.core.__init__` и `process_manager_module.__init__` больше не экспортируют локальный `ProcessStatus`. Единственный канонический источник enum — `multiprocess_framework.modules.base_manager.ProcessStatus` (доступен и через корневой фасад `multiprocess_framework.ProcessStatus`).
+  - Тест `tests/test_process_status.py` мигрирован на `ProcessStatusMonitor` (импорт + класс `TestProcessStatusMonitor`).
+  - Семантический конфликт устранён: больше нет ситуации «`ProcessStatus` в одном модуле — enum, в другом — класс».
 
 ---
 

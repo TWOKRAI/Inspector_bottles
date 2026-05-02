@@ -56,7 +56,7 @@ Multiprocess Framework — **конструктор многопроцессны
 
 ## 3. Слои архитектуры
 
-19 модулей сгруппированы по слоям снизу вверх. Внутри слоя модули независимы или зависят только от нижележащих слоёв.
+21 модуль сгруппирован по слоям снизу вверх. Внутри слоя модули независимы или зависят только от нижележащих слоёв.
 
 | Слой | Модули | Роль |
 |------|--------|------|
@@ -64,8 +64,8 @@ Multiprocess Framework — **конструктор многопроцессны
 | **L2. Routing primitives** | `dispatch_module`, `channel_routing_module` | Маршрутизация ключ → handler (4 стратегии) и CRM как базовый класс канальных менеджеров |
 | **L3. Messaging** | `message_module`, `router_module` | `Message` (Dict at Boundary) и `RouterManager` поверх CRM |
 | **L4. Observability** | `logger_module`, `error_module`, `statistics_module` | Наследники CRM с каналами (файл, консоль, prometheus, UI) |
-| **L5. Resources & Config** | `shared_resources_module`, `config_module` | Pickle-safe SRM (Queue/Event/SharedMemory + ConfigStore) и runtime-конфиги |
-| **L6. Command & Work** | `command_module`, `worker_module` | Команды поверх dispatch и потоки-воркеры внутри процесса |
+| **L5. Resources & Config** | `shared_resources_module`, `config_module`, `state_store_module` | Pickle-safe SRM (Queue/Event/SharedMemory + ConfigStore), runtime-конфиги, реактивное дерево состояния (StateStoreManager + StateProxy + glob-подписки) |
+| **L6. Command & Work** | `command_module`, `worker_module`, `chain_module` | Команды поверх dispatch, потоки-воркеры внутри процесса, DAG/Chain execution engine (ChainRunnable, DagRunnable, WorkerPoolDispatcher) |
 | **L7. Process** | `process_module`, `console_module` | `ProcessModule` — база дочернего процесса; `ConsoleManager` — терминальный I/O |
 | **L8. Orchestration** | `process_manager_module` | `SystemLauncher`, `ProcessManagerProcess`, `ProcessRegistry`, `ProcessMonitor` |
 | **L9. Storage** | `sql_module` | SQL-инструментарий (DDL, QuerySet, UoW, Repository) |
@@ -91,8 +91,10 @@ graph BT
     stats[statistics_module]
     srm[shared_resources_module]
     config[config_module]
+    state_store[state_store_module]
     command[command_module]
     worker[worker_module]
+    chain[chain_module]
     process[process_module]
     pmgr[process_manager_module]
     console[console_module]
@@ -114,8 +116,12 @@ graph BT
     srm --> base
     config --> base
     config --> schema
+    state_store --> base
+    state_store --> message
     command --> dispatch
     worker --> base
+    chain --> base
+    chain --> schema
     process --> worker
     process --> router
     process --> logger
@@ -298,7 +304,7 @@ class CameraRegister(SchemaBase):
 import multiprocess_framework as mf
 ```
 
-49 символов в `__all__`. Сгруппированы по слоям:
+60 символов в `__all__` (плюс `__version__`). Сгруппированы по слоям:
 
 | Слой | Экспорт |
 |------|---------|
@@ -307,10 +313,14 @@ import multiprocess_framework as mf
 | Messaging | `RouterManager` |
 | Observability | `LoggerManager`, `LoggerManagerConfig`, `get_logger`, `ErrorManager`, `StatsManager` |
 | Resources & Config | `ConfigManager`, `EventManager`, `EventType`, `ProcessData`, `ProcessDataKeys`, `QueueRegistry`, `SharedResourcesManager` |
+| State Store | `StateStoreManager`, `StateProxy`, `GuiStateProxy`, `IStateRouter` |
 | Command & Work | `CommandManager`, `ThreadConfig`, `ThreadPriority`, `WorkerManager`, `WorkerStatus` |
+| Chain Engine | `ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`, `ChainContext`, `ChainResult` |
 | Process | `ConsoleManager`, `ProcessModule` |
-| Orchestration | `SystemLauncher`, `ProcessManagerProcess`, `ProcessRegistry`, `ProcessMonitor`, `ProcessPriority`, `ProcessStatus`, `ProcessSpawner`, `ProcessSchemaAdapter`, `ISystemLauncher`, `IProcessManagerProcess`, `IProcessRegistry` |
+| Orchestration | `SystemLauncher`, `ProcessManagerProcess`, `ProcessRegistry`, `ProcessMonitor`, `ProcessPriority`, `ProcessStatus`, `ProcessStatusMonitor`, `ProcessSpawner`, `ProcessSchemaAdapter`, `ISystemLauncher`, `IProcessManagerProcess`, `IProcessRegistry` |
+| Storage | `SQLManager` |
 | Application kit | `RegistersManager` |
+| UI (optional) | `FrontendManager` (None если PySide6 не установлен) |
 
 ---
 
@@ -384,6 +394,6 @@ from multiprocess_framework.modules.data_schema_module import SchemaBase  # то
  && python scripts/run_framework_tests.py
 ```
 
-Ожидаемый результат: **1 877 passed / 30 skipped / 2 known-failing** (см. [`PROBLEMS.md`](PROBLEMS.md)).
+Ожидаемый результат: **2 465 passed / 29 skipped / 0 failed** (см. [`PROBLEMS.md`](PROBLEMS.md)).
 
 Все импорты в тестах — каноничные. `pytest.ini` в `modules/` оставлен как точка сбора `testpaths`; никаких `pythonpath = .` хаков.

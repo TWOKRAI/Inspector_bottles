@@ -1,5 +1,5 @@
 """
-Тесты для ProcessStatus.
+Тесты для ProcessStatusMonitor.
 
 Проверяют мониторинг статуса процессов.
 """
@@ -8,20 +8,20 @@ import time
 import pytest
 from multiprocessing import Process
 
-from ..core.process_status import ProcessStatus
+from ..core.process_status import ProcessStatusMonitor
 
 
 def _dummy_target() -> None:
     time.sleep(2)
 
 
-class TestProcessStatus:
-    """Тесты ProcessStatus."""
+class TestProcessStatusMonitor:
+    """Тесты ProcessStatusMonitor."""
 
     def test_get_process_status(self) -> None:
         """get_process_status() возвращает статус процесса."""
         process = Process(target=_dummy_target, name="TestProcess")
-        status_obj = ProcessStatus([process])
+        status_obj = ProcessStatusMonitor([process])
 
         status = status_obj.get_process_status("TestProcess")
 
@@ -41,7 +41,7 @@ class TestProcessStatus:
 
     def test_get_process_status_not_found(self) -> None:
         """get_process_status() для неизвестного возвращает None."""
-        status_obj = ProcessStatus([])
+        status_obj = ProcessStatusMonitor([])
         result = status_obj.get_process_status("Unknown")
         assert result is None
 
@@ -49,7 +49,7 @@ class TestProcessStatus:
         """get_all_status() возвращает словарь всех процессов."""
         p1 = Process(target=_dummy_target, name="P1")
         p2 = Process(target=_dummy_target, name="P2")
-        status_obj = ProcessStatus([p1, p2])
+        status_obj = ProcessStatusMonitor([p1, p2])
 
         all_status = status_obj.get_all_status()
 
@@ -60,7 +60,7 @@ class TestProcessStatus:
     def test_get_stats(self) -> None:
         """get_stats() возвращает total, alive, dead, alive_percent."""
         process = Process(target=_dummy_target, name="TestProcess")
-        status_obj = ProcessStatus([process])
+        status_obj = ProcessStatusMonitor([process])
 
         stats = status_obj.get_stats()
 
@@ -72,7 +72,7 @@ class TestProcessStatus:
     def test_get_alive_count(self) -> None:
         """get_alive_count() возвращает количество живых."""
         process = Process(target=_dummy_target, name="TestProcess")
-        status_obj = ProcessStatus([process])
+        status_obj = ProcessStatusMonitor([process])
 
         assert status_obj.get_alive_count() == 0
 

@@ -6,7 +6,7 @@
 
 ```
 multiprocess_framework/
-├── __init__.py                 # Публичный фасад (49 экспортов)
+├── __init__.py                 # Публичный фасад (60 экспортов)
 ├── README.md
 ├── SPEC.md                     # Главное ТЗ
 ├── DOCUMENTATION_INDEX.md
@@ -19,6 +19,7 @@ multiprocess_framework/
 │   ├── conftest.py             # Общие фикстуры pytest
 │   ├── pytest.ini              # testpaths
 │   ├── base_manager/
+│   ├── chain_module/
 │   ├── channel_routing_module/
 │   ├── command_module/
 │   ├── config_module/
@@ -35,6 +36,7 @@ multiprocess_framework/
 │   ├── router_module/
 │   ├── shared_resources_module/
 │   ├── sql_module/
+│   ├── state_store_module/
 │   ├── statistics_module/
 │   └── worker_module/
 ├── docs/
@@ -62,7 +64,7 @@ multiprocess_framework/
     └── validate_all_modules.py
 ```
 
-**Всего пакетов под `modules/`:** 19. Список и краткая роль — [`docs/MODULES_OVERVIEW.md`](docs/MODULES_OVERVIEW.md).
+**Всего пакетов под `modules/`:** 21. Список и краткая роль — [`docs/MODULES_OVERVIEW.md`](docs/MODULES_OVERVIEW.md).
 
 ## Принципы организации
 

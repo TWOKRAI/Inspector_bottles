@@ -2,7 +2,7 @@
 
 **Этап: 8/8** — Модуль управления процессами.
 
-ProcessManagerProcess — оркестратор с композицией ProcessRegistry + ProcessPriority + ProcessStatus + ProcessMonitor. Dict at Boundary: SystemLauncher принимает только (name, proc_dict); конвертация в app через process(); нормализация через merge_with_defaults(DEFAULT_PROCESS_SCHEMA).
+ProcessManagerProcess — оркестратор с композицией ProcessRegistry + ProcessPriority + ProcessStatusMonitor + ProcessMonitor. Dict at Boundary: SystemLauncher принимает только (name, proc_dict); конвертация в app через process(); нормализация через merge_with_defaults(DEFAULT_PROCESS_SCHEMA).
 
 **Новое в этапе 8:**
 - `interfaces.py` — публичные контракты `ISystemLauncher`, `IProcessManagerProcess`, `IProcessRegistry`
@@ -36,10 +36,10 @@ process_manager_module/
 ├── interfaces.py                       # ISystemLauncher, IProcessManagerProcess, IProcessRegistry
 │
 ├── core/                               # Ядро управления процессами
-│   ├── __init__.py                     # ProcessRegistry, ProcessPriority, ProcessStatus
+│   ├── __init__.py                     # ProcessRegistry, ProcessPriority, ProcessStatusMonitor
 │   ├── process_registry.py             # ProcessRegistry (registry + lifecycle + create_and_register)
 │   ├── process_priority.py             # ProcessPriority
-│   └── process_status.py               # ProcessStatus
+│   └── process_status.py               # ProcessStatusMonitor
 │
 ├── process/                            # Процесс-оркестратор
 │   ├── __init__.py                     # ProcessManagerProcess
@@ -71,7 +71,7 @@ process_manager_module/
 │   ├── test_system_launcher.py         # SystemLauncher
 │   ├── test_process_registry.py        # ProcessRegistry
 │   ├── test_process_priority.py        # ProcessPriority
-│   ├── test_process_status.py          # ProcessStatus
+│   ├── test_process_status.py          # ProcessStatusMonitor
 │   ├── test_process_spawner.py         # ProcessSpawner + signal handling
 │   ├── test_process_manager_process.py # ProcessManagerProcess (новый)
 │   ├── test_process_runner.py          # run_process_function (новый)
@@ -154,7 +154,7 @@ ProcessModule (из process_module)
                     │
                     ├── ProcessRegistry (registry + lifecycle + create)
                     ├── ProcessPriority
-                    ├── ProcessStatus
+                    ├── ProcessStatusMonitor
                     └── ProcessMonitor
 ```
 
@@ -171,7 +171,7 @@ SystemLauncher
                                             │
                                             ├── ProcessRegistry
                                             ├── ProcessPriority
-                                            ├── ProcessStatus
+                                            ├── ProcessStatusMonitor
                                             └── ProcessMonitor
 ```
 
@@ -202,7 +202,7 @@ SystemLauncher
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │              ProcessManagerProcess (process/)                                │
-│  ProcessModule. Композиция: ProcessRegistry + ProcessPriority + ProcessStatus + ProcessMonitor │
+│  ProcessModule. Композиция: ProcessRegistry + ProcessPriority + ProcessStatusMonitor + ProcessMonitor │
 └──────────────┬────────────────────────────────────────────┬────────────────┘
                │ содержит                                     │ содержит
                ▼                                             ▼
@@ -213,10 +213,10 @@ SystemLauncher
 └──────┬───────┬───────────────┘              └──────────────────────────────────┘
        │       │
        ▼       ▼
-┌──────────┐ ┌──────────┐
-│Process   │ │Process   │
-│Priority  │ │Status    │
-└──────────┘ └──────────┘
+┌──────────┐ ┌──────────────┐
+│Process   │ │Process       │
+│Priority  │ │StatusMonitor │
+└──────────┘ └──────────────┘
 ```
 
 ---
@@ -290,9 +290,9 @@ SystemLauncher
 
 ---
 
-### 5. `core/process_status.py` — ProcessStatus
+### 5. `core/process_status.py` — ProcessStatusMonitor
 
-**Роль:** Мониторинг статуса (alive, pid, exitcode).
+**Роль:** Мониторинг статуса (alive, pid, exitcode). Не путать с `ProcessStatus` enum из `base_manager` (значения жизненного цикла процесса, ADR-117).
 
 | Метод | Описание |
 |-------|----------|
@@ -305,11 +305,11 @@ SystemLauncher
 ### 6. `process/process_manager_process.py` — ProcessManagerProcess
 
 **Наследование:** ProcessModule  
-**Роль:** Оркестратор. Композиция: ProcessRegistry + ProcessPriority + ProcessStatus + ProcessMonitor.
+**Роль:** Оркестратор. Композиция: ProcessRegistry + ProcessPriority + ProcessStatusMonitor + ProcessMonitor.
 
 | Метод | Описание |
 |-------|----------|
-| `__init__(name, shared_resources, config)` | ConfigManager, QueueRegistry, ConsoleManager, ProcessRegistry, ProcessPriority, ProcessStatus, ProcessMonitor. |
+| `__init__(name, shared_resources, config)` | ConfigManager, QueueRegistry, ConsoleManager, ProcessRegistry, ProcessPriority, ProcessStatusMonitor, ProcessMonitor. |
 | `initialize()` | ProcessModule.initialize(), _create_processes_from_config(), process_monitor.start(). |
 | `shutdown()` | process_monitor.stop(), registry.stop_all(), console_manager.close_all(), ProcessModule.shutdown(). |
 | `create_process(name, class_path, config, priority)` | _registry.create_and_register + _priority.register. |

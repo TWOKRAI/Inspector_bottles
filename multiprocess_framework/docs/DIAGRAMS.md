@@ -6,7 +6,7 @@
 
 ## 1. Architecture layer cake
 
-Десять слоёв с модулями (19 пакетов + `registers_module` на схеме). Снизу вверх — от примитивов к приложению.
+Одиннадцать слоёв, 21 пакет в `modules/`. Снизу вверх — от примитивов к приложению.
 
 ```mermaid
 flowchart TB
@@ -30,10 +30,12 @@ flowchart TB
   subgraph L5 [Resources and config]
     SRM[shared_resources_module]
     CFG[config_module]
+    SS[state_store_module]
   end
   subgraph L6 [Command and work]
     CMD[command_module]
     WRK[worker_module]
+    CHN[chain_module]
   end
   subgraph L7 [Process]
     PM[process_module]
@@ -108,7 +110,7 @@ flowchart LR
 
 ---
 
-## 5. Module dependency graph (19 packages)
+## 5. Module dependency graph (21 packages)
 
 ```mermaid
 graph BT
@@ -123,9 +125,11 @@ graph BT
   router_module
   shared_resources_module
   config_module
+  state_store_module
   registers_module
   command_module
   worker_module
+  chain_module
   process_module
   process_manager_module
   console_module
@@ -137,6 +141,10 @@ graph BT
   statistics_module --> channel_routing_module
   router_module --> channel_routing_module
   router_module --> message_module
+  state_store_module --> base_manager
+  state_store_module --> message_module
+  chain_module --> base_manager
+  chain_module --> data_schema_module
   process_module --> router_module
   process_module --> command_module
   process_module --> worker_module

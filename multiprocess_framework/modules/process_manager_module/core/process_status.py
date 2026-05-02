@@ -8,7 +8,10 @@
 
 Примечание (ADR-117): класс переименован в ProcessStatusMonitor,
 чтобы не конфликтовать с ProcessStatus enum из base_manager.
-ProcessStatus остаётся как алиас для backward compat.
+Алиас ProcessStatus = ProcessStatusMonitor удалён 2026-05-02 (Tier-1
+IMPROVEMENT_PLAN, пункт 1.3) — backward-compat снят, потребители
+мигрированы на ProcessStatusMonitor (для класса мониторинга) или на
+ProcessStatus enum из multiprocess_framework.modules.base_manager.
 """
 
 from multiprocessing import Process
@@ -104,9 +107,3 @@ class ProcessStatusMonitor:
             'dead': dead,
             'alive_percent': round((alive / total * 100) if total > 0 else 0, 2)
         }
-
-
-# Backward compat: алиас для кода, импортирующего ProcessStatus из этого модуля.
-# В будущем перейти на ProcessStatusMonitor (ADR-117).
-ProcessStatus = ProcessStatusMonitor
-

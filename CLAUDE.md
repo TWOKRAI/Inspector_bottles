@@ -11,8 +11,11 @@
 - **IPC:** `Message` / `MessageAdapter` → `RouterManager` → `shared_resources_module` (pickle-safe)
 - **Внутри процесса:** `CommandManager`, `worker_module`, `LoggerManager` / `ErrorManager` / `StatsManager` (база `channel_routing_module`), `RouterManager`
 - **Данные/конфиг:** `data_schema_module` (`SchemaBase`), `config_module` + `ConfigStore`
+- **Состояние:** `state_store_module` — реактивное дерево (StateStoreManager + StateProxy + glob-подписки)
+- **Pipeline-исполнители:** `chain_module` — DAG/Chain engine (ChainRunnable, DagRunnable, WorkerPoolDispatcher)
 - **GUI:** `frontend_module` (PySide6), схемы регистров в приложении. Виджеты v3 сгруппированы по доменам (`chrome/`, `sources/`, `recipes/`, `processing/`, `settings/`, `pipeline/`, `tabs_setting/`, `base/`) — детали в [`docs/refactors/2026-04_widgets_reorg.md`](docs/refactors/2026-04_widgets_reorg.md).
 - **Роутинг:** НЕ путать **имя процесса** (`targets`, `send_message`) и **канал Router** (`FieldRouting.channel`, `msg["channel"]`). См. `ROUTING_GLOSSARY.md`
+- **Всего модулей в `multiprocess_framework/modules/`:** 21 (см. [`MODULES_STATUS.md`](multiprocess_framework/MODULES_STATUS.md), [`docs/MODULES_OVERVIEW.md`](multiprocess_framework/docs/MODULES_OVERVIEW.md))
 
 ## Ключевые пути
 
@@ -20,7 +23,8 @@
 |-----|------|
 | **АКТИВНЫЙ прототип** | `multiprocess_prototype/` ← **только сюда вносить изменения** |
 | Фреймворк | `multiprocess_framework/` |
-| Документация фреймворка | `multiprocess_framework/docs/` (`FRAMEWORK_OVERVIEW.md`, `ARCHITECTURE_REFERENCE.md`) |
+| Документация фреймворка | `multiprocess_framework/docs/` (`MODULES_OVERVIEW.md`, `MODULE_CONTRACTS.md`, `DIAGRAMS.md`) |
+| Конструктор-blueprint фреймворка (21 модуль) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
 | Точка входа v3 | `multiprocess_prototype/run.py` |
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |

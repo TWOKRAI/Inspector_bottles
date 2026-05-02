@@ -1,14 +1,14 @@
 # Известные проблемы фреймворка
 
-**Обновлено:** 2026-04-25 — после миграции на каноничные импорты `multiprocess_framework.modules.<X>`.
+**Обновлено:** 2026-05-02 — Tier-1 IMPROVEMENT_PLAN: оба доимиграционных failing-теста починены, документация синхронизирована под 21 модуль.
 
 **Прогон unit-тестов:**
 
 ```bash
- && python scripts/run_framework_tests.py
+python scripts/run_framework_tests.py
 ```
 
-Текущий результат: **1 877 passed / 30 skipped / 2 failed** (доимиграционные баги тестов, см. ниже).
+Текущий результат: **2 465 passed / 29 skipped / 0 failed**.
 
 ---
 
@@ -17,37 +17,11 @@
 | Категория              | Статус |
 |------------------------|--------|
 | Каноничные импорты      | ✅ OK (688 правок применены, 460 битых top-level импортов мигрированы) |
-| Корневой фасад `multiprocess_framework` | ✅ OK (49 / 49 символов экспортируются) |
-| Unit-тесты              | ✅ 1 877 passed / 2 known-failing |
-| Документация            | ⏳ В процессе наведения порядка |
+| Корневой фасад `multiprocess_framework` | ✅ OK (state_store/chain/sql/frontend добавлены 2026-05-02) |
+| Unit-тесты              | ✅ 2 465 passed / 0 failed |
+| Документация            | ✅ синхронизирована под 21 модуль (Tier-1, 2026-05-02) |
 | MemoryManager на macOS | ⏭️ Пропуск 15 тестов (платформенная особенность) |
 | Pydantic v2 deprecation | ✅ Исправлено (`type(self).model_fields` вместо `self.model_fields`) |
-
----
-
-## Доимиграционные failing-тесты (2 шт.)
-
-Падали и до миграции — см. `git log` или прогон на `HEAD~1`.
-
-### 1. `test_process_manager_process.py::TestProcessManagerProcessInit::test_init_creates_components`
-
-```
-AttributeError: 'ProcessManagerProcess' object has no attribute 'config_handler'
-```
-
-**Где:** `process_manager_module/tests/test_process_manager_process.py:48`. Тест вызывает `pmp._create_components()` без полной `initialize()`, поэтому `config_handler` ещё не присвоен.
-
-**Решение:** обернуть `get_config()` в `_create_components()` в защиту от отсутствия handler'а **или** перевести тест на полноценную инициализацию через mock-fixture.
-
-### 2. `test_managers_normalize.py::test_console_process_config_build_and_process_helper`
-
-```
-AssertionError: assert ''.endswith('ProcessModule')
-```
-
-**Где:** `process_module/tests/test_managers_normalize.py:52`. Тест ожидает, что `proc_dict["class"]` не пустая строка, но фактически она пустая — изменился контракт `ConsoleProcessConfig.build()`.
-
-**Решение:** обновить тест под новый контракт `proc_dict`.
 
 ---
 

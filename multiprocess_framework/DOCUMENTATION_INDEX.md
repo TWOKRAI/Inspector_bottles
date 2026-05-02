@@ -10,7 +10,7 @@
 |----------|------------|
 | [`README.md`](./README.md) | Что это, как запустить, как тестировать |
 | [`SPEC.md`](./SPEC.md) | **Главное ТЗ** — спецификация фреймворка |
-| [`MODULES_STATUS.md`](./MODULES_STATUS.md) | Таблица 19 модулей: размер, статус, тесты |
+| [`MODULES_STATUS.md`](./MODULES_STATUS.md) | Таблица 21 модуля: размер, статус, тесты |
 | [`PROBLEMS.md`](./PROBLEMS.md) | Известные ограничения и failing-тесты |
 | [`DECISIONS.md`](./DECISIONS.md) | Глобальные ADR (`ADR-NNN`) |
 | [`STRUCTURE.md`](./STRUCTURE.md) | Дерево пакета |
@@ -20,7 +20,7 @@
 | Документ | Назначение |
 |----------|------------|
 | [`docs/MODULES_OVERVIEW.md`](./docs/MODULES_OVERVIEW.md) | **Навигатор**: какой модуль за что отвечает |
-| [`docs/MODULE_CONTRACTS.md`](./docs/MODULE_CONTRACTS.md) | Контракт каждого из 19 модулей |
+| [`docs/MODULE_CONTRACTS.md`](./docs/MODULE_CONTRACTS.md) | Контракт каждого из 21 модуля |
 | [`docs/INTERACTION_FLOWS.md`](./docs/INTERACTION_FLOWS.md) | Цепочки взаимодействия |
 | [`docs/DESIGN_RULES.md`](./docs/DESIGN_RULES.md) | Императивные правила |
 | [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) | Термины и сокращения |

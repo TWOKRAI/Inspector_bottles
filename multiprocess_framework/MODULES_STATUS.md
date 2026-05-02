@@ -30,10 +30,10 @@
 
 **Итого:** 21 пакет, ~77 269 LOC (с тестами), 670+ файлов `.py`.
 
-**Тесты:** 1 877 passed / 30 skipped / 2 known-failing (см. PROBLEMS.md). Полный прогон:
+**Тесты:** 2 465 passed / 29 skipped / 0 failed (см. PROBLEMS.md). Полный прогон:
 
 ```bash
- && python scripts/run_framework_tests.py
+python scripts/run_framework_tests.py
 ```
 
 ---
@@ -43,5 +43,3 @@
 См. [PROBLEMS.md](./PROBLEMS.md). Кратко:
 
 1. `MemoryManager` — пропуск 15 тестов на macOS (`SharedMemory` платформенно нестабилен).
-2. `test_init_creates_components` — `ProcessManagerProcess.config_handler` в момент `_create_components()` ещё не выставлен (доимиграционный баг теста).
-3. `test_console_process_config_build_and_process_helper` — устаревшая проверка `proc_dict["class"]` (доимиграционный баг теста).

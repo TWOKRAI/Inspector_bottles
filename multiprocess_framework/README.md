@@ -2,7 +2,7 @@
 
 **Конструктор многопроцессных приложений на Python.**
 
-Скрывает многопроцессорную «боль» Python (spawn/fork, pickle-safe сериализацию, lifecycle, IPC, маршрутизацию, наблюдаемость) и даёт **19 готовых модулей-«деталей»**, которые собираются друг в друга через явные интерфейсы.
+Скрывает многопроцессорную «боль» Python (spawn/fork, pickle-safe сериализацию, lifecycle, IPC, маршрутизацию, наблюдаемость) и даёт **21 готовый модуль-«деталь»**, которые собираются друг в друга через явные интерфейсы.
 
 **Версия:** 2.0 · **Python:** 3.11+ · **Статус:** Production · **License:** MIT
 
@@ -89,7 +89,7 @@ python scripts/run_framework_tests.py
 python scripts/run_framework_tests.py base_manager/tests -v
 ```
 
-**Ожидаемый результат:** 1 877 passed / 30 skipped / 2 known-failing (см. [`PROBLEMS.md`](./PROBLEMS.md)).
+**Ожидаемый результат:** 2 465 passed / 29 skipped / 0 failed.
 
 ---
 
@@ -104,8 +104,8 @@ multiprocess_framework/
 ├── PROBLEMS.md
 ├── DECISIONS.md            ← глобальные ADR
 ├── STRUCTURE.md
-├── __init__.py             ← публичный фасад (49 экспортов)
-├── modules/                ← 19 модулей
+├── __init__.py             ← публичный фасад (60 экспортов)
+├── modules/                ← 21 модуль
 │   ├── base_manager/
 │   ├── data_schema_module/
 │   ├── ...

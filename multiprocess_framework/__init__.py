@@ -104,8 +104,36 @@ from multiprocess_framework.modules.process_manager_module import (
 # ProcessStatus enum — единый источник (ADR-117), уже импортирован из base_manager (LAYER 1)
 from multiprocess_framework.modules.base_manager import ProcessStatus
 
-# === LAYER 9: APPLICATION KIT ===
+# === LAYER 9: STORAGE ===
+from multiprocess_framework.modules.sql_module import SQLManager
+
+# === LAYER 10: APPLICATION KIT ===
 from multiprocess_framework.modules.registers_module import RegistersManager
+
+# === LAYER 5+: STATE STORE (реактивное дерево состояния) ===
+from multiprocess_framework.modules.state_store_module import (
+    GuiStateProxy,
+    StateProxy,
+    StateStoreManager,
+)
+from multiprocess_framework.modules.state_store_module import (
+    IRouter as IStateRouter,
+)
+
+# === LAYER 6+: CHAIN ENGINE (DAG/Chain исполнители) ===
+from multiprocess_framework.modules.chain_module import (
+    ChainContext,
+    ChainResult,
+    ChainRunnable,
+    DagRunnable,
+    ParallelChainRunnable,
+)
+
+# === LAYER 11: UI (опционально — PySide6 может отсутствовать в headless-окружении) ===
+try:
+    from multiprocess_framework.modules.frontend_module import FrontendManager
+except ImportError:
+    FrontendManager = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "__version__",
@@ -165,6 +193,21 @@ __all__ = [
     "ProcessStatus",
     "ProcessStatusMonitor",
     "SystemLauncher",
+    # Storage
+    "SQLManager",
     # Application kit
     "RegistersManager",
+    # State store
+    "StateStoreManager",
+    "StateProxy",
+    "GuiStateProxy",
+    "IStateRouter",
+    # Chain engine
+    "ChainRunnable",
+    "DagRunnable",
+    "ParallelChainRunnable",
+    "ChainContext",
+    "ChainResult",
+    # UI (optional)
+    "FrontendManager",
 ]

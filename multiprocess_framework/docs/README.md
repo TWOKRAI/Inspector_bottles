@@ -19,7 +19,7 @@
 
 | Файл | Назначение |
 |------|------------|
-| [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) | **Навигатор по 19 модулям** — точка входа |
+| [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md) | **Навигатор по 21 модулю** — точка входа |
 | [`MODULE_CONTRACTS.md`](MODULE_CONTRACTS.md) | Контракт каждого модуля (API + инварианты) |
 | [`INTERACTION_FLOWS.md`](INTERACTION_FLOWS.md) | Цепочки вызовов (запуск, send, shutdown, FieldRouting…) |
 | [`DESIGN_RULES.md`](DESIGN_RULES.md) | Императивные правила |

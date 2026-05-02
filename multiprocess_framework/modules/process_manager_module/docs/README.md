@@ -24,7 +24,7 @@ SystemLauncher (фасад)
 | `runner/process_runner.py` | `run_process_function` | Top-level функция (pickle-safe) |
 | `core/process_registry.py` | `ProcessRegistry` | Реестр + lifecycle дочерних процессов |
 | `core/process_priority.py` | `ProcessPriority` | Управление приоритетами |
-| `core/process_status.py` | `ProcessStatus` | Статусы процессов |
+| `core/process_status.py` | `ProcessStatusMonitor` | Мониторинг статусов ОС-процессов (alive, pid, exitcode) |
 | `monitor/process_monitor.py` | `ProcessMonitor` | Мониторинг состояний |
 | `adapters/schema_adapter.py` | `ProcessSchemaAdapter` | SchemaBase → dict |
 | `interfaces.py` | `ISystemLauncher`, `IProcessManagerProcess`, `IProcessRegistry` | Публичные контракты |
