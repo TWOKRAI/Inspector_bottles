@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from copy import copy
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -47,6 +48,15 @@ class WireStatus(str, Enum):
     """Ошибка: SHM или процесс недоступен."""
 
 
+@dataclass
+class WireMetrics:
+    """Количественные метрики wire-канала."""
+
+    fps: float = 0.0
+    latency_ms: float = 0.0
+    buffer_fill: float = 0.0  # 0.0-1.0
+
+
 class WireDataBridge(QObject):
     """Мониторинг runtime-статусов wire-каналов.
 
@@ -60,6 +70,9 @@ class WireDataBridge(QObject):
 
     # Сигнал: статусы изменились. Payload — копия всего словаря статусов.
     statuses_changed = Signal(dict)
+
+    # Сигнал: метрики изменились. Payload — {wire_key: WireMetrics}.
+    metrics_changed = Signal(dict)
 
     def __init__(
         self,
@@ -81,6 +94,9 @@ class WireDataBridge(QObject):
 
         # Текущие статусы: wire_key → WireStatus
         self._wire_statuses: dict[str, WireStatus] = {}
+
+        # Текущие метрики: wire_key → WireMetrics
+        self._wire_metrics: dict[str, WireMetrics] = {}
 
         # Время перехода в PENDING: wire_key → timestamp (monotonic)
         self._pending_since: dict[str, float] = {}
@@ -128,6 +144,56 @@ class WireDataBridge(QObject):
             Копия словаря wire_key → WireStatus.
         """
         return copy(self._wire_statuses)
+
+    # ------------------------------------------------------------------
+    # Публичный API — чтение метрик
+    # ------------------------------------------------------------------
+
+    def get_metrics(self, wire_key: str) -> WireMetrics:
+        """Вернуть метрики wire-канала (default: нули если неизвестен).
+
+        Args:
+            wire_key: Ключ wire в конфигурации.
+
+        Returns:
+            WireMetrics с нулевыми значениями если wire неизвестен.
+        """
+        return self._wire_metrics.get(wire_key, WireMetrics())
+
+    def get_all_metrics(self) -> dict[str, WireMetrics]:
+        """Вернуть копию всех метрик.
+
+        Returns:
+            Копия словаря wire_key → WireMetrics.
+        """
+        return dict(self._wire_metrics)
+
+    def on_metrics_received(self, data: dict) -> None:
+        """Обновить метрики из полученных данных.
+
+        Формат data: {wire_key: {"fps": float, "latency_ms": float, "buffer_fill": float}}
+
+        Args:
+            data: Словарь с метриками по каждому wire-каналу.
+        """
+        if not data:
+            return
+
+        changed = False
+        for wire_key, raw in data.items():
+            if not isinstance(raw, dict):
+                continue
+            new_metrics = WireMetrics(
+                fps=float(raw.get("fps", 0.0)),
+                latency_ms=float(raw.get("latency_ms", 0.0)),
+                buffer_fill=max(0.0, min(1.0, float(raw.get("buffer_fill", 0.0)))),
+            )
+            if self._wire_metrics.get(wire_key) != new_metrics:
+                self._wire_metrics[wire_key] = new_metrics
+                changed = True
+
+        if changed:
+            self.metrics_changed.emit(dict(self._wire_metrics))
 
     # ------------------------------------------------------------------
     # Публичный API — обновление из apply workflow
@@ -265,4 +331,4 @@ class WireDataBridge(QObject):
             self.statuses_changed.emit(copy(self._wire_statuses))
 
 
-__all__ = ["WireStatus", "WireDataBridge"]
+__all__ = ["WireStatus", "WireMetrics", "WireDataBridge"]
