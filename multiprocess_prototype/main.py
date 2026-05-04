@@ -23,6 +23,21 @@ if str(_proto_root) not in sys.path:
     sys.path.insert(0, str(_proto_root))
 
 
+def _ensure_plugins_registered() -> None:
+    """Сканировать директории с плагинами для автоматической регистрации.
+
+    PluginRegistry.discover() рекурсивно ищет plugin.py и импортирует.
+    @register_plugin декоратор срабатывает при import.
+    """
+    from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
+
+    proto_root = Path(__file__).resolve().parent
+    PluginRegistry.discover(
+        str(proto_root / "plugins"),          # multiprocess_prototype/plugins/
+        str(proto_root / "backend" / "plugins"),  # multiprocess_prototype/backend/plugins/
+    )
+
+
 def _load_profile():
     """Загрузить активный settings profile.
 
@@ -87,13 +102,16 @@ def main() -> int:
         worker_pool_size=profile.worker_pool_size,
     )
 
+    # Принудительная регистрация плагинов в PluginRegistry перед валидацией
+    # (плагины регистрируются при импорте их модулей через @register_plugin)
+    _ensure_plugins_registered()
+
     # Валидация blueprint до запуска
     errors = blueprint.check()
     if errors:
         for err in errors:
-            _logger.error("Blueprint error: %s", err)
-        # Не прерываем — wires validation может быть неполным для service-плагинов
-        # (у них inputs/outputs=[]), это ожидаемо
+            _logger.warning("Blueprint check: %s", err)
+        # Не прерываем — service-плагины (database, robot) могут не иметь портов
 
     # SHM cleanup
     shm_names = blueprint.shm_names()

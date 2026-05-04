@@ -33,7 +33,7 @@ from multiprocess_prototype.services.processor.worker_pool.dispatcher import Wor
 
 
 @register_plugin(
-    "processor_service",
+    "processor",
     category="processing",
     description="Оркестратор обработки кадров (SHM, chain, detector, worker pool)"
 )

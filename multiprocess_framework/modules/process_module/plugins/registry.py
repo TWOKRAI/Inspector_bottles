@@ -123,6 +123,82 @@ class _PluginRegistry:
         """Имена всех зарегистрированных плагинов."""
         return list(self._plugins.keys())
 
+    def discover(self, *plugin_dirs: str) -> int:
+        """Автоматическое сканирование директорий с плагинами.
+
+        Ищет файлы plugin.py рекурсивно, импортирует их модули.
+        @register_plugin декоратор срабатывает при import — плагины
+        автоматически попадают в каталог.
+
+        Args:
+            *plugin_dirs: Пути к директориям с плагинами.
+                Каждая директория сканируется рекурсивно.
+
+        Returns:
+            Количество новых зарегистрированных плагинов.
+        """
+        import importlib
+        import logging
+        from pathlib import Path
+
+        logger = logging.getLogger(__name__)
+        count_before = len(self._plugins)
+
+        for dir_path in plugin_dirs:
+            plugins_root = Path(dir_path).resolve()
+            if not plugins_root.is_dir():
+                logger.warning("PluginRegistry.discover: директория не найдена: %s", dir_path)
+                continue
+
+            # Найти все plugin.py рекурсивно
+            for plugin_file in plugins_root.rglob("plugin.py"):
+                # Конвертировать путь файла в dotted module path
+                module_path = self._file_to_module(plugin_file)
+                if module_path is None:
+                    continue
+
+                try:
+                    importlib.import_module(module_path)
+                except Exception as exc:
+                    logger.debug(
+                        "PluginRegistry.discover: %s — %s: %s",
+                        module_path, type(exc).__name__, exc,
+                    )
+
+        discovered = len(self._plugins) - count_before
+        if discovered > 0:
+            logger.info(
+                "PluginRegistry.discover: найдено %d новых плагинов (всего %d)",
+                discovered, len(self._plugins),
+            )
+        return discovered
+
+    @staticmethod
+    def _file_to_module(file_path) -> str | None:
+        """Конвертировать путь к plugin.py в dotted module path.
+
+        Ищет ближайший sys.path entry как корень пакета.
+        Поддерживает как абсолютные, так и относительные пути в sys.path.
+        """
+        import sys
+        from pathlib import Path
+
+        path = Path(file_path).resolve()
+
+        # Перебрать sys.path — найти entry, от которого можно вычислить relative path
+        for sp in sys.path:
+            if not sp:
+                continue
+            try:
+                sp_resolved = Path(sp).resolve()
+                rel = path.relative_to(sp_resolved)
+                module_path = ".".join(rel.with_suffix("").parts)
+                return module_path
+            except (ValueError, OSError):
+                continue
+
+        return None
+
     def clear(self) -> None:
         """Очистить каталог (для тестов)."""
         self._plugins.clear()
