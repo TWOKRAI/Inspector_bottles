@@ -218,6 +218,9 @@ class ConstructorTabWidget(QWidget):
         from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.canvas.plugin_process_node import (
             PluginProcessNode,
         )
+        from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.canvas.shm_route_node import (
+            ShmRouteNode,
+        )
         from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.models.cross_process_model import (
             CrossProcessModel,
         )
@@ -227,8 +230,9 @@ class ConstructorTabWidget(QWidget):
         self._graph.set_background_color(30, 30, 30)
         self._graph.set_grid_mode(1)  # Точечная сетка
 
-        # Регистрируем кастомный тип ноды
+        # Регистрируем кастомные типы нод
         self._graph.register_node(PluginProcessNode)
+        self._graph.register_node(ShmRouteNode)  # fan-out route-нода
 
         # Модели данных (всё через единое дерево topology editor)
         self._cross_model = CrossProcessModel(self._editor)
