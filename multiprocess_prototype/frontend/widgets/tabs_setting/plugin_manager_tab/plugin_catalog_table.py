@@ -67,6 +67,7 @@ class PluginCatalogTable(QWidget):
 
         # Внутреннее состояние — имена плагинов по строкам таблицы
         self._row_plugin_names: list[str] = []
+        self._item_changed_connected = False
 
         self._build_ui()
         self._connect_signals()
@@ -205,11 +206,10 @@ class PluginCatalogTable(QWidget):
 
         # Подключаем обработчик чекбоксов после заполнения
         # (используем itemChanged — cellClicked не ловит изменение чекбокса клавиатурой)
-        try:
-            self._table.itemChanged.disconnect()
-        except RuntimeError:
-            pass  # нет подключённых сигналов — ок
+        if self._item_changed_connected:
+            self._table.itemChanged.disconnect(self._on_item_changed)
         self._table.itemChanged.connect(self._on_item_changed)
+        self._item_changed_connected = True
 
     def current_filter(self) -> tuple[str | None, str]:
         """Вернуть текущие значения фильтра.

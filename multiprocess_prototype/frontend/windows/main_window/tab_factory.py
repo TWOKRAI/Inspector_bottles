@@ -126,6 +126,14 @@ def create_tab_widget_factory(ctx: FrontendAppContext) -> TabWidgetFactory:
                 topology_editor=ctx.topology_editor,
                 topology_bridge=ctx.topology_bridge,
             )
+        if widget_key == "plugin_manager":
+            from multiprocess_prototype.frontend.widgets.tabs_setting.plugin_manager_tab.widget import (
+                PluginManagerTabWidget,
+            )
+            return PluginManagerTabWidget(
+                plugin_manager=ctx.extras.get("plugin_manager"),
+                command_handler=ctx.command_handler,
+            )
         return None
 
     return factory

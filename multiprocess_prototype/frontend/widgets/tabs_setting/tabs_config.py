@@ -15,7 +15,7 @@ from .tab_item_config import TabItemConfig
 
 
 def _default_tabs() -> list[TabItemConfig]:
-    """Вкладки: settings, recipes, processes, sources, pipeline, display."""
+    """Вкладки: settings, recipes, processes, plugin_manager, sources, pipeline, display."""
     from ..recipes.settings_recipe_widget.schemas import default_tab_item as _rec
     from .display_tab.schemas import default_tab_item as _disp
     from .recipes_settings_tab.schemas import default_tab_item as _set
@@ -29,7 +29,10 @@ def _default_tabs() -> list[TabItemConfig]:
     def _processes() -> TabItemConfig:
         return TabItemConfig(id="processes", widget="processes", title="Процессы")
 
-    return [_set(), _rec(), _processes(), _sources(), _graph(), _disp()]
+    def _plugin_manager() -> TabItemConfig:
+        return TabItemConfig(id="plugin_manager", widget="plugin_manager", title="Плагины")
+
+    return [_set(), _rec(), _processes(), _plugin_manager(), _sources(), _graph(), _disp()]
 
 
 @register_schema("TabsConfig")
