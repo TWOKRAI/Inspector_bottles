@@ -16,6 +16,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from .auto_layout import auto_layout
+from .display_target_node import DISPLAY_NODE_TYPE, DisplayTargetNode
 from .plugin_process_node import PROCESS_NODE_TYPE, PluginProcessNode
 from .shm_route_node import ROUTE_NODE_TYPE, ShmRouteNode
 
@@ -45,22 +46,27 @@ class GraphBuilder:
         self,
         cross_model: CrossProcessModel,
         wires: dict[str, dict],
+        displays_data: dict[str, dict] | None = None,
     ) -> tuple[
         dict[str, PluginProcessNode],
         dict[tuple[str, str], str],
         dict[str, ShmRouteNode],
+        dict[str, DisplayTargetNode],
     ]:
-        """Построить полную сцену: ноды + wire-соединения + route nodes + layout.
+        """Построить полную сцену: ноды + wire-соединения + route nodes + display nodes + layout.
 
         Args:
             cross_model: Агрегатор данных процессов.
             wires: wire_key → wire dict из WiresSectionView.
+            displays_data: display_key → display dict из секции displays.
+                Если None или пустой — display-ноды не создаются.
 
         Returns:
-            Кортеж (node_map, addr_to_wire_key, route_nodes):
+            Кортеж (node_map, addr_to_wire_key, route_nodes, display_nodes):
             - node_map: process_key → созданная PluginProcessNode
             - addr_to_wire_key: (source_addr, target_addr) → wire_key
             - route_nodes: source_addr → ShmRouteNode (fan-out >= 2)
+            - display_nodes: display_key → DisplayTargetNode
         """
         # Фаза 1: создать ноды
         node_map = self._create_nodes(cross_model)
@@ -81,13 +87,18 @@ class GraphBuilder:
         # Фаза 4: вставить route nodes для fan-out >= 2
         route_nodes = self._insert_route_nodes(node_map, wires, addr_to_wire_key)
 
+        # Фаза 5: создать display-ноды из секции displays
+        display_nodes = self._create_display_nodes(node_map, displays_data)
+
         logger.info(
-            "GraphBuilder: построена сцена — %d нод, %d wires, %d route nodes",
+            "GraphBuilder: построена сцена — %d нод, %d wires, %d route nodes, "
+            "%d display nodes",
             len(node_map),
             len(wires),
             len(route_nodes),
+            len(display_nodes),
         )
-        return node_map, addr_to_wire_key, route_nodes
+        return node_map, addr_to_wire_key, route_nodes, display_nodes
 
     def _create_nodes(
         self,
@@ -144,6 +155,70 @@ class GraphBuilder:
             node_map[pk] = qt_node
 
         return node_map
+
+    def _create_display_nodes(
+        self,
+        node_map: dict[str, PluginProcessNode],
+        displays_data: dict[str, dict] | None,
+    ) -> dict[str, DisplayTargetNode]:
+        """Создать DisplayTargetNode для каждого display из topology.
+
+        Display-ноды позиционируются правее всех process-нод.
+
+        Args:
+            node_map: process_key → PluginProcessNode (для вычисления позиций).
+            displays_data: display_key → display dict (name, source_ref, fps_limit).
+
+        Returns:
+            Маппинг display_key → DisplayTargetNode.
+        """
+        if not displays_data:
+            return {}
+
+        display_nodes: dict[str, DisplayTargetNode] = {}
+
+        # Вычислить max_x среди process-нод для позиционирования display-нод правее
+        max_x = 0.0
+        for qt_node in node_map.values():
+            x = qt_node.x_pos()
+            if x > max_x:
+                max_x = x
+
+        display_x = max_x + 300.0
+
+        for idx, (display_key, display_data) in enumerate(displays_data.items()):
+            display_name = display_data.get("name", display_key)
+
+            try:
+                qt_node = self._graph.create_node(
+                    DISPLAY_NODE_TYPE,
+                    name=display_name,
+                    selected=False,
+                    push_undo=False,
+                )
+            except Exception as exc:
+                logger.error(
+                    "GraphBuilder: ошибка создания display-ноды '%s': %s",
+                    display_key, exc,
+                )
+                continue
+
+            if not isinstance(qt_node, DisplayTargetNode):
+                logger.warning(
+                    "GraphBuilder: нода '%s' не DisplayTargetNode", display_key,
+                )
+                continue
+
+            fps_limit = display_data.get("fps_limit", 30)
+            qt_node.set_display_data(display_key, display_name, fps_limit)
+
+            # Позиционирование: правее process-нод, вертикально по порядку
+            display_y = idx * 120.0
+            qt_node.set_pos(display_x, display_y)
+
+            display_nodes[display_key] = qt_node
+
+        return display_nodes
 
     def _create_wire_connections(
         self,

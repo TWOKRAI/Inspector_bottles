@@ -262,7 +262,7 @@ class TestGraphBuilderReturnsTuple:
             result = builder.build(mock_cross_model, wires={})
 
         assert isinstance(result, tuple), "build() должен возвращать tuple"
-        assert len(result) == 3, "build() должен возвращать 3 элемента"
+        assert len(result) == 4, "build() должен возвращать 4 элемента"
 
     def test_builder_returns_empty_maps_for_empty_input(self) -> None:
         """build() с пустыми данными возвращает пустые словари."""
@@ -281,11 +281,12 @@ class TestGraphBuilderReturnsTuple:
             )
 
             builder = GraphBuilder(mock_graph)
-            node_map, addr_to_wire_key, route_nodes = builder.build(mock_cross_model, wires={})
+            node_map, addr_to_wire_key, route_nodes, display_nodes = builder.build(mock_cross_model, wires={})
 
         assert node_map == {}
         assert addr_to_wire_key == {}
         assert route_nodes == {}
+        assert display_nodes == {}
 
 
 # ===========================================================================

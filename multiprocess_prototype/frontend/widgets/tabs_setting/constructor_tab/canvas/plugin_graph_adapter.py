@@ -22,6 +22,7 @@ from PySide6.QtGui import QColor, QPen
 
 from multiprocess_prototype.frontend.bridges.wire_data_bridge import WireStatus
 
+from .display_target_node import DisplayTargetNode
 from .graph_builder import GraphBuilder
 from .plugin_process_node import PROCESS_NODE_TYPE, PluginProcessNode
 from .shm_route_node import ROUTE_NODE_TYPE, ShmRouteNode
@@ -105,6 +106,9 @@ class PluginGraphAdapter(QtCore.QObject):
         # Route nodes: source_addr → ShmRouteNode (fan-out >= 2)
         self._route_nodes: dict[str, ShmRouteNode] = {}
 
+        # Display nodes: display_key → DisplayTargetNode
+        self._display_nodes: dict[str, DisplayTargetNode] = {}
+
         # Флаг подавления сигналов при programmatic update
         self._suppress: bool = False
 
@@ -171,19 +175,28 @@ class PluginGraphAdapter(QtCore.QObject):
             self._addr_wire_map.clear()
             self._wire_key_to_pipe.clear()
             self._route_nodes.clear()
+            self._display_nodes.clear()
 
             # Обновить кэш cross_model
             self._cross_model.invalidate()
 
+            # Получить данные displays из topology editor
+            displays_data = self._editor._data.get("displays", {})
+
             # Построить сцену — получить node_map, маппинг адресов → wire_key,
-            # и route nodes для fan-out >= 2
+            # route nodes для fan-out >= 2, display nodes
             wires = self._wire_model.wires
-            self._node_map, addr_to_wire_key, route_nodes = self._builder.build(
-                self._cross_model, wires,
+            self._node_map, addr_to_wire_key, route_nodes, display_nodes = (
+                self._builder.build(
+                    self._cross_model, wires, displays_data=displays_data,
+                )
             )
 
             # Сохранить route nodes
             self._route_nodes.update(route_nodes)
+
+            # Сохранить display nodes
+            self._display_nodes.update(display_nodes)
 
             # Заполнить маппинги нод
             for pk, qt_node in self._node_map.items():
@@ -581,12 +594,20 @@ class PluginGraphAdapter(QtCore.QObject):
 
         NodeGraphQt порядок: (input_port, output_port).
         Wire-модель: source (output) → target (input).
+
+        Особый случай: если target — DisplayTargetNode, создаём wire
+        с target формата "ui_process.{display_key}.frame".
         """
         if self._suppress:
             return
 
         target_qt_node = in_port.node()
         source_qt_node = out_port.node()
+
+        # Особый случай: target — display-нода
+        if isinstance(target_qt_node, DisplayTargetNode):
+            self._on_display_connected(in_port, out_port, target_qt_node)
+            return
 
         target_pk = self._reverse_map.get(target_qt_node.id)
         source_pk = self._reverse_map.get(source_qt_node.id)
@@ -719,6 +740,152 @@ class PluginGraphAdapter(QtCore.QObject):
             logger.debug("_register_pipe_for_wire: %s", exc)
 
     # ------------------------------------------------------------------
+    # Display wire: connect / disconnect
+    # ------------------------------------------------------------------
+
+    def _on_display_connected(
+        self,
+        in_port: Any,
+        out_port: Any,
+        display_node: DisplayTargetNode,
+    ) -> None:
+        """Обработка wire от process output к display-ноде.
+
+        Создаёт wire с target формата "ui_process.{display_key}.frame".
+        Если display уже имеет входящий wire — заменяет (удаляет старый).
+
+        Args:
+            in_port: Входной порт display-ноды ("frame").
+            out_port: Выходной порт source process-ноды.
+            display_node: DisplayTargetNode — целевая нода.
+        """
+        source_qt_node = out_port.node()
+        source_pk = self._reverse_map.get(source_qt_node.id)
+
+        if source_pk is None:
+            logger.warning(
+                "_on_display_connected: source нода не найдена в reverse_map",
+            )
+            with self._block_signals():
+                try:
+                    in_port.disconnect_from(out_port)
+                except Exception:
+                    pass
+            return
+
+        display_key = display_node.display_key
+        out_port_name = out_port.name()
+        source_addr = f"{source_pk}.{out_port_name}"
+        target_addr = f"ui_process.{display_key}.frame"
+
+        # Удалить существующий wire к этому display (замена при повторном connect)
+        self._remove_display_wire(display_key)
+
+        # Создать wire через WireEditorModel
+        wire_key = self._wire_model.add_wire(
+            source=source_addr,
+            target=target_addr,
+            description=f"{source_pk} → display:{display_key}",
+        )
+
+        if not wire_key:
+            # Валидация не прошла — отменяем визуальное соединение
+            reason = "; ".join(
+                self._wire_model.validate_wire(source_addr, target_addr),
+            )
+            logger.info(
+                "Wire к display отклонён: %s → %s — %s",
+                source_addr, target_addr, reason,
+            )
+            with self._block_signals():
+                try:
+                    in_port.disconnect_from(out_port)
+                except Exception:
+                    pass
+            self.wire_rejected.emit(source_addr, target_addr, reason)
+            return
+
+        # Зарегистрировать маппинг
+        self._addr_wire_map[(source_addr, target_addr)] = wire_key
+
+        # Зарегистрировать pipe для окраски
+        self._register_pipe_for_wire(wire_key, in_port, out_port)
+
+        logger.info(
+            "Wire к display создан: %s — %s → %s",
+            wire_key, source_addr, target_addr,
+        )
+
+    def _on_display_disconnected(
+        self,
+        in_port: Any,
+        out_port: Any,
+        display_node: DisplayTargetNode,
+    ) -> None:
+        """Обработка disconnect от display-ноды — удаляем wire из модели.
+
+        Args:
+            in_port: Входной порт display-ноды ("frame").
+            out_port: Выходной порт source process-ноды.
+            display_node: DisplayTargetNode — целевая нода.
+        """
+        display_key = display_node.display_key
+        target_addr = f"ui_process.{display_key}.frame"
+
+        # Найти и удалить wire по target_addr
+        for wk, wire in list(self._wire_model.wires.items()):
+            if wire.get("target") == target_addr:
+                source_addr = wire.get("source", "")
+                self._wire_model.remove_wire(wk)
+                self._addr_wire_map.pop((source_addr, target_addr), None)
+                self._wire_key_to_pipe.pop(wk, None)
+                logger.info(
+                    "Wire к display удалён: %s (display=%s)", wk, display_key,
+                )
+                return
+
+        logger.warning(
+            "_on_display_disconnected: wire не найден для display '%s'",
+            display_key,
+        )
+
+    def _remove_display_wire(self, display_key: str) -> None:
+        """Удалить существующий wire к display (если есть).
+
+        Вызывается перед назначением нового wire — обеспечивает
+        семантику «один wire на display».
+
+        Args:
+            display_key: Ключ display-окна.
+        """
+        target_addr = f"ui_process.{display_key}.frame"
+
+        for wk, wire in list(self._wire_model.wires.items()):
+            if wire.get("target") == target_addr:
+                source_addr = wire.get("source", "")
+                self._wire_model.remove_wire(wk)
+                self._addr_wire_map.pop((source_addr, target_addr), None)
+                self._wire_key_to_pipe.pop(wk, None)
+                logger.debug(
+                    "_remove_display_wire: удалён старый wire '%s' к display '%s'",
+                    wk, display_key,
+                )
+                # Отключить визуальный pipe на канвасе
+                display_node = self._display_nodes.get(display_key)
+                if display_node is not None:
+                    frame_port = display_node.get_input("frame")
+                    if frame_port is not None:
+                        with self._block_signals():
+                            for connected in frame_port.connected_ports():
+                                try:
+                                    frame_port.disconnect_from(
+                                        connected, push_undo=False,
+                                    )
+                                except Exception:
+                                    pass
+                return
+
+    # ------------------------------------------------------------------
     # Qt-сигнал: port_disconnected
     # ------------------------------------------------------------------
 
@@ -727,12 +894,18 @@ class PluginGraphAdapter(QtCore.QObject):
 
         Если disconnect пришёл от route node (не от process node),
         нужно вычислить реальный source_addr из route_key.
+        Если target — DisplayTargetNode, удаляем display-wire.
         """
         if self._suppress:
             return
 
         target_qt_node = in_port.node()
         source_qt_node = out_port.node()
+
+        # Особый случай: target — display-нода
+        if isinstance(target_qt_node, DisplayTargetNode):
+            self._on_display_disconnected(in_port, out_port, target_qt_node)
+            return
 
         # Если source — это route node, пользователь отсоединил pipe
         # от route node. Реальный source_addr хранится в route_key.
@@ -809,6 +982,10 @@ class PluginGraphAdapter(QtCore.QObject):
             # Route node — чисто визуальный, не эмитим node_selected
             if isinstance(qt_node, ShmRouteNode):
                 return
+            # Display node — нет отдельной панели, сбрасываем выделение
+            if isinstance(qt_node, DisplayTargetNode):
+                self.selection_cleared.emit()
+                return
             pk = self._reverse_map.get(qt_node.id)
             if pk is not None:
                 self.node_selected.emit(pk)
@@ -878,6 +1055,15 @@ class PluginGraphAdapter(QtCore.QObject):
         if isinstance(target_qt_node, ShmRouteNode):
             # Это pipe source→route, не маппится на wire_key напрямую
             return None
+
+        # Pipe идёт к display-ноде
+        if isinstance(target_qt_node, DisplayTargetNode):
+            source_pk = self._reverse_map.get(source_qt_node.id)
+            if source_pk is None:
+                return None
+            source_addr = f"{source_pk}.{out_port.name()}"
+            target_addr = f"ui_process.{target_qt_node.display_key}.frame"
+            return self._addr_wire_map.get((source_addr, target_addr))
 
         # Стандартный pipe: process → process
         target_pk = self._reverse_map.get(target_qt_node.id)

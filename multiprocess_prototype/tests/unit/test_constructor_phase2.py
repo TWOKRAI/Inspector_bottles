@@ -333,7 +333,7 @@ class TestGraphBuilder:
 
         builder = GraphBuilder(graph)
         cross_model = self._make_cross_model()
-        node_map, _addr_map, _route_nodes = builder.build(cross_model, wires={})
+        node_map, _addr_map, _route_nodes, _display_nodes = builder.build(cross_model, wires={})
 
         assert "camera_0" in node_map
         assert "processor_0" in node_map
@@ -374,7 +374,7 @@ class TestGraphBuilder:
 
         builder = GraphBuilder(graph)
         cross_model = self._make_cross_model()
-        node_map, _addr_map, _route_nodes = builder.build(cross_model, wires={})
+        node_map, _addr_map, _route_nodes, _display_nodes = builder.build(cross_model, wires={})
 
         # Обе ноды изолированные → в одном столбце, разные Y (или одинаковые)
         assert len(node_map) == 2
