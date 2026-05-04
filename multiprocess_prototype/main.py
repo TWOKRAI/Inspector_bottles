@@ -133,7 +133,7 @@ def main() -> int:
 
     # Добавляем процессы из blueprint (GenericProcess + плагины)
     for cfg in blueprint.build_configs():
-        launcher.add_process(cfg.process_name, cfg.build())
+        launcher.add_process(*cfg.build())
 
     # GUI — отдельно (специальный процесс)
     from multiprocess_framework.modules.data_schema_module import process as process_fn
