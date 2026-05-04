@@ -2,16 +2,18 @@
 
 Фаза 2: NodeGraphQt канвас с процессами-как-нодами + toolbar.
 Фаза 3: правые панели (ProcessPluginPanel, WireInspectorPanel) + Save/Load Blueprint.
+Фаза 5: ShmDashboardPanel — страница 3, кнопка "SHM" в toolbar.
 
 Структура:
   ┌─────────────────────────────────────────────────────────────┐
   │ Toolbar: [Обновить][Авто-layout][Вписать][Проверить]       │
-  │          [Сохранить Blueprint][Загрузить Blueprint]         │
+  │          [Сохранить Blueprint][Загрузить Blueprint][SHM]    │
   ├────────────────────────────────┬────────────────────────────┤
   │                                │  QStackedWidget:           │
   │    NodeGraphQt канвас          │    0: Placeholder          │
   │   (процессы-ноды, wires)       │    1: ProcessPluginPanel   │
-  │                                │    2: WireInspectorPanel    │
+  │                                │    2: WireInspectorPanel   │
+  │                                │    3: ShmDashboardPanel    │
   └────────────────────────────────┴────────────────────────────┘
 """
 
@@ -36,11 +38,13 @@ from PySide6.QtWidgets import (
 
 from multiprocess_prototype.frontend.bridges.wire_data_bridge import WireDataBridge
 from multiprocess_prototype.registers.system_topology.schemas import (
+    SECTION_DISPLAYS,
     SECTION_PROCESSES,
     SECTION_WIRES,
 )
 
 from .panels.process_plugin_panel import ProcessPluginPanel
+from .panels.shm_dashboard_panel import ShmDashboardPanel
 from .panels.wire_inspector import WireInspectorPanel
 
 if TYPE_CHECKING:
@@ -54,6 +58,7 @@ logger = logging.getLogger(__name__)
 _PAGE_PLACEHOLDER = 0
 _PAGE_PROCESS = 1
 _PAGE_WIRE = 2
+_PAGE_DASHBOARD = 3
 
 
 class ConstructorTabWidget(QWidget):
@@ -188,6 +193,15 @@ class ConstructorTabWidget(QWidget):
 
         toolbar.addSeparator()
 
+        # SHM Dashboard toggle
+        self._btn_shm = QPushButton("SHM")
+        self._btn_shm.setCheckable(True)
+        self._btn_shm.setToolTip("Показать/скрыть SHM Dashboard (мониторинг буферов)")
+        self._btn_shm.clicked.connect(self._on_toggle_dashboard)
+        toolbar.addWidget(self._btn_shm)
+
+        toolbar.addSeparator()
+
         # Статус
         self._status_label = QLabel("")
         self._status_label.setStyleSheet("color: #888; padding-left: 12px;")
@@ -231,8 +245,13 @@ class ConstructorTabWidget(QWidget):
         self._graph.set_grid_mode(1)  # Точечная сетка
 
         # Регистрируем кастомные типы нод
+        from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.canvas.display_target_node import (
+            DisplayTargetNode,
+        )
+
         self._graph.register_node(PluginProcessNode)
         self._graph.register_node(ShmRouteNode)  # fan-out route-нода
+        self._graph.register_node(DisplayTargetNode)  # display target-нода
 
         # Модели данных (всё через единое дерево topology editor)
         self._cross_model = CrossProcessModel(self._editor)
@@ -317,6 +336,10 @@ class ConstructorTabWidget(QWidget):
         self._wire_panel.wire_changed.connect(self._on_wire_panel_changed)
         self._stack.addWidget(self._wire_panel)  # index 2
 
+        # Страница 3: SHM Dashboard
+        self._shm_dashboard = ShmDashboardPanel(self)
+        self._stack.addWidget(self._shm_dashboard)  # index 3
+
         self._stack.setCurrentIndex(_PAGE_PLACEHOLDER)
         layout.addWidget(self._stack)
 
@@ -347,9 +370,10 @@ class ConstructorTabWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _subscribe_to_topology(self) -> None:
-        """Подписаться на изменения в секциях processes и wires."""
+        """Подписаться на изменения в секциях processes, wires и displays."""
         self._editor.subscribe(SECTION_PROCESSES, self._on_processes_changed)
         self._editor.subscribe(SECTION_WIRES, self._on_wires_changed)
+        self._editor.subscribe(SECTION_DISPLAYS, self._on_displays_changed)
 
     def _on_processes_changed(self) -> None:
         """Секция processes изменилась — перестроить канвас."""
@@ -382,6 +406,12 @@ class ConstructorTabWidget(QWidget):
         """Секция wires изменилась извне — обновить статус."""
         wire_count = len(self._editor._data.get("wires", {}))
         self._update_status(f"Wires: {wire_count}")
+
+    def _on_displays_changed(self) -> None:
+        """Секция displays изменилась — перестроить канвас."""
+        if self._adapter is not None:
+            self._adapter.refresh_from_topology()
+            self._update_status("Канвас обновлён (изменения displays)")
 
     # ------------------------------------------------------------------
     # Обработчики кнопок toolbar
@@ -486,9 +516,12 @@ class ConstructorTabWidget(QWidget):
             # Полная замена данных editor — все вкладки обновятся через подписки
             self._editor.load(topo_data)
 
-            # Сбросить правую панель
+            # Сбросить правую панель и dashboard
             self._process_panel.clear()
             self._wire_panel.clear()
+            self._shm_dashboard.clear()
+            # Снять toggle SHM и вернуться к placeholder
+            self._btn_shm.setChecked(False)
             self._stack.setCurrentIndex(_PAGE_PLACEHOLDER)
 
             self._update_status(f"Blueprint загружен: {bp.name}")
@@ -496,6 +529,18 @@ class ConstructorTabWidget(QWidget):
         except Exception as exc:
             self._update_status(f"Ошибка загрузки: {exc}", error=True)
             logger.exception("Ошибка загрузки blueprint: %s", exc)
+
+    # ------------------------------------------------------------------
+    # SHM Dashboard toggle
+    # ------------------------------------------------------------------
+
+    def _on_toggle_dashboard(self, checked: bool) -> None:
+        """Кнопка SHM — toggle dashboard панели."""
+        if checked:
+            self._stack.setCurrentIndex(_PAGE_DASHBOARD)
+        else:
+            # Вернуть на placeholder (выбор нода/wire восстановится при следующем клике)
+            self._stack.setCurrentIndex(_PAGE_PLACEHOLDER)
 
     # ------------------------------------------------------------------
     # Обработчики сигналов адаптера → правая панель
@@ -506,11 +551,14 @@ class ConstructorTabWidget(QWidget):
         self._update_status(f"Отклонено: {reason}", error=True)
 
     def _on_node_selected(self, process_key: str) -> None:
-        """Нода выбрана — показать ProcessPluginPanel."""
+        """Нода выбрана — заполнить ProcessPluginPanel, показать если dashboard не активен."""
         proc_data = self._editor._data.get("processes", {}).get(process_key)
         if proc_data is not None:
+            # Всегда обновляем данные панели — чтобы были актуальны после снятия dashboard
             self._process_panel.show_process(process_key, dict(proc_data))
-            self._stack.setCurrentIndex(_PAGE_PROCESS)
+            # Переключить stack только если dashboard не показан
+            if not self._btn_shm.isChecked():
+                self._stack.setCurrentIndex(_PAGE_PROCESS)
         else:
             logger.warning(
                 "ConstructorTabWidget: процесс '%s' не найден в editor",
@@ -518,11 +566,14 @@ class ConstructorTabWidget(QWidget):
             )
 
     def _on_wire_selected(self, wire_key: str) -> None:
-        """Wire выбран — показать WireInspectorPanel."""
+        """Wire выбран — заполнить WireInspectorPanel, показать если dashboard не активен."""
         wire_data = self._editor._data.get("wires", {}).get(wire_key)
         if wire_data is not None:
+            # Всегда обновляем данные панели — чтобы были актуальны после снятия dashboard
             self._wire_panel.show_wire(wire_key, dict(wire_data))
-            self._stack.setCurrentIndex(_PAGE_WIRE)
+            # Переключить stack только если dashboard не показан
+            if not self._btn_shm.isChecked():
+                self._stack.setCurrentIndex(_PAGE_WIRE)
         else:
             logger.warning(
                 "ConstructorTabWidget: wire '%s' не найден в editor",
@@ -530,10 +581,12 @@ class ConstructorTabWidget(QWidget):
             )
 
     def _on_selection_cleared(self) -> None:
-        """Выделение снято — показать placeholder."""
+        """Выделение снято — показать placeholder или dashboard."""
         self._process_panel.clear()
         self._wire_panel.clear()
-        self._stack.setCurrentIndex(_PAGE_PLACEHOLDER)
+        # Не трогать stack если dashboard активен
+        if not self._btn_shm.isChecked():
+            self._stack.setCurrentIndex(_PAGE_PLACEHOLDER)
 
     # ------------------------------------------------------------------
     # Обработчики сигналов панелей → модель
@@ -601,13 +654,15 @@ class ConstructorTabWidget(QWidget):
             self._adapter.update_wire_colors(statuses)
 
     def _on_wire_metrics_changed(self, metrics: dict) -> None:
-        """Слот: WireDataBridge обновил метрики — обновить badges на канвасе.
+        """Слот: WireDataBridge обновил метрики — обновить badges и dashboard.
 
         Args:
             metrics: Словарь wire_key → метрики (dict или WireMetrics) от WireDataBridge.
         """
         if self._adapter is not None:
             self._adapter.update_wire_metrics(metrics)
+        # Обновить SHM dashboard (всегда, не только когда он показан)
+        self._shm_dashboard.update_metrics(metrics)
 
     # ------------------------------------------------------------------
     # Утилиты
