@@ -101,26 +101,36 @@ class WireDataBridge(QObject):
         # Время перехода в PENDING: wire_key → timestamp (monotonic)
         self._pending_since: dict[str, float] = {}
 
-        # Таймер polling
+        # Таймер polling статусов
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2000)
         self._poll_timer.timeout.connect(self._poll_statuses)
+
+        # Таймер polling метрик (чаще чем статусы)
+        self._metrics_timer = QTimer(self)
+        self._metrics_timer.setInterval(1000)
+        self._metrics_timer.timeout.connect(self._poll_metrics)
 
     # ------------------------------------------------------------------
     # Публичный API — управление мониторингом
     # ------------------------------------------------------------------
 
     def start_monitoring(self) -> None:
-        """Запустить периодический polling статусов."""
+        """Запустить периодический polling статусов и метрик."""
         if not self._poll_timer.isActive():
             self._poll_timer.start()
-            logger.info("WireDataBridge: polling запущен (интервал 2000 мс)")
+            logger.info("WireDataBridge: polling статусов запущен (интервал %d мс)", self._poll_timer.interval())
+        if not self._metrics_timer.isActive():
+            self._metrics_timer.start()
+            logger.info("WireDataBridge: polling метрик запущен (интервал %d мс)", self._metrics_timer.interval())
 
     def stop_monitoring(self) -> None:
-        """Остановить периодический polling статусов."""
+        """Остановить периодический polling."""
         if self._poll_timer.isActive():
             self._poll_timer.stop()
-            logger.info("WireDataBridge: polling остановлен")
+        if self._metrics_timer.isActive():
+            self._metrics_timer.stop()
+        logger.info("WireDataBridge: polling остановлен")
 
     # ------------------------------------------------------------------
     # Публичный API — чтение статусов
@@ -167,6 +177,14 @@ class WireDataBridge(QObject):
             Копия словаря wire_key → WireMetrics.
         """
         return dict(self._wire_metrics)
+
+    def set_metrics_interval(self, ms: int) -> None:
+        """Настроить интервал polling метрик.
+
+        Args:
+            ms: Интервал в миллисекундах (минимум 200).
+        """
+        self._metrics_timer.setInterval(max(200, ms))
 
     def on_metrics_received(self, data: dict) -> None:
         """Обновить метрики из полученных данных.
@@ -270,6 +288,19 @@ class WireDataBridge(QObject):
     # ------------------------------------------------------------------
     # Внутренний polling
     # ------------------------------------------------------------------
+
+    def _poll_metrics(self) -> None:
+        """Слот QTimer — периодический запрос wire-метрик.
+
+        Fire-and-forget: отправляем wire.metrics, ответ придёт асинхронно
+        через on_metrics_received (вызовется извне).
+        """
+        if self._cmd is None:
+            return
+        try:
+            self._cmd.send("process.command", data={"cmd": "wire.metrics"})
+        except Exception:
+            logger.exception("WireDataBridge: ошибка отправки wire.metrics")
 
     def _poll_statuses(self) -> None:
         """Слот QTimer — периодический опрос статусов wire-каналов.
