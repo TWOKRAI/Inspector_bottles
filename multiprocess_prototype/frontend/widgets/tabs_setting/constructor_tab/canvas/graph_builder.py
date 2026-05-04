@@ -12,10 +12,12 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from .auto_layout import auto_layout
 from .plugin_process_node import PROCESS_NODE_TYPE, PluginProcessNode
+from .shm_route_node import ROUTE_NODE_TYPE, ShmRouteNode
 
 if TYPE_CHECKING:
     from NodeGraphQt import NodeGraph
@@ -43,17 +45,22 @@ class GraphBuilder:
         self,
         cross_model: CrossProcessModel,
         wires: dict[str, dict],
-    ) -> tuple[dict[str, PluginProcessNode], dict[tuple[str, str], str]]:
-        """Построить полную сцену: ноды + wire-соединения + layout.
+    ) -> tuple[
+        dict[str, PluginProcessNode],
+        dict[tuple[str, str], str],
+        dict[str, ShmRouteNode],
+    ]:
+        """Построить полную сцену: ноды + wire-соединения + route nodes + layout.
 
         Args:
             cross_model: Агрегатор данных процессов.
             wires: wire_key → wire dict из WiresSectionView.
 
         Returns:
-            Кортеж (node_map, addr_to_wire_key):
+            Кортеж (node_map, addr_to_wire_key, route_nodes):
             - node_map: process_key → созданная PluginProcessNode
             - addr_to_wire_key: (source_addr, target_addr) → wire_key
+            - route_nodes: source_addr → ShmRouteNode (fan-out >= 2)
         """
         # Фаза 1: создать ноды
         node_map = self._create_nodes(cross_model)
@@ -71,12 +78,16 @@ class GraphBuilder:
         # Фаза 3: создать wire-соединения, получить маппинг адресов → wire_key
         addr_to_wire_key = self._create_wire_connections(node_map, wires)
 
+        # Фаза 4: вставить route nodes для fan-out >= 2
+        route_nodes = self._insert_route_nodes(node_map, wires, addr_to_wire_key)
+
         logger.info(
-            "GraphBuilder: построена сцена — %d нод, %d wires",
+            "GraphBuilder: построена сцена — %d нод, %d wires, %d route nodes",
             len(node_map),
             len(wires),
+            len(route_nodes),
         )
-        return node_map, addr_to_wire_key
+        return node_map, addr_to_wire_key, route_nodes
 
     def _create_nodes(
         self,
@@ -204,6 +215,162 @@ class GraphBuilder:
                 )
 
         return addr_to_wire_key
+
+    # ------------------------------------------------------------------
+    # Fan-out route nodes
+    # ------------------------------------------------------------------
+
+    def _insert_route_nodes(
+        self,
+        node_map: dict[str, PluginProcessNode],
+        wires: dict[str, dict],
+        addr_to_wire_key: dict[tuple[str, str], str],
+    ) -> dict[str, ShmRouteNode]:
+        """Создать ShmRouteNode для каждого source_addr с fan-out >= 2.
+
+        Route node — чисто визуальный элемент: перехватывает pipes
+        (source → targets) и пропускает через себя. Wire model не меняется.
+
+        Алгоритм:
+        1. Сгруппировать wires по source_addr
+        2. Для fan-out >= 2: создать ShmRouteNode, переключить pipes
+
+        Args:
+            node_map: process_key → PluginProcessNode.
+            wires: wire_key → wire dict.
+            addr_to_wire_key: (source_addr, target_addr) → wire_key.
+
+        Returns:
+            source_addr → ShmRouteNode.
+        """
+        # Сгруппировать target_addr по source_addr
+        fan_out_groups: dict[str, list[str]] = defaultdict(list)
+        for (src_addr, tgt_addr) in addr_to_wire_key:
+            fan_out_groups[src_addr].append(tgt_addr)
+
+        route_nodes: dict[str, ShmRouteNode] = {}
+
+        for source_addr, targets in fan_out_groups.items():
+            if len(targets) < 2:
+                continue
+
+            # Разобрать адрес источника
+            src_parts = source_addr.split(".")
+            if len(src_parts) != 3:
+                continue
+
+            src_proc, src_plugin, src_port = src_parts
+            src_node = node_map.get(src_proc)
+            if src_node is None:
+                continue
+
+            out_port_name = f"{src_plugin}.{src_port}"
+            out_port = src_node.get_output(out_port_name)
+            if out_port is None:
+                continue
+
+            # Собрать целевые порты
+            target_ports = []
+            for tgt_addr in targets:
+                tgt_parts = tgt_addr.split(".")
+                if len(tgt_parts) != 3:
+                    continue
+                tgt_proc, tgt_plugin, tgt_port = tgt_parts
+                tgt_node = node_map.get(tgt_proc)
+                if tgt_node is None:
+                    continue
+                in_port = tgt_node.get_input(f"{tgt_plugin}.{tgt_port}")
+                if in_port is not None:
+                    target_ports.append(in_port)
+
+            if len(target_ports) < 2:
+                continue
+
+            # Удалить прямые pipes (source → targets)
+            for tp in target_ports:
+                try:
+                    out_port.disconnect_from(tp, push_undo=False)
+                except Exception:
+                    pass
+
+            # Создать route node
+            shm_name = self._make_shm_name(source_addr)
+            try:
+                route_node = self._graph.create_node(
+                    ROUTE_NODE_TYPE,
+                    name=f"Route: {shm_name}",
+                    selected=False,
+                    push_undo=False,
+                )
+            except Exception as exc:
+                logger.error(
+                    "GraphBuilder: ошибка создания route node для '%s': %s",
+                    source_addr, exc,
+                )
+                # Восстановить прямые pipes
+                for tp in target_ports:
+                    try:
+                        out_port.connect_to(tp, push_undo=False)
+                    except Exception:
+                        pass
+                continue
+
+            if not isinstance(route_node, ShmRouteNode):
+                logger.warning(
+                    "GraphBuilder: route node не ShmRouteNode для '%s'",
+                    source_addr,
+                )
+                continue
+
+            route_node.set_route_data(source_addr, shm_name, len(target_ports))
+
+            # Позиция: среднее между source и средним targets
+            src_x, src_y = src_node.x_pos(), src_node.y_pos()
+            tgt_xs = [tp.node().x_pos() for tp in target_ports]
+            tgt_ys = [tp.node().y_pos() for tp in target_ports]
+            avg_tgt_x = sum(tgt_xs) / len(tgt_xs)
+            avg_tgt_y = sum(tgt_ys) / len(tgt_ys)
+            route_x = (src_x + avg_tgt_x) / 2.0
+            route_y = avg_tgt_y
+            route_node.set_pos(route_x, route_y)
+
+            # Подключить: source → route.in
+            route_in = route_node.get_input("in")
+            if route_in is not None:
+                try:
+                    out_port.connect_to(route_in, push_undo=False)
+                except Exception as exc:
+                    logger.warning(
+                        "GraphBuilder: route source→in ошибка: %s", exc,
+                    )
+
+            # Подключить: route.out_N → target
+            for i, tp in enumerate(target_ports):
+                route_out = route_node.get_output(f"out_{i + 1}")
+                if route_out is not None:
+                    try:
+                        route_out.connect_to(tp, push_undo=False)
+                    except Exception as exc:
+                        logger.warning(
+                            "GraphBuilder: route out_%d→target ошибка: %s",
+                            i + 1, exc,
+                        )
+
+            route_nodes[source_addr] = route_node
+            logger.debug(
+                "GraphBuilder: route node для '%s' — %d выходов",
+                source_addr, len(target_ports),
+            )
+
+        return route_nodes
+
+    @staticmethod
+    def _make_shm_name(source_addr: str) -> str:
+        """Конвертировать source_addr в имя SHM.
+
+        Формат: "process.plugin.port" → "process__plugin__port"
+        """
+        return source_addr.replace(".", "__")
 
     def clear(self) -> None:
         """Очистить канвас (удалить все ноды)."""

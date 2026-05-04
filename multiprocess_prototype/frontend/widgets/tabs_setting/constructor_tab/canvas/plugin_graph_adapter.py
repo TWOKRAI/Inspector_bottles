@@ -24,6 +24,7 @@ from multiprocess_prototype.frontend.bridges.wire_data_bridge import WireStatus
 
 from .graph_builder import GraphBuilder
 from .plugin_process_node import PROCESS_NODE_TYPE, PluginProcessNode
+from .shm_route_node import ROUTE_NODE_TYPE, ShmRouteNode
 
 if TYPE_CHECKING:
     from NodeGraphQt import NodeGraph
@@ -97,6 +98,9 @@ class PluginGraphAdapter(QtCore.QObject):
         # Обратный маппинг: wire_key → pipe QGraphicsPathItem (для окраски)
         self._wire_key_to_pipe: dict[str, Any] = {}
 
+        # Route nodes: source_addr → ShmRouteNode (fan-out >= 2)
+        self._route_nodes: dict[str, ShmRouteNode] = {}
+
         # Флаг подавления сигналов при programmatic update
         self._suppress: bool = False
 
@@ -162,15 +166,20 @@ class PluginGraphAdapter(QtCore.QObject):
             self._reverse_map.clear()
             self._addr_wire_map.clear()
             self._wire_key_to_pipe.clear()
+            self._route_nodes.clear()
 
             # Обновить кэш cross_model
             self._cross_model.invalidate()
 
-            # Построить сцену — получить node_map и маппинг адресов → wire_key
+            # Построить сцену — получить node_map, маппинг адресов → wire_key,
+            # и route nodes для fan-out >= 2
             wires = self._wire_model.wires
-            self._node_map, addr_to_wire_key = self._builder.build(
+            self._node_map, addr_to_wire_key, route_nodes = self._builder.build(
                 self._cross_model, wires,
             )
+
+            # Сохранить route nodes
+            self._route_nodes.update(route_nodes)
 
             # Заполнить маппинги нод
             for pk, qt_node in self._node_map.items():
@@ -281,6 +290,219 @@ class PluginGraphAdapter(QtCore.QObject):
                 )
 
     # ------------------------------------------------------------------
+    # Fan-out route nodes — вспомогательные методы
+    # ------------------------------------------------------------------
+
+    def _count_outgoing_wires(self, source_addr: str) -> int:
+        """Подсчитать количество wires из данного source_addr."""
+        return sum(
+            1 for (src, _tgt) in self._addr_wire_map if src == source_addr
+        )
+
+    def _collect_targets_for_source(self, source_addr: str) -> list[str]:
+        """Собрать все target_addr для данного source_addr."""
+        return [
+            tgt for (src, tgt) in self._addr_wire_map if src == source_addr
+        ]
+
+    @staticmethod
+    def _get_shm_name(source_addr: str) -> str:
+        """Извлечь имя SHM из source_addr.
+
+        Формат: "process.plugin.port" → "process__plugin__port"
+        """
+        return source_addr.replace(".", "__")
+
+    def _insert_route_node(self, source_addr: str, targets: list[str]) -> None:
+        """Вставить ShmRouteNode для fan-out точки.
+
+        Удаляет прямые pipes source → targets и создаёт:
+        source → route.in, route.out_N → target_N.
+
+        Wire model (_addr_wire_map) НЕ меняется.
+
+        Args:
+            source_addr: Адрес выходного порта (process.plugin.port).
+            targets: Список target_addr для fan-out.
+        """
+        src_parts = source_addr.split(".")
+        if len(src_parts) != 3:
+            return
+
+        src_proc, src_plugin, src_port = src_parts
+        src_node = self._node_map.get(src_proc)
+        if src_node is None:
+            return
+
+        out_port = src_node.get_output(f"{src_plugin}.{src_port}")
+        if out_port is None:
+            return
+
+        # Собрать целевые порты NodeGraphQt
+        target_ports: list[Any] = []
+        for tgt_addr in targets:
+            tgt_parts = tgt_addr.split(".")
+            if len(tgt_parts) != 3:
+                continue
+            tgt_proc, tgt_plugin, tgt_port = tgt_parts
+            tgt_node = self._node_map.get(tgt_proc)
+            if tgt_node is None:
+                continue
+            in_port = tgt_node.get_input(f"{tgt_plugin}.{tgt_port}")
+            if in_port is not None:
+                target_ports.append(in_port)
+
+        if not target_ports:
+            return
+
+        # Удалить прямые pipes
+        with self._block_signals():
+            for tp in target_ports:
+                try:
+                    out_port.disconnect_from(tp, push_undo=False)
+                except Exception:
+                    pass
+
+            # Создать route node
+            shm_name = self._get_shm_name(source_addr)
+            try:
+                route_node = self._graph.create_node(
+                    ROUTE_NODE_TYPE,
+                    name=f"Route: {shm_name}",
+                    selected=False,
+                    push_undo=False,
+                )
+            except Exception as exc:
+                logger.error(
+                    "_insert_route_node: ошибка создания для '%s': %s",
+                    source_addr, exc,
+                )
+                # Восстановить прямые pipes
+                for tp in target_ports:
+                    try:
+                        out_port.connect_to(tp, push_undo=False)
+                    except Exception:
+                        pass
+                return
+
+            if not isinstance(route_node, ShmRouteNode):
+                return
+
+            route_node.set_route_data(source_addr, shm_name, len(target_ports))
+
+            # Позиция: среднее между source и средним targets
+            src_x, src_y = src_node.x_pos(), src_node.y_pos()
+            tgt_xs = [tp.node().x_pos() for tp in target_ports]
+            tgt_ys = [tp.node().y_pos() for tp in target_ports]
+            avg_tgt_x = sum(tgt_xs) / len(tgt_xs)
+            avg_tgt_y = sum(tgt_ys) / len(tgt_ys)
+            route_node.set_pos((src_x + avg_tgt_x) / 2.0, avg_tgt_y)
+
+            # Подключить: source → route.in
+            route_in = route_node.get_input("in")
+            if route_in is not None:
+                try:
+                    out_port.connect_to(route_in, push_undo=False)
+                except Exception as exc:
+                    logger.warning("_insert_route_node: source→in: %s", exc)
+
+            # Подключить: route.out_N → target
+            for i, tp in enumerate(target_ports):
+                route_out = route_node.get_output(f"out_{i + 1}")
+                if route_out is not None:
+                    try:
+                        route_out.connect_to(tp, push_undo=False)
+                    except Exception as exc:
+                        logger.warning(
+                            "_insert_route_node: out_%d→target: %s",
+                            i + 1, exc,
+                        )
+
+            self._route_nodes[source_addr] = route_node
+
+            # Перестроить pipe map — pipes теперь идут через route node
+            self._rebuild_pipe_map()
+
+        logger.debug(
+            "_insert_route_node: '%s' — %d выходов",
+            source_addr, len(target_ports),
+        )
+
+    def _remove_route_node(self, source_addr: str) -> None:
+        """Удалить route node и восстановить прямые pipes при необходимости.
+
+        Если остался 1 target — восстанавливает прямое соединение.
+        Если 0 targets — просто удаляет.
+
+        Args:
+            source_addr: Адрес выходного порта.
+        """
+        route_node = self._route_nodes.pop(source_addr, None)
+        if route_node is None:
+            return
+
+        src_parts = source_addr.split(".")
+        if len(src_parts) != 3:
+            return
+
+        src_proc, src_plugin, src_port = src_parts
+        src_node = self._node_map.get(src_proc)
+        if src_node is None:
+            return
+
+        out_port = src_node.get_output(f"{src_plugin}.{src_port}")
+        if out_port is None:
+            return
+
+        # Собрать оставшиеся target_addr
+        remaining_targets = self._collect_targets_for_source(source_addr)
+
+        with self._block_signals():
+            # Отключить все pipes через route node
+            route_in = route_node.get_input("in")
+            if route_in is not None:
+                try:
+                    out_port.disconnect_from(route_in, push_undo=False)
+                except Exception:
+                    pass
+
+            for rout_port in route_node.output_ports():
+                for connected in rout_port.connected_ports():
+                    try:
+                        rout_port.disconnect_from(connected, push_undo=False)
+                    except Exception:
+                        pass
+
+            # Удалить route node с канваса
+            try:
+                self._graph.delete_node(route_node, push_undo=False)
+            except Exception as exc:
+                logger.warning("_remove_route_node: delete: %s", exc)
+
+            # Восстановить прямые pipes для оставшихся targets
+            for tgt_addr in remaining_targets:
+                tgt_parts = tgt_addr.split(".")
+                if len(tgt_parts) != 3:
+                    continue
+                tgt_proc, tgt_plugin, tgt_port = tgt_parts
+                tgt_node = self._node_map.get(tgt_proc)
+                if tgt_node is None:
+                    continue
+                in_port = tgt_node.get_input(f"{tgt_plugin}.{tgt_port}")
+                if in_port is not None:
+                    try:
+                        out_port.connect_to(in_port, push_undo=False)
+                    except Exception as exc:
+                        logger.warning(
+                            "_remove_route_node: restore pipe: %s", exc,
+                        )
+
+            # Перестроить pipe map
+            self._rebuild_pipe_map()
+
+        logger.debug("_remove_route_node: '%s' удалён", source_addr)
+
+    # ------------------------------------------------------------------
     # Qt-сигнал: port_connected (user drag wire)
     # ------------------------------------------------------------------
 
@@ -337,12 +559,47 @@ class PluginGraphAdapter(QtCore.QObject):
         # Зарегистрировать маппинг адресов → wire_key
         self._addr_wire_map[(source_addr, target_addr)] = wire_key
 
-        # Найти pipe item в сцене и сохранить в маппинг wire_key → pipe
-        self._register_pipe_for_wire(wire_key, in_port, out_port)
+        # Проверить fan-out: нужен ли route node?
+        fan_out_count = self._count_outgoing_wires(source_addr)
+
+        if fan_out_count >= 2:
+            if source_addr in self._route_nodes:
+                # Route node уже есть — добавить выход и подключить
+                route_node = self._route_nodes[source_addr]
+                with self._block_signals():
+                    # Удалить прямой pipe (только что созданный drag-ом)
+                    try:
+                        in_port.disconnect_from(out_port)
+                    except Exception:
+                        pass
+
+                    # Добавить новый выходной порт на route node
+                    new_port_name = f"out_{len(route_node.output_ports()) + 1}"
+                    route_node.add_fan_out_port(new_port_name)
+
+                    # Подключить новый выход к target
+                    new_out = route_node.get_output(new_port_name)
+                    if new_out is not None:
+                        try:
+                            new_out.connect_to(in_port, push_undo=False)
+                        except Exception as exc:
+                            logger.warning(
+                                "_on_port_connected: route fan-out: %s", exc,
+                            )
+
+                    # Перестроить pipe map
+                    self._rebuild_pipe_map()
+            else:
+                # Первый fan-out: создать route node для всех targets
+                all_targets = self._collect_targets_for_source(source_addr)
+                self._insert_route_node(source_addr, all_targets)
+        else:
+            # Единственный wire — прямое соединение, просто регистрируем pipe
+            self._register_pipe_for_wire(wire_key, in_port, out_port)
 
         logger.info(
-            "Wire создан: %s — %s → %s",
-            wire_key, source_addr, target_addr,
+            "Wire создан: %s — %s → %s (fan-out=%d)",
+            wire_key, source_addr, target_addr, fan_out_count,
         )
 
     def _register_pipe_for_wire(
@@ -396,24 +653,37 @@ class PluginGraphAdapter(QtCore.QObject):
     # ------------------------------------------------------------------
 
     def _on_port_disconnected(self, in_port: Any, out_port: Any) -> None:
-        """Пользователь разорвал соединение — удаляем wire из модели."""
+        """Пользователь разорвал соединение — удаляем wire из модели.
+
+        Если disconnect пришёл от route node (не от process node),
+        нужно вычислить реальный source_addr из route_key.
+        """
         if self._suppress:
             return
 
         target_qt_node = in_port.node()
         source_qt_node = out_port.node()
 
-        target_pk = self._reverse_map.get(target_qt_node.id)
-        source_pk = self._reverse_map.get(source_qt_node.id)
-
-        if target_pk is None or source_pk is None:
+        # Если source — это route node, пользователь отсоединил pipe
+        # от route node. Реальный source_addr хранится в route_key.
+        if isinstance(source_qt_node, ShmRouteNode):
+            source_addr = source_qt_node.route_key
+            target_pk = self._reverse_map.get(target_qt_node.id)
+            if target_pk is None:
+                return
+            target_addr = f"{target_pk}.{in_port.name()}"
+        elif isinstance(target_qt_node, ShmRouteNode):
+            # Пользователь отсоединил source от route.in — пока игнорируем
+            # (route node полностью управляется адаптером)
             return
-
-        out_port_name = out_port.name()
-        in_port_name = in_port.name()
-
-        source_addr = f"{source_pk}.{out_port_name}"
-        target_addr = f"{target_pk}.{in_port_name}"
+        else:
+            # Стандартный случай: прямое соединение process → process
+            target_pk = self._reverse_map.get(target_qt_node.id)
+            source_pk = self._reverse_map.get(source_qt_node.id)
+            if target_pk is None or source_pk is None:
+                return
+            source_addr = f"{source_pk}.{out_port.name()}"
+            target_addr = f"{target_pk}.{in_port.name()}"
 
         # Найти wire_key по source+target
         for wk, wire in self._wire_model.wires.items():
@@ -423,7 +693,22 @@ class PluginGraphAdapter(QtCore.QObject):
                 self._addr_wire_map.pop((source_addr, target_addr), None)
                 # Удалить из маппинга wire_key → pipe
                 self._wire_key_to_pipe.pop(wk, None)
-                logger.info("Wire удалён: %s", wk)
+
+                # Проверить fan-out после удаления
+                fan_out_after = self._count_outgoing_wires(source_addr)
+                if source_addr in self._route_nodes:
+                    if fan_out_after <= 1:
+                        # Fan-out снизился до 0 или 1 — удалить route node
+                        self._remove_route_node(source_addr)
+                    else:
+                        # Fan-out всё ещё >= 2 — перестроить route node
+                        # (проще пересоздать чем патчить порты)
+                        self._remove_route_node(source_addr)
+                        remaining = self._collect_targets_for_source(source_addr)
+                        if len(remaining) >= 2:
+                            self._insert_route_node(source_addr, remaining)
+
+                logger.info("Wire удалён: %s (fan-out=%d)", wk, fan_out_after)
                 return
 
         logger.warning(
@@ -451,6 +736,9 @@ class PluginGraphAdapter(QtCore.QObject):
 
         if selected:
             qt_node = selected[0]
+            # Route node — чисто визуальный, не эмитим node_selected
+            if isinstance(qt_node, ShmRouteNode):
+                return
             pk = self._reverse_map.get(qt_node.id)
             if pk is not None:
                 self.node_selected.emit(pk)
@@ -494,6 +782,9 @@ class PluginGraphAdapter(QtCore.QObject):
     def _find_wire_key_for_ports(self, in_port: Any, out_port: Any) -> str | None:
         """Найти wire_key по NodeGraphQt портам pipe item.
 
+        Учитывает route nodes: если source или target — route node,
+        извлекает реальный source_addr из route_key.
+
         Args:
             in_port: Входной порт pipe item (target).
             out_port: Выходной порт pipe item (source).
@@ -504,6 +795,21 @@ class PluginGraphAdapter(QtCore.QObject):
         target_qt_node = in_port.node()
         source_qt_node = out_port.node()
 
+        # Pipe идёт от route node → target process
+        if isinstance(source_qt_node, ShmRouteNode):
+            source_addr = source_qt_node.route_key
+            target_pk = self._reverse_map.get(target_qt_node.id)
+            if target_pk is None:
+                return None
+            target_addr = f"{target_pk}.{in_port.name()}"
+            return self._addr_wire_map.get((source_addr, target_addr))
+
+        # Pipe идёт от source process → route node.in (промежуточный pipe)
+        if isinstance(target_qt_node, ShmRouteNode):
+            # Это pipe source→route, не маппится на wire_key напрямую
+            return None
+
+        # Стандартный pipe: process → process
         target_pk = self._reverse_map.get(target_qt_node.id)
         source_pk = self._reverse_map.get(source_qt_node.id)
 
