@@ -25,6 +25,7 @@ from multiprocess_prototype.frontend.bridges.wire_data_bridge import WireStatus
 from .graph_builder import GraphBuilder
 from .plugin_process_node import PROCESS_NODE_TYPE, PluginProcessNode
 from .shm_route_node import ROUTE_NODE_TYPE, ShmRouteNode
+from .wire_metrics_badge import WireMetricsBadge
 
 if TYPE_CHECKING:
     from NodeGraphQt import NodeGraph
@@ -97,6 +98,9 @@ class PluginGraphAdapter(QtCore.QObject):
 
         # Обратный маппинг: wire_key → pipe QGraphicsPathItem (для окраски)
         self._wire_key_to_pipe: dict[str, Any] = {}
+
+        # Маппинг wire_key → WireMetricsBadge (overlay с метриками канала)
+        self._wire_key_to_badge: dict[str, WireMetricsBadge] = {}
 
         # Route nodes: source_addr → ShmRouteNode (fan-out >= 2)
         self._route_nodes: dict[str, ShmRouteNode] = {}
@@ -240,6 +244,40 @@ class PluginGraphAdapter(QtCore.QObject):
         except Exception as exc:
             logger.debug("_rebuild_pipe_map: %s", exc)
 
+        # Создать/обновить badges для каждого pipe
+        self._rebuild_badges()
+
+    def _rebuild_badges(self) -> None:
+        """Пересоздать WireMetricsBadge для каждого pipe.
+
+        Вызывается после каждого перестроения _wire_key_to_pipe.
+        Старые badges удаляются из сцены, новые добавляются — по одному
+        на каждый wire_key из актуального маппинга.
+        """
+        try:
+            viewer = self._graph.viewer()
+            if viewer is None:
+                return
+            scene = viewer.scene()
+            if scene is None:
+                return
+
+            # Удалить старые badges из сцены
+            for badge in self._wire_key_to_badge.values():
+                if badge.scene() is not None:
+                    scene.removeItem(badge)
+            self._wire_key_to_badge.clear()
+
+            # Создать badge для каждого pipe в актуальном маппинге
+            for wire_key, pipe_item in self._wire_key_to_pipe.items():
+                badge = WireMetricsBadge()
+                scene.addItem(badge)
+                badge.update_position(pipe_item)
+                self._wire_key_to_badge[wire_key] = badge
+
+        except Exception as exc:
+            logger.debug("_rebuild_badges: %s", exc)
+
     def _set_pipe_color(self, pipe_item: Any, status: WireStatus) -> None:
         """Установить цвет pipe item согласно статусу wire.
 
@@ -288,6 +326,38 @@ class PluginGraphAdapter(QtCore.QObject):
                     "update_wire_colors: pipe для wire '%s' не найден в маппинге",
                     wire_key,
                 )
+
+    def update_wire_metrics(self, metrics: dict) -> None:
+        """Обновить метрики на badges.
+
+        Вызывается из ConstructorTabWidget при получении сигнала
+        WireDataBridge.metrics_changed.
+
+        Args:
+            metrics: {wire_key: WireMetrics или dict с fps/latency_ms/buffer_fill}
+        """
+        for wire_key, m in metrics.items():
+            badge = self._wire_key_to_badge.get(wire_key)
+            if badge is None:
+                # wire_key без badge — пропустить gracefully
+                continue
+
+            # Поддержка dict и объектов WireMetrics через getattr/get
+            if isinstance(m, dict):
+                fps = m.get("fps", 0.0)
+                latency = m.get("latency_ms", 0.0)
+                fill = m.get("buffer_fill", 0.0)
+            else:
+                fps = getattr(m, "fps", 0.0)
+                latency = getattr(m, "latency_ms", 0.0)
+                fill = getattr(m, "buffer_fill", 0.0)
+
+            badge.update_metrics(fps, latency, fill)
+
+            # Обновить позицию (pipe мог измениться после перерисовки сцены)
+            pipe_item = self._wire_key_to_pipe.get(wire_key)
+            if pipe_item is not None:
+                badge.update_position(pipe_item)
 
     # ------------------------------------------------------------------
     # Fan-out route nodes — вспомогательные методы

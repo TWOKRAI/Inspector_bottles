@@ -255,6 +255,8 @@ class ConstructorTabWidget(QWidget):
 
         # Подключаем WireDataBridge — обновление цветов pipes при смене статусов
         self._wire_bridge.statuses_changed.connect(self._on_wire_statuses_changed)
+        # Подключаем WireDataBridge — обновление метрик badges при смене метрик
+        self._wire_bridge.metrics_changed.connect(self._on_wire_metrics_changed)
 
         # Получаем Qt-виджет канваса
         self._graph_widget = self._graph.widget
@@ -597,6 +599,15 @@ class ConstructorTabWidget(QWidget):
         """
         if self._adapter is not None:
             self._adapter.update_wire_colors(statuses)
+
+    def _on_wire_metrics_changed(self, metrics: dict) -> None:
+        """Слот: WireDataBridge обновил метрики — обновить badges на канвасе.
+
+        Args:
+            metrics: Словарь wire_key → метрики (dict или WireMetrics) от WireDataBridge.
+        """
+        if self._adapter is not None:
+            self._adapter.update_wire_metrics(metrics)
 
     # ------------------------------------------------------------------
     # Утилиты
