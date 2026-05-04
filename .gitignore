@@ -59,6 +59,9 @@ logs/
 *.bin
 **/Models/
 **/models_weights/
+# Исключение: Python-пакеты с именем models/ (case-insensitive Windows)
+!multiprocess_prototype/**/models/
+!multiprocess_framework/**/models/
 Inspector_backup_worker/
 
 # Legacy user prefs
