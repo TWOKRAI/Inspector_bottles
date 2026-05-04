@@ -147,6 +147,17 @@ class ProcessModulePlugin(ABC):
         Transition: PAUSED → RUNNING.
         """
 
+    def configure_managers(self, ctx: PluginContext) -> None:
+        """Ранняя инициализация менеджеров ДО основного lifecycle. Default: no-op.
+
+        Вызывается из GenericProcess._init_custom_managers() — до configure().
+        Используется плагинами, которым нужно создать framework-менеджеры
+        (SQLManager, кастомный RouterManager и т.д.) до того, как другие
+        плагины начнут configure().
+
+        Не путать с configure() — тот для SHM, middleware, воркеров.
+        """
+
     def shutdown(self, ctx: PluginContext) -> None:
         """Очистка ресурсов. Default: no-op.
 

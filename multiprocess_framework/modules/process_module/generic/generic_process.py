@@ -27,18 +27,19 @@ class GenericProcess(ProcessModule):
     - ... остальные поля — plugin-specific конфиг
     """
 
-    def _init_application_threads(self) -> None:
-        """Загрузить плагины и провести через IDLE → READY → RUNNING."""
-        super()._init_application_threads()
+    def _init_custom_managers(self) -> None:
+        """Ранняя инициализация: вызвать configure_managers() у плагинов.
+
+        Выполняется ДО _init_application_threads() (и до configure/start).
+        Позволяет плагинам создать framework-менеджеры (SQLManager и т.д.),
+        которые должны существовать до основного plugin lifecycle.
+        """
+        super()._init_custom_managers()
 
         app_cfg = self.get_config("config") or {}
-        plugin_defs: list[dict[str, Any]] = app_cfg.get("plugins", [])
-
-        self._plugins: list[ProcessModulePlugin] = []
-        self._plugin_contexts: list[PluginContext] = []
+        plugin_defs: list[dict] = app_cfg.get("plugins", [])
 
         if not plugin_defs:
-            self._log_info(f"GenericProcess[{self.name}]: нет плагинов")
             return
 
         io = ProcessIO(self)
@@ -46,37 +47,56 @@ class GenericProcess(ProcessModule):
             process_name=self.name, config={}, process=self, io=io,
         )
 
-        # Фаза 1: загрузка + IDLE → READY (configure + авторегистрация команд)
+        # Предзагрузка плагинов для early-init
+        self._early_plugins: list[tuple[ProcessModulePlugin, PluginContext]] = []
         for pdef in plugin_defs:
             plugin_class_path = pdef.get("plugin_class", "")
             plugin_name = pdef.get("plugin_name", "unknown")
-
             if not plugin_class_path:
-                self._log_error(f"GenericProcess[{self.name}]: '{plugin_name}' без plugin_class")
                 continue
-
             try:
                 plugin = self._load_plugin(plugin_class_path, plugin_name)
+                plugin_config = {
+                    k: v for k, v in pdef.items()
+                    if k not in ("plugin_class", "plugin_name")
+                }
+                ctx = base_ctx.with_config(plugin_config)
+                plugin.configure_managers(ctx)
+                self._early_plugins.append((plugin, ctx))
             except Exception as e:
-                self._log_error(f"GenericProcess[{self.name}]: загрузка '{plugin_name}': {e}")
-                continue
+                self._log_error(
+                    f"GenericProcess[{self.name}]: configure_managers '{plugin_name}': {e}"
+                )
 
-            plugin_config = {
-                k: v for k, v in pdef.items()
-                if k not in ("plugin_class", "plugin_name")
-            }
-            ctx = base_ctx.with_config(plugin_config)
+    def _init_application_threads(self) -> None:
+        """Провести плагины через IDLE → READY → RUNNING.
 
+        Плагины уже загружены в _init_custom_managers() (early-init).
+        Здесь только configure → start lifecycle.
+        """
+        super()._init_application_threads()
+
+        # Плагины предзагружены в _init_custom_managers()
+        early = getattr(self, "_early_plugins", [])
+        if not early:
+            self._log_info(f"GenericProcess[{self.name}]: нет плагинов")
+            return
+
+        self._plugins: list[ProcessModulePlugin] = []
+        self._plugin_contexts: list[PluginContext] = []
+
+        # Фаза 1: IDLE → READY (configure + авторегистрация команд)
+        for plugin, ctx in early:
             try:
                 plugin._do_configure(ctx)
                 self._plugins.append(plugin)
                 self._plugin_contexts.append(ctx)
                 self._log_info(
-                    f"GenericProcess[{self.name}]: '{plugin_name}' "
+                    f"GenericProcess[{self.name}]: '{plugin.name}' "
                     f"[{plugin.category}] {plugin.state.value}"
                 )
             except Exception as e:
-                self._log_error(f"GenericProcess[{self.name}]: configure '{plugin_name}': {e}")
+                self._log_error(f"GenericProcess[{self.name}]: configure '{plugin.name}': {e}")
 
         # Фаза 2: READY → RUNNING (start)
         for plugin, ctx in zip(self._plugins, self._plugin_contexts):
