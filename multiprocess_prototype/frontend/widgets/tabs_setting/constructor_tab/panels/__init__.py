@@ -3,6 +3,9 @@
 from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.shm_config_panel import (
     ShmConfigPanel,
 )
+from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.shm_dashboard_panel import (
+    ShmDashboardPanel,
+)
 from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.wire_inspector import (
     WireInspectorPanel,
 )
@@ -11,4 +14,4 @@ from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels
     ProcessPluginPanel,
 )
 
-__all__ = ["ProcessPluginPanel", "ShmConfigPanel", "WireInspectorPanel"]
+__all__ = ["ProcessPluginPanel", "ShmConfigPanel", "ShmDashboardPanel", "WireInspectorPanel"]
