@@ -47,6 +47,16 @@ class MiddlewarePipeline:
         """Добавить функцию в конец pipeline."""
         self._pipeline.append(fn)
 
+    def remove(self, fn: Callable) -> None:
+        """Удалить конкретную функцию из pipeline по identity.
+
+        Если функция не найдена — молча игнорирует (idempotent).
+        """
+        try:
+            self._pipeline.remove(fn)
+        except ValueError:
+            pass
+
     def clear(self) -> None:
         """Удалить все функции из pipeline."""
         self._pipeline.clear()

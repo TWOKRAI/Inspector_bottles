@@ -151,6 +151,87 @@ class DisplayDefinition(SchemaBase):
 
 
 # ---------------------------------------------------------------------------
+# Секция 5: Wires (межпроцессные связи)
+# ---------------------------------------------------------------------------
+
+
+@register_schema("ShmWireConfigV1")
+class ShmWireConfig(SchemaBase):
+    """Конфигурация SharedMemory для wire-канала."""
+
+    shm_name: Annotated[
+        str,
+        FieldMeta("Имя SHM", info="Имя SharedMemory региона (уникальное в системе)."),
+    ] = ""
+
+    buffer_slots: Annotated[
+        int,
+        FieldMeta(
+            "Слоты буфера",
+            info="Количество слотов ring-buffer (>= 2 для безопасного чтения).",
+            min=2,
+            max=32,
+        ),
+    ] = 4
+
+    owner_process: Annotated[
+        str,
+        FieldMeta(
+            "Владелец",
+            info="Процесс-владелец SHM (create=True). Обычно — процесс-отправитель.",
+        ),
+    ] = ""
+
+    strategy: Annotated[
+        str,
+        FieldMeta(
+            "Стратегия",
+            info="direct — прямая запись производителем; via_pm — через ProcessManager.",
+        ),
+    ] = "direct"
+
+
+@register_schema("WireDefinitionV1")
+class WireDefinition(SchemaBase):
+    """Связь между портами плагинов разных процессов.
+
+    Формат адреса: "process_name.plugin_name.port_name"
+    Пример: "camera_0.capture.frame" → "processor_0.color_mask.frame"
+    """
+
+    source: Annotated[
+        str,
+        FieldMeta("Источник", info="process.plugin.port — выходной порт."),
+    ] = ""
+
+    target: Annotated[
+        str,
+        FieldMeta("Приёмник", info="process.plugin.port — входной порт."),
+    ] = ""
+
+    description: Annotated[
+        str,
+        FieldMeta("Описание", info="Человекочитаемое описание связи."),
+    ] = ""
+
+    transport: Annotated[
+        str,
+        FieldMeta(
+            "Транспорт",
+            info="router — через RouterManager + SHM; direct — будущее.",
+        ),
+    ] = "router"
+
+    shm_config: Annotated[
+        Dict[str, Any],
+        FieldMeta(
+            "SHM конфиг",
+            info="Конфигурация SharedMemory канала (ShmWireConfig.model_dump()).",
+        ),
+    ] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
 # SystemTopology — корневая модель
 # ---------------------------------------------------------------------------
 
@@ -160,10 +241,11 @@ class SystemTopology(SchemaBase):
     """Полная конфигурация системы — единый объект, редактируемый UI по секциям.
 
     Вкладки UI:
-      Tab «Процессы»  → processes, workers
+      Tab «Процессы»   → processes, workers
       Tab «Источники»  → cameras, regions
       Tab «Pipeline»   → pipeline
-      Tab «Дисплеи»   → displays
+      Tab «Дисплеи»    → displays
+      Tab «Конструктор» → wires (межпроцессные связи)
     """
 
     # Секция 1: Процессы (Tab «Процессы»)
@@ -201,12 +283,18 @@ class SystemTopology(SchemaBase):
         FieldMeta("Дисплеи", info="Display-окна с подписками на источники."),
     ] = Field(default_factory=dict)
 
+    # Секция 5: Wires (Tab «Конструктор»)
+    wires: Annotated[
+        Dict[str, WireDefinition],
+        FieldMeta("Связи", info="Межпроцессные wire-связи между портами плагинов."),
+    ] = Field(default_factory=dict)
+
     # ------------------------------------------------------------------
     # Валидация FK (foreign key)
     # ------------------------------------------------------------------
 
     def validate_refs(self) -> List[str]:
-        """FK-валидация: workers→processes, regions→cameras.
+        """FK-валидация: workers→processes, regions→cameras, wires→processes.plugins.
 
         Returns:
             Список ошибок (пустой = всё ок).
@@ -254,6 +342,38 @@ class SystemTopology(SchemaBase):
                     )
                 else:
                     seen_names.add(pname)
+
+        # wires: source/target → "process.plugin.port" должны ссылаться на существующие
+        all_plugin_names: dict[str, set[str]] = {}
+        for pk, proc in self.processes.items():
+            all_plugin_names[pk] = {
+                p.get("plugin_name", "") for p in proc.plugins
+            }
+
+        for wk, wire in self.wires.items():
+            for field_name, addr in [("source", wire.source), ("target", wire.target)]:
+                if not addr:
+                    errors.append(
+                        f"Wire '{wk}': {field_name} пустой"
+                    )
+                    continue
+                parts = addr.split(".")
+                if len(parts) != 3:
+                    errors.append(
+                        f"Wire '{wk}': {field_name} '{addr}' — ожидается формат "
+                        f"'process.plugin.port'"
+                    )
+                    continue
+                proc_name, plugin_name, _port_name = parts
+                if proc_name not in self.processes:
+                    errors.append(
+                        f"Wire '{wk}': {field_name} — процесс '{proc_name}' не найден"
+                    )
+                elif plugin_name not in all_plugin_names.get(proc_name, set()):
+                    errors.append(
+                        f"Wire '{wk}': {field_name} — плагин '{plugin_name}' "
+                        f"не найден в процессе '{proc_name}'"
+                    )
 
         return errors
 
@@ -304,26 +424,39 @@ SECTION_PIPELINE = "pipeline"
 SECTION_DISPLAYS = "displays"
 """Секция дисплеев."""
 
+SECTION_WIRES = "wires"
+"""Секция межпроцессных wire-связей (Tab «Конструктор»)."""
+
 # Маппинг секция → ключи в SystemTopology
 SECTION_KEYS = {
     SECTION_PROCESSES: ("processes", "workers"),
     SECTION_SOURCES: ("cameras", "regions"),
     SECTION_PIPELINE: ("pipeline",),
     SECTION_DISPLAYS: ("displays",),
+    SECTION_WIRES: ("wires",),
 }
 
-ALL_SECTIONS = (SECTION_PROCESSES, SECTION_SOURCES, SECTION_PIPELINE, SECTION_DISPLAYS)
+ALL_SECTIONS = (
+    SECTION_PROCESSES,
+    SECTION_SOURCES,
+    SECTION_PIPELINE,
+    SECTION_DISPLAYS,
+    SECTION_WIRES,
+)
 
 
 __all__ = [
     "ProcessDefinition",
     "WorkerDefinition",
     "DisplayDefinition",
+    "ShmWireConfig",
+    "WireDefinition",
     "SystemTopology",
     "SECTION_PROCESSES",
     "SECTION_SOURCES",
     "SECTION_PIPELINE",
     "SECTION_DISPLAYS",
+    "SECTION_WIRES",
     "SECTION_KEYS",
     "ALL_SECTIONS",
 ]

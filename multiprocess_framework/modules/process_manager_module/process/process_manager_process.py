@@ -44,6 +44,8 @@ class ProcessManagerProcess(ProcessModule):
     ) -> None:
         super().__init__(name, shared_resources, config or {})
         self._process_configs: dict[str, dict[str, Any]] = {}
+        # Трекинг активных wire-каналов (wire_key → метаданные)
+        self._active_wires: dict[str, dict[str, Any]] = {}
         self._create_components()
 
     def _create_components(self) -> None:
@@ -206,6 +208,9 @@ class ProcessManagerProcess(ProcessModule):
             "topology.apply": (self._cmd_topology_apply, "Применить топологию процессов"),
             "topology.get": (self._cmd_topology_get, "Получить текущую топологию"),
             "topology.diff": (self._cmd_topology_diff, "Вычислить diff топологии (dry-run)"),
+            "wire.setup": (self._cmd_wire_setup, "Настроить wire-канал (SHM + routes)"),
+            "wire.teardown": (self._cmd_wire_teardown, "Разобрать wire-канал"),
+            "wire.status": (self._cmd_wire_status, "Статусы wire-каналов"),
         }
 
         for cmd_name, (handler, description) in commands.items():
@@ -426,6 +431,168 @@ class ProcessManagerProcess(ProcessModule):
         if self._topology_manager is None:
             return {"error": "TopologyManager not initialized"}
         return self._topology_manager.diff(topology_dict)
+
+    # -------------------------------------------------------------------------
+    # Wire commands — runtime-настройка SHM-каналов между процессами
+    # -------------------------------------------------------------------------
+
+    def _cmd_wire_setup(self, data=None, **kwargs) -> dict:
+        """Настроить wire-канал: аллоцировать SHM и отправить wire.configure в процессы.
+
+        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
+
+        Параметры в data:
+            wire_key: уникальный ключ wire (например "camera→processor")
+            source_process: имя процесса-отправителя
+            target_process: имя процесса-получателя
+            transport: тип транспорта ("router" для SHM)
+            shm_config: dict с параметрами SHM (shm_name, buffer_slots, owner_process)
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+
+        wire_key = kwargs.get("wire_key", "")
+        source_process = kwargs.get("source_process", "")
+        target_process = kwargs.get("target_process", "")
+        transport = kwargs.get("transport", "router")
+        shm_config = kwargs.get("shm_config") or {}
+
+        if not wire_key:
+            return {"error": "wire_key required"}
+        if not source_process or not target_process:
+            return {"error": "source_process и target_process обязательны"}
+
+        # SHM аллокация (если transport == "router")
+        shm_name = shm_config.get("shm_name", wire_key)
+        buffer_slots = shm_config.get("buffer_slots", 4)
+        owner = shm_config.get("owner_process", source_process)
+
+        if transport == "router":
+            mm = getattr(self.shared_resources, "memory_manager", None) if self.shared_resources else None
+            if mm and hasattr(mm, "create_memory_dict"):
+                try:
+                    # Размеры 480x640x3 uint8 — defaults для MVP
+                    mm.create_memory_dict(
+                        owner,
+                        {shm_name: (1, (480, 640, 3), "uint8")},
+                        buffer_slots,
+                    )
+                    self._log_info(
+                        f"wire.setup: SHM аллоцирован — owner={owner}, "
+                        f"slot={shm_name}, buffer_slots={buffer_slots}"
+                    )
+                except Exception as exc:
+                    self._log_error(f"wire.setup: SHM аллокация не удалась: {exc}")
+                    return {"success": False, "wire_key": wire_key, "error": str(exc)}
+            else:
+                self._log_warning("wire.setup: memory_manager недоступен, SHM не аллоцирован")
+
+        # Сохранить wire в трекер
+        self._active_wires[wire_key] = {
+            "source_process": source_process,
+            "target_process": target_process,
+            "transport": transport,
+            "shm_config": {
+                "shm_name": shm_name,
+                "buffer_slots": buffer_slots,
+                "owner_process": owner,
+            },
+            "status": "pending",
+        }
+
+        # IPC в source process: wire.configure (role=sender)
+        configure_base = {
+            "wire_key": wire_key,
+            "shm_name": shm_name,
+            "shm_owner": owner,
+            "buffer_slots": buffer_slots,
+        }
+
+        source_cmd = {
+            "type": "system",
+            "command": "wire.configure",
+            "sender": self.name,
+            "data": {**configure_base, "role": "sender"},
+        }
+        try:
+            self.send_message(source_process, source_cmd)
+        except Exception as exc:
+            self._log_error(f"wire.setup: не удалось отправить wire.configure в {source_process}: {exc}")
+
+        # IPC в target process: wire.configure (role=receiver)
+        target_cmd = {
+            "type": "system",
+            "command": "wire.configure",
+            "sender": self.name,
+            "data": {**configure_base, "role": "receiver"},
+        }
+        try:
+            self.send_message(target_process, target_cmd)
+        except Exception as exc:
+            self._log_error(f"wire.setup: не удалось отправить wire.configure в {target_process}: {exc}")
+
+        self._active_wires[wire_key]["status"] = "active"
+        self._log_info(f"wire.setup: канал '{wire_key}' настроен ({source_process} → {target_process})")
+        return {"success": True, "wire_key": wire_key}
+
+    def _cmd_wire_teardown(self, data=None, **kwargs) -> dict:
+        """Разобрать wire-канал: отправить wire.deconfigure в процессы и удалить из трекера.
+
+        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
+
+        Параметры в data:
+            wire_key: ключ wire для удаления
+            source_process: имя процесса-отправителя
+            target_process: имя процесса-получателя
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+
+        wire_key = kwargs.get("wire_key", "")
+        if not wire_key:
+            return {"error": "wire_key required"}
+
+        wire_info = self._active_wires.get(wire_key)
+        # Позволяем переопределить процессы из kwargs (для гибкости)
+        source_process = kwargs.get("source_process") or (wire_info or {}).get("source_process", "")
+        target_process = kwargs.get("target_process") or (wire_info or {}).get("target_process", "")
+
+        # IPC wire.deconfigure в source + target
+        deconfigure_cmd_base = {
+            "type": "system",
+            "command": "wire.deconfigure",
+            "sender": self.name,
+            "data": {"wire_key": wire_key},
+        }
+
+        for process_name in (source_process, target_process):
+            if process_name:
+                try:
+                    self.send_message(process_name, deconfigure_cmd_base)
+                except Exception as exc:
+                    self._log_error(
+                        f"wire.teardown: не удалось отправить wire.deconfigure в {process_name}: {exc}"
+                    )
+
+        # Удалить из трекера
+        self._active_wires.pop(wire_key, None)
+        self._log_info(f"wire.teardown: канал '{wire_key}' разобран")
+        return {"success": True, "wire_key": wire_key}
+
+    def _cmd_wire_status(self, data=None, **kwargs) -> dict:
+        """Статусы wire-каналов.
+
+        Параметр data принимается но не используется — команда не требует аргументов.
+        """
+        result = {}
+        for wire_key, info in self._active_wires.items():
+            result[wire_key] = {
+                "status": info.get("status", "idle"),
+                "source_process": info.get("source_process", ""),
+                "target_process": info.get("target_process", ""),
+                "transport": info.get("transport", ""),
+            }
+        return {"success": True, "wires": result}
 
     # -------------------------------------------------------------------------
     # Router endpoint — приём команд от других процессов (AD-8)

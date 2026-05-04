@@ -24,6 +24,7 @@ from multiprocess_prototype.registers.system_topology.schemas import (
     SECTION_PIPELINE,
     SECTION_PROCESSES,
     SECTION_SOURCES,
+    SECTION_WIRES,
     SystemTopology,
 )
 
@@ -341,6 +342,9 @@ class SystemTopologyEditor:
         if section is None or section == SECTION_SOURCES:
             errors.extend(self._validate_sources())
 
+        if section is None or section == SECTION_WIRES:
+            errors.extend(self._validate_wires())
+
         if section is None:
             # FK-валидация через SystemTopology
             try:
@@ -443,6 +447,43 @@ class SystemTopologyEditor:
 
         return errors
 
+    def _validate_wires(self) -> List[str]:
+        """Валидация секции wires — формат адресов и FK-ссылки."""
+        errors: list[str] = []
+        wires = self._data.get("wires", {})
+        procs = self._data.get("processes", {})
+
+        for wk, wire in wires.items():
+            for field in ("source", "target"):
+                addr = wire.get(field, "")
+                if not addr:
+                    errors.append(f"Wire '{wk}': {field} пустой")
+                    continue
+                parts = addr.split(".")
+                if len(parts) != 3:
+                    errors.append(
+                        f"Wire '{wk}': {field} '{addr}' — "
+                        f"ожидается 'process.plugin.port'"
+                    )
+                    continue
+                proc_name = parts[0]
+                plugin_name = parts[1]
+                if proc_name not in procs:
+                    errors.append(
+                        f"Wire '{wk}': {field} — процесс '{proc_name}' не найден"
+                    )
+                else:
+                    plugin_names = {
+                        p.get("plugin_name", "")
+                        for p in procs[proc_name].get("plugins", [])
+                    }
+                    if plugin_name not in plugin_names:
+                        errors.append(
+                            f"Wire '{wk}': {field} — плагин '{plugin_name}' "
+                            f"не найден в процессе '{proc_name}'"
+                        )
+        return errors
+
     def _validate_sources(self) -> List[str]:
         """Валидация секции источников."""
         errors: list[str] = []
@@ -520,6 +561,20 @@ class SystemTopologyEditor:
             )
             self._section_views["displays"] = DisplaysSectionView(self)
         return self._section_views["displays"]
+
+    @property
+    def wires_section(self) -> Any:
+        """Section View для межпроцессных wire-связей (lazy).
+
+        Returns:
+            WiresSectionView
+        """
+        if "wires" not in self._section_views:
+            from multiprocess_prototype.frontend.models.sections.wires_section import (
+                WiresSectionView,
+            )
+            self._section_views["wires"] = WiresSectionView(self)
+        return self._section_views["wires"]
 
 
 __all__ = ["SystemTopologyEditor"]

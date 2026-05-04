@@ -102,6 +102,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._threads = SystemThreads(self)
         self._state = ProcessState(self)
 
+        # Трекинг wire middleware (wire_key → (middleware_instance, role))
+        self._wire_middlewares: dict[str, tuple] = {}
+
         # initialize() вызывается явно после создания
 
     # ========================================================================
@@ -590,6 +593,115 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             "Встроенные команды worker.pause_all/resume_all зарегистрированы",
             module="lifecycle",
         )
+
+        # --- wire.configure / wire.deconfigure ---
+        self.command_manager.register_command(
+            "wire.configure",
+            self._cmd_wire_configure,
+            metadata={"description": "Настроить wire middleware (SHM sender/receiver)"},
+            tags=["system"],
+        )
+        self.command_manager.register_command(
+            "wire.deconfigure",
+            self._cmd_wire_deconfigure,
+            metadata={"description": "Удалить wire middleware"},
+            tags=["system"],
+        )
+        self._log_debug(
+            "Встроенные команды wire.configure/deconfigure зарегистрированы",
+            module="lifecycle",
+        )
+
+    # ========================================================================
+    # WIRE MIDDLEWARE — runtime-настройка SHM-каналов
+    # ========================================================================
+
+    def _cmd_wire_configure(self, data=None, **kwargs) -> dict:
+        """Настроить wire middleware: создать FrameShmMiddleware и подключить к router.
+
+        Параметры в data:
+            wire_key: уникальный ключ wire
+            role: "sender" или "receiver"
+            shm_name: имя SHM-слота
+            shm_owner: имя процесса-владельца SHM
+            buffer_slots: кол-во буферных слотов (информативно)
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+
+        wire_key = kwargs.get("wire_key", "")
+        role = kwargs.get("role", "")
+        shm_name = kwargs.get("shm_name", "")
+        shm_owner = kwargs.get("shm_owner", "")
+
+        if not wire_key or not role:
+            return {"success": False, "reason": "wire_key и role обязательны"}
+        if role not in ("sender", "receiver"):
+            return {"success": False, "reason": f"неизвестная role: {role}"}
+        if not self.router_manager:
+            return {"success": False, "reason": "router_manager недоступен"}
+
+        # Получить memory_manager
+        mm = self.memory_manager
+        if mm is None and self.shared_resources:
+            mm = getattr(self.shared_resources, "memory_manager", None)
+
+        from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import (
+            FrameShmMiddleware,
+        )
+
+        mw = FrameShmMiddleware(memory_manager=mm, owner=shm_owner, slot=shm_name)
+
+        # Подключить middleware к router
+        if role == "sender":
+            self.router_manager.add_send_middleware(mw.on_send)
+        else:
+            self.router_manager.add_receive_middleware(mw.on_receive)
+
+        # Сохранить для последующего удаления
+        self._wire_middlewares[wire_key] = (mw, role)
+
+        self._log_info(
+            f"wire.configure: middleware подключён — wire_key={wire_key}, "
+            f"role={role}, shm={shm_owner}/{shm_name}",
+            module="wire",
+        )
+        return {"success": True, "wire_key": wire_key, "role": role}
+
+    def _cmd_wire_deconfigure(self, data=None, **kwargs) -> dict:
+        """Удалить wire middleware из router.
+
+        Параметры в data:
+            wire_key: ключ wire для удаления
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+
+        wire_key = kwargs.get("wire_key", "")
+        if not wire_key:
+            return {"success": False, "reason": "wire_key обязателен"}
+
+        entry = self._wire_middlewares.pop(wire_key, None)
+        if entry is None:
+            self._log_warning(
+                f"wire.deconfigure: wire_key '{wire_key}' не найден в _wire_middlewares",
+                module="wire",
+            )
+            return {"success": True, "wire_key": wire_key, "note": "уже удалён или не существовал"}
+
+        mw, role = entry
+
+        if self.router_manager:
+            if role == "sender":
+                self.router_manager.remove_send_middleware(mw.on_send)
+            else:
+                self.router_manager.remove_receive_middleware(mw.on_receive)
+
+        self._log_info(
+            f"wire.deconfigure: middleware удалён — wire_key={wire_key}, role={role}",
+            module="wire",
+        )
+        return {"success": True, "wire_key": wire_key}
 
     # ========================================================================
     # HEARTBEAT

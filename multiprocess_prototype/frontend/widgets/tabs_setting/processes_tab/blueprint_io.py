@@ -27,19 +27,18 @@ def topology_to_blueprint(
     proc_data: dict[str, dict],
     name: str = "untitled",
     description: str = "",
+    wires_data: dict[str, dict] | None = None,
 ) -> SystemBlueprint:
-    """Конвертировать processes dict из topology в SystemBlueprint.
+    """Конвертировать topology данные в SystemBlueprint.
 
     Args:
         proc_data:   Словарь процессов из ProcessesSectionView.processes.
-                     Формат каждого значения:
-                     {name, class_path, priority, auto_start, sort_order, plugins}.
-        name:        Название рецепта (blueprint.name).
-        description: Описание рецепта (blueprint.description).
+        name:        Название рецепта.
+        description: Описание рецепта.
+        wires_data:  Словарь wire-связей из WiresSectionView.wires (опционально).
 
     Returns:
-        SystemBlueprint с processes из proc_data. Wires пустые
-        (auto-wiring внутри процессов не требует явных wires).
+        SystemBlueprint с processes и wires.
     """
     process_configs: list[ProcessConfig] = []
 
@@ -60,30 +59,41 @@ def topology_to_blueprint(
         )
         process_configs.append(config)
 
+    # Конвертируем wires из topology dict в Wire-объекты
+    wire_objects: list[Wire] = []
+    if wires_data:
+        for _wk, w in wires_data.items():
+            wire_objects.append(
+                Wire(
+                    source=w.get("source", ""),
+                    target=w.get("target", ""),
+                    description=w.get("description", ""),
+                )
+            )
+
     blueprint = SystemBlueprint(
         name=name,
         description=description,
         processes=process_configs,
-        wires=[],   # Wire-связи между процессами не поддерживаются в UI пока
+        wires=wire_objects,
     )
 
     logger.info(
-        "topology_to_blueprint: создан blueprint '%s' с %d процессами",
-        name, len(process_configs),
+        "topology_to_blueprint: создан blueprint '%s' с %d процессами, %d wires",
+        name, len(process_configs), len(wire_objects),
     )
     return blueprint
 
 
 def blueprint_to_topology(bp: SystemBlueprint) -> dict[str, dict]:
-    """Конвертировать SystemBlueprint в dict для ProcessesSectionView.load_from_snapshot.
+    """Конвертировать SystemBlueprint в dict для load_from_snapshot.
 
     Args:
-        bp: SystemBlueprint с списком ProcessConfig.
+        bp: SystemBlueprint с процессами и wires.
 
     Returns:
-        Словарь вида {"processes": {...}, "workers": {...}}.
-        Для каждого процесса автоматически создаётся защищённый main-воркер
-        (аналогично ProcessesSectionView.add_process).
+        Словарь вида {"processes": {...}, "workers": {...}, "wires": {...}}.
+        Для каждого процесса создаётся защищённый main-воркер.
     """
     processes: dict[str, dict] = {}
     workers: dict[str, dict] = {}
@@ -113,11 +123,23 @@ def blueprint_to_topology(bp: SystemBlueprint) -> dict[str, dict]:
             "sort_order": 0,
         }
 
+    # Конвертируем wires из Blueprint в dict-формат WiresSectionView
+    wires: dict[str, dict] = {}
+    for idx, wire in enumerate(bp.wires):
+        wire_key = f"wire_{idx:04d}"
+        wires[wire_key] = {
+            "source": wire.source,
+            "target": wire.target,
+            "description": wire.description,
+            "transport": "router",
+            "shm_config": {},
+        }
+
     logger.info(
-        "blueprint_to_topology: конвертировано %d процессов из blueprint '%s'",
-        len(processes), bp.name,
+        "blueprint_to_topology: конвертировано %d процессов, %d wires из '%s'",
+        len(processes), len(wires), bp.name,
     )
-    return {"processes": processes, "workers": workers}
+    return {"processes": processes, "workers": workers, "wires": wires}
 
 
 def save_blueprint(bp: SystemBlueprint, path: Path) -> None:

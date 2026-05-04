@@ -450,6 +450,14 @@ class RouterManager(ChannelRoutingManager):
     def add_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
         self._recv_mw.add(fn)
 
+    def remove_send_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
+        """Удалить send middleware по identity."""
+        self._send_mw.remove(fn)
+
+    def remove_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None:
+        """Удалить receive middleware по identity."""
+        self._recv_mw.remove(fn)
+
     def clear_middleware(self) -> None:
         self._send_mw.clear()
         self._recv_mw.clear()

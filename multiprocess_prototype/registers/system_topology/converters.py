@@ -332,6 +332,177 @@ def extract_display_diff(
     }
 
 
+# ---------------------------------------------------------------------------
+# Секция Wires: diff + команды (Фаза 4 конструктора)
+# ---------------------------------------------------------------------------
+
+
+def diff_wire_configs(
+    current: Optional[dict],
+    desired: dict,
+) -> Dict[str, Any]:
+    """Вычислить diff wires между текущим и желаемым состоянием.
+
+    Args:
+        current: Текущий SystemTopology dict (None = первый запуск).
+        desired: Желаемый SystemTopology dict.
+
+    Returns:
+        dict с ключами:
+            wires_added:   list[str] — ключи новых wires
+            wires_removed: list[str] — ключи удалённых wires
+            wires_modified: list[str] — ключи изменённых wires
+            has_changes:   bool
+    """
+    cur_wires = (current or {}).get("wires", {})
+    des_wires = desired.get("wires", {})
+
+    cur_keys = set(cur_wires.keys())
+    des_keys = set(des_wires.keys())
+
+    wires_added = sorted(des_keys - cur_keys)
+    wires_removed = sorted(cur_keys - des_keys)
+
+    # Изменённые: source, target, transport или shm_config отличаются
+    wires_modified: list[str] = []
+    _compare_fields = ("source", "target", "transport", "shm_config")
+    for wk in sorted(cur_keys & des_keys):
+        cur_w = cur_wires[wk]
+        des_w = des_wires[wk]
+        for field in _compare_fields:
+            cur_val = cur_w.get(field) if isinstance(cur_w, dict) else getattr(cur_w, field, None)
+            des_val = des_w.get(field) if isinstance(des_w, dict) else getattr(des_w, field, None)
+            if cur_val != des_val:
+                wires_modified.append(wk)
+                break
+
+    has_changes = bool(wires_added or wires_removed or wires_modified)
+
+    return {
+        "wires_added": wires_added,
+        "wires_removed": wires_removed,
+        "wires_modified": wires_modified,
+        "has_changes": has_changes,
+    }
+
+
+def _parse_process_from_addr(addr: str) -> str:
+    """Извлечь имя процесса ��з адреса 'process.plugin.port'."""
+    parts = addr.split(".")
+    return parts[0] if parts else ""
+
+
+def _ensure_shm_defaults(wire_key: str, shm_config: dict, source_process: str) -> dict:
+    """Заполнить пустые поля SHM-конфига дефолтами.
+
+    Args:
+        wire_key: Ключ wire (используется для авто-генерации shm_name).
+        shm_config: Исходный shm_config dict (может быть пустым).
+        source_process: Имя процесса-отправителя (дл�� owner_process).
+
+    Returns:
+        Новый dict с заполненными ��ефолтами.
+    """
+    result = dict(shm_config) if shm_config else {}
+    if not result.get("shm_name"):
+        result["shm_name"] = f"{wire_key}_shm"
+    if not result.get("owner_process"):
+        result["owner_process"] = source_process
+    if "buffer_slots" not in result:
+        result["buffer_slots"] = 4
+    if not result.get("strategy"):
+        result["strategy"] = "direct"
+    return result
+
+
+def extract_wire_commands(
+    current: Optional[dict],
+    desired: dict,
+) -> List[Dict[str, Any]]:
+    """Из diff wires → список IPC-команд для ProcessManager.
+
+    Порядок: teardown removed → setup added → teardown+setup modified.
+
+    Args:
+        current: Текущий SystemTopology dict (None = первый запуск).
+        desired: Желаемый SystemTopology dict.
+
+    Returns:
+        Список команд: [{"cmd": "wire.setup", ...}, {"cmd": "wire.teardown", ...}]
+    """
+    diff = diff_wire_configs(current, desired)
+    if not diff["has_changes"]:
+        return []
+
+    commands: list[dict[str, Any]] = []
+
+    cur_wires = (current or {}).get("wires", {})
+    des_wires = desired.get("wires", {})
+
+    # 1. Teardown удалённых wires
+    for wk in diff["wires_removed"]:
+        wire = cur_wires[wk]
+        w = wire if isinstance(wire, dict) else wire.model_dump() if hasattr(wire, "model_dump") else {}
+        source_proc = _parse_process_from_addr(w.get("source", ""))
+        target_proc = _parse_process_from_addr(w.get("target", ""))
+        commands.append({
+            "cmd": "wire.teardown",
+            "wire_key": wk,
+            "source_process": source_proc,
+            "target_process": target_proc,
+            "shm_config": w.get("shm_config", {}),
+        })
+
+    # 2. Setup новых wires
+    for wk in diff["wires_added"]:
+        wire = des_wires[wk]
+        w = wire if isinstance(wire, dict) else wire.model_dump() if hasattr(wire, "model_dump") else {}
+        source_proc = _parse_process_from_addr(w.get("source", ""))
+        target_proc = _parse_process_from_addr(w.get("target", ""))
+        shm_config = _ensure_shm_defaults(wk, w.get("shm_config", {}), source_proc)
+        commands.append({
+            "cmd": "wire.setup",
+            "wire_key": wk,
+            "source": w.get("source", ""),
+            "target": w.get("target", ""),
+            "source_process": source_proc,
+            "target_process": target_proc,
+            "transport": w.get("transport", "router"),
+            "shm_config": shm_config,
+        })
+
+    # 3. Modified wires: teardown старого + setup нового
+    for wk in diff["wires_modified"]:
+        # Teardown текущего
+        cur_wire = cur_wires[wk]
+        cw = cur_wire if isinstance(cur_wire, dict) else cur_wire.model_dump() if hasattr(cur_wire, "model_dump") else {}
+        commands.append({
+            "cmd": "wire.teardown",
+            "wire_key": wk,
+            "source_process": _parse_process_from_addr(cw.get("source", "")),
+            "target_process": _parse_process_from_addr(cw.get("target", "")),
+            "shm_config": cw.get("shm_config", {}),
+        })
+        # Setup нового
+        des_wire = des_wires[wk]
+        dw = des_wire if isinstance(des_wire, dict) else des_wire.model_dump() if hasattr(des_wire, "model_dump") else {}
+        source_proc = _parse_process_from_addr(dw.get("source", ""))
+        target_proc = _parse_process_from_addr(dw.get("target", ""))
+        shm_config = _ensure_shm_defaults(wk, dw.get("shm_config", {}), source_proc)
+        commands.append({
+            "cmd": "wire.setup",
+            "wire_key": wk,
+            "source": dw.get("source", ""),
+            "target": dw.get("target", ""),
+            "source_process": source_proc,
+            "target_process": target_proc,
+            "transport": dw.get("transport", "router"),
+            "shm_config": shm_config,
+        })
+
+    return commands
+
+
 __all__ = [
     "extract_source_topology",
     "inject_source_topology",
@@ -339,4 +510,6 @@ __all__ = [
     "diff_process_configs",
     "extract_process_commands",
     "extract_display_diff",
+    "diff_wire_configs",
+    "extract_wire_commands",
 ]

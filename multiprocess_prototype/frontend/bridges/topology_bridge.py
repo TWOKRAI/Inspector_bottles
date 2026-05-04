@@ -21,6 +21,7 @@ from multiprocess_prototype.registers.system_topology.converters import (
     extract_display_diff,
     extract_process_commands,
     extract_source_commands,
+    extract_wire_commands,
 )
 from multiprocess_prototype.registers.system_topology.schemas import (
     ALL_SECTIONS,
@@ -28,6 +29,7 @@ from multiprocess_prototype.registers.system_topology.schemas import (
     SECTION_PIPELINE,
     SECTION_PROCESSES,
     SECTION_SOURCES,
+    SECTION_WIRES,
 )
 
 if TYPE_CHECKING:
@@ -97,6 +99,7 @@ class TopologyBridge:
             "regions": {},
             "pipeline": {},
             "displays": {},
+            "wires": {},
         }
 
         # Register Writes path: cameras/regions
@@ -152,7 +155,8 @@ class TopologyBridge:
           1. processes (IPC Commands) — сначала создать процессы
           2. sources (Register Writes) — потом записать параметры
           3. pipeline (Register Writes)
-          4. displays (Direct API)
+          4. wires (IPC Commands) — SHM + routes между процессами
+          5. displays (Direct API)
 
         Args:
             section: SECTION_PROCESSES / SECTION_SOURCES / SECTION_PIPELINE /
@@ -180,6 +184,10 @@ class TopologyBridge:
 
         if section is None or section == SECTION_PIPELINE:
             if not self._apply_pipeline(data):
+                success = False
+
+        if section is None or section == SECTION_WIRES:
+            if not self._apply_wires(data):
                 success = False
 
         if section is None or section == SECTION_DISPLAYS:
@@ -288,6 +296,44 @@ class TopologyBridge:
             return False
         finally:
             self._writing = False
+
+    # ------------------------------------------------------------------
+    # Транспорт D: IPC Commands → wire management (SHM + routes)
+    # ------------------------------------------------------------------
+
+    def _apply_wires(self, data: dict) -> bool:
+        """Отправить IPC-команды для wire management (SHM + routes).
+
+        Порядок: teardown removed → setup added → teardown+setup modified.
+
+        Args:
+            data: SystemTopology dict.
+
+        Returns:
+            True если все команды отправлены.
+        """
+        if self._cmd is None:
+            logger.debug("TopologyBridge: command_handler не задан, пропуск wires")
+            return True
+
+        commands = extract_wire_commands(self._current, data)
+        if not commands:
+            return True
+
+        success = True
+        for cmd in commands:
+            ok = self._cmd.send("process.command", data=cmd)
+            if not ok:
+                logger.error("TopologyBridge: wire-команда не отправлена: %s", cmd)
+                success = False
+            else:
+                logger.info(
+                    "TopologyBridge: wire-команда отправлена: %s (%s)",
+                    cmd.get("cmd"),
+                    cmd.get("wire_key"),
+                )
+
+        return success
 
     # ------------------------------------------------------------------
     # Транспорт C: Direct API → DisplayWindowManager
