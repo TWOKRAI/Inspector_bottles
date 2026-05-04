@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 from PySide6 import QtCore
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QColor, QPen
+
+from multiprocess_prototype.frontend.bridges.wire_data_bridge import WireStatus
 
 from .graph_builder import GraphBuilder
 from .plugin_process_node import PROCESS_NODE_TYPE, PluginProcessNode
@@ -32,6 +35,18 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.models.cross_process_model import (
         CrossProcessModel,
     )
+
+# ---------------------------------------------------------------------------
+# Цветовая схема статусов wire-соединений
+# ---------------------------------------------------------------------------
+
+WIRE_STATUS_COLORS: dict[WireStatus, tuple[int, int, int]] = {
+    WireStatus.NOT_APPLIED: (128, 128, 128),  # Серый — не применён
+    WireStatus.PENDING: (255, 200, 0),         # Жёлтый — ожидает подтверждения
+    WireStatus.IDLE: (100, 180, 255),           # Голубой — подключён, данных нет
+    WireStatus.ACTIVE: (50, 220, 80),           # Зелёный — данные передаются
+    WireStatus.BROKEN: (230, 60, 60),           # Красный — ошибка
+}
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +93,9 @@ class PluginGraphAdapter(QtCore.QObject):
 
         # Маппинг wire: (source_addr, target_addr) → wire_key
         self._addr_wire_map: dict[tuple[str, str], str] = {}
+
+        # Обратный маппинг: wire_key → pipe QGraphicsPathItem (для окраски)
+        self._wire_key_to_pipe: dict[str, Any] = {}
 
         # Флаг подавления сигналов при programmatic update
         self._suppress: bool = False
@@ -134,12 +152,16 @@ class PluginGraphAdapter(QtCore.QObject):
         - Инициализации вкладки
         - Изменениях в секции processes (подписка)
         - Load Blueprint
+
+        После построения сцены: строим маппинг wire_key → pipe item
+        и сбрасываем все цвета в NOT_APPLIED (серый).
         """
         with self._block_signals():
             self._builder.clear()
             self._node_map.clear()
             self._reverse_map.clear()
             self._addr_wire_map.clear()
+            self._wire_key_to_pipe.clear()
 
             # Обновить кэш cross_model
             self._cross_model.invalidate()
@@ -157,6 +179,9 @@ class PluginGraphAdapter(QtCore.QObject):
             # Сохранить маппинг edge→wire_key из builder
             self._addr_wire_map.update(addr_to_wire_key)
 
+            # Построить маппинг wire_key → pipe item и сбросить цвета
+            self._rebuild_pipe_map()
+
         logger.info(
             "PluginGraphAdapter: сцена загружена — %d нод, %d wires",
             len(self._node_map),
@@ -169,6 +194,91 @@ class PluginGraphAdapter(QtCore.QObject):
         Стратегия: полный rebuild. Оптимизация (diff) — в будущих фазах.
         """
         self.load_scene()
+
+    # ------------------------------------------------------------------
+    # Цвет pipes — runtime-статусы wire-соединений
+    # ------------------------------------------------------------------
+
+    def _rebuild_pipe_map(self) -> None:
+        """Построить маппинг wire_key → pipe QGraphicsPathItem.
+
+        Обходит items сцены NodeGraphQt, ищет pipe items (имеют input_port
+        и output_port), сопоставляет их с _addr_wire_map по адресам портов.
+        Все найденные pipes окрашиваются в цвет NOT_APPLIED (серый).
+        """
+        self._wire_key_to_pipe.clear()
+
+        try:
+            viewer = self._graph.viewer()
+            if viewer is None:
+                return
+            scene = viewer.scene()
+            if scene is None:
+                return
+
+            for item in scene.items():
+                in_port = getattr(item, "input_port", None)
+                out_port = getattr(item, "output_port", None)
+                if in_port is None or out_port is None:
+                    continue
+
+                wire_key = self._find_wire_key_for_ports(in_port, out_port)
+                if wire_key is not None:
+                    self._wire_key_to_pipe[wire_key] = item
+                    # Сбросить цвет в NOT_APPLIED
+                    self._set_pipe_color(item, WireStatus.NOT_APPLIED)
+
+        except Exception as exc:
+            logger.debug("_rebuild_pipe_map: %s", exc)
+
+    def _set_pipe_color(self, pipe_item: Any, status: WireStatus) -> None:
+        """Установить цвет pipe item согласно статусу wire.
+
+        NodeGraphQt pipe items — QGraphicsPathItem. Цвет задаётся через QPen.
+        Для ACTIVE — толщина 3px, остальные — 2px.
+
+        Args:
+            pipe_item: QGraphicsPathItem из сцены NodeGraphQt.
+            status: Статус wire для выбора цвета.
+        """
+        rgb = WIRE_STATUS_COLORS.get(status, WIRE_STATUS_COLORS[WireStatus.NOT_APPLIED])
+        color = QColor(*rgb)
+        width = 3 if status == WireStatus.ACTIVE else 2
+
+        try:
+            # Пробуем API NodeGraphQt если есть метод set_color
+            if hasattr(pipe_item, "set_color"):
+                pipe_item.set_color(*rgb)
+                return
+        except Exception:
+            pass
+
+        try:
+            pen = pipe_item.pen()
+            pen.setColor(color)
+            pen.setWidth(width)
+            pipe_item.setPen(pen)
+        except Exception as exc:
+            logger.debug("_set_pipe_color: не удалось установить цвет — %s", exc)
+
+    def update_wire_colors(self, statuses: dict[str, WireStatus]) -> None:
+        """Обновить цвета pipes на канвасе согласно runtime-статусам.
+
+        Вызывается из ConstructorTabWidget при получении сигнала
+        WireDataBridge.statuses_changed.
+
+        Args:
+            statuses: Словарь wire_key → WireStatus от WireDataBridge.
+        """
+        for wire_key, status in statuses.items():
+            pipe_item = self._wire_key_to_pipe.get(wire_key)
+            if pipe_item is not None:
+                self._set_pipe_color(pipe_item, status)
+            else:
+                logger.debug(
+                    "update_wire_colors: pipe для wire '%s' не найден в маппинге",
+                    wire_key,
+                )
 
     # ------------------------------------------------------------------
     # Qt-сигнал: port_connected (user drag wire)
@@ -227,10 +337,59 @@ class PluginGraphAdapter(QtCore.QObject):
         # Зарегистрировать маппинг адресов → wire_key
         self._addr_wire_map[(source_addr, target_addr)] = wire_key
 
+        # Найти pipe item в сцене и сохранить в маппинг wire_key → pipe
+        self._register_pipe_for_wire(wire_key, in_port, out_port)
+
         logger.info(
             "Wire создан: %s — %s → %s",
             wire_key, source_addr, target_addr,
         )
+
+    def _register_pipe_for_wire(
+        self,
+        wire_key: str,
+        in_port: Any,
+        out_port: Any,
+    ) -> None:
+        """Найти pipe item в сцене для пары портов и сохранить в маппинг.
+
+        Вызывается после успешного создания wire через drag-connect.
+
+        Args:
+            wire_key: Ключ wire в конфигурации.
+            in_port: Входной порт NodeGraphQt.
+            out_port: Выходной порт NodeGraphQt.
+        """
+        try:
+            viewer = self._graph.viewer()
+            if viewer is None:
+                return
+            scene = viewer.scene()
+            if scene is None:
+                return
+
+            # Ищем pipe item, у которого совпадают порты
+            for item in scene.items():
+                item_in = getattr(item, "input_port", None)
+                item_out = getattr(item, "output_port", None)
+                if item_in is None or item_out is None:
+                    continue
+                # Сравниваем по объекту (ссылка)
+                if item_in is in_port and item_out is out_port:
+                    self._wire_key_to_pipe[wire_key] = item
+                    self._set_pipe_color(item, WireStatus.NOT_APPLIED)
+                    logger.debug(
+                        "_register_pipe_for_wire: pipe для wire '%s' зарегистрирован",
+                        wire_key,
+                    )
+                    return
+
+            logger.debug(
+                "_register_pipe_for_wire: pipe для wire '%s' не найден в сцене",
+                wire_key,
+            )
+        except Exception as exc:
+            logger.debug("_register_pipe_for_wire: %s", exc)
 
     # ------------------------------------------------------------------
     # Qt-сигнал: port_disconnected
@@ -262,6 +421,8 @@ class PluginGraphAdapter(QtCore.QObject):
                 self._wire_model.remove_wire(wk)
                 # Удалить из маппинга адресов → wire_key
                 self._addr_wire_map.pop((source_addr, target_addr), None)
+                # Удалить из маппинга wire_key → pipe
+                self._wire_key_to_pipe.pop(wk, None)
                 logger.info("Wire удалён: %s", wk)
                 return
 
@@ -392,4 +553,4 @@ class PluginGraphAdapter(QtCore.QObject):
                 self._graph.clear_selection()
 
 
-__all__ = ["PluginGraphAdapter"]
+__all__ = ["PluginGraphAdapter", "WIRE_STATUS_COLORS"]
