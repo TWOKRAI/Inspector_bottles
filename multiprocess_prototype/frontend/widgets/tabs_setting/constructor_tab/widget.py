@@ -569,6 +569,14 @@ class ConstructorTabWidget(QWidget):
         """Wire выбран — заполнить WireInspectorPanel, показать если dashboard не активен."""
         wire_data = self._editor._data.get("wires", {}).get(wire_key)
         if wire_data is not None:
+            # Заполнить display combo актуальными displays перед показом wire
+            displays_data = self._editor._data.get("displays", {})
+            displays_list = [
+                {"key": dk, "name": dd.get("name", dk)}
+                for dk, dd in displays_data.items()
+            ]
+            self._wire_panel.set_available_displays(displays_list)
+
             # Всегда обновляем данные панели — чтобы были актуальны после снятия dashboard
             self._wire_panel.show_wire(wire_key, dict(wire_data))
             # Переключить stack только если dashboard не показан
@@ -606,6 +614,20 @@ class ConstructorTabWidget(QWidget):
         if self._wire_model is not None:
             self._wire_model.modify_wire(wire_key, changed_fields)
             self._update_status(f"Wire обновлён: {wire_key}")
+
+        # Обработка display_target — обновить source_ref в displays section
+        if "display_target" in changed_fields:
+            display_key = changed_fields["display_target"]
+            if display_key and hasattr(self._editor, "_data"):
+                displays = self._editor._data.get("displays", {})
+                if display_key in displays:
+                    # Получить source address из wire
+                    wire_data = self._editor._data.get("wires", {}).get(wire_key, {})
+                    source_addr = wire_data.get("source", "")
+                    self._editor.update_item(
+                        "displays", display_key, {"source_ref": source_addr}
+                    )
+                    self._update_status(f"Display '{display_key}' ← {source_addr}")
 
     # ------------------------------------------------------------------
     # Apply wires — применение конфигурации в runtime

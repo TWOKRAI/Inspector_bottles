@@ -87,6 +87,11 @@ class WireInspectorPanel(QWidget):
         self._description.setPlaceholderText("описание соединения")
         form.addRow("description:", self._description)
 
+        # display_target — быстрое назначение wire на display
+        self._display_combo = QComboBox(self)
+        self._display_combo.setPlaceholderText("(не назначен)")
+        form.addRow("Display:", self._display_combo)
+
         layout.addLayout(form)
 
         # Горизонтальный разделитель
@@ -107,6 +112,7 @@ class WireInspectorPanel(QWidget):
         self._transport.currentTextChanged.connect(self._on_transport_changed)
         self._description.textChanged.connect(self._on_description_changed)
         self._shm_panel.config_changed.connect(self._on_shm_config_changed)
+        self._display_combo.currentIndexChanged.connect(self._on_display_changed)
 
     # ------------------------------------------------------------------
     # Внутренние слоты
@@ -129,9 +135,34 @@ class WireInspectorPanel(QWidget):
         if self._wire_key is not None:
             self.wire_changed.emit(self._wire_key, {"shm_config": config_dict})
 
+    def _on_display_changed(self, index: int) -> None:
+        """Пользователь выбрал display для wire."""
+        if self._wire_key is None:
+            return
+        display_key = self._display_combo.currentData()  # userData — display_key или None
+        self.wire_changed.emit(self._wire_key, {"display_target": display_key})
+
     # ------------------------------------------------------------------
     # Публичный API
     # ------------------------------------------------------------------
+
+    def set_available_displays(self, displays: list[dict]) -> None:
+        """Заполнить combo доступными displays.
+
+        Args:
+            displays: список [{"key": "win_0", "name": "Main"}, ...]
+                      Пустой список → только "(нет)" в combo.
+        """
+        self._display_combo.blockSignals(True)
+        try:
+            self._display_combo.clear()
+            self._display_combo.addItem("(нет)", None)  # userData=None — не назначен
+            for d in displays:
+                key = d.get("key", "")
+                name = d.get("name", key)
+                self._display_combo.addItem(f"{name} ({key})", key)
+        finally:
+            self._display_combo.blockSignals(False)
 
     def show_wire(self, wire_key: str, wire_data: dict) -> None:
         """Заполнить панель данными wire-соединения.
@@ -170,6 +201,22 @@ class WireInspectorPanel(QWidget):
             self._transport.blockSignals(False)
             self._description.blockSignals(False)
 
+        # Display target — выбрать текущий display в combo
+        self._display_combo.blockSignals(True)
+        try:
+            display_target = wire_data.get("display_target")
+            if display_target:
+                idx = self._display_combo.findData(display_target)
+                if idx >= 0:
+                    self._display_combo.setCurrentIndex(idx)
+                else:
+                    # display_target задан, но не найден в combo — сбросить на "(нет)"
+                    self._display_combo.setCurrentIndex(0)
+            else:
+                self._display_combo.setCurrentIndex(0)
+        finally:
+            self._display_combo.blockSignals(False)
+
         # Определить имена процессов из адресов source/target (первая часть до точки)
         source_addr: str = wire_data.get("source", "")
         target_addr: str = wire_data.get("target", "")
@@ -203,6 +250,13 @@ class WireInspectorPanel(QWidget):
         finally:
             self._transport.blockSignals(False)
             self._description.blockSignals(False)
+
+        # Сбросить display combo на "(нет)"
+        self._display_combo.blockSignals(True)
+        try:
+            self._display_combo.setCurrentIndex(0)
+        finally:
+            self._display_combo.blockSignals(False)
 
         self._shm_panel.clear()
         self._shm_panel.setVisible(False)
