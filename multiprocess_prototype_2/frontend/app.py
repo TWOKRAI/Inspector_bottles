@@ -1,36 +1,65 @@
-"""app.py — запуск Qt event loop для GuiProcess.
-
-Функция run_gui(process) создаёт QApplication, главное окно-заглушку,
-safety-таймер для остановки по флагу процесса и запускает event loop.
-"""
-
+"""app.py — запуск Qt event loop для GuiProcess."""
 from __future__ import annotations
 
 import sys
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
+from PySide6.QtWidgets import QApplication
+
+from .windows.main_window import MainWindow
+from .widgets.camera.view import CameraView
+from .widgets.camera.presenter import CameraPresenter
 
 if TYPE_CHECKING:
     from .process import GuiProcess
 
 
 def run_gui(process: "GuiProcess") -> None:
-    """Создать QApplication и запустить Qt event loop.
-
-    Args:
-        process: GuiProcess — используется для проверки флага остановки
-                 и регистрации хука aboutToQuit.
-    """
-    # Получить существующий экземпляр или создать новый
+    """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
-    # Главное окно — заглушка для Task 4.2
-    window = QMainWindow()
-    window.setWindowTitle("Inspector v2")
-    window.setCentralWidget(QWidget())
-    window.resize(800, 600)
+    # Главное окно
+    window = MainWindow()
+
+    # Вкладка Camera
+    camera_view = CameraView()
+    camera_presenter = CameraPresenter(camera_view)
+    window.add_tab(camera_view, "Camera")
+
+    # Сохранить ссылки в process для доступа из других задач
+    process._window = window
+    process._camera_presenter = camera_presenter
+
+    # Подключить bridge signals
+    def _on_frame_received(msg_dict: dict) -> None:
+        """Slot: получен кадр через IPC."""
+        data = msg_dict.get("data", {})
+        frame = data.get("frame")  # numpy array если передан напрямую
+        if frame is not None:
+            camera_presenter.on_frame(frame)
+            window.increment_frame_count()
+        else:
+            # Если frame не в сообщении — будет реализовано при интеграции с реальной камерой
+            pass
+
+    def _on_state_updated(msg_dict: dict) -> None:
+        """Slot: обновление состояния от процесса. Полная реализация в Task 4.4."""
+        pass
+
+    process._bridge.frame_received.connect(_on_frame_received)
+    process._bridge.state_updated.connect(_on_state_updated)
+
+    # FPS таймер: раз в секунду считать fps и обновлять StatusBar
+    fps_timer = QTimer()
+    fps_timer.setInterval(1000)
+
+    def _update_fps() -> None:
+        count = window.reset_frame_count()
+        window.update_status(fps=float(count))
+
+    fps_timer.timeout.connect(_update_fps)
+    fps_timer.start()
 
     # Safety-таймер: проверяем флаг остановки каждую секунду
     safety_timer = QTimer()
@@ -44,11 +73,8 @@ def run_gui(process: "GuiProcess") -> None:
     safety_timer.timeout.connect(_check_stop)
     safety_timer.start()
 
-    # При выходе из Qt — сигнализируем процессу
-    def _on_about_to_quit() -> None:
-        process._stop_requested = True
-
-    app.aboutToQuit.connect(_on_about_to_quit)
+    # При выходе из Qt — сигнализируем процессу об остановке
+    app.aboutToQuit.connect(lambda: setattr(process, '_stop_requested', True))
 
     window.show()
     app.exec()
