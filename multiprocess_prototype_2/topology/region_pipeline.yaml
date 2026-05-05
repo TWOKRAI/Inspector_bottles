@@ -1,0 +1,172 @@
+# Region Pipeline — Camera → Resize → Split → Parallel processing → Stitch → GUI
+#
+# Демонстрация multi-region pipeline:
+#   1. camera_0        — захват кадров
+#   2. preprocessor     — масштабирование (ResizePlugin)
+#   3. region_splitter  — нарезка на 3 региона (2 ROI + full frame)
+#   4. process_negative — инверсия цвета (регион 0, верхний левый)
+#   5. process_grayscale— чёрно-белое (регион 1, верхний правый)
+#   6. process_flip     — вертикальный переворот (дефолтный регион, full frame)
+#   7. stitcher         — склейка всех регионов по координатам
+#   8. gui              — отображение результата
+#
+# Метаданные (координаты регионов) передаются через всю цепочку IPC.
+#
+# Запуск: python multiprocess_prototype_2/run.py multiprocess_prototype_2/topology/region_pipeline.yaml
+
+name: region_pipeline
+description: "Camera → Resize → Split → Negative/Grayscale/Flip → Stitch → GUI"
+
+processes:
+  # --- Камера: захват кадров ---
+  - process_name: camera_0
+    priority: high
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
+        plugin_name: capture
+        category: source
+        camera_id: 0
+        device_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        fps: 25
+        frame_targets:
+          - preprocessor
+
+  # --- Препроцессор: масштабирование ---
+  - process_name: preprocessor
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.resize.plugin.ResizePlugin
+        plugin_name: resize
+        category: processing
+        camera_id: 0
+        scale_factor: 1.0
+        resolution_width: 640
+        resolution_height: 480
+        interpolation: linear
+        frame_targets:
+          - region_splitter
+
+  # --- Нарезка на регионы ---
+  - process_name: region_splitter
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.region_split.plugin.RegionSplitPlugin
+        plugin_name: region_split
+        category: processing
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        regions:
+          - name: region_0
+            x: 0
+            y: 0
+            width: 320
+            height: 240
+            target: process_negative
+          - name: region_1
+            x: 320
+            y: 0
+            width: 320
+            height: 240
+            target: process_grayscale
+        default_region:
+          name: region_default
+          target: process_flip
+
+  # --- Обработка: негатив (верхний левый регион) ---
+  - process_name: process_negative
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.negative.plugin.NegativePlugin
+        plugin_name: negative
+        category: processing
+        camera_id: 0
+        resolution_width: 320
+        resolution_height: 240
+        target: stitcher
+
+  # --- Обработка: чёрно-белое (верхний правый регион) ---
+  - process_name: process_grayscale
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.grayscale.plugin.GrayscalePlugin
+        plugin_name: grayscale
+        category: processing
+        camera_id: 0
+        resolution_width: 320
+        resolution_height: 240
+        target: stitcher
+
+  # --- Обработка: переворот (полный кадр) ---
+  - process_name: process_flip
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.flip.plugin.FlipPlugin
+        plugin_name: flip
+        category: processing
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        target: stitcher
+
+  # --- Склейка регионов ---
+  - process_name: stitcher
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.stitcher.plugin.StitcherPlugin
+        plugin_name: stitcher
+        category: processing
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        expected_regions:
+          - region_0
+          - region_1
+          - region_default
+        layout: original
+        timeout_sec: 0.5
+        target: gui
+
+  # --- GUI: отображение ---
+  - process_name: gui
+    process_class: multiprocess_prototype_2.frontend.process.GuiProcess
+    plugins: []
+
+wires:
+  # Камера → Препроцессор
+  - source: camera_0.capture.frame
+    target: preprocessor.resize.frame
+    description: "BGR-кадры с камеры → масштабирование"
+
+  # Препроцессор → Нарезка на регионы
+  - source: preprocessor.resize.frame
+    target: region_splitter.region_split.frame
+    description: "Масштабированный кадр → нарезка на регионы"
+
+  # Регионы → Обработчики
+  - source: region_splitter.region_split.region
+    target: process_negative.negative.region
+    description: "Регион → негатив"
+
+  - source: region_splitter.region_split.region
+    target: process_grayscale.grayscale.frame
+    description: "Регион → grayscale"
+
+  - source: region_splitter.region_split.region
+    target: process_flip.flip.region
+    description: "Регион → переворот"
+
+  # Обработчики → Stitcher
+  - source: process_negative.negative.region
+    target: stitcher.stitcher.region
+    description: "Негатив-регион → склейка"
+
+  - source: process_grayscale.grayscale.frame
+    target: stitcher.stitcher.region
+    description: "Grayscale-регион → склейка"
+
+  - source: process_flip.flip.region
+    target: stitcher.stitcher.region
+    description: "Перевёрнутый регион → склейка"

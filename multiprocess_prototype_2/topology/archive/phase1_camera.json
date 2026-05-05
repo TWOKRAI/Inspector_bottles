@@ -1,0 +1,42 @@
+{
+  "name": "phase1_camera",
+  "description": "Camera capture → SHM → IPC frame_ready → frame counter",
+  "processes": [
+    {
+      "process_name": "camera_0",
+      "plugins": [
+        {
+          "plugin_class": "multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin",
+          "plugin_name": "capture",
+          "category": "source",
+          "camera_id": 0,
+          "device_id": 0,
+          "fps": 25,
+          "resolution_width": 640,
+          "resolution_height": 480,
+          "ring_buffer_size": 3
+        }
+      ],
+      "priority": "high"
+    },
+    {
+      "process_name": "processor_0",
+      "plugins": [
+        {
+          "plugin_class": "multiprocess_prototype_2.plugins.frame_counter.plugin.FrameCounterPlugin",
+          "plugin_name": "frame_counter",
+          "category": "processing",
+          "log_interval_sec": 3.0
+        }
+      ],
+      "priority": "normal"
+    }
+  ],
+  "wires": [
+    {
+      "source": "camera_0.capture.frame",
+      "target": "processor_0.frame_counter.frame",
+      "description": "BGR-кадры с камеры → счётчик"
+    }
+  ]
+}

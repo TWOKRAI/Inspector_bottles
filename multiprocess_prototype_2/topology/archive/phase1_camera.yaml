@@ -1,0 +1,39 @@
+# Phase 1 — Camera capture + frame counter
+# Доказательство: кадры проходят через SHM ring-buffer и IPC между процессами.
+#
+# Процессы:
+#   camera_0    — захват с вебкамеры (cv2) → SHM → IPC frame_ready
+#   processor_0 — приёмник кадров (счётчик + FPS лог)
+#
+# Wire: camera_0.capture.frame → processor_0.frame_counter.frame
+
+name: phase1_camera
+description: "Camera capture → SHM → IPC frame_ready → frame counter"
+
+processes:
+  # --- Камера: захват кадров ---
+  - process_name: camera_0
+    priority: high          # камера = real-time, выше приоритет
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
+        plugin_name: capture
+        category: source
+        # Override defaults из system.yaml:
+        camera_id: 0
+        device_id: 0        # /dev/video0 или Windows camera index
+        # fps, resolution, ring_buffer_size — берутся из system.yaml (camera section)
+
+  # --- Процессор: приём и подсчёт кадров ---
+  - process_name: processor_0
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.frame_counter.plugin.FrameCounterPlugin
+        plugin_name: frame_counter
+        category: processing
+        log_interval_sec: 3.0   # логировать FPS каждые 3 секунды
+
+# --- Связи между портами ---
+wires:
+  - source: camera_0.capture.frame
+    target: processor_0.frame_counter.frame
+    description: "BGR-кадры с камеры → счётчик"

@@ -1,0 +1,31 @@
+# Inspector Bottles v2 — системные defaults
+# Topology JSON (topology/*.json) описывает СТРУКТУРУ (процессы, плагины, wires).
+# Этот файл описывает ЗНАЧЕНИЯ по умолчанию для всех плагинов.
+# Плагин в topology может override любое поле — здесь только базовые defaults.
+
+# --- Системные параметры ---
+system:
+  stop_timeout: 5.0           # таймаут graceful shutdown (сек)
+  shm_budget_mb: 512          # лимит общей SHM-памяти
+  log_dir: ""                 # пустой = авто (./logs/)
+
+# --- Камеры (defaults для capture-плагинов) ---
+camera:
+  source_type: simulator      # simulator | webcam | hikvision | file
+  fps: 25
+  resolution_width: 640
+  resolution_height: 480
+  ring_buffer_size: 3
+
+# --- Обработка ---
+processing:
+  worker_pool_size: 0         # 0 = пул отключён
+
+# --- Дисплей ---
+display:
+  enabled: true
+
+# --- Хранение ---
+storage:
+  db_path: data/inspector.db
+  batch_size: 100

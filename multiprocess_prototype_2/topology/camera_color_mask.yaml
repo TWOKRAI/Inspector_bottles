@@ -1,0 +1,45 @@
+# Camera → ColorMask HSV filtering
+# HSV-фильтрация работает, пороги изменяются runtime через set_hsv_range.
+#
+# Процессы:
+#   camera_0    — захват с вебкамеры → SHM → IPC frame_ready
+#   processor_0 — color_mask: BGR → HSV inRange → binary mask
+#
+# Wire: camera_0.capture.frame → processor_0.color_mask.frame
+# Port check: image/bgr (H,W,3) → image/bgr (H,W,3) = OK
+
+name: camera_color_mask
+description: "Camera capture → ColorMask HSV filtering (runtime threshold tuning)"
+
+processes:
+  # --- Камера ---
+  - process_name: camera_0
+    priority: high
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
+        plugin_name: capture
+        category: source
+        camera_id: 0
+        device_id: 0
+
+  # --- Процессор: color mask ---
+  - process_name: processor_0
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.color_mask.plugin.ColorMaskPlugin
+        plugin_name: color_mask
+        category: processing
+        camera_id: 0
+        # Зелёный диапазон для демо
+        h_min: 35
+        h_max: 85
+        s_min: 50
+        s_max: 255
+        v_min: 50
+        v_max: 255
+
+# --- Связи ---
+wires:
+  - source: camera_0.capture.frame
+    target: processor_0.color_mask.frame
+    description: "BGR-кадры → HSV color mask"

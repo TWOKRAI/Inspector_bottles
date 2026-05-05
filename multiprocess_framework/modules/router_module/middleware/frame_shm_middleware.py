@@ -79,7 +79,8 @@ class FrameShmMiddleware:
         Если msg["data"] не содержит SHM-координат — пропускает без изменений.
 
         Стратегия чтения (приоритет):
-          1. MemoryManager.read_images() — если handles уже открыты (owner-процесс)
+          1. MemoryManager.read_images() с координатами из сообщения
+             (shm_owner/shm_name из data, fallback на self._owner/self._slot)
           2. Прямое открытие SharedMemory по shm_actual_name (consumer-процесс, другой OS-процесс)
              shm_actual_name передаётся от owner через IPC (включает PID на Windows)
         """
@@ -93,9 +94,13 @@ class FrameShmMiddleware:
         if shm_name is None or shm_index is None:
             return msg
 
+        # Координаты из сообщения (приоритет) или конфигурация middleware (fallback)
+        owner = data.get("shm_owner", self._owner)
+        slot = shm_name or self._slot
+
         # Попытка 1: через MemoryManager (работает если handles открыты в этом процессе)
         if self._mm:
-            images = self._mm.read_images(self._owner, self._slot, shm_index, n=1)
+            images = self._mm.read_images(owner, slot, shm_index, n=1)
             if images:
                 msg["frame"] = images[0]
                 return msg
@@ -128,8 +133,10 @@ class FrameShmMiddleware:
                         msg["frame"] = arr.reshape((h, w, c)).copy()
                 finally:
                     shm.close()
-            except Exception:
-                # Не удалось прочитать — пропускаем без frame
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger("FrameShmMiddleware").warning(
+                    "SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name
+                )
 
         return msg

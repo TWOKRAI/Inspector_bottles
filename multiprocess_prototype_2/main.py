@@ -3,7 +3,7 @@
 Декларативный запуск:
   1. Загрузка system.yaml (defaults)
   2. Автообнаружение плагинов
-  3. Загрузка topology из JSON + merge defaults
+  3. Загрузка topology из YAML/JSON + merge defaults
   4. Валидация
   5. Запуск через SystemLauncher
 """
@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 PLUGINS_DIR = HERE / "plugins"
 CONFIG_PATH = HERE / "config" / "system.yaml"
-DEFAULT_BLUEPRINT = HERE / "topology" / "camera_gui.yaml"
+DEFAULT_BLUEPRINT = HERE / "topology" / "region_pipeline.yaml"
 
 
 def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
@@ -49,10 +49,10 @@ def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
 
 
 def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
-    """Сборка системы из system.yaml + topology JSON.
+    """Сборка системы из system.yaml + topology YAML/JSON.
 
     Args:
-        topology_path: путь к topology JSON (по умолчанию phase0_heartbeat.json)
+        topology_path: путь к topology YAML/JSON (по умолчанию camera_gui.yaml)
 
     Returns:
         Готовый к запуску SystemLauncher
@@ -77,7 +77,7 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     discovered = PluginRegistry.discover(str(PLUGINS_DIR))
     print(f"[bootstrap] обнаружено плагинов: {discovered}")
 
-    # 3. Загрузка topology из JSON
+    # 3. Загрузка topology из YAML/JSON
     bp_path = Path(topology_path) if topology_path else DEFAULT_BLUEPRINT
     if not bp_path.exists():
         print(f"[bootstrap] ОШИБКА: topology не найден: {bp_path}", file=sys.stderr)

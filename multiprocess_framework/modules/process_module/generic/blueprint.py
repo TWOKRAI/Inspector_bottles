@@ -171,8 +171,10 @@ class SystemBlueprint(SchemaBase):
         """
         errors: list[str] = []
 
-        # Собираем карту портов: "process.plugin.port" → Port
-        port_map: dict[str, tuple[Port, str]] = {}  # address → (port, "input"|"output")
+        # Раздельные карты входов и выходов — плагин может иметь
+        # одноимённые input/output порты (e.g. "frame" → "frame")
+        input_map: dict[str, Port] = {}   # address → Port
+        output_map: dict[str, Port] = {}  # address → Port
         process_names = set()
 
         for proc in self.processes:
@@ -191,43 +193,37 @@ class SystemBlueprint(SchemaBase):
 
                 for port in entry.inputs:
                     addr = f"{proc.process_name}.{plugin_name}.{port.name}"
-                    port_map[addr] = (port, "input")
+                    input_map[addr] = port
 
                 for port in entry.outputs:
                     addr = f"{proc.process_name}.{plugin_name}.{port.name}"
-                    port_map[addr] = (port, "output")
+                    output_map[addr] = port
 
         # Проверяем Wire-связи
         wired_inputs: set[str] = set()
 
         for wire in self.wires:
-            if wire.source not in port_map:
-                errors.append(f"Wire: источник '{wire.source}' не найден")
+            if wire.source not in output_map:
+                errors.append(f"Wire: источник '{wire.source}' не найден среди выходов")
                 continue
-            if wire.target not in port_map:
-                errors.append(f"Wire: приёмник '{wire.target}' не найден")
+            if wire.target not in input_map:
+                errors.append(f"Wire: приёмник '{wire.target}' не найден среди входов")
                 continue
 
-            src_port, src_dir = port_map[wire.source]
-            tgt_port, tgt_dir = port_map[wire.target]
+            src_port = output_map[wire.source]
+            tgt_port = input_map[wire.target]
 
-            if src_dir != "output":
-                errors.append(f"Wire: '{wire.source}' не является выходом")
-            if tgt_dir != "input":
-                errors.append(f"Wire: '{wire.target}' не является входом")
-
-            if src_dir == "output" and tgt_dir == "input":
-                if not are_ports_compatible(src_port, tgt_port):
-                    errors.append(
-                        f"Wire: {wire.source} ({src_port.dtype} {src_port.shape}) "
-                        f"несовместим с {wire.target} ({tgt_port.dtype} {tgt_port.shape})"
-                    )
-                else:
-                    wired_inputs.add(wire.target)
+            if not are_ports_compatible(src_port, tgt_port):
+                errors.append(
+                    f"Wire: {wire.source} ({src_port.dtype} {src_port.shape}) "
+                    f"несовместим с {wire.target} ({tgt_port.dtype} {tgt_port.shape})"
+                )
+            else:
+                wired_inputs.add(wire.target)
 
         # Проверяем обязательные входы
-        for addr, (port, direction) in port_map.items():
-            if direction == "input" and not port.optional and addr not in wired_inputs:
+        for addr, port in input_map.items():
+            if not port.optional and addr not in wired_inputs:
                 # Входы внутри процесса могут быть покрыты auto-wiring
                 # (предыдущий плагин в цепочке), пропускаем такие
                 parts = addr.split(".")

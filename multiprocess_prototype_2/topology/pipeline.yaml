@@ -1,0 +1,71 @@
+# Phase 3: Full Pipeline — Camera → Processing → Output (fan-out)
+#
+# Демонстрация fan-out: один processing-плагин отправляет результат
+# двум output-получателям (database + frame_saver).
+#
+# Процессы:
+#   camera_0    — захват кадров → SHM → IPC frame_ready
+#   processor_0 — grayscale + отправка frame_processed
+#   output_0    — database (batch SQLite) + frame_saver (кадры на диск)
+#
+# Fan-out wire: processor_0.grayscale.frame → output_0.database.result
+#                                           → output_0.frame_saver.frame
+
+name: phase3_pipeline
+description: "Camera → Grayscale → Database + FrameSaver (fan-out output)"
+
+processes:
+  # --- Камера: захват кадров ---
+  - process_name: camera_0
+    priority: high
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
+        plugin_name: capture
+        category: source
+        camera_id: 0
+        device_id: 0
+
+  # --- Процессор: grayscale ---
+  - process_name: processor_0
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.grayscale.plugin.GrayscalePlugin
+        plugin_name: grayscale
+        category: processing
+        camera_id: 0
+
+  # --- Output: database + frame_saver (в одном процессе) ---
+  - process_name: output_0
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.database.plugin.DatabasePlugin
+        plugin_name: database
+        category: output
+        db_path: data/inspector.db
+        batch_size: 50
+        flush_interval_sec: 2.0
+
+      - plugin_class: multiprocess_prototype_2.plugins.frame_saver.plugin.FrameSaverPlugin
+        plugin_name: frame_saver
+        category: output
+        camera_id: 0
+        output_dir: data/frames
+        save_every_n: 25
+        image_format: jpeg
+        jpeg_quality: 85
+
+# --- Связи между портами ---
+wires:
+  # Камера → Процессор
+  - source: camera_0.capture.frame
+    target: processor_0.grayscale.frame
+    description: "BGR-кадры с камеры → grayscale"
+
+  # Fan-out: процессор → оба output-плагина
+  - source: processor_0.grayscale.frame
+    target: output_0.frame_saver.frame
+    description: "Обработанные кадры → сохранение на диск"
+
+  - source: processor_0.grayscale.frame
+    target: output_0.database.result
+    description: "Метаданные обработки → запись в БД"

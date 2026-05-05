@@ -1,0 +1,20 @@
+{
+  "name": "phase0_heartbeat",
+  "description": "Минимальный proof: один процесс, один heartbeat-плагин",
+  "processes": [
+    {
+      "process_name": "monitor",
+      "plugins": [
+        {
+          "plugin_class": "multiprocess_prototype_2.plugins.heartbeat.plugin.HeartbeatPlugin",
+          "plugin_name": "heartbeat",
+          "category": "utility",
+          "interval_sec": 2.0,
+          "message": "alive"
+        }
+      ],
+      "priority": "normal"
+    }
+  ],
+  "wires": []
+}
