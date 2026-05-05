@@ -131,6 +131,29 @@ class TopologyEditorWidget(QWidget):
     #  Обновление UI из данных presenter                                  #
     # ------------------------------------------------------------------ #
 
+    def set_topology_dir(self, dir_path: Path) -> None:
+        """Установить директорию с topology файлами.
+
+        Сканирует *.yaml/*.yml, загружает первый найденный.
+        При Load — QFileDialog откроется в этой директории.
+        """
+        self._topology_dir = dir_path
+        if not dir_path.is_dir():
+            return
+        # Найти все yaml файлы
+        files = sorted(dir_path.glob("*.yaml")) + sorted(dir_path.glob("*.yml"))
+        # Загрузить первый найденный (или текущий запущенный)
+        if files:
+            self.load_file(files[0])
+
+    def load_file(self, path: Path) -> None:
+        """Загрузить topology из файла."""
+        try:
+            self._presenter.load_from_file(path)
+            self._refresh_all()
+        except Exception:
+            pass  # Если файл не читается — просто оставить пустым
+
     def _refresh_all(self) -> None:
         """Синхронизировать все виджеты с текущим состоянием presenter."""
         bp = self._presenter.blueprint
@@ -160,8 +183,9 @@ class TopologyEditorWidget(QWidget):
 
     def _on_load(self) -> None:
         """Открыть YAML-файл и загрузить blueprint."""
+        start_dir = str(self._topology_dir) if hasattr(self, "_topology_dir") else ""
         path_str, _ = QFileDialog.getOpenFileName(
-            self, "Открыть topology", "", "YAML Files (*.yaml *.yml);;All Files (*)"
+            self, "Открыть topology", start_dir, "YAML Files (*.yaml *.yml);;All Files (*)"
         )
         if not path_str:
             return

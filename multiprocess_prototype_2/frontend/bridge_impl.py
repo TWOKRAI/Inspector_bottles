@@ -9,9 +9,10 @@ class DataReceiverBridge(QObject):
     Qt гарантирует queued connection для cross-thread signals.
     """
 
-    frame_received = Signal(dict)
-    state_updated = Signal(dict)
-    command_response = Signal(dict)
+    # object вместо dict — чтобы numpy array внутри msg не терялся при queued connection
+    frame_received = Signal(object)
+    state_updated = Signal(object)
+    command_response = Signal(object)
 
     def dispatch(self, msg_dict: dict) -> None:
         """Классифицировать сообщение по data_type и emit соответствующий signal."""

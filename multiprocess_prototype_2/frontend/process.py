@@ -4,11 +4,13 @@
   - main thread: Qt event loop (QApplication.exec())
   - data_receiver worker: получает IPC data-сообщения, emit'ит через DataReceiverBridge
   - _init_system_threads() НЕ переопределён — стандартный framework message_processor
+  - FrameShmMiddleware.on_receive — автоматически извлекает numpy frame из SHM
 """
 
 from __future__ import annotations
 
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
+from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
 
 from .bridge import DataReceiverBridge
@@ -21,13 +23,23 @@ class GuiProcess(ProcessModule):
     run() запускает Qt event loop и блокирует main thread до закрытия окна.
     Данные от других процессов поступают через data_receiver worker (отдельный поток),
     который emit'ит Qt signals через DataReceiverBridge (queued connection).
+
+    FrameShmMiddleware.on_receive подключён к router — входящие frame_ready
+    автоматически обогащаются numpy frame из SHM (msg["frame"]).
     """
 
     # _init_system_threads() — НЕ переопределён: стандартный framework message_processor
 
     def _init_application_threads(self) -> None:
-        """Создать DataReceiverBridge и worker data_receiver."""
+        """Создать DataReceiverBridge, SHM middleware и worker data_receiver."""
         super()._init_application_threads()
+
+        # SHM receive middleware: при получении frame_ready — читать кадр из SHM
+        if self.router_manager and self.memory_manager:
+            self._recv_frame_mw = FrameShmMiddleware(
+                self.memory_manager, owner="camera_0", slot="camera_0_frame"
+            )
+            self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
 
         # Создаём bridge в main thread — он будет использоваться из worker
         self._bridge = DataReceiverBridge()
@@ -42,7 +54,7 @@ class GuiProcess(ProcessModule):
         )
 
         self._log_info(
-            f"GuiProcess '{self.name}': bridge и data_receiver worker созданы",
+            f"GuiProcess '{self.name}': bridge + SHM middleware + data_receiver созданы",
             module="gui",
         )
 
@@ -54,15 +66,11 @@ class GuiProcess(ProcessModule):
                 time.sleep(0.05)
                 continue
             try:
-                msgs = self.router_manager.receive(timeout=0.1, channel_types=["data"])
-                for msg in msgs:
-                    # msg может быть dict или объект с to_dict()
-                    if isinstance(msg, dict):
-                        msg_dict = msg
-                    elif hasattr(msg, "to_dict"):
-                        msg_dict = msg.to_dict()
-                    else:
-                        msg_dict = dict(msg) if hasattr(msg, "__iter__") else {}
+                # return_messages=False → получаем сырые dict (после middleware)
+                msgs = self.router_manager.receive(
+                    timeout=0.1, channel_types=["data"], return_messages=False
+                )
+                for msg_dict in msgs:
                     self._bridge.dispatch(msg_dict)
             except Exception as exc:
                 self._log_error(

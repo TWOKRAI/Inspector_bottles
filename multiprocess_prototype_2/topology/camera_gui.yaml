@@ -1,0 +1,34 @@
+# Camera + GUI — захват с вебкамеры + отображение в Qt окне
+#
+# Процессы:
+#   camera_0 — захват с вебкамеры → SHM → IPC frame_ready → gui
+#   gui      — PySide6 окно, отображение кадров из SHM
+#
+# Для запуска: python multiprocess_prototype_2/run.py multiprocess_prototype_2/topology/camera_gui.yaml
+# Затем нажать "Start Capture" в табе Controls.
+
+name: camera_gui
+description: "Webcam capture -> GUI display (SHM ring-buffer)"
+
+processes:
+  # --- Камера ---
+  - process_name: camera_0
+    priority: high
+    plugins:
+      - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
+        plugin_name: capture
+        category: source
+        camera_id: 0
+        device_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        fps: 30
+        frame_targets:
+          - gui
+
+  # --- GUI ---
+  - process_name: gui
+    process_class: multiprocess_prototype_2.frontend.process.GuiProcess
+    plugins: []
+
+wires: []

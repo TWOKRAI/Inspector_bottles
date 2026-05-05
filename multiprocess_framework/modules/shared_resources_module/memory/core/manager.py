@@ -358,6 +358,18 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
     # Вспомогательные методы
     # =========================================================================
 
+    def get_actual_shm_name(self, process_name: str, shm_name: str, index: int) -> Optional[str]:
+        """Получить фактическое OS-имя SHM-блока по индексу слота.
+
+        На Windows имена создаются с PID (camera_0_frame_{PID}_0), поэтому
+        consumer-процесс не может угадать имя заранее. Этот метод позволяет
+        owner-процессу передать фактическое имя через IPC (в frame_data).
+        """
+        handles = self._local_handles.get(process_name, {}).get(shm_name)
+        if handles is None or index >= len(handles) or handles[index] is None:
+            return None
+        return handles[index].name
+
     def find_free_index(self, process_name: str, shm_name: str) -> Optional[int]:
         memory_data = self.get_memory_data(process_name, shm_name)
         if not memory_data:

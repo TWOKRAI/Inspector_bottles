@@ -48,25 +48,32 @@ def run_gui(process: "GuiProcess") -> None:
     topology_editor = TopologyEditorWidget()
     window.add_tab(topology_editor, "Topology")
 
+    # Установить директорию топологий для редактора
+    from pathlib import Path
+    # По умолчанию — директория topology рядом с frontend/
+    default_topo_dir = Path(__file__).resolve().parent.parent / "topology"
+    topology_editor.set_topology_dir(default_topo_dir)
+
     # Сохранить ссылки в process для доступа из других задач
     process._window = window
     process._camera_presenter = camera_presenter
 
     # Подключить bridge signals
     def _on_frame_received(msg_dict: dict) -> None:
-        """Slot: получен кадр через IPC."""
-        data = msg_dict.get("data", {})
-        frame = data.get("frame")  # numpy array если передан напрямую
+        """Slot: получен кадр через IPC.
+
+        FrameShmMiddleware.on_receive уже подставил msg["frame"] (numpy)
+        из SHM по координатам shm_actual_name.
+        """
+        frame = msg_dict.get("frame")
         if frame is not None:
             camera_presenter.on_frame(frame)
             window.increment_frame_count()
-        else:
-            # Если frame не в сообщении — будет реализовано при интеграции с реальной камерой
-            pass
 
     process._bridge.frame_received.connect(_on_frame_received)
     # Подключить state updates к таблице статусов процессов
     process._bridge.state_updated.connect(process_status.on_state_updated)
+
 
     # FPS таймер: раз в секунду считать fps и обновлять StatusBar
     fps_timer = QTimer()

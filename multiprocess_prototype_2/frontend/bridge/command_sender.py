@@ -26,6 +26,7 @@ class CommandSender:
         """
         msg = {
             "type": "command",
+            "command": command,
             "data_type": command,
             "sender": self._process.name,
             "targets": [target_process],

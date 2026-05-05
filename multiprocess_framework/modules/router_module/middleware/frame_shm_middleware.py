@@ -77,6 +77,11 @@ class FrameShmMiddleware:
         """Перехватить входящее сообщение: прочитать frame из SHM по координатам.
 
         Если msg["data"] не содержит SHM-координат — пропускает без изменений.
+
+        Стратегия чтения (приоритет):
+          1. MemoryManager.read_images() — если handles уже открыты (owner-процесс)
+          2. Прямое открытие SharedMemory по shm_actual_name (consumer-процесс, другой OS-процесс)
+             shm_actual_name передаётся от owner через IPC (включает PID на Windows)
         """
         data = msg.get("data")
         if not isinstance(data, dict):
@@ -88,11 +93,43 @@ class FrameShmMiddleware:
         if shm_name is None or shm_index is None:
             return msg
 
-        if not self._mm:
-            return msg
+        # Попытка 1: через MemoryManager (работает если handles открыты в этом процессе)
+        if self._mm:
+            images = self._mm.read_images(self._owner, self._slot, shm_index, n=1)
+            if images:
+                msg["frame"] = images[0]
+                return msg
 
-        images = self._mm.read_images(self._owner, self._slot, shm_index, n=1)
-        if images:
-            msg["frame"] = images[0]
+        # Попытка 2: прямое открытие SharedMemory по фактическому имени.
+        # TODO: Костыль — дублирует бинарный формат из write_images/create_shm_blocks.
+        #   Правильное решение: MemoryManager.attach_remote(shm_actual_name) — подключение
+        #   к чужому SHM через штатный API без знания layout.
+        #   Рефакторинг: https://github.com/... (Phase 5 или отдельный ADR)
+        shm_actual_name = data.get("shm_actual_name")
+        if shm_actual_name:
+            try:
+                from multiprocessing import shared_memory as _shm_mod
+                import struct as _struct
+                import numpy as _np
+
+                shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
+                try:
+                    buf = shm.buf
+                    # Читаем заголовок: num_images (uint32)
+                    num_images = _struct.unpack("I", buf[0:4])[0]
+                    if num_images > 0:
+                        # Заголовок изображения: h, w, c (3x uint32) + dtype char (1 byte)
+                        h, w, c = _struct.unpack("III", buf[4:16])
+                        dtype_char = chr(buf[16])
+                        dtype = _np.dtype(dtype_char)
+                        offset = 17
+                        pixel_count = h * w * c
+                        arr = _np.frombuffer(buf, dtype=dtype, count=pixel_count, offset=offset)
+                        msg["frame"] = arr.reshape((h, w, c)).copy()
+                finally:
+                    shm.close()
+            except Exception:
+                # Не удалось прочитать — пропускаем без frame
+                pass
 
         return msg
