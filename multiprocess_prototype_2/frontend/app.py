@@ -5,11 +5,15 @@ import sys
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
 
 from .windows.main_window import MainWindow
 from .widgets.camera.view import CameraView
 from .widgets.camera.presenter import CameraPresenter
+from .bridge.command_sender import CommandSender
+from .widgets.controls.command_panel import CommandPanel
+from .widgets.controls.process_status import ProcessStatusWidget
+from .widgets.topology.editor import TopologyEditorWidget
 
 if TYPE_CHECKING:
     from .process import GuiProcess
@@ -27,6 +31,23 @@ def run_gui(process: "GuiProcess") -> None:
     camera_presenter = CameraPresenter(camera_view)
     window.add_tab(camera_view, "Camera")
 
+    # Вкладка Controls
+    controls_widget = QWidget()
+    controls_layout = QVBoxLayout(controls_widget)
+
+    command_sender = CommandSender(process)
+    command_panel = CommandPanel(command_sender)
+    process_status = ProcessStatusWidget()
+
+    controls_layout.addWidget(command_panel)
+    controls_layout.addWidget(process_status)
+
+    window.add_tab(controls_widget, "Controls")
+
+    # Вкладка Topology Editor
+    topology_editor = TopologyEditorWidget()
+    window.add_tab(topology_editor, "Topology")
+
     # Сохранить ссылки в process для доступа из других задач
     process._window = window
     process._camera_presenter = camera_presenter
@@ -43,12 +64,9 @@ def run_gui(process: "GuiProcess") -> None:
             # Если frame не в сообщении — будет реализовано при интеграции с реальной камерой
             pass
 
-    def _on_state_updated(msg_dict: dict) -> None:
-        """Slot: обновление состояния от процесса. Полная реализация в Task 4.4."""
-        pass
-
     process._bridge.frame_received.connect(_on_frame_received)
-    process._bridge.state_updated.connect(_on_state_updated)
+    # Подключить state updates к таблице статусов процессов
+    process._bridge.state_updated.connect(process_status.on_state_updated)
 
     # FPS таймер: раз в секунду считать fps и обновлять StatusBar
     fps_timer = QTimer()
