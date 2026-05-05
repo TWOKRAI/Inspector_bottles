@@ -77,22 +77,32 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Приоритет", info="normal | high | low"),
     ] = "normal"
 
+    process_class: Annotated[
+        str,
+        FieldMeta("Класс процесса", info="Dotted path к классу (по умолчанию GenericProcess)"),
+    ] = ""
+
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
         # Восстановить PluginConfig-инстансы для агрегации memory
         plugin_configs = _restore_plugin_configs(self.plugins)
 
+        # Базовые kwargs — process_class передаётся если задан
+        base_kwargs: dict = dict(priority=self.priority)
+        if self.process_class:
+            base_kwargs["process_class"] = self.process_class
+
         if plugin_configs:
             return GenericProcessConfig.from_plugins(
                 process_name=self.process_name,
                 plugin_configs=plugin_configs,
-                priority=self.priority,
+                **base_kwargs,
             )
 
         return GenericProcessConfig(
             process_name=self.process_name,
             plugins=self.plugins,
-            priority=self.priority,
+            **base_kwargs,
         )
 
     @classmethod
