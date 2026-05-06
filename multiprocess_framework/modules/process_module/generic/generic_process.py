@@ -313,7 +313,7 @@ class GenericProcess(ProcessModule):
                 self.worker_manager.create_worker(
                     worker_name="data_receiver",
                     target=self._data_receiver.run_loop,
-                    config={"execution_mode": "loop", "priority": "high"},
+                    config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )
                 self.worker_manager.create_worker(
@@ -321,7 +321,7 @@ class GenericProcess(ProcessModule):
                     target=lambda stop, pause: self._pipeline_executor.run_loop(
                         self._chain_queue, stop, pause
                     ),
-                    config={"execution_mode": "loop", "priority": "high"},
+                    config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )
                 self._log_info(
@@ -348,7 +348,7 @@ class GenericProcess(ProcessModule):
                 self.worker_manager.create_worker(
                     worker_name=worker_name,
                     target=producer.run_loop,
-                    config={"execution_mode": "loop", "priority": "high"},
+                    config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )
                 self._log_info(
