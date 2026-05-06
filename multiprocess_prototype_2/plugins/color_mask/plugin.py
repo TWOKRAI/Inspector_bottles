@@ -1,13 +1,15 @@
-"""ColorMaskPlugin — HSV-маска по цвету.
+"""ColorMaskPlugin -- HSV-маска по цвету.
 
-Processing-плагин: получает frame_ready → читает BGR из SHM →
-cv2.cvtColor(HSV) → cv2.inRange → записывает маску в SHM → отправляет mask_ready.
-Пороги изменяются через команду set_hsv_range (runtime).
+Processing-плагин: process(items) -> items с cv2.inRange.
+Пороги настраиваются через:
+  - RegistersManager (если регистр color_mask доступен) — обновляются из GUI автоматически
+  - Команда set_hsv_range (fallback, legacy)
+  - Config defaults (если ни регистра, ни команды)
 """
 
 from __future__ import annotations
 
-import time
+from typing import Any
 
 import cv2
 import numpy as np
@@ -15,6 +17,7 @@ import numpy as np
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
+    for_each,
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
@@ -22,7 +25,7 @@ from multiprocess_framework.modules.process_module.plugins.registry import regis
 
 @register_plugin("color_mask", category="processing", description="HSV-маска по цвету")
 class ColorMaskPlugin(ProcessModulePlugin):
-    """HSV-маска по цвету с runtime-настройкой порогов."""
+    """HSV-маска по цвету с runtime-настройкой через регистр или команду."""
 
     name = "color_mask"
     category = "processing"
@@ -38,133 +41,106 @@ class ColorMaskPlugin(ProcessModulePlugin):
         "set_hsv_range": "set_hsv_range",
     }
 
+    def register_schema(self) -> Any | None:
+        """Вернуть ColorMaskRegisters для RegistersManager."""
+        try:
+            from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
+            return ColorMaskRegisters()
+        except ImportError:
+            return None
+
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка HSV-параметров и handler."""
+        """Настройка HSV-параметров: из регистра или config defaults."""
         cfg = ctx.config
-        self._camera_id: int = cfg.get("camera_id", 0)
-
-        # HSV-диапазон
-        self._lower = np.array([
-            cfg.get("h_min", 0),
-            cfg.get("s_min", 50),
-            cfg.get("v_min", 50),
-        ], dtype=np.uint8)
-        self._upper = np.array([
-            cfg.get("h_max", 180),
-            cfg.get("s_max", 255),
-            cfg.get("v_max", 255),
-        ], dtype=np.uint8)
-
-        self._width: int = cfg.get("resolution_width", 640)
-        self._height: int = cfg.get("resolution_height", 480)
-
-        self._pending_frame_info: dict | None = None
         self._ctx = ctx
 
-        # Handler для frame_ready
-        ctx.router_manager.register_message_handler(
-            "frame_ready", self._on_frame_ready
-        )
+        # Попытка получить регистр (если RegistersManager доступен)
+        self._reg = None
+        if ctx.registers is not None:
+            self._reg = ctx.registers.get_register(self.name)
 
-        ctx.log_info(
-            f"ColorMaskPlugin[{self._camera_id}]: "
-            f"HSV [{self._lower}]-[{self._upper}]"
-        )
+        if self._reg is not None:
+            # Регистр есть — HSV-пороги читаются из него (всегда актуальные)
+            # Переопределить defaults из config если заданы
+            for field, cfg_key in [
+                ("min_h", "h_min"), ("max_h", "h_max"),
+                ("min_s", "s_min"), ("max_s", "s_max"),
+                ("min_v", "v_min"), ("max_v", "v_max"),
+            ]:
+                if cfg_key in cfg:
+                    setattr(self._reg, field, cfg[cfg_key])
+
+            ctx.log_info(
+                f"ColorMaskPlugin: HSV из регистра "
+                f"[{self._reg.min_h},{self._reg.min_s},{self._reg.min_v}]-"
+                f"[{self._reg.max_h},{self._reg.max_s},{self._reg.max_v}]"
+            )
+        else:
+            # Graceful degradation — fallback на config/hardcode
+            self._lower = np.array([
+                cfg.get("h_min", 0),
+                cfg.get("s_min", 50),
+                cfg.get("v_min", 50),
+            ], dtype=np.uint8)
+            self._upper = np.array([
+                cfg.get("h_max", 180),
+                cfg.get("s_max", 255),
+                cfg.get("v_max", 255),
+            ], dtype=np.uint8)
+            ctx.log_info(f"ColorMaskPlugin: HSV из config [{self._lower}]-[{self._upper}]")
 
     def start(self, ctx: PluginContext) -> None:
-        """Создать processing worker."""
-        from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
-
-        cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
-        ctx.worker_manager.create_worker(
-            "mask_worker", self._process_loop, cfg, auto_start=True
-        )
-        ctx.log_info(f"ColorMaskPlugin[{self._camera_id}]: worker запущен")
-
-    def shutdown(self, ctx: PluginContext) -> None:
-        """Остановка."""
-        ctx.log_info(f"ColorMaskPlugin[{self._camera_id}]: shutdown")
+        """No-op -- обработка через process()."""
 
     # --- Команды ---
 
     def set_hsv_range(self, data: dict) -> dict:
-        """Обновить HSV-диапазон в runtime.
-
-        Args:
-            data: {"h_min": 10, "h_max": 90, "s_min": 100, ...}
-        """
-        if "h_min" in data:
-            self._lower[0] = data["h_min"]
-        if "h_max" in data:
-            self._upper[0] = data["h_max"]
-        if "s_min" in data:
-            self._lower[1] = data["s_min"]
-        if "s_max" in data:
-            self._upper[1] = data["s_max"]
-        if "v_min" in data:
-            self._lower[2] = data["v_min"]
-        if "v_max" in data:
-            self._upper[2] = data["v_max"]
-
-        self._ctx.log_info(
-            f"ColorMaskPlugin[{self._camera_id}]: HSV обновлён "
-            f"[{self._lower}]-[{self._upper}]"
-        )
-        return {"status": "ok", "lower": self._lower.tolist(), "upper": self._upper.tolist()}
+        """Обновить HSV-диапазон в runtime (legacy fallback)."""
+        if self._reg is not None:
+            # Через регистр — изменения автоматически видны в process()
+            for field, key in [
+                ("min_h", "h_min"), ("max_h", "h_max"),
+                ("min_s", "s_min"), ("max_s", "s_max"),
+                ("min_v", "v_min"), ("max_v", "v_max"),
+            ]:
+                if key in data:
+                    setattr(self._reg, field, data[key])
+            self._ctx.log_info(
+                f"ColorMaskPlugin: HSV обновлён через регистр "
+                f"[{self._reg.min_h},{self._reg.min_s},{self._reg.min_v}]-"
+                f"[{self._reg.max_h},{self._reg.max_s},{self._reg.max_v}]"
+            )
+            return {"status": "ok"}
+        else:
+            # Legacy: обновить numpy arrays
+            if "h_min" in data: self._lower[0] = data["h_min"]
+            if "h_max" in data: self._upper[0] = data["h_max"]
+            if "s_min" in data: self._lower[1] = data["s_min"]
+            if "s_max" in data: self._upper[1] = data["s_max"]
+            if "v_min" in data: self._lower[2] = data["v_min"]
+            if "v_max" in data: self._upper[2] = data["v_max"]
+            self._ctx.log_info(
+                f"ColorMaskPlugin: HSV обновлён [{self._lower}]-[{self._upper}]"
+            )
+            return {"status": "ok", "lower": self._lower.tolist(), "upper": self._upper.tolist()}
 
     # --- Обработка ---
 
-    def _on_frame_ready(self, msg: dict) -> None:
-        """Handler для frame_ready — сохранить info для worker."""
-        data = msg.get("data", {})
-        if data.get("camera_id") == self._camera_id:
-            self._pending_frame_info = data
+    @for_each
+    def process(self, item: dict) -> dict | None:
+        """BGR -> HSV -> inRange -> маска (BGR 3ch для pipeline совместимости)."""
+        frame = item.get("frame")
+        if frame is None:
+            return None
 
-    def _process_loop(self, stop_event, pause_event) -> None:
-        """Цикл: BGR из SHM → HSV mask → SHM → IPC mask_ready."""
-        while not stop_event.is_set():
-            if pause_event.is_set():
-                time.sleep(0.05)
-                continue
+        # HSV-пороги: из регистра (auto-update) или numpy arrays
+        if self._reg is not None:
+            lower = np.array([self._reg.min_h, self._reg.min_s, self._reg.min_v], dtype=np.uint8)
+            upper = np.array([self._reg.max_h, self._reg.max_s, self._reg.max_v], dtype=np.uint8)
+        else:
+            lower, upper = self._lower, self._upper
 
-            if self._pending_frame_info is None:
-                time.sleep(0.01)
-                continue
-
-            info = self._pending_frame_info
-            self._pending_frame_info = None
-
-            # Читаем кадр из SHM
-            shm_name = info.get("shm_name", f"camera_{self._camera_id}_frame")
-            shm_index = info.get("shm_index", 0)
-
-            mm = self._ctx.memory_manager
-            if mm is None:
-                continue
-
-            frame = mm.read_images(f"camera_{self._camera_id}", shm_name, shm_index)
-            if frame is None:
-                continue
-
-            # HSV-маска
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-            mask = cv2.inRange(hsv, self._lower, self._upper)
-
-            # Записываем маску в SHM (H, W, 1)
-            mask_slot = f"mask_{self._camera_id}"
-            mask_3d = mask[:, :, np.newaxis]
-            mm.write_images(f"camera_{self._camera_id}", mask_slot, [mask_3d], 0)
-
-            # IPC: mask_ready
-            self._ctx.io.send_data(
-                "renderer",
-                "mask_ready",
-                {
-                    "camera_id": self._camera_id,
-                    "shm_name": mask_slot,
-                    "shm_index": 0,
-                    "frame_shm_name": shm_name,
-                    "frame_shm_index": shm_index,
-                    "seq_id": info.get("seq_id", 0),
-                },
-            )
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, lower, upper)
+        mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        return {**item, "frame": mask_bgr}

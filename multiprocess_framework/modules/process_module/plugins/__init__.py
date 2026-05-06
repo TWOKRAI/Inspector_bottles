@@ -8,7 +8,7 @@
 - register_plugin — декоратор регистрации
 """
 
-from .base import PluginContext, PluginState, ProcessModulePlugin
+from .base import PluginContext, PluginState, ProcessModulePlugin, for_each
 from .metrics import PluginMetrics
 from .port import Port, are_ports_compatible, validate_chain
 from .registry import PluginRegistry, register_plugin
@@ -25,4 +25,5 @@ __all__ = [
     "validate_chain",
     "PluginRegistry",
     "register_plugin",
+    "for_each",
 ]

@@ -62,6 +62,43 @@ class GenericProcessConfig(ProcessLaunchConfig):
         FieldMeta("Plugins", info="Список конфигов плагинов (dict)."),
     ] = []
 
+    # --- Phase 5: Data Pipeline config ---
+
+    chain_targets: Annotated[
+        list[str],
+        FieldMeta("Chain targets", info="Default routing targets после pipeline (Q1)."),
+    ] = []
+
+    queue_size: Annotated[
+        int,
+        FieldMeta("Queue size", info="Размер internal chain_queue.", min=1, max=1024),
+    ] = 64
+
+    lag_alert_threshold_sec: Annotated[
+        float,
+        FieldMeta("Lag alert threshold", info="Backpressure alert порог (Q6).", min=0.1),
+    ] = 2.0
+
+    source_target_fps: Annotated[
+        float,
+        FieldMeta("Source target FPS", info="Целевой FPS для source-плагинов.", min=1.0),
+    ] = 25.0
+
+    error_max_consecutive_fails: Annotated[
+        int,
+        FieldMeta("Error max fails", info="Circuit breaker порог (Q7).", min=1),
+    ] = 5
+
+    error_auto_reset_sec: Annotated[
+        float,
+        FieldMeta("Error auto-reset", info="Auto-reset circuit breaker (Q7).", min=1.0),
+    ] = 60.0
+
+    error_critical_plugins: Annotated[
+        list[str],
+        FieldMeta("Critical plugins", info="Имена критических плагинов (Q7)."),
+    ] = []
+
     @property
     def memory(self) -> dict[str, Any] | None:
         """Агрегация SHM layout из всех плагинов.
