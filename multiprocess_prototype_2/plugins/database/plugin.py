@@ -35,6 +35,8 @@ class DatabasePlugin(ProcessModulePlugin):
     commands = {
         "flush": "_cmd_flush",
         "get_stats": "_cmd_get_stats",
+        "set_batch_size": "_cmd_set_batch_size",
+        "reset_stats": "_cmd_reset_stats",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -47,6 +49,7 @@ class DatabasePlugin(ProcessModulePlugin):
         self._buffer: list[dict] = []
         self._buffer_lock = threading.Lock()
         self._total_written: int = 0
+        self._total_errors: int = 0
         self._ctx = ctx
 
         # Создаём директорию
@@ -110,7 +113,10 @@ class DatabasePlugin(ProcessModulePlugin):
         with self._buffer_lock:
             self._buffer.append(record)
             if len(self._buffer) >= self._batch_size:
-                self._flush_buffer()
+                # Забираем batch прямо здесь (lock уже захвачен) и сбрасываем
+                batch = self._buffer[:]
+                self._buffer.clear()
+                self._do_flush(batch)
 
     def _flush_loop(self, stop_event, pause_event) -> None:
         """Периодический flush буфера."""
@@ -122,29 +128,46 @@ class DatabasePlugin(ProcessModulePlugin):
             self._flush_buffer()
 
     def _flush_buffer(self) -> int:
-        """Записать буфер в БД."""
+        """Записать буфер в БД (захватывает lock)."""
         with self._buffer_lock:
             if not self._buffer:
                 return 0
             batch = self._buffer[:]
             self._buffer.clear()
 
+        return self._do_flush(batch)
+
+    def _do_flush(self, batch: list[dict]) -> int:
+        """Записать готовый batch в БД (без захвата lock)."""
+
         if not self._conn:
             return 0
 
+        insert_sql = (
+            "INSERT INTO detections (timestamp, frame_id, camera_id, event_type, data) "
+            "VALUES (:timestamp, :frame_id, :camera_id, :event_type, :data)"
+        )
         try:
-            self._conn.executemany(
-                "INSERT INTO detections (timestamp, frame_id, camera_id, event_type, data) "
-                "VALUES (:timestamp, :frame_id, :camera_id, :event_type, :data)",
-                batch,
-            )
+            self._conn.executemany(insert_sql, batch)
             self._conn.commit()
             count = len(batch)
             self._total_written += count
             return count
         except Exception as e:
-            self._ctx.log_error(f"DatabasePlugin flush error: {e}")
-            return 0
+            # Fallback: вставляем по одной записи
+            self._ctx.log_error(f"Batch insert failed: {e}, trying one-by-one")
+            saved = 0
+            for record in batch:
+                try:
+                    self._conn.execute(insert_sql, record)
+                    saved += 1
+                except Exception:
+                    self._total_errors += 1
+            if saved > 0:
+                self._conn.commit()
+            count = saved
+            self._total_written += count
+            return count
 
     # --- Команды ---
 
@@ -160,6 +183,19 @@ class DatabasePlugin(ProcessModulePlugin):
         return {
             "status": "ok",
             "total_written": self._total_written,
+            "total_errors": self._total_errors,
             "pending": pending,
             "db_path": self._db_path,
         }
+
+    def _cmd_set_batch_size(self, data: dict) -> dict:
+        """Изменить размер batch на лету."""
+        size = max(1, min(10000, int(data.get("batch_size", self._batch_size))))
+        self._batch_size = size
+        return {"status": "ok", "batch_size": self._batch_size}
+
+    def _cmd_reset_stats(self, data: dict) -> dict:
+        """Обнулить счётчики total_written и total_errors."""
+        self._total_written = 0
+        self._total_errors = 0
+        return {"status": "ok"}
