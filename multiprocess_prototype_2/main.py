@@ -105,6 +105,15 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
 
     # 6. Сборка launcher
     configs = topology.build_configs()
+
+    # Прокинуть log_dir из system.yaml в каждый процесс
+    log_dir = sys_config.system.log_dir or "logs"
+    for cfg in configs:
+        if not cfg.log_dir:
+            cfg.log_dir = log_dir
+
+    print(f"[bootstrap] log_dir: {Path(log_dir).resolve()}")
+
     launcher = SystemLauncher(stop_timeout=sys_config.system.stop_timeout)
     for cfg in configs:
         launcher.add_process(*process(cfg))

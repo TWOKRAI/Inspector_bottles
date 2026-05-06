@@ -86,12 +86,33 @@ class PipelineExecutor:
             except queue.Empty:
                 continue
 
+            # [TRACE] Логируем каждый 30-й batch
+            if not hasattr(self, "_trace_exec_cnt"):
+                self._trace_exec_cnt = 0
+            self._trace_exec_cnt += 1
+            do_trace = (self._trace_exec_cnt % 30 == 1)
+
+            if do_trace:
+                self._log_info(
+                    f"[TRACE] PipelineExecutor: got {len(items)} item(s) from queue, "
+                    f"plugins={[p.name for p in self._plugins]}, "
+                    f"targets={self._chain_targets}"
+                )
+
             # Прогнать items через chain плагинов
             items = self._execute_chain(items)
 
             # Если items пустой после chain — ничего не отправляем
             if not items:
+                if do_trace:
+                    self._log_info("[TRACE] PipelineExecutor: chain вернул пустой список!")
                 continue
+
+            if do_trace:
+                self._log_info(
+                    f"[TRACE] PipelineExecutor: chain → {len(items)} item(s), "
+                    f"sending to {self._chain_targets}"
+                )
 
             # Отправить результаты по IPC
             self._send_results(items)

@@ -34,10 +34,11 @@ class GuiProcess(ProcessModule):
         """Создать DataReceiverBridge, SHM middleware и worker data_receiver."""
         super()._init_application_threads()
 
-        # SHM receive middleware: при получении frame_ready — читать кадр из SHM
+        # SHM receive middleware: при получении данных — читать кадр из SHM
+        # owner/slot — fallback, реальные координаты берутся из msg["data"]
         if self.router_manager and self.memory_manager:
             self._recv_frame_mw = FrameShmMiddleware(
-                self.memory_manager, owner="camera_0", slot="camera_0_frame"
+                self.memory_manager, owner=self.name, slot="output_frames"
             )
             self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
 
@@ -60,6 +61,7 @@ class GuiProcess(ProcessModule):
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
+        _trace_cnt = 0
         while not stop_event.is_set():
             if pause_event.is_set():
                 import time
@@ -71,6 +73,16 @@ class GuiProcess(ProcessModule):
                     timeout=0.1, channel_types=["data"], return_messages=False
                 )
                 for msg_dict in msgs:
+                    _trace_cnt += 1
+                    if _trace_cnt % 30 == 1:
+                        data = msg_dict.get("data", {})
+                        self._log_info(
+                            f"[TRACE] GuiProcess.data_receiver: msg #{_trace_cnt}, "
+                            f"data_type={msg_dict.get('data_type', '?')}, "
+                            f"has_frame={'frame' in msg_dict}, "
+                            f"has_data_shm={bool(data.get('shm_name') if isinstance(data, dict) else False)}",
+                            module="gui",
+                        )
                     self._bridge.dispatch(msg_dict)
             except Exception as exc:
                 self._log_error(

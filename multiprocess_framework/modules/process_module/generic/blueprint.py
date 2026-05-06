@@ -82,6 +82,18 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Класс процесса", info="Dotted path к классу (по умолчанию GenericProcess)"),
     ] = ""
 
+    # --- Data Pipeline routing (Phase 5) ---
+
+    chain_targets: Annotated[
+        list[str],
+        FieldMeta("Chain targets", info="Куда отправлять результат pipeline (имена процессов)."),
+    ] = []
+
+    source_target_fps: Annotated[
+        float,
+        FieldMeta("Source target FPS", info="Целевой FPS для source-плагинов.", min=1.0),
+    ] = 25.0
+
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
         # Восстановить PluginConfig-инстансы для агрегации memory
@@ -91,6 +103,12 @@ class ProcessConfig(SchemaBase):
         base_kwargs: dict = dict(priority=self.priority)
         if self.process_class:
             base_kwargs["process_class"] = self.process_class
+
+        # Data Pipeline routing
+        if self.chain_targets:
+            base_kwargs["chain_targets"] = self.chain_targets
+        if self.source_target_fps != 25.0:
+            base_kwargs["source_target_fps"] = self.source_target_fps
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(

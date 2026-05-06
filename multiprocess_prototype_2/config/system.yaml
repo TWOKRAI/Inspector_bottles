@@ -7,7 +7,7 @@
 system:
   stop_timeout: 5.0           # таймаут graceful shutdown (сек)
   shm_budget_mb: 512          # лимит общей SHM-памяти
-  log_dir: ""                 # пустой = авто (./logs/)
+  log_dir: "logs/prototype_2"  # относительно cwd, каждый процесс → подпапка
 
 # --- Камеры (defaults для capture-плагинов) ---
 camera:

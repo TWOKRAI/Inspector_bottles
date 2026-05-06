@@ -95,12 +95,48 @@ class DataReceiver:
             if msg is None:
                 continue
 
+            # Message → dict: middleware и pipeline работают с plain dict
+            if hasattr(msg, "to_dict"):
+                msg = msg.to_dict()
+
+            # [TRACE] Логируем каждый 30-й приём
+            if not hasattr(self, "_trace_recv_cnt"):
+                self._trace_recv_cnt = 0
+            self._trace_recv_cnt += 1
+            do_trace = (self._trace_recv_cnt % 30 == 1)
+
+            if do_trace:
+                data = msg.get("data", {})
+                self._log_info(
+                    f"[TRACE] DataReceiver: msg received, "
+                    f"data_type={msg.get('data_type', '?')}, "
+                    f"sender={msg.get('sender', '?')}, "
+                    f"has_shm_name={bool(data.get('shm_name') if isinstance(data, dict) else False)}, "
+                    f"has_frame={'frame' in msg}"
+                )
+
             # Восстановить frame из SHM
             if self._shm:
                 msg = self._shm.restore_frame(msg)
 
+            if do_trace:
+                self._log_info(
+                    f"[TRACE] DataReceiver: after restore_frame, has_frame={'frame' in msg}, "
+                    f"frame_is_none={msg.get('frame') is None if 'frame' in msg else 'N/A'}"
+                )
+
             # Построить item из msg
             item = self._build_item(msg)
+
+            if do_trace:
+                frame = item.get("frame")
+                shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
+                self._log_info(
+                    f"[TRACE] DataReceiver: item built, "
+                    f"has_frame={'frame' in item}, shape={shape}, "
+                    f"total_regions={item.get('total_regions', 0)}, "
+                    f"seq_id={item.get('seq_id')}"
+                )
 
             # Передать в InspectorManager
             self._inspector.on_item(item)

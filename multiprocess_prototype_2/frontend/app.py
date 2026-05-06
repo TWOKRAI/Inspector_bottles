@@ -59,20 +59,41 @@ def run_gui(process: "GuiProcess") -> None:
     process._camera_presenter = camera_presenter
 
     # Подключить bridge signals
+    _frame_trace_cnt = 0
+
     def _on_frame_received(msg_dict: dict) -> None:
         """Slot: получен кадр через IPC.
 
         FrameShmMiddleware.on_receive уже подставил msg["frame"] (numpy)
         из SHM по координатам shm_actual_name.
         """
+        nonlocal _frame_trace_cnt
+        _frame_trace_cnt += 1
+
         frame = msg_dict.get("frame")
+
+        if _frame_trace_cnt % 30 == 1:
+            process._log_info(
+                f"[TRACE] _on_frame_received #{_frame_trace_cnt}: "
+                f"has_frame={frame is not None}, "
+                f"frame_shape={frame.shape if frame is not None and hasattr(frame, 'shape') else None}, "
+                f"data_type={msg_dict.get('data_type', '?')}, "
+                f"keys={list(msg_dict.keys())[:10]}",
+                module="gui",
+            )
+
         if frame is not None:
             camera_presenter.on_frame(frame)
             window.increment_frame_count()
+        elif _frame_trace_cnt % 30 == 1:
+            process._log_info(
+                f"[TRACE] _on_frame_received: frame is None! "
+                f"msg keys={list(msg_dict.keys())}",
+                module="gui",
+            )
 
-    process._bridge.frame_received.connect(_on_frame_received)
-    # Подключить state updates к таблице статусов процессов
-    process._bridge.state_updated.connect(process_status.on_state_updated)
+    process._bridge.set_frame_callback(_on_frame_received)
+    process._bridge.set_state_callback(process_status.on_state_updated)
 
 
     # FPS таймер: раз в секунду считать fps и обновлять StatusBar

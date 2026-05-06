@@ -1,24 +1,62 @@
-"""DataReceiverBridge — мост worker thread → Qt signals → main thread."""
-from PySide6.QtCore import QObject, Signal
+"""DataReceiverBridge — мост worker thread → Qt main thread.
+
+Использует QMetaObject.invokeMethod для гарантированной доставки
+из произвольного Python thread (не обязательно QThread) в Qt main thread.
+"""
+from __future__ import annotations
+
+from functools import partial
+from typing import Callable
+
+from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
 
 
 class DataReceiverBridge(QObject):
-    """Классифицирует IPC-сообщения и emit'ит Qt signals для main thread.
+    """Классифицирует IPC-сообщения и вызывает callbacks в Qt main thread.
 
     Используется из worker thread data_receiver.
-    Qt гарантирует queued connection для cross-thread signals.
+    QMetaObject.invokeMethod с Qt.QueuedConnection гарантирует
+    вызов в main thread даже из non-QThread.
     """
 
-    frame_received = Signal(dict)
-    state_updated = Signal(dict)
-    command_response = Signal(dict)
+    # Сигнал-транспорт: worker emit → main thread slot
+    _deliver = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._frame_cb: Callable | None = None
+        self._state_cb: Callable | None = None
+        self._command_cb: Callable | None = None
+        # Внутренний сигнал → slot в main thread
+        self._deliver.connect(self._on_deliver, Qt.ConnectionType.QueuedConnection)
+
+    def set_frame_callback(self, cb: Callable) -> None:
+        self._frame_cb = cb
+
+    def set_state_callback(self, cb: Callable) -> None:
+        self._state_cb = cb
+
+    def set_command_callback(self, cb: Callable) -> None:
+        self._command_cb = cb
 
     def dispatch(self, msg_dict: dict) -> None:
-        """Классифицировать сообщение по data_type и emit соответствующий signal."""
+        """Из worker thread — отправить в main thread через internal signal."""
         data_type = msg_dict.get("data_type", "")
-        if data_type in ("frame_ready", "frame"):
-            self.frame_received.emit(msg_dict)
+        if data_type in ("frame_ready", "frame") or "frame" in msg_dict:
+            kind = "frame"
         elif data_type in ("status", "state_changed", "fps_update"):
-            self.state_updated.emit(msg_dict)
+            kind = "state"
         else:
-            self.command_response.emit(msg_dict)
+            kind = "command"
+        self._deliver.emit((kind, msg_dict))
+
+    @Slot(object)
+    def _on_deliver(self, payload: tuple) -> None:
+        """Slot в main thread — вызвать нужный callback."""
+        kind, msg_dict = payload
+        if kind == "frame" and self._frame_cb:
+            self._frame_cb(msg_dict)
+        elif kind == "state" and self._state_cb:
+            self._state_cb(msg_dict)
+        elif kind == "command" and self._command_cb:
+            self._command_cb(msg_dict)

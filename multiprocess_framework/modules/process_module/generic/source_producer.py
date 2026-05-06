@@ -71,6 +71,20 @@ class SourceProducer:
                 self._log_error(f"SourceProducer: {self._plugin.name}.produce() error: {e}")
                 items = []
 
+            # [TRACE] Логируем каждый 30-й кадр (чтобы не спамить)
+            if items and hasattr(self, "_trace_cnt"):
+                self._trace_cnt += 1
+            elif items:
+                self._trace_cnt = 1
+            if items and self._trace_cnt % 30 == 1:
+                frame = items[0].get("frame")
+                shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
+                self._log_info(
+                    f"[TRACE] SourceProducer({self._plugin.name}): "
+                    f"produce() → {len(items)} item(s), frame shape={shape}, "
+                    f"targets={self._chain_targets}"
+                )
+
             # Отправить каждый item
             for item in items:
                 self._send_item(item)
@@ -89,6 +103,15 @@ class SourceProducer:
         # SHM write: убрать frame, записать в SHM
         if self._shm and "frame" in item:
             item = self._shm.strip_and_write(item)
+            # [TRACE] Проверить что SHM write сработал
+            if getattr(self, "_trace_cnt", 0) % 30 == 1:
+                has_shm = "shm_name" in item and "shm_actual_name" in item
+                self._log_info(
+                    f"[TRACE] SourceProducer({self._plugin.name}): "
+                    f"strip_and_write → shm_ok={has_shm}, "
+                    f"owner={item.get('owner')}, shm_name={item.get('shm_name')}, "
+                    f"shm_actual={item.get('shm_actual_name')}"
+                )
 
         # Routing: item["target"] → per-item, else chain_targets
         per_item_target = item.pop("target", None)

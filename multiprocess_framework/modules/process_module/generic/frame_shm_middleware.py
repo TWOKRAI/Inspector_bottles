@@ -44,31 +44,77 @@ class FrameShmMiddleware:
 
         Входящий msg содержит shm_name, shm_index (или owner + slot + index).
         Читает ndarray из SHM → кладёт в msg["frame"].
+
+        Стратегия (как в router FrameShmMiddleware):
+          1. MemoryManager.read_images() — если SHM handle есть в этом процессе
+          2. Fallback: прямое открытие SharedMemory по shm_actual_name
+             (cross-process, другой OS-процесс)
         """
         data = msg.get("data", msg)
+
+        # Pickle fallback: frame уже в сообщении (не через SHM)
+        if "frame" in msg and msg["frame"] is not None:
+            return msg
+        if "frame" in data and data.get("frame") is not None:
+            msg["frame"] = data["frame"]
+            return msg
 
         shm_owner = data.get("owner", data.get("shm_owner", ""))
         shm_name = data.get("shm_name", "")
         shm_index = data.get("shm_index", 0)
 
         if not shm_owner or not shm_name:
-            # Нет SHM ref — возможно frame уже в сообщении или нет frame
             return msg
 
+        # Попытка 1: через MemoryManager (работает в пределах одного процесса)
         try:
             images = self._mm.read_images(shm_owner, shm_name, shm_index, n=1)
             if images:
                 msg["frame"] = images[0]
-            else:
-                msg["frame"] = None
-                self._log_error(
-                    f"FrameShmMiddleware: read_images вернул пустой результат "
-                    f"({shm_owner}/{shm_name}[{shm_index}])"
-                )
-        except Exception as e:
-            msg["frame"] = None
-            self._log_error(f"FrameShmMiddleware: restore_frame error: {e}")
+                return msg
+        except Exception:
+            pass
 
+        # Попытка 2: прямое открытие SharedMemory по shm_actual_name (cross-process)
+        shm_actual_name = data.get("shm_actual_name")
+        if shm_actual_name:
+            try:
+                from multiprocessing import shared_memory as _shm_mod
+                import struct as _struct
+                import numpy as _np
+
+                shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
+                try:
+                    buf = shm.buf
+                    num_images = _struct.unpack("I", buf[0:4])[0]
+                    if num_images > 0:
+                        h, w, c = _struct.unpack("III", buf[4:16])
+                        dtype_char = chr(buf[16])
+                        dtype = _np.dtype(dtype_char)
+                        offset = 17
+                        pixel_count = h * w * c
+                        arr = _np.frombuffer(
+                            buf, dtype=dtype, count=pixel_count, offset=offset,
+                        )
+                        frame = arr.reshape((h, w, c)).copy()
+                        del arr, buf  # Освободить ссылки на SHM до close()
+                        msg["frame"] = frame
+                        return msg
+                finally:
+                    shm.close()
+            except Exception as e:
+                self._log_error(
+                    f"FrameShmMiddleware(generic): SHM fallback failed: {e} "
+                    f"(shm={shm_actual_name})"
+                )
+
+        # Обе попытки не сработали
+        msg["frame"] = None
+        self._log_error(
+            f"FrameShmMiddleware(generic): frame не восстановлен "
+            f"({shm_owner}/{shm_name}[{shm_index}], "
+            f"actual={data.get('shm_actual_name', 'N/A')})"
+        )
         return msg
 
     def strip_and_write(self, item: dict) -> dict:
@@ -77,10 +123,13 @@ class FrameShmMiddleware:
         Lazy allocation: SHM создаётся при первом кадре (не нужна
         предварительная конфигурация формы кадра).
 
+        Fallback: если SHM write не удался (другая форма кадра, нет памяти),
+        frame остаётся в item и пойдёт через pickle в IPC.
+
         Returns:
-            item без "frame", с добавленными owner/shm_name/shm_index.
+            item без "frame" (+ shm_ref) или item с "frame" (fallback).
         """
-        frame = item.pop("frame", None)
+        frame = item.get("frame")
         if frame is None:
             return item
 
@@ -97,18 +146,19 @@ class FrameShmMiddleware:
                 self._owner, self._slot, [frame], idx
             )
             if shm_name:
+                # SHM write OK — убрать frame, добавить координаты
+                item.pop("frame", None)
                 item["owner"] = self._owner
                 item["shm_owner"] = self._owner
                 item["shm_name"] = self._slot
                 item["shm_index"] = idx
                 item["shm_actual_name"] = shm_name
             else:
-                self._log_error(
-                    f"FrameShmMiddleware: write_images вернул None "
-                    f"({self._owner}/{self._slot}[{idx}])"
-                )
-        except Exception as e:
-            self._log_error(f"FrameShmMiddleware: strip_and_write error: {e}")
+                # SHM write не удался — frame остаётся в item (pickle fallback)
+                pass
+        except Exception:
+            # frame остаётся в item (pickle fallback)
+            pass
 
         return item
 

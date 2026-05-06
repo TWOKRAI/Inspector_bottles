@@ -94,22 +94,44 @@ class FrameShmMiddleware:
         if shm_name is None or shm_index is None:
             return msg
 
+        # [TRACE] Счётчик для периодического лога
+        if not hasattr(self, "_trace_on_recv_cnt"):
+            self._trace_on_recv_cnt = 0
+        self._trace_on_recv_cnt += 1
+        do_trace = (self._trace_on_recv_cnt % 30 == 1)
+
         # Координаты из сообщения (приоритет) или конфигурация middleware (fallback)
         owner = data.get("shm_owner", self._owner)
         slot = shm_name or self._slot
+
+        if do_trace:
+            import logging
+            logging.getLogger("FrameShmMiddleware").info(
+                f"[TRACE] on_receive #{self._trace_on_recv_cnt}: "
+                f"owner={owner}, slot={slot}, index={shm_index}, "
+                f"shm_actual={data.get('shm_actual_name', 'N/A')}, "
+                f"self._owner={self._owner}, self._slot={self._slot}"
+            )
 
         # Попытка 1: через MemoryManager (работает если handles открыты в этом процессе)
         if self._mm:
             images = self._mm.read_images(owner, slot, shm_index, n=1)
             if images:
                 msg["frame"] = images[0]
+                if do_trace:
+                    import logging
+                    logging.getLogger("FrameShmMiddleware").info(
+                        f"[TRACE] on_receive: MemoryManager SUCCESS, "
+                        f"frame shape={images[0].shape}"
+                    )
                 return msg
+            elif do_trace:
+                import logging
+                logging.getLogger("FrameShmMiddleware").info(
+                    "[TRACE] on_receive: MemoryManager returned empty, trying fallback"
+                )
 
         # Попытка 2: прямое открытие SharedMemory по фактическому имени.
-        # TODO: Костыль — дублирует бинарный формат из write_images/create_shm_blocks.
-        #   Правильное решение: MemoryManager.attach_remote(shm_actual_name) — подключение
-        #   к чужому SHM через штатный API без знания layout.
-        #   Рефакторинг: https://github.com/... (Phase 5 или отдельный ADR)
         shm_actual_name = data.get("shm_actual_name")
         if shm_actual_name:
             try:
@@ -130,7 +152,15 @@ class FrameShmMiddleware:
                         offset = 17
                         pixel_count = h * w * c
                         arr = _np.frombuffer(buf, dtype=dtype, count=pixel_count, offset=offset)
-                        msg["frame"] = arr.reshape((h, w, c)).copy()
+                        frame = arr.reshape((h, w, c)).copy()
+                        del arr, buf  # Освободить ссылки на SHM до close()
+                        msg["frame"] = frame
+                        if do_trace:
+                            import logging
+                            logging.getLogger("FrameShmMiddleware").info(
+                                f"[TRACE] on_receive: SHM fallback SUCCESS, "
+                                f"frame shape=({h},{w},{c})"
+                            )
                 finally:
                     shm.close()
             except Exception as exc:
@@ -138,5 +168,16 @@ class FrameShmMiddleware:
                 logging.getLogger("FrameShmMiddleware").warning(
                     "SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name
                 )
+        elif do_trace:
+            import logging
+            logging.getLogger("FrameShmMiddleware").warning(
+                "[TRACE] on_receive: no shm_actual_name in data, cannot fallback!"
+            )
+
+        if do_trace and "frame" not in msg:
+            import logging
+            logging.getLogger("FrameShmMiddleware").warning(
+                f"[TRACE] on_receive: FRAME NOT RESTORED! keys={list(data.keys())}"
+            )
 
         return msg

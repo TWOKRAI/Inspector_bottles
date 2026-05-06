@@ -142,3 +142,22 @@ processes:
     process_class: ...GuiProcess
     plugins: []
 ```
+
+---
+
+## Phase 5 Debug (region_pipeline)
+
+При интеграции data pipeline (GenericProcess с region_split) обнаружены и решены **8 критических проблем** доставки кадров:
+
+1. **`chain_targets` терялись в Pydantic** — ProcessConfig не объявлял поле, Pydantic отбрасывал YAML-значение
+2. **`Message` vs `dict` в DataReceiver** — middleware пытался добавить "frame" в неизменяемый Pydantic-объект
+3. **SHM изоляция между OS-процессами** — missing fallback через `shm_actual_name` в generic middleware
+4. **`BufferError` при close() SharedMemory** — numpy array с reference на буфер блокировал close
+5. **Разные размеры регионов ломали write** — SHM lazy-alloc не рассчитывал на разные формы регионов
+6. **Bridge не маршрутизировал кадры** — dispatch() не распознавал type="data" как frame
+7. **Qt Signal из non-QThread** — AutoConnection не работает для worker threads, нужен callback
+8. **Python import shadowing** — одновременно `bridge.py` (файл) и `bridge/` (пакет) создавали конфликт
+
+Полная диагностика, симптомы и решения → **[FRAME_DELIVERY_DEBUG.md](FRAME_DELIVERY_DEBUG.md)**.
+
+**Применение:** При запуске нового pipeline topology с GenericProcess используйте checklist в конце FRAME_DELIVERY_DEBUG.md.
