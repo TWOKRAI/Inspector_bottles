@@ -12,10 +12,12 @@
 from .blueprint import ProcessConfig, SystemBlueprint, Wire
 from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
+from .inspector_manager import InspectorManager
 
 __all__ = [
     "GenericProcess",
     "GenericProcessConfig",
+    "InspectorManager",
     "PluginConfig",
     "SystemBlueprint",
     "ProcessConfig",
