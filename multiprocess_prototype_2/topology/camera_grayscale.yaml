@@ -1,20 +1,20 @@
-# Camera → Grayscale processing
-# Кадры проходят через processing-плагин, port compatibility работает.
+# Camera → Grayscale processing (Phase 5 data pipeline)
 #
 # Процессы:
-#   camera_0    — захват с вебкамеры → SHM → IPC frame_ready
-#   processor_0 — grayscale: BGR → GRAY, записывает в отдельный SHM region
+#   camera_0    — produce(): захват кадров
+#   processor_0 — process(): grayscale BGR → Gray → BGR 3ch
 #
-# Wire: camera_0.capture.frame → processor_0.grayscale.frame
-# Port check: image/bgr (H,W,3) → image/bgr (H,W,3) = OK
+# chain_targets: camera_0 → processor_0
 
 name: camera_grayscale
-description: "Camera capture → Grayscale processing (port compatibility proof)"
+description: "Camera capture → Grayscale processing"
 
 processes:
-  # --- Камера: захват кадров ---
   - process_name: camera_0
     priority: high
+    chain_targets:
+      - processor_0
+    source_target_fps: 25
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
         plugin_name: capture
@@ -22,16 +22,13 @@ processes:
         camera_id: 0
         device_id: 0
 
-  # --- Процессор: grayscale ---
   - process_name: processor_0
     priority: normal
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.grayscale.plugin.GrayscalePlugin
         plugin_name: grayscale
         category: processing
-        camera_id: 0
 
-# --- Связи между портами ---
 wires:
   - source: camera_0.capture.frame
     target: processor_0.grayscale.frame

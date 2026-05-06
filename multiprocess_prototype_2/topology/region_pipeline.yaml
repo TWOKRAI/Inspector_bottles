@@ -1,16 +1,17 @@
 # Region Pipeline — Camera → Resize → Split → Parallel processing → Stitch → GUI
 #
-# Демонстрация multi-region pipeline:
-#   1. camera_0        — захват кадров
-#   2. preprocessor     — масштабирование (ResizePlugin)
-#   3. region_splitter  — нарезка на 3 региона (2 ROI + full frame)
-#   4. process_negative — инверсия цвета (регион 0, верхний левый)
-#   5. process_grayscale— чёрно-белое (регион 1, верхний правый)
-#   6. process_flip     — вертикальный переворот (дефолтный регион, full frame)
-#   7. stitcher         — склейка всех регионов по координатам
-#   8. gui              — отображение результата
+# Демонстрация multi-region pipeline (Phase 5 data pipeline):
+#   1. camera_0        — produce() → BGR-кадры
+#   2. preprocessor    — process(): ResizePlugin
+#   3. region_splitter — process(): 1:N fan-out, item["target"] per-region
+#   4. process_negative   — process(): инверсия (регион 0)
+#   5. process_grayscale  — process(): grayscale (регион 1)
+#   6. process_flip       — process(): переворот (default region)
+#   7. stitcher        — process(): fan-in N:1 (InspectorManager буферизует по seq_id)
+#   8. gui             — отображение
 #
-# Метаданные (координаты регионов) передаются через всю цепочку IPC.
+# chain_targets на уровне процесса — куда GenericProcess отправляет результат.
+# item["target"] (region_split) — per-item override для fan-out.
 #
 # Запуск: python multiprocess_prototype_2/run.py multiprocess_prototype_2/topology/region_pipeline.yaml
 
@@ -21,6 +22,9 @@ processes:
   # --- Камера: захват кадров ---
   - process_name: camera_0
     priority: high
+    chain_targets:
+      - preprocessor
+    source_target_fps: 25
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin
         plugin_name: capture
@@ -30,34 +34,28 @@ processes:
         resolution_width: 640
         resolution_height: 480
         fps: 25
-        frame_targets:
-          - preprocessor
 
   # --- Препроцессор: масштабирование ---
   - process_name: preprocessor
     priority: normal
+    chain_targets:
+      - region_splitter
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.resize.plugin.ResizePlugin
         plugin_name: resize
         category: processing
-        camera_id: 0
         scale_factor: 1.0
-        resolution_width: 640
-        resolution_height: 480
         interpolation: linear
-        frame_targets:
-          - region_splitter
 
-  # --- Нарезка на регионы ---
+  # --- Нарезка на регионы (1:N fan-out через item["target"]) ---
   - process_name: region_splitter
     priority: normal
+    # chain_targets не нужен: region_split ставит item["target"] per-item
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.region_split.plugin.RegionSplitPlugin
         plugin_name: region_split
         category: processing
         camera_id: 0
-        resolution_width: 640
-        resolution_height: 480
         regions:
           - name: region_0
             x: 0
@@ -78,56 +76,47 @@ processes:
   # --- Обработка: негатив (верхний левый регион) ---
   - process_name: process_negative
     priority: normal
+    chain_targets:
+      - stitcher
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.negative.plugin.NegativePlugin
         plugin_name: negative
         category: processing
-        camera_id: 0
-        resolution_width: 320
-        resolution_height: 240
-        target: stitcher
 
   # --- Обработка: чёрно-белое (верхний правый регион) ---
   - process_name: process_grayscale
     priority: normal
+    chain_targets:
+      - stitcher
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.grayscale.plugin.GrayscalePlugin
         plugin_name: grayscale
         category: processing
-        camera_id: 0
-        resolution_width: 320
-        resolution_height: 240
-        target: stitcher
 
   # --- Обработка: переворот (полный кадр) ---
   - process_name: process_flip
     priority: normal
+    chain_targets:
+      - stitcher
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.flip.plugin.FlipPlugin
         plugin_name: flip
         category: processing
-        camera_id: 0
-        resolution_width: 640
-        resolution_height: 480
-        target: stitcher
 
-  # --- Склейка регионов ---
+  # --- Склейка регионов (fan-in N:1, InspectorManager буферизует) ---
   - process_name: stitcher
     priority: normal
+    chain_targets:
+      - gui
     plugins:
       - plugin_class: multiprocess_prototype_2.plugins.stitcher.plugin.StitcherPlugin
         plugin_name: stitcher
         category: processing
         camera_id: 0
-        resolution_width: 640
-        resolution_height: 480
         expected_regions:
           - region_0
           - region_1
           - region_default
-        layout: original
-        timeout_sec: 0.5
-        target: gui
 
   # --- GUI: отображение ---
   - process_name: gui
@@ -135,17 +124,14 @@ processes:
     plugins: []
 
 wires:
-  # Камера → Препроцессор
   - source: camera_0.capture.frame
     target: preprocessor.resize.frame
     description: "BGR-кадры с камеры → масштабирование"
 
-  # Препроцессор → Нарезка на регионы
   - source: preprocessor.resize.frame
     target: region_splitter.region_split.frame
     description: "Масштабированный кадр → нарезка на регионы"
 
-  # Регионы → Обработчики
   - source: region_splitter.region_split.region
     target: process_negative.negative.region
     description: "Регион → негатив"
@@ -158,7 +144,6 @@ wires:
     target: process_flip.flip.region
     description: "Регион → переворот"
 
-  # Обработчики → Stitcher
   - source: process_negative.negative.region
     target: stitcher.stitcher.region
     description: "Негатив-регион → склейка"
