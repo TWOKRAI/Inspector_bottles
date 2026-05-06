@@ -127,7 +127,7 @@ class StitcherPlugin(ProcessModulePlugin):
 
 > **CRITICAL:** Эти 8 вопросов должны быть решены **ДО старта Task 5.3**. Иначе риск переделки Tasks 5.4-5.8 после первого e2e. Каждый вопрос имеет статус `OPEN` / `DECIDED` и список вариантов.
 
-### Q1. Routing: куда GenericProcess отправляет результат chain?  `[OPEN]`
+### Q1. Routing: куда GenericProcess отправляет результат chain?  `[DECIDED — Вариант D]`
 
 **Контекст:** После прогона items через chain — куда их отправлять по IPC?
 
@@ -139,11 +139,21 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.3 (routing logic), Task 5.4 (capture target), Task 5.5 (processing pass-through), Task 5.6 (stitcher target), Task 5.7 (output side-effects), Task 5.8 (topology schema).
 
-**Решение:** _TBD_
+**Решение: Вариант D — гибрид chain_targets + item["target"].**
+
+- `chain_targets: list[str]` в config процесса — default routing для 90% случаев (простой pipeline, broadcast).
+- `item["target"]` — per-item override для fan-out сценариев (region_split: разные регионы → разные процессы).
+- Логика Chain Worker: если item содержит `target` → отправить туда; иначе → отправить всем из `chain_targets`.
+- Плагин обычно НЕ ставит target (не знает про routing), кроме fan-out где это часть логики разделения.
+
+**Обоснование:**
+1. Простые pipeline (camera→processor→gui) работают через статический chain_targets — плагины не знают про routing.
+2. Fan-out (region_split) требует per-item routing — только plugin знает какой region куда.
+3. Wires из topology (Вариант C) дублируют chain_targets — используем для валидации при boot, не для runtime routing.
 
 ---
 
-### Q2. Item schema: типизация контракта между плагинами  `[OPEN]`
+### Q2. Item schema: типизация контракта между плагинами  `[DECIDED — Вариант C (SchemaBase)]`
 
 **Контекст:** Сейчас `item: dict` — неявный контракт. Какие ключи mandatory, какие optional, как валидируется.
 
@@ -158,11 +168,24 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.2 (где определить тип), все последующие задачи (импорт типа), Task 5.1 (что InspectorManager видит в item).
 
-**Решение:** _TBD_
+**Решение: Вариант C — PipelineItem(SchemaBase) с FieldMeta.**
+
+- `PipelineItem` наследует SchemaBase (единый стиль с регистрами).
+- `model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")` — принимает ndarray и произвольные ключи от плагинов.
+- Core fields с FieldMeta: `frame`, `camera_id`, `seq_id`, `timestamp` (обязательные); `region_name`, `total_regions`, `original_x`, `original_y`, `target`, `_output_port` (optional).
+- Валидация только на boundaries: вход в pipeline (Data Worker) + выход source (produce). В горячем пути между плагинами — dict as-is, zero overhead.
+- Debug mode: `validate_items=True` в config → валидация после каждого plugin.process().
+- Метаданные FieldMeta потребляются: topology editor GUI (input/output контракт), compatibility checker (совместимость плагинов), автодокументация pipeline.
+
+**Обоснование:**
+1. Единый стиль SchemaBase + FieldMeta везде (регистры, items) — меньше когнитивной нагрузки.
+2. Закладываем архитектуру сразу — не переделывать при появлении topology editor.
+3. `extra="allow"` позволяет плагинам добавлять любые ключи без изменения schema.
+4. Boundary-only validation — приемлемый компромисс performance vs safety.
 
 ---
 
-### Q3. Frame ownership и IPC safety  `[OPEN]`
+### Q3. Frame ownership и IPC safety  `[DECIDED — Вариант D]`
 
 **Контекст:** `item` содержит `frame: ndarray`. Если кто-то случайно сделает `send_data(item)` — pickle гигабайтного массива в IPC. SHM существует именно чтобы этого избегать.
 
@@ -174,7 +197,18 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.3 (где split frame ↔ SHM), Task 5.6 (stitcher cross-process), Task 5.7 (output не отправляет frame дальше).
 
-**Решение:** _TBD_
+**Решение: Вариант D — SHM middleware (FrameShmMiddleware).**
+
+- Data Worker (receive): SHM read → `item["frame"] = ndarray` (frame восстановлен из SHM ref).
+- Chain Worker (send): `item.pop("frame")` → SHM write → IPC отправляется без frame (только shm_ref + metadata).
+- Плагин работает с `item["frame"]` как с обычным ndarray — не знает про SHM.
+- Защита автоматическая: невозможно случайно отправить frame через IPC (middleware всегда strip перед send).
+- Адаптируется из FrameShmMiddleware прототипа v1 (уже реализован аналогичный паттерн).
+
+**Обоснование:**
+1. Плагин полностью изолирован от SHM — чистая функция `process(items) → items`.
+2. Невозможна ошибка "забыл убрать frame перед отправкой" — middleware автоматический.
+3. FrameShmMiddleware из v1 уже решает эту задачу — адаптация, не написание с нуля.
 
 ---
 
@@ -210,7 +244,7 @@ class StitcherPlugin(ProcessModulePlugin):
 
 ---
 
-### Q5. Декомпозиция GenericProcess  `[OPEN]`
+### Q5. Декомпозиция GenericProcess  `[DECIDED — Вариант B (компоненты + chain_module)]`
 
 **Контекст:** GenericProcess берёт на себя: lifecycle + 3 worker'а + SHM на двух концах + InspectorManager + source-loop + routing + backwards-compat. Риск god-class.
 
@@ -228,11 +262,43 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.3 (структура файлов), тестируемость, будущая расширяемость.
 
-**Решение:** _TBD_
+**Решение: Вариант B — декомпозиция на компоненты в `process_module/generic/` + интеграция с chain_module.**
+
+Структура:
+```
+process_module/generic/
+  generic_process.py        — ~150 строк, композиция + lifecycle + Wire routing
+  data_receiver.py          — ~120 строк, receive loop + FrameShmMiddleware + InspectorManager
+  pipeline_executor.py      — ~180 строк, PluginStep адаптер + ChainRunnable/DagRunnable
+  source_producer.py        — ~80 строк, produce() loop + SHM write + send
+  inspector_manager.py      — ~150 строк, буферизация по (camera_id, seq_id)
+```
+
+Ключевые решения:
+1. **PipelineExecutor использует chain_module** (ChainRunnable для линейного, DagRunnable для графа). Адаптер `PluginStep` оборачивает `plugin.process()` в `RunnableStep` интерфейс.
+2. **Port routing сразу:** плагины декларируют inputs/outputs (Port), internal_wires в topology определяют граф. Auto-detect: есть wires → dag mode, нет → chain mode.
+3. **Parallel bundles:** для DAG mode — `detect_parallel_bundles()` + `ParallelChainRunnable` из chain_module. Плагины в параллельной группе исполняются одновременно.
+4. **Worker lifecycle** через существующий worker_module (LOOP mode с stop_event + pause_event).
+5. **FrameShmMiddleware** адаптируется из прототипа v1.
+6. **Не отдельные модули фреймворка** — компоненты используются только GenericProcess, полноценный модуль = overkill.
+
+**Переиспользование из фреймворка:**
+- `chain_module` — ChainRunnable, DagRunnable, ParallelChainRunnable, topological_sort, detect_parallel_bundles
+- `worker_module` — WorkerManager (LOOP mode) для всех worker loops
+- `router_module` — AsyncSender/AsyncReceiver для IPC
+- `shared_resources_module` — MemoryManager для SHM
+- `process_module/plugins/port.py` — Port, are_ports_compatible()
+- FrameShmMiddleware из прототипа v1
+
+**Обоснование:**
+1. Каждый компонент тестируется изолированно (mock dependencies).
+2. chain_module уже реализует execution patterns — не дублируем.
+3. Архитектура готова к DAG без переделки (смена config).
+4. ~650 строк нового кода вместо монолита 600+.
 
 ---
 
-### Q6. Backpressure policy  `[OPEN]`
+### Q6. Backpressure policy  `[DECIDED — Block + Alert (Process ALL)]`
 
 **Контекст:** `chain_queue = queue.Queue(maxsize=64)`. Что делать когда полна?
 
@@ -244,11 +310,36 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.3 (логика queue), метрики, поведение под нагрузкой.
 
-**Решение:** _TBD_
+**Решение: Block + Alert — обработать ВСЁ, алерт при sustained lag.**
+
+- **НИКОГДА не drop кадры.** Каждая бутылка ДОЛЖНА быть проверена. Пропуск = дефект на полке.
+- `queue.put(timeout=lag_alert_threshold)` — ждём освобождения очереди.
+- Если очередь полна дольше threshold (default 2 сек) → алерт "Pipeline overload: не успевает за конвейером".
+- После алерта — всё равно ждём и обрабатываем (данные нужны downstream машинам).
+- Метрики: `queue_depth`, `max_queue_depth`, `processing_lag_ms`, `overload_events`.
+
+**Доменный контекст:**
+- Отбраковщик находится через 5-10 бутылок — есть физический буфер для "догнать".
+- Даже если отбраковщик не успел — данные передаются дальше по линии (следующие машины словят).
+- Если часто не успевает — проблема конфигурации/оптимизации, не runtime fix. Оператор видит алерт и оптимизирует настройки.
+
+**Конфигурация:**
+```yaml
+processor:
+  backpressure: block_and_alert
+  queue_size: 64
+  lag_alert_threshold_sec: 2.0
+```
+
+**Обоснование:**
+1. Для инспекции дефектов потеря кадра = пропуск дефекта.
+2. Физический буфер 5-10 бутылок позволяет "догнать" после лага.
+3. Downstream машины используют данные даже с задержкой.
+4. Sustained lag — это проблема конфигурации, решается оператором.
 
 ---
 
-### Q7. Error policy: `plugin.process()` бросает exception  `[OPEN]`
+### Q7. Error policy: `plugin.process()` бросает exception  `[DECIDED — Pass-through + Mark Suspect + Circuit Breaker]`
 
 **Контекст:** Что происходит при сбое плагина в середине chain?
 
@@ -260,11 +351,33 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.3 (try/except логика), Task 5.7 (database может быть dead-letter sink), наблюдаемость.
 
-**Решение:** _TBD_
+**Решение: Pass-through + Mark Suspect + Circuit Breaker (A+C гибрид).**
+
+- **Одна ошибка:** exception логируется, item получает `inspection_status = "not_inspected"`, передаётся дальше (pass-through). Данные НЕ теряются.
+- **N ошибок подряд (circuit breaker):** плагин помечается bypassed, chain пропускает его. Алерт "inspection degraded".
+- **Критический плагин (detector):** если bypassed → алерт level CRITICAL, все items помечаются "suspect".
+- **Auto-reset:** через configurable таймер (default 60 сек) executor пробует включить плагин обратно.
+- **Бутылка с `not_inspected`/`suspect`:** shift register помечает → отбраковщик выкидывает (лучше выкинуть хорошую чем пропустить плохую).
+- **Данные ВСЕГДА передаются дальше** — downstream машины могут перепроверить.
+
+**Конфигурация:**
+```yaml
+error_policy:
+  max_consecutive_fails: 5
+  on_fail: mark_suspect     # item["inspection_status"] = "not_inspected"
+  critical_plugins: ["detector"]
+  auto_reset_sec: 60
+```
+
+**Обоснование:**
+1. Для инспекции потеря данных недопустима — pass-through + маркировка.
+2. Circuit breaker защищает от cascade failure (плагин спамит exceptions → тормозит pipeline).
+3. Suspect items отбраковываются — безопасный fail-mode.
+4. Auto-reset позволяет восстановиться после transient error без вмешательства оператора.
 
 ---
 
-### Q8. Thread-safety контракт `process()`  `[OPEN]`
+### Q8. Thread-safety контракт `process()`  `[DECIDED — Вариант B]`
 
 **Контекст:** Сейчас Chain Worker один — process() вызывается последовательно. Если в будущем распараллелим (ThreadPool по items) — `process()` должен быть thread-safe или явно non-reentrant.
 
@@ -275,7 +388,18 @@ class StitcherPlugin(ProcessModulePlugin):
 
 **Влияет на:** Task 5.2 (docstring), будущий параллелизм, контракт плагина.
 
-**Решение:** _TBD_
+**Решение: Вариант B — декларативно через ClassVar атрибут.**
+
+- `thread_safe: ClassVar[bool] = False` в базовом классе ProcessModulePlugin (default = НЕ thread-safe, safe by default).
+- `thread_safe = True` → PipelineExecutor может вызывать process() параллельно (для stateless плагинов в parallel bundles).
+- `thread_safe = False` → PipelineExecutor гарантирует sequential execution (lock или single-thread).
+- Простые stateless плагины (resize, grayscale, negative, flip) → `thread_safe = True`.
+- Плагины с mutable state (frame_counter, database, stitcher) → `thread_safe = False` (default).
+
+**Обоснование:**
+1. ParallelChainRunnable в DAG mode вызывает плагины из parallel bundles одновременно — нужен контракт.
+2. Default False = safe by default (автор не думал о thread-safety → не сломается).
+3. Opt-in True = осознанное решение автора плагина.
 
 ---
 
@@ -367,23 +491,65 @@ class ColorMaskPlugin(ProcessModulePlugin):
 - GUI получает виджеты бесплатно из `FieldMeta` плагина.
 - Один источник истины frontend ↔ backend.
 
-### Q9. Регистры — per-plugin vs централизованные  `[OPEN]`
+### Q9. Регистры — per-plugin vs централизованные  `[DECIDED — External layer + convention mapping]`
 
 **Варианты:**
 - **A. Централизованно (как v1):** `multiprocess_prototype_2/registers/{camera,processor,...}/schemas.py`. Плюс — общий вид. Минус — разрастается с ростом плагинов.
 - **B. Per-plugin:** регистр живёт рядом с плагином — `plugins/color_mask/{plugin.py, config.py, ...}`. Плюс — плагин самосодержащий, легко добавлять/удалять. Минус — нет общего обзора.
 - **C. Гибрид:** общие регистры (camera, settings, theme) — централизованно; плагин-специфичные — рядом с плагином.
 
-**Решение:** _TBD_
+**Решение: Регистры = внешний слой на backend, progressive enhancement, convention mapping.**
 
-### Q10. RegistersManager в GenericProcess  `[OPEN]`
+**Архитектура:**
+- Регистры живут в `multiprocess_prototype_2/registers/` (отдельный слой, НЕ внутри плагина).
+- Плагин самосодержащий — работает на defaults из config/hardcode без регистров.
+- Создание `registers/color_mask.py` = progressive enhancement: этот параметр становится управляемым из GUI.
+- Нет регистра → плагин на defaults, ничего не ломается (graceful degradation).
+
+**Маппинг register → plugin:**
+- Convention by name: `registers/color_mask.py` → автоматически к `plugins/color_mask/`.
+- Topology override: в YAML можно явно указать `register: custom_name`.
+- Общие регистры (camera, display): `registers/shared/` — подключаются через topology explicit.
+
+**Разграничение:** регистр читается одним плагином → маппинг по имени. Регистр нужен 2+ потребителям → `registers/shared/`.
+
+**Обоснование:**
+1. Плагин = чистая функция, не зависит от register framework (независимость 9/10).
+2. "Забыл создать регистр" = не баг, а "параметром нельзя управлять из GUI" (graceful degradation).
+3. Добавил файл → GUI получил слайдер. Удалил → плагин на defaults. Zero ceremony.
+
+### Q10. RegistersManager в GenericProcess  `[DECIDED — Вариант A + PM broadcast]`
 
 **Варианты:**
 - **A. GenericProcess собирает RegistersManager** — при bootstrap обходит плагины, вызывает `plugin.register_schema()`, формирует RegistersManager. Регистрирует handler `register_update`.
 - **B. RegistersManager как отдельный manager-процесс** — один на всю систему, плагины подключаются как клиенты.
 - **C. Каждый процесс держит свой RegistersManager** — изолированно, синхронизация через IPC `register_update`.
 
-**Решение:** _TBD_
+**Решение: Вариант A — локальный RegistersManager в GenericProcess + PM как broadcast hub при boot.**
+
+**Архитектура:**
+- Владелец состояния регистров — GenericProcess (локальный RegistersManager, только свои плагины).
+- При boot: GenericProcess сканирует `registers/` для своих плагинов → отправляет schemas + current values в ProcessManager.
+- ProcessManager собирает от ВСЕХ процессов → формирует полный каталог → broadcast ВСЕМ (включая GUI).
+- GUI — не special case, просто ещё один процесс получивший каталог (симметрично).
+- Runtime update: GUI → direct IPC → target GenericProcess (`register_update`), target → PM → broadcast (`register_changed`).
+- PM в runtime — только relay broadcast, не в hot path.
+
+**Протокол (3 типа сообщений):**
+- `register_schemas` — при boot, GenericProcess → PM (schemas + values)
+- `register_update` — runtime, GUI → target process (изменение значения)
+- `register_changed` — runtime, target process → PM → broadcast all (уведомление об изменении)
+
+**Отличие от StateStore:**
+- StateStore = runtime state (fps, frame_count, connection_status) — меняется само.
+- Registers = user config (HSV thresholds, scale) — меняет пользователь.
+- Разные домены, разные протоколы. В будущем можно связать (register_changed → пишем в StateStore для наблюдаемости).
+
+**Обоснование:**
+1. Локальное чтение быстрое (plugin читает self._reg.min_h без IPC).
+2. PM = discovery hub, не SPOF в runtime.
+3. Симметричная раздача: GUI, другие процессы — все получают каталог одинаково.
+4. Lightweight протокол (3 msg types) vs StateStore overkill.
 
 ---
 
@@ -406,30 +572,80 @@ class ColorMaskPlugin(ProcessModulePlugin):
 
 ---
 
-### Task 5.9 -- Per-plugin registers integration  `[DRAFT — зависит от Q9, Q10]`
+### Task 5.9 -- Per-plugin registers integration
 
 **Level:** Senior (Opus, normal thinking)
 **Assignee:** teamlead
-**Goal:** Интегрировать RegistersManager с GenericProcess: плагины опционально экспортируют register_schema, GenericProcess собирает регистры в RegistersManager, регистрирует handler `register_update`, обеспечивает плагину доступ к типизированному экземпляру через `ctx.registers`.
+**Goal:** Интегрировать RegistersManager с GenericProcess согласно решениям Q9 (external layer + convention mapping) и Q10 (локальный RegistersManager + PM broadcast): плагины опционально экспортируют register_schema, GenericProcess собирает регистры при bootstrap, регистрирует handler `register_update`, обеспечивает плагину доступ через `ctx.registers`.
 
-**Context:** Регистры существуют во фреймворке (`registers_module`), активно использовались в prototype_v1. В prototype_v2 их пока нет — плагины читают конфиг из YAML. Эта задача переносит control-plane инфраструктуру v1 в новую архитектуру v2 с учётом per-plugin organization.
+**Context:** Регистры существуют во фреймворке (`registers_module`), активно использовались в prototype_v1. В prototype_v2 их пока нет — плагины читают конфиг из YAML. Эта задача переносит control-plane инфраструктуру в новую архитектуру v2. Организация по Q9: регистры в `multiprocess_prototype_2/registers/` (внешний слой), convention mapping по имени (`registers/color_mask.py` → `plugins/color_mask/`). Владелец состояния по Q10: локальный RegistersManager в GenericProcess, PM = broadcast hub при boot.
 
-**Files (предварительно):**
+**Files:**
 - `multiprocess_framework/modules/process_module/plugins/base.py` — добавить `register_schema(self) -> SchemaBase | None` (default: None)
-- `multiprocess_framework/modules/process_module/generic/generic_process.py` — bootstrap RegistersManager из plugin schemas, регистрация handler `register_update`
-- `multiprocess_framework/modules/process_module/plugins/base.py` — расширить PluginContext полем `registers: RegistersManager`
-- `multiprocess_prototype_2/plugins/color_mask/config.py` — пример per-plugin регистра (SchemaBase с FieldMeta)
+- `multiprocess_framework/modules/process_module/plugins/base.py` — расширить PluginContext полем `registers: RegistersManager | None`
+- `multiprocess_framework/modules/process_module/generic/generic_process.py` — bootstrap RegistersManager из plugin schemas, handler `register_update`, boot-time `register_schemas` → PM, relay `register_changed` → PM
+- `multiprocess_prototype_2/registers/color_mask.py` — СОЗДАТЬ: ColorMaskRegisters(SchemaBase) с FieldMeta (min_h, max_h, min_s, max_s, min_v, max_v)
+- `multiprocess_prototype_2/plugins/color_mask/plugin.py` — proof-of-concept: читать `ctx.registers` вместо команды set_hsv_range
 
-**Зависит от решения Q9 (организация регистров) и Q10 (где живёт RegistersManager).** До решения этих вопросов — задача в статусе DRAFT.
+**Steps:**
+1. Добавить в `ProcessModulePlugin.base.py` метод `register_schema(self) -> SchemaBase | None`:
+   ```python
+   def register_schema(self) -> "SchemaBase | None":
+       """Опциональный регистр плагина. Если None — плагин на defaults из config.
+       Convention: возвращённая схема маппится на plugin.name в RegistersManager."""
+       return None
+   ```
 
-**Acceptance criteria (предварительно):**
+2. Расширить `PluginContext` полем `registers: RegistersManager | None = None` — плагин проверяет сам, есть ли регистр.
+
+3. В `generic_process.py` bootstrap RegistersManager (решение Q10):
+   - Сканировать `multiprocess_prototype_2/registers/` — найти файлы по convention (`{plugin_name}.py`).
+   - Для каждого плагина: если файл регистра существует → импортировать схему → `RegistersManager.register(plugin.name, schema_instance)`.
+   - Вызвать `plugin.configure(ctx)` уже с заполненным `ctx.registers`.
+   - Зарегистрировать handler: `register_message_handler("register_update", self._on_register_update)`.
+
+4. При boot отправить schemas в ProcessManager (Q10, протокол `register_schemas`):
+   ```python
+   schemas_payload = registers_manager.export_schemas()  # dict: name → schema dict
+   self._ctx.io.send_data("process_manager", "register_schemas", schemas_payload)
+   ```
+
+5. В `_on_register_update(msg)` handler:
+   - `registers_manager.set_field_value(msg["register"], msg["field"], msg["value"])`.
+   - Relay в PM: `send_data("process_manager", "register_changed", {...})`.
+
+6. **Создать `multiprocess_prototype_2/registers/color_mask.py`** — proof-of-concept:
+   ```python
+   from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta
+   from typing import Annotated
+
+   class ColorMaskRegisters(SchemaBase):
+       min_h: Annotated[int, FieldMeta("Min Hue", min=0, max=179, unit="°")] = 0
+       max_h: Annotated[int, FieldMeta("Max Hue", min=0, max=179, unit="°")] = 179
+       min_s: Annotated[int, FieldMeta("Min Saturation", min=0, max=255)] = 50
+       max_s: Annotated[int, FieldMeta("Max Saturation", min=0, max=255)] = 255
+       min_v: Annotated[int, FieldMeta("Min Value", min=0, max=255)] = 50
+       max_v: Annotated[int, FieldMeta("Max Value", min=0, max=255)] = 255
+   ```
+
+7. **Рефакторить `color_mask/plugin.py`** (proof-of-concept):
+   - В `configure(ctx)`: `self._reg = ctx.registers` (если None — fallback на config.get()).
+   - В `process(item)`: `lower = (self._reg.min_h, ...)` если reg есть, иначе `self._lower`.
+   - Команда `set_hsv_range` удаляется — заменена регистром.
+
+**Acceptance criteria:**
 - [ ] `ProcessModulePlugin.register_schema()` существует с default None
-- [ ] GenericProcess при bootstrap собирает регистры из плагинов с register_schema != None
-- [ ] GenericProcess регистрирует handler `register_update`, обновляет регистры
-- [ ] PluginContext.registers даёт плагину доступ к RegistersManager
-- [ ] color_mask использует регистр вместо команды set_hsv_range (e2e подтверждение)
+- [ ] `PluginContext.registers: RegistersManager | None` поле присутствует
+- [ ] GenericProcess при bootstrap находит `registers/color_mask.py` по convention и передаёт ctx.registers в ColorMaskPlugin
+- [ ] GenericProcess при boot отправляет `register_schemas` в ProcessManager
+- [ ] GenericProcess регистрирует handler `register_update`, применяет изменение к RegistersManager + relay в PM
+- [ ] `multiprocess_prototype_2/registers/color_mask.py` создан с 6 полями FieldMeta
+- [ ] color_mask plugin читает HSV thresholds из `ctx.registers` вместо команды set_hsv_range
+- [ ] Плагин без регистра (например resize) работает без изменений — graceful degradation
+- [ ] Тесты: bootstrap convention scan, register_update handler, graceful degradation без регистра (≥ 5 тестов)
 
-**Out of scope:** Frontend integration (FrontendRegistersBridge) — отдельная фаза. Миграция всех плагинов на регистры — постепенно (color_mask первый как proof-of-concept).
+**Out of scope:** Frontend integration (FrontendRegistersBridge) — отдельная фаза. PM-side broadcast implementation (ProcessManager принимает register_schemas — реализуется в PM task отдельно). Миграция всех плагинов на регистры — постепенно, color_mask первый как proof-of-concept.
+**Dependencies:** Task 5.2, Task 5.3
 
 ---
 
@@ -550,85 +766,108 @@ Source-плагины реализуют `produce() -> items`. Старые ме
            return result
        return wrapper
    ```
-5. НЕ делать process/produce абстрактными (чтобы не ломать существующие плагины вроде heartbeat — они получают pass-through по умолчанию).
-6. Экспортировать `for_each` из `multiprocess_framework/modules/process_module/plugins/__init__.py` рядом с `ProcessModulePlugin`.
+5. Добавить атрибут класса `thread_safe` (решение Q8):
+   ```python
+   from typing import ClassVar
+
+   class ProcessModulePlugin:
+       thread_safe: ClassVar[bool] = False
+       """PipelineExecutor уважает этот флаг при DAG/parallel execution.
+       False (default) — sequential, safe by default.
+       True — разрешает параллельный вызов process() (только для stateless плагинов)."""
+   ```
+6. НЕ делать process/produce абстрактными (чтобы не ломать существующие плагины вроде heartbeat — они получают pass-through по умолчанию).
+7. Экспортировать `for_each` из `multiprocess_framework/modules/process_module/plugins/__init__.py` рядом с `ProcessModulePlugin`.
 
 **Acceptance criteria:**
 - [ ] `process()` существует с default pass-through
 - [ ] `produce()` существует с default NotImplementedError
 - [ ] `is_source` property работает
+- [ ] `thread_safe: ClassVar[bool] = False` присутствует в базовом классе
 - [ ] `for_each` декоратор экспортирован, работает на методе плагина
 - [ ] Декоратор корректно обрабатывает `dict` (append), `list[dict]` (extend), `None` (skip)
 - [ ] Существующие плагины (heartbeat, frame_counter) не ломаются — они не переопределяют process/produce и это OK
-- [ ] Тесты base.py: >= 5 тестов (default process pass-through, produce raises, is_source для разных category, @for_each для 1:1, @for_each для 1:N через list, @for_each фильтрация через None)
+- [ ] Тесты base.py: >= 6 тестов (default process pass-through, produce raises, is_source для разных category, thread_safe default False, @for_each для 1:1, @for_each для 1:N через list, @for_each фильтрация через None)
 
 **Out of scope:** Не менять плагины прототипа (это Task 5.4-5.7). Не удалять старые абстрактные методы configure/start.
 **Dependencies:** Нет
 
 ---
 
-### Task 5.3 -- Data Worker + Chain Worker в GenericProcess
+### Task 5.3 -- Компонентная архитектура GenericProcess (DataReceiver + PipelineExecutor + SourceProducer)
 
 **Level:** Senior+ (Opus, extended thinking)
 **Assignee:** teamlead
-**Goal:** Добавить Data Worker и Chain Worker в GenericProcess, интегрировать InspectorManager, переключить data flow с прямых message_handler на pipeline через внутреннюю очередь
-**Context:** Это центральная задача рефакторинга. Data Worker заменяет текущий `_data_receiver_loop` -- он не только вызывает `router_manager.receive()`, но и превращает IPC-сообщения в items (через SHM middleware) и передает в InspectorManager. Chain Worker получает готовые `list[dict]` из очереди и прогоняет через `plugin.process()`, затем записывает результат в SHM и отправляет IPC.
+**Goal:** Реализовать компонентную декомпозицию GenericProcess согласно решению Q5: DataReceiver, PipelineExecutor, SourceProducer как отдельные файлы + интеграция с chain_module, FrameShmMiddleware, block+alert backpressure (Q6), pass-through+circuit breaker error policy (Q7)
+**Context:** Это центральная задача рефакторинга. Вместо монолита — четыре компонента по ~80-180 строк каждый. PipelineExecutor использует chain_module (ChainRunnable/DagRunnable). DataReceiver оборачивает FrameShmMiddleware + InspectorManager. SourceProducer управляет produce()-loop. GenericProcess — тонкая обёртка-композиция.
 
 **Files:**
-- `multiprocess_framework/modules/process_module/generic/generic_process.py` -- рефакторинг
-- `multiprocess_framework/modules/process_module/generic/generic_process_config.py` -- возможно расширить конфиг (chain_targets, shm_slot_prefix)
+- `multiprocess_framework/modules/process_module/generic/data_receiver.py` — СОЗДАТЬ (~120 строк)
+- `multiprocess_framework/modules/process_module/generic/pipeline_executor.py` — СОЗДАТЬ (~180 строк)
+- `multiprocess_framework/modules/process_module/generic/source_producer.py` — СОЗДАТЬ (~80 строк)
+- `multiprocess_framework/modules/process_module/generic/generic_process.py` — рефакторинг (композиция, ~150 строк)
+- `multiprocess_framework/modules/process_module/generic/generic_process_config.py` — расширить: `chain_targets: list[str]`, `queue_size: int = 64`, `lag_alert_threshold_sec: float = 2.0`, `error_policy` секция
 
 **Steps:**
-1. Добавить `import queue` и создать `self._chain_queue = queue.Queue(maxsize=64)` -- внутренняя очередь между Data Worker и Chain Worker
-2. Создать `InspectorManager` в `_init_application_threads()` с callback `on_ready=self._chain_queue.put`
-3. Рефакторить `_data_receiver_loop` в новый `_data_worker_loop`:
-   - Вызывает `router_manager.receive(channel_types=["data"])` как раньше
-   - НО: вместо диспатча в message_handler'ы плагинов -- собирает сообщения, формирует items:
-     ```python
-     item = {"frame": msg.get("frame"), **msg.get("data", {})}
-     ```
-   - Передает item в `inspector_manager.on_item(item)`
-   - Периодически вызывает `inspector_manager.check_timeouts()`
-4. Создать `_chain_worker_loop`:
-   - Ожидает `self._chain_queue.get(timeout=0.05)`
-   - Получает `list[dict]` (items)
-   - Прогоняет через каждый plugin в порядке объявления:
-     ```python
-     for plugin in self._plugins:
-         if plugin.is_source:
-             continue  # source не участвует в chain
-         items = plugin.process(items)
-         if not items:
-             break
-     ```
-   - После chain: для каждого item с frame -- SHM write через `memory_manager.write_images()`
-   - IPC send результата в targets (из конфига процесса или из item["target"])
-5. Для source-плагинов: создать `_source_worker_loop`:
-   - Вызывает `plugin.produce()` в цикле
-   - Для каждого item: SHM write + IPC send (через `self._ctx.io.send_data()`)
-   - Заменяет текущий подход CapturePlugin с собственным worker
-6. Обратная совместимость: если плагин переопределил configure() с register_message_handler -- это нормально, Data Worker просто не будет формировать items для таких сообщений (handler вызовется в receive). Постепенная миграция.
-7. Определить как из config/topology берутся targets для отправки результата chain. Варианты:
-   - `process_config.chain_targets: list[str]` -- в конфиге процесса
-   - Из item["target"] -- каждый item может указать свой target
-   - Fallback: `wires` из topology задают routing
+1. **Создать `data_receiver.py`** — компонент приёма и трансформации IPC-сообщений в items:
+   - Конструктор принимает `router_manager`, `inspector_manager`, `chain_queue`, `shm_middleware`, `log_*` callbacks
+   - Метод `run_loop(stop_event)`: `router_manager.receive(channel_types=["data"])` в цикле
+   - Для каждого сообщения: `shm_middleware.restore_frame(msg)` → `item = {**msg}` → `inspector_manager.on_item(item)`
+   - Периодически (каждые ~0.1 сек): `inspector_manager.check_timeouts()`
+   - Backpressure (Q6): `chain_queue.put(items, timeout=lag_alert_threshold_sec)` — если `Full` → алерт + retry; метрики `queue_depth`, `overload_events`
+
+2. **Создать `pipeline_executor.py`** — компонент исполнения chain через chain_module:
+   - Конструктор принимает `plugins: list[ProcessModulePlugin]`, `chain_targets: list[str]`, `shm_middleware`, `sender`, `error_policy_config`
+   - Адаптер `PluginStep(plugin)` — оборачивает `plugin.process()` в интерфейс `RunnableStep` из chain_module
+   - Метод `build_chain(wires=None)`: если wires переданы → `DagRunnable` с `detect_parallel_bundles()`, иначе → `ChainRunnable` (линейный)
+   - Метод `run_loop(chain_queue, stop_event)`: `chain_queue.get(timeout=0.05)` → `chain.run(items)` → `shm_middleware.strip_frame(item)` + SHM write → IPC send (с учётом Q1: `item.get("target")` или `chain_targets`)
+   - Error policy (Q7): try/except вокруг каждого PluginStep — одна ошибка → `item["inspection_status"] = "not_inspected"` + pass-through; N подряд → plugin.bypassed = True + алерт; auto-reset через таймер
+
+3. **Создать `source_producer.py`** — компонент produce()-loop для source-плагинов:
+   - Конструктор принимает `plugin: ProcessModulePlugin`, `shm_middleware`, `sender`, `chain_targets`, `target_interval_sec`, `log_*` callbacks
+   - Метод `run_loop(stop_event)`: `plugin.produce()` в цикле с `target_interval_sec` throttle
+   - Для каждого item: `shm_middleware.strip_frame(item)` + SHM write → IPC send в `chain_targets`
+   - Smart sleep: `time.monotonic()` до и после produce() → вычитаем из target_interval_sec
+
+4. **Рефакторить `generic_process.py`** — тонкая композиция (только lifecycle + компоненты):
+   - `_init_application_threads()`: создаёт `InspectorManager`, `FrameShmMiddleware`, `DataReceiver`, `PipelineExecutor`, `SourceProducer` (если есть source-плагины)
+   - Запускает каждый компонент как отдельный LOOP worker через `worker_module.WorkerManager`
+   - Метод `_on_receive(items)` как callback из InspectorManager → `chain_queue.put`
+   - Из config берёт `chain_targets`, `queue_size`, `lag_alert_threshold_sec`, `error_policy`
+
+5. **Расширить `generic_process_config.py`**:
+   ```python
+   class GenericProcessConfig(SchemaBase):
+       chain_targets: list[str] = []          # Q1: default routing targets
+       queue_size: int = 64                    # Q6: internal chain_queue maxsize
+       lag_alert_threshold_sec: float = 2.0   # Q6: backpressure alert threshold
+       error_policy: ErrorPolicyConfig = ...  # Q7: max_consecutive_fails, critical_plugins, auto_reset_sec
+   ```
+
+6. **Wire routing при boot** (Q1): в `_init_application_threads()` парсить `wires` из topology → передать в `PipelineExecutor.build_chain(wires)`. Если wires есть → DAG mode, нет → chain mode.
+
+7. **FrameShmMiddleware интеграция** (Q3): адаптировать из прототипа v1 (`multiprocess_prototype/`). Два метода: `restore_frame(msg) -> dict` (SHM ref → ndarray в msg["frame"]) и `strip_frame(item) -> shm_ref` (ndarray → SHM write, убрать из item). Middleware живёт в `generic/frame_shm_middleware.py`.
 
 **Acceptance criteria:**
-- [ ] Data Worker запускается и получает DATA-сообщения
-- [ ] SHM middleware по-прежнему читает frame из SHM в msg["frame"]
-- [ ] InspectorManager буферизует items с total_regions
-- [ ] Chain Worker прогоняет items через plugin.process()
-- [ ] Результат записывается в SHM и отправляется по IPC
-- [ ] Source-плагины работают через produce() loop
-- [ ] Обратная совместимость: heartbeat и frame_counter (не переопределившие process()) работают как pass-through
-- [ ] Старый `_data_receiver_loop` удален
+- [ ] Файлы `data_receiver.py`, `pipeline_executor.py`, `source_producer.py` созданы, каждый ≤ 200 строк
+- [ ] `generic_process.py` после рефакторинга ≤ 180 строк (только lifecycle + композиция)
+- [ ] DataReceiver: SHM middleware восстанавливает frame из shm_ref, items передаются в InspectorManager
+- [ ] PipelineExecutor: ChainRunnable используется для линейного pipeline (без wires)
+- [ ] PipelineExecutor: DagRunnable используется при наличии internal_wires в topology
+- [ ] Backpressure (Q6): queue.put с timeout; при Full > lag_alert_threshold_sec — алерт логируется; кадры НЕ дропаются
+- [ ] Error policy (Q7): exception в plugin.process() → item["inspection_status"]="not_inspected" + pass-through; N подряд → plugin.bypassed=True + алерт
+- [ ] Routing (Q1): item с "target" → отправить туда; без "target" → отправить в chain_targets
+- [ ] Source-плагины работают через SourceProducer.run_loop → produce() → SHM write → IPC send
+- [ ] Старый `_data_receiver_loop` и монолитный chain-код удалены из generic_process.py
+- [ ] Тесты: каждый компонент тестируется изолированно с mock dependencies (≥ 5 тестов на компонент)
 
-**Out of scope:** Не мигрировать конкретные плагины (это Tasks 5.4-5.7). Не менять system_threads.py.
+**Out of scope:** Не мигрировать конкретные плагины прототипа (это Tasks 5.4-5.7). Не менять system_threads.py. RegistersManager интеграция — Task 5.9.
 **Edge cases:**
-- chain_queue полна (maxsize=64): Data Worker блокируется на put с timeout, логирует warning
-- plugin.process() бросает exception: логировать, пропускать items (не крашить worker)
-- items пустой после plugin.process(): прервать chain, не отправлять IPC
-- Source-плагин + processing-плагин в одном процессе: source генерирует, processing обрабатывает
+- chain_queue полна: блокируемся, НЕ дропаем; алерт если > threshold
+- plugin.process() бросает exception: pass-through + mark_suspect; N подряд → circuit breaker
+- items пустые после plugin.process(): chain прерывается, IPC send не происходит
+- Source + processing плагин в одном процессе: SourceProducer генерирует → items через InspectorManager → PipelineExecutor
+- Процесс без source-плагинов: SourceProducer не создаётся
 **Dependencies:** Task 5.1, Task 5.2
 
 ---
