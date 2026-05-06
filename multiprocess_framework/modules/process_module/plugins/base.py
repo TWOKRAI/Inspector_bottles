@@ -69,6 +69,7 @@ class PluginContext:
         config: dict[str, Any],
         process: Any,
         io: ProcessIO,
+        registers: Any | None = None,
     ) -> None:
         self.process_name = process_name
         self.config = config
@@ -82,6 +83,10 @@ class PluginContext:
         # IPC facade
         self.io = io
 
+        # Registers (Phase 5.9) — RegistersManager | None
+        # Плагин читает self._reg = ctx.registers.get_register("plugin_name")
+        self.registers = registers
+
         # Logging
         self.log_info: Callable[[str], None] = process._log_info
         self.log_error: Callable[[str], None] = process._log_error
@@ -93,13 +98,18 @@ class PluginContext:
         # Ссылка на процесс для продвинутых плагинов (SHM middleware и т.д.)
         self._process = process
 
-    def with_config(self, plugin_config: dict[str, Any]) -> PluginContext:
+    def with_config(
+        self,
+        plugin_config: dict[str, Any],
+        registers: Any | None = None,
+    ) -> PluginContext:
         """Создать копию контекста с plugin-specific конфигом."""
         return PluginContext(
             process_name=self.process_name,
             config=plugin_config,
             process=self._process,
             io=self.io,
+            registers=registers,
         )
 
 
@@ -156,6 +166,18 @@ class ProcessModulePlugin(ABC):
     def is_source(self) -> bool:
         """True если плагин — источник данных (category == 'source')."""
         return self.category == "source"
+
+    def register_schema(self) -> Any | None:
+        """Опциональный регистр плагина (SchemaBase instance).
+
+        Если None — плагин на defaults из config (graceful degradation).
+        Convention: возвращённая схема маппится на plugin.name
+        в RegistersManager процесса.
+
+        Returns:
+            SchemaBase instance с FieldMeta полями или None.
+        """
+        return None
 
     def process(self, items: list[dict]) -> list[dict]:
         """Обработка items. Override в processing/output-плагинах.

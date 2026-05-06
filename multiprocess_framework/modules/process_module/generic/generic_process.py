@@ -8,6 +8,9 @@ Data Pipeline (Phase 5):
     DataReceiver  → InspectorManager → chain_queue → PipelineExecutor → IPC
     SourceProducer → SHM write → IPC (для source-плагинов)
 
+Registers (Phase 5.9):
+    RegistersManager — per-plugin registers bootstrap + IPC register_update handler.
+
 Загружает плагины из config["plugins"], передаёт в state machine.
 Команды плагинов автоматически регистрируются в CommandManager.
 """
@@ -82,7 +85,7 @@ class GenericProcess(ProcessModule):
         """Провести плагины через IDLE → READY → RUNNING.
 
         Плагины уже загружены в _init_custom_managers() (early-init).
-        Здесь только configure → start lifecycle.
+        Здесь только configure → start lifecycle + registers + data pipeline.
         """
         super()._init_application_threads()
 
@@ -95,9 +98,15 @@ class GenericProcess(ProcessModule):
         self._plugins: list[ProcessModulePlugin] = []
         self._plugin_contexts: list[PluginContext] = []
 
+        # Фаза 0: Registers bootstrap (до configure, чтобы ctx.registers был доступен)
+        registers_manager = self._init_registers(early)
+
         # Фаза 1: IDLE → READY (configure + авторегистрация команд)
         for plugin, ctx in early:
             try:
+                # Обновить ctx с registers
+                if registers_manager is not None:
+                    ctx.registers = registers_manager
                 plugin._do_configure(ctx)
                 self._plugins.append(plugin)
                 self._plugin_contexts.append(ctx)
@@ -124,6 +133,110 @@ class GenericProcess(ProcessModule):
 
         # Фаза 3: Data Pipeline bootstrap (Phase 5)
         self._init_data_pipeline()
+
+        # Фаза 4: Registers boot — отправить schemas в PM + handler
+        if registers_manager is not None:
+            self._boot_registers(registers_manager)
+
+    # --- Registers (Phase 5.9) ---
+
+    def _init_registers(
+        self, early: list[tuple[ProcessModulePlugin, PluginContext]],
+    ) -> Any | None:
+        """Собрать register_schema() от плагинов, создать RegistersManager.
+
+        Convention mapping: plugin.name → register name в RegistersManager.
+        Плагины без register_schema (return None) — пропускаются (graceful degradation).
+        """
+        schemas: dict[str, Any] = {}
+
+        for plugin, _ctx in early:
+            try:
+                schema = plugin.register_schema()
+                if schema is not None:
+                    schemas[plugin.name] = schema
+                    self._log_info(
+                        f"GenericProcess[{self.name}]: register '{plugin.name}' "
+                        f"schema loaded ({type(schema).__name__})"
+                    )
+            except Exception as e:
+                self._log_error(
+                    f"GenericProcess[{self.name}]: register_schema '{plugin.name}': {e}"
+                )
+
+        if not schemas:
+            return None
+
+        try:
+            from multiprocess_framework.modules.registers_module import RegistersManager
+            rm = RegistersManager(registers=schemas, logger=self)
+            self._registers_manager = rm
+            return rm
+        except Exception as e:
+            self._log_error(f"GenericProcess[{self.name}]: RegistersManager init: {e}")
+            return None
+
+    def _boot_registers(self, registers_manager: Any) -> None:
+        """Boot-time: handler register_update + отправка schemas в PM."""
+        # Handler для runtime register_update от GUI/других процессов
+        if self.router_manager:
+            self.router_manager.register_message_handler(
+                "register_update", self._on_register_update
+            )
+
+        # Отправить schemas в ProcessManager для broadcast
+        try:
+            schemas_payload = registers_manager.model_dump_all()
+            io = ProcessIO(self)
+            io.send_data("process_manager", "register_schemas", {
+                "process_name": self.name,
+                "schemas": schemas_payload,
+            })
+            self._log_info(
+                f"GenericProcess[{self.name}]: register_schemas → PM "
+                f"({len(schemas_payload)} registers)"
+            )
+        except Exception as e:
+            self._log_error(f"GenericProcess[{self.name}]: register_schemas send: {e}")
+
+    def _on_register_update(self, msg: dict) -> None:
+        """Handler: GUI/другой процесс обновляет значение регистра."""
+        rm = getattr(self, "_registers_manager", None)
+        if rm is None:
+            return
+
+        data = msg.get("data", {})
+        register_name = data.get("register")
+        field_name = data.get("field")
+        value = data.get("value")
+
+        if not register_name or not field_name:
+            return
+
+        success, error = rm.set_field_value(register_name, field_name, value)
+        if success:
+            self._log_info(
+                f"GenericProcess[{self.name}]: register_update "
+                f"{register_name}.{field_name} = {value}"
+            )
+            # Relay register_changed → PM для broadcast
+            try:
+                io = ProcessIO(self)
+                io.send_data("process_manager", "register_changed", {
+                    "process_name": self.name,
+                    "register": register_name,
+                    "field": field_name,
+                    "value": value,
+                })
+            except Exception:
+                pass
+        else:
+            self._log_error(
+                f"GenericProcess[{self.name}]: register_update failed "
+                f"{register_name}.{field_name}: {error}"
+            )
+
+    # --- Data Pipeline (Phase 5) ---
 
     def _init_data_pipeline(self) -> None:
         """Bootstrap data pipeline компонентов (Phase 5).
@@ -162,9 +275,6 @@ class GenericProcess(ProcessModule):
 
         # chain_queue: DataReceiver → PipelineExecutor
         self._chain_queue: queue.Queue = queue.Queue(maxsize=queue_size)
-
-        # InspectorManager → on_items_ready → chain_queue
-        # (DataReceiver создаёт свой callback)
 
         # --- DataReceiver (если есть processing плагины) ---
         if processing_plugins:
@@ -244,6 +354,8 @@ class GenericProcess(ProcessModule):
                 self._log_info(
                     f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started"
                 )
+
+    # --- Helpers ---
 
     def _load_plugin(self, class_path: str, plugin_name: str) -> ProcessModulePlugin:
         """Загрузить класс плагина по dotted path."""
