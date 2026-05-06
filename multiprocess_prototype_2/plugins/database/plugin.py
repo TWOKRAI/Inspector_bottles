@@ -1,8 +1,7 @@
-"""DatabasePlugin — хранение результатов детекции в SQLite.
+"""DatabasePlugin -- хранение результатов обработки в SQLite.
 
-Output-плагин: принимает detection_result / frame_processed →
-буферизует → batch INSERT по таймеру или по count.
-Лёгкая реализация без SQLManager — прямой sqlite3.
+Output-плагин: process(items) -> items (pass-through с side-effect записи в БД).
+Batch INSERT по таймеру или по count.
 """
 
 from __future__ import annotations
@@ -34,40 +33,26 @@ class DatabasePlugin(ProcessModulePlugin):
     outputs = []
 
     commands = {
-        "flush": "flush",
-        "get_stats": "get_stats",
+        "flush": "_cmd_flush",
+        "get_stats": "_cmd_get_stats",
     }
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка: DB path, batch params, handler."""
+        """Настройка: DB path, batch params."""
         cfg = ctx.config
         self._db_path = cfg.get("db_path", "data/inspector.db")
         self._batch_size: int = cfg.get("batch_size", 100)
         self._flush_interval: float = cfg.get("flush_interval_sec", 2.0)
 
-        # Буфер
         self._buffer: list[dict] = []
         self._buffer_lock = threading.Lock()
         self._total_written: int = 0
-        self._last_flush_time: float = time.monotonic()
         self._ctx = ctx
 
-        # Создаём директорию и БД
+        # Создаём директорию
         db_file = Path(self._db_path)
         db_file.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
-
-        # Handler для входящих результатов
-        ctx.router_manager.register_message_handler(
-            "detection_result", self._on_detection_result
-        )
-        ctx.router_manager.register_message_handler(
-            "frame_processed", self._on_frame_processed
-        )
-
-        # Команды
-        ctx.command_manager.register_command("flush", self._cmd_flush)
-        ctx.command_manager.register_command("get_stats", self._cmd_get_stats)
 
         ctx.log_info(
             f"DatabasePlugin: db={self._db_path}, "
@@ -90,7 +75,7 @@ class DatabasePlugin(ProcessModulePlugin):
         """)
         self._conn.commit()
 
-        # Worker для периодического flush
+        # Worker для периодического flush (фоновая задача, не data flow)
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
         ctx.worker_manager.create_worker(
             "db_flush_worker", self._flush_loop, cfg, auto_start=True
@@ -99,26 +84,19 @@ class DatabasePlugin(ProcessModulePlugin):
 
     def shutdown(self, ctx: PluginContext) -> None:
         """Flush остатков и закрытие соединения."""
-        ctx.log_info("DatabasePlugin: shutdown...")
         self._flush_buffer()
         if self._conn:
             self._conn.close()
             self._conn = None
-        ctx.log_info(
-            f"DatabasePlugin: shutdown complete, всего записано: {self._total_written}"
-        )
+        ctx.log_info(f"DatabasePlugin: shutdown, всего записано: {self._total_written}")
 
-    # --- Handlers ---
+    def process(self, items: list[dict]) -> list[dict]:
+        """Записать items в буфер для batch INSERT. Pass-through."""
+        for item in items:
+            self._add_to_buffer(item, item.get("event_type", "frame_processed"))
+        return items
 
-    def _on_detection_result(self, msg: dict) -> None:
-        """Handler для detection_result."""
-        data = msg.get("data", {})
-        self._add_to_buffer(data, "detection")
-
-    def _on_frame_processed(self, msg: dict) -> None:
-        """Handler для frame_processed."""
-        data = msg.get("data", {})
-        self._add_to_buffer(data, "frame_processed")
+    # --- Буферизация ---
 
     def _add_to_buffer(self, data: dict, event_type: str) -> None:
         """Добавить запись в буфер."""
@@ -134,8 +112,6 @@ class DatabasePlugin(ProcessModulePlugin):
             if len(self._buffer) >= self._batch_size:
                 self._flush_buffer()
 
-    # --- Flush ---
-
     def _flush_loop(self, stop_event, pause_event) -> None:
         """Периодический flush буфера."""
         while not stop_event.is_set():
@@ -146,7 +122,7 @@ class DatabasePlugin(ProcessModulePlugin):
             self._flush_buffer()
 
     def _flush_buffer(self) -> int:
-        """Записать буфер в БД. Возвращает количество записанных строк."""
+        """Записать буфер в БД."""
         with self._buffer_lock:
             if not self._buffer:
                 return 0
