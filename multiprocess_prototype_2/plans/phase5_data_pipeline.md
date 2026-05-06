@@ -39,35 +39,397 @@ IPC msg (frame_ready/region_ready)
 
 ## Новый контракт плагина
 
+Один универсальный метод `process(items) -> items` для всех случаев (1:1, 1:N, N:1, фильтрация, batching).
+
 ```python
 class ProcessModulePlugin:
     # Существующие: name, category, inputs, outputs, commands, configure(), start(), shutdown()
 
     def process(self, items: list[dict]) -> list[dict]:
-        """Чистая обработка. items = [{"frame": ndarray, ...meta}].
+        """Чистая обработка коллекции items.
+        items = [{"frame": ndarray, ...meta}].
+        Возвращает преобразованный список items.
         Без IPC, без SHM, без PluginContext.
-        Default: return items (pass-through)."""
+        Default: pass-through (return items).
+
+        Контракт покрывает все семантики:
+          1:1   -- [item_in] -> [item_out]            (resize, grayscale, ...)
+          1:N   -- [item] -> [item_a, item_b, ...]    (region_split: 1 frame -> N regions)
+          N:1   -- [item_a, item_b, ...] -> [merged]  (stitcher: N regions -> 1 canvas)
+          N:0   -- [...] -> []                        (фильтрация / отбрасывание)
+          N:M   -- [...] -> [...]                     (любая комбинация)
+        """
+        return items
 
     def produce(self) -> list[dict]:
         """Только для source-плагинов. Генерация items.
         Default: raise NotImplementedError."""
+        raise NotImplementedError(f"Plugin '{self.name}' does not implement produce()")
 ```
+
+### Декоратор `@for_each` (опциональный сахар)
+
+Простые 1:1 плагины могут декорировать `process` чтобы писать per-item логику. Контракт не меняется — декоратор оборачивает метод так, что снаружи вызывается `process(items) -> list[dict]`.
+
+```python
+# multiprocess_framework/modules/process_module/plugins/base.py
+import functools
+
+def for_each(func):
+    """Сахар: per-item функция -> process(items).
+    Возврат функции:
+      dict       -> 1:1
+      list[dict] -> 1:N (fan-out)
+      None       -> фильтрация (item отбрасывается)
+    """
+    @functools.wraps(func)
+    def wrapper(self, items: list[dict]) -> list[dict]:
+        result = []
+        for item in items:
+            out = func(self, item)
+            if out is None:
+                continue
+            if isinstance(out, list):
+                result.extend(out)
+            else:
+                result.append(out)
+        return result
+    return wrapper
+```
+
+**Использование:**
+
+```python
+# Простой 1:1 (resize)
+class ResizePlugin(ProcessModulePlugin):
+    @for_each
+    def process(self, item):
+        if item.get("frame") is None: return None
+        return {**item, "frame": cv2.resize(item["frame"], (w, h))}
+
+# Fan-out 1:N (region_split)
+class RegionSplitPlugin(ProcessModulePlugin):
+    @for_each
+    def process(self, item):
+        return [{**item, "frame": region, "region_name": name} for name, region in self._split(item["frame"])]
+
+# Fan-in N:1 (stitcher) -- БЕЗ декоратора
+class StitcherPlugin(ProcessModulePlugin):
+    def process(self, items):
+        return [{"frame": self._stitch(items), "seq_id": items[0]["seq_id"]}]
+```
+
+Декоратор использовать или нет — выбор автора плагина. Контракт `process(items) -> items` универсален в обоих случаях.
+
+---
+
+## Открытые архитектурные вопросы
+
+> **CRITICAL:** Эти 8 вопросов должны быть решены **ДО старта Task 5.3**. Иначе риск переделки Tasks 5.4-5.8 после первого e2e. Каждый вопрос имеет статус `OPEN` / `DECIDED` и список вариантов.
+
+### Q1. Routing: куда GenericProcess отправляет результат chain?  `[OPEN]`
+
+**Контекст:** После прогона items через chain — куда их отправлять по IPC?
+
+**Варианты:**
+- **A. `chain_targets: list[str]` в process_config** — статический список targets, задаётся в topology YAML процесса.
+- **B. `item["target"]`** — каждый item сам несёт свой target (для fan-out как region_split: разные регионы → разные процессы).
+- **C. `wires` из topology** — GenericProcess парсит wires при bootstrap, маршрутизирует по типу выходного канала.
+- **D. Гибрид A+B** — `chain_targets` как default, `item["target"]` override per-item.
+
+**Влияет на:** Task 5.3 (routing logic), Task 5.4 (capture target), Task 5.5 (processing pass-through), Task 5.6 (stitcher target), Task 5.7 (output side-effects), Task 5.8 (topology schema).
+
+**Решение:** _TBD_
+
+---
+
+### Q2. Item schema: типизация контракта между плагинами  `[OPEN]`
+
+**Контекст:** Сейчас `item: dict` — неявный контракт. Какие ключи mandatory, какие optional, как валидируется.
+
+**Варианты:**
+- **A. Чистый `dict`** — без типизации, договор в README. Минимум кода, максимум footgun.
+- **B. `TypedDict`** в `process_module/generic/item.py` — статическая типизация без runtime overhead.
+- **C. `pydantic` dataclass `PipelineItem`** — runtime валидация на boundaries (Data Worker → Chain Worker).
+- **D. Dual:** `TypedDict` для in-process, `pydantic` для cross-process boundary.
+
+**Mandatory ключи (минимум):** `frame: ndarray | None`, `camera_id: int`, `seq_id: int`, `timestamp: float`.
+**Optional:** `region_name`, `total_regions`, `original_x`, `original_y`, `target`, `frame_id`, ...
+
+**Влияет на:** Task 5.2 (где определить тип), все последующие задачи (импорт типа), Task 5.1 (что InspectorManager видит в item).
+
+**Решение:** _TBD_
+
+---
+
+### Q3. Frame ownership и IPC safety  `[OPEN]`
+
+**Контекст:** `item` содержит `frame: ndarray`. Если кто-то случайно сделает `send_data(item)` — pickle гигабайтного массива в IPC. SHM существует именно чтобы этого избегать.
+
+**Варианты:**
+- **A. Дисциплина в коде** — комментарий "frame только in-process, перед IPC удалять и писать в SHM". Нет защиты на уровне типов.
+- **B. Два типа:** `LocalItem` (с frame) vs `MessagePayload` (без frame, со ссылкой на SHM slot). Конвертация на boundary GenericProcess.
+- **C. Lazy frame-доступ:** `item.frame` — property, читает из SHM при обращении. Pickle сериализует только метаданные.
+- **D. Стандарт MessageAdapter:** middleware вытаскивает `frame` перед `send` и кладёт обратно после `receive` (как сейчас, но автоматически для всех item-сообщений).
+
+**Влияет на:** Task 5.3 (где split frame ↔ SHM), Task 5.6 (stitcher cross-process), Task 5.7 (output не отправляет frame дальше).
+
+**Решение:** _TBD_
+
+---
+
+### Q4. Backwards-compat: судьба `register_message_handler` для data flow  `[DECIDED — Вариант B]`
+
+**Контекст:** `register_message_handler(key, handler)` во фреймворке используется на двух уровнях:
+
+**Control plane (system) — нетронуто:**
+- `process_module/core/process_module.py:185` — `state.changed` (StateStore IPC)
+- `process_module/lifecycle/process_lifecycle.py:151` — все commands из `command_manager` (start_capture, stop_capture, ...)
+- `process_manager_module/process/process_manager_process.py:158` — `process.command` (AD-8)
+- `process_manager_module/monitor/process_monitor.py:128` — `heartbeat`
+- `register_update` — IPC от RegistersManager (см. раздел "Регистры" ниже)
+
+**Data plane (data flow) — мигрируется:**
+- 12 плагинов прототипа_2 регистрируют handlers для: `frame_ready`, `region_ready`, `region_processed`, `frame_processed`, `detection_result`. Все дублируют один паттерн (handler сохраняет `_pending_frame_info` → worker_loop читает SHM → обрабатывает → пишет SHM → `io.send_data`). Это и есть тот boilerplate, ради которого затеян рефакторинг.
+
+**Решение: Вариант B — полная миграция data plane в Phase 5.**
+
+- Все 12 плагинов мигрируются на `process(items)` в Tasks 5.5-5.7.
+- В GenericProcess (Task 5.3) **не появляется** branch "if плагин зарегистрировал handler — диспатчить через handler". Один путь данных: `IPC → Data Worker → item → InspectorManager → chain_queue → Chain Worker → process() → SHM → IPC`.
+- `register_message_handler` как метод RouterManager **остаётся** — используется фреймворком для control plane (state, heartbeat, commands, register_update).
+- Capture plugin (source) handler не использует — он остаётся в стороне.
+
+**Обоснование:**
+1. Все потребители (12 плагинов) мигрируются в той же фазе — нет внешних API consumers.
+2. Control vs data plane — чистое разделение, без exception cases.
+3. Между Task 5.3 и Task 5.7 прототип временно не работает (часы до e2e в Task 5.8) — приемлемо для одной фазы.
+
+**Риск:** если в Phase 6/7 понадобится data-handler для side-channel — придётся обосновать и аккуратно вернуть. Это правильный gating против "по привычке зарегистрировать handler в плагине".
+
+**Влияет на:** Task 5.3 (один путь, без backwards-compat кода), Tasks 5.5-5.7 (полная миграция всех плагинов).
+
+---
+
+### Q5. Декомпозиция GenericProcess  `[OPEN]`
+
+**Контекст:** GenericProcess берёт на себя: lifecycle + 3 worker'а + SHM на двух концах + InspectorManager + source-loop + routing + backwards-compat. Риск god-class.
+
+**Варианты:**
+- **A. Всё в `generic_process.py`** — как сейчас в плане Task 5.3. Простота, но толстый файл (~600 строк).
+- **B. Разбить на компоненты:**
+  - `PipelineExecutor` — chain worker + plugin orchestration
+  - `DataReceiver` — data worker + IPC→item трансформация
+  - `SourceProducer` — source-loop для produce()
+  - `GenericProcess` — композиция, lifecycle, configuration
+
+  Каждый компонент тестируется отдельно. ~150-200 строк на компонент.
+
+- **C. Промежуточный** — выделить только `PipelineExecutor` (самая сложная часть), остальное в GenericProcess.
+
+**Влияет на:** Task 5.3 (структура файлов), тестируемость, будущая расширяемость.
+
+**Решение:** _TBD_
+
+---
+
+### Q6. Backpressure policy  `[OPEN]`
+
+**Контекст:** `chain_queue = queue.Queue(maxsize=64)`. Что делать когда полна?
+
+**Варианты:**
+- **A. Block-with-timeout** (как сейчас в плане) — Data Worker блокируется на `put(timeout=...)`, логирует warning. Cascade: IPC очередь растёт.
+- **B. Drop-on-full** — `put_nowait`, при Full — drop item, метрика `dropped_frames++`. Минимизирует latency, теряет данные.
+- **C. Drop-oldest** — при Full удалить старейший из очереди и положить новый. Свежие данные приоритет, но сложнее реализация.
+- **D. Throttle source** — backpressure до CapturePlugin (skip следующий produce). Только для source-процессов.
+
+**Влияет на:** Task 5.3 (логика queue), метрики, поведение под нагрузкой.
+
+**Решение:** _TBD_
+
+---
+
+### Q7. Error policy: `plugin.process()` бросает exception  `[OPEN]`
+
+**Контекст:** Что происходит при сбое плагина в середине chain?
+
+**Варианты:**
+- **A. Drop + log** (как сейчас в плане) — items теряются, exception логируется, chain продолжает.
+- **B. Dead-letter queue** — failed items идут в отдельную очередь / SQLite таблицу для разбора.
+- **C. Circuit breaker** — N exception подряд → плагин помечается failed, chain пропускает его.
+- **D. Retry with backoff** — N попыток на одном items. Только для transient errors.
+
+**Влияет на:** Task 5.3 (try/except логика), Task 5.7 (database может быть dead-letter sink), наблюдаемость.
+
+**Решение:** _TBD_
+
+---
+
+### Q8. Thread-safety контракт `process()`  `[OPEN]`
+
+**Контекст:** Сейчас Chain Worker один — process() вызывается последовательно. Если в будущем распараллелим (ThreadPool по items) — `process()` должен быть thread-safe или явно non-reentrant.
+
+**Варианты:**
+- **A. Required thread-safe** — фиксируем в base.py docstring как требование к авторам плагинов.
+- **B. Декларативно через атрибут** — `class Plugin: thread_safe = True/False`, GenericProcess уважает.
+- **C. Не фиксировать** — решим когда дойдём до параллелизма. Риск: переписывать плагины.
+
+**Влияет на:** Task 5.2 (docstring), будущий параллелизм, контракт плагина.
+
+**Решение:** _TBD_
+
+---
+
+## Регистры — control plane между frontend и backend
+
+> **Контекст:** Обсуждение возникло после изучения `multiprocess_prototype/registers/` (v1) и `multiprocess_framework/modules/registers_module/`.
+
+### Что такое регистр
+
+**Регистр** — экземпляр Pydantic-схемы (`SchemaBase`) с богатыми field-level метаданными. Один Python-класс работает на обе стороны (frontend + backend), служит **единственным источником истины** для конфигурации.
+
+```python
+@register_schema("ColorMaskRegistersV1")
+class ColorMaskRegisters(SchemaBase):
+    register_dispatch: ClassVar[RegisterDispatchMeta] = RegisterDispatchMeta(
+        process_targets=("processor",)  # backend-таргет
+    )
+    min_h: Annotated[int, FieldMeta(
+        "Min Hue",                          # label для GUI
+        info="Нижняя граница H в HSV",      # tooltip
+        min=0, max=179, unit="°",           # валидация + UI hint
+        routing=FieldRouting(channel="control_processor"),
+    )] = 0
+    # ... max_h, min_s, max_s, min_v, max_v
+```
+
+**Два потребителя одного класса:**
+- **Frontend:** `FrontendRegistersBridge` автогенерит виджет (Slider 0..179, label "Min Hue", unit "°"). Изменение → `rm.set_field_value("color_mask", "min_h", 30)`.
+- **Backend:** Plugin читает `self._reg.min_h` — получает свежее значение, обновлённое через IPC.
+
+### Инфраструктура — уже есть во фреймворке
+
+`multiprocess_framework/modules/registers_module/` — полноценный модуль:
+- `RegistersManager` — хранение, pub/sub, set_field_value с dispatch
+- `build_connection_map_from_registers` — карта register → process из `register_dispatch`
+- `dispatch.py`, `routing_map.py` — маршрутизация изменений
+- `FrontendRegistersBridge` (frontend_module) — UI-обёртка
+- `register_message_handler("register_update", ...)` — control plane на backend
+
+В `prototype_v1` — 8 доменов регистров (camera, processor, renderer, settings, sources, processing, payloads, pipeline). В `prototype_v2` регистров **нет** — плагины читают конфиг из YAML через `cfg.get(key, default)`. Это пробел, который вылезет при росте GUI.
+
+### Связь с Q4 (data plane vs control plane)
+
+`register_update` идёт через тот же механизм `register_message_handler` что мы обсуждали в Q4. Но это **control plane**, не data plane:
+
+| Plane | Сообщения | Механизм | Phase 5 |
+|-------|-----------|----------|---------|
+| **Data** | `frame_ready`, `region_ready`, `region_processed`, `frame_processed`, `detection_result` | `process(items)` (новое) | мигрируется |
+| **Control** | `register_update`, `state.changed`, `heartbeat`, `process.command`, `<command_name>` | `register_message_handler` (как сейчас) | **нетронуто** |
+
+Это окончательно подтверждает Вариант B из Q4: data plane становится один путь, control plane сохраняет существующий механизм.
+
+### Как регистры применимы к плагинам Phase 5
+
+**Сейчас (v2):** плагин читает конфиг при `configure()`:
+```python
+def configure(self, ctx):
+    self._lower_h = ctx.config.get("min_h", 0)  # snapshot, не обновляется
+```
+
+Команда `set_hsv_range` для runtime-изменения:
+```python
+commands = {"set_hsv_range": ...}
+def _set_hsv_range(self, lower, upper): ...
+```
+
+**С регистрами:**
+```python
+class ColorMaskPlugin(ProcessModulePlugin):
+    def register_schema(self) -> SchemaBase:
+        return ColorMaskRegisters()  # экземпляр со defaults
+
+    def configure(self, ctx):
+        self._reg = ctx.registers.get("color_mask")  # типизированный экземпляр
+        # Опционально: подписка на тяжёлые пересчёты
+        ctx.registers.subscribe("color_mask", "min_h", self._rebuild_arrays)
+
+    @for_each
+    def process(self, item):
+        frame = item.get("frame")
+        if frame is None: return None
+        lower = (self._reg.min_h, self._reg.min_s, self._reg.min_v)  # авто-update
+        upper = (self._reg.max_h, self._reg.max_s, self._reg.max_v)
+        # ... cv2.inRange ...
+```
+
+**Что меняется:**
+- Команды runtime-настройки (set_hsv_range, ...) **удаляются** — заменяются регистрами.
+- GUI получает виджеты бесплатно из `FieldMeta` плагина.
+- Один источник истины frontend ↔ backend.
+
+### Q9. Регистры — per-plugin vs централизованные  `[OPEN]`
+
+**Варианты:**
+- **A. Централизованно (как v1):** `multiprocess_prototype_2/registers/{camera,processor,...}/schemas.py`. Плюс — общий вид. Минус — разрастается с ростом плагинов.
+- **B. Per-plugin:** регистр живёт рядом с плагином — `plugins/color_mask/{plugin.py, config.py, ...}`. Плюс — плагин самосодержащий, легко добавлять/удалять. Минус — нет общего обзора.
+- **C. Гибрид:** общие регистры (camera, settings, theme) — централизованно; плагин-специфичные — рядом с плагином.
+
+**Решение:** _TBD_
+
+### Q10. RegistersManager в GenericProcess  `[OPEN]`
+
+**Варианты:**
+- **A. GenericProcess собирает RegistersManager** — при bootstrap обходит плагины, вызывает `plugin.register_schema()`, формирует RegistersManager. Регистрирует handler `register_update`.
+- **B. RegistersManager как отдельный manager-процесс** — один на всю систему, плагины подключаются как клиенты.
+- **C. Каждый процесс держит свой RegistersManager** — изолированно, синхронизация через IPC `register_update`.
+
+**Решение:** _TBD_
+
+---
 
 ## Порядок выполнения
 
 ### Phase 5.1: Инфраструктура (фреймворк)
 - Task 5.1: InspectorManager
-- Task 5.2: Расширение ProcessModulePlugin (process/produce)
+- Task 5.2: Расширение ProcessModulePlugin (process/produce + опционально register_schema)
 - Task 5.3: Data Worker + Chain Worker в GenericProcess
+- Task 5.9: Per-plugin registers integration *(новая, после Q9/Q10)*
 
 ### Phase 5.2: Миграция плагинов (прототип)
 - Task 5.4: CapturePlugin --> produce()
-- Task 5.5: Processing-плагины --> process()
+- Task 5.5: Processing-плагины --> process() (color_mask использует регистр вместо команды)
 - Task 5.6: StitcherPlugin --> process() (fan-in)
 - Task 5.7: Output-плагины --> process()
 
 ### Phase 5.3: Интеграция и тесты
 - Task 5.8: Topology обновление и e2e тест
+
+---
+
+### Task 5.9 -- Per-plugin registers integration  `[DRAFT — зависит от Q9, Q10]`
+
+**Level:** Senior (Opus, normal thinking)
+**Assignee:** teamlead
+**Goal:** Интегрировать RegistersManager с GenericProcess: плагины опционально экспортируют register_schema, GenericProcess собирает регистры в RegistersManager, регистрирует handler `register_update`, обеспечивает плагину доступ к типизированному экземпляру через `ctx.registers`.
+
+**Context:** Регистры существуют во фреймворке (`registers_module`), активно использовались в prototype_v1. В prototype_v2 их пока нет — плагины читают конфиг из YAML. Эта задача переносит control-plane инфраструктуру v1 в новую архитектуру v2 с учётом per-plugin organization.
+
+**Files (предварительно):**
+- `multiprocess_framework/modules/process_module/plugins/base.py` — добавить `register_schema(self) -> SchemaBase | None` (default: None)
+- `multiprocess_framework/modules/process_module/generic/generic_process.py` — bootstrap RegistersManager из plugin schemas, регистрация handler `register_update`
+- `multiprocess_framework/modules/process_module/plugins/base.py` — расширить PluginContext полем `registers: RegistersManager`
+- `multiprocess_prototype_2/plugins/color_mask/config.py` — пример per-plugin регистра (SchemaBase с FieldMeta)
+
+**Зависит от решения Q9 (организация регистров) и Q10 (где живёт RegistersManager).** До решения этих вопросов — задача в статусе DRAFT.
+
+**Acceptance criteria (предварительно):**
+- [ ] `ProcessModulePlugin.register_schema()` существует с default None
+- [ ] GenericProcess при bootstrap собирает регистры из плагинов с register_schema != None
+- [ ] GenericProcess регистрирует handler `register_update`, обновляет регистры
+- [ ] PluginContext.registers даёт плагину доступ к RegistersManager
+- [ ] color_mask использует регистр вместо команды set_hsv_range (e2e подтверждение)
+
+**Out of scope:** Frontend integration (FrontendRegistersBridge) — отдельная фаза. Миграция всех плагинов на регистры — постепенно (color_mask первый как proof-of-concept).
 
 ---
 
@@ -80,10 +442,14 @@ class ProcessModulePlugin:
 **Goal:** Создать InspectorManager -- компонент буферизации items по seq_id для fan-in сценариев
 **Context:** В текущей архитектуре stitcher сам буферизует регионы по seq_id с timeout. Эта логика должна быть вынесена в универсальный менеджер внутри GenericProcess. InspectorManager принимает item из Data Worker, проверяет наличие `total_regions` в метаданных, буферизует по seq_id, и когда коллекция готова -- отдает `list[dict]` в очередь для Chain Worker.
 
+**Мотивация:** В сценарии «N камер -> один processing-процесс» каждая камера может слать свои регионы (например, по 3 ROI). Без отдельного буфера на каждую камеру seq_id=5 от camera_1 смешается с seq_id=5 от camera_2, и stitcher склеит каши. InspectorManager изолирует коллекции по `(camera_id, seq_id)` и отдает в Chain Worker полную коллекцию одной камеры.
+
 **Files:**
 - `multiprocess_framework/modules/process_module/generic/inspector_manager.py` -- СОЗДАТЬ
 - `multiprocess_framework/modules/process_module/generic/__init__.py` -- добавить экспорт
 - `multiprocess_framework/modules/process_module/tests/test_inspector_manager.py` -- СОЗДАТЬ
+
+> **Решение по размещению:** оставляем внутри `process_module/generic/`, не выносим в отдельный модуль. InspectorManager используется только GenericProcess; полноценный модуль (interfaces.py + README + STATUS + tests + регистрация) — overkill для ~150 строк. Если позже всплывет reuse вне GenericProcess — вынесем.
 
 **Steps:**
 1. Создать класс `InspectorManager` с интерфейсом:
@@ -94,39 +460,43 @@ class ProcessModulePlugin:
 
        def on_item(self, item: dict) -> None:
            """Принять один item. Если fan-in не нужен (нет total_regions) -- сразу вызывает on_ready([item]).
-           Если fan-in (total_regions > 0) -- буферизует по seq_id, вызывает on_ready когда все собраны или timeout."""
+           Если fan-in (total_regions > 0) -- буферизует по (camera_id, seq_id), вызывает on_ready когда все собраны или timeout."""
 
        def check_timeouts(self) -> None:
            """Проверить и выдать просроченные коллекции. Вызывается периодически из Data Worker."""
    ```
-2. Буферизация: `dict[int, dict[str, dict]]` -- `{seq_id: {region_name: item}}`
-3. Коллекция готова когда: `len(buffer[seq_id]) >= total_regions` или `time.monotonic() - timestamp > timeout_sec`
-4. Thread-safety: `threading.Lock` на буфер (Data Worker может вызывать on_item из одного потока, но check_timeouts может вызываться параллельно)
-5. Очистка старых записей (>2x timeout) в check_timeouts
-6. Логирование через callback `log_info`/`log_error` (передаются в конструктор)
+2. Буферизация: `dict[tuple[int, int], dict[str, dict]]` — `{(camera_id, seq_id): {region_name: item}}`. Составной ключ обязателен — иначе пересекаются seq_id из разных камер.
+3. `camera_id` берется из item (default 0, если плагин его не проставил — для одно-камерного сценария). `seq_id` — из item, default 0.
+4. Коллекция готова когда: `len(buffer[(cam, seq)]) >= total_regions` или `time.monotonic() - timestamp > timeout_sec`
+5. Thread-safety: `threading.Lock` на буфер (Data Worker может вызывать on_item из одного потока, но check_timeouts может вызываться параллельно)
+6. Очистка старых записей (>2x timeout) в check_timeouts
+7. Логирование через callback `log_info`/`log_error` (передаются в конструктор)
 
 **Acceptance criteria:**
-- [ ] Без fan-in (нет `total_regions` в item): `on_item({"frame": ..., "seq_id": 1})` --> немедленно вызывает `on_ready([item])`
-- [ ] С fan-in: 3 items с `total_regions=3, seq_id=5` --> вызывает `on_ready([item1, item2, item3])` после третьего
-- [ ] Timeout: 2 из 3 items + timeout --> вызывает `on_ready([item1, item2])` при check_timeouts
+- [ ] Без fan-in (нет `total_regions` в item): `on_item({"frame": ..., "seq_id": 1})` → немедленно вызывает `on_ready([item])`
+- [ ] С fan-in: 3 items с `total_regions=3, camera_id=0, seq_id=5` → вызывает `on_ready([item1, item2, item3])` после третьего
+- [ ] **Multi-camera изоляция:** items с `(camera_id=0, seq_id=5)` и `(camera_id=1, seq_id=5)` буферизуются раздельно, on_ready вызывается дважды по разным коллекциям
+- [ ] Timeout: 2 из 3 items + timeout → вызывает `on_ready([item1, item2])` при check_timeouts
 - [ ] Thread-safe: concurrent on_item не вызывает race condition
-- [ ] Тесты: >= 8 тестов (happy path, fan-in, timeout, cleanup, thread-safety)
+- [ ] Тесты: >= 9 тестов (happy path, fan-in, multi-camera, timeout, cleanup, thread-safety)
 
 **Out of scope:** Не менять существующие файлы GenericProcess (это Task 5.3). Не трогать IPC/SHM.
-**Edge cases:** total_regions=0 (трактовать как "нет fan-in"), total_regions=1 (один item = готово), дублирование region_name в одном seq_id (перезаписать с warning)
+**Edge cases:** total_regions=0 (трактовать как "нет fan-in"), total_regions=1 (один item = готово), дублирование region_name в одном (camera_id, seq_id) — перезаписать с warning, item без camera_id — трактовать camera_id=0.
 **Dependencies:** Нет
 
 ---
 
-### Task 5.2 -- Расширение ProcessModulePlugin
+### Task 5.2 -- Расширение ProcessModulePlugin + декоратор @for_each
 
-**Level:** Middle+ (Sonnet, extended thinking)
+**Level:** Middle (Sonnet, normal thinking)
 **Assignee:** developer
-**Goal:** Добавить методы `process()` и `produce()` в базовый класс ProcessModulePlugin
-**Context:** Новый контракт плагина: processing-плагины реализуют `process(items) -> items`, source-плагины реализуют `produce() -> items`. Старые методы (`configure`, `start`, `shutdown`) остаются для обратной совместимости и lifecycle.
+**Goal:** Добавить универсальные методы `process()` / `produce()` и helper-декоратор `@for_each` в базовый класс ProcessModulePlugin
+**Context:** Один контракт `process(items) -> items` покрывает все семантики (1:1, 1:N, N:1, фильтрация, batching). Декоратор `@for_each` — опциональный сахар для простых 1:1 / 1:N плагинов: позволяет писать per-item логику. Контракт это не меняет — `@for_each` оборачивает метод так, что снаружи вызывается `process(items) -> list[dict]`.
+
+Source-плагины реализуют `produce() -> items`. Старые методы (`configure`, `start`, `shutdown`) остаются для обратной совместимости и lifecycle.
 
 **Files:**
-- `multiprocess_framework/modules/process_module/plugins/base.py` -- добавить методы
+- `multiprocess_framework/modules/process_module/plugins/base.py` -- добавить методы и декоратор
 
 **Steps:**
 1. Добавить в класс `ProcessModulePlugin` метод `process()`:
@@ -135,7 +505,15 @@ class ProcessModulePlugin:
        """Обработка items. Override в processing/output-плагинах.
        Default: pass-through (return items).
        items -- список {"frame": ndarray, ...metadata}.
-       Чистая обработка: без IPC, без SHM, без PluginContext."""
+       Чистая обработка: без IPC, без SHM, без PluginContext.
+
+       Покрывает все семантики:
+         1:1   resize, grayscale, negative, ...
+         1:N   region_split
+         N:1   stitcher
+         N:0   фильтрация (return [])
+         batch frame_counter, FPS log
+       """
        return items
    ```
 2. Добавить метод `produce()`:
@@ -146,13 +524,43 @@ class ProcessModulePlugin:
        raise NotImplementedError(f"Plugin '{self.name}' does not implement produce()")
    ```
 3. Добавить property `is_source` -> bool: `return self.category == "source"`
-4. НЕ делать process/produce абстрактными (чтобы не ломать существующие плагины вроде heartbeat)
+4. Добавить декоратор `for_each` рядом с классом (модульная функция, не метод):
+   ```python
+   import functools
+
+   def for_each(func):
+       """Сахар: per-item функция -> process(items) -> list[dict].
+       Применяется к методу process плагина.
+       Возврат декорируемой функции:
+         dict       -> 1:1
+         list[dict] -> 1:N (fan-out)
+         None       -> фильтрация
+       """
+       @functools.wraps(func)
+       def wrapper(self, items: list[dict]) -> list[dict]:
+           result = []
+           for item in items:
+               out = func(self, item)
+               if out is None:
+                   continue
+               if isinstance(out, list):
+                   result.extend(out)
+               else:
+                   result.append(out)
+           return result
+       return wrapper
+   ```
+5. НЕ делать process/produce абстрактными (чтобы не ломать существующие плагины вроде heartbeat — они получают pass-through по умолчанию).
+6. Экспортировать `for_each` из `multiprocess_framework/modules/process_module/plugins/__init__.py` рядом с `ProcessModulePlugin`.
 
 **Acceptance criteria:**
 - [ ] `process()` существует с default pass-through
 - [ ] `produce()` существует с default NotImplementedError
 - [ ] `is_source` property работает
-- [ ] Существующие плагины (heartbeat, frame_counter) не ломаются -- они не переопределяют process/produce и это OK
+- [ ] `for_each` декоратор экспортирован, работает на методе плагина
+- [ ] Декоратор корректно обрабатывает `dict` (append), `list[dict]` (extend), `None` (skip)
+- [ ] Существующие плагины (heartbeat, frame_counter) не ломаются — они не переопределяют process/produce и это OK
+- [ ] Тесты base.py: >= 5 тестов (default process pass-through, produce raises, is_source для разных category, @for_each для 1:1, @for_each для 1:N через list, @for_each фильтрация через None)
 
 **Out of scope:** Не менять плагины прототипа (это Task 5.4-5.7). Не удалять старые абстрактные методы configure/start.
 **Dependencies:** Нет
@@ -294,61 +702,75 @@ class ProcessModulePlugin:
 - `multiprocess_prototype_2/plugins/frame_counter/plugin.py`
 
 **Steps:**
-1. **resize/plugin.py**: Заменить весь IPC/SHM boilerplate на:
+
+Простые 1:1 плагины используют декоратор `@for_each` (Task 5.2) для per-item логики. `frame_counter` — без декоратора (нужен batching для FPS).
+
+1. **resize/plugin.py**:
    ```python
-   def process(self, items: list[dict]) -> list[dict]:
-       result = []
-       for item in items:
-           frame = item.get("frame")
-           if frame is None:
-               result.append(item)
-               continue
-           # target size calculation (уже есть)
-           resized = cv2.resize(frame, (new_w, new_h), interpolation=self._interp)
-           result.append({**item, "frame": resized, "width": new_w, "height": new_h})
-       return result
+   from multiprocess_framework.modules.process_module.plugins import for_each
+
+   @for_each
+   def process(self, item):
+       frame = item.get("frame")
+       if frame is None:
+           return None
+       new_w, new_h = self._compute_target_size(frame)
+       resized = cv2.resize(frame, (new_w, new_h), interpolation=self._interp)
+       return {**item, "frame": resized, "width": new_w, "height": new_h}
    ```
    Убрать: `_on_frame_ready`, `_process_loop`, `_pending_frame_info`, `_ctx`, создание worker в start(), `register_message_handler` в configure(). Оставить configure() для чтения конфига (scale_factor, interpolation).
 
-2. **grayscale/plugin.py**: Аналогично:
+2. **grayscale/plugin.py**:
    ```python
-   def process(self, items):
-       return [{**item, "frame": cv2.cvtColor(cv2.cvtColor(item["frame"], cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)} for item in items if item.get("frame") is not None]
+   @for_each
+   def process(self, item):
+       frame = item.get("frame")
+       if frame is None: return None
+       gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+       return {**item, "frame": cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)}
    ```
-   Убрать режим standalone/region -- не нужен, GenericProcess маршрутизирует.
+   Убрать режим standalone/region — не нужен, GenericProcess маршрутизирует.
 
 3. **negative/plugin.py**:
    ```python
-   def process(self, items):
-       return [{**item, "frame": np.asarray(255 - item["frame"], dtype=np.uint8)} for item in items if item.get("frame") is not None]
+   @for_each
+   def process(self, item):
+       frame = item.get("frame")
+       if frame is None: return None
+       return {**item, "frame": np.asarray(255 - frame, dtype=np.uint8)}
    ```
 
 4. **flip/plugin.py**:
    ```python
-   def process(self, items):
-       return [{**item, "frame": cv2.flip(item["frame"], 0)} for item in items if item.get("frame") is not None]
+   @for_each
+   def process(self, item):
+       frame = item.get("frame")
+       if frame is None: return None
+       return {**item, "frame": cv2.flip(frame, 0)}
    ```
 
-5. **color_mask/plugin.py**: 
+5. **color_mask/plugin.py**:
    ```python
-   def process(self, items):
-       result = []
-       for item in items:
-           frame = item.get("frame")
-           if frame is None: continue
-           hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-           mask = cv2.inRange(hsv, self._lower, self._upper)
-           mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-           result.append({**item, "frame": mask_bgr})
-       return result
+   @for_each
+   def process(self, item):
+       frame = item.get("frame")
+       if frame is None: return None
+       hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+       mask = cv2.inRange(hsv, self._lower, self._upper)
+       return {**item, "frame": cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)}
    ```
    Оставить команду `set_hsv_range` и её регистрацию в configure().
 
-6. **frame_counter/plugin.py**: Оставить process() как pass-through с подсчетом:
+6. **frame_counter/plugin.py** — БЕЗ декоратора (нужен размер пачки для FPS log):
    ```python
    def process(self, items):
        self._frame_count += len(items)
-       # ... FPS log ...
+       now = time.monotonic()
+       if now - self._last_log_time >= self._log_interval:
+           fps = self._frame_count / (now - self._last_log_time)
+           self._log_info(f"FPS: {fps:.1f} (total: {self._frame_count})")
+           self._last_log_time = now
+           self._frame_count = 0
        return items
    ```
    Убрать register_message_handler.
@@ -359,7 +781,8 @@ class ProcessModulePlugin:
    - configure() больше НЕ использует ctx.router_manager, ctx.memory_manager, ctx.worker_manager
 
 **Acceptance criteria:**
-- [ ] Каждый плагин имеет `process(items) -> items`
+- [ ] Каждый 1:1 плагин использует `@for_each` поверх `process`
+- [ ] frame_counter использует обычный `process(items)` для batching
 - [ ] Ни один processing-плагин не обращается к `ctx.router_manager`, `ctx.memory_manager`, `ctx.io`, `ctx.worker_manager`
 - [ ] Каждый плагин <= 60 строк (сейчас 100-180)
 - [ ] color_mask сохраняет runtime-команду set_hsv_range
@@ -368,7 +791,7 @@ class ProcessModulePlugin:
 **Out of scope:** Не трогать capture (Task 5.4), stitcher (Task 5.6), database/frame_saver (Task 5.7).
 **Dependencies:** Task 5.2
 
----
+
 
 ### Task 5.6 -- StitcherPlugin: миграция на process() (fan-in)
 
