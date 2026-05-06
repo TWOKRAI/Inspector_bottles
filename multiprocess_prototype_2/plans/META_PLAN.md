@@ -32,8 +32,27 @@
 | Phase 1 | ✅ DONE | Camera — capture plugin, SHM, frame flow |
 | Phase 2 | ✅ DONE | Processing — граф обработки, wire-совместимость |
 | Phase 3 | ✅ DONE | Output — сохранение результатов (DB/файлы) |
-| Phase 4 | 🔲 TODO | GUI — перенос UI из прототипа v1 с улучшениями |
-| Phase 5 | 🔲 TODO | Data Pipeline — рефакторинг GenericProcess, чистые плагины |
+| Phase 4 | ✅ DONE | GUI базовый — 3 таба (Camera, Controls, Topology) |
+| Phase 5 | ✅ DONE | Data Pipeline — рефакторинг GenericProcess, region pipeline |
+
+### >>> MASTER_PLAN.md — Фазы 6-14 (пересоздание v1 в v2 архитектуре)
+
+> **v1 — АРХИВ (только чтение).** Все плагины и GUI пересоздаются в v2.
+
+| Фаза | Статус | Описание | Задач |
+|------|--------|----------|-------|
+| Phase 6 | 🔲 TODO | **Plugin Migration** — пересоздание всех плагинов v1 в v2 | 10 |
+| Phase 7 | 🔲 TODO | Registers v2 — автогенерация из plugin config_schema | 3 |
+| Phase 8 | 🔲 TODO | StateStore + реактивность | 3 |
+| Phase 9 | 🔲 TODO | GUI Foundations — MainWindow layout из v1 + DI + стили | 4 |
+| Phase 10 | 🔲 TODO | GUI Tabs — Sources, Processing, Processes, Settings, Display | 6 |
+| Phase 11 | 🔲 TODO | Recipes + Presets + Undo/Redo | 3 |
+| Phase 12 | 🔲 TODO | TopologyBridge v2 — GUI ↔ Runtime синхронизация | 3 |
+| Phase 13 | 🔲 TODO | Pipeline Editor — визуальный конструктор topology | 4 |
+| Phase 14 | 🔲 TODO | Polish + Production Ready | 5 |
+| | | **Итого** | **41** |
+
+Детали: [`MASTER_PLAN.md`](MASTER_PLAN.md)
 
 ## Что вынести во фреймворк
 
