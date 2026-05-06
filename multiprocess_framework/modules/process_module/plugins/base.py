@@ -14,12 +14,37 @@ PluginContext даёт доступ ко всему что есть в ProcessMo
 
 from __future__ import annotations
 
+import functools
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 if TYPE_CHECKING:
     from ..io import ProcessIO
+
+
+def for_each(func):
+    """Сахар: per-item функция -> process(items) -> list[dict].
+
+    Применяется к методу process плагина.
+    Возврат декорируемой функции:
+      dict       -> 1:1
+      list[dict] -> 1:N (fan-out)
+      None       -> фильтрация (item отбрасывается)
+    """
+    @functools.wraps(func)
+    def wrapper(self, items: list[dict]) -> list[dict]:
+        result = []
+        for item in items:
+            out = func(self, item)
+            if out is None:
+                continue
+            if isinstance(out, list):
+                result.extend(out)
+            else:
+                result.append(out)
+        return result
+    return wrapper
 
 
 class PluginState(str, Enum):
@@ -116,9 +141,46 @@ class ProcessModulePlugin(ABC):
     # Автоматически регистрируются в CommandManager при configure
     commands: dict[str, str] = {}
 
+    # Thread-safety контракт (Q8):
+    # False (default) — sequential, safe by default.
+    # True — разрешает параллельный вызов process() (для stateless плагинов).
+    thread_safe: ClassVar[bool] = False
+
     def __init__(self) -> None:
         self.state: PluginState = PluginState.IDLE
         self.metrics: PluginMetrics | None = None
+
+    # --- Data pipeline контракт (Phase 5) ---
+
+    @property
+    def is_source(self) -> bool:
+        """True если плагин — источник данных (category == 'source')."""
+        return self.category == "source"
+
+    def process(self, items: list[dict]) -> list[dict]:
+        """Обработка items. Override в processing/output-плагинах.
+
+        Default: pass-through (return items).
+        items — список {"frame": ndarray, ...metadata}.
+        Чистая обработка: без IPC, без SHM, без PluginContext.
+
+        Покрывает все семантики:
+          1:1   resize, grayscale, negative, ...
+          1:N   region_split
+          N:1   stitcher
+          N:0   фильтрация (return [])
+          batch frame_counter, FPS log
+        """
+        return items
+
+    def produce(self) -> list[dict]:
+        """Генерация items. Override в source-плагинах.
+
+        Default: raise NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"Plugin '{self.name}' does not implement produce()"
+        )
 
     @abstractmethod
     def configure(self, ctx: PluginContext) -> None:
