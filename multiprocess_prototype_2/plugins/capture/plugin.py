@@ -11,6 +11,9 @@ import time
 
 import cv2
 
+# Максимальное значение счётчика кадров (с rollover как в camera_service)
+_FRAME_ID_MODULO = 100_000
+
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
@@ -67,9 +70,24 @@ class CapturePlugin(ProcessModulePlugin):
         ctx.command_manager.register_command("start_capture", cmd_start_capture)
         ctx.command_manager.register_command("stop_capture", cmd_stop_capture)
 
+        # Команды pause/resume
+        def cmd_pause_capture(data: dict) -> dict:
+            self._paused = True
+            ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват приостановлен")
+            return {"status": "ok"}
+
+        def cmd_resume_capture(data: dict) -> dict:
+            self._paused = False
+            ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват возобновлён")
+            return {"status": "ok"}
+
+        ctx.command_manager.register_command("pause_capture", cmd_pause_capture)
+        ctx.command_manager.register_command("resume_capture", cmd_resume_capture)
+
         # Состояние
         self._cap: cv2.VideoCapture | None = None
         self._is_capturing = False
+        self._paused = False
         self._frame_count = 0
         self._ctx = ctx
 
@@ -90,7 +108,7 @@ class CapturePlugin(ProcessModulePlugin):
         Возвращает [{"frame": ndarray, "camera_id": int, ...}] или [].
         SHM write и IPC send выполняет SourceProducer.
         """
-        if not self._is_capturing or self._cap is None:
+        if not self._is_capturing or self._cap is None or self._paused:
             return []
 
         try:
@@ -106,7 +124,8 @@ class CapturePlugin(ProcessModulePlugin):
         if w != self._width or h != self._height:
             frame = cv2.resize(frame, (self._width, self._height))
 
-        self._frame_count += 1
+        # Инкремент счётчика с rollover
+        self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
 
         return [{
             "frame": frame,
