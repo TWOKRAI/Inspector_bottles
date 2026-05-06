@@ -10,15 +10,23 @@
 """
 
 from .blueprint import ProcessConfig, SystemBlueprint, Wire
+from .data_receiver import DataReceiver
+from .frame_shm_middleware import FrameShmMiddleware
 from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
 from .inspector_manager import InspectorManager
+from .pipeline_executor import PipelineExecutor
+from .source_producer import SourceProducer
 
 __all__ = [
+    "DataReceiver",
+    "FrameShmMiddleware",
     "GenericProcess",
     "GenericProcessConfig",
     "InspectorManager",
+    "PipelineExecutor",
     "PluginConfig",
+    "SourceProducer",
     "SystemBlueprint",
     "ProcessConfig",
     "Wire",
