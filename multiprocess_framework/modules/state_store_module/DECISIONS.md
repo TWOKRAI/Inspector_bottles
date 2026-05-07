@@ -391,6 +391,101 @@ def test_proxy_set_get():
 
 ---
 
+## ADR-SS-011: PersistenceManager — конфигурируемые file_mapping и предикаты
+
+**Дата:** 2026-05-07
+**Контекст:** Изначально `PersistenceManager` содержал зашитую константу `_PREFIX_TO_FILE` с доменными ветвями (`cameras`/`renderer`/`robot`/`database`/`system`) и доменные предикаты (`_is_state_only` для `*.state.*`, `_is_system` для `system.*`). Это противоречило ADR-SS-003 (фреймворк не знает о доменных схемах) — `RecipeEngine` исправили callbacks-ами, а `PersistenceManager` остался зашитым.
+
+**Решение:** Вынести три параметра в конструктор:
+
+```python
+PersistenceManager(
+    store: TreeStore,
+    data_dir: Path,
+    debounce_seconds: float = 2.0,
+    file_mapping: dict[str, str] | None = None,
+    skip_predicate: Callable[[str], bool] | None = None,
+    immediate_predicate: Callable[[str], bool] | None = None,
+)
+```
+
+- `file_mapping`: маппинг `{prefix: filename}`. По умолчанию пустой → менеджер не сохраняет ничего.
+- `skip_predicate`: какие пути пропускать (например, `*.state.*`). По умолчанию — ничего не пропускать.
+- `immediate_predicate`: какие пути требуют save без debounce (например, `system.*`). По умолчанию — все пути идут через debounce.
+
+Старые модульные функции `_resolve_file`, `_is_state_only`, `_is_system`, `_file_to_prefix`, словарь `_PREFIX_TO_FILE` удалены. Тесты модуля передают конкретный маппинг через фикстуру (фактически демонстрируя пример прикладной конфигурации).
+
+**Последствия:**
+- Фреймворк больше не знает доменных ветвей.
+- Прикладной код несёт прямую ответственность за маппинг (что и должно быть).
+- Защита от случайного срабатывания: без `file_mapping` менеджер полностью no-op.
+- Это **breaking change** для прикладного кода: если приложение раньше полагалось на дефолтный маппинг, теперь нужно передавать его явно. На момент рефакторинга активный прототип `PersistenceManager` напрямую не подключал — миграция не требуется.
+
+**Связанные решения:** ADR-SS-003 (RecipeEngine миграции), ADR-SS-009 (доменно-нейтральные публичные классы).
+
+---
+
+## ADR-SS-012: StateProxy — фильтрация callbacks по pattern на клиенте
+
+**Дата:** 2026-05-07
+**Контекст:** Сервер группирует дельты по `subscriber` через `DeltaDispatcher.dispatch()` и шлёт каждому подписчику ОДНО IPC-сообщение `state.changed` со списком всех дельт, попавших в его подписки. Если процесс держит несколько подписок (`cameras.0.*` и `renderer.*`), пакет содержит дельты обеих веток.
+
+В прежней реализации `StateProxy._invoke_callbacks` вызывал каждый зарегистрированный callback **со всеми дельтами пакета**, не сопоставляя их с pattern конкретной подписки. Это создавало неявный контракт «callback должен сам разбираться, что его, а что чужое» — нигде не задокументированный и провоцирующий ошибки.
+
+**Решение:** Хранить на клиенте маппинг `sub_id → pattern` (`StateProxy._sub_patterns`) и в `_invoke_callbacks` для каждого callback оставлять только дельты, чьи `delta.path` матчат `pattern` его подписки. Используется тот же `match_pattern`/`split_pattern`, что и на сервере — поведение клиента и сервера согласовано.
+
+```python
+def _invoke_callbacks(self, deltas: list[Delta]) -> None:
+    for sub_id, cbs in list(self._callbacks.items()):
+        pattern = self._sub_patterns.get(sub_id)
+        if pattern is None:
+            matched = deltas        # legacy / locally-only — без фильтрации
+        else:
+            matched = self._filter_deltas_by_pattern(deltas, pattern)
+            if not matched:
+                continue
+        for cb in cbs:
+            cb(matched)
+```
+
+Альтернатива (расширение проводного формата `state.changed` полем `sub_ids` per-delta) отвергнута: текущий подход не меняет IPC-формат, не требует миграции существующих клиентов и сохраняет дедупликацию по subscriber на сервере.
+
+**Последствия:**
+- Каждый callback видит только дельты, которые он реально просил → понятный, явный контракт.
+- Внешний API `subscribe()/unsubscribe()` не изменился.
+- IPC-формат `state.changed` не изменился.
+- Накладные расходы: один проход matching на клиенте на пакет (для типичных 1-3 подписок и нескольких дельт — пренебрежимо).
+- Legacy-режим: callback, добавленный напрямую в `_callbacks` без `subscribe()` (например, в тестах), получает дельты без фильтрации (pattern не сохранён).
+
+**Связанные решения:** ADR-SS-007 (exclude_self), ADR-SS-008 (адресная доставка).
+
+---
+
+## ADR-SS-013: SubscriptionManager — публичные snapshot-методы для shutdown / DevTools
+
+**Дата:** 2026-05-07
+**Контекст:** `StateStoreManager.shutdown()` собирал имена подписчиков через прямой доступ `self._subs._lock` / `self._subs._by_subscriber.keys()`, а `StateInspector.subscriptions()` читал `self._sub_manager._subscriptions` — оба клиента лезли к приватным атрибутам менеджера. Это нарушало инкапсуляцию: рефактор внутреннего хранения сразу сломал бы обоих клиентов.
+
+**Решение:** Добавить два публичных потокобезопасных метода в `SubscriptionManager`:
+
+```python
+def subscribers(self) -> list[str]: ...
+def all_subscriptions(self) -> list[Subscription]: ...
+```
+
+`subscribers()` возвращает имена процессов, у которых есть хотя бы одна подписка. `all_subscriptions()` отдаёт снимок всех `Subscription` (frozen dataclass — безопасно отдавать наружу). Обе операции выполняются под `self._lock` и возвращают независимые списки.
+
+`StateStoreManager.shutdown()` и `StateInspector.subscriptions()` переписаны на эти методы — приватных обращений к менеджеру в модуле больше нет.
+
+**Последствия:**
+- Внутреннее хранение (`_subscriptions: dict[str, Subscription]`, `_by_subscriber: dict[str, set[str]]`) можно менять без правок клиентов.
+- DevTools и shutdown — публичные сценарии, явно отражённые в API.
+- Snapshot — копия, поэтому даже модификация результата извне не влияет на состояние менеджера.
+
+**Связанные решения:** ADR-SS-009 (ABC и публичные классы — следствие того же принципа инкапсуляции).
+
+---
+
 ## Индекс ADR
 
 | ID | Название | Статус | Фаза |
@@ -405,4 +500,7 @@ def test_proxy_set_get():
 | ADR-SS-008 | Адресная доставка | ✅ Готово | 2.1 |
 | ADR-SS-009 | ABC vs Protocol | ✅ Готово | 2.1 |
 | ADR-SS-010 | InMemoryRouter testing | ✅ Готово | 2.1 |
+| ADR-SS-011 | PersistenceManager — конфигурируемые маппинг и предикаты | ✅ Готово | 2.1+ |
+| ADR-SS-012 | StateProxy — per-pattern фильтрация callbacks | ✅ Готово | 2.1+ |
+| ADR-SS-013 | SubscriptionManager — публичные snapshot-методы | ✅ Готово | 2.1+ |
 
