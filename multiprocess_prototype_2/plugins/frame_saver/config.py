@@ -25,8 +25,6 @@ class FrameSaverPluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.frame_saver.plugin.FrameSaverPlugin"
     )
-    plugin_name: str = "frame_saver"
-    category: str = "output"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [FrameSaverRegisters]

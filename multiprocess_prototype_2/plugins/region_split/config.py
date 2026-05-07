@@ -19,8 +19,6 @@ class RegionSplitPluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.region_split.plugin.RegionSplitPlugin"
     )
-    plugin_name: str = "region_split"
-    category: str = "processing"
 
     camera_id: int = 0
     resolution_width: int = 640
@@ -31,20 +29,3 @@ class RegionSplitPluginConfig(PluginConfig):
 
     # Дефолтный регион (полный кадр)
     default_region: dict[str, str] | None = None
-
-    @property
-    def memory(self) -> dict[str, Any] | None:
-        """SHM-слоты: один на каждый регион + default."""
-        mem: dict[str, Any] = {}
-        for r in self.regions:
-            name = r.get("name", "region")
-            w = int(r.get("width", self.resolution_width))
-            h = int(r.get("height", self.resolution_height))
-            mem[f"{name}_{self.camera_id}"] = (h, w, 3)
-
-        if self.default_region:
-            name = self.default_region.get("name", "region_default")
-            mem[f"{name}_{self.camera_id}"] = (self.resolution_height, self.resolution_width, 3)
-
-        mem["coll"] = 1
-        return mem

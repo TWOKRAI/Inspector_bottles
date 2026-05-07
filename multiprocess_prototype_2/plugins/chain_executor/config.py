@@ -25,8 +25,6 @@ class ChainExecutorConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.chain_executor.plugin.ChainExecutorPlugin"
     )
-    plugin_name: str = "chain_executor"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [ChainExecutorRegisters]

@@ -59,12 +59,27 @@ class CameraServicePlugin(ProcessModulePlugin):
         ),
     ]
 
-    commands = {}
+    commands = {
+        "start_capture": "cmd_start_capture",
+        "stop_capture": "cmd_stop_capture",
+        "set_camera_type": "cmd_set_camera_type",
+        "set_fps": "cmd_set_fps",
+        "set_resolution": "cmd_set_resolution",
+        "set_device_id": "cmd_set_device_id",
+        "set_camera_index": "cmd_set_camera_index",
+        "enum_devices": "cmd_enum_devices",
+        "hik_open": "cmd_hik_open",
+        "hik_close": "cmd_hik_close",
+        "hik_start_grabbing": "cmd_hik_start_grabbing",
+        "hik_stop_grabbing": "cmd_hik_stop_grabbing",
+        "hik_get_parameters": "cmd_hik_get_parameters",
+        "hik_set_parameters": "cmd_hik_set_parameters",
+    }
 
     # --- Lifecycle ---
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настроить параметры камеры и зарегистрировать команды."""
+        """Настроить параметры камеры."""
         cfg = ctx.config
 
         self._camera_type: str = cfg.get("camera_type", DEFAULT_CAMERA_TYPE)
@@ -86,9 +101,6 @@ class CameraServicePlugin(ProcessModulePlugin):
         self._is_capturing = False
         self._frame_count = 0
         self._ctx = ctx
-
-        # Зарегистрировать все 14 команд
-        self._register_commands(ctx)
 
         ctx.log_info(
             f"CameraServicePlugin[{self._camera_id}]: type={self._camera_type}, "
@@ -252,102 +264,84 @@ class CameraServicePlugin(ProcessModulePlugin):
         )
         return {"status": "ok", "camera_type": new_type}
 
-    # --- Регистрация команд ---
+    # --- Команды (авторегистрация через commands dict) ---
 
-    def _register_commands(self, ctx: PluginContext) -> None:
-        """Зарегистрировать все 14 команд плагина."""
-        cm = ctx.command_manager
+    def cmd_start_capture(self, data: dict) -> dict:
+        self._do_start_capture(self._ctx)
+        return {"status": "ok"}
 
-        # 1. start_capture
-        def cmd_start_capture(data: dict) -> dict:
-            self._do_start_capture(ctx)
-            return {"status": "ok"}
+    def cmd_stop_capture(self, data: dict) -> dict:
+        self._do_stop_capture(self._ctx)
+        return {"status": "ok"}
 
-        # 2. stop_capture
-        def cmd_stop_capture(data: dict) -> dict:
-            self._do_stop_capture(ctx)
-            return {"status": "ok"}
+    def cmd_set_camera_type(self, data: dict) -> dict:
+        new_type = data.get("camera_type", "")
+        return self._do_switch_camera_type(new_type)
 
-        # 3. set_camera_type
-        def cmd_set_camera_type(data: dict) -> dict:
-            new_type = data.get("camera_type", "")
-            return self._do_switch_camera_type(new_type)
+    def cmd_set_fps(self, data: dict) -> dict:
+        fps = data.get("fps", self._fps)
+        self._fps = max(1, min(120, int(fps)))
+        return {"status": "ok", "fps": self._fps}
 
-        # 4. set_fps — clamp 1-120
-        def cmd_set_fps(data: dict) -> dict:
-            fps = data.get("fps", self._fps)
-            self._fps = max(1, min(120, int(fps)))
-            return {"status": "ok", "fps": self._fps}
+    def cmd_set_resolution(self, data: dict) -> dict:
+        self._width = int(data.get("width", self._width))
+        self._height = int(data.get("height", self._height))
+        # Пересоздать backend если захват активен и тип simulator/webcam
+        if self._is_capturing and self._camera_type in ("simulator", "webcam"):
+            self._do_switch_camera_type(self._camera_type)
+        return {
+            "status": "ok",
+            "width": self._width,
+            "height": self._height,
+        }
 
-        # 5. set_resolution — обновить и пересоздать backend если нужно
-        def cmd_set_resolution(data: dict) -> dict:
-            self._width = int(data.get("width", self._width))
-            self._height = int(data.get("height", self._height))
-            # Пересоздать backend если захват активен и тип simulator/webcam
-            if self._is_capturing and self._camera_type in ("simulator", "webcam"):
-                self._do_switch_camera_type(self._camera_type)
+    def cmd_set_device_id(self, data: dict) -> dict:
+        self._device_id = int(data.get("device_id", self._device_id))
+        return {"status": "ok", "device_id": self._device_id}
+
+    def cmd_set_camera_index(self, data: dict) -> dict:
+        self._camera_index = int(
+            data.get("camera_index", self._camera_index)
+        )
+        return {"status": "ok", "camera_index": self._camera_index}
+
+    def cmd_enum_devices(self, data: dict) -> dict:
+        with self._backend_lock:
+            if self._backend:
+                result = self._backend.handle_command("enum_devices", data)
+                return result or {"status": "ok", "devices": []}
+        return {"status": "ok", "devices": []}
+
+    # hik_* passthrough команды — делегирование в backend (strip hik_ prefix)
+
+    def _hik_passthrough(self, hik_cmd: str, data: dict) -> dict:
+        """Общий обработчик hik_* команд."""
+        if self._camera_type != "hikvision":
             return {
-                "status": "ok",
-                "width": self._width,
-                "height": self._height,
+                "status": "error",
+                "error": f"Команда {hik_cmd} доступна только для hikvision backend",
             }
+        backend_cmd = hik_cmd[4:]  # strip "hik_" prefix
+        with self._backend_lock:
+            if self._backend:
+                result = self._backend.handle_command(backend_cmd, data)
+                return result or {"status": "ok"}
+        return {"status": "error", "error": "Backend не инициализирован"}
 
-        # 6. set_device_id
-        def cmd_set_device_id(data: dict) -> dict:
-            self._device_id = int(data.get("device_id", self._device_id))
-            return {"status": "ok", "device_id": self._device_id}
+    def cmd_hik_open(self, data: dict) -> dict:
+        return self._hik_passthrough("hik_open", data)
 
-        # 7. set_camera_index
-        def cmd_set_camera_index(data: dict) -> dict:
-            self._camera_index = int(
-                data.get("camera_index", self._camera_index)
-            )
-            return {"status": "ok", "camera_index": self._camera_index}
+    def cmd_hik_close(self, data: dict) -> dict:
+        return self._hik_passthrough("hik_close", data)
 
-        # 8. enum_devices — passthrough
-        def cmd_enum_devices(data: dict) -> dict:
-            with self._backend_lock:
-                if self._backend:
-                    result = self._backend.handle_command("enum_devices", data)
-                    return result or {"status": "ok", "devices": []}
-            return {"status": "ok", "devices": []}
+    def cmd_hik_start_grabbing(self, data: dict) -> dict:
+        return self._hik_passthrough("hik_start_grabbing", data)
 
-        # 9-14. hik_* команды — passthrough к backend (strip hik_ prefix)
-        def _make_hik_passthrough(hik_cmd: str):
-            """Создать обработчик hik_* команды."""
-            backend_cmd = hik_cmd[4:]  # strip "hik_" prefix
+    def cmd_hik_stop_grabbing(self, data: dict) -> dict:
+        return self._hik_passthrough("hik_stop_grabbing", data)
 
-            def handler(data: dict) -> dict:
-                if self._camera_type != "hikvision":
-                    return {
-                        "status": "error",
-                        "error": f"Команда {hik_cmd} доступна только для hikvision backend",
-                    }
-                with self._backend_lock:
-                    if self._backend:
-                        result = self._backend.handle_command(backend_cmd, data)
-                        return result or {"status": "ok"}
-                return {"status": "error", "error": "Backend не инициализирован"}
+    def cmd_hik_get_parameters(self, data: dict) -> dict:
+        return self._hik_passthrough("hik_get_parameters", data)
 
-            return handler
-
-        # Регистрация
-        cm.register_command("start_capture", cmd_start_capture)
-        cm.register_command("stop_capture", cmd_stop_capture)
-        cm.register_command("set_camera_type", cmd_set_camera_type)
-        cm.register_command("set_fps", cmd_set_fps)
-        cm.register_command("set_resolution", cmd_set_resolution)
-        cm.register_command("set_device_id", cmd_set_device_id)
-        cm.register_command("set_camera_index", cmd_set_camera_index)
-        cm.register_command("enum_devices", cmd_enum_devices)
-
-        # hik_* passthrough команды
-        for hik_cmd in (
-            "hik_open",
-            "hik_close",
-            "hik_start_grabbing",
-            "hik_stop_grabbing",
-            "hik_get_parameters",
-            "hik_set_parameters",
-        ):
-            cm.register_command(hik_cmd, _make_hik_passthrough(hik_cmd))
+    def cmd_hik_set_parameters(self, data: dict) -> dict:
+        return self._hik_passthrough("hik_set_parameters", data)

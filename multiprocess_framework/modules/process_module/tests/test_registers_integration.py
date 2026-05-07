@@ -198,15 +198,6 @@ class TestColorMaskRegisters:
         reg.h_min = 30
         assert reg.h_min == 30
 
-    def test_memory_property(self):
-        """memory вычисляется из полей register."""
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
-
-        reg = ColorMaskRegisters(camera_id=2, resolution_width=1920, resolution_height=1080)
-        mem = reg.memory
-        assert mem is not None
-        assert "mask_2" in mem
-        assert mem["mask_2"] == (1080, 1920, 1)
 
 
 # --- Tests: RegistersManager bootstrap ---

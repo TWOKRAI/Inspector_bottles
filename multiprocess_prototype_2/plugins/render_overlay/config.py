@@ -25,8 +25,6 @@ class RenderOverlayConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.render_overlay.plugin.RenderOverlayPlugin"
     )
-    plugin_name: str = "render_overlay"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [RenderOverlayRegisters]

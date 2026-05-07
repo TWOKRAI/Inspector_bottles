@@ -19,8 +19,6 @@ class CapturePluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.capture.plugin.CapturePlugin"
     )
-    plugin_name: str = "capture"
-    category: str = "source"
 
     # Параметры камеры
     camera_id: Annotated[

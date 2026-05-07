@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from multiprocess_framework.modules.data_schema_module import register_schema
 from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
 
@@ -18,8 +16,6 @@ class NegativePluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.negative.plugin.NegativePlugin"
     )
-    plugin_name: str = "negative"
-    category: str = "processing"
 
     camera_id: int = 0
     resolution_width: int = 640
@@ -27,11 +23,3 @@ class NegativePluginConfig(PluginConfig):
 
     # Куда отправлять обработанный регион
     target: str = "stitcher"
-
-    @property
-    def memory(self) -> dict[str, Any] | None:
-        """SHM для выходного негатива."""
-        return {
-            f"negative_{self.camera_id}": (self.resolution_height, self.resolution_width, 3),
-            "coll": 1,
-        }

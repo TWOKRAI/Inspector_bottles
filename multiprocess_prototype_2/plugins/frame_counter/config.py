@@ -19,8 +19,6 @@ class FrameCounterPluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.frame_counter.plugin.FrameCounterPlugin"
     )
-    plugin_name: str = "frame_counter"
-    category: str = "processing"
 
     log_interval_sec: Annotated[
         float,

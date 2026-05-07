@@ -25,8 +25,6 @@ class RobotControlConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.robot_control.plugin.RobotControlPlugin"
     )
-    plugin_name: str = "robot_control"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [RobotControlRegisters]

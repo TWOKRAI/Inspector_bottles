@@ -27,8 +27,6 @@ class ColorMaskPluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.color_mask.plugin.ColorMaskPlugin"
     )
-    plugin_name: str = "color_mask"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [ColorMaskRegisters]

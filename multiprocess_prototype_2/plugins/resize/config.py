@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from multiprocess_framework.modules.data_schema_module import register_schema
 from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
 
@@ -18,8 +16,6 @@ class ResizePluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.resize.plugin.ResizePlugin"
     )
-    plugin_name: str = "resize"
-    category: str = "processing"
 
     # Привязка к камере
     camera_id: int = 0
@@ -40,20 +36,3 @@ class ResizePluginConfig(PluginConfig):
 
     # Routing
     frame_targets: list[str] | None = None
-
-    @property
-    def memory(self) -> dict[str, Any] | None:
-        """SHM для выходного resized-кадра."""
-        w, h = self._output_size()
-        return {
-            f"resized_{self.camera_id}": (h, w, 3),
-            "coll": 1,
-        }
-
-    def _output_size(self) -> tuple[int, int]:
-        """Вычислить output width, height."""
-        if self.target_width > 0 and self.target_height > 0:
-            return self.target_width, self.target_height
-        w = int(self.resolution_width * self.scale_factor)
-        h = int(self.resolution_height * self.scale_factor)
-        return max(1, w), max(1, h)

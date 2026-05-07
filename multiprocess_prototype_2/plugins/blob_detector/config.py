@@ -25,8 +25,6 @@ class BlobDetectorConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.blob_detector.plugin.BlobDetectorPlugin"
     )
-    plugin_name: str = "blob_detector"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [BlobDetectorRegisters]

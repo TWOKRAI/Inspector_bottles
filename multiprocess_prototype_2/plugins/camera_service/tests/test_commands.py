@@ -19,8 +19,10 @@ def _make_mock_ctx(config: dict | None = None) -> MagicMock:
     return ctx
 
 
-def _get_registered_commands(ctx: MagicMock) -> dict:
-    """Извлечь зарегистрированные команды из mock command_manager."""
+def _configure_with_commands(plugin: CameraServicePlugin, ctx: MagicMock) -> dict:
+    """configure() + авторегистрация команд → dict зарегистрированных команд."""
+    plugin.configure(ctx)
+    plugin._auto_register_commands(ctx)
     commands = {}
     for c in ctx.command_manager.register_command.call_args_list:
         name, handler = c[0]
@@ -35,9 +37,7 @@ class TestStartStopCapture:
         """Команды start_capture и stop_capture работают."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
-        plugin.configure(ctx)
-
-        commands = _get_registered_commands(ctx)
+        commands = _configure_with_commands(plugin, ctx)
         assert "start_capture" in commands
         assert "stop_capture" in commands
 
@@ -61,9 +61,7 @@ class TestSetCameraType:
         """switch simulator → simulator (проверка механизма переключения)."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
-        plugin.configure(ctx)
-
-        commands = _get_registered_commands(ctx)
+        commands = _configure_with_commands(plugin, ctx)
 
         # Запустить захват
         commands["start_capture"]({})
@@ -82,9 +80,7 @@ class TestSetCameraType:
         """Неизвестный тип → error."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
-        plugin.configure(ctx)
-
-        commands = _get_registered_commands(ctx)
+        commands = _configure_with_commands(plugin, ctx)
         result = commands["set_camera_type"]({"camera_type": "invalid_type"})
         assert result["status"] == "error"
 
@@ -98,9 +94,7 @@ class TestSetFps:
         """clamp 1-120."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
-        plugin.configure(ctx)
-
-        commands = _get_registered_commands(ctx)
+        commands = _configure_with_commands(plugin, ctx)
 
         # Нормальное значение
         result = commands["set_fps"]({"fps": 30})
@@ -124,9 +118,7 @@ class TestHikPassthrough:
         """hik_* при camera_type != 'hikvision' → error."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
-        plugin.configure(ctx)
-
-        commands = _get_registered_commands(ctx)
+        commands = _configure_with_commands(plugin, ctx)
 
         # Все hik_* команды должны вернуть ошибку для не-hikvision backend
         hik_commands = [
@@ -155,9 +147,7 @@ class TestAllCommandsRegistered:
         """Все 14 команд зарегистрированы в command_manager."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
-        plugin.configure(ctx)
-
-        commands = _get_registered_commands(ctx)
+        commands = _configure_with_commands(plugin, ctx)
 
         expected = {
             "start_capture",

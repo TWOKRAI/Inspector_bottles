@@ -22,8 +22,6 @@ class CameraServiceConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.camera_service.plugin.CameraServicePlugin"
     )
-    plugin_name: str = "camera_service"
-    category: str = "source"
 
     # Тип backend'а
     camera_type: Annotated[

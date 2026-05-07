@@ -20,8 +20,6 @@ class HeartbeatPluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.heartbeat.plugin.HeartbeatPlugin"
     )
-    plugin_name: str = "heartbeat"
-    category: str = "utility"
 
     interval_sec: Annotated[
         float,

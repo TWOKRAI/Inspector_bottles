@@ -41,10 +41,15 @@ class CapturePlugin(ProcessModulePlugin):
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="BGR-кадр с камеры"),
     ]
 
-    commands = {}
+    commands = {
+        "start_capture": "cmd_start_capture",
+        "stop_capture": "cmd_stop_capture",
+        "pause_capture": "cmd_pause_capture",
+        "resume_capture": "cmd_resume_capture",
+    }
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка параметров камеры и команд."""
+        """Настройка параметров камеры."""
         cfg = ctx.config
         self._camera_id: int = cfg.get("camera_id", 0)
         self._device_id: int = cfg.get("device_id", 0)
@@ -58,38 +63,32 @@ class CapturePlugin(ProcessModulePlugin):
             f"{self._width}x{self._height}@{self._fps}fps"
         )
 
-        # Команды start/stop
-        def cmd_start_capture(data: dict) -> dict:
-            self._start_capture(ctx)
-            return {"status": "ok"}
-
-        def cmd_stop_capture(data: dict) -> dict:
-            self._stop_capture(ctx)
-            return {"status": "ok"}
-
-        ctx.command_manager.register_command("start_capture", cmd_start_capture)
-        ctx.command_manager.register_command("stop_capture", cmd_stop_capture)
-
-        # Команды pause/resume
-        def cmd_pause_capture(data: dict) -> dict:
-            self._paused = True
-            ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват приостановлен")
-            return {"status": "ok"}
-
-        def cmd_resume_capture(data: dict) -> dict:
-            self._paused = False
-            ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват возобновлён")
-            return {"status": "ok"}
-
-        ctx.command_manager.register_command("pause_capture", cmd_pause_capture)
-        ctx.command_manager.register_command("resume_capture", cmd_resume_capture)
-
         # Состояние
         self._cap: cv2.VideoCapture | None = None
         self._is_capturing = False
         self._paused = False
         self._frame_count = 0
         self._ctx = ctx
+
+    # --- Команды (авторегистрация через commands dict) ---
+
+    def cmd_start_capture(self, data: dict) -> dict:
+        self._start_capture(self._ctx)
+        return {"status": "ok"}
+
+    def cmd_stop_capture(self, data: dict) -> dict:
+        self._stop_capture(self._ctx)
+        return {"status": "ok"}
+
+    def cmd_pause_capture(self, data: dict) -> dict:
+        self._paused = True
+        self._ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват приостановлен")
+        return {"status": "ok"}
+
+    def cmd_resume_capture(self, data: dict) -> dict:
+        self._paused = False
+        self._ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват возобновлён")
+        return {"status": "ok"}
 
     def start(self, ctx: PluginContext) -> None:
         """Auto-start камеры если задан в конфиге."""

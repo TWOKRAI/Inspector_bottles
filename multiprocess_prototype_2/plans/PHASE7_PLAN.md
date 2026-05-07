@@ -1,12 +1,15 @@
 # Plan: Phase 7 — Registers v2 + Plugin Simplification
 
-## Статус: Phase 7A + 7B ЗАВЕРШЕНЫ (2026-05-07)
+## Статус: Phase 7A + 7B + 7C ЗАВЕРШЕНЫ (2026-05-07)
 
 **Результат:**
 - 163 теста плагинов — ✅ все прошли
-- 578 тестов FW — ✅ все прошли
-- ~200 строк boilerplate убрано из плагинов
+- 924 теста суммарно (plugins + FW + registers) — ✅ все прошли
+- ~200 строк boilerplate убрано из плагинов (7A-7B)
 - MagicMock убран из production-кода (chain_executor, worker_pool)
+- Commands dict вместо замыканий в capture + camera_service (7C)
+- Дубли plugin_name/category убраны из 19 config.py (7C)
+- memory property убран из 7 processing плагинов (7C)
 
 ---
 
@@ -45,6 +48,27 @@ Boilerplate (5 строк) → одна строка `self._reg = self._init_reg
 MagicMock → SubPluginContext с проброшенным log_info/log_error из родителя.
 
 **7B.4 — config.py оставлены по решению пользователя** (на будущее).
+
+### Phase 7C — Cleanup (2 файла plugin.py + 19 config.py + 7 registers/config)
+
+**7C.1 — Commands dict вместо замыканий (capture + camera_service)**
+- `capture/plugin.py`: 4 замыкания в `configure()` → 4 метода + `commands` dict
+- `camera_service/plugin.py`: 14 замыканий в `_register_commands()` → 14 методов + `commands` dict
+  - 8 основных команд: методы `cmd_*`
+  - 6 hik_* passthrough: `_hik_passthrough()` helper + 6 тонких методов `cmd_hik_*`
+  - `_register_commands()` удалён полностью
+
+**7C.2 — Убраны дубли plugin_name/category из 19 config.py**
+- Каждый config.py переопределял `plugin_name` и `category`, дублируя `@register_plugin()` декоратор.
+- Базовый `PluginConfig` уже имеет эти поля с `""` defaults. YAML topology передаёт реальные значения.
+
+**7C.3 — Убран memory property из 7 processing плагинов**
+- Processing-плагины не нуждаются в SHM pre-allocation (SHM прозрачен через middleware).
+- Убрано из registers.py: `color_mask`
+- Убрано из config.py: `grayscale`, `stitcher`, `region_split`, `flip`, `negative`, `resize`
+- `resize/config.py`: также убран helper `_output_size()`
+- `color_mask/registers.py`: убраны поля `camera_id`, `resolution_width`, `resolution_height` (были только для memory)
+- Source-плагины (`capture`, `camera_service`) memory property сохранён.
 
 ---
 

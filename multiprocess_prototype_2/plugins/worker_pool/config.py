@@ -25,8 +25,6 @@ class WorkerPoolConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.worker_pool.plugin.WorkerPoolPlugin"
     )
-    plugin_name: str = "worker_pool"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [WorkerPoolRegisters]

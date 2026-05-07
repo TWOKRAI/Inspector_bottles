@@ -25,8 +25,6 @@ class RendererCompositorConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.renderer_compositor.plugin.RendererCompositorPlugin"
     )
-    plugin_name: str = "renderer_compositor"
-    category: str = "processing"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [RendererCompositorRegisters]

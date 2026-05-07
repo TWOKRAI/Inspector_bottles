@@ -73,10 +73,11 @@ class TestConfigure:
         assert plugin._height == 720
 
     def test_commands_registered(self):
-        """configure() регистрирует start/stop/pause/resume команды."""
+        """configure() + _auto_register_commands() регистрирует 4 команды."""
         plugin = CapturePlugin()
         ctx = _make_mock_ctx()
         plugin.configure(ctx)
+        plugin._auto_register_commands(ctx)
 
         # Проверяем что все 4 команды зарегистрированы
         registered = [
@@ -241,6 +242,7 @@ class TestPauseResume:
         plugin = CapturePlugin()
         ctx = _make_mock_ctx()
         plugin.configure(ctx)
+        plugin._auto_register_commands(ctx)
 
         # Находим зарегистрированную команду pause_capture
         pause_fn = None
@@ -258,6 +260,7 @@ class TestPauseResume:
         plugin = CapturePlugin()
         ctx = _make_mock_ctx()
         plugin.configure(ctx)
+        plugin._auto_register_commands(ctx)
         plugin._paused = True
 
         # Находим зарегистрированную команду resume_capture

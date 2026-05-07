@@ -25,8 +25,6 @@ class DatabasePluginConfig(PluginConfig):
     plugin_class: str = (
         "multiprocess_prototype_2.plugins.database.plugin.DatabasePlugin"
     )
-    plugin_name: str = "database"
-    category: str = "output"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [DatabaseRegisters]
