@@ -17,6 +17,7 @@ import uuid
 from typing import Any, Callable
 
 from ...base_manager import BaseManager, ObservableMixin
+from ..core import match_pattern, split_pattern
 from ..core.delta import MISSING, Delta
 from ..interfaces import IRouter, IStateProxy
 
@@ -70,6 +71,8 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._cache: dict[str, Any] = {}
         # Реестр callbacks: sub_id → список Callable[[list[Delta]], None]
         self._callbacks: dict[str, list[Callable]] = {}
+        # sub_id → pattern (нужен для фильтрации входящих дельт по подписке)
+        self._sub_patterns: dict[str, str] = {}
         # Список активных sub_id для shutdown cleanup
         self._sub_ids: list[str] = []
 
@@ -249,13 +252,32 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             },
         }
 
-        # Если есть router — пробуем получить sub_id от сервера
+        # Если есть router — пробуем получить sub_id от сервера.
+        # Если ответа нет, сервер вернул error или sub_id отсутствует — логируем
+        # warning. Это значит, что серверная подписка не создана (callback не
+        # сработает), но локальный sub_id выдаём (чтобы клиентский код не падал).
         if self._router is not None:
             response = self._send_sync(msg)
-            if response is not None and response.get("status") == "ok":
+            if response is None:
+                self._log_warning(
+                    f"StateProxy '{self._process_name}': подписка на '{pattern}' "
+                    "не подтверждена сервером (response=None) — серверная подписка "
+                    "не создана, локальный callback срабатывать не будет"
+                )
+            elif response.get("status") != "ok":
+                self._log_warning(
+                    f"StateProxy '{self._process_name}': подписка на '{pattern}' "
+                    f"отклонена сервером: {response.get('error', response)}"
+                )
+            else:
                 server_sub_id = response.get("sub_id")
                 if server_sub_id:
                     local_sub_id = server_sub_id
+                else:
+                    self._log_warning(
+                        f"StateProxy '{self._process_name}': подписка на '{pattern}' "
+                        "не вернула sub_id от сервера"
+                    )
         else:
             self._log_debug(
                 f"StateProxy.subscribe: router=None, подписка '{pattern}' только локальная"
@@ -263,6 +285,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
 
         # Регистрируем callback локально
         self._callbacks[local_sub_id] = [callback]
+        self._sub_patterns[local_sub_id] = pattern
         self._sub_ids.append(local_sub_id)
 
         self._log_debug(
@@ -278,6 +301,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         """
         # Удаляем локальный callback
         self._callbacks.pop(sub_id, None)
+        self._sub_patterns.pop(sub_id, None)
         if sub_id in self._sub_ids:
             self._sub_ids.remove(sub_id)
 
@@ -337,6 +361,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             self._send(msg)
 
         self._callbacks.clear()
+        self._sub_patterns.clear()
         self._sub_ids.clear()
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
@@ -383,22 +408,51 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 self._cache[delta.path] = delta.new_value
 
     def _invoke_callbacks(self, deltas: list[Delta]) -> None:
-        """Вызвать все зарегистрированные callbacks с переданными дельтами.
+        """Вызвать callbacks, фильтруя дельты по pattern каждой подписки.
 
-        Вызывается напрямую в StateProxy (synchronous).
-        В GuiStateProxy переопределяется для Qt-thread-safety.
+        Сервер группирует дельты по subscriber и шлёт одним пакетом —
+        пакет содержит ВСЕ дельты, попавшие в любую подписку процесса.
+        Здесь мы для каждого callback оставляем только те дельты, чьи path
+        матчат pattern его подписки. Если совпадений нет — callback не вызывается.
+
+        Если pattern по какой-то причине не сохранён (legacy путь) —
+        вызываем callback со всеми дельтами (старое поведение).
 
         Args:
-            deltas: список Delta для передачи в callbacks.
+            deltas: список Delta из IPC-пакета.
         """
         for sub_id, cbs in list(self._callbacks.items()):
+            pattern = self._sub_patterns.get(sub_id)
+            if pattern is None:
+                # Legacy / locally-only путь без сохранённого pattern — без фильтрации
+                matched = deltas
+            else:
+                matched = self._filter_deltas_by_pattern(deltas, pattern)
+                if not matched:
+                    continue
+
             for cb in cbs:
                 try:
-                    cb(deltas)
+                    cb(matched)
                 except Exception as exc:
                     self._log_error(
                         f"StateProxy '{self._process_name}': ошибка в callback sub_id={sub_id}: {exc}"
                     )
+
+    @staticmethod
+    def _filter_deltas_by_pattern(deltas: list[Delta], pattern: str) -> list[Delta]:
+        """Отфильтровать дельты, чьи path совпадают с glob-паттерном.
+
+        Использует match_pattern из core (тот же матчер, что на сервере),
+        чтобы поведение клиента и сервера совпадало.
+        """
+        pattern_segs = split_pattern(pattern)
+        result: list[Delta] = []
+        for delta in deltas:
+            path_segs = tuple(delta.path.split(".")) if delta.path else ()
+            if match_pattern(pattern_segs, path_segs):
+                result.append(delta)
+        return result
 
     # -------------------------------------------------------------------
     # IPC-хелперы

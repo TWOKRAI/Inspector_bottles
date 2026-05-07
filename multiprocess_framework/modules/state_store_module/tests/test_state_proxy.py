@@ -74,6 +74,31 @@ def _make_delta(path="cameras.0.config.fps", old=MISSING, new=30, source="gui") 
     return Delta(path=path, old_value=old, new_value=new, source=source)
 
 
+def _make_mock_logger(warnings_sink: list[str]):
+    """Mock-logger, складывающий warning-сообщения в указанный список.
+
+    StateProxy использует ObservableMixin, который вызывает
+    `manager.warning(...)` или `manager.log_warning(...)` на переданном logger.
+    Достаточно реализовать оба интерфейса.
+    """
+    class _Logger:
+        def warning(self, msg, *args, **kwargs):
+            warnings_sink.append(msg if not args else msg % args)
+
+        def log_warning(self, msg, *args, **kwargs):
+            self.warning(msg, *args, **kwargs)
+
+        # Остальные уровни — no-op
+        def info(self, *a, **kw): pass
+        def debug(self, *a, **kw): pass
+        def error(self, *a, **kw): pass
+        def log_info(self, *a, **kw): pass
+        def log_debug(self, *a, **kw): pass
+        def log_error(self, *a, **kw): pass
+
+    return _Logger()
+
+
 # ===========================================================================
 # Тесты StateProxy — инициализация
 # ===========================================================================
@@ -301,6 +326,46 @@ class TestStateProxySubscribe:
         assert isinstance(sub_id, str)
         assert len(sub_id) > 0
 
+    def test_subscribe_warns_on_server_error(self):
+        """Если сервер вернул error — выдаём warning, sub_id всё равно создаётся локально."""
+        warnings: list[str] = []
+        logger = _make_mock_logger(warnings)
+        router = MockRouter()
+        router.set_sync_response(
+            "state.subscribe",
+            {"status": "error", "error": "broken"},
+        )
+        proxy = StateProxy("camera_0", router=router, logger=logger)
+        sub_id = proxy.subscribe("cameras.*", lambda d: None)
+        assert isinstance(sub_id, str) and len(sub_id) > 0
+        assert any("cameras.*" in w for w in warnings), warnings
+
+    def test_subscribe_warns_on_missing_sub_id(self):
+        """Сервер ответил ok, но без sub_id — тоже warning (контракт нарушен)."""
+        warnings: list[str] = []
+        logger = _make_mock_logger(warnings)
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok"})  # без sub_id
+        proxy = StateProxy("camera_0", router=router, logger=logger)
+        proxy.subscribe("cameras.*", lambda d: None)
+        assert any("sub_id" in w for w in warnings), warnings
+
+    def test_subscribe_warns_on_none_response(self):
+        """router.send вернул None — warning «не подтверждена сервером»."""
+        warnings: list[str] = []
+        logger = _make_mock_logger(warnings)
+        router = MockRouter()
+
+        # Отвечаем явно None для state.subscribe
+        def _send_returning_none(msg):
+            router.sent.append(msg)
+            return None
+
+        router.send = _send_returning_none  # type: ignore[method-assign]
+        proxy = StateProxy("camera_0", router=router, logger=logger)
+        proxy.subscribe("cameras.*", lambda d: None)
+        assert any("response=None" in w or "не подтверждена" in w for w in warnings), warnings
+
     def test_unsubscribe_sends_ipc(self):
         """unsubscribe() отправляет state.unsubscribe в IPC."""
         router = MockRouter()
@@ -426,6 +491,99 @@ class TestStateProxyOnStateChanged:
 
         # good_callback всё равно был вызван
         assert len(called_after) == 1
+
+
+# ===========================================================================
+# Тесты StateProxy — фильтрация callbacks по pattern подписки
+# ===========================================================================
+
+class TestStateProxyCallbackFiltering:
+    """Каждый callback получает ТОЛЬКО дельты, чьи path матчат его pattern."""
+
+    @staticmethod
+    def _make_proxy_with_subs(*patterns: str) -> tuple[StateProxy, MockRouter, dict]:
+        """Создать StateProxy с подписками на указанные patterns.
+
+        Возвращает (proxy, router, received) — received: pattern -> list[list[Delta]].
+        """
+        router = MockRouter()
+        proxy = StateProxy("camera_0", router=router)
+        received: dict[str, list[list[Delta]]] = {p: [] for p in patterns}
+
+        for i, pattern in enumerate(patterns):
+            sub_id = f"sub-{i}"
+            router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": sub_id})
+            proxy.subscribe(pattern, lambda d, p=pattern: received[p].append(d))
+
+        return proxy, router, received
+
+    def test_callback_receives_only_matching_deltas(self):
+        """Callback с pattern 'cameras.0.*' не должен получать дельты renderer.*"""
+        proxy, _router, received = self._make_proxy_with_subs(
+            "cameras.0.*", "renderer.*"
+        )
+
+        deltas = [
+            _make_delta(path="cameras.0.fps", new=30),
+            _make_delta(path="renderer.alpha", new=0.5),
+        ]
+        proxy.on_state_changed(_make_state_changed_msg(deltas))
+
+        # cameras.0.* видит только cameras.0.fps
+        assert len(received["cameras.0.*"]) == 1
+        assert [d.path for d in received["cameras.0.*"][0]] == ["cameras.0.fps"]
+
+        # renderer.* видит только renderer.alpha
+        assert len(received["renderer.*"]) == 1
+        assert [d.path for d in received["renderer.*"][0]] == ["renderer.alpha"]
+
+    def test_callback_not_called_when_no_match(self):
+        """Callback не вызывается, если в пакете нет дельт под его pattern."""
+        proxy, _router, received = self._make_proxy_with_subs("renderer.*")
+
+        # Только cameras.* — для renderer.* совпадений нет
+        proxy.on_state_changed(
+            _make_state_changed_msg([_make_delta(path="cameras.0.fps", new=30)])
+        )
+
+        assert received["renderer.*"] == []
+
+    def test_double_star_pattern_matches_all(self):
+        """Pattern '**' (или 'cameras.**') совпадает со всеми вложенными путями."""
+        proxy, _router, received = self._make_proxy_with_subs("cameras.**")
+
+        deltas = [
+            _make_delta(path="cameras.0.config.fps", new=30),
+            _make_delta(path="cameras.1.state.actual_fps", new=29.7),
+            _make_delta(path="renderer.alpha", new=0.5),
+        ]
+        proxy.on_state_changed(_make_state_changed_msg(deltas))
+
+        # cameras.** ловит обе cameras-дельты, не ловит renderer
+        assert len(received["cameras.**"]) == 1
+        paths = [d.path for d in received["cameras.**"][0]]
+        assert paths == ["cameras.0.config.fps", "cameras.1.state.actual_fps"]
+
+    def test_legacy_callback_without_pattern_receives_all(self):
+        """Если pattern для sub_id не сохранён (ручная регистрация) — без фильтрации.
+
+        Это сохраняет совместимость с тестами и сценариями, где callbacks
+        добавляются напрямую в _callbacks (см. test_on_state_changed_callback_exception).
+        """
+        proxy = StateProxy("camera_0")
+        received: list[list[Delta]] = []
+        proxy._callbacks["manual-sub"] = [lambda d: received.append(d)]
+        # Намеренно НЕ заполняем _sub_patterns
+
+        deltas = [
+            _make_delta(path="cameras.0.fps", new=30),
+            _make_delta(path="renderer.alpha", new=0.5),
+        ]
+        proxy.on_state_changed(_make_state_changed_msg(deltas))
+
+        # Без pattern — callback получил все дельты (legacy-режим)
+        assert len(received) == 1
+        assert len(received[0]) == 2
 
 
 # ===========================================================================
