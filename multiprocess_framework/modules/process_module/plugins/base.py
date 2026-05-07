@@ -71,6 +71,7 @@ class PluginContext:
         process: Any,
         io: ProcessIO,
         registers: Any | None = None,
+        state_proxy: Any = None,
     ) -> None:
         self.process_name = process_name
         self.config = config
@@ -87,6 +88,10 @@ class PluginContext:
         # Registers (Phase 5.9) — RegistersManager | None
         # Плагин читает self._reg = ctx.registers.get_register("plugin_name")
         self.registers = registers
+
+        # StateProxy (Phase 8) — для публикации состояния через реактивное дерево
+        # None по умолчанию для обратной совместимости
+        self.state_proxy = state_proxy
 
         # Logging
         self.log_info: Callable[[str], None] = process._log_info
@@ -111,6 +116,7 @@ class PluginContext:
             process=self._process,
             io=self.io,
             registers=registers,
+            state_proxy=self.state_proxy,
         )
 
 
@@ -146,6 +152,9 @@ class SubPluginContext:
     worker_manager: Any = None
     router_manager: Any = None
     memory_manager: Any = None
+    # StateProxy (Phase 8) — для публикации состояния через реактивное дерево
+    # None по умолчанию для обратной совместимости
+    state_proxy: Any = None
 
 
 class ProcessModulePlugin(ABC):

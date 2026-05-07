@@ -60,6 +60,11 @@ class GenericProcess(ProcessModule):
             process_name=self.name, config={}, process=self, io=io,
         )
 
+        # StateProxy (устанавливается подклассами, например GenericProcessApp)
+        state_proxy = getattr(self, '_state_proxy', None)
+        if state_proxy is not None:
+            base_ctx.state_proxy = state_proxy
+
         # Предзагрузка плагинов для early-init
         self._early_plugins: list[tuple[ProcessModulePlugin, PluginContext]] = []
         for pdef in plugin_defs:
