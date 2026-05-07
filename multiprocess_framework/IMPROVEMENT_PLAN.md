@@ -142,7 +142,8 @@ python scripts/run_framework_tests.py
 **Проблема.** Оба дают pub/sub изменений; граница только в документации, не в коде.
 
 **Действия:**
-- [ ] Написать ADR-RM-002 (или ADR-SS-011): «Когда применять регистры, когда — state store».
+- [ ] Написать ADR-RM-002 (или ADR-SS-014): «Когда применять регистры, когда — state store».  <!-- ADR-SS-011..013 уже заняты (см. modules/state_store_module/DECISIONS.md). -->
+
 - [ ] Чётко разграничить:
   - `registers_module` — **именованные регистры приложения** (Pydantic-инстансы, типизированные поля, валидация по `FieldMeta`, fan-out по `FieldRouting`). Применять для конфигурации устройств, UI-настроек.
   - `state_store_module` — **произвольное иерархическое дерево** (dict-tree, glob-patterns, delta-only IPC). Применять для real-time состояния, метрик, телеметрии, динамических топологий.
@@ -267,6 +268,12 @@ python scripts/run_framework_tests.py
 
 Месяц 2+ — Tier 3 по мере необходимости
 ```
+
+---
+
+## Дополнительные завершённые работы
+
+- ✅ **T1.3** (2026-05-07) — Sync framework для генерируемых разделов документации. Создан пакет `scripts/sync/` (3 sync-модуля: `adr_modules`, `adr_toc`, `adr_obsolete`), маркеры в `DECISIONS.md` и `ADR_REGISTRY.md`, CLI с флагами `--check` / `--list` / `--only`. ADR-119 добавлена в `multiprocess_framework/DECISIONS.md`. Правило 8 добавлено в корневой `CLAUDE.md`. `validate.py` интегрирован. 20 pytest-тестов (все зелёные). Коммиты: c6573ad…77e992a.
 
 ---
 
