@@ -75,21 +75,12 @@ class RobotControlPlugin(ProcessModulePlugin):
         "reset_counters": "cmd_reset_counters",
         "get_stats": "cmd_get_stats",
     }
+    register_class = RobotControlRegisters
 
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or RobotControlRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         # Счётчики статистики (не в register — runtime-only)
         self._total_inspected: int = 0
@@ -100,9 +91,6 @@ class RobotControlPlugin(ProcessModulePlugin):
             f"min_defect_area={self._reg.min_defect_area}, "
             f"reject_delay_ms={self._reg.reject_delay_ms}"
         )
-
-    def start(self, ctx: PluginContext) -> None:
-        """No-op — обработка через process()."""
 
     # --- Обработка ---
 

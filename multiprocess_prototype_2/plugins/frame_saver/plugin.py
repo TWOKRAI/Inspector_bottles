@@ -39,21 +39,13 @@ class FrameSaverPlugin(ProcessModulePlugin):
         "save_now": "_cmd_save_now",
         "get_stats": "_cmd_get_stats",
     }
+    register_class = FrameSaverRegisters
 
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or FrameSaverRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         # camera_id из cfg (не входит в register — идентификатор хоста)
         self._camera_id: int = cfg.get("camera_id", 0)
@@ -68,9 +60,6 @@ class FrameSaverPlugin(ProcessModulePlugin):
             f"dir={self._reg.output_dir}, every={self._reg.save_every_n}, "
             f"format={self._reg.image_format}"
         )
-
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
 
     def shutdown(self, ctx: PluginContext) -> None:
         """Финальная статистика."""

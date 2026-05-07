@@ -43,21 +43,12 @@ class DatabasePlugin(ProcessModulePlugin):
         "set_batch_size": "_cmd_set_batch_size",
         "reset_stats": "_cmd_reset_stats",
     }
+    register_class = DatabaseRegisters
 
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or DatabaseRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         self._buffer: list[dict] = []
         self._buffer_lock = threading.Lock()

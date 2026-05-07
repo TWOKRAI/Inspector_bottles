@@ -48,9 +48,6 @@ class StitcherPlugin(ProcessModulePlugin):
             f"expected_regions={self._expected_regions}"
         )
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     def process(self, items: list[dict]) -> list[dict]:
         """Склейка коллекции регионов на canvas.
 
