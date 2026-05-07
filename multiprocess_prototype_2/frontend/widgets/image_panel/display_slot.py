@@ -52,6 +52,11 @@ class DisplaySlot(QWidget):
         self._label.clear()
         self._label.setText(text)
 
+    def clear(self) -> None:
+        """Очистить слот и показать placeholder 'Нет сигнала'."""
+        placeholder = self._label_text if self._label_text else "Нет сигнала"
+        self.set_placeholder(placeholder)
+
     def resizeEvent(self, event) -> None:
         """При изменении размера — перемасштабировать текущий pixmap."""
         super().resizeEvent(event)

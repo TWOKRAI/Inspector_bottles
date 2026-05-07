@@ -28,6 +28,7 @@ class ImagePanelWidget(QWidget):
 
     def __init__(self, slots: list | None = None, parent=None):
         super().__init__(parent)
+        self.setObjectName("ImagePanel")
 
         self._presenter = ImagePanelPresenter()
         # slot_id → DisplaySlot
@@ -109,3 +110,8 @@ class ImagePanelWidget(QWidget):
     def slot_ids(self) -> list[str]:
         """Список идентификаторов активных слотов."""
         return list(self._slots.keys())
+
+    @property
+    def slot_count(self) -> int:
+        """Количество активных слотов."""
+        return len(self._slots)
