@@ -3,6 +3,14 @@
 Живёт внутри Processor-процесса. Round-robin распределение по worker-процессам
 через IPC+SHM. Блокирует вызывающий поток до получения ответа или timeout.
 Thread-safe: dispatch() может вызываться из разных потоков (ChainThreadPool).
+
+Интегрирован с ``BaseManager + ObservableMixin``:
+    - ``logger``  → структурное логирование (``self._log_*``)
+    - ``stats``   → метрики (``self._record_metric`` / ``self._record_timing``)
+    - ``errors``  → трекинг ошибок (``self._track_error``)
+
+Все три параметра опциональны: при отсутствии менеджера вызовы тихо
+возвращают ``None`` (см. ObservableMixin._call_manager).
 """
 from __future__ import annotations
 
@@ -11,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ...base_manager import BaseManager, ObservableMixin
 from .protocol import WorkerTaskRequest, WorkerTaskResponse
 
 
@@ -22,7 +31,7 @@ class PendingTask:
     response: WorkerTaskResponse | None = None
 
 
-class WorkerPoolDispatcher:
+class WorkerPoolDispatcher(BaseManager, ObservableMixin):
     """Диспетчер задач для worker pool.
 
     Round-robin маршрутизация по worker-процессам.
@@ -35,6 +44,9 @@ class WorkerPoolDispatcher:
         worker_count: Количество worker-процессов.
         timeout: Максимальное время ожидания ответа (секунды).
         input_queue_size: Максимальное количество одновременно ожидающих задач.
+        logger: LoggerManager или ObservableMixin-совместимый объект.
+        stats: StatsManager — приёмник метрик (опц.).
+        errors: ErrorManager — приёмник трекинга исключений (опц.).
     """
 
     def __init__(
@@ -44,11 +56,18 @@ class WorkerPoolDispatcher:
         timeout: float = 5.0,
         input_queue_size: int = 4,
         logger: Any = None,
+        stats: Any = None,
+        errors: Any = None,
     ) -> None:
+        BaseManager.__init__(self, manager_name="WorkerPoolDispatcher")
+        ObservableMixin.__init__(
+            self,
+            managers={"logger": logger, "stats": stats, "errors": errors},
+        )
+
         self._send_fn = send_fn
         self._timeout = timeout
         self._input_queue_size = max(1, input_queue_size)
-        self._log = logger
 
         self._worker_names: list[str] = [
             f"processor_worker_{i}" for i in range(worker_count)
@@ -61,6 +80,23 @@ class WorkerPoolDispatcher:
         self._drops_total: int = 0
         self._dispatched_total: int = 0
         self._timeout_total: int = 0
+
+    def initialize(self) -> bool:
+        self.is_initialized = True
+        return True
+
+    def shutdown(self) -> bool:
+        """Отменить все pending задачи и завершить работу."""
+        with self._lock:
+            for task_id, pending in list(self._pending.items()):
+                pending.response = WorkerTaskResponse.error_response(
+                    task_id=task_id,
+                    error="dispatcher shutdown",
+                )
+                pending.event.set()
+            self._pending.clear()
+        self.is_initialized = False
+        return True
 
     def dispatch(
         self,
@@ -107,10 +143,14 @@ class WorkerPoolDispatcher:
             data_type="worker_task_request",
         )
 
-        if self._log is not None:
-            self._log._log_debug(
-                f"Задача {request.task_id} отправлена worker={worker_name}, operation={operation_ref}"
-            )
+        self._record_metric(
+            "worker_pool.dispatched",
+            tags={"worker": worker_name, "operation": operation_ref},
+        )
+        self._log_debug(
+            f"Задача {request.task_id} отправлена worker={worker_name},"
+            f" operation={operation_ref}"
+        )
 
         signaled = pending.event.wait(timeout=self._timeout)
 
@@ -119,10 +159,14 @@ class WorkerPoolDispatcher:
                 self._pending.pop(request.task_id, None)
                 self._timeout_total += 1
 
-            if self._log is not None:
-                self._log._log_warning(
-                    f"Timeout задачи {request.task_id} ({self._timeout:.1f}s), operation={operation_ref}"
-                )
+            self._record_metric(
+                "worker_pool.timeouts",
+                tags={"worker": worker_name, "operation": operation_ref},
+            )
+            self._log_warning(
+                f"Timeout задачи {request.task_id} ({self._timeout:.1f}s),"
+                f" operation={operation_ref}"
+            )
             return WorkerTaskResponse.error_response(
                 task_id=request.task_id,
                 error="timeout",
@@ -132,6 +176,17 @@ class WorkerPoolDispatcher:
             self._pending.pop(request.task_id, None)
 
         if pending.response is not None:
+            if pending.response.success:
+                self._record_timing(
+                    "worker_pool.processing_time",
+                    pending.response.processing_time,
+                    tags={"operation": operation_ref},
+                )
+            else:
+                self._record_metric(
+                    "worker_pool.errors",
+                    tags={"operation": operation_ref},
+                )
             return pending.response
 
         return WorkerTaskResponse.error_response(
@@ -151,20 +206,20 @@ class WorkerPoolDispatcher:
             pending = self._pending.get(response.task_id)
 
         if pending is None:
-            if self._log is not None:
-                self._log._log_warning(
-                    f"Late response для task_id={response.task_id} (нет в pending), игнорируем"
-                )
+            self._record_metric("worker_pool.late_responses")
+            self._log_warning(
+                f"Late response для task_id={response.task_id}"
+                f" (нет в pending), игнорируем"
+            )
             return
 
         pending.response = response
         pending.event.set()
 
-        if self._log is not None:
-            self._log._log_debug(
-                f"Ответ получен для task_id={response.task_id},"
-                f" success={response.success}, time={response.processing_time:.3f}s"
-            )
+        self._log_debug(
+            f"Ответ получен для task_id={response.task_id},"
+            f" success={response.success}, time={response.processing_time:.3f}s"
+        )
 
     def _enforce_backpressure(self) -> None:
         """Drop oldest: если pending >= input_queue_size, удалить самую старую задачу.
@@ -176,11 +231,11 @@ class WorkerPoolDispatcher:
             oldest = self._pending.pop(oldest_task_id)
             self._drops_total += 1
 
-            if self._log is not None:
-                self._log._log_warning(
-                    f"Backpressure: drop task_id={oldest_task_id}"
-                    f" (pending={len(self._pending) + 1} >= limit={self._input_queue_size})"
-                )
+            self._record_metric("worker_pool.drops")
+            self._log_warning(
+                f"Backpressure: drop task_id={oldest_task_id}"
+                f" (pending={len(self._pending) + 1} >= limit={self._input_queue_size})"
+            )
 
             oldest.response = WorkerTaskResponse.error_response(
                 task_id=oldest_task_id,

@@ -1,6 +1,6 @@
 # chain_module — Архитектурные решения
 
-## ADR-CM-001: Protocol-based decoupling от доменных типов
+## ADR-CHN-001: Protocol-based decoupling от доменных типов
 
 **Статус:** Принято (2026-05-01)
 
@@ -25,7 +25,7 @@
 
 ---
 
-## ADR-CM-002: ChainContext перемещён во фреймворк
+## ADR-CHN-002: ChainContext перемещён во фреймворк
 
 **Статус:** Принято (2026-05-01)
 
@@ -43,7 +43,7 @@
 
 ---
 
-## ADR-CM-003: builder.py остаётся в прототипе
+## ADR-CHN-003: builder.py остаётся в прототипе
 
 **Статус:** Принято (2026-05-01)
 
@@ -60,7 +60,7 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
 
 ---
 
-## ADR-CM-004: autofill.py остаётся в прототипе
+## ADR-CHN-004: autofill.py остаётся в прототипе
 
 **Статус:** Принято (2026-05-01)
 
@@ -74,7 +74,7 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
 
 ---
 
-## ADR-CM-005: DagRunnable содержит _execute_dag_default
+## ADR-CHN-005: DagRunnable содержит _execute_dag_default
 
 **Статус:** Принято (2026-05-01)
 
@@ -85,3 +85,86 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
 **Решение:**
 `_execute_dag_default()` переносится в `chain_module/core/dag.py`.
 В прототипе `operations/base.py` функция может быть удалена или оставлена как re-export.
+
+---
+
+## ADR-CHN-006: Явный IRemoteExecutable + общая on_error политика
+
+**Статус:** Принято (2026-05-07)
+
+**Контекст:**
+1. `_is_cross_process(step)` использовал duck-typing через `hasattr("execute_remote", "dispatcher")`,
+   но сигнатура `execute_remote(frame, context, input_shm_name, input_shm_index)` была зафиксирована
+   только в `core/chain.py` — без явного Protocol-контракта в `interfaces.py`.
+2. `ParallelChainRunnable` **не проверял** `_is_cross_process(step)` — для cross-process шага
+   падал на `step.operation.execute(frame, ctx)` с AttributeError. Реальная регрессия.
+3. Логика on_error (skip / fail_region / fail_camera) дублировалась в 3 файлах:
+   `core/chain.py`, `core/dag.py`, `core/parallel.py` — DRY-нарушение, расхождение формулировок.
+4. `RunnableStep.node` и `RunnableStep.operation` были типизированы как `Any`,
+   что отключало статическую проверку доступа к `node.node_id` / `node.operation_ref`.
+
+**Решение:**
+1. Добавить `IRemoteExecutable` Protocol в `interfaces.py` — явный контракт cross-process шага.
+   `_is_cross_process` остаётся через `hasattr` (избегаем циклов импорта), но контракт публичный.
+2. Добавить cross-process ветку в `ParallelChainRunnable._execute_remote` (синхронное исполнение
+   через `execute_remote` — параллелизм через ThreadPool бессмыслен, dispatcher уже блокирует
+   поток). Бандл разделяется на remote/local: cross-process идут синхронно, local — через пул.
+3. Вынести on_error логику в `core/error_policy.apply_on_error_policy(step, exc, ctx, result)
+   -> bool` (returns should_break). Все три исполнителя зовут эту функцию.
+4. Заменить `Any` на `IStepNode` / `IExecutionStep` в `RunnableStep` —
+   оба Protocol уже `@runtime_checkable`, поэтому duck-typing не ломается.
+
+**Последствия:**
+- Cross-process шаги работают одинаково во всех трёх исполнителях.
+- Сообщения об ошибках унифицированы (формат `"Операция '...' (node=...) упала: ...  on_error=..."`).
+- IDE и type-checker подсказывают атрибуты `node.node_id` / `operation.execute`.
+- Прототип (`CrossProcessStep` в `services/processor/`) не требует изменений —
+  Protocol совпадает с фактическим API.
+- Поведенческий тест `test_parallel_runnable.py` фиксирует регрессию.
+
+---
+
+## ADR-CHN-007: ObservableMixin для долгоживущих сервисов модуля
+
+**Статус:** Принято (2026-05-07)
+
+**Контекст:**
+До итерации 2026-05-07 только `ChainThreadPool` наследовался от
+`BaseManager + ObservableMixin`. `WorkerPoolDispatcher` и `LatencyTracker`
+принимали `logger=None` параметром и использовали приватный паттерн
+`self._log._log_warning(msg)` (вызов приватных методов у переданного объекта).
+Метрики были скрытыми атрибутами (`_drops_total`, `_dispatched_total`,
+`_timeout_total` в Dispatcher) — недоступны через единый интерфейс.
+Сами модуль `metrics` не публиковал ничего в `StatsManager`.
+
+**Решение:**
+Подключить `BaseManager + ObservableMixin` к **долгоживущим сервисам** chain_module:
+1. `WorkerPoolDispatcher` принимает `logger`, `stats`, `errors` (всё опц.).
+   Заменяет ручные строки лога на `self._log_*`. Публикует:
+   - `worker_pool.dispatched` / `.timeouts` / `.drops` / `.late_responses` / `.errors` (counters)
+   - `worker_pool.processing_time` (timing per success ответ)
+   Реализует `initialize()`/`shutdown()` (последний отменяет все pending задачи).
+2. `LatencyTracker` принимает `logger`, `stats`, `metric_name` (default `chain.latency_ms`).
+   Каждый `record(e2e_ms)` пишется в `_record_timing`. `maybe_log()` дополнительно
+   публикует snapshot p50/p95/p99 как метрики `<name>.p50/.p95/.p99`.
+
+**Не подключаем:**
+Исполнители (`ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`) и data-классы
+(`RunnableStep`, `ChainResult`, `ChainContext`) **остаются обычными классами**.
+Причины:
+- Исполнители создаются на каждый `RegisterRuntime.rebuild()` → registry с менеджерами
+  на каждом билде = лишняя память.
+- Логгер уже доступен в исполнителях через `ChainContext.logger` (передаётся один раз
+  при создании контекста), `apply_on_error_policy` использует его.
+- Data-классы не имеют поведения — Mixin им не нужен по определению.
+
+**Последствия:**
+- Все три параметра — keyword, со значением `None` по умолчанию → старые места
+  создания (например `multiprocess_prototype/plugins/services/processor_service/plugin.py`)
+  работают без изменений.
+- `StatsManager.percentiles("chain.latency_ms")` — теперь основной источник истины
+  для p50/p95/p99 latency (не парсинг лога). GUI / Inspector могут читать оттуда.
+- `ErrorManager.track_error()` доступен, но пока не вызывается из chain_module
+  (резерв на будущее — добавить в `apply_on_error_policy` опционально).
+- Все тесты (фреймворк 67/67 + прототип test_worker_pool_dispatcher 14/14) проходят
+  без модификации.

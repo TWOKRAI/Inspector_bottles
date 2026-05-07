@@ -136,19 +136,21 @@ UI (опционально)   L11  frontend_module (PySide6)
 **Ключевое:**
 
 - `StateStoreManager` — серверный фасад (TreeStore + SubscriptionManager + DeltaDispatcher). Регистрирует 7 IPC-команд: `state.set/merge/get/get_subtree/subscribe/unsubscribe/unsubscribe_all`.
-- `TreeStore` — иерархическое дерево (`get/get_subtree/set/merge/delete`). Dot-path навигация.
-- `StateProxy` — клиентский прокси с локальным кэшем и подписками на glob-паттерны (`cameras.*.config.*`).
+- `TreeStore` — иерархическое дерево (`get/get_subtree/set/merge/delete`). Dot-path навигация. Glob-обход вынесен в общий `core/glob_walker.py`.
+- `StateProxy` — клиентский прокси с локальным кэшем и подписками на glob-паттерны (`cameras.*.config.*`). **Фильтрует входящие дельты per-pattern** (ADR-SS-012) — callback видит только дельты своей подписки.
 - `GuiStateProxy` — вариант StateProxy для PySide6 GUI (ленивый импорт PySide6).
 - `Delta` — единица изменения (path, old/new value, source, timestamp).
-- Middleware pipeline: `ThrottleMiddleware`, `ValidationMiddleware`, `LoggingMiddleware`, `MetricsMiddleware`.
+- `SubscriptionManager` — публичные snapshot-методы `subscribers_snapshot()` / `subscriptions_for(subscriber)` для shutdown и DevTools (ADR-SS-013).
+- `match_pattern` / `split_pattern` — публичные хелперы glob-матчинга (ADR-SS-004).
+- Middleware pipeline: `ThrottleMiddleware`, `ValidationMiddleware` (поддерживает `tuple` types), `LoggingMiddleware`, `MetricsMiddleware`.
 - `Selector` / `SelectorRegistry` — вычисляемые представления состояния.
 - `StateInspector` — devtool: `inspect(pattern)`, `subscriptions()`, `history()`, `stats()`.
 - `HealthMonitor` — watchdog по обновлениям путей.
-- `PersistenceManager` — сохранение/загрузка состояния в YAML с debounce.
-- `RecipeEngine` — снимки (snapshot) и восстановление (restore) с поддержкой миграций.
-- `InMemoryRouter` — встроенный mock `IRouter` для unit-тестов.
+- `PersistenceManager` — **доменно-нейтральный** (ADR-SS-011): принимает `file_mapping: dict[str, Path]` и опциональные `path_predicate` / `value_filter`; жёстко зашитых имён файлов больше нет.
+- `RecipeEngine` — снимки (snapshot) и восстановление (restore) с поддержкой миграций через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003).
+- `InMemoryRouter` — встроенный mock `IRouter` для unit-тестов (ADR-SS-010).
 
-**Зависимости:** только stdlib + опционально PySide6. **Не зависит от RouterManager** — использует Protocol `IRouter`.
+**Зависимости:** stdlib + `pyyaml` + `base_manager`; опционально `PySide6` (lazy). **Не зависит от RouterManager** — использует Protocol `IRouter` (ADR-SS-001).
 **Подробно:** [`modules/state_store_module/README.md`](../modules/state_store_module/README.md)
 
 ---
@@ -185,9 +187,12 @@ UI (опционально)   L11  frontend_module (PySide6)
 - `ChainThreadPool` — `ThreadPoolExecutor` с timeout и graceful shutdown.
 - Graph utilities: `topological_sort` (алгоритм Кана), `is_nonlinear_graph`, `detect_parallel_bundles`.
 - Worker pool: `WorkerPoolDispatcher` (round-robin, backpressure, timeout), `WorkerTaskRequest`/`WorkerTaskResponse` (Dict at Boundary IPC-протокол).
-- `LatencyTracker` — накапливает измерения, вычисляет p50/p95/p99.
+- `IRemoteExecutable` — Protocol для cross-process шагов (`execute_remote` через `WorkerPoolDispatcher`); поддерживается всеми тремя исполнителями (ADR-CHN-006).
+- `apply_on_error_policy` — единая обработка `on_error` (skip / fail_region / fail_camera) для всех исполнителей (ADR-CHN-006).
+- `LatencyTracker(BaseManager, ObservableMixin)` — накапливает измерения, вычисляет p50/p95/p99 (numpy linear interpolation). Каждый `record()` пишется как timing метрика; `maybe_log()` публикует p50/p95/p99 snapshot в `StatsManager` (ADR-CHN-007).
+- `WorkerPoolDispatcher(BaseManager, ObservableMixin)` — метрики `worker_pool.dispatched/timeouts/drops/late_responses/errors` (counter), `worker_pool.processing_time` (timing). Опциональные `logger`/`stats`/`errors`, обратно-совместимо (ADR-CHN-007).
 
-**Зависимости:** `numpy`, `loguru`, stdlib (`concurrent.futures`, `threading`). **Не зависит от других модулей фреймворка** — standalone.
+**Зависимости:** `numpy`, `base_manager`, stdlib (`concurrent.futures`, `threading`). **Не зависит от других модулей фреймворка** — standalone (логи через `_log_*` ObservableMixin, не loguru напрямую).
 **Подробно:** [`modules/chain_module/README.md`](../modules/chain_module/README.md)
 
 ---

@@ -3,10 +3,11 @@
 Протоколы для структурной типизации: chain_module не импортирует доменный код,
 доменные классы прототипа реализуют эти протоколы неявно (duck-typing).
 
-    IStepNode        — минимальный контракт дескриптора ноды (node_id, operation_ref, inputs)
-    INodeConnection  — соединение между нодами (source, input_port, output_port)
-    IExecutionStep   — операция обработки (execute, configure)
-    IChainRunnable   — исполняемая цепочка (execute → ChainResult)
+    IStepNode          — минимальный контракт дескриптора ноды (node_id, operation_ref, inputs)
+    INodeConnection    — соединение между нодами (source, input_port, output_port)
+    IExecutionStep     — операция обработки (execute, configure)
+    IChainRunnable     — исполняемая цепочка (execute → ChainResult)
+    IRemoteExecutable  — шаг с cross-process исполнением (execute_remote через WorkerPoolDispatcher)
 """
 from __future__ import annotations
 
@@ -60,10 +61,34 @@ class IChainRunnable(Protocol):
         ...
 
 
+@runtime_checkable
+class IRemoteExecutable(Protocol):
+    """Шаг с cross-process исполнением через WorkerPoolDispatcher.
+
+    Реализуется доменным классом (CrossProcessStep в прототипе): передаёт
+    кадр в worker-процесс и блокирующе ждёт ответ. Контракт нужен для
+    единообразной обработки во всех исполнителях (ChainRunnable,
+    DagRunnable, ParallelChainRunnable).
+    """
+
+    dispatcher: Any
+
+    def execute_remote(
+        self,
+        frame: Any,
+        context: Any,
+        input_shm_name: str,
+        input_shm_index: int,
+    ) -> Any:
+        """Отправить кадр в worker-процесс, вернуть WorkerTaskResponse."""
+        ...
+
+
 __all__ = [
     "INodeConnection",
     "IStepNode",
     "IStepNodeWithWorker",
     "IExecutionStep",
     "IChainRunnable",
+    "IRemoteExecutable",
 ]

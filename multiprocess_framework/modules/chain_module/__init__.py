@@ -8,6 +8,7 @@
         INodeConnection     — соединение между нодами (source, input_port, output_port)
         IExecutionStep      — операция обработки (execute, configure)
         IChainRunnable      — исполняемая цепочка (execute → ChainResult)
+        IRemoteExecutable   — шаг с cross-process исполнением (execute_remote)
 
     Контекст / Результат:
         ChainContext        — контекст выполнения (IDs, warnings, errors, timeouts)
@@ -42,11 +43,13 @@ from .interfaces import (
     INodeConnection,
     IExecutionStep,
     IChainRunnable,
+    IRemoteExecutable,
 )
 from .core import (
     ChainContext,
     ChainResult,
     RunnableStep,
+    apply_on_error_policy,
     ChainRunnable,
     IRunnableChain,
     DagRunnable,
@@ -64,10 +67,12 @@ __all__ = [
     "INodeConnection",
     "IExecutionStep",
     "IChainRunnable",
+    "IRemoteExecutable",
     # Контекст / Результат
     "ChainContext",
     "ChainResult",
     "RunnableStep",
+    "apply_on_error_policy",
     # Исполнители
     "ChainRunnable",
     "IRunnableChain",

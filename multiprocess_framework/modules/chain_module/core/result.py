@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from ..interfaces import IExecutionStep, IStepNode
 from .context import ChainContext
 
 
@@ -28,8 +29,8 @@ class ChainResult:
 class RunnableStep:
     """Один шаг исполняемой цепочки: дескриптор ноды + операция + политика ошибок."""
 
-    node: Any  # реализует IStepNode: .node_id, .operation_ref, .inputs
-    operation: Any  # реализует IExecutionStep: .execute(frame, context)
+    node: IStepNode  # .node_id, .operation_ref, .inputs (опц. .worker_id)
+    operation: IExecutionStep  # .execute(frame, context), .configure(params)
     on_error: str  # "skip" | "fail_region" | "fail_camera"
 
 

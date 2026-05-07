@@ -2,6 +2,11 @@
 
 Бандлы исполняются последовательно (barrier между уровнями),
 шаги внутри бандла — параллельно через ChainThreadPool.
+
+Cross-process шаги (реализующие IRemoteExecutable) обрабатываются
+синхронно через ``execute_remote``: dispatcher уже сам блокирует
+поток в ожидании ответа от worker-процесса, параллелизм через
+ThreadPool не даёт выигрыша.
 """
 from __future__ import annotations
 
@@ -11,7 +16,8 @@ from typing import Any
 import numpy as np
 
 from .context import ChainContext
-from .result import ChainResult, RunnableStep, _collect_side_results
+from .error_policy import apply_on_error_policy
+from .result import ChainResult, RunnableStep, _collect_side_results, _is_cross_process
 
 
 class ParallelChainRunnable:
@@ -60,13 +66,28 @@ class ParallelChainRunnable:
         t_start = time.perf_counter()
 
         for bundle in self._bundles:
-            if len(bundle) == 1:
+            remote_steps = [s for s in bundle if _is_cross_process(s)]
+            local_steps = [s for s in bundle if not _is_cross_process(s)]
+
+            should_break = False
+            for step in remote_steps:
+                step_break = self._execute_remote(step, current_frame, metadata, context, result)
+                if step_break:
+                    should_break = True
+                    break
+            if should_break:
+                break
+
+            if not local_steps:
+                continue
+
+            if len(local_steps) == 1:
                 current_frame, should_break = self._execute_single(
-                    bundle[0], current_frame, context, result,
+                    local_steps[0], current_frame, context, result,
                 )
             else:
                 current_frame, should_break = self._execute_parallel(
-                    bundle, current_frame, context, result,
+                    local_steps, current_frame, context, result,
                 )
             if should_break:
                 break
@@ -74,6 +95,33 @@ class ParallelChainRunnable:
         result.frame = current_frame
         result.processing_time = time.perf_counter() - t_start
         return result
+
+    def _execute_remote(
+        self,
+        step: Any,  # RunnableStep | IRemoteExecutable proxy (CrossProcessStep)
+        current_frame: np.ndarray,
+        metadata: dict[str, Any],
+        context: ChainContext,
+        result: ChainResult,
+    ) -> bool:
+        """Cross-process шаг: вызвать execute_remote, собрать детекции.
+
+        Frame не модифицируется (как в ChainRunnable / DagRunnable).
+        Возвращает should_break.
+        """
+        try:
+            response = step.execute_remote(
+                frame=current_frame,
+                context=context,
+                input_shm_name=metadata.get("input_shm_name", ""),
+                input_shm_index=metadata.get("input_shm_index", 0),
+            )
+        except Exception as exc:
+            return apply_on_error_policy(step, exc, context, result)
+
+        if getattr(response, "detections", None):
+            result.detections.extend(response.detections)
+        return False
 
     def _execute_single(
         self,
@@ -85,7 +133,8 @@ class ParallelChainRunnable:
         try:
             output = step.operation.execute(current_frame, context)
         except Exception as exc:
-            return self._handle_step_error(step, exc, current_frame, context, result)
+            should_break = apply_on_error_policy(step, exc, context, result)
+            return current_frame, should_break
 
         _collect_side_results(step.operation, result)
         return output, False
@@ -107,10 +156,7 @@ class ParallelChainRunnable:
             if isinstance(res, Exception):
                 if isinstance(res, TimeoutError):
                     context.timeouts.append(step.node.node_id)
-                _, step_break = self._handle_step_error(
-                    step, res, current_frame, context, result,
-                )
-                if step_break:
+                if apply_on_error_policy(step, res, context, result):
                     should_break = True
             else:
                 _collect_side_results(step.operation, result)
@@ -124,51 +170,6 @@ class ParallelChainRunnable:
             current_frame = first_successful_frame
 
         return current_frame, False
-
-    @staticmethod
-    def _handle_step_error(
-        step: RunnableStep,
-        exc: Exception,
-        current_frame: np.ndarray,
-        context: ChainContext,
-        result: ChainResult,
-    ) -> tuple[np.ndarray, bool]:
-        _log = context.logger
-        if step.on_error == "skip":
-            msg = (
-                f"Операция '{step.node.operation_ref}' "
-                f"(node={step.node.node_id}) упала: {exc}. on_error=skip."
-            )
-            if _log is not None:
-                _log._log_warning(msg)
-            context.warnings.append(msg)
-            result.skipped_nodes.append(step.node.node_id)
-            return current_frame, False
-
-        elif step.on_error == "fail_region":
-            msg = (
-                f"Операция '{step.node.operation_ref}' "
-                f"(node={step.node.node_id}) упала: {exc}. on_error=fail_region."
-            )
-            if _log is not None:
-                _log._log_error(msg)
-            context.errors.append(msg)
-            result.failed = True
-            result.fail_level = "region"
-            return current_frame, True
-
-        else:
-            msg = (
-                f"Операция '{step.node.operation_ref}' "
-                f"(node={step.node.node_id}) упала: {exc}. "
-                f"on_error={step.on_error} (camera)."
-            )
-            if _log is not None:
-                _log._log_error(msg)
-            context.errors.append(msg)
-            result.failed = True
-            result.fail_level = "camera"
-            return current_frame, True
 
 
 __all__ = ["ParallelChainRunnable"]

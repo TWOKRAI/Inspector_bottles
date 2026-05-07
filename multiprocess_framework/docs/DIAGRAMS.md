@@ -142,9 +142,7 @@ graph BT
   router_module --> channel_routing_module
   router_module --> message_module
   state_store_module --> base_manager
-  state_store_module --> message_module
   chain_module --> base_manager
-  chain_module --> data_schema_module
   process_module --> router_module
   process_module --> command_module
   process_module --> worker_module

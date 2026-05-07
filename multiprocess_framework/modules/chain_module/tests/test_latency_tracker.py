@@ -32,15 +32,30 @@ class TestLatencyTrackerPercentiles:
         assert p["p95"] >= p["p50"]
         assert p["p99"] >= p["p95"]
 
-    def test_two_values(self):
+    def test_two_values_linear_interpolation(self):
         tracker = LatencyTracker()
         tracker.record(10.0)
         tracker.record(20.0)
         p = tracker.percentiles()
-        # int(2 * 0.50) = 1 → sorted[1] = 20.0
-        assert p["p50"] == 20.0
-        assert p["p95"] == 20.0
-        assert p["p99"] == 20.0
+        # Linear interpolation: pos = 0.5 * (2-1) = 0.5 → 10 + 0.5*(20-10) = 15.0
+        assert p["p50"] == pytest.approx(15.0)
+        # p95 → pos = 0.95 * 1 = 0.95 → 10 + 0.95*10 = 19.5
+        assert p["p95"] == pytest.approx(19.5)
+        # p99 → pos = 0.99 * 1 = 0.99 → 10 + 0.99*10 = 19.9
+        assert p["p99"] == pytest.approx(19.9)
+
+    def test_percentiles_match_numpy_linear(self):
+        """Сверка с эталонной формулой numpy.quantile(method='linear')."""
+        tracker = LatencyTracker()
+        for v in [1.0, 2.0, 3.0, 4.0, 5.0]:
+            tracker.record(v)
+        p = tracker.percentiles()
+        # n=5 → pos50 = 2.0 → точно sorted[2] = 3.0
+        assert p["p50"] == pytest.approx(3.0)
+        # pos95 = 0.95 * 4 = 3.8 → 4 + 0.8*(5-4) = 4.8
+        assert p["p95"] == pytest.approx(4.8)
+        # pos99 = 0.99 * 4 = 3.96 → 4 + 0.96*(5-4) = 4.96
+        assert p["p99"] == pytest.approx(4.96)
 
     def test_buffer_size_limit(self):
         tracker = LatencyTracker(buffer_size=5)

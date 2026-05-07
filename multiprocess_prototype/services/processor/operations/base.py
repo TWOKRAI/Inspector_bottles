@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-# ChainContext перемещён во фреймворк (Phase 2.3, ADR-CM-002)
+# ChainContext перемещён во фреймворк (Phase 2.3, ADR-CHN-002)
 from multiprocess_framework.modules.chain_module import ChainContext
 
 __all__ = ["ChainContext", "ProcessingOperation", "should_emit_preview", "execute_dag_default"]

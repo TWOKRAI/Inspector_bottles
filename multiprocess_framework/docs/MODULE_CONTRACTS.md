@@ -2,7 +2,7 @@
 
 **Назначение:** для каждого из 21 модуля указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть».
 
-**Обновлено:** 2026-05-02 — добавлены контракты `state_store_module` (L5) и `chain_module` (L6).
+**Обновлено:** 2026-05-07 — `state_store_module` актуализирован под ADR-SS-011/012/013, `chain_module` — под ADR-CHN-006/007 (renamed из ADR-CM-*; код модуля **CHN**, не **CM** — последний за `console_module`).
 
 > **Формат записи модуля:**
 > - **Цель** — одно предложение
@@ -281,24 +281,30 @@
 - `IStateProxy` (ABC) — `get`, `set`, `merge`, `subscribe`, `unsubscribe`, `on_state_changed`.
 - `IStateStoreManager` (ABC) — `initialize`, `shutdown`, `use`, `register_commands`, `register_message_handlers`.
 - `StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager)` — серверный фасад, живёт в `ProcessManagerProcess`. Содержит `TreeStore + SubscriptionManager + DeltaDispatcher`.
-- `StateProxy(BaseManager, ObservableMixin, IStateProxy)` — клиентский прокси в каждом `ProcessModule`. Кэширует подписанные пути.
-- `GuiStateProxy(StateProxy)` — Qt-safe вариант: callbacks через `QMetaObject.invokeMethod` (QueuedConnection).
-- `TreeStore` — иерархический dict с dot-notation путями и delta-генерацией.
+- `StateProxy(BaseManager, ObservableMixin, IStateProxy)` — клиентский прокси в каждом `ProcessModule`. Кэширует подписанные пути; **фильтрует входящие дельты per-pattern** (ADR-SS-012) — callback видит только дельты своей подписки.
+- `GuiStateProxy(StateProxy)` — Qt-safe вариант: callbacks через `QMetaObject.invokeMethod` (QueuedConnection); ленивый импорт `PySide6` (ADR-SS-005).
+- `TreeStore` — иерархический dict с dot-notation путями и delta-генерацией. Glob-обход узлов делегирован общему `core/glob_walker.py`.
 - `Delta` — `path`, `old_value`, `new_value`, `source`, `timestamp`.
-- `DeltaDispatcher` — batch рассылка дельт подписчикам с дедупликацией.
-- `SubscriptionManager` — glob-паттерны + `match(delta) -> list[Subscription]`.
+- `DeltaDispatcher` — адресная (по `targets`) рассылка дельт подписчикам с дедупликацией (ADR-SS-008).
+- `SubscriptionManager` — glob-паттерны + `match(delta) -> list[Subscription]`. Публичные snapshot-методы `subscribers_snapshot()` / `subscriptions_for(subscriber)` для shutdown и DevTools (ADR-SS-013) — приватные атрибуты больше не дёргаются извне.
+- `match_pattern`, `split_pattern` — публичные хелперы glob-матчинга (ADR-SS-004).
 - `StateMiddleware` (ABC) — `before_set/after_set`, `before_merge/after_merge`, `before_delete/after_delete`.
 - `MiddlewarePipeline` — цепочка middleware (пустой pipeline — нулевой overhead).
-- `InMemoryRouter` — тестовый router без IPC (синхронная диспатч).
+- `ValidationMiddleware` — поддерживает `rule['type']` как одиночный тип или `tuple[type, ...]`.
+- `PersistenceManager` — доменно-нейтральный (ADR-SS-011): принимает `file_mapping: dict[str, Path]` (root → файл) и опциональные `path_predicate` / `value_filter`. Без жёстко зашитых имён файлов (`recipes.yaml`, `settings_recipes.yaml` и т.п.) — конфигурируется приложением.
+- `RecipeEngine` — `save / load / list / delete / diff / is_dirty` + миграции через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003).
+- `InMemoryRouter` — тестовый router без IPC (синхронная диспатч), экспортирован публично (ADR-SS-010).
 
 **Инварианты:**
 1. `IRouter` — Protocol (не конкретный `RouterManager`); внешняя зависимость через утиную типизацию.
 2. `StateStoreManager` (сервер) живёт в `ProcessManagerProcess`; `StateProxy` (клиент) — в каждом рабочем процессе.
 3. Доставка только delta-only: полный snapshot **не** рассылается, только изменившиеся узлы.
 4. `GuiStateProxy` импортирует `PySide6` лениво — тестируется без Qt.
+5. `PersistenceManager` не знает доменных имён — список файлов и предикаты передаются приложением (после ADR-SS-011).
+6. `StateProxy` фильтрует дельты по pattern до вызова callback (после ADR-SS-012).
 
-**Зависимости:** `base_manager`. Внешние: опционально `PySide6`.
-**Тестов:** ~415+
+**Зависимости:** `base_manager`, `pyyaml`. Внешние: опционально `PySide6` (lazy).
+**Тестов:** 421
 
 ---
 
@@ -358,26 +364,33 @@
 
 **Контракт:**
 - `IChainRunnable` (Protocol) — `execute(frame, metadata) -> ChainResult`.
+- `IStepNode` / `IStepNodeWithWorker` (Protocol) — дескриптор ноды графа (`node_id`, `operation_ref`, `inputs`, опц. `worker_id`).
+- `INodeConnection` (Protocol) — соединение между нодами (`source`, `input_port`, `output_port`).
+- `IExecutionStep` (Protocol) — операция: `execute(data, context)`, `configure(params)`.
+- `IRemoteExecutable` (Protocol, ADR-CHN-006) — явный контракт cross-process шага: атрибут `dispatcher` + метод `execute_remote(frame, context, input_shm_name, input_shm_index)`. Поддерживается всеми тремя исполнителями.
 - `ChainRunnable` — последовательный исполнитель списка `RunnableStep`.
 - `DagRunnable` — исполнитель DAG (ветвления 1→N и слияния N→1 через именованные порты).
-- `ParallelChainRunnable` — параллельные бандлы через `ChainThreadPool`.
+- `ParallelChainRunnable` — параллельные бандлы через `ChainThreadPool`. В бандле cross-process шаги выполняются синхронно (через `execute_remote`), local — через пул.
 - `ChainContext` — контекст выполнения: `camera_id`, `region_id`, `seq_id`, `warnings`, `errors`, `timeouts`, `logger`.
 - `ChainResult` — результат: `frame`, `detections`, `skipped_nodes`, `failed`, `fail_level`, `processing_time`.
-- `RunnableStep` — шаг: `node`, `operation`, `on_error`, опционально `execute_remote` для cross-process.
-- `WorkerPoolDispatcher` — round-robin маршрутизация задач в worker pool через IPC+SHM.
-- `WorkerTaskRequest / WorkerTaskResponse` — протокол обмена с worker-процессом.
+- `RunnableStep` — шаг: `node: IStepNode`, `operation: IExecutionStep`, `on_error`. Cross-process определяется через `_is_cross_process(step)` (duck-typing по `IRemoteExecutable`).
+- `apply_on_error_policy(step, exc, context, result) -> bool` — единая on_error логика (skip / fail_region / fail_camera) для всех трёх исполнителей (ADR-CHN-006). DRY.
+- `WorkerPoolDispatcher(BaseManager, ObservableMixin)` — round-robin маршрутизация задач в worker pool через IPC+SHM (ADR-CHN-007). Метрики `worker_pool.dispatched/timeouts/drops/late_responses/errors` (counter) и `worker_pool.processing_time` (timing).
+- `WorkerTaskRequest / WorkerTaskResponse` — Dict-at-Boundary IPC-протокол обмена с worker-процессом.
 - `ChainThreadPool(BaseManager, ObservableMixin)` — обёртка над `ThreadPoolExecutor` с timeout и graceful shutdown.
-- `topological_sort`, `detect_parallel_bundles`, `is_nonlinear_graph` — graph utilities.
-- `LatencyTracker` — измерение end-to-end latency (p50/p95/p99).
+- `LatencyTracker(BaseManager, ObservableMixin)` — measurement queue + p50/p95/p99 (numpy linear interpolation, точно для маленьких N). Каждый `record()` пишется как timing метрика `<name>` (default `chain.latency_ms`); `maybe_log()` публикует snapshot `.p50/.p95/.p99`.
+- `topological_sort`, `detect_parallel_bundles`, `is_nonlinear_graph` — graph utilities (Кан + bundle detection).
 
 **Инварианты:**
-1. Execution objects (`ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`) — **не** менеджеры; не наследуют `BaseManager`.
-2. Logger передаётся через `ChainContext.logger` (duck-typed: методы `_log_info/warning/error`); если не задан — тихо.
-3. Граница фреймворк/прототип: builder.py и конкретные операции остаются в прототипе.
-4. `ChainThreadPool` — единственный компонент с `BaseManager`; управляет пулом потоков.
+1. Execution objects (`ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`) — **не** менеджеры; не наследуют `BaseManager` (создаются на каждый `RegisterRuntime.rebuild()`).
+2. Долгоживущие сервисы (`ChainThreadPool`, `WorkerPoolDispatcher`, `LatencyTracker`) — наследники `BaseManager + ObservableMixin`; принимают `logger=None`, `stats=None`, `errors=None` опционально.
+3. Logger исполнителей передаётся через `ChainContext.logger`; если не задан — тихо.
+4. Граница фреймворк/прототип: builder.py (load_operation_class) и конкретные операции остаются в прототипе (ADR-CHN-003, ADR-CHN-004).
+5. on_error логика — единственная точка истины в `core/error_policy.apply_on_error_policy` (ADR-CHN-006).
+6. Cross-process шаги определяются через `IRemoteExecutable` Protocol (ADR-CHN-006); сигнатура `execute_remote(frame, context, input_shm_name, input_shm_index)` зафиксирована.
 
 **Зависимости:** `base_manager`. Внешние: `numpy`.
-**Тестов:** ~60+
+**Тестов:** 67
 
 ---
 
@@ -565,10 +578,10 @@
 | `statistics_module` | 1 500 | L4 | crm | 40+ |
 | `shared_resources_module` | 5 233 | L5 | base | 50+ |
 | `config_module` | 2 393 | L5 | base, schema | 49 |
-| `state_store_module` | ~2 500 | L5 | base | 415+ |
+| `state_store_module` | ~3 300 | L5 | base | 421 |
 | `command_module` | 1 220 | L6 | dispatch, base | 34 |
 | `worker_module` | 2 356 | L6 | base | 49 |
-| `chain_module` | ~1 135 | L6 | base | 60+ |
+| `chain_module` | ~1 610 | L6 | base | 67 |
 | `process_module` | 3 965 | L7 | worker, router, logger, srm, schema | 60+ |
 | `console_module` | 2 877 | L7 | base, schema, logger | 40+ |
 | `process_manager_module` | 4 612 | L8 | process, command | 80+ |

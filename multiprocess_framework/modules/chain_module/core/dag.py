@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from .context import ChainContext
+from .error_policy import apply_on_error_policy
 from .result import ChainResult, RunnableStep, _collect_side_results, _is_cross_process
 
 
@@ -101,7 +102,7 @@ class DagRunnable:
                         input_shm_name=metadata.get("input_shm_name", ""),
                         input_shm_index=metadata.get("input_shm_index", 0),
                     )
-                    if response.detections:
+                    if getattr(response, "detections", None):
                         result.detections.extend(response.detections)
                     port_data[node_id] = {"out": inputs.get("in", frame)}
                     continue
@@ -109,43 +110,10 @@ class DagRunnable:
                 outputs = _execute_dag_default(step.operation, inputs, context)
 
             except Exception as exc:
-                _log = context.logger
-                if step.on_error == "skip":
-                    msg = (
-                        f"Операция '{step.node.operation_ref}' "
-                        f"(node={node_id}) упала: {exc}. on_error=skip — пропускаем."
-                    )
-                    if _log is not None:
-                        _log._log_warning(msg)
-                    context.warnings.append(msg)
-                    result.skipped_nodes.append(node_id)
-                    port_data[node_id] = {}
-                    continue
-
-                elif step.on_error == "fail_region":
-                    msg = (
-                        f"Операция '{step.node.operation_ref}' "
-                        f"(node={node_id}) упала: {exc}. on_error=fail_region."
-                    )
-                    if _log is not None:
-                        _log._log_error(msg)
-                    context.errors.append(msg)
-                    result.failed = True
-                    result.fail_level = "region"
+                if apply_on_error_policy(step, exc, context, result, node_id=node_id):
                     break
-
-                else:
-                    msg = (
-                        f"Операция '{step.node.operation_ref}' "
-                        f"(node={node_id}) упала: {exc}. "
-                        f"on_error={step.on_error} (camera)."
-                    )
-                    if _log is not None:
-                        _log._log_error(msg)
-                    context.errors.append(msg)
-                    result.failed = True
-                    result.fail_level = "camera"
-                    break
+                port_data[node_id] = {}
+                continue
 
             port_data[node_id] = outputs
             _collect_side_results(step.operation, result)
