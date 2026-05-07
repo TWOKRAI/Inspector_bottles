@@ -225,8 +225,9 @@ class RendererCompositorPlugin(ProcessModulePlugin):
         if mode in ("grid", "side_by_side", "pip"):
             self._reg.layout_mode = mode
 
+        # Обновляем остальные поля кроме layout_mode (он уже обработан выше с валидацией)
         for field in type(self._reg).model_fields:
-            if field in data:
+            if field in data and field != "layout_mode":
                 setattr(self._reg, field, data[field])
 
         self._ctx.log_info(

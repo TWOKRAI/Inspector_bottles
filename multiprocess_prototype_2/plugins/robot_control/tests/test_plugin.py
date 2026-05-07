@@ -43,10 +43,10 @@ class TestConfigure:
 
         plugin.configure(ctx)
 
-        assert plugin._enabled is False
-        assert plugin._min_defect_area == 300
-        assert plugin._reject_delay_ms == 50
-        assert plugin._max_detections_for_reject == 3
+        assert plugin._reg.enabled is False
+        assert plugin._reg.min_defect_area == 300
+        assert plugin._reg.reject_delay_ms == 50
+        assert plugin._reg.max_detections_for_reject == 3
         # Счётчики должны быть обнулены
         assert plugin._total_inspected == 0
         assert plugin._total_rejected == 0
@@ -56,10 +56,10 @@ class TestConfigure:
         plugin = RobotControlPlugin()
         plugin.configure(_make_mock_ctx({}))
 
-        assert plugin._enabled is True
-        assert plugin._min_defect_area == 500
-        assert plugin._reject_delay_ms == 0
-        assert plugin._max_detections_for_reject == 0
+        assert plugin._reg.enabled is True
+        assert plugin._reg.min_defect_area == 500
+        assert plugin._reg.reject_delay_ms == 0
+        assert plugin._reg.max_detections_for_reject == 0
 
 
 class TestProcess:
@@ -203,29 +203,29 @@ class TestProcess:
 
 class TestCommands:
     def test_cmd_enable_disable(self):
-        """enable/disable переключают _enabled."""
+        """enable/disable переключают enabled."""
         plugin = RobotControlPlugin()
         plugin.configure(_make_mock_ctx({"enabled": True}))
 
         # Отключаем
         resp = plugin.cmd_disable({})
         assert resp["status"] == "ok"
-        assert plugin._enabled is False
+        assert plugin._reg.enabled is False
 
         # Включаем обратно
         resp = plugin.cmd_enable({})
         assert resp["status"] == "ok"
-        assert plugin._enabled is True
+        assert plugin._reg.enabled is True
 
     def test_cmd_set_delay(self):
-        """set_delay обновляет _reject_delay_ms."""
+        """set_delay обновляет reject_delay_ms."""
         plugin = RobotControlPlugin()
         plugin.configure(_make_mock_ctx({}))
 
         resp = plugin.cmd_set_delay({"delay_ms": 150})
         assert resp["status"] == "ok"
         assert resp["delay_ms"] == 150
-        assert plugin._reject_delay_ms == 150
+        assert plugin._reg.reject_delay_ms == 150
 
     def test_cmd_set_delay_negative_clamped(self):
         """Отрицательная задержка зажимается до 0."""
@@ -234,7 +234,7 @@ class TestCommands:
 
         resp = plugin.cmd_set_delay({"delay_ms": -100})
         assert resp["delay_ms"] == 0
-        assert plugin._reject_delay_ms == 0
+        assert plugin._reg.reject_delay_ms == 0
 
     def test_cmd_reset_counters(self):
         """reset_counters обнуляет счётчики."""

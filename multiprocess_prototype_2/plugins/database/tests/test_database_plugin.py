@@ -72,9 +72,9 @@ class TestConfigure:
         ctx = make_ctx({})
         plugin.configure(ctx)
 
-        assert plugin._batch_size == 100
-        assert plugin._flush_interval == 2.0
-        assert plugin._db_path == "data/inspector.db"
+        assert plugin._reg.batch_size == 100
+        assert plugin._reg.flush_interval_sec == 2.0
+        assert plugin._reg.db_path == "data/inspector.db"
         assert plugin._total_written == 0
         assert plugin._total_errors == 0
 
@@ -84,9 +84,9 @@ class TestConfigure:
         ctx = make_ctx({"batch_size": 50, "flush_interval_sec": 5.0, "db_path": "/tmp/test.db"})
         plugin.configure(ctx)
 
-        assert plugin._batch_size == 50
-        assert plugin._flush_interval == 5.0
-        assert plugin._db_path == "/tmp/test.db"
+        assert plugin._reg.batch_size == 50
+        assert plugin._reg.flush_interval_sec == 5.0
+        assert plugin._reg.db_path == "/tmp/test.db"
 
 
 # ---------------------------------------------------------------------------
@@ -226,13 +226,13 @@ class TestCommands:
         assert result["total"] == 1
 
     def test_cmd_set_batch_size(self):
-        """set_batch_size обновляет _batch_size в допустимых пределах."""
+        """set_batch_size обновляет batch_size в допустимых пределах."""
         plugin = make_plugin()
 
         result = plugin._cmd_set_batch_size({"batch_size": 500})
         assert result["status"] == "ok"
         assert result["batch_size"] == 500
-        assert plugin._batch_size == 500
+        assert plugin._reg.batch_size == 500
 
     def test_cmd_set_batch_size_clamps_min(self):
         """set_batch_size зажимает значение до 1."""

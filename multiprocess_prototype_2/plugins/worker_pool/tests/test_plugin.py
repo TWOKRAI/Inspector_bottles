@@ -80,10 +80,10 @@ class TestConfigure:
         plugin = WorkerPoolPlugin()
         plugin.configure(_make_mock_ctx({}))
 
-        assert plugin._pool_size == 4
-        assert plugin._queue_timeout == 5.0
-        assert plugin._balancing == "round_robin"
-        assert plugin._worker_plugin_class == ""
+        assert plugin._reg.pool_size == 4
+        assert plugin._reg.queue_timeout == 5.0
+        assert plugin._reg.balancing == "round_robin"
+        assert plugin._reg.worker_plugin_class == ""
         assert plugin._worker_plugins == []
         assert plugin._total_processed == 0
         assert plugin._total_errors == 0
@@ -99,10 +99,10 @@ class TestConfigure:
             "worker_plugin_config": {"key": "val"},
         }))
 
-        assert plugin._pool_size == 8
-        assert plugin._queue_timeout == 2.5
-        assert plugin._balancing == "shortest_queue"
-        assert plugin._worker_plugin_config == {"key": "val"}
+        assert plugin._reg.pool_size == 8
+        assert plugin._reg.queue_timeout == 2.5
+        assert plugin._reg.balancing == "shortest_queue"
+        assert plugin._reg.worker_plugin_config == {"key": "val"}
 
     def test_configure_with_worker_plugin(self):
         """worker_plugin_class → создаётся pool_size экземпляров sub-plugin."""
@@ -299,7 +299,7 @@ class TestCommands:
             response = plugin.cmd_resize_pool({"pool_size": 4})
             assert response["status"] == "ok"
             assert response["pool_size"] == 4
-            assert plugin._pool_size == 4
+            assert plugin._reg.pool_size == 4
         finally:
             plugin._pool.shutdown(wait=False)
 

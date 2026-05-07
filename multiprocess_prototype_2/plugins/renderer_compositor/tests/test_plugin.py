@@ -48,29 +48,29 @@ class TestConfigure:
             "overlay_font_scale": 1.0,
         }))
 
-        assert plugin._layout_mode == "pip"
-        assert plugin._grid_cols == 3
-        assert plugin._grid_rows == 3
-        assert plugin._output_width == 640
-        assert plugin._output_height == 360
-        assert plugin._pip_scale == pytest.approx(0.3)
-        assert plugin._pip_position == "bottom_left"
-        assert plugin._overlay_enabled is False
-        assert plugin._overlay_font_scale == pytest.approx(1.0)
+        assert plugin._reg.layout_mode == "pip"
+        assert plugin._reg.grid_cols == 3
+        assert plugin._reg.grid_rows == 3
+        assert plugin._reg.output_width == 640
+        assert plugin._reg.output_height == 360
+        assert plugin._reg.pip_scale == pytest.approx(0.3)
+        assert plugin._reg.pip_position == "bottom_left"
+        assert plugin._reg.overlay_enabled is False
+        assert plugin._reg.overlay_font_scale == pytest.approx(1.0)
 
     def test_configure_defaults(self):
         """Значения по умолчанию при пустом config."""
         plugin = _make_plugin({})
 
-        assert plugin._layout_mode == "grid"
-        assert plugin._grid_cols == 2
-        assert plugin._grid_rows == 2
-        assert plugin._output_width == 1280
-        assert plugin._output_height == 720
-        assert plugin._pip_scale == pytest.approx(0.25)
-        assert plugin._pip_position == "top_right"
-        assert plugin._overlay_enabled is True
-        assert plugin._overlay_font_scale == pytest.approx(0.5)
+        assert plugin._reg.layout_mode == "grid"
+        assert plugin._reg.grid_cols == 2
+        assert plugin._reg.grid_rows == 2
+        assert plugin._reg.output_width == 1280
+        assert plugin._reg.output_height == 720
+        assert plugin._reg.pip_scale == pytest.approx(0.25)
+        assert plugin._reg.pip_position == "top_right"
+        assert plugin._reg.overlay_enabled is True
+        assert plugin._reg.overlay_font_scale == pytest.approx(0.5)
 
 
 class TestGridLayout:
@@ -348,9 +348,9 @@ class TestCommands:
 
         assert response["status"] == "ok"
         assert response["layout_mode"] == "side_by_side"
-        assert plugin._layout_mode == "side_by_side"
-        assert plugin._grid_cols == 3
-        assert plugin._grid_rows == 4
+        assert plugin._reg.layout_mode == "side_by_side"
+        assert plugin._reg.grid_cols == 3
+        assert plugin._reg.grid_rows == 4
 
     def test_cmd_set_layout_invalid_mode(self):
         """set_layout с неверным mode → режим не меняется."""
@@ -360,7 +360,7 @@ class TestCommands:
 
         # Неверный режим игнорируется, статус ok, режим не изменился
         assert response["status"] == "ok"
-        assert plugin._layout_mode == "grid"
+        assert plugin._reg.layout_mode == "grid"
 
     def test_cmd_toggle_overlay(self):
         """toggle_overlay переключает overlay_enabled."""
@@ -370,11 +370,11 @@ class TestCommands:
         response = plugin.toggle_overlay({})
         assert response["status"] == "ok"
         assert response["overlay_enabled"] is False
-        assert plugin._overlay_enabled is False
+        assert plugin._reg.overlay_enabled is False
 
         # Второй toggle: False → True
         plugin.toggle_overlay({})
-        assert plugin._overlay_enabled is True
+        assert plugin._reg.overlay_enabled is True
 
     def test_cmd_set_layout_partial(self):
         """set_layout с частичными параметрами — только grid_cols."""
@@ -387,6 +387,6 @@ class TestCommands:
         response = plugin.set_layout({"grid_cols": 4})
 
         assert response["status"] == "ok"
-        assert plugin._grid_cols == 4
-        assert plugin._grid_rows == 2  # не изменился
-        assert plugin._layout_mode == "grid"  # не изменился
+        assert plugin._reg.grid_cols == 4
+        assert plugin._reg.grid_rows == 2  # не изменился
+        assert plugin._reg.layout_mode == "grid"  # не изменился

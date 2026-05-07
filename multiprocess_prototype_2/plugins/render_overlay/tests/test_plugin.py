@@ -58,22 +58,22 @@ class TestConfigure:
 
         plugin.configure(ctx)
 
-        assert plugin._alpha == pytest.approx(0.7)
-        assert plugin._mask_color.tolist() == [128, 64, 32]
-        assert plugin._draw_detections is False
-        assert plugin._line_thickness == 4
-        assert plugin._label_font_scale == pytest.approx(0.8)
+        assert plugin._reg.mask_alpha == pytest.approx(0.7)
+        assert [plugin._reg.mask_color_b, plugin._reg.mask_color_g, plugin._reg.mask_color_r] == [128, 64, 32]
+        assert plugin._reg.draw_detections is False
+        assert plugin._reg.line_thickness == 4
+        assert plugin._reg.label_font_scale == pytest.approx(0.8)
 
     def test_configure_defaults(self):
         """Значения по умолчанию без config."""
         plugin = RenderOverlayPlugin()
         plugin.configure(_make_mock_ctx({}))
 
-        assert plugin._alpha == pytest.approx(0.5)
-        assert plugin._mask_color.tolist() == [0, 255, 0]
-        assert plugin._draw_detections is True
-        assert plugin._line_thickness == 2
-        assert plugin._label_font_scale == pytest.approx(0.5)
+        assert plugin._reg.mask_alpha == pytest.approx(0.5)
+        assert [plugin._reg.mask_color_b, plugin._reg.mask_color_g, plugin._reg.mask_color_r] == [0, 255, 0]
+        assert plugin._reg.draw_detections is True
+        assert plugin._reg.line_thickness == 2
+        assert plugin._reg.label_font_scale == pytest.approx(0.5)
 
 
 class TestProcess:
@@ -241,7 +241,7 @@ class TestProcess:
 
 class TestCommands:
     def test_cmd_set_alpha(self):
-        """set_alpha обновляет _alpha с clamp 0-1."""
+        """set_alpha обновляет mask_alpha с clamp 0-1."""
         plugin = RenderOverlayPlugin()
         plugin.configure(_make_mock_ctx())
 
@@ -249,48 +249,48 @@ class TestCommands:
         response = plugin.set_alpha({"alpha": 0.8})
         assert response["status"] == "ok"
         assert response["alpha"] == pytest.approx(0.8)
-        assert plugin._alpha == pytest.approx(0.8)
+        assert plugin._reg.mask_alpha == pytest.approx(0.8)
 
         # Clamp: > 1.0 → 1.0
         plugin.set_alpha({"alpha": 1.5})
-        assert plugin._alpha == pytest.approx(1.0)
+        assert plugin._reg.mask_alpha == pytest.approx(1.0)
 
         # Clamp: < 0.0 → 0.0
         plugin.set_alpha({"alpha": -0.3})
-        assert plugin._alpha == pytest.approx(0.0)
+        assert plugin._reg.mask_alpha == pytest.approx(0.0)
 
     def test_cmd_set_color(self):
-        """set_color обновляет _mask_color по ключам b, g, r."""
+        """set_color обновляет mask_color_b/g/r по ключам b, g, r."""
         plugin = RenderOverlayPlugin()
         plugin.configure(_make_mock_ctx())
 
         response = plugin.set_color({"b": 100, "g": 150, "r": 200})
         assert response["status"] == "ok"
         assert response["color_bgr"] == [100, 150, 200]
-        assert plugin._mask_color.tolist() == [100, 150, 200]
+        assert [plugin._reg.mask_color_b, plugin._reg.mask_color_g, plugin._reg.mask_color_r] == [100, 150, 200]
 
         # Частичное обновление — только синий
         plugin.set_color({"b": 0})
-        assert plugin._mask_color[0] == 0
-        assert plugin._mask_color[1] == 150  # зелёный не изменился
-        assert plugin._mask_color[2] == 200  # красный не изменился
+        assert plugin._reg.mask_color_b == 0
+        assert plugin._reg.mask_color_g == 150  # зелёный не изменился
+        assert plugin._reg.mask_color_r == 200  # красный не изменился
 
         # Clamp: > 255 → 255
         plugin.set_color({"g": 300})
-        assert plugin._mask_color[1] == 255
+        assert plugin._reg.mask_color_g == 255
 
     def test_cmd_toggle_detections(self):
         """toggle_detections переключает bool draw_detections."""
         plugin = RenderOverlayPlugin()
         plugin.configure(_make_mock_ctx({"draw_detections": True}))
 
-        assert plugin._draw_detections is True
+        assert plugin._reg.draw_detections is True
 
         response = plugin.toggle_detections({})
         assert response["status"] == "ok"
         assert response["draw_detections"] is False
-        assert plugin._draw_detections is False
+        assert plugin._reg.draw_detections is False
 
         # Повторный toggle — снова True
         plugin.toggle_detections({})
-        assert plugin._draw_detections is True
+        assert plugin._reg.draw_detections is True
