@@ -1,20 +1,13 @@
-"""persistence_manager.py — Debounced сохранение config-ветвей StateStore на диск.
+"""persistence_manager.py — Debounced сохранение веток StateStore на диск.
 
 Реализует PersistenceManager (владелец данных + таймер) и
 PersistenceMiddleware (хук after_set / after_merge), который перехватывает
 изменения дерева и помечает секции как dirty.
 
-Маппинг prefix → файл:
-    cameras.*   → state_cameras.yaml
-    renderer.*  → state_renderer.yaml
-    robot.*     → state_robot.yaml
-    database.*  → state_database.yaml
-    system.*    → state_system.yaml
-
-Правила:
-    - **.state.** в пути → пропускаем (runtime-only, не персистим)
-    - **.config.**, **.regions.**, cameras.* → dirty → debounce → save
-    - system.* → dirty → save_now() немедленно
+ADR-SS-011 (2026-05-07): file_mapping и предикаты пропуска/немедленного save
+вынесены в параметры конструктора. Раньше зашитые prefix (cameras/renderer/...)
+и предикаты `.state.` / `system.*` нарушали ADR-SS-003 — фреймворк не должен
+знать про доменные ветви. Теперь приложение конфигурирует их явно.
 """
 
 from __future__ import annotations
@@ -22,7 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -32,45 +25,12 @@ from ..middleware.base import StateMiddleware
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
-# Маппинг: первый сегмент пути → имя YAML-файла
+# Типы предикатов
 # ---------------------------------------------------------------------------
 
-_PREFIX_TO_FILE: dict[str, str] = {
-    "cameras": "state_cameras.yaml",
-    "renderer": "state_renderer.yaml",
-    "robot": "state_robot.yaml",
-    "database": "state_database.yaml",
-    "system": "state_system.yaml",
-}
-
-
-def _resolve_file(path: str) -> str | None:
-    """Определяет имя YAML-файла по точечному пути.
-
-    Returns:
-        Имя файла или None если путь не нужно сохранять.
-    """
-    if not path:
-        return None
-    prefix = path.split(".")[0]
-    return _PREFIX_TO_FILE.get(prefix)
-
-
-def _is_state_only(path: str) -> bool:
-    """True если путь ведёт в runtime-only ветку (.state.).
-
-    Примеры:
-        "cameras.0.state.status" → True
-        "cameras.0.config.fps"   → False
-        "cameras.0.regions.zone" → False
-    """
-    return ".state." in path or path.endswith(".state")
-
-
-def _is_system(path: str) -> bool:
-    """True если путь начинается с 'system.'."""
-    return path == "system" or path.startswith("system.")
+PathPredicate = Callable[[str], bool]
 
 
 # ---------------------------------------------------------------------------
@@ -107,20 +67,36 @@ class PersistenceMiddleware(StateMiddleware):
 
 
 class PersistenceManager:
-    """Debounced сохранение config-ветвей StateStore на диск.
+    """Debounced сохранение секций StateStore на диск (доменно-нейтральный).
 
-    Реализуется через PersistenceMiddleware (extends StateMiddleware).
-    Подключается через store_manager.use(persistence.middleware).
+    Поведение полностью определяется тремя параметрами конструктора:
 
-    Правила:
-        - **.config.** → dirty → debounce 2с → save YAML
-        - **.state.** → НЕ сохранять (runtime only)
-        - **.regions.** → dirty → debounce 2с → save YAML
-        - system.* → save немедленно (profile switch)
+    * ``file_mapping``: dict ``{prefix: filename}`` — маппинг первого сегмента
+      пути в имя YAML-файла. Прикладной код задаёт собственные ветви.
+    * ``skip_predicate``: callable, возвращающий True для путей, которые
+      сохранять НЕ нужно (например, runtime-only ``*.state.*``). По умолчанию —
+      ничего не пропускать.
+    * ``immediate_predicate``: callable для путей, которые требуют сохранения
+      без debounce (например, ``system.*`` для смены профиля). По умолчанию —
+      все пути идут через debounce.
 
-    Debounce: при каждом dirty-изменении сбрасывается таймер.
-    Когда таймер истекает — вызывается save.
-    Threading: Timer из threading для debounce.
+    Подключается через ``store_manager.use(manager.middleware)``.
+
+    Пример конфигурации (приложение, не фреймворк)::
+
+        manager = PersistenceManager(
+            store=tree,
+            data_dir=Path("/var/state"),
+            file_mapping={
+                "cameras":  "state_cameras.yaml",
+                "renderer": "state_renderer.yaml",
+                "system":   "state_system.yaml",
+            },
+            skip_predicate=lambda p: ".state." in p or p.endswith(".state"),
+            immediate_predicate=lambda p: p == "system" or p.startswith("system."),
+        )
+
+    Threading: ``threading.Timer`` для debounce.
     """
 
     def __init__(
@@ -128,30 +104,46 @@ class PersistenceManager:
         store: TreeStore,
         data_dir: Path,
         debounce_seconds: float = 2.0,
+        file_mapping: dict[str, str] | None = None,
+        skip_predicate: PathPredicate | None = None,
+        immediate_predicate: PathPredicate | None = None,
     ) -> None:
         """
         Args:
             store: TreeStore — для чтения данных при save.
             data_dir: папка для YAML-файлов (создаётся автоматически если нет).
             debounce_seconds: задержка перед сохранением в секундах.
+            file_mapping: ``{prefix: filename}``. ``None`` или пустой dict —
+                сохранять нечего (любой путь даёт «неизвестный prefix»).
+            skip_predicate: callable(path) → True для путей, которые
+                пропускать. ``None`` — ничего не пропускать.
+            immediate_predicate: callable(path) → True для путей, требующих
+                save без debounce. ``None`` — все пути идут через debounce.
         """
         self._store = store
         self._data_dir = Path(data_dir)
         self._debounce_seconds = debounce_seconds
+        self._file_mapping: dict[str, str] = dict(file_mapping or {})
+        # Обратный маппинг для save: filename → prefix
+        self._reverse_mapping: dict[str, str] = {
+            fname: prefix for prefix, fname in self._file_mapping.items()
+        }
+        self._skip = skip_predicate
+        self._immediate = immediate_predicate
 
-        # множество грязных файлов (state_cameras.yaml и т.д.)
         self._dirty: set[str] = set()
-        # текущий debounce-таймер (один на всё — сбрасывается при каждом dirty)
         self._timer: threading.Timer | None = None
-        # блокировка для _dirty и _timer
         self._lock = threading.Lock()
 
-        # middleware-объект для подключения в pipeline
         self._middleware = PersistenceMiddleware(self)
 
-        # создаём папку если не существует
         self._data_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug("PersistenceManager: data_dir=%s, debounce=%.1fs", data_dir, debounce_seconds)
+        logger.debug(
+            "PersistenceManager: data_dir=%s, debounce=%.1fs, prefixes=%s",
+            data_dir,
+            debounce_seconds,
+            sorted(self._file_mapping.keys()),
+        )
 
     # -----------------------------------------------------------------------
     # Публичный API
@@ -172,31 +164,29 @@ class PersistenceManager:
         """Принудительный save всех dirty-секций.
 
         Отменяет текущий debounce-таймер и сохраняет немедленно.
-        Вызывается при shutdown или для system.*.
+        Вызывается при shutdown или для immediate-путей.
         """
         with self._lock:
-            # отменяем таймер если активен
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
-            # берём копию dirty-списка и очищаем
             to_save = set(self._dirty)
             self._dirty.clear()
 
-        # сохраняем вне блокировки (чтение из TreeStore и запись на диск)
         for filename in to_save:
             self._save_file(filename)
 
     def load(self) -> dict[str, Any]:
-        """Загрузить все YAML-файлы из data_dir и вернуть merged dict.
+        """Загрузить все YAML-файлы из ``data_dir`` и вернуть merged dict.
 
-        Результат подходит для TreeStore.merge("", result).
+        Берёт только файлы из ``file_mapping`` (отсекает чужие YAML рядом).
+        Результат подходит для ``TreeStore.merge("", result)``.
 
         Returns:
             Объединённый dict со всеми загруженными данными.
         """
         merged: dict[str, Any] = {}
-        for filename in _PREFIX_TO_FILE.values():
+        for filename in self._file_mapping.values():
             filepath = self._data_dir / filename
             if not filepath.exists():
                 logger.debug("PersistenceManager: файл не найден, пропуск: %s", filepath)
@@ -221,10 +211,7 @@ class PersistenceManager:
         return merged
 
     def shutdown(self) -> None:
-        """Отменить debounce-таймер и сохранить все dirty-секции.
-
-        Вызывать при завершении работы приложения.
-        """
+        """Отменить debounce-таймер и сохранить все dirty-секции."""
         logger.info("PersistenceManager: shutdown, сохраняем dirty-секции")
         self.save_now()
 
@@ -232,58 +219,52 @@ class PersistenceManager:
     # Внутренние методы
     # -----------------------------------------------------------------------
 
-    def _on_delta(self, path: str) -> None:
-        """Обработка одного изменения: определить файл, пометить dirty.
+    def _resolve_file(self, path: str) -> str | None:
+        """Имя YAML-файла для пути или None если prefix не настроен."""
+        if not path:
+            return None
+        prefix = path.split(".")[0]
+        return self._file_mapping.get(prefix)
 
-        Args:
-            path: точечный путь изменённого узла.
-        """
-        # runtime-ветки не сохраняем
-        if _is_state_only(path):
-            logger.debug("PersistenceManager: skip state-path: %s", path)
+    def _on_delta(self, path: str) -> None:
+        """Обработка одного изменения: определить файл, пометить dirty."""
+        # 1. Пропускаемые ветви (например, runtime *.state.*)
+        if self._skip is not None and self._skip(path):
+            logger.debug("PersistenceManager: skip по skip_predicate: %s", path)
             return
 
-        # определяем целевой файл
-        filename = _resolve_file(path)
+        # 2. Найти целевой файл по mapping
+        filename = self._resolve_file(path)
         if filename is None:
-            logger.debug("PersistenceManager: неизвестный prefix, skip: %s", path)
+            logger.debug("PersistenceManager: prefix не в file_mapping, skip: %s", path)
             return
 
         logger.debug("PersistenceManager: dirty %s ← %s", filename, path)
 
-        if _is_system(path):
-            # system.* → немедленное сохранение без debounce
+        # 3. Решить — debounce или immediate
+        if self._immediate is not None and self._immediate(path):
             with self._lock:
                 self._dirty.add(filename)
-            logger.info("PersistenceManager: немедленный save для system.* (%s)", path)
+            logger.info("PersistenceManager: immediate save для пути %s", path)
             self.save_now()
         else:
-            # обычные конфиги → debounce
             with self._lock:
                 self._dirty.add(filename)
                 self._reset_timer()
 
     def _reset_timer(self) -> None:
-        """Сбросить (или запустить) debounce-таймер.
-
-        Вызывается под _lock.
-        """
-        # отменяем предыдущий таймер
+        """Сбросить (или запустить) debounce-таймер. Вызывается под _lock."""
         if self._timer is not None:
             self._timer.cancel()
-        # запускаем новый
         self._timer = threading.Timer(self._debounce_seconds, self._debounce_fire)
-        self._timer.daemon = True  # не блокирует завершение процесса
+        self._timer.daemon = True
         self._timer.start()
 
     def _debounce_fire(self) -> None:
-        """Вызывается когда debounce-таймер истекает.
-
-        Выполняется в отдельном потоке (threading.Timer).
-        """
+        """Колбэк debounce-таймера. Выполняется в отдельном потоке."""
         logger.debug("PersistenceManager: debounce сработал, сохраняем")
         with self._lock:
-            self._timer = None  # таймер уже выполнился
+            self._timer = None
             to_save = set(self._dirty)
             self._dirty.clear()
 
@@ -291,28 +272,21 @@ class PersistenceManager:
             self._save_file(filename)
 
     def _save_file(self, filename: str) -> None:
-        """Сохранить одну секцию дерева в YAML-файл.
-
-        Читает данные из TreeStore и записывает только нужный prefix.
-
-        Args:
-            filename: имя YAML-файла (например 'state_cameras.yaml').
-        """
-        # обратный маппинг: имя файла → prefix дерева
-        prefix = _file_to_prefix(filename)
+        """Сохранить одну секцию дерева в YAML-файл."""
+        prefix = self._reverse_mapping.get(filename)
         if prefix is None:
-            logger.error("PersistenceManager: неизвестный файл: %s", filename)
+            logger.error("PersistenceManager: filename вне file_mapping: %s", filename)
             return
 
-        # читаем данные из TreeStore
         try:
             data = self._store.get(prefix)
         except KeyError:
-            # ветка ещё не создана в дереве — сохраняем пустой dict
             data = {}
-            logger.debug("PersistenceManager: ветка '%s' не существует, save пустого dict", prefix)
+            logger.debug(
+                "PersistenceManager: ветка '%s' не существует, save пустого dict",
+                prefix,
+            )
 
-        # оборачиваем в { prefix: data } — для корректного load/merge
         payload = {prefix: data}
 
         filepath = self._data_dir / filename
@@ -333,18 +307,6 @@ class PersistenceManager:
 # ---------------------------------------------------------------------------
 # Утилиты
 # ---------------------------------------------------------------------------
-
-
-def _file_to_prefix(filename: str) -> str | None:
-    """Обратный маппинг: имя YAML-файла → prefix дерева.
-
-    Returns:
-        Строка-prefix или None если файл неизвестен.
-    """
-    for prefix, fname in _PREFIX_TO_FILE.items():
-        if fname == filename:
-            return prefix
-    return None
 
 
 def _deep_merge_inplace(target: dict, source: dict) -> None:

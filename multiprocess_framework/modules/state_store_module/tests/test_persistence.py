@@ -41,10 +41,36 @@ def store() -> TreeStore:
     return TreeStore()
 
 
+# Прикладная конфигурация для тестов — пример доменного маппинга,
+# который раньше был зашит в модуле, а теперь передаётся прикладным кодом.
+TEST_FILE_MAPPING = {
+    "cameras":  "state_cameras.yaml",
+    "renderer": "state_renderer.yaml",
+    "robot":    "state_robot.yaml",
+    "database": "state_database.yaml",
+    "system":   "state_system.yaml",
+}
+
+
+def _is_state_path(path: str) -> bool:
+    return ".state." in path or path.endswith(".state")
+
+
+def _is_system_path(path: str) -> bool:
+    return path == "system" or path.startswith("system.")
+
+
 @pytest.fixture
 def pm(store: TreeStore, tmp_data_dir: Path) -> PersistenceManager:
     """PersistenceManager с коротким debounce для тестов."""
-    return PersistenceManager(store=store, data_dir=tmp_data_dir, debounce_seconds=0.1)
+    return PersistenceManager(
+        store=store,
+        data_dir=tmp_data_dir,
+        debounce_seconds=0.1,
+        file_mapping=TEST_FILE_MAPPING,
+        skip_predicate=_is_state_path,
+        immediate_predicate=_is_system_path,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +193,14 @@ def test_load_returns_merged_dict(
     with open(tmp_data_dir / "state_robot.yaml", "w") as f:
         yaml.dump(robot_data, f)
 
-    pm = PersistenceManager(store=store, data_dir=tmp_data_dir, debounce_seconds=0.1)
+    pm = PersistenceManager(
+        store=store,
+        data_dir=tmp_data_dir,
+        debounce_seconds=0.1,
+        file_mapping=TEST_FILE_MAPPING,
+        skip_predicate=_is_state_path,
+        immediate_predicate=_is_system_path,
+    )
     loaded = pm.load()
 
     assert "cameras" in loaded
@@ -264,8 +297,18 @@ def test_load_and_merge_restores_state(
     tmp_data_dir: Path
 ) -> None:
     """Полный цикл: save → load() → merge() → данные в новом TreeStore."""
+    def _make_pm(s: TreeStore) -> PersistenceManager:
+        return PersistenceManager(
+            store=s,
+            data_dir=tmp_data_dir,
+            debounce_seconds=0.1,
+            file_mapping=TEST_FILE_MAPPING,
+            skip_predicate=_is_state_path,
+            immediate_predicate=_is_system_path,
+        )
+
     store1 = TreeStore()
-    pm1 = PersistenceManager(store=store1, data_dir=tmp_data_dir, debounce_seconds=0.1)
+    pm1 = _make_pm(store1)
 
     # записываем данные
     store1.set("robot.config.speed", 150, source="test")
@@ -278,7 +321,7 @@ def test_load_and_merge_restores_state(
 
     # новый store + загрузка
     store2 = TreeStore()
-    pm2 = PersistenceManager(store=store2, data_dir=tmp_data_dir, debounce_seconds=0.1)
+    pm2 = _make_pm(store2)
     loaded = pm2.load()
     store2.merge("", loaded, source="load")
 
@@ -369,3 +412,61 @@ def test_multiple_sections_saved(
     assert (tmp_data_dir / "state_cameras.yaml").exists()
     assert (tmp_data_dir / "state_renderer.yaml").exists()
     assert (tmp_data_dir / "state_robot.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# Тест 13: Без file_mapping — никакого save (доменно-нейтральный default)
+# ---------------------------------------------------------------------------
+
+
+def test_no_mapping_no_save(store: TreeStore, tmp_data_dir: Path) -> None:
+    """PersistenceManager без file_mapping не сохраняет ничего."""
+    pm = PersistenceManager(store=store, data_dir=tmp_data_dir, debounce_seconds=0.1)
+
+    _fire_after_set(pm, "cameras.0.config.fps", 30)
+    _fire_after_set(pm, "system.profile", "prod")
+
+    time.sleep(0.3)
+    assert not pm.is_dirty
+    assert list(tmp_data_dir.glob("*.yaml")) == []
+
+
+# ---------------------------------------------------------------------------
+# Тест 14: Кастомный file_mapping и предикаты
+# ---------------------------------------------------------------------------
+
+
+def test_custom_mapping_and_predicates(store: TreeStore, tmp_data_dir: Path) -> None:
+    """Можно задать свои prefix-ы и предикаты — фреймворк к ним agnostic."""
+    custom_mapping = {"sensors": "sensors.yaml", "alerts": "alerts.yaml"}
+
+    pm = PersistenceManager(
+        store=store,
+        data_dir=tmp_data_dir,
+        debounce_seconds=0.1,
+        file_mapping=custom_mapping,
+        # Пропускать всё, что заканчивается на ".raw" — кастомное правило
+        skip_predicate=lambda p: p.endswith(".raw") or ".raw." in p,
+        immediate_predicate=lambda p: p.startswith("alerts."),
+    )
+
+    # cameras не в mapping — пропускается
+    _fire_after_set(pm, "cameras.0.fps", 30)
+    # sensors — нормальный debounce save
+    store.set("sensors.t1", 25, source="test")
+    _fire_after_set(pm, "sensors.t1", 25)
+    # alerts — immediate
+    store.set("alerts.fire", True, source="test")
+    _fire_after_set(pm, "alerts.fire", True)
+    # sensors.raw — skip
+    _fire_after_set(pm, "sensors.t2.raw", 9999)
+
+    # alerts уже сохранён немедленно
+    assert (tmp_data_dir / "alerts.yaml").exists()
+
+    # sensors через debounce
+    time.sleep(0.3)
+    assert (tmp_data_dir / "sensors.yaml").exists()
+
+    # cameras и raw — нет
+    assert not (tmp_data_dir / "state_cameras.yaml").exists()
