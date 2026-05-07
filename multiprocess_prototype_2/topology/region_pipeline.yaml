@@ -21,6 +21,7 @@ description: "Camera → Resize → Split → Negative/Grayscale/Flip → Stitch
 processes:
   # --- Камера: захват кадров ---
   - process_name: camera_0
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: high
     chain_targets:
       - preprocessor
@@ -37,6 +38,7 @@ processes:
 
   # --- Препроцессор: масштабирование ---
   - process_name: preprocessor
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - region_splitter
@@ -49,6 +51,7 @@ processes:
 
   # --- Нарезка на регионы (1:N fan-out через item["target"]) ---
   - process_name: region_splitter
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     # chain_targets не нужен: region_split ставит item["target"] per-item
     plugins:
@@ -75,6 +78,7 @@ processes:
 
   # --- Обработка: негатив (верхний левый регион) ---
   - process_name: process_negative
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - stitcher
@@ -85,6 +89,7 @@ processes:
 
   # --- Обработка: чёрно-белое (верхний правый регион) ---
   - process_name: process_grayscale
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - stitcher
@@ -95,6 +100,7 @@ processes:
 
   # --- Обработка: переворот (полный кадр) ---
   - process_name: process_flip
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - stitcher
@@ -105,6 +111,7 @@ processes:
 
   # --- Склейка регионов (fan-in N:1, InspectorManager буферизует) ---
   - process_name: stitcher
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - gui

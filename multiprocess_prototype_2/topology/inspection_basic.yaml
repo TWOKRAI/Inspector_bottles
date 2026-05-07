@@ -15,6 +15,7 @@ description: "Базовая инспекция: камера → HSV-маска
 processes:
   # --- Камера: захват кадров через simulator backend ---
   - process_name: camera_0
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: high
     chain_targets:
       - processor
@@ -31,6 +32,7 @@ processes:
 
   # --- Процессор: HSV-маска + детекция контуров ---
   - process_name: processor
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - renderer
@@ -55,6 +57,7 @@ processes:
 
   # --- Рендерер: наложение маски и bbox на кадр ---
   - process_name: renderer
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - gui

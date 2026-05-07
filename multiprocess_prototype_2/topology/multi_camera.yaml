@@ -20,6 +20,7 @@ description: "Мульти-камера: 2 камеры → 2 процессор
 processes:
   # --- Камера 0: первая камера (simulator, camera_id=0) ---
   - process_name: camera_0
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: high
     chain_targets:
       - processor_0
@@ -36,6 +37,7 @@ processes:
 
   # --- Камера 1: вторая камера (simulator, camera_id=1) ---
   - process_name: camera_1
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: high
     chain_targets:
       - processor_1
@@ -52,6 +54,7 @@ processes:
 
   # --- Процессор 0: HSV-маска для камеры 0 ---
   - process_name: processor_0
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - compositor
@@ -68,6 +71,7 @@ processes:
 
   # --- Процессор 1: детекция контуров для камеры 1 ---
   - process_name: processor_1
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - compositor
@@ -79,8 +83,9 @@ processes:
         max_area: 0
         draw_contours: true
 
-  # --- Compositor: grid 2×1 из двух потоков (1280×480) ---
+  # --- Compositor: grid 2x1 из двух потоков (1280x480) ---
   - process_name: compositor
+    process_class: multiprocess_prototype_2.generic_process_app.GenericProcessApp
     priority: normal
     chain_targets:
       - gui

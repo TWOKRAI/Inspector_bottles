@@ -92,6 +92,17 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     # 4. Merge defaults → topology plugin configs
     bp_dict = _merge_defaults(bp_dict, sys_config)
 
+    # 4.5. State bootstrap — построение начального дерева состояния
+    from multiprocess_prototype_2.state.bootstrap import build_initial_state
+    from multiprocess_prototype_2.state.manager_setup import build_throttle_rules
+
+    initial_state = build_initial_state(bp_dict, sys_config.model_dump())
+    throttle_rules = build_throttle_rules()
+    print(
+        f"[bootstrap] initial state: "
+        f"{len(initial_state.get('processes', {}))} процессов"
+    )
+
     topology = SystemBlueprint.model_validate(bp_dict)
     print(f"[bootstrap] topology: {topology.name} - {topology.description}")
 
@@ -114,7 +125,16 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
 
     print(f"[bootstrap] log_dir: {Path(log_dir).resolve()}")
 
-    launcher = SystemLauncher(stop_timeout=sys_config.system.stop_timeout)
+    launcher = SystemLauncher(
+        stop_timeout=sys_config.system.stop_timeout,
+        orchestrator_class_path=(
+            "multiprocess_prototype_2.orchestrator.ProcessManagerProcessApp"
+        ),
+        orchestrator_config={
+            "initial_state": initial_state,
+            "state_throttle_rules": throttle_rules,
+        },
+    )
     for cfg in configs:
         launcher.add_process(*process(cfg))
 
