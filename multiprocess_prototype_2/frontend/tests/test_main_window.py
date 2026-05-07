@@ -70,14 +70,14 @@ def test_header_brand_label(qtbot):
     assert brand.objectName() == "BrandLabel"
 
 
-# -- Header update_status_text --
+# -- Header update_status --
 
 def test_header_status_text(qtbot):
-    """update_status_text обновляет StatusLabel."""
+    """update_status обновляет StatusLabel."""
     window = MainWindow()
     qtbot.addWidget(window)
 
-    window.header.update_status_text("Online")
+    window.header.update_status("Online")
     assert window.header._status_label.text() == "Online"
 
 
@@ -109,13 +109,16 @@ def test_tab_widget_property(qtbot):
 # -- update_status (обратная совместимость) --
 
 def test_update_status(qtbot):
-    """update_status обновляет fps и latency labels в StatusBar."""
+    """update_status обновляет fps и latency labels в StatusBar и header."""
     window = MainWindow()
     qtbot.addWidget(window)
 
     window.update_status(fps=30.5, latency_ms=12.3)
     assert window._fps_label.text() == "FPS: 30.5"
     assert window._latency_label.text() == "Latency: 12.3 ms"
+    # Header тоже обновляется
+    assert "30.5" in window.header._status_label.text()
+    assert "12.3" in window.header._status_label.text()
 
 
 # -- frame count (обратная совместимость) --

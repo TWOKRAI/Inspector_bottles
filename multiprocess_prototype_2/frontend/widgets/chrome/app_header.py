@@ -32,6 +32,6 @@ class AppHeaderWidget(QWidget):
 
     # -- Публичное API --
 
-    def update_status_text(self, text: str) -> None:
+    def update_status(self, text: str) -> None:
         """Обновить текст статуса в правой части header."""
         self._status_label.setText(text)

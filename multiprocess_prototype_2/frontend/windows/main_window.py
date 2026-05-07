@@ -96,9 +96,11 @@ class MainWindow(QMainWindow):
         return self._tab_widget.addTab(widget, title)
 
     def update_status(self, fps: float, latency_ms: float = 0.0) -> None:
-        """Обновить StatusBar: fps и latency."""
+        """Обновить StatusBar и header: fps и latency."""
         self._fps_label.setText(f"FPS: {fps:.1f}")
         self._latency_label.setText(f"Latency: {latency_ms:.1f} ms")
+        # Дублируем ключевые метрики в header
+        self._header.update_status(f"FPS: {fps:.1f} | Latency: {latency_ms:.1f} ms")
 
     def increment_frame_count(self) -> None:
         """Инкремент счётчика кадров (вызывается при каждом frame)."""
