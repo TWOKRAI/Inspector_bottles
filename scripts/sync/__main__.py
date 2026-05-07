@@ -17,14 +17,15 @@ from scripts.sync.registry import SyncModule, apply_sync
 # Регистрация sync-модулей
 # ---------------------------------------------------------------------------
 # T1.3.2 — adr_modules подключён.
-# TODO: раскомментировать после реализации T1.3.3–4:
-# from scripts.sync import adr_toc, adr_obsolete
+# T1.3.3 — adr_toc подключён.
+# TODO: раскомментировать после реализации T1.3.4:
+# from scripts.sync import adr_obsolete
 
-from scripts.sync import adr_modules
+from scripts.sync import adr_modules, adr_toc
 
 SYNC_MODULES: list[SyncModule] = [
     adr_modules.module(),
-    # adr_toc.module(),       # T1.3.3
+    adr_toc.module(),
     # adr_obsolete.module(),  # T1.3.4
 ]
 
