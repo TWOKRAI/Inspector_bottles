@@ -167,15 +167,26 @@ class ProcessModulePlugin(ABC):
         """True если плагин — источник данных (category == 'source')."""
         return self.category == "source"
 
-    def register_schema(self) -> Any | None:
-        """Опциональный регистр плагина (SchemaBase instance).
+    @classmethod
+    def register_schema(cls) -> list:
+        """Register-классы плагина (list[type[SchemaBase]]).
 
-        Если None — плагин на defaults из config (graceful degradation).
-        Convention: возвращённая схема маппится на plugin.name
-        в RegistersManager процесса.
+        V3_MY_PURE: по умолчанию берёт из config_class.register_bindings.
+        Плагины без register_bindings → пустой список (graceful degradation).
 
         Returns:
-            SchemaBase instance с FieldMeta полями или None.
+            Список SchemaBase-классов (не инстансов).
+        """
+        config_cls = cls.config_class()
+        if config_cls is not None and hasattr(config_cls, "register_bindings"):
+            return list(config_cls.register_bindings)
+        return []
+
+    @classmethod
+    def config_class(cls) -> type | None:
+        """PluginConfig-класс этого плагина (lazy discovery через PluginRegistry).
+
+        Override если автоматический discovery не работает.
         """
         return None
 

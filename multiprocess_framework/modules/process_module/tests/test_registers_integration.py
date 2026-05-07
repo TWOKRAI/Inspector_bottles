@@ -11,12 +11,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
+from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
@@ -52,21 +54,20 @@ class SimplePlugin(ProcessModulePlugin):
         pass
 
 
+class _WithRegisterRegisters(SchemaBase):
+    """Register-класс для тестового плагина."""
+    threshold: Annotated[int, FieldMeta("Threshold", min=0, max=100)] = 50
+    enabled: Annotated[bool, FieldMeta("Enabled")] = True
+
+
 class PluginWithRegister(ProcessModulePlugin):
-    """Плагин с регистром."""
+    """Плагин с регистром (V3_MY_PURE)."""
     name = "with_register"
     category = "processing"
 
-    def register_schema(self) -> Any | None:
-        from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
-        from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
-        from typing import Annotated
-
-        class TestRegisters(SchemaBase):
-            threshold: Annotated[int, FieldMeta("Threshold", min=0, max=100)] = 50
-            enabled: Annotated[bool, FieldMeta("Enabled")] = True
-
-        return TestRegisters()
+    @classmethod
+    def register_schema(cls) -> list:
+        return [_WithRegisterRegisters]
 
     def configure(self, ctx: PluginContext) -> None:
         self._reg = None
@@ -81,26 +82,30 @@ class PluginWithRegister(ProcessModulePlugin):
 
 
 class TestRegisterSchema:
-    """register_schema() — default None, override."""
+    """register_schema() — classmethod, возвращает list[type[SchemaBase]]."""
 
-    def test_default_returns_none(self):
-        """Base class register_schema() returns None."""
-        plugin = SimplePlugin()
-        assert plugin.register_schema() is None
+    def test_default_returns_empty_list(self):
+        """Base class register_schema() returns []."""
+        assert SimplePlugin.register_schema() == []
 
-    def test_override_returns_schema(self):
-        """Plugin with register returns SchemaBase instance."""
-        plugin = PluginWithRegister()
-        schema = plugin.register_schema()
-        assert schema is not None
-        assert hasattr(schema, "threshold")
-        assert schema.threshold == 50
+    def test_override_returns_classes(self):
+        """Plugin with register returns list of SchemaBase classes."""
+        classes = PluginWithRegister.register_schema()
+        assert len(classes) == 1
+        assert classes[0] is _WithRegisterRegisters
+
+    def test_schema_instantiation(self):
+        """Register class can be instantiated with defaults."""
+        classes = PluginWithRegister.register_schema()
+        instance = classes[0]()
+        assert instance.threshold == 50
+        assert instance.enabled is True
 
     def test_schema_field_meta(self):
         """Schema fields have FieldMeta metadata."""
-        plugin = PluginWithRegister()
-        schema = plugin.register_schema()
-        meta = schema.get_field_meta("threshold")
+        classes = PluginWithRegister.register_schema()
+        instance = classes[0]()
+        meta = instance.get_field_meta("threshold")
         assert meta is not None
         assert meta.min == 0
         assert meta.max == 100

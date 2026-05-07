@@ -38,6 +38,12 @@ class PluginEntry:
         self.category = category
         self.description = description
 
+        # V3_MY_PURE: register-классы из plugin.register_schema()
+        try:
+            self.register_classes: list = plugin_class.register_schema()
+        except Exception:
+            self.register_classes = []
+
     @property
     def inputs(self) -> list[Port]:
         """Входные порты плагина."""

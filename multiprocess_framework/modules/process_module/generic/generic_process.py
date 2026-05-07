@@ -143,21 +143,34 @@ class GenericProcess(ProcessModule):
     def _init_registers(
         self, early: list[tuple[ProcessModulePlugin, PluginContext]],
     ) -> Any | None:
-        """Собрать register_schema() от плагинов, создать RegistersManager.
+        """Собрать register schemas от плагинов, создать RegistersManager.
+
+        V3_MY_PURE: register_schema() — classmethod, возвращает list[type[SchemaBase]].
+        Для обратной совместимости поддерживает и старый формат (SchemaBase instance).
 
         Convention mapping: plugin.name → register name в RegistersManager.
-        Плагины без register_schema (return None) — пропускаются (graceful degradation).
         """
         schemas: dict[str, Any] = {}
 
         for plugin, _ctx in early:
             try:
-                schema = plugin.register_schema()
-                if schema is not None:
-                    schemas[plugin.name] = schema
+                result = plugin.register_schema()
+
+                if isinstance(result, list):
+                    # V3_MY_PURE: list of classes → инстанцировать каждый
+                    for reg_cls in result:
+                        instance = reg_cls()
+                        schemas[plugin.name] = instance
+                        self._log_info(
+                            f"GenericProcess[{self.name}]: register '{plugin.name}' "
+                            f"schema loaded ({reg_cls.__name__})"
+                        )
+                elif result is not None:
+                    # Legacy: SchemaBase instance
+                    schemas[plugin.name] = result
                     self._log_info(
                         f"GenericProcess[{self.name}]: register '{plugin.name}' "
-                        f"schema loaded ({type(schema).__name__})"
+                        f"schema loaded ({type(result).__name__})"
                     )
             except Exception as e:
                 self._log_error(
