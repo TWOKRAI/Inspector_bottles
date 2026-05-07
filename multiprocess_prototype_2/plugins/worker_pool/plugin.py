@@ -4,6 +4,9 @@ Processing-плагин: process(items) → items — распределяет i
 Каждый worker = отдельный экземпляр sub-plugin (thread safety через изоляцию).
 Порядок результатов соответствует порядку входных items.
 При ошибке в worker — fallback на оригинальный item.
+
+V3_MY_PURE: plugin самодостаточен — создаёт локальный register
+если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+
+from .registers import WorkerPoolRegisters
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +59,21 @@ class WorkerPoolPlugin(ProcessModulePlugin):
     # --- configure ---
 
     def configure(self, ctx: PluginContext) -> None:
-        """Инициализация параметров пула и создание экземпляров sub-plugin."""
+        """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
+        self._ctx = ctx
 
-        self._pool_size: int = int(cfg.get("pool_size", 4))
-        self._queue_timeout: float = float(cfg.get("queue_timeout", 5.0))
-        self._balancing: str = cfg.get("balancing", "round_robin")
-        self._worker_plugin_class: str = cfg.get("worker_plugin_class", "")
-        self._worker_plugin_config: dict = cfg.get("worker_plugin_config", {})
+        # Register: managed (RegistersManager → GUI видит) или локальный
+        self._reg = (
+            ctx.registers.get_register(self.name) if ctx.registers is not None else None
+        ) or WorkerPoolRegisters()
 
-        # Счётчики статистики
+        # YAML overrides → синхронизируем в register
+        for field in type(self._reg).model_fields:
+            if field in cfg:
+                setattr(self._reg, field, cfg[field])
+
+        # Счётчики статистики (runtime-only, не в register)
         self._total_processed: int = 0
         self._total_errors: int = 0
 
@@ -78,15 +88,15 @@ class WorkerPoolPlugin(ProcessModulePlugin):
 
         # Создать по одному экземпляру sub-plugin на каждый worker
         self._worker_plugins: list[ProcessModulePlugin] = []
-        if self._worker_plugin_class:
-            for _ in range(self._pool_size):
+        if self._reg.worker_plugin_class:
+            for _ in range(self._reg.pool_size):
                 wp = self._create_worker_plugin()
                 if wp is not None:
                     self._worker_plugins.append(wp)
 
         ctx.log_info(
-            f"WorkerPoolPlugin: pool_size={self._pool_size}, "
-            f"balancing={self._balancing}, "
+            f"WorkerPoolPlugin: pool_size={self._reg.pool_size}, "
+            f"balancing={self._reg.balancing}, "
             f"workers_created={len(self._worker_plugins)}"
         )
 
@@ -94,8 +104,8 @@ class WorkerPoolPlugin(ProcessModulePlugin):
 
     def start(self, ctx: PluginContext) -> None:
         """Запустить ThreadPoolExecutor."""
-        self._pool = ThreadPoolExecutor(max_workers=self._pool_size)
-        ctx.log_info(f"WorkerPoolPlugin: pool запущен, max_workers={self._pool_size}")
+        self._pool = ThreadPoolExecutor(max_workers=self._reg.pool_size)
+        ctx.log_info(f"WorkerPoolPlugin: pool запущен, max_workers={self._reg.pool_size}")
 
     def shutdown(self, ctx: PluginContext) -> None:
         """Остановить ThreadPoolExecutor, дождаться завершения задач."""
@@ -127,7 +137,7 @@ class WorkerPoolPlugin(ProcessModulePlugin):
         for future in as_completed(futures):
             idx = futures[future]
             try:
-                result = future.result(timeout=self._queue_timeout)
+                result = future.result(timeout=self._reg.queue_timeout)
                 results[idx] = result
                 with self._lock:
                     self._total_processed += 1
@@ -148,7 +158,7 @@ class WorkerPoolPlugin(ProcessModulePlugin):
         round_robin — последовательно по кругу.
         shortest_queue — для ThreadPoolExecutor недоступен, fallback к round_robin.
         """
-        if self._balancing == "round_robin":
+        if self._reg.balancing == "round_robin":
             idx = self._round_robin_idx % len(self._worker_plugins)
             self._round_robin_idx += 1
             return idx
@@ -172,17 +182,17 @@ class WorkerPoolPlugin(ProcessModulePlugin):
         Использует importlib для загрузки класса по полному пути.
         Возвращает None при ошибке импорта или конфигурирования.
         """
-        if not self._worker_plugin_class:
+        if not self._reg.worker_plugin_class:
             return None
         try:
-            module_path, class_name = self._worker_plugin_class.rsplit(".", 1)
+            module_path, class_name = self._reg.worker_plugin_class.rsplit(".", 1)
             module = importlib.import_module(module_path)
             plugin_cls = getattr(module, class_name)
             instance: ProcessModulePlugin = plugin_cls()
 
             # Создать mock-контекст для sub-plugin (реальный ctx недоступен на этом этапе)
             mock_ctx = MagicMock(spec=PluginContext)
-            mock_ctx.config = self._worker_plugin_config
+            mock_ctx.config = self._reg.worker_plugin_config
             mock_ctx.log_info = lambda msg: logger.info(f"[worker] {msg}")
             mock_ctx.log_error = lambda msg: logger.error(f"[worker] {msg}")
             mock_ctx.registers = None
@@ -202,30 +212,30 @@ class WorkerPoolPlugin(ProcessModulePlugin):
         Принимает pool_size (1..32). Пересоздаёт ThreadPoolExecutor.
         Добавляет недостающие экземпляры sub-plugin если нужно.
         """
-        new_size = max(1, min(32, int(data.get("pool_size", self._pool_size))))
+        new_size = max(1, min(32, int(data.get("pool_size", self._reg.pool_size))))
 
         # Остановить текущий пул без ожидания завершения задач
         if self._pool is not None:
             self._pool.shutdown(wait=False)
 
-        self._pool_size = new_size
-        self._pool = ThreadPoolExecutor(max_workers=self._pool_size)
+        self._reg.pool_size = new_size
+        self._pool = ThreadPoolExecutor(max_workers=self._reg.pool_size)
 
         # Дополнить список worker plugin instances если их стало меньше
-        if self._worker_plugin_class:
-            while len(self._worker_plugins) < self._pool_size:
+        if self._reg.worker_plugin_class:
+            while len(self._worker_plugins) < self._reg.pool_size:
                 wp = self._create_worker_plugin()
                 if wp is not None:
                     self._worker_plugins.append(wp)
 
-        logger.info(f"WorkerPoolPlugin: pool resized to {self._pool_size}")
-        return {"status": "ok", "pool_size": self._pool_size}
+        logger.info(f"WorkerPoolPlugin: pool resized to {self._reg.pool_size}")
+        return {"status": "ok", "pool_size": self._reg.pool_size}
 
     def cmd_get_stats(self, data: dict) -> dict:
         """Вернуть статистику обработки."""
         return {
             "status": "ok",
-            "pool_size": self._pool_size,
+            "pool_size": self._reg.pool_size,
             "total_processed": self._total_processed,
             "total_errors": self._total_errors,
             "workers_count": len(self._worker_plugins),

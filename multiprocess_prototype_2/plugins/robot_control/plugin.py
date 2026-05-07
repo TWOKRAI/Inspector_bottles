@@ -3,6 +3,9 @@
 Processing-плагин: принимает item с detections (от blob_detector),
 фильтрует дефекты по min_defect_area, принимает решение reject/pass.
 Ведёт статистику: total_inspected, total_rejected, reject_rate.
+
+V3_MY_PURE: plugin самодостаточен — создаёт локальный register
+если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
@@ -17,6 +20,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+
+from .registers import RobotControlRegisters
 
 
 @register_plugin(
@@ -72,24 +77,28 @@ class RobotControlPlugin(ProcessModulePlugin):
     }
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка параметров отбраковки из конфига."""
+        """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
         self._ctx = ctx
 
-        # Параметры отбраковки
-        self._enabled: bool = cfg.get("enabled", True)
-        self._min_defect_area: int = cfg.get("min_defect_area", 500)
-        self._reject_delay_ms: int = cfg.get("reject_delay_ms", 0)
-        self._max_detections_for_reject: int = cfg.get("max_detections_for_reject", 0)
+        # Register: managed (RegistersManager → GUI видит) или локальный
+        self._reg = (
+            ctx.registers.get_register(self.name) if ctx.registers is not None else None
+        ) or RobotControlRegisters()
 
-        # Счётчики статистики
+        # YAML overrides → синхронизируем в register
+        for field in type(self._reg).model_fields:
+            if field in cfg:
+                setattr(self._reg, field, cfg[field])
+
+        # Счётчики статистики (не в register — runtime-only)
         self._total_inspected: int = 0
         self._total_rejected: int = 0
 
         ctx.log_info(
-            f"RobotControlPlugin: enabled={self._enabled}, "
-            f"min_defect_area={self._min_defect_area}, "
-            f"reject_delay_ms={self._reject_delay_ms}"
+            f"RobotControlPlugin: enabled={self._reg.enabled}, "
+            f"min_defect_area={self._reg.min_defect_area}, "
+            f"reject_delay_ms={self._reg.reject_delay_ms}"
         )
 
     def start(self, ctx: PluginContext) -> None:
@@ -112,7 +121,7 @@ class RobotControlPlugin(ProcessModulePlugin):
         self._total_inspected += 1
 
         # Плагин отключён — всегда пропускаем
-        if not self._enabled:
+        if not self._reg.enabled:
             item["inspection_result"] = {
                 "action": "pass",
                 "reason": "disabled",
@@ -125,20 +134,20 @@ class RobotControlPlugin(ProcessModulePlugin):
         # Фильтруем дефекты по минимальной площади
         defects = [
             d for d in detections
-            if d.get("area", 0) >= self._min_defect_area
+            if d.get("area", 0) >= self._reg.min_defect_area
         ]
 
         # Ограничиваем количество дефектов для анализа (если задано)
-        if self._max_detections_for_reject > 0:
-            defects = defects[:self._max_detections_for_reject]
+        if self._reg.max_detections_for_reject > 0:
+            defects = defects[:self._reg.max_detections_for_reject]
 
         # Принимаем решение
         if len(defects) > 0:
             action = "reject"
             self._total_rejected += 1
             # Задержка перед отбраковкой (например, для синхронизации с механизмом)
-            if self._reject_delay_ms > 0:
-                time.sleep(self._reject_delay_ms / 1000.0)
+            if self._reg.reject_delay_ms > 0:
+                time.sleep(self._reg.reject_delay_ms / 1000.0)
         else:
             action = "pass"
 
@@ -163,20 +172,20 @@ class RobotControlPlugin(ProcessModulePlugin):
 
     def cmd_enable(self, data: dict) -> dict:
         """Включить отбраковку."""
-        self._enabled = True
+        self._reg.enabled = True
         self._ctx.log_info("RobotControlPlugin: отбраковка включена")
         return {"status": "ok", "enabled": True}
 
     def cmd_disable(self, data: dict) -> dict:
         """Выключить отбраковку."""
-        self._enabled = False
+        self._reg.enabled = False
         self._ctx.log_info("RobotControlPlugin: отбраковка выключена")
         return {"status": "ok", "enabled": False}
 
     def cmd_set_delay(self, data: dict) -> dict:
         """Установить задержку отбраковки в миллисекундах."""
         delay_ms = max(0, int(data.get("delay_ms", 0)))
-        self._reject_delay_ms = delay_ms
+        self._reg.reject_delay_ms = delay_ms
         self._ctx.log_info(f"RobotControlPlugin: задержка установлена {delay_ms} мс")
         return {"status": "ok", "delay_ms": delay_ms}
 

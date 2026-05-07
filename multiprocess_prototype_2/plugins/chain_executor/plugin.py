@@ -7,6 +7,9 @@ Processing-плагин: process(items) -> items — прогоняет чере
 
 Параллельный режим (parallel=True):
     items → [шаг1, шаг2, ..., шагN] (каждый получает копию) → мерж результатов
+
+V3_MY_PURE: plugin самодостаточен — создаёт локальный register
+если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+
+from .registers import ChainExecutorRegisters
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +74,19 @@ class ChainExecutorPlugin(ProcessModulePlugin):
     # --- Жизненный цикл ---
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка цепочки: параметры + инициализация шагов из конфига."""
+        """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
         self._ctx = ctx
-        self._parallel = cfg.get("parallel", False)
-        self._max_workers = cfg.get("max_workers", 4)
-        self._on_error = cfg.get("on_error", "skip")
+
+        # Register: managed (RegistersManager → GUI видит) или локальный
+        self._reg = (
+            ctx.registers.get_register(self.name) if ctx.registers is not None else None
+        ) or ChainExecutorRegisters()
+
+        # YAML overrides → синхронизируем в register
+        for field in type(self._reg).model_fields:
+            if field in cfg:
+                setattr(self._reg, field, cfg[field])
 
         # Список шагов: [{"name": str, "plugin": ProcessModulePlugin, "config": dict}]
         self._steps: list[dict] = []
@@ -82,23 +94,22 @@ class ChainExecutorPlugin(ProcessModulePlugin):
         # ThreadPoolExecutor для параллельного режима (создаётся в start)
         self._pool: ThreadPoolExecutor | None = None
 
-        # Инициализировать шаги из конфига
-        steps_config = cfg.get("steps", [])
-        for step_cfg in steps_config:
+        # Инициализировать шаги из register
+        for step_cfg in self._reg.steps:
             self._init_step(step_cfg)
 
         ctx.log_info(
             f"ChainExecutorPlugin: {len(self._steps)} шагов, "
-            f"parallel={self._parallel}, on_error={self._on_error}"
+            f"parallel={self._reg.parallel}, on_error={self._reg.on_error}"
         )
 
     def start(self, ctx: PluginContext) -> None:
         """Запуск: создать ThreadPoolExecutor если параллельный режим."""
-        if self._parallel and self._max_workers > 1:
-            self._pool = ThreadPoolExecutor(max_workers=self._max_workers)
+        if self._reg.parallel and self._reg.max_workers > 1:
+            self._pool = ThreadPoolExecutor(max_workers=self._reg.max_workers)
             ctx.log_info(
                 f"ChainExecutorPlugin: ThreadPoolExecutor запущен, "
-                f"max_workers={self._max_workers}"
+                f"max_workers={self._reg.max_workers}"
             )
 
     def shutdown(self, ctx: PluginContext) -> None:
@@ -178,7 +189,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
         if not self._steps:
             return items
 
-        if self._parallel and self._pool and len(self._steps) > 1:
+        if self._reg.parallel and self._pool and len(self._steps) > 1:
             return self._process_parallel(items)
 
         return self._process_sequential(items)
@@ -199,7 +210,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                 logger.error(
                     f"ChainExecutorPlugin: ошибка в шаге '{step['name']}': {e}"
                 )
-                if self._on_error == "fail":
+                if self._reg.on_error == "fail":
                     # Остановить цепочку, вернуть что есть
                     break
                 # on_error == "skip" → продолжаем с текущими items

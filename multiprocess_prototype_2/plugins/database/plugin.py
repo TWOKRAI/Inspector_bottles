@@ -2,6 +2,9 @@
 
 Output-плагин: process(items) -> items (pass-through с side-effect записи в БД).
 Batch INSERT по таймеру или по count.
+
+V3_MY_PURE: plugin самодостаточен — создаёт локальный register
+если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
+
+from .registers import DatabaseRegisters
 
 
 @register_plugin("database", category="output", description="Запись результатов в SQLite")
@@ -40,31 +45,38 @@ class DatabasePlugin(ProcessModulePlugin):
     }
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка: DB path, batch params."""
+        """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
-        self._db_path = cfg.get("db_path", "data/inspector.db")
-        self._batch_size: int = cfg.get("batch_size", 100)
-        self._flush_interval: float = cfg.get("flush_interval_sec", 2.0)
+        self._ctx = ctx
+
+        # Register: managed (RegistersManager → GUI видит) или локальный
+        self._reg = (
+            ctx.registers.get_register(self.name) if ctx.registers is not None else None
+        ) or DatabaseRegisters()
+
+        # YAML overrides → синхронизируем в register
+        for field in type(self._reg).model_fields:
+            if field in cfg:
+                setattr(self._reg, field, cfg[field])
 
         self._buffer: list[dict] = []
         self._buffer_lock = threading.Lock()
         self._total_written: int = 0
         self._total_errors: int = 0
-        self._ctx = ctx
 
         # Создаём директорию
-        db_file = Path(self._db_path)
+        db_file = Path(self._reg.db_path)
         db_file.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
 
         ctx.log_info(
-            f"DatabasePlugin: db={self._db_path}, "
-            f"batch={self._batch_size}, flush_interval={self._flush_interval}s"
+            f"DatabasePlugin: db={self._reg.db_path}, "
+            f"batch={self._reg.batch_size}, flush_interval={self._reg.flush_interval_sec}s"
         )
 
     def start(self, ctx: PluginContext) -> None:
         """Открыть соединение, создать таблицу, запустить flush worker."""
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(self._reg.db_path, check_same_thread=False)
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS detections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,7 +124,7 @@ class DatabasePlugin(ProcessModulePlugin):
         }
         with self._buffer_lock:
             self._buffer.append(record)
-            if len(self._buffer) >= self._batch_size:
+            if len(self._buffer) >= self._reg.batch_size:
                 # Забираем batch прямо здесь (lock уже захвачен) и сбрасываем
                 batch = self._buffer[:]
                 self._buffer.clear()
@@ -124,7 +136,7 @@ class DatabasePlugin(ProcessModulePlugin):
             if pause_event.is_set():
                 time.sleep(0.1)
                 continue
-            time.sleep(self._flush_interval)
+            time.sleep(self._reg.flush_interval_sec)
             self._flush_buffer()
 
     def _flush_buffer(self) -> int:
@@ -185,14 +197,14 @@ class DatabasePlugin(ProcessModulePlugin):
             "total_written": self._total_written,
             "total_errors": self._total_errors,
             "pending": pending,
-            "db_path": self._db_path,
+            "db_path": self._reg.db_path,
         }
 
     def _cmd_set_batch_size(self, data: dict) -> dict:
         """Изменить размер batch на лету."""
-        size = max(1, min(10000, int(data.get("batch_size", self._batch_size))))
-        self._batch_size = size
-        return {"status": "ok", "batch_size": self._batch_size}
+        size = max(1, min(10000, int(data.get("batch_size", self._reg.batch_size))))
+        self._reg.batch_size = size
+        return {"status": "ok", "batch_size": self._reg.batch_size}
 
     def _cmd_reset_stats(self, data: dict) -> dict:
         """Обнулить счётчики total_written и total_errors."""

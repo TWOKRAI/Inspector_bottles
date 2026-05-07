@@ -1,20 +1,25 @@
-"""Конфиг BlobDetectorPlugin — параметры HSV-маски и фильтрации контуров."""
+"""Конфиг BlobDetectorPlugin — identity + register_bindings.
+
+V3_MY_PURE: все параметры живут в registers.py.
+Config содержит только identity для discovery и привязку к register-классам.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import ClassVar
 
 from multiprocess_framework.modules.data_schema_module import register_schema
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
 from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
+
+from .registers import BlobDetectorRegisters
 
 
 @register_schema("BlobDetectorPluginConfigV1")
 class BlobDetectorConfig(PluginConfig):
-    """Конфиг плагина детекции цветных контуров.
+    """Конфиг плагина детекции цветных контуров — identity + register binding.
 
-    Processing: вход BGR → HSV-маска → findContours → detections + mask.
-    Параметры изменяются runtime через set_color_range / set_area_range.
+    Все параметры (HSV, area, contours) — в BlobDetectorRegisters.
     """
 
     plugin_class: str = (
@@ -23,26 +28,5 @@ class BlobDetectorConfig(PluginConfig):
     plugin_name: str = "blob_detector"
     category: str = "processing"
 
-    # HSV-диапазон
-    h_min: Annotated[int, FieldMeta(description="Hue minimum (0-180)")] = 0
-    h_max: Annotated[int, FieldMeta(description="Hue maximum (0-180)")] = 180
-    s_min: Annotated[int, FieldMeta(description="Saturation minimum (0-255)")] = 50
-    s_max: Annotated[int, FieldMeta(description="Saturation maximum (0-255)")] = 255
-    v_min: Annotated[int, FieldMeta(description="Value minimum (0-255)")] = 50
-    v_max: Annotated[int, FieldMeta(description="Value maximum (0-255)")] = 255
-
-    # Фильтрация по площади контура
-    min_area: Annotated[int, FieldMeta(description="Минимальная площадь контура (px²)")] = 100
-    max_area: Annotated[int, FieldMeta(description="Максимальная площадь (0 = без ограничения)")] = 0
-
-    # Отрисовка контуров
-    draw_contours: Annotated[bool, FieldMeta(description="Рисовать контуры на кадре")] = False
-    contour_color_bgr: Annotated[
-        list[int], FieldMeta(description="Цвет контуров BGR")
-    ] = [0, 255, 0]
-    contour_thickness: Annotated[int, FieldMeta(description="Толщина линий контуров")] = 2
-
-    @property
-    def memory(self) -> dict[str, Any] | None:
-        """Не владеет SHM."""
-        return None
+    # Привязка к register-классам
+    register_bindings: ClassVar[list[type[SchemaBase]]] = [BlobDetectorRegisters]

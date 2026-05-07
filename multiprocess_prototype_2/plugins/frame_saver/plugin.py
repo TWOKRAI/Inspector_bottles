@@ -2,6 +2,9 @@
 
 Output-плагин: process(items) -> items (pass-through с side-effect сохранения).
 Каждый N-й кадр сохраняется в output_dir (PNG или JPEG).
+
+V3_MY_PURE: plugin самодостаточен — создаёт локальный register
+если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
@@ -16,6 +19,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+
+from .registers import FrameSaverRegisters
 
 
 @register_plugin("frame_saver", category="output", description="Сохранение кадров на диск")
@@ -36,24 +41,32 @@ class FrameSaverPlugin(ProcessModulePlugin):
     }
 
     def configure(self, ctx: PluginContext) -> None:
-        """Настройка: output_dir, формат, интервал."""
+        """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
+        self._ctx = ctx
+
+        # Register: managed (RegistersManager → GUI видит) или локальный
+        self._reg = (
+            ctx.registers.get_register(self.name) if ctx.registers is not None else None
+        ) or FrameSaverRegisters()
+
+        # YAML overrides → синхронизируем в register
+        for field in type(self._reg).model_fields:
+            if field in cfg:
+                setattr(self._reg, field, cfg[field])
+
+        # camera_id из cfg (не входит в register — идентификатор хоста)
         self._camera_id: int = cfg.get("camera_id", 0)
-        self._output_dir = Path(cfg.get("output_dir", "data/frames"))
-        self._save_every_n: int = cfg.get("save_every_n", 10)
-        self._image_format: str = cfg.get("image_format", "jpeg")
-        self._jpeg_quality: int = cfg.get("jpeg_quality", 85)
 
         self._frame_count: int = 0
         self._saved_count: int = 0
-        self._ctx = ctx
 
-        self._output_dir.mkdir(parents=True, exist_ok=True)
+        Path(self._reg.output_dir).mkdir(parents=True, exist_ok=True)
 
         ctx.log_info(
             f"FrameSaverPlugin[{self._camera_id}]: "
-            f"dir={self._output_dir}, every={self._save_every_n}, "
-            f"format={self._image_format}"
+            f"dir={self._reg.output_dir}, every={self._reg.save_every_n}, "
+            f"format={self._reg.image_format}"
         )
 
     def start(self, ctx: PluginContext) -> None:
@@ -70,7 +83,7 @@ class FrameSaverPlugin(ProcessModulePlugin):
         """Сохранить каждый N-й кадр на диск. Pass-through."""
         for item in items:
             self._frame_count += 1
-            if self._frame_count % self._save_every_n == 0:
+            if self._frame_count % self._reg.save_every_n == 0:
                 self._save_frame(item)
         return items
 
@@ -81,12 +94,12 @@ class FrameSaverPlugin(ProcessModulePlugin):
             return False
 
         frame_id = item.get("frame_id", self._saved_count)
-        ext = "jpg" if self._image_format == "jpeg" else "png"
+        ext = "jpg" if self._reg.image_format == "jpeg" else "png"
         filename = f"camera_{self._camera_id}_frame_{frame_id:06d}.{ext}"
-        filepath = self._output_dir / filename
+        filepath = Path(self._reg.output_dir) / filename
 
-        if self._image_format == "jpeg":
-            params = [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality]
+        if self._reg.image_format == "jpeg":
+            params = [cv2.IMWRITE_JPEG_QUALITY, self._reg.jpeg_quality]
         else:
             params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
 
@@ -99,7 +112,7 @@ class FrameSaverPlugin(ProcessModulePlugin):
 
     def _cmd_save_now(self, data: dict) -> dict:
         """Принудительное сохранение следующего кадра."""
-        self._frame_count = self._save_every_n - 1
+        self._frame_count = self._reg.save_every_n - 1
         return {"status": "ok", "message": "next frame will be saved"}
 
     def _cmd_get_stats(self, data: dict) -> dict:
@@ -108,5 +121,5 @@ class FrameSaverPlugin(ProcessModulePlugin):
             "status": "ok",
             "saved_count": self._saved_count,
             "total_frames": self._frame_count,
-            "output_dir": str(self._output_dir),
+            "output_dir": str(self._reg.output_dir),
         }

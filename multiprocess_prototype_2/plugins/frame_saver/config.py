@@ -1,19 +1,25 @@
-"""Конфиг FrameSaverPlugin."""
+"""Конфиг FrameSaverPlugin — identity + register_bindings.
+
+V3_MY_PURE: все параметры живут в registers.py.
+Config содержит только identity для discovery и привязку к register-классам.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import ClassVar
 
 from multiprocess_framework.modules.data_schema_module import register_schema
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
 from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
+
+from .registers import FrameSaverRegisters
 
 
 @register_schema("FrameSaverPluginConfigV1")
 class FrameSaverPluginConfig(PluginConfig):
-    """Конфиг плагина сохранения кадров на диск.
+    """Конфиг плагина сохранения кадров на диск — identity + register binding.
 
-    Сохраняет каждый N-й кадр в output_dir.
+    Все параметры (output_dir, save_every_n, image_format, jpeg_quality) — в FrameSaverRegisters.
     """
 
     plugin_class: str = (
@@ -22,22 +28,5 @@ class FrameSaverPluginConfig(PluginConfig):
     plugin_name: str = "frame_saver"
     category: str = "output"
 
-    output_dir: Annotated[
-        str,
-        FieldMeta(description="Директория для сохранённых кадров"),
-    ] = "data/frames"
-
-    save_every_n: Annotated[
-        int,
-        FieldMeta(description="Сохранять каждый N-й кадр"),
-    ] = 10
-
-    image_format: Annotated[
-        Literal["png", "jpeg"],
-        FieldMeta(description="Формат сохранения (png/jpeg)"),
-    ] = "jpeg"
-
-    jpeg_quality: Annotated[
-        int,
-        FieldMeta(description="Качество JPEG (1-100)"),
-    ] = 85
+    # Привязка к register-классам
+    register_bindings: ClassVar[list[type[SchemaBase]]] = [FrameSaverRegisters]

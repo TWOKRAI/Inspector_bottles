@@ -1,19 +1,25 @@
-"""Конфиг DatabasePlugin."""
+"""Конфиг DatabasePlugin — identity + register_bindings.
+
+V3_MY_PURE: все параметры живут в registers.py.
+Config содержит только identity для discovery и привязку к register-классам.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import ClassVar
 
 from multiprocess_framework.modules.data_schema_module import register_schema
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
 from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
+
+from .registers import DatabaseRegisters
 
 
 @register_schema("DatabasePluginConfigV1")
 class DatabasePluginConfig(PluginConfig):
-    """Конфиг плагина записи результатов в SQLite.
+    """Конфиг плагина записи результатов в SQLite — identity + register binding.
 
-    Принимает detection_result, буферизует, batch insert.
+    Все параметры (db_path, batch_size, flush_interval_sec) — в DatabaseRegisters.
     """
 
     plugin_class: str = (
@@ -22,17 +28,5 @@ class DatabasePluginConfig(PluginConfig):
     plugin_name: str = "database"
     category: str = "output"
 
-    db_path: Annotated[
-        str,
-        FieldMeta(description="Путь к SQLite файлу"),
-    ] = "data/inspector.db"
-
-    batch_size: Annotated[
-        int,
-        FieldMeta(description="Размер batch для flush"),
-    ] = 100
-
-    flush_interval_sec: Annotated[
-        float,
-        FieldMeta(description="Интервал авто-flush (секунды)"),
-    ] = 2.0
+    # Привязка к register-классам
+    register_bindings: ClassVar[list[type[SchemaBase]]] = [DatabaseRegisters]

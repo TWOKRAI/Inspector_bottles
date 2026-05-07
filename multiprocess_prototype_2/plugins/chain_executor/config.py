@@ -1,17 +1,25 @@
-"""Конфиг ChainExecutorPlugin — параметры цепочки шагов."""
+"""Конфиг ChainExecutorPlugin — identity + register_bindings.
+
+V3_MY_PURE: все параметры живут в registers.py.
+Config содержит только identity для discovery и привязку к register-классам.
+"""
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from multiprocess_framework.modules.data_schema_module import register_schema
+from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
 from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
+
+from .registers import ChainExecutorRegisters
 
 
 @register_schema("ChainExecutorPluginConfigV1")
 class ChainExecutorConfig(PluginConfig):
-    """Конфиг плагина-оркестратора цепочки.
+    """Конфиг плагина-оркестратора цепочки — identity + register binding.
 
-    Processing: items прогоняются через каждый шаг (sub-plugin) по порядку.
-    Параллельный режим: каждый шаг получает копию items, результаты мержатся.
+    Все параметры (steps, parallel, max_workers, on_error) — в ChainExecutorRegisters.
     """
 
     plugin_class: str = (
@@ -20,14 +28,5 @@ class ChainExecutorConfig(PluginConfig):
     plugin_name: str = "chain_executor"
     category: str = "processing"
 
-    # Шаги цепочки: [{"plugin_class": "full.path.Plugin", "plugin_name": "step_name", "config": {...}}]
-    steps: list[dict] = []
-
-    # Параллельный режим (каждый шаг получает копию items, результаты мержатся)
-    parallel: bool = False
-
-    # Максимальное число потоков для параллельного режима
-    max_workers: int = 4
-
-    # При ошибке в шаге: skip (продолжить) или fail (остановить)
-    on_error: str = "skip"  # "skip" | "fail"
+    # Привязка к register-классам
+    register_bindings: ClassVar[list[type[SchemaBase]]] = [ChainExecutorRegisters]

@@ -1,6 +1,9 @@
 """RenderOverlayPlugin -- наложение маски и bounding boxes на кадр.
 
 Processing-плагин: process(items) → items с alpha blending маски.
+
+V3_MY_PURE: plugin самодостаточен — создаёт локальный register
+если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+
+from .registers import RenderOverlayRegisters
 
 
 @register_plugin(
@@ -64,33 +69,24 @@ class RenderOverlayPlugin(ProcessModulePlugin):
     }
 
     def configure(self, ctx: PluginContext) -> None:
-        """Инициализация параметров из конфига."""
+        """Настройка: register managed (GUI) или локальный (defaults)."""
         cfg = ctx.config
         self._ctx = ctx
 
-        # Прозрачность маски с зажимом в [0.0, 1.0]
-        alpha_raw = cfg.get("mask_alpha", 0.5)
-        self._alpha = max(0.0, min(1.0, float(alpha_raw)))
+        # Register: managed (RegistersManager → GUI видит) или локальный
+        self._reg = (
+            ctx.registers.get_register(self.name) if ctx.registers is not None else None
+        ) or RenderOverlayRegisters()
 
-        # Цвет маски в формате BGR (numpy array для in-place обновления через set_color)
-        self._mask_color = np.array(
-            [
-                cfg.get("mask_color_b", 0),
-                cfg.get("mask_color_g", 255),
-                cfg.get("mask_color_r", 0),
-            ],
-            dtype=np.uint8,
-        )
-
-        # Параметры отрисовки detections
-        self._draw_detections = bool(cfg.get("draw_detections", True))
-        self._line_thickness = int(cfg.get("line_thickness", 2))
-        self._label_font_scale = float(cfg.get("label_font_scale", 0.5))
+        # YAML overrides → синхронизируем в register
+        for field in type(self._reg).model_fields:
+            if field in cfg:
+                setattr(self._reg, field, cfg[field])
 
         ctx.log_info(
-            f"RenderOverlayPlugin: alpha={self._alpha}, "
-            f"color_bgr={self._mask_color.tolist()}, "
-            f"draw_detections={self._draw_detections}"
+            f"RenderOverlayPlugin: alpha={self._reg.mask_alpha}, "
+            f"color_bgr=[{self._reg.mask_color_b},{self._reg.mask_color_g},{self._reg.mask_color_r}], "
+            f"draw_detections={self._reg.draw_detections}"
         )
 
     def start(self, ctx: PluginContext) -> None:
@@ -113,6 +109,13 @@ class RenderOverlayPlugin(ProcessModulePlugin):
         if frame is None:
             return None
 
+        # Параметры всегда из register
+        alpha = max(0.0, min(1.0, float(self._reg.mask_alpha)))
+        mask_color = np.array(
+            [self._reg.mask_color_b, self._reg.mask_color_g, self._reg.mask_color_r],
+            dtype=np.uint8,
+        )
+
         # Работаем с копией — оригинальный кадр остаётся нетронутым
         result = frame.copy()
 
@@ -125,34 +128,34 @@ class RenderOverlayPlugin(ProcessModulePlugin):
 
             # Создаём цветной overlay (заливка цветом маски по всему кадру)
             color_overlay = np.zeros_like(result)
-            color_overlay[:] = self._mask_color
+            color_overlay[:] = mask_color
 
             # Blending только там, где маска ненулевая
             mask_bool = mask > 0
             if mask_bool.any():
                 result[mask_bool] = cv2.addWeighted(
                     result[mask_bool],
-                    1.0 - self._alpha,
+                    1.0 - alpha,
                     color_overlay[mask_bool],
-                    self._alpha,
+                    alpha,
                     0,
                 )
 
         # --- Отрисовка bounding boxes ---
-        if self._draw_detections:
+        if self._reg.draw_detections:
             detections = item.get("detections", [])
             for det in detections:
                 bbox = det.get("bbox")
                 if bbox and len(bbox) == 4:
                     x1, y1, x2, y2 = bbox
                     # Цвет как tuple int — cv2 не принимает numpy uint8
-                    color_tuple = tuple(int(c) for c in self._mask_color)
+                    color_tuple = tuple(int(c) for c in mask_color)
                     cv2.rectangle(
                         result,
                         (x1, y1),
                         (x2, y2),
                         color_tuple,
-                        self._line_thickness,
+                        self._reg.line_thickness,
                     )
                     # Подпись area если присутствует в detection
                     area = det.get("area")
@@ -163,7 +166,7 @@ class RenderOverlayPlugin(ProcessModulePlugin):
                             label,
                             (x1, y1 - 5),
                             cv2.FONT_HERSHEY_SIMPLEX,
-                            self._label_font_scale,
+                            self._reg.label_font_scale,
                             color_tuple,
                             1,
                         )
@@ -174,28 +177,32 @@ class RenderOverlayPlugin(ProcessModulePlugin):
 
     def set_alpha(self, data: dict) -> dict:
         """Установить прозрачность маски (0.0-1.0)."""
-        alpha = data.get("alpha", self._alpha)
-        self._alpha = max(0.0, min(1.0, float(alpha)))
-        self._ctx.log_info(f"RenderOverlayPlugin: alpha обновлён → {self._alpha}")
-        return {"status": "ok", "alpha": self._alpha}
+        alpha = data.get("alpha", self._reg.mask_alpha)
+        self._reg.mask_alpha = max(0.0, min(1.0, float(alpha)))
+        self._ctx.log_info(f"RenderOverlayPlugin: alpha обновлён → {self._reg.mask_alpha}")
+        return {"status": "ok", "alpha": self._reg.mask_alpha}
 
     def set_color(self, data: dict) -> dict:
         """Установить цвет маски BGR (ключи b, g, r)."""
         if "b" in data:
-            self._mask_color[0] = max(0, min(255, int(data["b"])))
+            self._reg.mask_color_b = max(0, min(255, int(data["b"])))
         if "g" in data:
-            self._mask_color[1] = max(0, min(255, int(data["g"])))
+            self._reg.mask_color_g = max(0, min(255, int(data["g"])))
         if "r" in data:
-            self._mask_color[2] = max(0, min(255, int(data["r"])))
+            self._reg.mask_color_r = max(0, min(255, int(data["r"])))
         self._ctx.log_info(
-            f"RenderOverlayPlugin: цвет обновлён → {self._mask_color.tolist()}"
+            f"RenderOverlayPlugin: цвет обновлён → "
+            f"[{self._reg.mask_color_b},{self._reg.mask_color_g},{self._reg.mask_color_r}]"
         )
-        return {"status": "ok", "color_bgr": self._mask_color.tolist()}
+        return {
+            "status": "ok",
+            "color_bgr": [self._reg.mask_color_b, self._reg.mask_color_g, self._reg.mask_color_r],
+        }
 
     def toggle_detections(self, data: dict) -> dict:
         """Переключить отрисовку bounding boxes (вкл/выкл)."""
-        self._draw_detections = not self._draw_detections
+        self._reg.draw_detections = not self._reg.draw_detections
         self._ctx.log_info(
-            f"RenderOverlayPlugin: draw_detections → {self._draw_detections}"
+            f"RenderOverlayPlugin: draw_detections → {self._reg.draw_detections}"
         )
-        return {"status": "ok", "draw_detections": self._draw_detections}
+        return {"status": "ok", "draw_detections": self._reg.draw_detections}
