@@ -38,11 +38,16 @@ class PluginEntry:
         self.category = category
         self.description = description
 
-        # V3_MY_PURE: register-классы из plugin.register_schema()
-        try:
-            self.register_classes: list = plugin_class.register_schema()
-        except Exception:
-            self.register_classes = []
+        # Register-классы плагина: приоритет register_class на классе,
+        # fallback на register_schema() (через config_class → register_bindings)
+        rc = getattr(plugin_class, "register_class", None)
+        if rc is not None:
+            self.register_classes: list = [rc]
+        else:
+            try:
+                self.register_classes = plugin_class.register_schema()
+            except Exception:
+                self.register_classes = []
 
     @property
     def inputs(self) -> list[Port]:

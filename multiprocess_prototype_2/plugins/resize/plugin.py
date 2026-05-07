@@ -54,9 +54,6 @@ class ResizePlugin(ProcessModulePlugin):
             f"target={self._target_width}x{self._target_height}"
         )
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     @for_each
     def process(self, item: dict) -> dict | None:
         """Масштабирование одного кадра."""

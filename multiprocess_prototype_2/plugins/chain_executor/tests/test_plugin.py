@@ -72,9 +72,9 @@ class TestConfigure:
         plugin.configure(ctx)
 
         assert plugin._steps == []
-        assert plugin._parallel is False
-        assert plugin._max_workers == 4
-        assert plugin._on_error == "skip"
+        assert plugin._reg.parallel is False
+        assert plugin._reg.max_workers == 4
+        assert plugin._reg.on_error == "skip"
 
     def test_configure_with_steps(self):
         """Конфигурация с шагами из config — шаги инициализированы."""
@@ -97,9 +97,9 @@ class TestConfigure:
         })
         plugin.configure(ctx)
 
-        assert plugin._parallel is True
-        assert plugin._max_workers == 2
-        assert plugin._on_error == "fail"
+        assert plugin._reg.parallel is True
+        assert plugin._reg.max_workers == 2
+        assert plugin._reg.on_error == "fail"
 
     def test_configure_invalid_plugin_class(self):
         """Шаг с несуществующим классом — логируется ошибка, шаг пропускается."""

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
@@ -113,6 +114,40 @@ class PluginContext:
         )
 
 
+def _noop_log(msg: str) -> None:
+    """No-op fallback для логирования в SubPluginContext."""
+
+
+@dataclass
+class SubPluginContext:
+    """Облегчённый контекст для вложенных плагинов (chain_executor, worker_pool).
+
+    Совместим с PluginContext по duck-typing — плагины используют
+    ctx.config, ctx.log_info, ctx.log_error, ctx.registers, ctx.command_manager.
+
+    Заменяет unittest.mock.MagicMock в production-коде.
+
+    Для логирования через LoggerManager фреймворка — передайте log_info/log_error
+    из родительского PluginContext::
+
+        sub_ctx = SubPluginContext(
+            config=sub_config,
+            log_info=self._ctx.log_info,
+            log_error=self._ctx.log_error,
+        )
+    """
+
+    process_name: str = "sub_plugin"
+    config: dict[str, Any] = field(default_factory=dict)
+    registers: Any = None
+    log_info: Callable[[str], None] = _noop_log
+    log_error: Callable[[str], None] = _noop_log
+    command_manager: Any = None
+    worker_manager: Any = None
+    router_manager: Any = None
+    memory_manager: Any = None
+
+
 class ProcessModulePlugin(ABC):
     """Единица поведения, подключаемая к GenericProcess.
 
@@ -190,6 +225,59 @@ class ProcessModulePlugin(ABC):
         """
         return None
 
+    def _init_register(self, ctx: PluginContext, register_cls: type | None = None) -> Any:
+        """Инициализировать register: managed (GUI) → локальный fallback → YAML overrides.
+
+        Порядок:
+          1. Если ctx.registers есть — берёт managed register (GUI видит и меняет)
+          2. Если нет — создаёт локальный экземпляр register_cls (defaults)
+          3. Применяет YAML overrides из ctx.config (inline-значения из topology)
+
+        Args:
+            ctx: PluginContext с config и registers.
+            register_cls: Класс регистра. Если None — берёт из self.register_class.
+
+        Returns:
+            Инстанс регистра (managed или локальный).
+
+        Raises:
+            ValueError: если register_cls не задан ни явно, ни через self.register_class.
+
+        Пример использования::
+
+            class MyPlugin(ProcessModulePlugin):
+                register_class = MyRegisters
+
+                def configure(self, ctx):
+                    self._ctx = ctx
+                    self._reg = self._init_register(ctx)
+        """
+        cls = register_cls or getattr(self, "register_class", None)
+        if cls is None:
+            raise ValueError(
+                f"Plugin '{self.name}': register_class не задан. "
+                f"Укажите register_class на классе или передайте register_cls аргументом."
+            )
+
+        # 1. Managed register (GUI видит)
+        reg = None
+        if ctx.registers is not None:
+            managed = ctx.registers.get_register(self.name)
+            # Проверяем что managed — реальный SchemaBase, а не mock
+            if managed is not None and hasattr(type(managed), "model_fields"):
+                reg = managed
+
+        # 2. Fallback: локальный экземпляр
+        if reg is None:
+            reg = cls()
+
+        # 3. YAML overrides из config
+        for field_name in type(reg).model_fields:
+            if field_name in ctx.config:
+                setattr(reg, field_name, ctx.config[field_name])
+
+        return reg
+
     def process(self, items: list[dict]) -> list[dict]:
         """Обработка items. Override в processing/output-плагинах.
 
@@ -223,11 +311,11 @@ class ProcessModulePlugin(ABC):
         Команды из self.commands регистрируются автоматически (GenericProcess).
         """
 
-    @abstractmethod
     def start(self, ctx: PluginContext) -> None:
         """Запуск после configure всех плагинов. Создание воркеров.
 
         Transition: READY → RUNNING.
+        Default: no-op. Override при необходимости (воркеры, фоновые задачи).
         """
 
     def pause(self, ctx: PluginContext) -> None:

@@ -57,13 +57,18 @@ class TestConfigure:
 
         plugin.configure(ctx)
 
-        assert plugin._lower.tolist() == [10, 30, 40]
-        assert plugin._upper.tolist() == [170, 200, 220]
-        assert plugin._min_area == 50
-        assert plugin._max_area == 5000
-        assert plugin._draw_contours is True
-        assert plugin._contour_color == [255, 0, 0]
-        assert plugin._contour_thickness == 3
+        # После рефакторинга все параметры в self._reg (register)
+        assert plugin._reg.h_min == 10
+        assert plugin._reg.h_max == 170
+        assert plugin._reg.s_min == 30
+        assert plugin._reg.s_max == 200
+        assert plugin._reg.v_min == 40
+        assert plugin._reg.v_max == 220
+        assert plugin._reg.min_area == 50
+        assert plugin._reg.max_area == 5000
+        assert plugin._reg.draw_contours is True
+        assert plugin._reg.contour_color_bgr == [255, 0, 0]
+        assert plugin._reg.contour_thickness == 3
 
 
 class TestProcess:
@@ -231,30 +236,32 @@ class TestCommands:
         })
 
         assert response["status"] == "ok"
-        assert plugin._lower.tolist() == [20, 40, 60]
-        assert plugin._upper.tolist() == [160, 210, 230]
+        assert plugin._reg.h_min == 20
+        assert plugin._reg.h_max == 160
+        assert plugin._reg.s_min == 40
+        assert plugin._reg.s_max == 210
 
     def test_cmd_set_area_range(self):
-        """set_area_range обновляет _min_area и _max_area."""
+        """set_area_range обновляет min_area и max_area в register."""
         plugin = BlobDetectorPlugin()
         plugin.configure(_make_mock_ctx({}))
 
         response = plugin.set_area_range({"min_area": 200, "max_area": 8000})
 
         assert response["status"] == "ok"
-        assert plugin._min_area == 200
-        assert plugin._max_area == 8000
+        assert plugin._reg.min_area == 200
+        assert plugin._reg.max_area == 8000
 
     def test_cmd_toggle_draw(self):
-        """toggle_draw_contours переключает _draw_contours."""
+        """toggle_draw_contours переключает draw_contours в register."""
         plugin = BlobDetectorPlugin()
         plugin.configure(_make_mock_ctx({"draw_contours": False}))
 
-        assert plugin._draw_contours is False
+        assert plugin._reg.draw_contours is False
 
         response = plugin.toggle_draw_contours({})
         assert response["status"] == "ok"
-        assert plugin._draw_contours is True
+        assert plugin._reg.draw_contours is True
 
         plugin.toggle_draw_contours({})
-        assert plugin._draw_contours is False
+        assert plugin._reg.draw_contours is False

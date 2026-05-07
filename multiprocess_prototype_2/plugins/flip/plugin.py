@@ -38,9 +38,6 @@ class FlipPlugin(ProcessModulePlugin):
         """Настройка (параметров нет -- stateless)."""
         ctx.log_info("FlipPlugin: configured")
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     @for_each
     def process(self, item: dict) -> dict | None:
         """Переворот: cv2.flip(frame, 0). Все метаданные пробрасываются."""

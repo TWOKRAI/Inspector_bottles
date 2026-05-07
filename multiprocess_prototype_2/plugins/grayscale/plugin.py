@@ -39,9 +39,6 @@ class GrayscalePlugin(ProcessModulePlugin):
         """Настройка (параметров нет -- stateless)."""
         ctx.log_info("GrayscalePlugin: configured")
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     @for_each
     def process(self, item: dict) -> dict | None:
         """BGR -> Gray -> BGR 3ch. Все метаданные пробрасываются."""

@@ -38,9 +38,6 @@ class NegativePlugin(ProcessModulePlugin):
         """Настройка (параметров нет -- stateless)."""
         ctx.log_info("NegativePlugin: configured")
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     @for_each
     def process(self, item: dict) -> dict | None:
         """Инверсия: 255 - frame. Все метаданные пробрасываются."""

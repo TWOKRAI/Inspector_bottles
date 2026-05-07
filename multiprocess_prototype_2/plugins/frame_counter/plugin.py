@@ -40,9 +40,6 @@ class FrameCounterPlugin(ProcessModulePlugin):
         self._ctx = ctx
         ctx.log_info("FrameCounterPlugin: configured")
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     def shutdown(self, ctx: PluginContext) -> None:
         """Финальная статистика."""
         ctx.log_info(f"FrameCounterPlugin: shutdown. Всего кадров: {self._frame_count}")

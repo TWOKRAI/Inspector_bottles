@@ -53,9 +53,6 @@ class RegionSplitPlugin(ProcessModulePlugin):
             f"regions={region_names}, total={self._total_regions}"
         )
 
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
-
     @for_each
     def process(self, item: dict) -> list[dict] | None:
         """1:N fan-out: нарезка кадра на регионы.
