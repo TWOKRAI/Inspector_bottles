@@ -63,7 +63,8 @@ def run_gui(process: "GuiProcess") -> None:
     window.set_image_panel(image_panel)
 
     # 5. Создать TabFactory и заполнить табы
-    tab_factory = TabFactory(ctx)
+    from .widgets.tabs.settings import SettingsTab
+    tab_factory = TabFactory(ctx, custom_factories={"settings": SettingsTab.create})
     tab_factory.create_tabs(window.tab_widget)
 
     # 6. Подключить bridge callbacks
