@@ -1,7 +1,9 @@
 """app.py — запуск Qt event loop для GuiProcess."""
 from __future__ import annotations
 
+import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
@@ -16,6 +18,11 @@ from .styles.theme_loader import apply_default_theme
 if TYPE_CHECKING:
     from .process import GuiProcess
 
+logger = logging.getLogger(__name__)
+
+# Папка с плагинами прототипа: multiprocess_prototype_2/plugins/
+_PLUGINS_DIR = Path(__file__).resolve().parents[1] / "plugins"
+
 
 def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
@@ -24,8 +31,23 @@ def run_gui(process: "GuiProcess") -> None:
     # 1. Применить тему
     apply_default_theme(app)
 
-    # 2. Создать AppContext
-    ctx = build_app_context(process)
+    # 2. Сканировать плагины и построить RegistersManagerV2
+    from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
+    from multiprocess_prototype_2.registers.manager import RegistersManagerV2
+
+    try:
+        PluginRegistry.discover(str(_PLUGINS_DIR))
+    except Exception as e:
+        logger.warning("Не удалось обнаружить плагины: %s", e)
+
+    registers_manager = RegistersManagerV2.from_registry(PluginRegistry)
+
+    # 3. Создать AppContext
+    ctx = build_app_context(
+        process,
+        plugin_registry=PluginRegistry,
+        registers_manager=registers_manager,
+    )
 
     # 3. Создать MainWindow
     window = MainWindow()

@@ -9,6 +9,7 @@ from .bridge.command_sender import CommandSender
 if TYPE_CHECKING:
     from .process import GuiProcess
     from .bridge import DataReceiverBridge
+    from multiprocess_prototype_2.registers.manager import RegistersManagerV2
 
 
 @dataclass
@@ -29,13 +30,29 @@ class AppContext:
         """Доступ к extras по ключу."""
         return self.extras.get(key, default)
 
+    def registers_manager(self) -> "RegistersManagerV2 | None":
+        """Вернуть RegistersManagerV2 из extras, если был передан при сборке контекста."""
+        return self.extras.get("registers_manager")
 
-def build_app_context(process: "GuiProcess", config: dict | None = None) -> AppContext:
+    def plugin_registry(self) -> Any | None:
+        """Вернуть PluginRegistry из extras, если был передан при сборке контекста."""
+        return self.extras.get("plugin_registry")
+
+
+def build_app_context(
+    process: "GuiProcess",
+    config: dict | None = None,
+    *,
+    plugin_registry: Any | None = None,
+    registers_manager: "RegistersManagerV2 | None" = None,
+) -> AppContext:
     """Собрать AppContext из GuiProcess.
 
     Args:
         process: инициализированный GuiProcess (с _bridge)
         config: дополнительная конфигурация приложения
+        plugin_registry: глобальный каталог плагинов (опционально)
+        registers_manager: менеджер регистров v2 (опционально)
 
     Returns:
         Готовый AppContext для передачи в GUI-компоненты
@@ -53,10 +70,17 @@ def build_app_context(process: "GuiProcess", config: dict | None = None) -> AppC
 
     command_sender = CommandSender(process)
 
+    # Собираем extras с опциональными зависимостями
+    extras: dict[str, Any] = {}
+    if plugin_registry is not None:
+        extras["plugin_registry"] = plugin_registry
+    if registers_manager is not None:
+        extras["registers_manager"] = registers_manager
+
     return AppContext(
         process=process,
         command_sender=command_sender,
         bridge=bridge,
         config=config or {},
-        extras={},
+        extras=extras,
     )

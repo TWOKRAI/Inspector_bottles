@@ -198,3 +198,79 @@ class TestBuildAppContext:
         ctx2 = build_app_context(process)
 
         assert ctx1.command_sender is not ctx2.command_sender
+
+
+# ---------------------------------------------------------------------------
+# Тесты расширения AppContext: plugin_registry / registers_manager (Task 10A.1)
+# ---------------------------------------------------------------------------
+
+
+class TestAppContextExtras:
+    """Тесты методов-аксессоров и kwargs plugin_registry/registers_manager."""
+
+    def test_registers_manager_stored_in_extras(self):
+        """build_app_context сохраняет registers_manager в extras["registers_manager"]."""
+        process = _make_mock_process(has_bridge=True)
+        mock_rm = MagicMock(name="RegistersManagerV2")
+
+        ctx = build_app_context(process, registers_manager=mock_rm)
+
+        assert ctx.extras.get("registers_manager") is mock_rm
+
+    def test_plugin_registry_stored_in_extras(self):
+        """build_app_context сохраняет plugin_registry в extras["plugin_registry"]."""
+        process = _make_mock_process(has_bridge=True)
+        mock_registry = MagicMock(name="PluginRegistry")
+
+        ctx = build_app_context(process, plugin_registry=mock_registry)
+
+        assert ctx.extras.get("plugin_registry") is mock_registry
+
+    def test_accessor_returns_none_when_absent(self):
+        """registers_manager() и plugin_registry() возвращают None если не переданы."""
+        process = _make_mock_process(has_bridge=True)
+
+        ctx = build_app_context(process)
+
+        assert ctx.registers_manager() is None
+        assert ctx.plugin_registry() is None
+
+    def test_accessor_returns_instance_when_present(self):
+        """registers_manager() и plugin_registry() возвращают переданные объекты."""
+        process = _make_mock_process(has_bridge=True)
+        mock_rm = MagicMock(name="RegistersManagerV2")
+        mock_registry = MagicMock(name="PluginRegistry")
+
+        ctx = build_app_context(
+            process,
+            plugin_registry=mock_registry,
+            registers_manager=mock_rm,
+        )
+
+        assert ctx.registers_manager() is mock_rm
+        assert ctx.plugin_registry() is mock_registry
+
+    def test_extras_extra_kwargs_optional(self):
+        """build_app_context без новых kwargs сохраняет BC — extras пустой."""
+        process = _make_mock_process(has_bridge=True)
+
+        ctx = build_app_context(process)
+
+        # extras пуст: новые ключи не появились
+        assert "registers_manager" not in ctx.extras
+        assert "plugin_registry" not in ctx.extras
+
+    def test_two_contexts_independent_extras(self):
+        """Два AppContext с разными kwargs имеют независимые extras."""
+        process = _make_mock_process(has_bridge=True)
+        mock_rm_1 = MagicMock(name="RegistersManagerV2_1")
+        mock_rm_2 = MagicMock(name="RegistersManagerV2_2")
+
+        ctx1 = build_app_context(process, registers_manager=mock_rm_1)
+        ctx2 = build_app_context(process, registers_manager=mock_rm_2)
+
+        assert ctx1.registers_manager() is mock_rm_1
+        assert ctx2.registers_manager() is mock_rm_2
+        assert ctx1.registers_manager() is not ctx2.registers_manager()
+        # extras — разные объекты
+        assert ctx1.extras is not ctx2.extras
