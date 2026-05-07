@@ -8,10 +8,10 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .app_context import build_app_context
-from .styles.theme_loader import apply_default_theme
-from .tab_factory import TabFactory
-from .widgets.image_panel import ImagePanelWidget
 from .windows.main_window import MainWindow
+from .widgets.image_panel import ImagePanelWidget
+from .tab_factory import TabFactory
+from .styles.theme_loader import apply_default_theme
 
 if TYPE_CHECKING:
     from .process import GuiProcess
@@ -28,7 +28,7 @@ def run_gui(process: "GuiProcess") -> None:
     ctx = build_app_context(process)
 
     # 3. Создать MainWindow
-    window = MainWindow(config=ctx.config)
+    window = MainWindow()
 
     # 4. Создать и установить ImagePanel
     image_panel = ImagePanelWidget()
@@ -39,7 +39,7 @@ def run_gui(process: "GuiProcess") -> None:
     tab_factory.create_tabs(window.tab_widget)
 
     # 6. Подключить bridge callbacks
-    _setup_bridge_callbacks(ctx, image_panel, window)
+    _setup_bridge_callbacks(process, image_panel, window)
 
     # 7. Запустить таймеры (fps, safety)
     _setup_timers(app, process, window)
@@ -53,11 +53,11 @@ def run_gui(process: "GuiProcess") -> None:
 
 
 def _setup_bridge_callbacks(
-    ctx: "AppContext",
+    process: "GuiProcess",
     image_panel: ImagePanelWidget,
     window: MainWindow,
 ) -> None:
-    """Подключить bridge callbacks для кадров и состояния."""
+    """Подключить bridge signals к виджетам."""
     _frame_trace_cnt = 0
 
     def _on_frame_received(msg_dict: dict) -> None:
@@ -67,7 +67,7 @@ def _setup_bridge_callbacks(
         frame = msg_dict.get("frame")
 
         if _frame_trace_cnt % 30 == 1:
-            ctx.process._log_info(
+            process._log_info(
                 f"[TRACE] _on_frame_received #{_frame_trace_cnt}: "
                 f"has_frame={frame is not None}, "
                 f"frame_shape={frame.shape if frame is not None and hasattr(frame, 'shape') else None}, "
@@ -79,15 +79,9 @@ def _setup_bridge_callbacks(
         if frame is not None:
             image_panel.display_frame("main", frame)
             window.increment_frame_count()
-        elif _frame_trace_cnt % 30 == 1:
-            ctx.process._log_info(
-                f"[TRACE] _on_frame_received: frame is None! "
-                f"msg keys={list(msg_dict.keys())}",
-                module="gui",
-            )
 
-    ctx.bridge.set_frame_callback(_on_frame_received)
-    # state callback — пока noop (ProcessStatusWidget убран, будет в табе Processes Phase 10+)
+    process._bridge.set_frame_callback(_on_frame_received)
+    # State callback — будет интегрирован в таб Processes (Phase 10+)
 
 
 def _setup_timers(
@@ -95,8 +89,8 @@ def _setup_timers(
     process: "GuiProcess",
     window: MainWindow,
 ) -> None:
-    """Настроить FPS и safety таймеры."""
-    # FPS таймер: раз в секунду считать fps и обновлять StatusBar
+    """FPS таймер + safety таймер."""
+    # FPS таймер: раз в секунду
     fps_timer = QTimer()
     fps_timer.setInterval(1000)
 
@@ -107,21 +101,20 @@ def _setup_timers(
     fps_timer.timeout.connect(_update_fps)
     fps_timer.start()
 
-    # Safety-таймер: проверяем флаг остановки каждую секунду
+    # Safety таймер: проверяем флаг остановки
     safety_timer = QTimer()
     safety_timer.setInterval(1000)
 
     def _check_stop() -> None:
-        """Завершить Qt loop если процесс запросил остановку."""
         if process.should_stop():
             app.quit()
 
     safety_timer.timeout.connect(_check_stop)
     safety_timer.start()
 
-    # При выходе из Qt — сигнализируем процессу об остановке
+    # При выходе из Qt — сигнализируем процессу
     app.aboutToQuit.connect(lambda: setattr(process, '_stop_requested', True))
 
-    # Сохранить ссылки на таймеры чтобы GC не собрал
+    # Сохранить ссылки на таймеры чтобы GC не убил их
     window._fps_timer = fps_timer
     window._safety_timer = safety_timer
