@@ -9,10 +9,12 @@
     Subscription        — описание одной подписки
     match_pattern       — публичный алиас для glob-матчинга паттерна с путём (ADR-SS-004)
     split_pattern       — публичный алиас для кэшированного split паттерна (ADR-SS-004)
+    iter_matches        — обход дерева по glob-паттерну (генератор пар path/value)
 """
 from .delta import Delta, MISSING, Transaction
 from .tree_store import TreeStore
 from .subscription_manager import SubscriptionManager, Subscription, match_pattern, split_pattern
+from .glob_walker import iter_matches
 
 __all__ = [
     "TreeStore",
@@ -23,4 +25,5 @@ __all__ = [
     "Subscription",
     "match_pattern",
     "split_pattern",
+    "iter_matches",
 ]

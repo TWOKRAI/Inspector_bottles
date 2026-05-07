@@ -13,77 +13,24 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..core.delta import Delta
 from ..core.subscription_manager import SubscriptionManager
-from ..core import match_pattern, split_pattern
+from ..core import iter_matches, match_pattern, split_pattern
 from ..core.tree_store import TreeStore
 
 
 # ---------------------------------------------------------------------------
-# Утилита: сбор значений по glob-паттерну из дерева
+# Совместимость: тонкая обёртка над общим iter_matches.
+# Сохранена ради тестов test_selectors.py, которые проверяют сбор по паттерну
+# через приватный helper. Реальная логика обхода теперь живёт в
+# core/glob_walker.py — единый walker для всего модуля.
 # ---------------------------------------------------------------------------
 
-def _collect_values_by_pattern(
-    root: Dict[str, Any],
-    pattern: str,
-) -> Dict[str, Any]:
-    """Обходит дерево и собирает все leaf-значения, чей путь совпадает с паттерном.
+def _collect_values_by_pattern(root: Dict[str, Any], pattern: str) -> Dict[str, Any]:
+    """Собрать `{полный_точечный_путь: значение}` по glob-паттерну.
 
-    Паттерн поддерживает '*' (один сегмент) и '**' (ноль и более сегментов).
-
-    Returns:
-        dict {полный_точечный_путь: значение} для всех совпавших узлов.
-
-    Пример:
-        pattern = "cameras.*.state.actual_fps"
-        root = {"cameras": {"0": {"state": {"actual_fps": 29.8}},
-                            "1": {"state": {"actual_fps": 24.5}}}}
-        → {"cameras.0.state.actual_fps": 29.8,
-           "cameras.1.state.actual_fps": 24.5}
+    Тонкая обёртка над `core.iter_matches`. Оставлена для обратной
+    совместимости с тестами/прикладным кодом, импортировавшим этот хелпер.
     """
-    pattern_segs = split_pattern(pattern)
-    result: Dict[str, Any] = {}
-    _walk(root, pattern_segs, 0, [], result)
-    return result
-
-
-def _walk(
-    node: Any,
-    pattern_segs: tuple[str, ...],
-    depth: int,
-    current_path: List[str],
-    result: Dict[str, Any],
-) -> None:
-    """Рекурсивный обход дерева с матчингом паттерна.
-
-    Когда паттерн полностью исчерпан — записываем текущий node как значение.
-    """
-    # Паттерн исчерпан — мы нашли совпадение
-    if depth >= len(pattern_segs):
-        full_path = ".".join(current_path)
-        result[full_path] = node
-        return
-
-    # Если текущий узел не dict — дальше идти некуда
-    if not isinstance(node, dict):
-        return
-
-    seg = pattern_segs[depth]
-
-    if seg == "**":
-        # '**' может поглотить 0 сегментов: пропускаем ** и идём дальше
-        _walk(node, pattern_segs, depth + 1, current_path, result)
-        # '**' может поглотить 1+ сегментов: съедаем один уровень, остаёмся на **
-        for key, child in node.items():
-            _walk(child, pattern_segs, depth, current_path + [key], result)
-
-    elif seg == "*":
-        # '*' — ровно один сегмент (любой ключ)
-        for key, child in node.items():
-            _walk(child, pattern_segs, depth + 1, current_path + [key], result)
-
-    else:
-        # Конкретный ключ
-        if seg in node:
-            _walk(node[seg], pattern_segs, depth + 1, current_path + [seg], result)
+    return dict(iter_matches(root, pattern))
 
 
 # ---------------------------------------------------------------------------
@@ -156,12 +103,12 @@ class Selector:
         Returns:
             Новое вычисленное значение.
         """
-        # Собираем значения по всем паттернам зависимостей
+        # Собираем значения по всем паттернам зависимостей через единый walker
         values: Dict[str, Any] = {}
         root = store.get_subtree("")
         for pattern in self._dependencies:
-            matched = _collect_values_by_pattern(root, pattern)
-            values.update(matched)
+            for path, value in iter_matches(root, pattern):
+                values[path] = value
 
         # Вычисляем новое значение
         new_value = self._compute(values)
