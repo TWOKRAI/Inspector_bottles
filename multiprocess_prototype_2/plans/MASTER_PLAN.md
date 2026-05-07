@@ -536,6 +536,21 @@ MainWindow (v1 дизайн)
     ├── Tab 5: Processes (Phase 9)
     ├── Tab 6: Recipes (Phase 10)
     └── Tab 7: Settings (Phase 9)
+
+
+хочу что то типо такого наверное. надо обсудить!!
+MainWindow (v2 дизайн)
+├── AppHeader (лого, кнопки, search)
+├── ImagePanel (отображение кадров из SHM)
+└── TabWidget
+    └── Tab 1: Settings (Phase 9)
+    └── Tab 2: Recipes (Phase 10)
+    └── Tab 3: Processes (Phase 9)
+    └── Tab 4: Services
+    └── Tab 5: Plugins
+    └── Tab 6: Pipeline (Phase 12) (цепочки обработок)
+    └── Tab 7: Дисплеи 
+
 ```
 
 ### Task 9.1 — FrontendAppContext v2

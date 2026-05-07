@@ -74,7 +74,7 @@ def test_main_window_tabs(qtbot):
 
     window.add_tab(dummy, "Camera")
 
-    assert window._tabs.count() == 1
+    assert window.tab_widget.count() == 1
 
 
 def test_main_window_fps_counter(qtbot):
