@@ -1,190 +1,316 @@
-# Plan: Phase 7 — Registers v2 (Plugin-Driven)
+# Plan: Phase 7 — Registers v2 (Plugin-Embedded)
 
 ## Context
 
-Phase 6 DONE (163 теста, 10 задач). Phase 7 = система регистров, автоматически строящаяся из plugin-конфигов.
-
-**Текущее состояние:**
-- `register_schema()` метод уже есть в `ProcessModulePlugin` (возвращает None)
-- Только `color_mask` реализует его (возвращает `ColorMaskRegisters`)
-- `FieldMeta` полностью готова (validation, i18n, access_level, min/max, routing)
-- `PluginRegistry.discover()` работает
-- Все 19 плагинов имеют `config.py` с `PluginConfig` наследниками и `Annotated[type, FieldMeta(...)]`
-- `SchemaRegistry` (data_schema_module) хранит все зарегистрированные schema
-
-**Ключевой инсайт:** config.py каждого плагина УЖЕ содержит полную Pydantic-схему с FieldMeta. НЕ нужно создавать отдельные register-классы для каждого плагина — можно извлекать схему из PluginConfig напрямую.
+В `multiprocess_prototype_2` существует скрытое дублирование: поля `h_min/h_max/s_min/...` описаны и в [plugins/color_mask/config.py](../plugins/color_mask/config.py) (как `ColorMaskPluginConfig.h_min`), и в [registers/color_mask.py](../registers/color_mask.py) (как `ColorMaskRegisters.min_h`) — два класса с разными именами полей описывают пересекающиеся данные. В [plugins/color_mask/plugin.py:65-71](../plugins/color_mask/plugin.py) есть hardcoded mapping между ними, который и есть симптом проблемы.
 
 ---
 
-## Task 7.1 — Plugin Config Schema Protocol
+## Выбранный подход: V3_MY_PURE
 
-**Goal:** Каждый плагин экспортирует Pydantic-схему конфига через стандартный метод.
-**Level:** Middle (Sonnet)
-**Files:**
-- `multiprocess_framework/modules/process_module/plugins/base.py` — добавить `config_schema() → type[PluginConfig] | None`
-- Все 19 плагинов — добавить `config_schema()` (возвращает свой PluginConfig class)
+> **Решение принято 2026-05-07.** Сравнение 6 вариантов — в [`plugins/color_mask/_pilots/README.md`](../plugins/color_mask/_pilots/README.md).
 
-**Логика:**
-```python
-# В base.py:
-@classmethod
-def config_schema(cls) -> type | None:
-    """Pydantic-модель конфига плагина для RegistersManager/GUI."""
-    return None
+### Принцип
 
-# В каждом plugin.py:
-@classmethod
-def config_schema(cls) -> type:
-    from .config import BlobDetectorConfig
-    return BlobDetectorConfig
+**Register = самодостаточный модуль плагина** (все параметры + memory + FieldMeta).
+**Config = identity + routing** (plugin_class, plugin_name, category, register_bindings).
+**Plugin = самодостаточен** — создаёт локальный register если RegistersManager нет.
+
+```
+Plugin (работает на defaults)
+  ├── Config attached? → identity + register_bindings (YAML discovery)
+  └── Register attached? → ВСЕ параметры + memory + FieldMeta
+       managed (RegistersManager → GUI) или локальный (defaults)
 ```
 
-**Steps:**
-1. Добавить `config_schema()` classmethod в `ProcessModulePlugin`
-2. Для каждого из 19 плагинов — override с lazy import своего Config class
-3. Обновить `PluginEntry` в registry.py: хранить `config_schema` при регистрации
-4. Тесты: 5+ (проверить что все плагины возвращают schema, schema имеет fields)
+### Контракт
 
-**Acceptance:**
-- [ ] `plugin.config_schema()` → Pydantic model class
-- [ ] Модель содержит Annotated fields с FieldMeta
-- [ ] Все 19 плагинов имеют config_schema
+```python
+# plugins/color_mask/registers.py — ВСЕ параметры + memory
+@register_schema("ColorMaskRegistersV3")
+class ColorMaskRegisters(SchemaBase):
+    camera_id: Annotated[int, FieldMeta("ID камеры")] = 0
+    resolution_width: Annotated[int, FieldMeta("Ширина кадра", unit="px")] = 640
+    resolution_height: Annotated[int, FieldMeta("Высота кадра", unit="px")] = 480
+
+    h_min: Annotated[int, FieldMeta("Min Hue", min=0, max=179, unit="°")] = 0
+    h_max: Annotated[int, FieldMeta("Max Hue", min=0, max=179, unit="°")] = 179
+    s_min: Annotated[int, FieldMeta("Min Saturation", min=0, max=255)] = 50
+    s_max: Annotated[int, FieldMeta("Max Saturation", min=0, max=255)] = 255
+    v_min: Annotated[int, FieldMeta("Min Value", min=0, max=255)] = 50
+    v_max: Annotated[int, FieldMeta("Max Value", min=0, max=255)] = 255
+
+    @property
+    def memory(self) -> dict[str, Any] | None:
+        return {
+            f"mask_{self.camera_id}": (self.resolution_height, self.resolution_width, 1),
+            "coll": 1,
+        }
+```
+
+```python
+# plugins/color_mask/config.py — identity + binding
+@register_schema("ColorMaskPluginConfigV3")
+class ColorMaskPluginConfig(PluginConfig):
+    plugin_class: str = "...ColorMaskPlugin"
+    plugin_name: str = "color_mask"
+    category: str = "processing"
+    register_bindings: ClassVar[list[type[SchemaBase]]] = [ColorMaskRegisters]
+```
+
+```python
+# plugins/color_mask/plugin.py — self-contained
+def configure(self, ctx):
+    cfg = ctx.config
+    self._reg = (ctx.registers.get_register(self.name) if ctx.registers else None) or ColorMaskRegisters()
+    # YAML overrides → синхронизируем в register
+    for field in self._reg.model_fields:
+        if field in cfg:
+            setattr(self._reg, field, cfg[field])
+
+def process(self, item):
+    # ВСЕГДА через self._reg — никаких if/else
+    lower = np.array([self._reg.h_min, self._reg.s_min, self._reg.v_min])
+    upper = np.array([self._reg.h_max, self._reg.s_max, self._reg.v_max])
+```
+
+### Целевая файловая структура
+
+```
+plugins/color_mask/
+├── __init__.py
+├── plugin.py        # ColorMaskPlugin (self-contained)
+├── config.py        # ColorMaskPluginConfig (identity + register_bindings)
+└── registers.py     # ColorMaskRegisters (все параметры + memory + FieldMeta)
+
+multiprocess_prototype_2/registers/
+├── __init__.py
+├── manager.py       # RegistersManager v2 (Task 7.3)
+├── connection_map.py# ConnectionMap (Task 7.4)
+├── field_info.py    # FieldInfo dataclass
+└── shared/          # cross-plugin регистры
+    ├── processing_node.py
+    ├── frame_message.py
+    └── detection.py
+```
+
+### FW-рефактор (~13 строк)
+
+**1. `PluginConfig` — `extra="allow"` (~3 строки)**
+
+```python
+# generic_process_config.py
+class PluginConfig(SchemaBase):
+    model_config = ConfigDict(extra="allow", validate_assignment=True, populate_by_name=True)
+```
+
+**2. `from_plugins()` — memory из register (~10 строк)**
+
+```python
+for pc in plugin_configs:
+    mem = pc.memory
+    if hasattr(pc, 'register_bindings') and pc.register_bindings:
+        extras = getattr(pc, '__pydantic_extra__', {}) or {}
+        for reg_cls in pc.register_bindings:
+            reg_fields = {k: v for k, v in extras.items() if k in reg_cls.model_fields}
+            reg = reg_cls(**reg_fields)
+            if hasattr(reg, 'memory') and reg.memory:
+                mem = reg.memory
+    if mem:
+        merged_memory.update(mem)
+```
+
+### Анти-паттерны
+
+- **Не пишем** HSV-поля в config.py — они живут только в registers.py.
+- **Не дублируем** camera_id/resolution в обоих файлах.
+- **Не делаем** register наследником config (это подход V3_INHERIT — отвергнут).
+- **Не вводим** `FieldMeta(bind="...")` точечный mapping.
 
 ---
 
-## Task 7.2 — RegistersManager v2
+## Tasks
 
-**Goal:** Менеджер, собирающий config-схемы из PluginRegistry автоматически.
-**Level:** Middle+ (Sonnet)
+### Task 7.0 — FW: PluginConfig extra="allow" + from_plugins() memory proxy
+
+**Goal:** Минимальный FW-рефактор чтобы V3_MY_PURE работал.
+
 **Files:**
-- `multiprocess_prototype_2/registers/manager.py` (новый)
-- `multiprocess_prototype_2/registers/field_info.py` (новый)
-
-**Архитектура:**
-```python
-class FieldInfo:
-    """Описание одного поля регистра для GUI."""
-    plugin_name: str
-    field_name: str
-    field_type: type
-    default: Any
-    meta: FieldMeta | None     # description, min, max, unit, etc.
-    current_value: Any
-
-class RegistersManager:
-    """Автоматически строит регистры из plugin config schemas."""
-    
-    @classmethod
-    def from_registry(cls, registry: PluginRegistry) -> RegistersManager:
-        """Сканирует все плагины, извлекает config schemas."""
-    
-    @classmethod
-    def from_topology(cls, topology: dict) -> RegistersManager:
-        """Строит из topology YAML (знает какие плагины с каким конфигом)."""
-    
-    def get_plugins(self) -> list[str]
-    def get_fields(self, plugin_name: str) -> list[FieldInfo]
-    def get_value(self, plugin_name: str, field_name: str) -> Any
-    def set_value(self, plugin_name: str, field_name: str, value: Any) -> bool
-    def get_categories(self) -> dict[str, list[str]]  # category → [plugin_names]
-    def validate(self, plugin_name: str, field_name: str, value: Any) -> tuple[bool, str|None]
-    def to_dict(self, plugin_name: str) -> dict  # snapshot текущих значений
-```
-
-**Извлечение FieldMeta из Pydantic model:**
-```python
-for field_name, field_info in config_class.model_fields.items():
-    # field_info.metadata содержит FieldMeta если Annotated
-    meta = None
-    for m in field_info.metadata:
-        if isinstance(m, FieldMeta):
-            meta = m
-            break
-    # field_info.default — значение по умолчанию
-    # field_info.annotation — тип
-```
+- [generic_process_config.py](../../multiprocess_framework/modules/process_module/generic/generic_process_config.py) — `extra="allow"` в PluginConfig + memory proxy в `from_plugins()`
 
 **Steps:**
-1. Создать `FieldInfo` dataclass
-2. Создать `RegistersManager` с from_registry() и from_topology()
-3. Извлечение FieldMeta из `model_fields.metadata`
-4. get/set/validate через Pydantic validation
-5. Тесты: 12+ (from_registry, from_topology, get/set, validation, categories)
+1. Добавить `model_config = ConfigDict(extra="allow")` в `PluginConfig` (или дополнить существующий)
+2. В `from_plugins()` — если у PluginConfig есть `register_bindings`, инстанцировать register из extra-полей и взять `memory` оттуда
+3. Тесты: существующие плагины работают без изменений
 
 **Acceptance:**
-- [ ] RegistersManager строится из PluginRegistry автоматически
-- [ ] get/set по plugin_name.field_name
+- [ ] `PluginConfig` принимает extra-поля без ошибок
+- [ ] `from_plugins()` корректно вычисляет memory через register
+- [ ] Существующие тесты проходят
+- [ ] 3+ новых теста на extra + memory proxy
+
+---
+
+### Task 7.1 — Reference implementation: color_mask
+
+**Goal:** Реализовать V3_MY_PURE паттерн на color_mask.
+
+**Files:**
+- `plugins/color_mask/registers.py` — **новый** (все параметры + memory + FieldMeta)
+- `plugins/color_mask/config.py` — убрать все поля кроме identity, добавить register_bindings
+- `plugins/color_mask/plugin.py` — паттерн self._reg always exists, убрать mapping
+- `registers/color_mask.py` — **удалить**
+
+**Steps:**
+1. Создать `plugins/color_mask/registers.py` (из `_pilots/v3_my_pure/registers.py`)
+2. Очистить `config.py` — оставить identity + register_bindings
+3. Рефакторить `plugin.py`:
+   - `configure()`: `self._reg = ... or ColorMaskRegisters()` + sync из cfg
+   - `process()`: всегда через `self._reg`
+   - `set_hsv_range()`: всегда через `self._reg`
+   - Убрать `self._lower` / `self._upper` numpy fallback
+4. Обновить импорты
+5. Удалить `registers/color_mask.py`
+6. Smoke: `python -m multiprocess_prototype_2.main --topology inspection_basic`
+
+**Acceptance:**
+- [ ] `process()` не содержит if/else для reg vs config
+- [ ] Plugin работает без RegistersManager (local register)
+- [ ] Plugin работает с RegistersManager (managed register)
+- [ ] YAML overrides HSV-полей синхронизируются в register
+- [ ] Smoke проходит
+
+**Зависимости:** Task 7.0 (extra="allow" нужен чтобы YAML-поля HSV не терялись)
+
+---
+
+### Task 7.2 — Plugin Schemas Protocol
+
+**Goal:** Стандартизировать `register_schema()` в `ProcessModulePlugin`.
+
+**Files:**
+- [base.py](../../multiprocess_framework/modules/process_module/plugins/base.py) — `register_schema()` → classmethod, возвращает **классы** (не instances)
+- [registry.py](../../multiprocess_framework/modules/process_module/plugins/registry.py) — `PluginEntry` хранит schema
+- [generic_process_config.py](../../multiprocess_framework/modules/process_module/generic/generic_process_config.py) — `register_bindings` в `PluginConfig` base
+
+**Acceptance:**
+- [ ] `Plugin.register_schema()` → list of SchemaBase classes
+- [ ] Default `register_schema()` возвращает `cls.config_schema().register_bindings`
+- [ ] 5+ тестов
+
+---
+
+### Task 7.3 — RegistersManager v2
+
+**Goal:** Менеджер собирает регистры из `register_bindings` всех плагинов.
+
+**Files:** `multiprocess_prototype_2/registers/manager.py` (новый), `field_info.py` (новый)
+
+**API:**
+- `RegistersManager.from_registry(registry) → RegistersManager`
+- `manager.get_register(plugin_name) → SchemaBase | None`
+- `manager.get_fields(plugin_name) → list[FieldInfo]`
+- `manager.set_value(plugin, field, value) → bool`
+- `manager.validate(plugin, field, value) → tuple[bool, str|None]`
+
+**Acceptance:**
+- [ ] Строится автоматически из PluginRegistry
 - [ ] Pydantic validation при set_value
-- [ ] FieldInfo содержит FieldMeta (min/max/description/unit)
+- [ ] FieldInfo содержит FieldMeta
 - [ ] 12+ тестов
 
 ---
 
-## Task 7.3 — Connection Map (Register → Process)
+### Task 7.4 — ConnectionMap
 
-**Goal:** Маппинг register field → target process + command для отправки изменений.
-**Level:** Middle (Sonnet)
-**Files:**
-- `multiprocess_prototype_2/registers/connection_map.py` (новый)
+**Goal:** Маппинг `(plugin_name, field_name) → (process_name, command_name, arg_key)` из YAML.
 
-**Логика:**
-```python
-class ConnectionMap:
-    """Маппинг: (plugin_name, field_name) → (process_name, command_name, arg_key)."""
-    
-    @classmethod
-    def from_topology(cls, topology: dict) -> ConnectionMap:
-        """Из topology YAML: plugin X запущен в process Y."""
-        # Для каждого process → для каждого plugin → запомнить process_name
-    
-    def resolve(self, plugin_name: str, field_name: str) -> tuple[str, str, str] | None:
-        """Вернуть (process_name, command_name, arg_key).
-        
-        command_name генерируется: 'set_{field_name}' или из commands dict плагина.
-        """
-    
-    def get_process(self, plugin_name: str) -> str | None:
-        """В каком процессе запущен плагин."""
-```
-
-**Steps:**
-1. Парсинг topology: `process.plugins[].plugin_name → process_name`
-2. Для каждого field → генерация command: проверить plugin.commands dict, иначе `set_{field}`
-3. resolve() → (process_name, command, arg_key)
-4. Тесты: 6+ (from_topology, resolve, missing plugin, multiple processes)
+**Files:** `multiprocess_prototype_2/registers/connection_map.py` (новый)
 
 **Acceptance:**
-- [ ] ConnectionMap строится из topology YAML
-- [ ] resolve() → (process_name, command_name, arg_key)
+- [ ] `resolve(plugin, field) → (process, command, arg_key)`
 - [ ] 6+ тестов
+
+---
+
+### Task 7.5 — Rollout на остальные 8 runtime-плагинов
+
+**Goal:** Применить V3_MY_PURE ко всем плагинам с runtime-параметрами.
+
+**Плагины:**
+- blob_detector, render_overlay, renderer_compositor
+- robot_control, database, frame_saver
+- chain_executor, worker_pool
+
+Для каждого: создать registers.py (параметры + memory если есть), очистить config.py, обновить plugin.py.
+
+---
+
+### Task 7.6 — Shared Registers Migration
+
+**Goal:** Перенести cross-plugin регистры в `registers/shared/`.
+
+**Files (move):**
+- `registers/pipeline/processing_node.py` → `registers/shared/processing_node.py`
+- Остальные cross-plugin — по мере появления
+
+---
+
+### Task 7.7 — Cleanup
+
+**Goal:** Удалить `_pilots/`, обновить документацию.
+
+- [ ] Удалить `plugins/color_mask/_pilots/`
+- [ ] Обновить `PHASE7_PLAN.md` — пометить завершённые таски
+- [ ] Обновить `MODULES_STATUS.md` если нужно
 
 ---
 
 ## Порядок выполнения
 
-1. **Task 7.1** — config_schema protocol (зависимость для 7.2)
-2. **Task 7.2 + 7.3** — параллельно (RegistersManager + ConnectionMap)
-3. Верификация: все тесты Phase 7
+1. **Task 7.0** — FW-рефактор (extra="allow" + memory proxy)
+2. **Task 7.1** — Reference: color_mask
+3. **Task 7.2** — Protocol в base.py
+4. **Task 7.3** + **Task 7.4** — параллельно (RegistersManager v2 + ConnectionMap)
+5. **Task 7.5** — Rollout на 8 плагинов
+6. **Task 7.6** — Shared registers
+7. **Task 7.7** — Cleanup
 
-## Справочники
+---
 
-- [base.py](multiprocess_framework/modules/process_module/plugins/base.py) — ProcessModulePlugin.register_schema()
-- [registry.py](multiprocess_framework/modules/process_module/plugins/registry.py) — PluginRegistry, PluginEntry, discover()
-- [generic_process_config.py](multiprocess_framework/modules/process_module/generic/generic_process_config.py) — PluginConfig
-- [field_meta.py](multiprocess_framework/modules/data_schema_module/core/field_meta.py) — FieldMeta с validation/i18n
-- [color_mask/plugin.py](multiprocess_prototype_2/plugins/color_mask/plugin.py) — пример register_schema()
-- [registers/color_mask.py](multiprocess_prototype_2/registers/color_mask.py) — пример SchemaBase register
-- [registers/__init__.py](multiprocess_prototype_2/registers/__init__.py) — convention mapping docs
+## Критические файлы
 
-## Верификация
+| Файл | Что делать |
+|------|-----------|
+| [generic_process_config.py](../../multiprocess_framework/modules/process_module/generic/generic_process_config.py) | Task 7.0: extra="allow" + memory proxy |
+| [base.py](../../multiprocess_framework/modules/process_module/plugins/base.py) | Task 7.2: register_schema() classmethod |
+| [registry.py](../../multiprocess_framework/modules/process_module/plugins/registry.py) | Task 7.2: PluginEntry + schema |
+| [plugins/color_mask/plugin.py](../plugins/color_mask/plugin.py) | Task 7.1: self._reg always exists |
+| [plugins/color_mask/config.py](../plugins/color_mask/config.py) | Task 7.1: identity only |
+| plugins/color_mask/registers.py | Task 7.1: **новый** — все параметры + memory |
+| [registers/color_mask.py](../registers/color_mask.py) | Task 7.1: **удалить** |
+| [_pilots/README.md](../plugins/color_mask/_pilots/README.md) | Сравнение 6 подходов (reference) |
+
+## Verification
 
 ```bash
-# Task 7.1
-python -m pytest multiprocess_prototype_2/tests/test_config_schema.py -v
+# Task 7.0
+python scripts/run_framework_tests.py
 
-# Task 7.2
-python -m pytest multiprocess_prototype_2/registers/tests/test_manager.py -v
+# Task 7.1
+python -m multiprocess_prototype_2.main --topology inspection_basic
+# Цвет фильтруется, GUI слайдеры работают
 
 # Task 7.3
+python -m pytest multiprocess_prototype_2/registers/tests/test_manager.py -v
+
+# Task 7.4
 python -m pytest multiprocess_prototype_2/registers/tests/test_connection_map.py -v
 ```
+
+## Что без изменений
+
+- `FieldMeta` готова — не трогаем
+- `PluginRegistry.discover()` работает — не трогаем
+- `SchemaRegistry` (data_schema_module) — не трогаем
+- Startup-only плагины (10 шт.) — **0 изменений** пока не появятся runtime-параметры

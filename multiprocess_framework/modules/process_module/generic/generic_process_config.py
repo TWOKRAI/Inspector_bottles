@@ -9,7 +9,9 @@ Dict at Boundary: plugins хранятся как list[dict] (model_dump()),
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, ClassVar
+
+from pydantic import ConfigDict
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..configs.process_launch_config import ProcessLaunchConfig
@@ -21,7 +23,17 @@ class PluginConfig(SchemaBase):
 
     Наследники добавляют plugin-specific поля.
     plugin_class + plugin_name — обязательные для GenericProcess.
+
+    extra="allow" — YAML-поля регистра (h_min, camera_id и т.п.)
+    сохраняются в __pydantic_extra__ и доступны через register_bindings
+    для вычисления memory при построении topology.
     """
+
+    model_config = ConfigDict(
+        extra="allow",
+        validate_assignment=True,
+        populate_by_name=True,
+    )
 
     plugin_class: Annotated[
         str,
@@ -37,6 +49,10 @@ class PluginConfig(SchemaBase):
         str,
         FieldMeta("Category", info="source | processing | output"),
     ] = ""
+
+    # Привязка к register-классам. Плагины с runtime-параметрами
+    # переопределяют: register_bindings = [MyRegisters]
+    register_bindings: ClassVar[list[type[SchemaBase]]] = []
 
     @property
     def memory(self) -> dict[str, Any] | None:
@@ -132,7 +148,24 @@ class GenericProcessConfig(ProcessLaunchConfig):
         # Агрегация SHM
         merged_memory: dict[str, Any] = {}
         for pc in plugin_configs:
-            mem = pc.memory
+            mem = pc.memory  # стандартный путь (для плагинов без register)
+
+            # V3_MY_PURE: если есть register_bindings — memory из register
+            if hasattr(pc, "register_bindings") and pc.register_bindings:
+                extras = getattr(pc, "__pydantic_extra__", None) or {}
+                for reg_cls in pc.register_bindings:
+                    # Собираем только поля, известные register-классу
+                    reg_fields = {
+                        k: v for k, v in extras.items()
+                        if k in reg_cls.model_fields
+                    }
+                    reg = reg_cls(**reg_fields)
+                    reg_mem = getattr(reg, "memory", None)
+                    if callable(reg_mem):
+                        reg_mem = reg_mem()
+                    if reg_mem:
+                        mem = reg_mem
+
             if mem:
                 merged_memory.update(mem)
 
