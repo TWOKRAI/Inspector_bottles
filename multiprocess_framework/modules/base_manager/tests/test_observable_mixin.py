@@ -181,10 +181,16 @@ class TestObservableMixin:
         m.log_info("public")
         assert logger.logs == [('info', 'private'), ('info', 'public')]
 
-    def test_no_auto_proxy_no_public_methods(self):
+    def test_public_log_methods_available_without_auto_proxy(self):
+        """Публичные log_* — методы класса (ADR-CHN-008): доступны всегда,
+        тонкие алиасы над _log_*. auto_proxy создаёт ДОПОЛНИТЕЛЬНЫЕ замыкания
+        для record_metric/increment/gauge — тех методов нет в классе."""
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, auto_proxy=False)
-        assert not hasattr(m, 'log_info')
+        m.log_info("via class method")
+        assert logger.logs == [('info', 'via class method')]
+        # record_metric — нет; auto_proxy не запрошен → замыкания не создаются
+        assert 'record_metric' not in m.__dict__
 
     # ---- Enable / Disable ----
 
@@ -248,11 +254,18 @@ class TestObservableMixin:
         assert logger.logs == []
 
     def test_register_manager_updates_proxy(self):
+        """auto_proxy=True создаёт замыкания для record_metric/increment/gauge
+        (динамические методы для stats-менеджера). log_info — метод класса
+        (ADR-CHN-008), доступен независимо от auto_proxy."""
         m = ObservableManager("test", auto_proxy=True)
-        assert not hasattr(m, 'log_info')
-        logger = MockLogger()
-        m.register_manager('logger', logger)
+        # log_info — метод класса, есть всегда:
         assert hasattr(m, 'log_info')
+        # Замыканий для stats нет (менеджер не зарегистрирован):
+        assert 'record_metric' not in m.__dict__
+        # После регистрации stats-менеджера — появляются stats-замыкания:
+        stats = MockStats()
+        m.register_manager('stats', stats)
+        assert 'record_metric' in m.__dict__
 
     # ---- Get state / config ----
 
@@ -301,24 +314,26 @@ class TestObservableMixin:
 
     def test_pickle_roundtrip_auto_proxy_without_managers(self):
         """
-        После unpickle proxy-методы (log_info, …) НЕ создаются,
-        если managers не были восстановлены (они не picklable).
+        После unpickle публичные log_* остаются (методы класса, ADR-CHN-008),
+        но тихо no-op пока менеджеры не перерегистрированы.
 
-        Корректное поведение: публичные методы появляются только когда
-        соответствующий менеджер реально зарегистрирован. После unpickle
-        владелец должен заново вызвать register_manager() если нужно.
+        Замыкания auto_proxy для record_metric/increment/gauge при
+        unpickle обнуляются — после unpickle их нет в __dict__.
         """
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, auto_proxy=True)
-        assert hasattr(m, 'log_info')  # до pickle — метод есть
+        assert hasattr(m, 'log_info')
+        assert 'record_metric' not in m.__dict__  # logger ≠ stats
 
         m2 = pickle.loads(pickle.dumps(m))
-        # После unpickle managers потеряны → log_info не существует
-        assert not hasattr(m2, 'log_info')
-
-        # Но после ручного register_manager — снова появится
-        m2.register_manager('logger', MockLogger())
+        # log_info — метод класса, остаётся; но тихо no-op без менеджеров
         assert hasattr(m2, 'log_info')
+        m2.log_info("silent")  # не падает
+
+        # После register_manager — replay замыканий (если auto_proxy был включён)
+        stats = MockStats()
+        m2.register_manager('stats', stats)
+        assert 'record_metric' in m2.__dict__
 
     # ---- Декораторы (опционально, skip если не поддерживаются) ----
 

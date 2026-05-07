@@ -168,3 +168,49 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
   (резерв на будущее — добавить в `apply_on_error_policy` опционально).
 - Все тесты (фреймворк 67/67 + прототип test_worker_pool_dispatcher 14/14) проходят
   без модификации.
+
+---
+
+## ADR-CHN-008: Публичный IChainLogger Protocol для исполнителей
+
+**Статус:** Принято (2026-05-07)
+
+**Контекст:**
+- `ChainContext.logger` был типизирован `Any` — у внешнего объекта вызывались
+  псевдо-приватные методы `log._log_warning(msg)` / `log._log_error(msg)` в
+  `core/error_policy.py`. Имена с `_` в `IObservableMixin` маркируют их как
+  «семейные» методы для наследников `BaseManager` — вызов из чужого модуля
+  нарушает эту конвенцию.
+- В коде прототипа `ChainContext(logger=...)` сейчас не передаётся (ветка
+  `if log is not None: ...` всегда уходит в no-op), но контракт всё равно
+  должен быть зафиксирован — иначе любая попытка передать настоящий
+  логгер натолкнётся на стилистическую регрессию.
+
+**Решение:**
+1. `IChainLogger` — узкий `runtime_checkable` Protocol в
+   `chain_module/interfaces.py` с тремя публичными методами:
+   `log_info`, `log_warning`, `log_error`. `log_debug` / `log_critical`
+   не включены — внешним потребителям chain_module они не нужны.
+2. `ChainContext.logger: IChainLogger | None` (вместо `Any`).
+3. `core/error_policy.py` зовёт `log.log_warning` / `log.log_error`.
+4. `ObservableMixin` получает публичные алиасы `log_debug/info/warning/error/critical`
+   как методы класса — тонкие обёртки над `_log_*`. Это автоматически делает
+   любого наследника `BaseManager + ObservableMixin` совместимым с
+   `IChainLogger` через duck-typing.
+
+**Не делаем:**
+- ❌ Переименование `_log_*` → `log_*` внутри менеджеров. Это отдельный
+  рефакторинг ~21 модуля без архитектурной пользы. `_log_*` остаются
+  каноничным внутренним путём.
+- ❌ `@abstractmethod` на публичные `log_*` в `IObservableMixin` ABC —
+  заставило бы все standalone-фейки в тестах реализовать их. Контракт
+  фиксируется в `ObservableMixin` и `IChainLogger`.
+
+**Последствия:**
+- Внешний код может передавать в `ChainContext` любой объект с тремя
+  методами (упрощает тесты — не нужен `Mock(spec=...)` с приватными
+  атрибутами).
+- `isinstance(LoggerManager_instance, IChainLogger)` → `True` (smoke-тест).
+- `auto_proxy=True` режим продолжает работать без изменений: динамические
+  замыкания в `__dict__` имеют приоритет в lookup, методы класса остаются
+  как fallback для `auto_proxy=False`.

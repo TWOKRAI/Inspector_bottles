@@ -123,6 +123,24 @@ class ObservableMixin(IObservableMixin):
         """Логирование уровня CRITICAL через logger manager."""
         self._call_manager('logger', 'critical', message, **kwargs)
 
+    # Публичные алиасы — для внешнего кода, который принимает менеджер
+    # как зависимость (например, ChainContext.logger). _log_* остаются
+    # каноничным «семейным» путём для наследников BaseManager.
+    def log_debug(self, message: str, **kwargs) -> None:
+        self._log_debug(message, **kwargs)
+
+    def log_info(self, message: str, **kwargs) -> None:
+        self._log_info(message, **kwargs)
+
+    def log_warning(self, message: str, **kwargs) -> None:
+        self._log_warning(message, **kwargs)
+
+    def log_error(self, message: str, **kwargs) -> None:
+        self._log_error(message, **kwargs)
+
+    def log_critical(self, message: str, **kwargs) -> None:
+        self._log_critical(message, **kwargs)
+
     def _record_metric(
         self,
         metric_name: str,

@@ -176,7 +176,7 @@
 
 ### chain_module (CHN)
 
-Локальные решения модуля имеют формат **ADR-CHN-NNN** (ADR-CHN-001…007). Модуль выделен из прототипа во фреймворк в Phase 2.3 (2026-05-01) и допилен в 2026-05-07. **Внимание:** код **CHN**, не **CM** — `CM` зарезервирован за `console_module`. Прежние внутренние ссылки `ADR-CM-*` в chain_module/DECISIONS.md, chain_module/STATUS.md и `multiprocess_prototype/services/processor/operations/base.py` переведены на **ADR-CHN-***.
+Локальные решения модуля имеют формат **ADR-CHN-NNN** (ADR-CHN-001…008). Модуль выделен из прототипа во фреймворк в Phase 2.3 (2026-05-01) и допилен в 2026-05-07 (006/007 — общая on_error политика, IRemoteExecutable, ObservableMixin для долгоживущих сервисов; 008 — публичный IChainLogger Protocol). **Внимание:** код **CHN**, не **CM** — `CM` зарезервирован за `console_module`. Прежние внутренние ссылки `ADR-CM-*` в chain_module/DECISIONS.md, chain_module/STATUS.md и `multiprocess_prototype/services/processor/operations/base.py` переведены на **ADR-CHN-***.
 
 ### Глобальные ADR (без переноса номера)
 

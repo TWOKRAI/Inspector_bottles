@@ -368,10 +368,11 @@
 - `INodeConnection` (Protocol) — соединение между нодами (`source`, `input_port`, `output_port`).
 - `IExecutionStep` (Protocol) — операция: `execute(data, context)`, `configure(params)`.
 - `IRemoteExecutable` (Protocol, ADR-CHN-006) — явный контракт cross-process шага: атрибут `dispatcher` + метод `execute_remote(frame, context, input_shm_name, input_shm_index)`. Поддерживается всеми тремя исполнителями.
+- `IChainLogger` (runtime_checkable Protocol, ADR-CHN-008) — узкий публичный логгер исполнителей: `log_info`, `log_warning`, `log_error`. Любой `BaseManager + ObservableMixin` удовлетворяет через duck-typing (после ADR-CHN-008 `ObservableMixin` имеет публичные `log_*` алиасы).
 - `ChainRunnable` — последовательный исполнитель списка `RunnableStep`.
 - `DagRunnable` — исполнитель DAG (ветвления 1→N и слияния N→1 через именованные порты).
 - `ParallelChainRunnable` — параллельные бандлы через `ChainThreadPool`. В бандле cross-process шаги выполняются синхронно (через `execute_remote`), local — через пул.
-- `ChainContext` — контекст выполнения: `camera_id`, `region_id`, `seq_id`, `warnings`, `errors`, `timeouts`, `logger`.
+- `ChainContext` — контекст выполнения: `camera_id`, `region_id`, `seq_id`, `warnings`, `errors`, `timeouts`, `logger: IChainLogger | None` (ADR-CHN-008).
 - `ChainResult` — результат: `frame`, `detections`, `skipped_nodes`, `failed`, `fail_level`, `processing_time`.
 - `RunnableStep` — шаг: `node: IStepNode`, `operation: IExecutionStep`, `on_error`. Cross-process определяется через `_is_cross_process(step)` (duck-typing по `IRemoteExecutable`).
 - `apply_on_error_policy(step, exc, context, result) -> bool` — единая on_error логика (skip / fail_region / fail_camera) для всех трёх исполнителей (ADR-CHN-006). DRY.
@@ -384,7 +385,7 @@
 **Инварианты:**
 1. Execution objects (`ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`) — **не** менеджеры; не наследуют `BaseManager` (создаются на каждый `RegisterRuntime.rebuild()`).
 2. Долгоживущие сервисы (`ChainThreadPool`, `WorkerPoolDispatcher`, `LatencyTracker`) — наследники `BaseManager + ObservableMixin`; принимают `logger=None`, `stats=None`, `errors=None` опционально.
-3. Logger исполнителей передаётся через `ChainContext.logger`; если не задан — тихо.
+3. Logger исполнителей передаётся через `ChainContext.logger` (тип `IChainLogger | None`, ADR-CHN-008); если не задан — тихо. `error_policy` зовёт `log_warning`/`log_error` (публичные методы).
 4. Граница фреймворк/прототип: builder.py (load_operation_class) и конкретные операции остаются в прототипе (ADR-CHN-003, ADR-CHN-004).
 5. on_error логика — единственная точка истины в `core/error_policy.apply_on_error_policy` (ADR-CHN-006).
 6. Cross-process шаги определяются через `IRemoteExecutable` Protocol (ADR-CHN-006); сигнатура `execute_remote(frame, context, input_shm_name, input_shm_index)` зафиксирована.

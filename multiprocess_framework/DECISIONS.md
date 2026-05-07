@@ -1962,7 +1962,7 @@
 | `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…005 (Композиция RegistersContainer вместо дублирования, ..., Этапы 1–6 не применимы к registers_module) |
 | `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…012 (Три уровня использования в едином ConsoleManager, ..., `reg info` показывает FieldMeta и FieldRouting) |
 | `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…013 (IRouter Protocol для инкапсуляции router-зависимости, ..., SubscriptionManager — публичные snapshot-методы для shutdown / DevTools) |
-| `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…007 (Protocol-based decoupling от доменных типов, ..., ObservableMixin для долгоживущих сервисов модуля) |
+| `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…008 (Protocol-based decoupling от доменных типов, ..., Публичный IChainLogger Protocol для исполнителей) |
 <!-- ADR-INDEX:END -->
 
 ---

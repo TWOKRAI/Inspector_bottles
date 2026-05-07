@@ -9,6 +9,7 @@
         IExecutionStep      — операция обработки (execute, configure)
         IChainRunnable      — исполняемая цепочка (execute → ChainResult)
         IRemoteExecutable   — шаг с cross-process исполнением (execute_remote)
+        IChainLogger        — узкий публичный логгер исполнителей (log_info/warning/error)
 
     Контекст / Результат:
         ChainContext        — контекст выполнения (IDs, warnings, errors, timeouts)
@@ -44,6 +45,7 @@ from .interfaces import (
     IExecutionStep,
     IChainRunnable,
     IRemoteExecutable,
+    IChainLogger,
 )
 from .core import (
     ChainContext,
@@ -68,6 +70,7 @@ __all__ = [
     "IExecutionStep",
     "IChainRunnable",
     "IRemoteExecutable",
+    "IChainLogger",
     # Контекст / Результат
     "ChainContext",
     "ChainResult",

@@ -8,6 +8,7 @@
     IExecutionStep     — операция обработки (execute, configure)
     IChainRunnable     — исполняемая цепочка (execute → ChainResult)
     IRemoteExecutable  — шаг с cross-process исполнением (execute_remote через WorkerPoolDispatcher)
+    IChainLogger       — узкий публичный логгер для исполнителей (log_info/log_warning/log_error)
 """
 from __future__ import annotations
 
@@ -84,6 +85,23 @@ class IRemoteExecutable(Protocol):
         ...
 
 
+@runtime_checkable
+class IChainLogger(Protocol):
+    """Узкий публичный логгер для исполнителей chain_module.
+
+    Любой объект с тремя публичными методами годится — например, наследник
+    ``ObservableMixin`` (после добавления ``log_*`` алиасов) удовлетворяет
+    Protocol через duck-typing. ``log_debug`` / ``log_critical`` сюда не
+    включены — внешним потребителям chain_module они не нужны.
+    """
+
+    def log_info(self, message: str, **kwargs: Any) -> None: ...
+
+    def log_warning(self, message: str, **kwargs: Any) -> None: ...
+
+    def log_error(self, message: str, **kwargs: Any) -> None: ...
+
+
 __all__ = [
     "INodeConnection",
     "IStepNode",
@@ -91,4 +109,5 @@ __all__ = [
     "IExecutionStep",
     "IChainRunnable",
     "IRemoteExecutable",
+    "IChainLogger",
 ]

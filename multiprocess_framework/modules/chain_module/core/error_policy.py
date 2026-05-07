@@ -43,7 +43,7 @@ def apply_on_error_policy(
             f"on_error=skip — пропускаем."
         )
         if log is not None:
-            log._log_warning(msg)
+            log.log_warning(msg)
         context.warnings.append(msg)
         result.skipped_nodes.append(nid)
         return False
@@ -54,7 +54,7 @@ def apply_on_error_policy(
             f"on_error=fail_region — прерываем (region)."
         )
         if log is not None:
-            log._log_error(msg)
+            log.log_error(msg)
         context.errors.append(msg)
         result.failed = True
         result.fail_level = "region"
@@ -65,7 +65,7 @@ def apply_on_error_policy(
         f"on_error={step.on_error} — прерываем (camera)."
     )
     if log is not None:
-        log._log_error(msg)
+        log.log_error(msg)
     context.errors.append(msg)
     result.failed = True
     result.fail_level = "camera"
