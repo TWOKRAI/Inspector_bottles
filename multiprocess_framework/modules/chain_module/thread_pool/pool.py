@@ -37,8 +37,8 @@ class ChainThreadPool(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
-        self._executor.shutdown(wait=True)
+    def shutdown(self, wait: bool = True) -> bool:
+        self._executor.shutdown(wait=wait)
         self.is_initialized = False
         return True
 
