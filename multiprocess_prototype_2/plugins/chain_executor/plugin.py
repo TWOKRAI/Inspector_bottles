@@ -18,11 +18,11 @@ import copy
 import importlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import MagicMock
 
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
+    SubPluginContext,
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
@@ -46,6 +46,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
 
     name = "chain_executor"
     category = "processing"
+    register_class = ChainExecutorRegisters
 
     inputs = [
         Port(
@@ -75,18 +76,8 @@ class ChainExecutorPlugin(ProcessModulePlugin):
 
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or ChainExecutorRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         # Список шагов: [{"name": str, "plugin": ProcessModulePlugin, "config": dict}]
         self._steps: list[dict] = []
@@ -121,8 +112,12 @@ class ChainExecutorPlugin(ProcessModulePlugin):
         # Корректно завершить каждый sub-plugin
         for step in self._steps:
             try:
-                mock_ctx = MagicMock(spec=PluginContext)
-                step["plugin"].shutdown(mock_ctx)
+                sub_ctx = SubPluginContext(
+                    config=step["config"],
+                    log_info=self._ctx.log_info,
+                    log_error=self._ctx.log_error,
+                )
+                step["plugin"].shutdown(sub_ctx)
             except Exception:
                 pass  # sub-plugin мог не реализовать shutdown — игнорируем
 
@@ -155,15 +150,15 @@ class ChainExecutorPlugin(ProcessModulePlugin):
             module = importlib.import_module(module_path)
             plugin_cls = getattr(module, class_name)
 
-            # Создать экземпляр и сконфигурировать с mock ctx
+            # Создать экземпляр и сконфигурировать с sub-контекстом
             plugin_instance = plugin_cls()
-            mock_ctx = MagicMock(spec=PluginContext)
-            mock_ctx.config = sub_config
-            mock_ctx.log_info = lambda msg: logger.info(f"[{step_name}] {msg}")
-            mock_ctx.log_error = lambda msg: logger.error(f"[{step_name}] {msg}")
-            mock_ctx.registers = None
-            mock_ctx.command_manager = MagicMock()
-            plugin_instance.configure(mock_ctx)
+            sub_ctx = SubPluginContext(
+                process_name=step_name,
+                config=sub_config,
+                log_info=self._ctx.log_info,
+                log_error=self._ctx.log_error,
+            )
+            plugin_instance.configure(sub_ctx)
 
             self._steps.append({
                 "name": step_name,

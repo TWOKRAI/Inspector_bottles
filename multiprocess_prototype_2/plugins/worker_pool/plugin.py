@@ -15,11 +15,11 @@ import importlib
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import MagicMock
 
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
+    SubPluginContext,
 )
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
@@ -43,6 +43,7 @@ class WorkerPoolPlugin(ProcessModulePlugin):
 
     name = "worker_pool"
     category = "processing"
+    register_class = WorkerPoolRegisters
 
     inputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Входные данные"),
@@ -60,18 +61,8 @@ class WorkerPoolPlugin(ProcessModulePlugin):
 
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or WorkerPoolRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         # Счётчики статистики (runtime-only, не в register)
         self._total_processed: int = 0
@@ -190,15 +181,14 @@ class WorkerPoolPlugin(ProcessModulePlugin):
             plugin_cls = getattr(module, class_name)
             instance: ProcessModulePlugin = plugin_cls()
 
-            # Создать mock-контекст для sub-plugin (реальный ctx недоступен на этом этапе)
-            mock_ctx = MagicMock(spec=PluginContext)
-            mock_ctx.config = self._reg.worker_plugin_config
-            mock_ctx.log_info = lambda msg: logger.info(f"[worker] {msg}")
-            mock_ctx.log_error = lambda msg: logger.error(f"[worker] {msg}")
-            mock_ctx.registers = None
-            mock_ctx.command_manager = MagicMock()
-
-            instance.configure(mock_ctx)
+            # Создать sub-контекст для worker plugin
+            sub_ctx = SubPluginContext(
+                process_name="worker",
+                config=self._reg.worker_plugin_config,
+                log_info=self._ctx.log_info,
+                log_error=self._ctx.log_error,
+            )
+            instance.configure(sub_ctx)
             return instance
         except Exception as exc:
             logger.error(f"WorkerPoolPlugin: ошибка создания worker plugin: {exc}")
