@@ -63,12 +63,19 @@ class CapturePlugin(ProcessModulePlugin):
             f"{self._width}x{self._height}@{self._fps}fps"
         )
 
-        # Состояние
+        # Состояние захвата
         self._cap: cv2.VideoCapture | None = None
         self._is_capturing = False
         self._paused = False
         self._frame_count = 0
         self._ctx = ctx
+
+        # Метрики FPS и потерь кадров
+        self._state_proxy = ctx.state_proxy  # может быть None (обратная совместимость)
+        self._fps_counter = 0
+        self._fps_timer = time.monotonic()
+        self._actual_fps = 0.0
+        self._drops = 0
 
     # --- Команды (авторегистрация через commands dict) ---
 
@@ -83,11 +90,13 @@ class CapturePlugin(ProcessModulePlugin):
     def cmd_pause_capture(self, data: dict) -> dict:
         self._paused = True
         self._ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват приостановлен")
+        self._publish_state()
         return {"status": "ok"}
 
     def cmd_resume_capture(self, data: dict) -> dict:
         self._paused = False
         self._ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват возобновлён")
+        self._publish_state()
         return {"status": "ok"}
 
     def start(self, ctx: PluginContext) -> None:
@@ -116,6 +125,8 @@ class CapturePlugin(ProcessModulePlugin):
             return []
 
         if not ret or frame is None:
+            # Считаем потерянные кадры (camera.read() не вернул данные)
+            self._drops += 1
             return []
 
         # Resize если камера отдаёт другое разрешение
@@ -125,6 +136,16 @@ class CapturePlugin(ProcessModulePlugin):
 
         # Инкремент счётчика с rollover
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
+
+        # Обновление FPS-метрики раз в секунду
+        self._fps_counter += 1
+        now = time.monotonic()
+        elapsed = now - self._fps_timer
+        if elapsed >= 1.0:
+            self._actual_fps = self._fps_counter / elapsed
+            self._fps_counter = 0
+            self._fps_timer = now
+            self._publish_state()
 
         return [{
             "frame": frame,
@@ -157,16 +178,34 @@ class CapturePlugin(ProcessModulePlugin):
             )
             self._is_capturing = True
             ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват запущен")
+            # Публикуем начальное состояние после старта захвата
+            self._publish_state()
         else:
             ctx.log_error(
                 f"CapturePlugin[{self._camera_id}]: не удалось открыть камеру {self._device_id}"
             )
 
     def _stop_capture(self, ctx: PluginContext) -> None:
-        """Остановить захват."""
+        """Остановить захват и сбросить FPS-метрику."""
         self._is_capturing = False
         self._release_camera()
         ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват остановлен")
+        # Сбрасываем FPS и публикуем финальное состояние
+        self._actual_fps = 0.0
+        self._publish_state()
+
+    def _publish_state(self) -> None:
+        """Опубликовать метрики в StateStore."""
+        if self._state_proxy is None:
+            return
+        path = f"processes.{self._ctx.process_name}.state"
+        self._state_proxy.merge(path, {
+            "status": "running" if self._is_capturing else "stopped",
+            "fps": round(self._actual_fps, 1),
+            "frame_count": self._frame_count,
+            "drops": self._drops,
+            "paused": self._paused,
+        })
 
     def _release_camera(self) -> None:
         """Освободить камеру."""
