@@ -55,15 +55,8 @@ class SyncModule(Protocol):
 # replace_between_markers
 # ---------------------------------------------------------------------------
 
-# Паттерн маркера BEGIN: <!-- KEY:BEGIN ... -->
-# Допускает любое содержимое после KEY:BEGIN (описание, " — DO NOT EDIT" и т.д.).
-# Паттерн маркера END: <!-- KEY:END -->
-_MARKER_BEGIN_RE = re.compile(
-    r"^(<!-- {key}:BEGIN\b[^>]*-->)[ \t]*$",
-)
-_MARKER_END_RE = re.compile(
-    r"^(<!-- {key}:END\s*-->)[ \t]*$",
-)
+# Паттерны маркеров BEGIN/END компилируются внутри replace_between_markers
+# (с подстановкой ключа через re.escape) — модульного пре-компилирования нет.
 
 
 def replace_between_markers(
