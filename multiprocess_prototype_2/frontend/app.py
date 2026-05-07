@@ -5,15 +5,13 @@ import sys
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PySide6.QtWidgets import QApplication
 
+from .app_context import build_app_context
+from .styles.theme_loader import apply_default_theme
+from .tab_factory import TabFactory
+from .widgets.image_panel import ImagePanelWidget
 from .windows.main_window import MainWindow
-from .widgets.camera.view import CameraView
-from .widgets.camera.presenter import CameraPresenter
-from .bridge.command_sender import CommandSender
-from .widgets.controls.command_panel import CommandPanel
-from .widgets.controls.process_status import ProcessStatusWidget
-from .widgets.topology.editor import TopologyEditorWidget
 
 if TYPE_CHECKING:
     from .process import GuiProcess
@@ -23,57 +21,53 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
-    # Главное окно
-    window = MainWindow()
+    # 1. Применить тему
+    apply_default_theme(app)
 
-    # Вкладка Camera
-    camera_view = CameraView()
-    camera_presenter = CameraPresenter(camera_view)
-    window.add_tab(camera_view, "Camera")
+    # 2. Создать AppContext
+    ctx = build_app_context(process)
 
-    # Вкладка Controls
-    controls_widget = QWidget()
-    controls_layout = QVBoxLayout(controls_widget)
+    # 3. Создать MainWindow
+    window = MainWindow(config=ctx.config)
 
-    command_sender = CommandSender(process)
-    command_panel = CommandPanel(command_sender)
-    process_status = ProcessStatusWidget()
+    # 4. Создать и установить ImagePanel
+    image_panel = ImagePanelWidget()
+    window.set_image_panel(image_panel)
 
-    controls_layout.addWidget(command_panel)
-    controls_layout.addWidget(process_status)
+    # 5. Создать TabFactory и заполнить табы
+    tab_factory = TabFactory(ctx)
+    tab_factory.create_tabs(window.tab_widget)
 
-    window.add_tab(controls_widget, "Controls")
+    # 6. Подключить bridge callbacks
+    _setup_bridge_callbacks(ctx, image_panel, window)
 
-    # Вкладка Topology Editor
-    topology_editor = TopologyEditorWidget()
-    window.add_tab(topology_editor, "Topology")
+    # 7. Запустить таймеры (fps, safety)
+    _setup_timers(app, process, window)
 
-    # Установить директорию топологий для редактора
-    from pathlib import Path
-    # По умолчанию — директория topology рядом с frontend/
-    default_topo_dir = Path(__file__).resolve().parent.parent / "topology"
-    topology_editor.set_topology_dir(default_topo_dir)
-
-    # Сохранить ссылки в process для доступа из других задач
+    # 8. Сохранить ссылки в process
     process._window = window
-    process._camera_presenter = camera_presenter
+    process._app_context = ctx
 
-    # Подключить bridge signals
+    window.show()
+    app.exec()
+
+
+def _setup_bridge_callbacks(
+    ctx: "AppContext",
+    image_panel: ImagePanelWidget,
+    window: MainWindow,
+) -> None:
+    """Подключить bridge callbacks для кадров и состояния."""
     _frame_trace_cnt = 0
 
     def _on_frame_received(msg_dict: dict) -> None:
-        """Slot: получен кадр через IPC.
-
-        FrameShmMiddleware.on_receive уже подставил msg["frame"] (numpy)
-        из SHM по координатам shm_actual_name.
-        """
         nonlocal _frame_trace_cnt
         _frame_trace_cnt += 1
 
         frame = msg_dict.get("frame")
 
         if _frame_trace_cnt % 30 == 1:
-            process._log_info(
+            ctx.process._log_info(
                 f"[TRACE] _on_frame_received #{_frame_trace_cnt}: "
                 f"has_frame={frame is not None}, "
                 f"frame_shape={frame.shape if frame is not None and hasattr(frame, 'shape') else None}, "
@@ -83,19 +77,25 @@ def run_gui(process: "GuiProcess") -> None:
             )
 
         if frame is not None:
-            camera_presenter.on_frame(frame)
+            image_panel.display_frame("main", frame)
             window.increment_frame_count()
         elif _frame_trace_cnt % 30 == 1:
-            process._log_info(
+            ctx.process._log_info(
                 f"[TRACE] _on_frame_received: frame is None! "
                 f"msg keys={list(msg_dict.keys())}",
                 module="gui",
             )
 
-    process._bridge.set_frame_callback(_on_frame_received)
-    process._bridge.set_state_callback(process_status.on_state_updated)
+    ctx.bridge.set_frame_callback(_on_frame_received)
+    # state callback — пока noop (ProcessStatusWidget убран, будет в табе Processes Phase 10+)
 
 
+def _setup_timers(
+    app: QApplication,
+    process: "GuiProcess",
+    window: MainWindow,
+) -> None:
+    """Настроить FPS и safety таймеры."""
     # FPS таймер: раз в секунду считать fps и обновлять StatusBar
     fps_timer = QTimer()
     fps_timer.setInterval(1000)
@@ -122,5 +122,6 @@ def run_gui(process: "GuiProcess") -> None:
     # При выходе из Qt — сигнализируем процессу об остановке
     app.aboutToQuit.connect(lambda: setattr(process, '_stop_requested', True))
 
-    window.show()
-    app.exec()
+    # Сохранить ссылки на таймеры чтобы GC не собрал
+    window._fps_timer = fps_timer
+    window._safety_timer = safety_timer
