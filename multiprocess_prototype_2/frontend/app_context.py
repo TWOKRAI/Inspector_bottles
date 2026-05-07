@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .process import GuiProcess
     from .bridge import DataReceiverBridge
     from multiprocess_prototype_2.registers.manager import RegistersManagerV2
+    from multiprocess_prototype_2.frontend.state.bindings import GuiStateBindings
 
 
 @dataclass
@@ -37,6 +38,14 @@ class AppContext:
     def plugin_registry(self) -> Any | None:
         """Вернуть PluginRegistry из extras, если был передан при сборке контекста."""
         return self.extras.get("plugin_registry")
+
+    def bindings(self) -> "GuiStateBindings | None":
+        """Вернуть GuiStateBindings из extras, если был создан в run_gui().
+
+        Используется табами Phase 10B для реактивного обновления виджетов
+        по путям StateStore (FPS, status, latency и т.п.).
+        """
+        return self.extras.get("bindings")
 
 
 def build_app_context(

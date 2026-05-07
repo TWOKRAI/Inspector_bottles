@@ -49,10 +49,16 @@ def run_gui(process: "GuiProcess") -> None:
         registers_manager=registers_manager,
     )
 
-    # 3. Создать MainWindow
+    # 3a. Создать GuiStateBindings — занимает слот bridge.set_state_callback
+    #     (Phase 10B: табы обращаются через ctx.bindings().bind(...))
+    from .state.bindings import GuiStateBindings
+    bindings = GuiStateBindings(process._bridge)
+    ctx.extras["bindings"] = bindings
+
+    # 4. Создать MainWindow
     window = MainWindow()
 
-    # 4. Создать и установить ImagePanel
+    # 4b. Создать и установить ImagePanel
     image_panel = ImagePanelWidget()
     window.set_image_panel(image_panel)
 
@@ -103,7 +109,7 @@ def _setup_bridge_callbacks(
             window.increment_frame_count()
 
     process._bridge.set_frame_callback(_on_frame_received)
-    # State callback — будет интегрирован в таб Processes (Phase 10+)
+    # State callback занят GuiStateBindings (создан в run_gui, Phase 10A)
 
 
 def _setup_timers(
