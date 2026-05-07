@@ -317,3 +317,21 @@ class TestMultipleChecks:
         proceed, value = mw.before_set("score", 0.75, "src", {})
         assert proceed is True
         assert value == 0.75
+
+
+class TestTupleType:
+    """rule['type'] может быть кортежем types — сообщение об ошибке корректно."""
+
+    def test_tuple_type_accepts_any_member(self) -> None:
+        mw = ValidationMiddleware({"x": {"type": (int, float)}})
+        assert mw.before_set("x", 1, "src", {})[0] is True
+        assert mw.before_set("x", 1.5, "src", {})[0] is True
+
+    def test_tuple_type_rejects_other(self) -> None:
+        mw = ValidationMiddleware({"x": {"type": (int, float)}})
+        ctx: dict = {}
+        proceed, _ = mw.before_set("x", "text", "src", ctx)
+        assert proceed is False
+        # Сообщение должно перечислить оба допустимых имени, без падения по __name__
+        assert "int" in ctx["validation_error"]
+        assert "float" in ctx["validation_error"]

@@ -90,14 +90,11 @@ class ValidationMiddleware(StateMiddleware):
         Returns:
             Описание ошибки или None если значение валидно.
         """
-        # Проверка type
+        # Проверка type. rule["type"] может быть type, кортежем types,
+        # либо строкой (legacy) — формируем читаемое имя для каждого случая.
         if "type" in rule:
             if not isinstance(value, rule["type"]):
-                expected = (
-                    rule["type"].__name__
-                    if isinstance(rule["type"], type)
-                    else str(rule["type"])
-                )
+                expected = self._format_type(rule["type"])
                 return f"Ожидается тип {expected}, получен {type(value).__name__}"
 
         # Проверка min (только для числовых типов)
@@ -116,3 +113,14 @@ class ValidationMiddleware(StateMiddleware):
                 return f"Значение '{value}' не входит в допустимые: {rule['enum']}"
 
         return None
+
+    @staticmethod
+    def _format_type(type_spec: Any) -> str:
+        """Читаемое имя для type/tuple-of-types/строки."""
+        if isinstance(type_spec, type):
+            return type_spec.__name__
+        if isinstance(type_spec, tuple):
+            return " | ".join(
+                t.__name__ if isinstance(t, type) else str(t) for t in type_spec
+            )
+        return str(type_spec)
