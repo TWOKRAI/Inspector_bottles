@@ -153,45 +153,55 @@ class TestPluginContextRegisters:
 
 
 class TestColorMaskRegisters:
-    """ColorMaskRegisters schema."""
+    """ColorMaskRegisters schema (V3_MY_PURE — живёт в plugins/color_mask/registers.py)."""
 
     def test_create_with_defaults(self):
         """Schema создаётся с defaults."""
-        from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
-        assert reg.min_h == 0
-        assert reg.max_h == 179
-        assert reg.min_s == 50
-        assert reg.max_s == 255
-        assert reg.min_v == 50
-        assert reg.max_v == 255
+        assert reg.h_min == 0
+        assert reg.h_max == 179
+        assert reg.s_min == 50
+        assert reg.s_max == 255
+        assert reg.v_min == 50
+        assert reg.v_max == 255
 
     def test_field_meta_present(self):
-        """Все 6 полей имеют FieldMeta."""
-        from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
+        """Все 6 HSV-полей имеют FieldMeta."""
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
-        for field_name in ["min_h", "max_h", "min_s", "max_s", "min_v", "max_v"]:
+        for field_name in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]:
             meta = reg.get_field_meta(field_name)
             assert meta is not None, f"FieldMeta отсутствует для {field_name}"
 
     def test_hue_range(self):
         """Hue поля: min=0, max=179."""
-        from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
-        meta_h = reg.get_field_meta("min_h")
+        meta_h = reg.get_field_meta("h_min")
         assert meta_h.min == 0
         assert meta_h.max == 179
 
     def test_mutable(self):
         """Значения можно менять."""
-        from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
-        reg.min_h = 30
-        assert reg.min_h == 30
+        reg.h_min = 30
+        assert reg.h_min == 30
+
+    def test_memory_property(self):
+        """memory вычисляется из полей register."""
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+
+        reg = ColorMaskRegisters(camera_id=2, resolution_width=1920, resolution_height=1080)
+        mem = reg.memory
+        assert mem is not None
+        assert "mask_2" in mem
+        assert mem["mask_2"] == (1080, 1920, 1)
 
 
 # --- Tests: RegistersManager bootstrap ---
@@ -257,7 +267,7 @@ class TestGracefulDegradation:
         assert plugin._value == 99
 
     def test_color_mask_without_register(self):
-        """ColorMaskPlugin работает без регистра — fallback на config."""
+        """ColorMaskPlugin без RegistersManager — локальный register с YAML overrides."""
         from multiprocess_prototype_2.plugins.color_mask.plugin import ColorMaskPlugin
 
         plugin = ColorMaskPlugin()
@@ -269,17 +279,18 @@ class TestGracefulDegradation:
             registers=None,
         )
         plugin.configure(ctx)
-        assert plugin._reg is None
-        assert plugin._lower[0] == 10
-        assert plugin._upper[0] == 90
+        # V3_MY_PURE: _reg всегда существует (локальный ColorMaskRegisters)
+        assert plugin._reg is not None
+        assert plugin._reg.h_min == 10
+        assert plugin._reg.h_max == 90
 
     def test_color_mask_with_register(self):
-        """ColorMaskPlugin с регистром — читает пороги из него."""
+        """ColorMaskPlugin с managed регистром — читает пороги из него."""
         from multiprocess_prototype_2.plugins.color_mask.plugin import ColorMaskPlugin
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
         from multiprocess_framework.modules.registers_module import RegistersManager
-        from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
 
-        reg_instance = ColorMaskRegisters(min_h=20, max_h=100)
+        reg_instance = ColorMaskRegisters(h_min=20, h_max=100)
         rm = RegistersManager(registers={"color_mask": reg_instance})
 
         plugin = ColorMaskPlugin()
@@ -292,16 +303,16 @@ class TestGracefulDegradation:
         )
         plugin.configure(ctx)
         assert plugin._reg is not None
-        assert plugin._reg.min_h == 20
-        assert plugin._reg.max_h == 100
+        assert plugin._reg.h_min == 20
+        assert plugin._reg.h_max == 100
 
     def test_color_mask_process_with_register(self):
         """ColorMaskPlugin.process() использует регистр для HSV."""
         from multiprocess_prototype_2.plugins.color_mask.plugin import ColorMaskPlugin
+        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
         from multiprocess_framework.modules.registers_module import RegistersManager
-        from multiprocess_prototype_2.registers.color_mask import ColorMaskRegisters
 
-        reg_instance = ColorMaskRegisters(min_h=0, max_h=179, min_s=0, max_s=255, min_v=0, max_v=255)
+        reg_instance = ColorMaskRegisters(h_min=0, h_max=179, s_min=0, s_max=255, v_min=0, v_max=255)
         rm = RegistersManager(registers={"color_mask": reg_instance})
 
         plugin = ColorMaskPlugin()

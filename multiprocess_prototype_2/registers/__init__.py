@@ -1,5 +1,5 @@
-"""Регистры прототипа v2 — per-plugin register schemas.
+"""Регистры прототипа v2.
 
-Convention mapping: файл color_mask.py → регистр для плагина "color_mask".
-Плагин возвращает экземпляр schema из register_schema() метода.
+V3_MY_PURE: регистры живут внутри плагинов (plugins/X/registers.py).
+Здесь остаются shared (cross-plugin) регистры и RegistersManager.
 """
