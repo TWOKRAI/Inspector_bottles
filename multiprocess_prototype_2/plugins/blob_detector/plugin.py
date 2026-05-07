@@ -43,29 +43,18 @@ class BlobDetectorPlugin(ProcessModulePlugin):
         "toggle_draw_contours": "toggle_draw_contours",
     }
 
+    register_class = BlobDetectorRegisters
+
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or BlobDetectorRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         ctx.log_info(
             f"BlobDetectorPlugin: HSV [{self._reg.h_min},{self._reg.s_min},{self._reg.v_min}]-"
             f"[{self._reg.h_max},{self._reg.s_max},{self._reg.v_max}], "
             f"area=[{self._reg.min_area}, {self._reg.max_area}], draw={self._reg.draw_contours}"
         )
-
-    def start(self, ctx: PluginContext) -> None:
-        """No-op -- обработка через process()."""
 
     # --- Обработка ---
 

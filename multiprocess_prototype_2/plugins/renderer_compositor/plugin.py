@@ -55,31 +55,20 @@ class RendererCompositorPlugin(ProcessModulePlugin):
         "toggle_overlay": "toggle_overlay",
     }
 
+    register_class = RendererCompositorRegisters
+
     # --- Инициализация ---
 
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or RendererCompositorRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         ctx.log_info(
             f"RendererCompositorPlugin: layout={self._reg.layout_mode}, "
             f"output={self._reg.output_width}x{self._reg.output_height}, "
             f"overlay={self._reg.overlay_enabled}"
         )
-
-    def start(self, ctx: PluginContext) -> None:
-        """No-op — обработка через process()."""
 
     # --- Основная обработка (batch, без @for_each) ---
 

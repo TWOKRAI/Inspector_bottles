@@ -68,29 +68,18 @@ class RenderOverlayPlugin(ProcessModulePlugin):
         "toggle_detections": "toggle_detections",
     }
 
+    register_class = RenderOverlayRegisters
+
     def configure(self, ctx: PluginContext) -> None:
         """Настройка: register managed (GUI) или локальный (defaults)."""
-        cfg = ctx.config
         self._ctx = ctx
-
-        # Register: managed (RegistersManager → GUI видит) или локальный
-        self._reg = (
-            ctx.registers.get_register(self.name) if ctx.registers is not None else None
-        ) or RenderOverlayRegisters()
-
-        # YAML overrides → синхронизируем в register
-        for field in type(self._reg).model_fields:
-            if field in cfg:
-                setattr(self._reg, field, cfg[field])
+        self._reg = self._init_register(ctx)
 
         ctx.log_info(
             f"RenderOverlayPlugin: alpha={self._reg.mask_alpha}, "
             f"color_bgr=[{self._reg.mask_color_b},{self._reg.mask_color_g},{self._reg.mask_color_r}], "
             f"draw_detections={self._reg.draw_detections}"
         )
-
-    def start(self, ctx: PluginContext) -> None:
-        """No-op — обработка ведётся через process()."""
 
     # --- Обработка ---
 
