@@ -119,17 +119,15 @@ class StateInspector:
     def subscriptions(self) -> list[dict]:
         """Вернуть список активных подписок.
 
-        Читает внутренний _subscriptions dict из SubscriptionManager.
+        Использует публичный `SubscriptionManager.all_subscriptions()` —
+        не лезет к приватным атрибутам менеджера (ADR-SS-013).
 
         Returns:
             Список dict: [{"pattern": str, "subscriber": str, "sub_id": str,
                            "exclude_sources": list}, ...]
         """
-        with self._sub_manager._lock:
-            subs_snapshot = list(self._sub_manager._subscriptions.values())
-
         result: list[dict] = []
-        for sub in subs_snapshot:
+        for sub in self._sub_manager.all_subscriptions():
             result.append({
                 "pattern": sub.pattern,
                 "subscriber": sub.subscriber,

@@ -107,13 +107,9 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         Returns:
             True если остановка успешна.
         """
-        with self._subs._lock:
-            subscribers = list(self._subs._by_subscriber.keys())
-
         total = 0
-        for subscriber in subscribers:
-            count = self._subs.unsubscribe_all(subscriber)
-            total += count
+        for subscriber in self._subs.subscribers():
+            total += self._subs.unsubscribe_all(subscriber)
 
         self.is_initialized = False
         self._log_info(f"StateStoreManager остановлен, отписано подписок: {total}")

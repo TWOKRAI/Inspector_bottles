@@ -444,3 +444,44 @@ class TestEdgeCases:
         result1 = _split_pattern("a.b.c")
         result2 = _split_pattern("a.b.c")
         assert result1 is result2  # тот же объект из кэша
+
+
+# ===========================================================================
+# Публичный API для shutdown / DevTools (ADR-SS-013)
+# ===========================================================================
+
+class TestSubscriptionManagerPublicSnapshot:
+    """`subscribers()` и `all_subscriptions()` — без обращений к приватным."""
+
+    def test_subscribers_returns_unique_names(self) -> None:
+        mgr = SubscriptionManager()
+        mgr.subscribe("a.*", "gui")
+        mgr.subscribe("b.*", "gui")          # тот же subscriber, две подписки
+        mgr.subscribe("c.*", "camera_0")
+
+        subscribers = sorted(mgr.subscribers())
+        assert subscribers == ["camera_0", "gui"]
+
+    def test_subscribers_empty_when_no_subscriptions(self) -> None:
+        mgr = SubscriptionManager()
+        assert mgr.subscribers() == []
+
+    def test_subscribers_after_unsubscribe_all(self) -> None:
+        mgr = SubscriptionManager()
+        mgr.subscribe("a.*", "gui")
+        mgr.subscribe("b.*", "gui")
+        mgr.unsubscribe_all("gui")
+        assert mgr.subscribers() == []
+
+    def test_all_subscriptions_snapshot(self) -> None:
+        mgr = SubscriptionManager()
+        s1 = mgr.subscribe("a.*", "gui")
+        s2 = mgr.subscribe("b.*", "camera_0")
+
+        snap = mgr.all_subscriptions()
+        ids = {s.sub_id for s in snap}
+        assert ids == {s1, s2}
+
+        # Снимок — отдельный список (не разделяет состояние)
+        snap.clear()
+        assert mgr.subscription_count == 2

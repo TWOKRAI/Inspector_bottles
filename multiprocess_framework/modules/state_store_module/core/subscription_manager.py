@@ -258,6 +258,31 @@ class SubscriptionManager:
         with self._lock:
             return len(self._subscriptions)
 
+    # -----------------------------------------------------------------------
+    # Публичные снимки для shutdown / DevTools (ADR-SS-013)
+    # Раньше StateStoreManager.shutdown и StateInspector.subscriptions лезли
+    # к приватным `_lock` / `_subscriptions` / `_by_subscriber`.
+    # Теперь публичный, потокобезопасный snapshot.
+    # -----------------------------------------------------------------------
+
+    def subscribers(self) -> list[str]:
+        """Снимок имён подписчиков, у которых есть хотя бы одна подписка.
+
+        Returns:
+            Список имён процессов-подписчиков (без дубликатов, порядок не гарантируется).
+        """
+        with self._lock:
+            return list(self._by_subscriber.keys())
+
+    def all_subscriptions(self) -> list[Subscription]:
+        """Снимок всех активных подписок.
+
+        Returns:
+            Список Subscription (frozen dataclass — безопасно отдавать наружу).
+        """
+        with self._lock:
+            return list(self._subscriptions.values())
+
 
 # ---------------------------------------------------------------------------
 # Публичные алиасы для использования в health/, middleware/
