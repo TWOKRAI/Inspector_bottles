@@ -19,121 +19,125 @@
 
 ## Оглавление (по номеру)
 
-- ## ADR-001: ObservableMixin остаётся
-- ## ADR-002: registers_module остаётся (runtime != schema)
-- ## ADR-003: data_schema_module — «живое ДНК»
-- ## ADR-004: Синхронизация ДНК через connection bundle
-- ## ADR-005: Request-response через correlation_id
-- ## ADR-006: Базы данных как отдельный ProcessModule
-- ## ADR-007: ProcessPriority — Windows-only stub
-- ## ADR-008: Dict at Boundary (передача данных через границы процессов)
-- ## ADR-009: gui_module пропускается
-- ## ADR-010: console_module — менеджер терминальных окон
-- ## ADR-011: Подход сверху вниз (top-down)
-- ## ADR-012: Unit-тесты достаточны (без integration на первом этапе)
-- ## ADR-013: channel_routing_module — базовый класс для всех менеджеров с каналами
-- ## ADR-014: IChannel — единый базовый интерфейс каналов
-- ## ADR-015: AsyncSender остаётся в RouterManager (не заменяется AsyncSenderBuffer)
-- ## ADR-016: ChannelRoutingConfig(RegisterBase) — базовый конфиг через наследование
-- ## ADR-017: ConfigStore отдельно от ProcessData
-- ## ADR-018: SRM.register_process() — единая точка регистрации
-- ## ADR-019: SharedMemory по именам (pickle-safe)
-- ## ADR-020: reinitialize_in_child() для восстановления после unpickle
-- ## ADR-021: Прямой pickle SRM вместо ad-hoc bundle dict
-- ## ADR-022: StatsManager — прямой наследник ChannelRoutingManager (не LoggerManager)
-- ## ADR-023: config_module — тонкая обёртка над data_schema_module
-- ## ADR-024: channel_types в receive() — разделение system и data очередей
-- ## ADR-025: multiprocess_prototype — ProcessConfigBase, config-driven memory, logging
-- ## ADR-026: SharedMemory pipeline — unlink при shutdown, stale cleanup, print fallback
-- ## ADR-027: rendered_frame_ready — два изображения (original + mask)
-- ## ADR-028: shared_resources_module и data_schema_module — разделение ответственностей
-- ## ADR-029: hikvision_camera_module — вынос Hikvision в отдельный модуль
-- ## ADR-030: SharedMemory на Windows — уникальные имена с PID
-- ## ADR-031: SharedMemory — очистка перед стартом (все платформы)
-- ## ADR-032: sql_module — универсальный SQL-менеджер
-- ## ADR-033: frontend_module и shared_registers — фундамент UI-фреймворка
-- ## ADR-034: FrontendManager — единая точка входа (BaseManager)
-- ## ADR-035: FrontendRegistersBridge — связь frontend с backend
-- ## ADR-036: Конфигурация frontend — hot-reload без перезапуска
-- ## ADR-037: Рефакторинг frontend_module и multiprocess_prototype (2026-03-18)
-- ## ADR-038: Устранение дублирования processes и registers (2026-03-18)
-- ## ADR-039: Рефакторинг multiprocess_prototype — документация и очистка (2026-03-18)
-- ## ADR-040: GuiProcessMixin
-- ## ADR-041: Конфиг-драйвен window registry
-- ## ADR-042: ProcessModule как IRouterLike для FrontendManager
-- ## ADR-043: Унифицированные конфиги frontend на SchemaBase + FieldMeta
-- ## ADR-044: Реорганизация frontend_module/components и паттерн «конфиг рядом с виджетом»
-- ## ADR-045: action_triggered + connect_action_handlers + optional action_id
-- ## ADR-046: Прототип — feature-папка windows/main_window
-- ## ADR-047: Прототип — матрёшка widgets: вкладка + конфиг рядом
-- ## ADR-048: Доставка register_update — RegisterDispatchMeta, FieldRouting.process_targets, fan-out
-- ## ADR-049: StateRegister vs UiSchema (главное окно и вкладки)
-- ## ADR-050: Схемы регистров — в приложении, не во фреймворке
-- ## ADR-051: Модульные логи — опция `rotate` (Windows / общий файл)
-- ## ADR-052: Регистры по фичам — `schemas/processing_tab/`, UI-строки у виджета
-- ## ADR-053: Прототип — один GuiProcess, импорты регистров, FrontendManager runtime
-- ## ADR-054: Backend прототипа — домен вне ProcessModule, merge managers
-- ## ADR-055: Backend — граф импортов без циклов (configs ↔ processes ↔ modules)
-- ## ADR-056: Прототип — единый GuiConfig, без алиасов GUI и лишних реэкспортов
-- ## ADR-057: Персистентность прототипа — пакет persistence и корень данных
-- ## ADR-058: Outbound GUI-команда — IRouterLike + MessageAdapter + RoutedCommandSender
-- ## ADR-059: Рефакторинг SliderControl и CheckboxControl — config-based API, инкапсуляция операций со схемами
-- ## ADR-060: Controls — примитивы UI, стили, coerce_schema_config, узкий конструктор
-- ## ADR-061: Controls — common/field_sync, common/sizes, legacy_sync, Base без exclude
-- ## ADR-062: Controls v2 — Traits + Presenter + View + Facade, принцип конструктора
-- ## ADR-063: Controls v2 — доработки по ревью (9/10)
-- ## ADR-064: Controls v2 `base` — порты presenter и документация со схемами
-- ## ADR-065: Controls v2 `checkbox` — выравнивание с base
-- ## ADR-066: `example_with_data_schema` — учебный checkbox с двумя SchemaBase
-- ## ADR-067: Controls v2 — `ControlHooks`, отдельные `SliderPresenter` / `SpinBoxPresenter`
-- ## ADR-068: Controls v2 — фабрика `create_labeled_numeric_view` в `group/labeled_numeric_factory.py`
-- ## ADR-069: Пакет `control_v2` вне `components/controls`, примеры в `control_v2/examples`
-- ## ADR-070: primitives и common в control_v2, удаление controls v1
-- ## ADR-071: IRegistersManagerGui — единый протокол регистров для GUI
-- ## ADR-072: Паттерн вкладок — MVP, coerce_schema_config, callback_no_args, TAB_STRUCTURE
-- ## ADR-073: TabPresenterBase, TabViewProtocol; processing_tab и RegisterBindingContext
-- ## ADR-074: Единый стиль всех вкладок — IRegistersManagerGui, RegisterBindingContext, coerce
-- ## ADR-075: MvpTabBase, create_registers_placeholder, callbacks_base, recipes schemas
-- ## ADR-076: BaseWidget — MVP-виджет с опциональным Model
-- ## ADR-077: components vs widgets, flatten контролов, MvpTabBase = BaseWidget
-- ## ADR-078: Стили кнопок шапки — `widgets/header/button_style`, удалён пакет `widgets/base`
-- ## ADR-079: Граница `components` / `widgets`; `WidgetSignalBus`; TabWidget и клавиатуры без BaseWidget
-- ## ADR-080: Рецепты в multiprocess_prototype — снимок = model_dump_all
-- ## ADR-081: Двойные рецепты — register_recipes + app_recipes, AccessContext
-- ## ADR-082: Вкладки «Рецепты» и «Настройки» — разделение register vs app-рецепт, общая панель
-- ## ADR-083: Опциональная телеметрия UI — `ui_diagnostics`, одна подписка на шины
-- ## ADR-084: `FrontendAppContext` — явный контекст вкладок без слияния слоёв
-- ## ADR-085: Сжатие документации refactored — один актуальный контур
-- ## ADR-086: Вкладка «Регионы обрезки» и `ProcessorRegisters.crop_regions` без пакета App
-- ## ADR-087: Таблица регионов ROI — `StructuredTableWidget` и `CroppedRegionsTabUiConfig`
-- ## ADR-088: Оболочки вкладок (`*_tab`) — единый каталог `widgets/tabs_setting/`
-- ## ADR-089: `numeric_bind_or_lineedit` — общий fallback NumericControl vs QLineEdit
-- ## ADR-090: `frontend/coordinators`, границы виджет / Presenter / `managers`, accessors контекста
-- ## ADR-091: ROI по камерам — вложенный `processor.crop_regions`
-- ## ADR-092: Постобработка — `ProcessorRegisters.post_processing_regions` и вкладка прототипа
-- ## ADR-093: Вложенные payload processor — канон в `registers`, миграция снимков, мульти-камера
-- ## ADR-094: Логические камеры в UI — `logical_camera_ids`, сидирование, `subscribe_all`
-- ## ADR-095: `StructuredTwoLevelTreeWidget` — группа → строки в `frontend_module/widgets/tables`
-- ## ADR-096: Touch-клавиатура — `TouchKeyboardConfig`, интеграция numeric / tables
-- ## ADR-097: Touch-клавиатура — проброс из `FrontendConfig`, делегат по колонкам
-- ## ADR-098: Рецепты — два файла (`recipes.yaml` + `settings_recipes.yaml`), слот `0` = заводской
-- ## ADR-099: Пакет `multiprocess_prototype.registers_2` — слой над `schema_v3` без второго RegistersManager
-- ## ADR-100: Единая карта `REGISTER_MODELS` в `multiprocess_prototype.registers`, без пакета `registers_2`
-- ## ADR-101: Канонические схемы v3 в `multiprocess_prototype.schemas`; legacy регистры — `archive/registers`
-- ## ADR-102: Канонический schema→dict, ветки доставки и фасад чтения конфига в процессе
-- ## ADR-103: Конфиги модулей фреймворка — единый SchemaBase (ломающая миграция)
-- ## ADR-104: model_dump как канон процессного конфига, ProcessLaunchConfig и нормализация managers
-- ## ADR-105: Папка `configs/` со SchemaBase-схемами и универсальный `build()` в SchemaMixin
-- ## ADR-106: config_module — `configs/` только SchemaBase, `core/` только рантайм
-- ## ADR-107: error_module — единая сборка конфига в `core/error_config_assembly`, без `error_config.py`
-- ## ADR-108: Дублирующие `build()` у CRM-наследников и `ChannelRoutingConfig` в `core/`
-- ## ADR-109: Удаление `multiprocess_framework/core/interfaces.py` и `logging_facade`
-- ## ADR-110: Memory config — декларативно в конфиге, создание под капотом
-- ## ADR-111: Пути файлов логов — не от cwd пакета; pytest задаёт каталог
-- ## ADR-115: Публичный API пакета — lazy `ManagersConfig` / `SchemaBaseMapper`, реэкспорт схем шапки из `widgets`
-- ## ADR-116: SystemLauncher.wait_until_ready — детерминированное ожидание готовности системы
-- ## ADR-117: Единый ProcessStatus enum — унификация из трёх определений
-- ## ADR-118: `tabs_setting/` — оболочки вкладок vs. доменные группы (обсуждение)
+<!-- ADR-TOC:BEGIN — generated by scripts/sync/adr_toc.py — DO NOT EDIT -->
+- [ADR-001](#adr-001-observablemixin-остаётся): ObservableMixin остаётся
+- [ADR-002](#adr-002-registers_module-остаётся-runtime-!=-schema): registers_module остаётся (runtime != schema)
+- [ADR-003](#adr-003-data_schema_module-—-живое-днк): data_schema_module — «живое ДНК»
+- [ADR-004](#adr-004-синхронизация-днк-через-connection-bundle): Синхронизация ДНК через connection bundle
+- [ADR-005](#adr-005-request-response-через-correlation_id): Request-response через correlation_id
+- [ADR-006](#adr-006-базы-данных-как-отдельный-processmodule): Базы данных как отдельный ProcessModule
+- [ADR-007](#adr-007-processpriority-—-windows-only-stub): ProcessPriority — Windows-only stub
+- [ADR-008](#adr-008-dict-at-boundary-передача-данных-через-границы-процессов): Dict at Boundary (передача данных через границы процессов)
+- [ADR-009](#adr-009-gui_module-пропускается): gui_module пропускается
+- [ADR-010](#adr-010-console_module-—-менеджер-терминальных-окон): console_module — менеджер терминальных окон
+- [ADR-011](#adr-011-подход-сверху-вниз-top-down): Подход сверху вниз (top-down)
+- [ADR-012](#adr-012-unit-тесты-достаточны-без-integration-на-первом-этапе): Unit-тесты достаточны (без integration на первом этапе)
+- [ADR-013](#adr-013-channel_routing_module-—-базовый-класс-для-всех-менеджеров-с-каналами): channel_routing_module — базовый класс для всех менеджеров с каналами
+- [ADR-014](#adr-014-ichannel-—-единый-базовый-интерфейс-каналов): IChannel — единый базовый интерфейс каналов
+- [ADR-015](#adr-015-asyncsender-остаётся-в-routermanager-не-заменяется-asyncsenderbuffer): AsyncSender остаётся в RouterManager (не заменяется AsyncSenderBuffer)
+- [ADR-016](#adr-016-channelroutingconfigregisterbase-—-базовый-конфиг-через-наследование): ChannelRoutingConfig(RegisterBase) — базовый конфиг через наследование
+- [ADR-017](#adr-017-configstore-отдельно-от-processdata): ConfigStore отдельно от ProcessData
+- [ADR-018](#adr-018-srmregister_process-—-единая-точка-регистрации): SRM.register_process() — единая точка регистрации
+- [ADR-019](#adr-019-sharedmemory-по-именам-pickle-safe): SharedMemory по именам (pickle-safe)
+- [ADR-020](#adr-020-reinitialize_in_child-для-восстановления-после-unpickle): reinitialize_in_child() для восстановления после unpickle
+- [ADR-021](#adr-021-прямой-pickle-srm-вместо-ad-hoc-bundle-dict): Прямой pickle SRM вместо ad-hoc bundle dict
+- [ADR-022](#adr-022-statsmanager-—-прямой-наследник-channelroutingmanager-не-loggermanager): StatsManager — прямой наследник ChannelRoutingManager (не LoggerManager)
+- [ADR-023](#adr-023-config_module-—-тонкая-обёртка-над-data_schema_module): config_module — тонкая обёртка над data_schema_module
+- [ADR-024](#adr-024-channel_types-в-receive-—-разделение-system-и-data-очередей): channel_types в receive() — разделение system и data очередей
+- [ADR-025](#adr-025-multiprocess_prototype-—-processconfigbase-config-driven-memory-logging): multiprocess_prototype — ProcessConfigBase, config-driven memory, logging
+- [ADR-026](#adr-026-sharedmemory-pipeline-—-unlink-при-shutdown-stale-cleanup-print-fallback): SharedMemory pipeline — unlink при shutdown, stale cleanup, print fallback
+- [ADR-027](#adr-027-rendered_frame_ready-—-два-изображения-original-+-mask): rendered_frame_ready — два изображения (original + mask)
+- [ADR-028](#adr-028-shared_resources_module-и-data_schema_module-—-разделение-ответственностей): shared_resources_module и data_schema_module — разделение ответственностей
+- [ADR-029](#adr-029-hikvision_camera_module-—-вынос-hikvision-в-отдельный-модуль): hikvision_camera_module — вынос Hikvision в отдельный модуль
+- [ADR-030](#adr-030-sharedmemory-на-windows-—-уникальные-имена-с-pid): SharedMemory на Windows — уникальные имена с PID
+- [ADR-031](#adr-031-sharedmemory-—-очистка-перед-стартом-все-платформы): SharedMemory — очистка перед стартом (все платформы)
+- [ADR-032](#adr-032-sql_module-—-универсальный-sql-менеджер): sql_module — универсальный SQL-менеджер
+- [ADR-033](#adr-033-frontend_module-и-shared_registers-—-фундамент-ui-фреймворка): frontend_module и shared_registers — фундамент UI-фреймворка
+- [ADR-034](#adr-034-frontendmanager-—-единая-точка-входа-basemanager): FrontendManager — единая точка входа (BaseManager)
+- [ADR-035](#adr-035-frontendregistersbridge-—-связь-frontend-с-backend): FrontendRegistersBridge — связь frontend с backend
+- [ADR-036](#adr-036-конфигурация-frontend-—-hot-reload-без-перезапуска): Конфигурация frontend — hot-reload без перезапуска
+- [ADR-037](#adr-037-рефакторинг-frontend_module-и-multiprocess_prototype-2026-03-18): Рефакторинг frontend_module и multiprocess_prototype (2026-03-18)
+- [ADR-038](#adr-038-устранение-дублирования-processes-и-registers-2026-03-18): Устранение дублирования processes и registers (2026-03-18)
+- [ADR-039](#adr-039-рефакторинг-multiprocess_prototype-—-документация-и-очистка-2026-03-18): Рефакторинг multiprocess_prototype — документация и очистка (2026-03-18)
+- [ADR-040](#adr-040-guiprocessmixin): GuiProcessMixin
+- [ADR-041](#adr-041-конфиг-драйвен-window-registry): Конфиг-драйвен window registry
+- [ADR-042](#adr-042-processmodule-как-irouterlike-для-frontendmanager): ProcessModule как IRouterLike для FrontendManager
+- [ADR-043](#adr-043-унифицированные-конфиги-frontend-на-schemabase-+-fieldmeta): Унифицированные конфиги frontend на SchemaBase + FieldMeta
+- [ADR-044](#adr-044-реорганизация-frontend_modulecomponents-и-паттерн-конфиг-рядом-с-виджетом): Реорганизация frontend_module/components и паттерн «конфиг рядом с виджетом»
+- [ADR-045](#adr-045-action_triggered-+-connect_action_handlers-+-optional-action_id): action_triggered + connect_action_handlers + optional action_id
+- [ADR-046](#adr-046-прототип-—-feature-папка-windowsmain_window): Прототип — feature-папка windows/main_window
+- [ADR-047](#adr-047-прототип-—-матрёшка-widgets-вкладка-+-конфиг-рядом): Прототип — матрёшка widgets: вкладка + конфиг рядом
+- [ADR-048](#adr-048-доставка-register_update-—-registerdispatchmeta-fieldroutingprocess_targets-fan-out): Доставка register_update — RegisterDispatchMeta, FieldRouting.process_targets, fan-out
+- [ADR-049](#adr-049-stateregister-vs-uischema-главное-окно-и-вкладки): StateRegister vs UiSchema (главное окно и вкладки)
+- [ADR-050](#adr-050-схемы-регистров-—-в-приложении-не-во-фреймворке): Схемы регистров — в приложении, не во фреймворке
+- [ADR-051](#adr-051-модульные-логи-—-опция-`rotate`-windows-общий-файл): Модульные логи — опция `rotate` (Windows / общий файл)
+- [ADR-052](#adr-052-регистры-по-фичам-—-`schemasprocessing_tab`-ui-строки-у-виджета): Регистры по фичам — `schemas/processing_tab/`, UI-строки у виджета
+- [ADR-053](#adr-053-прототип-—-один-guiprocess-импорты-регистров-frontendmanager-runtime): Прототип — один GuiProcess, импорты регистров, FrontendManager runtime
+- [ADR-054](#adr-054-backend-прототипа-—-домен-вне-processmodule-merge-managers): Backend прототипа — домен вне ProcessModule, merge managers
+- [ADR-055](#adr-055-backend-—-граф-импортов-без-циклов-configs-↔-processes-↔-modules): Backend — граф импортов без циклов (configs ↔ processes ↔ modules)
+- [ADR-056](#adr-056-прототип-—-единый-guiconfig-без-алиасов-gui-и-лишних-реэкспортов): Прототип — единый GuiConfig, без алиасов GUI и лишних реэкспортов
+- [ADR-057](#adr-057-персистентность-прототипа-—-пакет-persistence-и-корень-данных): Персистентность прототипа — пакет persistence и корень данных
+- [ADR-058](#adr-058-outbound-gui-команда-—-irouterlike-+-messageadapter-+-routedcommandsender): Outbound GUI-команда — IRouterLike + MessageAdapter + RoutedCommandSender
+- [ADR-059](#adr-059-рефакторинг-slidercontrol-и-checkboxcontrol-—-config-based-api-инкапсуляция-операций-со-схемами): Рефакторинг SliderControl и CheckboxControl — config-based API, инкапсуляция операций со схемами
+- [ADR-060](#adr-060-controls-—-примитивы-ui-стили-coerce_schema_config-узкий-конструктор): Controls — примитивы UI, стили, coerce_schema_config, узкий конструктор
+- [ADR-061](#adr-061-controls-—-commonfield_sync-commonsizes-legacy_sync-base-без-exclude): Controls — common/field_sync, common/sizes, legacy_sync, Base без exclude
+- [ADR-062](#adr-062-controls-v2-—-traits-+-presenter-+-view-+-facade-принцип-конструктора): Controls v2 — Traits + Presenter + View + Facade, принцип конструктора
+- [ADR-063](#adr-063-controls-v2-—-доработки-по-ревью-910): Controls v2 — доработки по ревью (9/10)
+- [ADR-064](#adr-064-controls-v2-`base`-—-порты-presenter-и-документация-со-схемами): Controls v2 `base` — порты presenter и документация со схемами
+- [ADR-065](#adr-065-controls-v2-`checkbox`-—-выравнивание-с-base): Controls v2 `checkbox` — выравнивание с base
+- [ADR-066](#adr-066-`example_with_data_schema`-—-учебный-checkbox-с-двумя-schemabase): `example_with_data_schema` — учебный checkbox с двумя SchemaBase
+- [ADR-067](#adr-067-controls-v2-—-`controlhooks`-отдельные-`sliderpresenter`-`spinboxpresenter`): Controls v2 — `ControlHooks`, отдельные `SliderPresenter` / `SpinBoxPresenter`
+- [ADR-068](#adr-068-controls-v2-—-фабрика-`create_labeled_numeric_view`-в-`grouplabeled_numeric_factorypy`): Controls v2 — фабрика `create_labeled_numeric_view` в `group/labeled_numeric_factory.py`
+- [ADR-069](#adr-069-пакет-`control_v2`-вне-`componentscontrols`-примеры-в-`control_v2examples`): Пакет `control_v2` вне `components/controls`, примеры в `control_v2/examples`
+- [ADR-070](#adr-070-primitives-и-common-в-control_v2-удаление-controls-v1): primitives и common в control_v2, удаление controls v1
+- [ADR-071](#adr-071-iregistersmanagergui-—-единый-протокол-регистров-для-gui): IRegistersManagerGui — единый протокол регистров для GUI
+- [ADR-072](#adr-072-паттерн-вкладок-—-mvp-coerce_schema_config-callback_no_args-tab_structure): Паттерн вкладок — MVP, coerce_schema_config, callback_no_args, TAB_STRUCTURE
+- [ADR-073](#adr-073-tabpresenterbase-tabviewprotocol;-processing_tab-и-registerbindingcontext): TabPresenterBase, TabViewProtocol; processing_tab и RegisterBindingContext
+- [ADR-074](#adr-074-единый-стиль-всех-вкладок-—-iregistersmanagergui-registerbindingcontext-coerce): Единый стиль всех вкладок — IRegistersManagerGui, RegisterBindingContext, coerce
+- [ADR-075](#adr-075-mvptabbase-create_registers_placeholder-callbacks_base-recipes-schemas): MvpTabBase, create_registers_placeholder, callbacks_base, recipes schemas
+- [ADR-076](#adr-076-basewidget-—-mvp-виджет-с-опциональным-model): BaseWidget — MVP-виджет с опциональным Model
+- [ADR-077](#adr-077-components-vs-widgets-flatten-контролов-mvptabbase-=-basewidget): components vs widgets, flatten контролов, MvpTabBase = BaseWidget
+- [ADR-078](#adr-078-стили-кнопок-шапки-—-`widgetsheaderbutton_style`-удалён-пакет-`widgetsbase`): Стили кнопок шапки — `widgets/header/button_style`, удалён пакет `widgets/base`
+- [ADR-079](#adr-079-граница-`components`-`widgets`;-`widgetsignalbus`;-tabwidget-и-клавиатуры-без-basewidget): Граница `components` / `widgets`; `WidgetSignalBus`; TabWidget и клавиатуры без BaseWidget
+- [ADR-080](#adr-080-рецепты-в-multiprocess_prototype-—-снимок-=-model_dump_all): Рецепты в multiprocess_prototype — снимок = model_dump_all
+- [ADR-081](#adr-081-двойные-рецепты-—-register_recipes-+-app_recipes-accesscontext): Двойные рецепты — register_recipes + app_recipes, AccessContext
+- [ADR-082](#adr-082-вкладки-рецепты-и-настройки-—-разделение-register-vs-app-рецепт-общая-панель): Вкладки «Рецепты» и «Настройки» — разделение register vs app-рецепт, общая панель
+- [ADR-083](#adr-083-опциональная-телеметрия-ui-—-`ui_diagnostics`-одна-подписка-на-шины): Опциональная телеметрия UI — `ui_diagnostics`, одна подписка на шины
+- [ADR-084](#adr-084-`frontendappcontext`-—-явный-контекст-вкладок-без-слияния-слоёв): `FrontendAppContext` — явный контекст вкладок без слияния слоёв
+- [ADR-085](#adr-085-сжатие-документации-refactored-—-один-актуальный-контур): Сжатие документации refactored — один актуальный контур
+- [ADR-086](#adr-086-вкладка-регионы-обрезки-и-`processorregisterscrop_regions`-без-пакета-app): Вкладка «Регионы обрезки» и `ProcessorRegisters.crop_regions` без пакета App
+- [ADR-087](#adr-087-таблица-регионов-roi-—-`structuredtablewidget`-и-`croppedregionstabuiconfig`): Таблица регионов ROI — `StructuredTableWidget` и `CroppedRegionsTabUiConfig`
+- [ADR-088](#adr-088-оболочки-вкладок-`*_tab`-—-единый-каталог-`widgetstabs_setting`): Оболочки вкладок (`*_tab`) — единый каталог `widgets/tabs_setting/`
+- [ADR-089](#adr-089-`numeric_bind_or_lineedit`-—-общий-fallback-numericcontrol-vs-qlineedit): `numeric_bind_or_lineedit` — общий fallback NumericControl vs QLineEdit
+- [ADR-090](#adr-090-`frontendcoordinators`-границы-виджет-presenter-`managers`-accessors-контекста): `frontend/coordinators`, границы виджет / Presenter / `managers`, accessors контекста
+- [ADR-091](#adr-091-roi-по-камерам-—-вложенный-`processorcrop_regions`): ROI по камерам — вложенный `processor.crop_regions`
+- [ADR-092](#adr-092-постобработка-—-`processorregisterspost_processing_regions`-и-вкладка-прототипа): Постобработка — `ProcessorRegisters.post_processing_regions` и вкладка прототипа
+- [ADR-093](#adr-093-вложенные-payload-processor-—-канон-в-`registers`-миграция-снимков-мульти-камера): Вложенные payload processor — канон в `registers`, миграция снимков, мульти-камера
+- [ADR-094](#adr-094-логические-камеры-в-ui-—-`logical_camera_ids`-сидирование-`subscribe_all`): Логические камеры в UI — `logical_camera_ids`, сидирование, `subscribe_all`
+- [ADR-095](#adr-095-`structuredtwoleveltreewidget`-—-группа-→-строки-в-`frontend_modulewidgetstables`): `StructuredTwoLevelTreeWidget` — группа → строки в `frontend_module/widgets/tables`
+- [ADR-096](#adr-096-touch-клавиатура-—-`touchkeyboardconfig`-интеграция-numeric-tables): Touch-клавиатура — `TouchKeyboardConfig`, интеграция numeric / tables
+- [ADR-097](#adr-097-touch-клавиатура-—-проброс-из-`frontendconfig`-делегат-по-колонкам): Touch-клавиатура — проброс из `FrontendConfig`, делегат по колонкам
+- [ADR-098](#adr-098-рецепты-—-два-файла-`recipesyaml`-+-`settings_recipesyaml`-слот-`0`-=-заводской): Рецепты — два файла (`recipes.yaml` + `settings_recipes.yaml`), слот `0` = заводской
+- [ADR-100](#adr-100-единая-карта-`register_models`-в-`multiprocess_prototyperegisters`-без-пакета-`registers_2`): Единая карта `REGISTER_MODELS` в `multiprocess_prototype.registers`, без пакета `registers_2`
+- [ADR-101](#adr-101-канонические-схемы-v3-в-`multiprocess_prototypeschemas`;-legacy-регистры-—-`archiveregisters`): Канонические схемы v3 в `multiprocess_prototype.schemas`; legacy регистры — `archive/registers`
+- [ADR-102](#adr-102-канонический-schema→dict-ветки-доставки-и-фасад-чтения-конфига-в-процессе): Канонический schema→dict, ветки доставки и фасад чтения конфига в процессе
+- [ADR-103](#adr-103-конфиги-модулей-фреймворка-—-единый-schemabase-ломающая-миграция): Конфиги модулей фреймворка — единый SchemaBase (ломающая миграция)
+- [ADR-104](#adr-104-model_dump-как-канон-процессного-конфига-processlaunchconfig-и-нормализация-managers): model_dump как канон процессного конфига, ProcessLaunchConfig и нормализация managers
+- [ADR-105](#adr-105-папка-`configs`-со-schemabase-схемами-и-универсальный-`build`-в-schemamixin): Папка `configs/` со SchemaBase-схемами и универсальный `build()` в SchemaMixin
+- [ADR-106](#adr-106-config_module-—-`configs`-только-schemabase-`core`-только-рантайм): config_module — `configs/` только SchemaBase, `core/` только рантайм
+- [ADR-107](#adr-107-error_module-—-единая-сборка-конфига-в-`coreerror_config_assembly`-без-`error_configpy`): error_module — единая сборка конфига в `core/error_config_assembly`, без `error_config.py`
+- [ADR-108](#adr-108-дублирующие-`build`-у-crm-наследников-и-`channelroutingconfig`-в-`core`): Дублирующие `build()` у CRM-наследников и `ChannelRoutingConfig` в `core/`
+- [ADR-109](#adr-109-удаление-`multiprocess_frameworkcoreinterfacespy`-и-`logging_facade`): Удаление `multiprocess_framework/core/interfaces.py` и `logging_facade`
+- [ADR-110](#adr-110-memory-config-—-декларативно-в-конфиге-создание-под-капотом): Memory config — декларативно в конфиге, создание под капотом
+- [ADR-111](#adr-111-пути-файлов-логов-—-не-от-cwd-пакета;-pytest-задаёт-каталог): Пути файлов логов — не от cwd пакета; pytest задаёт каталог
+- [ADR-112](#adr-112-единый-контур-данных-—-`model_dump`-`model_validate`-без-лишних-методов-на-схемах): Единый контур данных — `model_dump` / `model_validate`, без лишних методов на схемах
+- [ADR-113](#adr-113-`managersconfig`-—-blueprint-дефолты;-`routermanagerconfigduplicate_messages_to_logger`): `ManagersConfig` — blueprint-дефолты; `RouterManagerConfig.duplicate_messages_to_logger`
+- [ADR-114](#adr-114-`managers_from_log_dir`-`managers_payload_for_proc`-—-фабрики-уровня-модуля-для-`managersconfig`): `managers_from_log_dir` / `managers_payload_for_proc` — фабрики уровня модуля для `ManagersConfig`
+- [ADR-115](#adr-115-публичный-api-пакета-—-lazy-`managersconfig`-`managers_*`-`schemabasemapper`-реэкспорт-схем-шапки-из-`widgets`): Публичный API пакета — lazy `ManagersConfig` / `managers_*`, `SchemaBaseMapper`, реэкспорт схем шапки из `widgets`
+- [ADR-116](#adr-116-systemlauncherwait_until_ready-—-детерминированное-ожидание-готовности-системы): SystemLauncher.wait_until_ready — детерминированное ожидание готовности системы
+- [ADR-117](#adr-117-единый-processstatus-enum-—-унификация-из-трёх-определений): Единый ProcessStatus enum — унификация из трёх определений
+- [ADR-118](#adr-118-`tabs_setting`-—-оболочки-вкладок-vs-доменные-группы-обсуждение): `tabs_setting/` — оболочки вкладок vs. доменные группы (обсуждение)
+<!-- ADR-TOC:END -->
 
 ---
 
@@ -1906,26 +1910,30 @@
 
 **Принцип локальности:** Каждый модуль может иметь свой `modules/<module>/DECISIONS.md` для решений, касающихся только его архитектуры.
 
+<!-- ADR-INDEX:BEGIN — generated by scripts/sync/adr_modules.py — DO NOT EDIT -->
 | Модуль | Файл | Слой | Статус |
 |--------|------|------|--------|
-| `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-114…117 (удаление плагинов, декораторов, __getattr__, on_event/emit_event) |
-| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-120…123 (shim cleanup, `_compat`, `tests_backup`, явный `extensions/`) |
-| `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-130…132 (`ScenarioManager`, удаление legacy API и `AdvancedDispatcher`) |
-| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-013…016 (CRM, буферы, broadcast), ADR-108 (двойная роль конфигов) |
-| `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-140…142 (удаление LogDispatcher, BatchManager, выделение LogRecord) |
-| `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-023 (global) + ADR-143…146 (Dict at Boundary, no I/O, пять компонентов, env-fallback) |
-| `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-147…152 (Message = SchemaBase, MessageAdapter, IMessage Protocol, routers) |
-| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-153…158 (CRM inheritance, name-returning handlers, dual dispatchers, thread-safe stats) |
-| `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-159…162 (нет зависимости от dispatch, dual config, self.name alias, WorkerInfo TypedDict) |
-| `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-163…167 + 166a (dual comm API, ISharedResources DI, PSR shim removal, managers pipeline, lifecycle init + delegators, importlib) |
-| `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-168…172 (ICommandManager wiring, legacy kwargs removal, dead except removal, process_name alias, CRM distinction) |
-| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…008 (Handle API, PSR single source of truth, MemoryAccessStatus, for_process naming, expanded config) |
-| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PM-001…006 (per-process stop events, минимальный spawner, bundle contract, monitor liveness, split runner, stop_event оркестратора), ADR-PMM-007 (Router endpoint для ProcessManagerProcess) |
-| `error_module` | [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md) | Observability | ADR-EM-001…006 (наследование LoggerManager, _level_to_channel, normalize config, expand assembly, init order, ленивый export в core) |
-| `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…006 (прямое наследование CRM, dual-layer storage, sentinel broadcast, _metric_key isolation, StatsAdapter, AggregationWindow) |
-| `sql_module` | [`modules/sql_module/DECISIONS.md`](modules/sql_module/DECISIONS.md) | Data & SQL | ADR-SQL-001…011 (DDL из SchemaBase, QuerySet immutable builder, адаптеры Strategy, Dict at Boundary, fork-safety с NullPool) |
-| `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…004 (композиция RegistersContainer, удаление IRegistersConverter, dispatch.py, логирование) |
-| `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…007 (три уровня в одном менеджере, God Mode как конфиг, ConsoleLogChannel, IPlatformConsole фабрика, ConsoleProcessConfig наследует ProcessLaunchConfig, RegisterCommandHandler, ConsoleRedirector без Queue) |
+| `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…004 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., Удаление BaseManager.on_event/emit_event (дублирует dispatch_module)) |
+| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…004 (Удаление `_compat.py`, ..., `extensions/` — только явный импорт) |
+| `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…003 (Извлечение ScenarioManager из Dispatcher, ..., Удаление AdvancedDispatcher alias) |
+| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…005 (Паттерн CRM (ChannelRoutingManager), ..., Две роли конфигов (ChannelRoutingConfig vs ChannelRoutingManagerConfig)) |
+| `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…003 (Удаление LogDispatcher, ..., LogRecord как отдельный тип) |
+| `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-CFG-001…004 (Dict at Boundary для ConfigStore, ..., Env-fallback как опциональная возможность) |
+| `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-MSG-001…006 (Message как value object с опциональной Pydantic-схемой, ..., Message наследует SchemaBase (Pydantic v2)) |
+| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-RTR-001…006 (RouterManager наследует ChannelRoutingManager, ..., Сохранение registration API (register_channel_handler, register_channel_scenario, cleanup)) |
+| `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-WRK-001…004 (Удаление ложного ребра worker → dispatch, ..., WorkerInfo как TypedDict (документация) + plain dict (runtime)) |
+| `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-PM-001…006 (Dual Communication API (send_message vs send), ..., `importlib.import_module` для динамической загрузки воркеров) |
+| `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-CMD-001…005 (CommandManager реализует ICommandManager, ..., CommandManager vs ChannelRoutingManager — разные паттерны, синхронный by design) |
+| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…008 (Удалён legacy API v1, ..., SharedResourcesManagerConfig — SchemaBase с параметрами модуля) |
+| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PMM-001…006 (Per-process stop events (2026-04-10), ..., stop_event оркестратора вне bundle (2026-04-10)) |
+| `error_module` | [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md) | Observability | ADR-EM-001…006 (ErrorManager как наследник LoggerManager (не композиция), ..., Ленивый экспорт ErrorManager из `core/__init__.py`) |
+| `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…006 (StatsManager как прямой наследник ChannelRoutingManager (не LoggerManager), ..., AggregationWindow как IBufferStrategy (не BatchBuffer)) |
+| `sql_module` | [`modules/sql_module/DECISIONS.md`](modules/sql_module/DECISIONS.md) | Data & SQL | ADR-SQL-001…011 (Двойной доступ (sync/async) через адаптеры, ..., UnitOfWork делегирует адаптеру управление транзакцией) |
+| `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…005 (Композиция RegistersContainer вместо дублирования, ..., Этапы 1–6 не применимы к registers_module) |
+| `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…012 (Три уровня использования в едином ConsoleManager, ..., `reg info` показывает FieldMeta и FieldRouting) |
+| `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…013 (IRouter Protocol для инкапсуляции router-зависимости, ..., SubscriptionManager — публичные snapshot-методы для shutdown / DevTools) |
+| `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…007 (Protocol-based decoupling от доменных типов, ..., ObservableMixin для долгоживущих сервисов модуля) |
+<!-- ADR-INDEX:END -->
 
 ---
 
@@ -1933,12 +1941,7 @@
 
 Ниже — решения, явно помеченные как устаревшие; обычно указан преемник (**Суперсед**).
 
-## ADR-099: Пакет `multiprocess_prototype.registers_2` — слой над `schema_v3` без второго RegistersManager
-- Дата: 2026-03-27
-- Статус: устарело
-- Суперсед: **ADR-100** (2026-03-27)
-- Контекст: Нужен прикладной слой для корневых регистров (`Pipeline` из schema_v3 + renderer), фабрики и фасада рецепт↔dict↔менеджер; типы пайплайна остаются в неизменном `registers/schema_v3`.
-- Решение (историческое): Каталог **`registers_2/`** с **`REGISTER_MODELS`**, **`PipelineRegisterRoot`**, **`RegisterRecipeBridge`**.
-- Причина отмены: Дублирование с основным **`registers/`**; карта регистров перенесена в **`registers/registry.py`**, пакет **`registers_2`** удалён; диспетчеризация на **`Pipeline`** — см. **ADR-100**.
+<!-- ADR-OBSOLETE:BEGIN — generated by scripts/sync/adr_obsolete.py — DO NOT EDIT -->
+<!-- ADR-OBSOLETE:END -->
 
 ---
