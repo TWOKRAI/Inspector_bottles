@@ -7,7 +7,11 @@ import pytest
 import yaml
 
 from multiprocess_framework.modules.frontend_module.managers.theme_manager import ThemeManager
-from multiprocess_prototype_2.frontend.styles.theme_loader import create_theme_manager
+from multiprocess_prototype_2.frontend.styles.theme_loader import (
+    available_themes,
+    create_theme_manager,
+    load_theme,
+)
 
 # Путь к директории styles/ в v2
 # __file__ = .../multiprocess_prototype_2/frontend/tests/test_theme_loader.py
@@ -36,19 +40,22 @@ class TestAvailableThemes:
 
     def test_innotech_theme_in_available(self) -> None:
         """available_themes() содержит 'innotech_theme'."""
-        tm = create_theme_manager()
-        themes = tm.available_themes()
+        themes = available_themes()
         assert _THEME_NAME in themes
 
     def test_available_themes_is_sorted(self) -> None:
         """available_themes() возвращает отсортированный список."""
-        tm = create_theme_manager()
-        themes = tm.available_themes()
+        themes = available_themes()
         assert themes == sorted(themes)
+
+    def test_available_themes_via_theme_manager(self) -> None:
+        """available_themes() совпадает с ThemeManager.available_themes()."""
+        tm = create_theme_manager()
+        assert available_themes() == tm.available_themes()
 
 
 class TestReadTheme:
-    """Тесты чтения QSS темы."""
+    """Тесты чтения QSS темы через ThemeManager."""
 
     def test_read_theme_returns_nonempty_string(self) -> None:
         """read_theme('innotech_theme') возвращает непустую строку."""
@@ -90,8 +97,47 @@ class TestReadTheme:
         assert result is None
 
 
+class TestLoadTheme:
+    """Тесты функции load_theme — полный цикл с подстановкой переменных."""
+
+    def test_load_theme_returns_nonempty_string(self) -> None:
+        """load_theme('innotech_theme') возвращает непустую строку."""
+        qss = load_theme(_THEME_NAME)
+        assert isinstance(qss, str)
+        assert len(qss) > 0
+
+    def test_load_theme_no_unresolved_variables(self) -> None:
+        """После load_theme() в QSS не остаётся @-плейсхолдеров переменных из yaml."""
+        qss = load_theme(_THEME_NAME)
+        # Загружаем список известных переменных из yaml
+        yaml_path = _STYLES_DIR / "themes" / _THEME_NAME / "variables.yaml"
+        with open(yaml_path, encoding="utf-8") as f:
+            variables = yaml.safe_load(f)
+        for var_name in variables:
+            assert f"@{var_name}" not in qss, (
+                f"Плейсхолдер @{var_name} не был заменён в load_theme()"
+            )
+
+    def test_load_theme_invalid_raises_file_not_found(self) -> None:
+        """load_theme() с несуществующей темой бросает FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            load_theme("nonexistent_theme_xyz")
+
+    def test_load_theme_contains_hex_colors(self) -> None:
+        """load_theme() содержит реальные hex-цвета вместо переменных."""
+        qss = load_theme(_THEME_NAME)
+        # Акцентный цвет из variables.yaml — #2b7fff
+        assert "#2b7fff" in qss.lower() or "2b7fff" in qss.lower()
+
+    def test_load_theme_default_is_innotech(self) -> None:
+        """load_theme() без аргументов загружает innotech_theme."""
+        qss_explicit = load_theme("innotech_theme")
+        qss_default = load_theme()
+        assert qss_explicit == qss_default
+
+
 class TestResolveQss:
-    """Тесты подстановки переменных в QSS-шаблон."""
+    """Тесты подстановки переменных в QSS-шаблон через ThemeManager.resolve_qss."""
 
     def _load_variables(self) -> dict[str, str]:
         """Загрузить переменные напрямую из variables.yaml."""
