@@ -11,6 +11,7 @@
 """
 
 import sys
+import subprocess
 import importlib
 from pathlib import Path
 
@@ -154,6 +155,26 @@ def check_status_files() -> None:
             warnings.append(msg)
 
 
+def check_adr_sync() -> None:
+    check_header("6. Проверка синхронизации ADR-документации (scripts/sync --check)")
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.sync", "--check"],
+        capture_output=True,
+        text=True,
+        cwd=str(BASE),
+    )
+    if result.returncode == 0:
+        print("  [OK] ADR-документация синхронизирована")
+    else:
+        msg = "  [FAIL] ADR дрифт обнаружен — запусти: python -m scripts.sync"
+        print(msg)
+        if result.stderr:
+            # печатаем stderr с отступом, чтобы было видно diff
+            for line in result.stderr.splitlines():
+                print(f"    {line}")
+        errors.append(msg)
+
+
 def main() -> int:
     print(f"\nMULTIPROCESS FRAMEWORK — Валидация")
     print(f"Base: {BASE}")
@@ -163,6 +184,7 @@ def main() -> int:
     check_init_files()
     check_interfaces()
     check_status_files()
+    check_adr_sync()
 
     print(f"\n{'='*60}")
     print(f"  ИТОГ")
