@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
+from .interfaces import IProcessServices
+
 if TYPE_CHECKING:
     from ..io import ProcessIO
 
@@ -66,43 +68,59 @@ class PluginContext:
 
     def __init__(
         self,
-        process_name: str,
-        config: dict[str, Any],
-        process: Any,
-        io: ProcessIO,
+        services: IProcessServices | None = None,
+        config: dict[str, Any] | None = None,
+        io: Any | None = None,
         registers: Any | None = None,
+        # Backward-compat kwargs (deprecated — используйте services)
+        process_name: str | None = None,
+        process: Any = None,
         state_proxy: Any = None,
     ) -> None:
-        self.process_name = process_name
-        self.config = config
+        # Backward-compat: если передан process вместо services (старый API)
+        if services is None and process is not None:
+            services = process
+            if process_name is None:
+                process_name = getattr(process, "name", "unknown")
 
-        # Менеджеры — прямые ссылки (без обёртки, плагин сам решает что использовать)
-        self.worker_manager = process.worker_manager
-        self.command_manager = process.command_manager
-        self.router_manager = process.router_manager
-        self.memory_manager = process.memory_manager
+        # Имя процесса: из аргумента (deprecated) или из services
+        self.process_name = process_name if process_name is not None else services.name  # type: ignore[union-attr]
+        self.config = config or {}
 
-        # IPC facade
+        # Менеджеры через Protocol (плагин использует только то, что ему нужно)
+        self.worker_manager = getattr(services, "worker_manager", None)
+        self.command_manager = getattr(services, "command_manager", None)
+        self.router_manager = getattr(services, "router_manager", None)
+        self.memory_manager = getattr(services, "memory_manager", None)
+
+        # IPC facade (передаётся отдельно — ProcessIO app-specific, не часть Protocol)
         self.io = io
 
         # Registers (Phase 5.9) — RegistersManager | None
         # Плагин читает self._reg = ctx.registers.get_register("plugin_name")
         self.registers = registers
 
-        # StateProxy (Phase 8) — для публикации состояния через реактивное дерево
-        # None по умолчанию для обратной совместимости
-        self.state_proxy = state_proxy
+        # StateProxy: из deprecated аргумента или из services
+        self.state_proxy = state_proxy if state_proxy is not None else getattr(services, "state_proxy", None)
 
-        # Logging
-        self.log_info: Callable[[str], None] = process._log_info
-        self.log_error: Callable[[str], None] = process._log_error
+        # Логирование — публичные методы (не приватные _log_*)
+        # Backward-compat: ProcessModule имеет _log_info/_log_error, MockProcessServices — log_info/log_error
+        self.log_info: Callable[[str], None] = (
+            getattr(services, "log_info", None)
+            or getattr(services, "_log_info", None)
+        )
+        self.log_error: Callable[[str], None] = (
+            getattr(services, "log_error", None)
+            or getattr(services, "_log_error", None)
+        )
 
-        # Доступ к низкоуровневым методам процесса (send/receive)
-        self.send_message: Callable = process.send_message
-        self.receive_message: Callable = process.receive_message
+        # IPC через Protocol
+        self.send_message: Callable = getattr(services, "send_message", None)  # type: ignore[assignment]
+        self.receive_message: Callable = getattr(services, "receive_message", None)  # type: ignore[assignment]
 
-        # Ссылка на процесс для продвинутых плагинов (SHM middleware и т.д.)
-        self._process = process
+        # Backward-compat: _process для продвинутых плагинов (SHM middleware и т.д.)
+        # DEPRECATED: используйте services напрямую
+        self._process = services
 
     def with_config(
         self,
@@ -111,12 +129,10 @@ class PluginContext:
     ) -> PluginContext:
         """Создать копию контекста с plugin-specific конфигом."""
         return PluginContext(
-            process_name=self.process_name,
+            services=self._process,  # _process хранит services (или process при backward-compat)
             config=plugin_config,
-            process=self._process,
             io=self.io,
             registers=registers,
-            state_proxy=self.state_proxy,
         )
 
 
