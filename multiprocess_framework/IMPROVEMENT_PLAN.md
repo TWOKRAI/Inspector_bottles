@@ -142,12 +142,10 @@ python scripts/run_framework_tests.py
 **Проблема.** Оба дают pub/sub изменений; граница только в документации, не в коде.
 
 **Действия:**
-- [ ] Написать ADR-RM-002 (или ADR-SS-014): «Когда применять регистры, когда — state store».  <!-- ADR-SS-011..013 уже заняты (см. modules/state_store_module/DECISIONS.md). -->
-
-- [ ] Чётко разграничить:
-  - `registers_module` — **именованные регистры приложения** (Pydantic-инстансы, типизированные поля, валидация по `FieldMeta`, fan-out по `FieldRouting`). Применять для конфигурации устройств, UI-настроек.
-  - `state_store_module` — **произвольное иерархическое дерево** (dict-tree, glob-patterns, delta-only IPC). Применять для real-time состояния, метрик, телеметрии, динамических топологий.
-- [ ] Добавить раздел в `CONSTRUCTOR_BLUEPRINT.md` §4 «Семь паттернов» — добавить восьмой: «Регистр vs State Store».
+- [x] Написать ADR-RM-006: «Когда применять регистры, когда — state store» (ADR-RM-002 был занят).
+- [x] Чётко разграничить: decision matrix с 8 критериями + правило выбора + 4 граничных случая.
+- [x] Добавить раздел в `CONSTRUCTOR_BLUEPRINT.md` §4 — восьмой паттерн: «Регистр vs State Store».
+<!-- Закрыто: 2026-05-08 — ADR-RM-006, CONSTRUCTOR_BLUEPRINT §4 паттерн 8 -->
 
 **Срок:** 0.5 дня.
 

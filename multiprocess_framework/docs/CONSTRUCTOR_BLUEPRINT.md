@@ -324,7 +324,7 @@ sequenceDiagram
 
 ---
 
-## 4. Семь ключевых паттернов фреймворка
+## 4. Восемь ключевых паттернов фреймворка
 
 | # | Паттерн | Где живёт | Идея |
 |---|---------|-----------|------|
@@ -335,6 +335,7 @@ sequenceDiagram
 | 5 | **Per-process stop_event** | `ProcessRegistry` (ADR-PM-001) | Для каждого процесса — свой `multiprocessing.Event`. Остановка одного не задевает других. |
 | 6 | **Bundle Contract** | `process_manager_module/launcher/bundle_contract.py` (ADR-PM-003) | Pickle-safe формализованный dict для дочернего процесса. Валидируется перед spawn'ом. |
 | 7 | **Unified ProcessStatus** | `base_manager/types/process_status.py` (ADR-117) | Один `Enum` на всех. Раньше было 3 копии — устранено. |
+| 8 | **Регистр vs State Store** | `registers_module` / `state_store_module` (ADR-RM-006) | Именованная схема + FieldRouting → регистр. Динамическое дерево + glob + delta-IPC → state store. Не взаимозаменяемы. |
 
 ---
 
