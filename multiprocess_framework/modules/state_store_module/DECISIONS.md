@@ -163,7 +163,7 @@ class GuiStateProxy(StateProxy):
 
 ---
 
-## ADR-SS-006: TODO Фаза 4 — авто-регистрация handler-а state.changed
+## ADR-SS-006: Авто-регистрация handler-а state.changed в ProcessModule
 
 **Контекст:** В Фазе 2.1 каждый рабочий процесс явно регистрирует handler для входящих дельт:
 
@@ -173,25 +173,23 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 
 Это требует от разработчика помнить о регистрации и добавлять строку в каждый процесс.
 
-**Решение (TODO):** В Фазе 4 при рефакторинге ProcessModule:
-- ProcessModule будет принимать опциональный `state_proxy: IStateProxy | None`
-- При инициализации ProcessModule автоматически регистрирует handler если proxy задан
-- Разработчик просто создаёт proxy, не думая о регистрации
+**Решение:**
+- `ProcessModule.__init__` принимает `state_proxy: IStateProxy | None = None`
+- Метод `_init_state_proxy()` вызывается в конце `initialize()` (после `_lifecycle.initialize()`)
+- Если `state_proxy` задан и `router_manager` доступен — handler регистрируется автоматически
+- Разработчик создаёт proxy в `_init_application_threads()` и назначает `self.state_proxy = proxy`
 
 ```python
-# Фаза 4 (target):
-class ProcessModule:
-    def initialize(self):
-        if self._state_proxy:
-            self.router.register_message_handler(
-                "state.changed",
-                self._state_proxy.on_state_changed,
-            )
+# В конкретном процессе:
+def _init_application_threads(self):
+    self._state_proxy = StateProxy("name", router=self.router_manager, ...)
+    self.state_proxy = self._state_proxy  # авто-регистрация в _init_state_proxy()
 ```
 
-**Причина откладывания:** Требует изменения ProcessModule (базовый класс фреймворка), а не только state_store_module.
+**Статус:** Реализовано (2026-05-08, T1.2).
+Мигрированы все процессы прототипа: robot, camera, renderer, gui, database, processor.
 
-**Последствия:** Упрощение интеграции для разработчика, прозрачность управления подписками.
+**Последствия:** Упрощение интеграции для разработчика, прозрачность управления подписками. Новые процессы не могут «забыть» зарегистрировать handler.
 
 ---
 

@@ -80,11 +80,7 @@ class GuiProcess(ProcessModule):
             router=self.router_manager,
             server_target="ProcessManager",
         )
-
-        # Регистрация обработчика state.changed
-        self.router_manager.register_message_handler(
-            "state.changed", self._state_proxy.on_state_changed
-        )
+        self.state_proxy = self._state_proxy  # ADR-SS-006: авто-регистрация в _init_state_proxy()
 
         # Начальная запись состояния в StateStore
         self._state_proxy.set("gui.state.status", "initialized")

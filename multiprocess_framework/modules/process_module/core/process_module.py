@@ -7,7 +7,10 @@
 
 import importlib
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ...state_store_module.interfaces import IStateProxy
 
 from ...base_manager import BaseManager, ObservableMixin
 from ..communication import ProcessCommunication
@@ -50,7 +53,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         name: str,
         shared_resources: ISharedResources | None = None,
         config: dict | None = None,
-        state_proxy: Any | None = None,
+        state_proxy: "IStateProxy | None" = None,
     ):
         """
         Инициализация процесса.
@@ -74,7 +77,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.name = name
         self.shared_resources: ISharedResources | None = shared_resources
         self.config = config or {}
-        self.state_proxy = state_proxy
+        self.state_proxy: "IStateProxy | None" = state_proxy
 
         # Компоненты (настраиваются в initialize())
         self.config_handler = None

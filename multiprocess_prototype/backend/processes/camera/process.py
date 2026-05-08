@@ -67,9 +67,7 @@ class CameraProcess(ProcessModule):
             router=self.router_manager,
             server_target="ProcessManager",
         )
-
-        # Регистрация обработчика state.changed
-        self.router_manager.register_message_handler("state.changed", self._state_proxy.on_state_changed)
+        self.state_proxy = self._state_proxy  # ADR-SS-006: авто-регистрация в _init_state_proxy()
 
         # Подписка на config-ветвь — exclude_self, чтобы не реагировать на собственные записи
         self._state_config_handlers = build_state_config_handlers(
