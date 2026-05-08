@@ -12,7 +12,7 @@
 
 | Кто | Куда смотреть |
 |-----|---------------|
-| **Новый разработчик / агент** | [`SPEC.md`](./SPEC.md) → [`docs/MODULES_OVERVIEW.md`](./docs/MODULES_OVERVIEW.md) → `modules/<X>/README.md` |
+| **Новый разработчик / агент** | [`docs/AGENT_CHEATSHEET.md`](./docs/AGENT_CHEATSHEET.md) → [`SPEC.md`](./SPEC.md) → [`docs/MODULES_OVERVIEW.md`](./docs/MODULES_OVERVIEW.md) → `modules/<X>/README.md` |
 | **Архитектор** | [`SPEC.md`](./SPEC.md) + [`docs/MODULE_CONTRACTS.md`](./docs/MODULE_CONTRACTS.md) + [`DECISIONS.md`](./DECISIONS.md) |
 | **Расширяющий фреймворк** | [`docs/DESIGN_RULES.md`](./docs/DESIGN_RULES.md) + [`docs/EXTENSION_GUIDE.md`](./docs/EXTENSION_GUIDE.md) + [`docs/MODULE_README_TEMPLATE.md`](./docs/MODULE_README_TEMPLATE.md) |
 | **Тестировщик** | [`PROBLEMS.md`](./PROBLEMS.md) + раздел [Testing](#testing) ниже |
