@@ -4,10 +4,11 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-05-08:** Рефакторинг `refactor/t1.1-plugin-composition`: composition pattern для plugin-системы (ADR-PM-007, ADR-PM-008). `IProcessServices` Protocol — явный контракт между plugin-системой и `ProcessModule`. `PluginOrchestrator` — composition class для plugin lifecycle. `ProcessHeartbeat` и `BuiltinCommands` извлечены из `ProcessModule` как отдельные composition classes. `GenericProcess` → deprecated shim (404 → 155 LOC). `MockProcessServices` для изолированного тестирования плагинов. 206 тестов — все green.
 - **2026-04-09:** Рефакторинг по `plans/refactoring/12_process_module.md`: инициализация конфигурации/очередей в `ProcessLifecycle` с делегатами на `ProcessModule` (ADR-PM-005), pipeline `ProcessManagers.initialize()`, удалён shim `state/process_state_registry.py`, `DECISIONS.md` (ADR-PM-001…006), §6.11 в `ARCHITECTURE.md`, `importlib` для воркеров, удалён `reload_manager`, помечен deprecated `log()`.
 - Корневая сборка `managers`: **`configs/managers_config.py`** — blueprint-дефолты, **`RouterManagerConfig` / `CommandManagerConfig`**, **`managers_from_log_dir`** / **`managers_payload_for_proc`** + тонкие **`from_log_dir`** / **`managers_for_proc_dict`** на классе (ADR-112, **ADR-113**, **ADR-114**); нормализация **`normalize_managers_view`** + **`ProcessLaunchConfig`** (ADR-104). Публичный импорт **`ManagersConfig`** / **`managers_*`** с корня пакета **`process_module`** — лениво (**`__getattr__`**, **ADR-115**), рядом с **`ProcessModule`**.
-- Версия: 2.0.0 (Refactored)
-- Тесты: 69/69 в `process_module/tests` (pytest)
+- Версия: 2.1.0 (Composition)
+- Тесты: 206/206 в `process_module/tests` (pytest)
 - Документация: ✅ полная
 - Циклические зависимости: ✓ устранены
 
@@ -40,9 +41,9 @@
 ```
 process_module/
 ├── __init__.py              # Публичный API
-├── interfaces.py            # Контракты: IProcessModule, ISharedResources, IProcessCommunication
+├── interfaces.py            # Контракты: IProcessModule, ISharedResources, IProcessCommunication, IProcessServices
 ├── types/                   # ProcessStatus enum, TypedDict
-├── core/                    # ProcessModule (главный класс)
+├── core/                    # ProcessModule (главный класс, 586 LOC)
 ├── lifecycle/               # Жизненный цикл: initialize/shutdown
 ├── managers/                # Инициализация менеджеров
 ├── communication/           # IPC (send/receive/broadcast)
@@ -50,7 +51,11 @@ process_module/
 ├── state/                   # Состояние процесса
 ├── threads/                 # Системные потоки
 ├── adapters/                # ProcessAdapter, SchemaAdapter
-├── tests/                   # 49 unit-тестов
+├── plugins/                 # PluginOrchestrator (333 LOC), MockProcessServices
+├── heartbeat/               # ProcessHeartbeat (93 LOC)
+├── commands/                # BuiltinCommands (208 LOC)
+├── generic/                 # GenericProcess deprecated shim (155 LOC)
+├── tests/                   # 206 unit-тестов
 ├── README.md                # Документация пользователя
 ├── ARCHITECTURE.md          # Архитектура и дизайн
 ├── docs/
@@ -62,16 +67,21 @@ process_module/
 
 ## Компоненты и ответственность
 
-| Компонент | Класс | Назначение |
-|-----------|-------|-----------|
-| **Ядро** | ProcessModule | Основной класс процесса, жизненный цикл |
-| **Жизненный цикл** | ProcessLifecycle | initialize, shutdown, status transitions |
-| **Менеджеры** | ProcessManagers | Инициализация WorkerManager, RouterManager, LoggerManager |
-| **Коммуникация** | ProcessCommunication | send_message, receive_message, broadcast_message |
-| **Конфигурация** | ProcessConfigHandler | get/update конфигурации |
-| **Состояние** | ProcessState | Интеграция с shared_resources |
-| **Потоки** | SystemThreads | Управление системными потоками |
-| **Адаптеры** | ProcessAdapter, SchemaAdapter | Интеграция с внешними системами |
+| Компонент | Класс | LOC | Назначение |
+|-----------|-------|-----|-----------|
+| **Ядро** | ProcessModule | 586 | Основной класс процесса, жизненный цикл |
+| **Жизненный цикл** | ProcessLifecycle | — | initialize, shutdown, status transitions |
+| **Менеджеры** | ProcessManagers | — | Инициализация WorkerManager, RouterManager, LoggerManager |
+| **Коммуникация** | ProcessCommunication | — | send_message, receive_message, broadcast_message |
+| **Конфигурация** | ProcessConfigHandler | — | get/update конфигурации |
+| **Состояние** | ProcessState | — | Интеграция с shared_resources |
+| **Потоки** | SystemThreads | — | Управление системными потоками |
+| **Адаптеры** | ProcessAdapter, SchemaAdapter | — | Интеграция с внешними системами |
+| **Composition: плагины** | PluginOrchestrator | 333 | Plugin lifecycle через IProcessServices (ADR-PM-007) |
+| **Composition: heartbeat** | ProcessHeartbeat | 93 | Отправка heartbeat через IProcessServices |
+| **Composition: команды** | BuiltinCommands | 208 | wire/worker команды через IProcessServices |
+| **Тестирование** | MockProcessServices | — | Лёгкий мок IProcessServices для изолированных тестов |
+| **Deprecated** | GenericProcess | 155 | Backward-compat shim (будет удалён, ADR-PM-008) |
 
 ---
 

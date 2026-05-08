@@ -1,7 +1,11 @@
 """GenericProcess — backward-compat shim + data pipeline.
 
-Делегирует plugin lifecycle в PluginOrchestrator.
-Data pipeline (app-specific) остаётся здесь.
+DEPRECATED: Используйте ProcessModule напрямую с config.plugins.
+ProcessModule теперь нативно поддерживает плагины через PluginOrchestrator.
+
+GenericProcess добавляет только app-specific data pipeline
+(DataReceiver, PipelineExecutor, SourceProducer) — это не часть
+фреймворка, а логика Inspector vision приложения.
 """
 
 from __future__ import annotations
@@ -9,53 +13,28 @@ from __future__ import annotations
 import queue
 
 from ..core.process_module import ProcessModule
-from ..io import ProcessIO
 from .data_receiver import DataReceiver
 from .frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
 from .pipeline_executor import PipelineExecutor
-from .plugin_orchestrator import PluginOrchestrator
 from .source_producer import SourceProducer
 
 
 class GenericProcess(ProcessModule):
-    """Backward-compat shim: plugin lifecycle через PluginOrchestrator + data pipeline."""
+    """DEPRECATED: ProcessModule теперь поддерживает плагины нативно.
 
-    def _init_custom_managers(self) -> None:
-        """Ранняя инициализация: создать PluginOrchestrator, загрузить плагины."""
-        super()._init_custom_managers()
-
-        app_cfg = self.get_config("config") or {}
-        plugin_defs: list[dict] = app_cfg.get("plugins", [])
-
-        if not plugin_defs:
-            return
-
-        io = ProcessIO(self)
-        self._orchestrator = PluginOrchestrator(services=self, io=io)
-        self._orchestrator.load_and_configure_managers(plugin_defs)
+    GenericProcess = ProcessModule + data pipeline (app-specific).
+    Plugin lifecycle (load → configure → start → shutdown) полностью
+    обрабатывается ProcessModule через PluginOrchestrator.
+    """
 
     def _init_application_threads(self) -> None:
-        """Boot плагинов через orchestrator + data pipeline."""
+        """super() делает plugin boot, здесь только data pipeline."""
         super()._init_application_threads()
 
-        orchestrator = getattr(self, "_orchestrator", None)
-        if orchestrator is None:
-            self._log_info(f"GenericProcess[{self.name}]: нет плагинов")
-            return
-
-        # Plugin lifecycle: IDLE -> READY -> RUNNING + registers
-        orchestrator.boot()
-
-        # Data pipeline bootstrap (Phase 5)
-        self._init_data_pipeline()
-
-    def shutdown(self) -> bool:
-        """Shutdown плагинов через orchestrator + super().shutdown()."""
-        orchestrator = getattr(self, "_orchestrator", None)
-        if orchestrator:
-            orchestrator.shutdown()
-        return super().shutdown()
+        # Data pipeline — только если orchestrator загрузил плагины
+        if self._orchestrator is not None:
+            self._init_data_pipeline()
 
     # --- Data Pipeline (Phase 5) — остаётся без изменений ---
 

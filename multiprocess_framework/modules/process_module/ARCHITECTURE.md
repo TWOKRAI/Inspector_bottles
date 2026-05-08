@@ -686,7 +686,37 @@ class Consumer(ProcessModule):
 
 ---
 
-## 12. Дополнительные ссылки
+## 12. Composition Pattern (ADR-PM-007)
+
+ProcessModule использует composition вместо наследования для расширения поведения. Каждый composition class принимает `IProcessServices` Protocol — явный контракт без runtime-стоимости (structural subtyping).
+
+```
+ProcessModule
+├── PluginOrchestrator(IProcessServices)  — plugin lifecycle (load → configure → start → shutdown)
+├── ProcessHeartbeat(IProcessServices)    — отправка heartbeat в роутер
+└── BuiltinCommands(IProcessServices)     — wire/worker команды
+```
+
+`IProcessServices` определяет только то, что composition classes реально используют — подмножество публичного API `ProcessModule`:
+
+```python
+class IProcessServices(Protocol):
+    name: str
+    config: dict
+    router_manager: Any
+    worker_manager: Any
+    def log_info(self, msg: str) -> None: ...
+    def log_error(self, msg: str) -> None: ...
+    # ...
+```
+
+Для тестирования плагинов и composition classes в изоляции используется `MockProcessServices` — не требует запуска процесса. Это принципиальное отличие от предыдущего подхода через наследование `GenericProcess`.
+
+**Правило расширения:** новые composition classes должны принимать только `IProcessServices`, не `ProcessModule`. ProcessModule создаёт их в `initialize()` если соответствующий конфиг-ключ присутствует.
+
+---
+
+## 13. Дополнительные ссылки
 
 - **README.md** — пользовательская документация с примерами
 - **STATUS.md** — карточка здоровья, оценки, чеклист

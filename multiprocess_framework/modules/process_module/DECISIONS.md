@@ -49,3 +49,58 @@
 **Контекст:** `_create_workers_from_config` использовал `__import__(module_path, fromlist=[...])` для загрузки класса воркера по строке пути.  
 **Решение:** Заменить на `importlib.import_module(module_path)` и `getattr` для класса — идиоматичный API, проще сопровождать.  
 **Последствия:** Эквивалентная семантика для обычных модулей; поведение для edge-case имён пакетов предсказуемее для читателя кода.
+
+---
+
+## ADR-PM-007: Plugin composition через IProcessServices Protocol
+
+**Статус:** принято  
+**Дата:** 2026-05-08  
+**Контекст:** `GenericProcess` наследовал `ProcessModule` для добавления plugin lifecycle. `PluginContext` получал весь `ProcessModule` напрямую. Контракт между plugin-системой и процессом был неявным (duck typing): плагины зависели от конкретного класса, что делало изолированное тестирование невозможным без запуска полного процесса.  
+**Решение:**
+- `IProcessServices` Protocol — явный контракт (structural subtyping, zero runtime cost) между plugin-системой и `ProcessModule`: только то, что плагинам действительно нужно
+- `PluginOrchestrator` — composition class, управляет plugin lifecycle (load → configure → start → shutdown) через `IProcessServices`
+- `ProcessModule` нативно поддерживает плагины: при наличии `config["plugins"]` создаёт `PluginOrchestrator` внутри себя
+- `PluginContext` принимает `IProcessServices` вместо `ProcessModule`
+- `MockProcessServices` — лёгкий мок для изолированного тестирования плагинов без запуска процесса
+
+**Отклонённые альтернативы:**
+
+A. **Оставить наследование (GenericProcess → ProcessModule)** — плагины через override методов
+- Плюсы: минимальные изменения
+- Минусы: неявный контракт, невозможно тестировать плагины изолированно, наследование как механизм расширения поведения — анти-паттерн
+
+B. **Отдельный PluginProcess рядом с ProcessModule** — новый класс параллельно
+- Плюсы: нет изменений в ProcessModule
+- Минусы: два универсальных класса процессов вместо одного, дублирование lifecycle-кода
+
+**Последствия:**
+- `GenericProcess` deprecated — тонкий shim (404 → 155 LOC) для backward-compat, будет удалён
+- Плагины тестируются без `ProcessModule` через `MockProcessServices` (206 тестов — все green)
+- Новый composition pattern: `heartbeat`, `commands`, `orchestrator` — все через `IProcessServices`
+- Присоединение будущих composition class к `ProcessModule` следует тому же паттерну
+
+---
+
+## ADR-PM-008: ProcessModule как единственный универсальный класс процесса
+
+**Статус:** принято  
+**Дата:** 2026-05-08  
+**Контекст:** На момент рефакторинга 9 классов наследовали `ProcessModule` (`CameraProcess`, `GuiProcess`, `GenericProcess` и др.). Каждый добавлял поведение через наследование, что приводило к размытию ответственностей и усложнению тестирования. Архитектурная цель — один универсальный класс процесса, поведение которого определяется конфигурацией, а не иерархией классов.  
+**Решение:** `ProcessModule` — единственный класс процесса в фреймворке. Поведение определяется конфигурацией (`plugins`, `workers`) и composition classes, не наследованием. Единственный легитимный наследник — `ProcessManagerProcess` (оркестратор со специальным «god mode» доступом к системным ресурсам).  
+
+**Отклонённые альтернативы:**
+
+A. **Специализированные подклассы** (CameraProcess, GuiProcess, etc.)
+- Плюсы: явная типизация, понятное именование
+- Минусы: размножение классов при добавлении новых сценариев, жёсткая иерархия не позволяет комбинировать поведения
+
+B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin)
+- Плюсы: гибкость комбинирования
+- Минусы: MRO-проблемы, неочевидный порядок инициализации, сложность тестирования
+
+**Последствия:**
+- Миграция прикладных процессов (`CameraProcess` → `ProcessModule` + `CameraServicePlugin`) — future work
+- `GenericProcess` → deprecated shim → будет удалён после миграции прикладного кода
+- Data pipeline (`DataReceiver`, `PipelineExecutor`), пока живущий в `GenericProcess`, станет `DataPipelinePlugin` — future work
+- Прикладной код (`multiprocess_prototype/`) не обязан следовать этому правилу — запрет касается только фреймворка
