@@ -179,8 +179,8 @@ class TestProcessModule:
         assert hasattr(process, 'log_info')
         assert hasattr(process, 'log_error')
         
-        # Тест метода log() для совместимости
-        process.log("INFO", "Test message", "test_context")
+        # Публичные методы вызываются без ошибок
+        process.log_info("Test message", module="test_context")
         # Не должно упасть
     
     def test_get_stats(self):

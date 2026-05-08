@@ -6,7 +6,6 @@
 """
 
 import importlib
-import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -105,8 +104,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._threads = SystemThreads(self)
         self._state = ProcessState(self)
 
-        # Трекинг wire middleware (wire_key → (middleware_instance, role))
-        self._wire_middlewares: dict[str, tuple] = {}
+        # Heartbeat и встроенные команды (создаются в run())
+        self._heartbeat = None
+        self._builtin_cmds = None
+
+        # Plugin orchestrator — опциональная композиция
+        # Активируется если config["plugins"] непуст (см. _init_custom_managers)
+        self._orchestrator = None
 
         # initialize() вызывается явно после создания
 
@@ -137,6 +141,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Завершение работы процесса.
 
         Интегрирует функциональность ProcessCore:
+        - Shutdown плагинов (если есть orchestrator)
         - Остановка всех потоков
         - Очистка ресурсов
         - Отключение менеджеров
@@ -144,6 +149,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Returns:
             bool: True если завершение успешно
         """
+        # Plugin shutdown (если orchestrator был создан)
+        if self._orchestrator is not None:
+            self._orchestrator.shutdown()
+
         return self._lifecycle.shutdown()
 
     # ========================================================================
@@ -237,9 +246,22 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ========================================================================
 
     def _init_custom_managers(self):
-        """Опциональная инициализация кастомных менеджеров."""
-        # Переопределяется в дочерних классах
-        pass
+        """Опциональная инициализация кастомных менеджеров.
+
+        Если config["plugins"] задан — создаёт PluginOrchestrator
+        и загружает плагины (early-init: configure_managers).
+        Дочерние классы могут переопределить для дополнительной логики.
+        """
+        app_cfg = self.get_config("config") or {}
+        plugin_defs: list[dict] = app_cfg.get("plugins", [])
+
+        if plugin_defs:
+            from ..generic.plugin_orchestrator import PluginOrchestrator
+            from ..io import ProcessIO
+
+            io = ProcessIO(self)
+            self._orchestrator = PluginOrchestrator(services=self, io=io)
+            self._orchestrator.load_and_configure_managers(plugin_defs)
 
     def _init_application_threads(self):
         """Опциональная инициализация потоков приложения."""
@@ -247,8 +269,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         workers_config = self.config.get("workers") if self.config else {}
         if workers_config and self.worker_manager:
             self._create_workers_from_config(workers_config)
-        # Дочерние классы могут переопределить для дополнительной логики
-        pass
+
+        # Plugin boot (если orchestrator создан в _init_custom_managers)
+        if self._orchestrator is not None:
+            self._orchestrator.boot()
 
     def _create_workers_from_config(self, workers_config: dict[str, Any]) -> None:
         """Создать воркеры из config. worker_dict: {class: path, config: {...}, thread: {...}}."""
@@ -475,35 +499,6 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # УДОБНЫЕ МЕТОДЫ
     # ========================================================================
 
-    def log(self, level: str, message: str, context: str = None):
-        """
-        Логирование через адаптер (для совместимости со старым API).
-
-        .. deprecated::
-            Предпочтительно ``_log_info`` / ``_log_error`` и родственные методы
-            или адаптер логгера; метод сохранён для подклассов и существующих тестов.
-
-        Args:
-            level: Уровень логирования (INFO, DEBUG, ERROR и т.д.)
-            message: Текст сообщения
-            context: Контекст логирования
-        """
-        # Используем ObservableMixin для логирования
-        level_lower = level.lower()
-        if level_lower == "info":
-            self.log_info(message, module=context or self.name)
-        elif level_lower == "debug":
-            self.log_debug(message, module=context or self.name)
-        elif level_lower == "error":
-            self.log_error(message, module=context or self.name)
-        elif level_lower == "warning":
-            self.log_warning(message, module=context or self.name)
-        else:
-            # Fallback на адаптер если есть
-            adapter = self.logger_adapter
-            if adapter and hasattr(adapter, "log"):
-                adapter.log(level, message, context or self.name)
-
     def execute_command(self, command: str, data: dict = None) -> Any:
         """
         Выполнение команды через адаптер.
@@ -531,258 +526,17 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if self.worker_manager:
             self.worker_manager.start_all_workers()
 
-        # Регистрируем встроенные команды управления воркерами
-        self._register_builtin_process_commands()
+        # Встроенные команды (composition)
+        from ..commands.builtin_commands import BuiltinCommands
+        self._builtin_cmds = BuiltinCommands(self)
+        self._builtin_cmds.register()
 
-        # Запуск heartbeat воркера (если интервал > 0)
-        self._start_heartbeat_worker()
+        # Heartbeat (composition)
+        from ..heartbeat.process_heartbeat import ProcessHeartbeat
+        self._heartbeat = ProcessHeartbeat(self)
+        self._heartbeat.start()
 
         self._log_info(f"Process '{self.name}' started", module="lifecycle")
-
-    # ========================================================================
-    # ВСТРОЕННЫЕ КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
-    # ========================================================================
-
-    def _register_builtin_process_commands(self) -> None:
-        """Зарегистрировать встроенные команды управления воркерами в command_manager.
-
-        worker.pause_all — поставить все прикладные воркеры на паузу и
-                           обновить _current_process_status → "paused".
-        worker.resume_all — возобновить все воркеры, вернуть статус "running".
-
-        Статус транслируется в каждом heartbeat, поэтому ProcessMonitor получит
-        обновление на следующем цикле heartbeat_sender.
-        """
-        if not self.command_manager:
-            self._log_debug(
-                "command_manager недоступен — встроенные команды воркеров не зарегистрированы",
-                module="lifecycle",
-            )
-            return
-
-        def pause_all_handler(data=None, **kwargs) -> dict:
-            """Поставить все прикладные воркеры на паузу."""
-            if not self.worker_manager:
-                return {"success": False, "reason": "worker_manager недоступен"}
-            self.worker_manager.pause_all_workers(exclude_system=True)
-            # Обновляем статус — он попадёт в следующий heartbeat
-            self._current_process_status = "paused"
-            self._log_info(f"Процесс '{self.name}' переведён в паузу", module="lifecycle")
-            return {"success": True, "status": "paused"}
-
-        def resume_all_handler(data=None, **kwargs) -> dict:
-            """Возобновить все прикладные воркеры."""
-            if not self.worker_manager:
-                return {"success": False, "reason": "worker_manager недоступен"}
-            self.worker_manager.resume_all_workers(exclude_system=True)
-            # Возвращаем статус "running"
-            self._current_process_status = "running"
-            self._log_info(f"Процесс '{self.name}' возобновлён", module="lifecycle")
-            return {"success": True, "status": "running"}
-
-        self.command_manager.register_command(
-            "worker.pause_all",
-            pause_all_handler,
-            metadata={"description": "Поставить все прикладные воркеры процесса на паузу"},
-            tags=["system"],
-        )
-        self.command_manager.register_command(
-            "worker.resume_all",
-            resume_all_handler,
-            metadata={"description": "Возобновить все прикладные воркеры процесса"},
-            tags=["system"],
-        )
-        self._log_debug(
-            "Встроенные команды worker.pause_all/resume_all зарегистрированы",
-            module="lifecycle",
-        )
-
-        # --- wire.configure / wire.deconfigure ---
-        self.command_manager.register_command(
-            "wire.configure",
-            self._cmd_wire_configure,
-            metadata={"description": "Настроить wire middleware (SHM sender/receiver)"},
-            tags=["system"],
-        )
-        self.command_manager.register_command(
-            "wire.deconfigure",
-            self._cmd_wire_deconfigure,
-            metadata={"description": "Удалить wire middleware"},
-            tags=["system"],
-        )
-        self._log_debug(
-            "Встроенные команды wire.configure/deconfigure зарегистрированы",
-            module="lifecycle",
-        )
-
-    # ========================================================================
-    # WIRE MIDDLEWARE — runtime-настройка SHM-каналов
-    # ========================================================================
-
-    def _cmd_wire_configure(self, data=None, **kwargs) -> dict:
-        """Настроить wire middleware: создать FrameShmMiddleware и подключить к router.
-
-        Параметры в data:
-            wire_key: уникальный ключ wire
-            role: "sender" или "receiver"
-            shm_name: имя SHM-слота
-            shm_owner: имя процесса-владельца SHM
-            buffer_slots: кол-во буферных слотов (информативно)
-        """
-        if isinstance(data, dict):
-            kwargs.update(data)
-
-        wire_key = kwargs.get("wire_key", "")
-        role = kwargs.get("role", "")
-        shm_name = kwargs.get("shm_name", "")
-        shm_owner = kwargs.get("shm_owner", "")
-
-        if not wire_key or not role:
-            return {"success": False, "reason": "wire_key и role обязательны"}
-        if role not in ("sender", "receiver"):
-            return {"success": False, "reason": f"неизвестная role: {role}"}
-        if not self.router_manager:
-            return {"success": False, "reason": "router_manager недоступен"}
-
-        # Получить memory_manager
-        mm = self.memory_manager
-        if mm is None and self.shared_resources:
-            mm = getattr(self.shared_resources, "memory_manager", None)
-
-        from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import (
-            FrameShmMiddleware,
-        )
-
-        mw = FrameShmMiddleware(memory_manager=mm, owner=shm_owner, slot=shm_name)
-
-        # Подключить middleware к router
-        if role == "sender":
-            self.router_manager.add_send_middleware(mw.on_send)
-        else:
-            self.router_manager.add_receive_middleware(mw.on_receive)
-
-        # Сохранить для последующего удаления
-        self._wire_middlewares[wire_key] = (mw, role)
-
-        self._log_info(
-            f"wire.configure: middleware подключён — wire_key={wire_key}, "
-            f"role={role}, shm={shm_owner}/{shm_name}",
-            module="wire",
-        )
-        return {"success": True, "wire_key": wire_key, "role": role}
-
-    def _cmd_wire_deconfigure(self, data=None, **kwargs) -> dict:
-        """Удалить wire middleware из router.
-
-        Параметры в data:
-            wire_key: ключ wire для удаления
-        """
-        if isinstance(data, dict):
-            kwargs.update(data)
-
-        wire_key = kwargs.get("wire_key", "")
-        if not wire_key:
-            return {"success": False, "reason": "wire_key обязателен"}
-
-        entry = self._wire_middlewares.pop(wire_key, None)
-        if entry is None:
-            self._log_warning(
-                f"wire.deconfigure: wire_key '{wire_key}' не найден в _wire_middlewares",
-                module="wire",
-            )
-            return {"success": True, "wire_key": wire_key, "note": "уже удалён или не существовал"}
-
-        mw, role = entry
-
-        if self.router_manager:
-            if role == "sender":
-                self.router_manager.remove_send_middleware(mw.on_send)
-            else:
-                self.router_manager.remove_receive_middleware(mw.on_receive)
-
-        self._log_info(
-            f"wire.deconfigure: middleware удалён — wire_key={wire_key}, role={role}",
-            module="wire",
-        )
-        return {"success": True, "wire_key": wire_key}
-
-    # ========================================================================
-    # HEARTBEAT
-    # ========================================================================
-
-    def _start_heartbeat_worker(self) -> None:
-        """Создать и запустить heartbeat воркер если включён в конфиге.
-
-        Heartbeat отправляет периодическое сообщение ProcessManager-у,
-        чтобы ProcessMonitor мог отличить зависший процесс от живого.
-        Интервал задаётся через config['heartbeat_interval'] (default=5.0).
-        Если heartbeat_interval <= 0 — heartbeat отключён.
-        """
-        heartbeat_interval = self.get_config("heartbeat_interval", 5.0)
-        try:
-            heartbeat_interval = float(heartbeat_interval)
-        except (TypeError, ValueError):
-            heartbeat_interval = 5.0
-
-        if heartbeat_interval <= 0:
-            self._log_debug("Heartbeat отключён (heartbeat_interval <= 0)", module="heartbeat")
-            return
-
-        if not self.worker_manager:
-            return
-
-        from ...worker_module import ThreadConfig, ThreadPriority
-
-        self._heartbeat_interval = heartbeat_interval
-
-        self.worker_manager.create_worker(
-            "heartbeat_sender",
-            self._heartbeat_loop,
-            ThreadConfig(priority=ThreadPriority.BACKGROUND),
-            auto_start=True,
-        )
-        self._log_debug(
-            f"Heartbeat воркер запущен (interval={heartbeat_interval}с)",
-            module="heartbeat",
-        )
-
-    def _heartbeat_loop(self, stop_event, pause_event) -> None:
-        """Цикл отправки heartbeat-сообщений в ProcessManager."""
-        interval = getattr(self, "_heartbeat_interval", 5.0)
-        while not stop_event.is_set():
-            if pause_event.is_set():
-                time.sleep(0.1)
-                continue
-            try:
-                heartbeat_msg = {
-                    "type": "system",
-                    "subtype": "heartbeat",
-                    "command": "heartbeat",
-                    "sender": self.name,
-                    "timestamp": time.time(),
-                    # Текущий статус процесса (running / paused)
-                    # Используется ProcessMonitor для корректной классификации
-                    "status": getattr(self, "_current_process_status", "running"),
-                }
-
-                # Данные о воркерах для ProcessMonitor
-                # Dict at Boundary: get_all_workers_status() уже возвращает чистые dict
-                # с примитивами (.value для enum), без Thread-объектов и прочих не-pickle типов
-                if self.worker_manager:
-                    try:
-                        workers = self.worker_manager.get_all_workers_status()
-                        # Исключаем metrics для экономии трафика IPC
-                        for w in workers.values():
-                            w.pop("metrics", None)
-                        heartbeat_msg["workers_status"] = workers
-                    except Exception:
-                        pass
-
-                self.send_message("ProcessManager", heartbeat_msg)
-            except Exception as exc:
-                self._log_debug(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
-            # Ожидание с проверкой stop_event для быстрого завершения
-            stop_event.wait(timeout=interval)
 
     def stop(self):
         """Остановка процесса — статус STOPPING, остановка воркеров и shutdown."""
