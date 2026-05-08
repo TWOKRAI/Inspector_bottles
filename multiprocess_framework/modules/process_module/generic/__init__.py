@@ -14,6 +14,7 @@ from .data_receiver import DataReceiver
 from .frame_shm_middleware import FrameShmMiddleware
 from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
+from .plugin_orchestrator import PluginOrchestrator
 from .inspector_manager import InspectorManager
 from .pipeline_executor import PipelineExecutor
 from .source_producer import SourceProducer
@@ -23,6 +24,7 @@ __all__ = [
     "FrameShmMiddleware",
     "GenericProcess",
     "GenericProcessConfig",
+    "PluginOrchestrator",
     "InspectorManager",
     "PipelineExecutor",
     "PluginConfig",

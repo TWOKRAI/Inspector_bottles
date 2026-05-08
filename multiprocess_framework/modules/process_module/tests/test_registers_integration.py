@@ -4,7 +4,7 @@
 1. register_schema() — default None, override в плагине
 2. PluginContext.registers — передача RegistersManager
 3. ColorMaskRegisters — schema с FieldMeta
-4. GenericProcess._init_registers — bootstrap из register_schema()
+4. PluginOrchestrator._init_registers — bootstrap из register_schema()
 5. Graceful degradation — плагин без регистра работает на defaults
 6. register_update handler — set_field_value через IPC
 """
@@ -203,39 +203,53 @@ class TestColorMaskRegisters:
 # --- Tests: RegistersManager bootstrap ---
 
 
+class _MockServices:
+    """Мок-сервисы для PluginOrchestrator."""
+    name = "test"
+    worker_manager = None
+    command_manager = None
+    router_manager = None
+    memory_manager = None
+
+    def __init__(self):
+        self.log_info = MagicMock()
+        self.log_error = MagicMock()
+        self.send_message = MagicMock()
+        self.receive_message = MagicMock()
+
+    def get_config(self, key, default=None):
+        return default
+
+
 class TestRegistersBootstrap:
-    """GenericProcess._init_registers — сбор schemas из плагинов."""
+    """PluginOrchestrator._init_registers — сбор schemas из плагинов."""
 
     def test_no_schemas_returns_none(self):
-        """Если ни один плагин не вернул schema → None."""
-        from multiprocess_framework.modules.process_module.generic.generic_process import (
-            GenericProcess,
+        """Если ни один плагин не вернул schema -> None."""
+        from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+            PluginOrchestrator,
         )
 
-        gp = GenericProcess.__new__(GenericProcess)
-        gp.name = "test"
-        gp._log_info = MagicMock()
-        gp._log_error = MagicMock()
+        services = _MockServices()
+        orch = PluginOrchestrator(services=services)
 
         plugin = SimplePlugin()
         ctx = MagicMock()
-        result = gp._init_registers([(plugin, ctx)])
+        result = orch._init_registers([(plugin, ctx)])
         assert result is None
 
     def test_with_schema_creates_manager(self):
-        """Плагин с register_schema → RegistersManager создан."""
-        from multiprocess_framework.modules.process_module.generic.generic_process import (
-            GenericProcess,
+        """Плагин с register_schema -> RegistersManager создан."""
+        from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+            PluginOrchestrator,
         )
 
-        gp = GenericProcess.__new__(GenericProcess)
-        gp.name = "test"
-        gp._log_info = MagicMock()
-        gp._log_error = MagicMock()
+        services = _MockServices()
+        orch = PluginOrchestrator(services=services)
 
         plugin = PluginWithRegister()
         ctx = MagicMock()
-        result = gp._init_registers([(plugin, ctx)])
+        result = orch._init_registers([(plugin, ctx)])
         assert result is not None
         # Проверяем что регистр доступен
         reg = result.get_register("with_register")
