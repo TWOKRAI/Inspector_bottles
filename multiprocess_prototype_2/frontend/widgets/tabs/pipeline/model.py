@@ -1,0 +1,254 @@
+"""PipelineModel — SSOT-модель topology pipeline.
+
+Чистый Python (+ dag_utils). Тестируется без Qt.
+Адаптация v1 GraphEditorModel для topology dict формата.
+"""
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass, field
+from typing import Any
+
+from . import dag_utils
+
+
+@dataclass
+class ProcessNodeData:
+    """Данные процесса в модели."""
+
+    name: str
+    plugin_name: str = ""
+    category: str = "utility"
+    config: dict[str, Any] = field(default_factory=dict)
+    x: float = 0.0
+    y: float = 0.0
+
+
+@dataclass
+class WireData:
+    """Данные wire в модели."""
+
+    source: str  # "process.plugin.port"
+    target: str  # "process.plugin.port"
+
+
+class PipelineModel:
+    """SSOT-модель topology pipeline.
+
+    Все мутации возвращают (old_topology, new_topology) для undo/redo.
+    Использует dag_utils для валидации (cycle detection, topological sort).
+    """
+
+    def __init__(self, topology: dict | None = None) -> None:
+        self._topology: dict = topology or {"processes": [], "wires": []}
+
+    def from_topology_dict(self, topo: dict) -> None:
+        """Загрузить topology из dict."""
+        self._topology = copy.deepcopy(topo)
+
+    def to_topology_dict(self) -> dict:
+        """Экспортировать topology в dict (deep copy)."""
+        return copy.deepcopy(self._topology)
+
+    # ---- Read-only доступ ---- #
+
+    def get_process_names(self) -> list[str]:
+        """Список имён процессов."""
+        return [
+            p.get("process_name", "")
+            if isinstance(p, dict)
+            else getattr(p, "process_name", "")
+            for p in self._topology.get("processes", [])
+        ]
+
+    def get_wires(self) -> list[dict]:
+        """Список wire'ов (копии)."""
+        return copy.deepcopy(self._topology.get("wires", []))
+
+    def get_edges_as_tuples(self) -> list[tuple[str, str]]:
+        """Wire'ы как list[(source_process, target_process)] для dag_utils."""
+        result: list[tuple[str, str]] = []
+        for w in self._topology.get("wires", []):
+            src = w.get("source", "") if isinstance(w, dict) else ""
+            tgt = w.get("target", "") if isinstance(w, dict) else ""
+            src_proc = src.split(".")[0] if "." in src else src
+            tgt_proc = tgt.split(".")[0] if "." in tgt else tgt
+            if src_proc and tgt_proc:
+                result.append((src_proc, tgt_proc))
+        return result
+
+    # ---- Мутации (все возвращают old_topo, new_topo) ---- #
+
+    def add_process(
+        self,
+        name: str,
+        plugin_name: str = "",
+        category: str = "utility",
+        config: dict | None = None,
+    ) -> tuple[dict, dict]:
+        """Добавить процесс. Возвращает (old_topo, new_topo)."""
+        old = self.to_topology_dict()
+        process_entry: dict[str, Any] = {
+            "process_name": name,
+            "plugins": [{"plugin_name": plugin_name}] if plugin_name else [],
+        }
+        if config:
+            process_entry["config"] = config
+        self._topology.setdefault("processes", []).append(process_entry)
+        return old, self.to_topology_dict()
+
+    def remove_process(self, name: str) -> tuple[dict, dict]:
+        """Удалить процесс и каскадно все wire'ы. Возвращает (old_topo, new_topo)."""
+        old = self.to_topology_dict()
+
+        # Удалить процесс
+        processes = self._topology.get("processes", [])
+        self._topology["processes"] = [
+            p
+            for p in processes
+            if (
+                p.get("process_name")
+                if isinstance(p, dict)
+                else getattr(p, "process_name", "")
+            )
+            != name
+        ]
+
+        # Каскадное удаление wire'ов
+        wires = self._topology.get("wires", [])
+        self._topology["wires"] = [
+            w for w in wires if not self._wire_involves_process(w, name)
+        ]
+
+        return old, self.to_topology_dict()
+
+    def add_wire(
+        self,
+        source: str,
+        target: str,
+        src_dtype: str = "any",
+        tgt_dtype: str = "any",
+    ) -> tuple[dict, dict]:
+        """Добавить wire с cycle detection и type-aware валидацией.
+
+        Args:
+            source: endpoint "process.plugin.port"
+            target: endpoint "process.plugin.port"
+            src_dtype: dtype выходного порта ("image/bgr", "any" и т.д.)
+            tgt_dtype: dtype входного порта
+
+        Returns:
+            (old_topo, new_topo)
+
+        Raises:
+            ValueError: если wire создаёт цикл, дублируется или типы несовместимы.
+        """
+        old = self.to_topology_dict()
+
+        # Проверка совместимости типов
+        if not dag_utils.validate_port_compatibility(src_dtype, tgt_dtype):
+            raise ValueError(
+                f"Несовместимые типы портов: {src_dtype} -> {tgt_dtype}"
+            )
+
+        # Проверка дубликатов
+        for w in self._topology.get("wires", []):
+            if (
+                isinstance(w, dict)
+                and w.get("source") == source
+                and w.get("target") == target
+            ):
+                raise ValueError(f"Wire {source} -> {target} уже существует")
+
+        # Cycle detection через dag_utils
+        src_proc = source.split(".")[0] if "." in source else source
+        tgt_proc = target.split(".")[0] if "." in target else target
+
+        # Self-loop check
+        if src_proc == tgt_proc:
+            raise ValueError(f"Self-loop запрещён: {src_proc}")
+
+        existing_edges = self.get_edges_as_tuples()
+        if dag_utils.has_cycle(existing_edges, (src_proc, tgt_proc)):
+            raise ValueError(f"Wire {source} -> {target} создаёт цикл")
+
+        # Сохранить wire с dtype-информацией
+        wire_entry: dict[str, Any] = {
+            "source": source,
+            "target": target,
+        }
+        if src_dtype != "any":
+            wire_entry["src_dtype"] = src_dtype
+        if tgt_dtype != "any":
+            wire_entry["tgt_dtype"] = tgt_dtype
+
+        self._topology.setdefault("wires", []).append(wire_entry)
+        return old, self.to_topology_dict()
+
+    def remove_wire(self, source: str, target: str) -> tuple[dict, dict]:
+        """Удалить wire. Возвращает (old_topo, new_topo)."""
+        old = self.to_topology_dict()
+        wires = self._topology.get("wires", [])
+        self._topology["wires"] = [
+            w
+            for w in wires
+            if not (
+                isinstance(w, dict)
+                and w.get("source") == source
+                and w.get("target") == target
+            )
+        ]
+        return old, self.to_topology_dict()
+
+    # ---- Валидация ---- #
+
+    def validate(self) -> list[str]:
+        """Полная валидация topology. Возвращает список ошибок."""
+        errors: list[str] = []
+
+        process_names = self.get_process_names()
+
+        # Дубликаты имён
+        seen: set[str] = set()
+        for name in process_names:
+            if name in seen:
+                errors.append(f"Дублирующееся имя процесса: {name}")
+            seen.add(name)
+
+        # Проверка wire'ов
+        edges = self.get_edges_as_tuples()
+        for src_proc, tgt_proc in edges:
+            if src_proc not in seen:
+                errors.append(
+                    f"Wire ссылается на несуществующий процесс: {src_proc}"
+                )
+            if tgt_proc not in seen:
+                errors.append(
+                    f"Wire ссылается на несуществующий процесс: {tgt_proc}"
+                )
+
+        # Циклы
+        if dag_utils.has_cycle(edges):
+            errors.append("Topology содержит цикл")
+
+        # Orphan-процессы (предупреждение, не ошибка)
+        connected: set[str] = set()
+        for s, t in edges:
+            connected.add(s)
+            connected.add(t)
+        orphans = [n for n in process_names if n and n not in connected]
+        for o in orphans:
+            errors.append(f"Изолированный процесс: {o}")
+
+        return errors
+
+    # ---- Приватные ---- #
+
+    @staticmethod
+    def _wire_involves_process(wire: dict, process_name: str) -> bool:
+        """Проверить, связан ли wire с процессом."""
+        src = wire.get("source", "") if isinstance(wire, dict) else ""
+        tgt = wire.get("target", "") if isinstance(wire, dict) else ""
+        src_proc = src.split(".")[0] if "." in src else src
+        tgt_proc = tgt.split(".")[0] if "." in tgt else tgt
+        return src_proc == process_name or tgt_proc == process_name

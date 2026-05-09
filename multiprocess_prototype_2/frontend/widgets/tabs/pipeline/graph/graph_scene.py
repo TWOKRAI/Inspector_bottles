@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QGraphicsScene, QMenu
 from .constants import GRID_SPACING_X, GRID_SPACING_Y
 from .node_item import NodeData, NodeItem
 from .edge_item import EdgeData, EdgeItem
+from .port_schema import PortSchema
 
 
 class GraphScene(QGraphicsScene):
@@ -56,9 +57,19 @@ class GraphScene(QGraphicsScene):
     #  CRUD                                                                #
     # ------------------------------------------------------------------ #
 
-    def add_node(self, data: NodeData) -> NodeItem:
-        """Добавить узел на сцену."""
-        item = NodeItem(data)
+    def add_node(
+        self,
+        data: NodeData,
+        port_schemas: list[PortSchema] | None = None,
+    ) -> NodeItem:
+        """Добавить узел на сцену.
+
+        Args:
+            data: данные узла
+            port_schemas: схемы портов плагина (Schema-Driven Ports).
+                          Если None — backward compat: 1 input + 1 output.
+        """
+        item = NodeItem(data, port_schemas=port_schemas)
         self.addItem(item)
         self._nodes[data.node_id] = item
         return item
@@ -155,6 +166,13 @@ class GraphScene(QGraphicsScene):
 
     def get_node(self, node_id: str) -> NodeItem | None:
         return self._nodes.get(node_id)
+
+    def get_all_node_positions(self) -> dict[str, tuple[float, float]]:
+        """Вернуть позиции всех нод {node_id: (x, y)}."""
+        return {
+            nid: (item.pos().x(), item.pos().y())
+            for nid, item in self._nodes.items()
+        }
 
     def port_at(self, scene_pos: tuple[float, float]):
         """Найти PortItem в точке scene_pos."""
