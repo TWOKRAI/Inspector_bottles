@@ -2,6 +2,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 
+# Sentinel для элемента "Все процессы" в навигации
+ALL_PROCESSES_KEY = "__all__"
+
 
 @dataclass
 class ProcessInfo:

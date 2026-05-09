@@ -117,9 +117,10 @@ class RegisterView(QWidget):
         self._suppress_field_changed = False
         for key, editor in self._editors.items():
             self._tracked_values[key] = editor.getter()
-            editor.change_signal.connect(
-                lambda *_args, _key=key: self._on_editor_changed(_key),
-            )
+            if editor.change_signal is not None:
+                editor.change_signal.connect(
+                    lambda *_args, _key=key: self._on_editor_changed(_key),
+                )
 
     # ------------------------------------------------------------------
     # Публичный API

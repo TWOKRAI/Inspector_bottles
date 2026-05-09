@@ -156,3 +156,41 @@ class ProcessesPresenter:
     def category_title(self, category: str) -> str:
         """Русское название категории."""
         return self.CATEGORY_TITLES.get(category, category.capitalize())
+
+    def get_process_by_name(self, name: str) -> ProcessInfo | None:
+        """Найти процесс по имени."""
+        for proc in self.get_processes():
+            if proc.name == name:
+                return proc
+        return None
+
+    def get_process_names(self) -> list[str]:
+        """Упорядоченный список имён процессов для навигации."""
+        return [p.name for p in self.get_processes()]
+
+    def get_table_rows(self) -> list[dict[str, str]]:
+        """Плоские данные всех процессов для таблицы."""
+        rows: list[dict[str, str]] = []
+        for proc in self.get_processes():
+            rows.append({
+                "Имя": proc.name,
+                "Категория": self.category_title(proc.category),
+                "Статус": proc.status,
+                "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
+                "Плагины": ", ".join(proc.plugins) or "—",
+            })
+        return rows
+
+    def get_detail_metrics(self, name: str) -> dict[str, str]:
+        """Полные метрики одного процесса для детальной карточки."""
+        proc = self.get_process_by_name(name)
+        if not proc:
+            return {}
+        return {
+            "Категория": self.category_title(proc.category),
+            "Статус": proc.status,
+            "PID": str(proc.pid) if proc.pid else "—",
+            "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
+            "Кадры": str(proc.frame_count) if proc.frame_count else "—",
+            "Плагины": ", ".join(proc.plugins) or "—",
+        }
