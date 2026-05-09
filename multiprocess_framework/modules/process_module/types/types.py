@@ -5,6 +5,7 @@ process_module — типы и перечисления.
 ProcessStatus — re-export из base_manager (единый enum, ADR-117).
 """
 
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TypedDict
 
@@ -70,3 +71,22 @@ class ProcessMetadataDict(TypedDict, total=False):
     class_path: str
     pid: int
     start_time: float
+
+
+@dataclass
+class ManagersBundle:
+    """Результат ProcessManagers.create_all() — контейнер менеджеров.
+
+    Composition-объект ProcessManagers создаёт менеджеры и возвращает bundle.
+    ProcessModule распаковывает bundle и присваивает свои атрибуты (ADR-PM-009).
+    """
+
+    worker: Any
+    logger: Any
+    router: Any
+    command: Any
+    stats: Any
+    console: Any
+    error: Any | None = None
+    config_manager: Any | None = None
+    console_enabled: bool = False

@@ -80,6 +80,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         # Компоненты (настраиваются в initialize())
         self.config_handler = None
+        self.config_manager = None
         self.communication = None
         self.queues = None
         self.queue_registry = None
@@ -91,11 +92,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Обновляется командами worker.pause_all / worker.resume_all
         self._current_process_status: str = "running"
 
-        # Менеджеры (создаются в initialize())
+        # Менеджеры (создаются в initialize() через ManagersBundle, ADR-PM-009)
         self.worker_manager = None
         self.logger_manager = None
+        self.error_manager = None
         self.command_manager = None
         self.router_manager = None
+        self.stats_manager = None
         self.console_manager = None
 
         # Внутренние компоненты (композиция)
@@ -120,21 +123,60 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
     def initialize(self) -> bool:
         """
-        Инициализация процесса.
+        Инициализация процесса — оркестратор всех шагов (ADR-PM-009).
 
-        Интегрирует функциональность ProcessCore:
-        - Загрузка конфигурации из ProcessData
-        - Создание очередей
-        - Инициализация менеджеров через ObservableMixin
-        - Настройка коммуникации
-        - Регистрация state.changed handler (ADR-SS-006), если state_proxy задан
+        ProcessModule владеет своим жизненным циклом.
+        Helper-объекты (lifecycle, process_managers) возвращают результаты,
+        ProcessModule сам присваивает атрибуты.
 
         Returns:
             bool: True если инициализация успешна
         """
-        result = self._lifecycle.initialize()
-        self._init_state_proxy()
-        return result
+        try:
+            # 1-2. Конфигурация и очереди
+            self._init_configuration()
+            self._init_queues()
+
+            # 3. Инициализация менеджеров через ManagersBundle
+            self._init_managers()
+
+            # 4. Инициализация коммуникации
+            self._init_communication()
+
+            # 5. Регистрация состояния процесса
+            self._register_process_state()
+
+            # 6. Воркеры и кастомные менеджеры — до message_processor,
+            #    чтобы register_message_handler успел зарегистрироваться
+            self._init_custom_managers()
+            self._init_application_threads()
+
+            # 6b. Связать command_manager с router.message_dispatcher
+            self._lifecycle.register_commands_with_router()
+
+            # 7. Системные потоки (message_processor) — после воркеров
+            self._init_system_threads()
+
+            # 8. Обновляем статус на "ready"
+            self.update_process_state(status=ProcessStatus.READY.value)
+
+            # 9. Контекст логирования (proc_name в extra для логов)
+            logger = self.get_manager("logger")
+            if logger and hasattr(logger, "push_context"):
+                logger.push_context(proc_name=self.name)
+
+            self.is_initialized = True
+            self._log_info(f"Process '{self.name}' initialized successfully")
+            return True
+
+        except Exception as e:
+            import traceback as _tb
+
+            self._log_error(f"Failed to initialize process '{self.name}': {e}")
+            self._log_error(f"Traceback: {_tb.format_exc()}")
+            return False
+        finally:
+            self._init_state_proxy()
 
     def shutdown(self) -> bool:
         """
@@ -160,16 +202,48 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # ========================================================================
 
     def _init_configuration(self) -> None:
-        """Инициализация конфигурации процесса. Реализация в ProcessLifecycle."""
-        self._lifecycle._init_configuration()
+        """Инициализация конфигурации процесса (ADR-PM-009: return-based).
+
+        Вызывает lifecycle helper и сам присваивает атрибуты ProcessModule.
+        Имя метода сохранено для совместимости с тестами.
+        """
+        ch, cm, cfg = self._lifecycle.init_configuration()
+        self.config_handler, self.config_manager, self.config = ch, cm, cfg
 
     def _init_queues(self) -> None:
-        """Инициализация очередей процесса. Реализация в ProcessLifecycle."""
-        self._lifecycle._init_queues()
+        """Инициализация очередей процесса (ADR-PM-009: return-based).
 
-    def _init_managers(self):
-        """Инициализация менеджеров процесса через ObservableMixin."""
-        self._process_managers.initialize()
+        Вызывает lifecycle helper и сам присваивает атрибуты ProcessModule.
+        Имя метода сохранено для совместимости с тестами.
+        """
+        q, qr, mm = self._lifecycle.init_queues()
+        self.queues, self.queue_registry, self.memory_manager = q, qr, mm
+
+    def _init_managers(self) -> None:
+        """Инициализация менеджеров через ManagersBundle (ADR-PM-009).
+
+        Вызывает create_all(), получает bundle, применяет через _apply_managers_bundle.
+        Имя метода сохранено для совместимости с тестами.
+        """
+        bundle = self._process_managers.create_all()
+        self._apply_managers_bundle(bundle)
+
+    def _apply_managers_bundle(self, bundle) -> None:
+        """Распаковать ManagersBundle — ProcessModule владеет своими атрибутами.
+
+        ProcessModule сам присваивает менеджеры из bundle,
+        затем регистрирует их через ObservableMixin и подключает адаптеры.
+        """
+        self.worker_manager = bundle.worker
+        self.logger_manager = bundle.logger
+        self.error_manager = bundle.error
+        self.router_manager = bundle.router
+        self.stats_manager = bundle.stats
+        self.command_manager = bundle.command
+        self.console_manager = bundle.console
+        self._process_managers.register_all(bundle, self)
+        self._process_managers.attach_adapters(bundle, self)
+        self._process_managers.connect_event_manager(self)
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""

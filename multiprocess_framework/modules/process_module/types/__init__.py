@@ -10,6 +10,7 @@ from .types import (
     ProcessConfigDict,
     ProcessStatsDict,
     ProcessMetadataDict,
+    ManagersBundle,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "ProcessConfigDict",
     "ProcessStatsDict",
     "ProcessMetadataDict",
+    "ManagersBundle",
 ]

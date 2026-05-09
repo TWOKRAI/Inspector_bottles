@@ -1,7 +1,11 @@
 """
 Жизненный цикл процесса.
 
-Отвечает за инициализацию и завершение работы процесса.
+Helper-функции для инициализации и завершения работы (ADR-PM-009).
+Оркестрация перенесена в ProcessModule.initialize().
+
+Контракт: init_configuration() и init_queues() ЧИТАЮТ из self.process,
+создают объекты и ВОЗВРАЩАЮТ результат. ProcessModule сам присваивает атрибуты.
 """
 
 import traceback
@@ -10,38 +14,46 @@ from ..types import ProcessStatus
 
 class ProcessLifecycle:
     """
-    Управление жизненным циклом процесса.
-    
-    Инкапсулирует логику инициализации и завершения работы.
+    Helper-класс жизненного цикла процесса.
+
+    Инкапсулирует логику инициализации конфигурации, очередей и завершения работы.
+    Оркестрация (порядок вызовов) — ответственность ProcessModule.
     """
-    
+
     def __init__(self, process):
         """
         Инициализация жизненного цикла.
-        
+
         Args:
             process: Ссылка на ProcessModule
         """
         self.process = process
 
-    def _init_configuration(self) -> None:
-        """Инициализация конфигурации процесса."""
+    def init_configuration(self) -> tuple:
+        """Инициализация конфигурации процесса (return-based, ADR-PM-009).
+
+        Читает из self.process (name, shared_resources, config).
+        НЕ пишет в self.process.*.
+
+        Returns:
+            tuple: (config_handler, config_manager, config_dict)
+        """
         from ..configs import ProcessConfigHandler
         from ...config_module import ConfigManager
 
-        self.process.config_handler = ProcessConfigHandler(
+        config_handler = ProcessConfigHandler(
             self.process.name,
             self.process.shared_resources,
             self.process.config,
         )
-        self.process.config_manager = ConfigManager()
-        self.process.config_handler.config_manager = self.process.config_manager
-        self.process.config = (
-            self.process.config_handler.data if self.process.config_handler else {}
-        )
+        config_manager = ConfigManager()
+        config_handler.config_manager = config_manager
+        config_dict = config_handler.data if config_handler else {}
 
-    def _init_queues(self) -> None:
-        """Инициализация очередей процесса.
+        return config_handler, config_manager, config_dict
+
+    def init_queues(self) -> tuple:
+        """Инициализация очередей процесса (return-based, ADR-PM-009).
 
         Основной путь: очереди уже созданы через
         SharedResourcesManager.register_process() → QueueRegistry.create_and_register_queues()
@@ -49,10 +61,18 @@ class ProcessLifecycle:
 
         Fallback: если shared_resources не передан (тесты, standalone),
         создаются локальные multiprocessing.Queue.
+
+        Читает из self.process (name, shared_resources).
+        НЕ пишет в self.process.*.
+
+        Returns:
+            tuple: (queues, queue_registry, memory_manager)
         """
         process_data = None
         if self.process.shared_resources:
-            process_data = self.process.shared_resources.get_process_data(self.process.name)
+            process_data = self.process.shared_resources.get_process_data(
+                self.process.name
+            )
 
         if process_data and process_data.queues:
             queues_dict = {}
@@ -60,14 +80,15 @@ class ProcessLifecycle:
                 queue = process_data.get_queue(queue_type)
                 if queue:
                     queues_dict[queue_type] = queue
-            self.process.queues = queues_dict if queues_dict else None
+            queues = queues_dict if queues_dict else None
         else:
-            self.process.queues = None
+            queues = None
 
         # Fallback: создать локальные очереди если не получены из SRM
-        if not self.process.queues:
+        if not queues:
             from multiprocessing import Queue
-            self.process.queues = {
+
+            queues = {
                 "system": Queue(maxsize=100),
                 "data": Queue(maxsize=50),
                 "broadcast": Queue(maxsize=20),
@@ -75,69 +96,25 @@ class ProcessLifecycle:
             }
 
         if self.process.shared_resources:
-            self.process.queue_registry = getattr(
+            queue_registry = getattr(
                 self.process.shared_resources, "queue_registry", None
             )
-            self.process.memory_manager = getattr(
+            memory_manager = getattr(
                 self.process.shared_resources, "memory_manager", None
             )
         else:
-            self.process.queue_registry = None
-            self.process.memory_manager = None
+            queue_registry = None
+            memory_manager = None
 
-    def initialize(self) -> bool:
-        """
-        Инициализация процесса.
-        
-        Returns:
-            bool: True если инициализация успешна
-        """
-        try:
-            # 1–2. Конфигурация и очереди (через process для мокаемости в тестах)
-            self.process._init_configuration()
-            self.process._init_queues()
-            
-            # 3. Инициализация менеджеров через ObservableMixin
-            self.process._init_managers()
-            
-            # 4. Инициализация коммуникации
-            self.process._init_communication()
-            
-            # 5. Регистрация состояния процесса
-            self.process._register_process_state()
-            
-            # 6. Воркеры и кастомные менеджеры — до message_processor,
-            #    чтобы register_message_handler успел зарегистрироваться
-            self.process._init_custom_managers()
-            self.process._init_application_threads()
-            
-            # 6b. Связать command_manager с router.message_dispatcher — иначе команды из очередей не обрабатываются
-            self._register_commands_with_router()
-            
-            # 7. Системные потоки (message_processor) — после воркеров
-            self.process._init_system_threads()
-            
-            # 8. Обновляем статус на "ready"
-            self.process.update_process_state(status=ProcessStatus.READY.value)
+        return queues, queue_registry, memory_manager
 
-            # 9. Контекст логирования (proc_name в extra для логов)
-            logger = self.process.get_manager("logger")
-            if logger and hasattr(logger, "push_context"):
-                logger.push_context(proc_name=self.process.name)
-
-            self.process.is_initialized = True
-            self.process._log_info(f"Process '{self.process.name}' initialized successfully")
-            return True
-
-        except Exception as e:
-            error_trace = traceback.format_exc()
-            self.process._log_error(f"Failed to initialize process '{self.process.name}': {e}")
-            self.process._log_error(f"Traceback: {error_trace}")
-            return False
-    
-    def _register_commands_with_router(self) -> None:
+    def register_commands_with_router(self) -> None:
         """Регистрирует все команды command_manager в router.message_dispatcher.
-        Без этого команды из очередей (например start_capture от GUI) не доходят до обработчиков.
+
+        Без этого команды из очередей (например start_capture от GUI)
+        не доходят до обработчиков.
+
+        Читает из self.process (command_manager, router_manager).
         """
         if not self.process.command_manager or not self.process.router_manager:
             return
@@ -160,11 +137,11 @@ class ProcessLifecycle:
                 )
         except Exception as e:
             self.process._log_warning(f"Failed to register commands with router: {e}")
-    
+
     def shutdown(self) -> bool:
         """
         Завершение работы процесса.
-        
+
         Returns:
             bool: True если завершение успешно
         """
@@ -179,7 +156,7 @@ class ProcessLifecycle:
 
             # 2. Останавливаем системные потоки
             self.process._stop_system_threads()
-            
+
             # 3. Останавливаем воркеры
             if self.process.worker_manager:
                 self.process.worker_manager.stop_all_workers()
@@ -202,15 +179,18 @@ class ProcessLifecycle:
                 self.process.command_manager.shutdown()
             if self.process.router_manager:
                 self.process.router_manager.shutdown()
-            
+
             # 5. Обновляем статус процесса
             self.process.update_process_state(status=ProcessStatus.STOPPED.value)
-            
-            self.process.is_initialized = False
-            self.process._log_info(f"Process '{self.process.name}' shut down successfully")
-            return True
-            
-        except Exception as e:
-            self.process._log_error(f"Error during shutdown of process '{self.process.name}': {e}")
-            return False
 
+            self.process.is_initialized = False
+            self.process._log_info(
+                f"Process '{self.process.name}' shut down successfully"
+            )
+            return True
+
+        except Exception as e:
+            self.process._log_error(
+                f"Error during shutdown of process '{self.process.name}': {e}"
+            )
+            return False
