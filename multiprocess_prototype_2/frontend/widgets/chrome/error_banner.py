@@ -117,7 +117,7 @@ class ErrorBannerWidget(QWidget):
         icon_text = _ICON_ERROR if level == "error" else _ICON_WARNING
 
         # Создаём контейнер строки
-        row_widget = QWidget()
+        row_widget = QWidget(self)
         row_widget.setStyleSheet(style)
 
         row_layout = QHBoxLayout(row_widget)

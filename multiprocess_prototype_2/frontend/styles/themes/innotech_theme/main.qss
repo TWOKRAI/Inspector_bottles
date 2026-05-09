@@ -70,8 +70,8 @@ QWidget#AppHeader {
 }
 
 QLabel#BrandLabel {
-    color: #0096DB;
-    font-family: "Orbitron", "@font_family", sans-serif;
+    color: #003087;
+    font-family: "Square721 BdEx BT";
     font-size: 44px;
     font-weight: 900;
     padding-left: 8px;

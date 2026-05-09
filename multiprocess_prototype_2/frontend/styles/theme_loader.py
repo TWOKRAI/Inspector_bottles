@@ -71,8 +71,19 @@ def load_theme(theme_name: str = "innotech_theme") -> str:
     return resolved
 
 
+def _register_theme_fonts(theme_name: str) -> None:
+    """Зарегистрировать OTF/TTF шрифты из папки темы в QFontDatabase."""
+    from PySide6.QtGui import QFontDatabase
+
+    theme_dir = _STYLES_DIR / "themes" / theme_name
+    for ext in ("*.otf", "*.ttf", "*.OTF", "*.TTF"):
+        for font_path in theme_dir.glob(ext):
+            QFontDatabase.addApplicationFont(str(font_path))
+
+
 def apply_default_theme(app: "QApplication") -> None:
     """Применить дефолтную тему innotech_theme к QApplication."""
+    _register_theme_fonts("innotech_theme")
     qss = load_theme("innotech_theme")
     app.setStyleSheet(qss)
 

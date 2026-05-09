@@ -48,9 +48,15 @@ class RegisterView(QWidget):
           +-- QStackedWidget
                 +-- page 0: cards (QScrollArea)
                 +-- page 1: table (QTableWidget)
+
+    Signals:
+        mode_changed(str): ViewMode.value при переключении Cards/Table.
+        field_changed(str, str, object, object): (register_name, field_name, old_value, new_value)
+            — эмитится при изменении значения поля пользователем.
     """
 
     mode_changed = Signal(str)  # ViewMode.value
+    field_changed = Signal(str, str, object, object)  # register_name, field_name, old, new
 
     def __init__(
         self,
@@ -105,6 +111,15 @@ class RegisterView(QWidget):
         self._current_mode = initial_mode
         self._place_editors_in_current_mode()
         self._stack.setCurrentIndex(0 if initial_mode == ViewMode.CARDS else 1)
+
+        # 7. Подключить change_signal каждого editor для трекинга изменений
+        self._tracked_values: dict[str, object] = {}
+        self._suppress_field_changed = False
+        for key, editor in self._editors.items():
+            self._tracked_values[key] = editor.getter()
+            editor.change_signal.connect(
+                lambda *_args, _key=key: self._on_editor_changed(_key),
+            )
 
     # ------------------------------------------------------------------
     # Публичный API
@@ -273,6 +288,38 @@ class RegisterView(QWidget):
     # ------------------------------------------------------------------
     # Обработчики
     # ------------------------------------------------------------------
+
+    def set_editor_value(self, key: str, value: object) -> None:
+        """Программно установить значение editor без эмиссии field_changed.
+
+        Используется для синхронизации UI при undo/redo (ActionBus callback).
+        """
+        editor = self._editors.get(key)
+        if editor is None:
+            return
+        self._suppress_field_changed = True
+        try:
+            editor.setter(value)
+            self._tracked_values[key] = value
+        finally:
+            self._suppress_field_changed = False
+
+    def _on_editor_changed(self, key: str) -> None:
+        """Обработчик изменения значения editor пользователем."""
+        if self._suppress_field_changed:
+            return
+        editor = self._editors.get(key)
+        if editor is None:
+            return
+        new_value = editor.getter()
+        old_value = self._tracked_values.get(key)
+        self._tracked_values[key] = new_value
+
+        # Извлечь register_name и field_name из FieldInfo
+        fi = editor.field_info
+        register_name = fi.plugin_name or ""
+        field_name = fi.field_name or ""
+        self.field_changed.emit(register_name, field_name, old_value, new_value)
 
     def _on_mode_changed(self, mode_str: str) -> None:
         """Обработчик переключения mode от ViewModeToggle."""

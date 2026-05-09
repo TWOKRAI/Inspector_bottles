@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-"""
-Тестовое GUI-приложение для отладки камеры Hikvision.
+"""SDK App — автономное GUI для отладки камеры Hikvision.
 
 Работает напрямую через HikvisionCamera (single-process),
 без ProcessManager или multiprocess_framework.
+
+Запуск:
+    python -m hikvision_camera_module_2
+    Или из плагина: cmd_open_sdk_app
 """
 from __future__ import annotations
 
@@ -36,7 +39,7 @@ from hikvision_camera_module_2.core.converter import FrameConverter
 from hikvision_camera_module_2.core.parameters import CameraParameters, get_parameters, set_parameters
 
 
-class CameraTestWindow(QMainWindow):
+class HikvisionCameraWindow(QMainWindow):
     """Главное окно тестового приложения камеры Hikvision.
 
     Предоставляет полный цикл управления камерой:
@@ -675,7 +678,7 @@ def main() -> None:
     print("Возможности: поиск устройств, захват, FPS, параметры")
     print("=" * 60)
 
-    window = CameraTestWindow()
+    window = HikvisionCameraWindow()
     window.show()
 
     sys.exit(app.exec())

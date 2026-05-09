@@ -59,7 +59,8 @@ class TestRecipesPresenter:
     def _make_ctx(self):
         ctx = MagicMock()
         ctx.config = {"topology": {"name": "test_topology", "processes": []}}
-        ctx.extras = {}
+        ctx.extras = {"topology": {"name": "test_topology", "processes": []}}
+        ctx.get = lambda key, default=None: ctx.extras.get(key, default)
         return ctx
 
     def test_refresh_empty(self, tmp_path):
@@ -117,8 +118,10 @@ class TestRecipesTab:
     def _make_ctx(self, tmp_path):
         ctx = MagicMock()
         ctx.config = {"topology": {"name": "test", "processes": []}}
-        ctx.extras = {}
+        ctx.extras = {"topology": {"name": "test", "processes": []}}
+        ctx.get = lambda key, default=None: ctx.extras.get(key, default)
         ctx.bindings.return_value = None
+        ctx.action_bus.return_value = None
         # Патчим RECIPES_DIR через presenter
         return ctx
 

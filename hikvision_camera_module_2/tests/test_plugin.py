@@ -194,9 +194,11 @@ class TestHikvisionCameraPlugin:
             "set_gain",
             "set_frame_rate",
             "set_resolution",
+            "open_sdk_app",
+            "close_sdk_app",
         }
         assert set(plugin.commands.keys()) == expected
-        assert len(plugin.commands) == 11
+        assert len(plugin.commands) == 13
 
     def test_configure_creates_camera(self):
         """configure() создаёт HikvisionCamera и сохраняет параметры из конфига."""

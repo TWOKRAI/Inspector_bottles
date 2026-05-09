@@ -9,8 +9,12 @@ from .bridge.command_sender import CommandSender
 if TYPE_CHECKING:
     from .process import GuiProcess
     from .bridge import DataReceiverBridge
+    from .bridge.command_catalog import CommandCatalog
+    from .bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype_2.registers.manager import RegistersManagerV2
     from multiprocess_prototype_2.frontend.state.bindings import GuiStateBindings
+    from multiprocess_prototype_2.frontend.topology_holder import TopologyHolder
+    from multiprocess_framework.modules.frontend_module.actions.bus import ActionBus
 
 
 @dataclass
@@ -46,6 +50,34 @@ class AppContext:
         по путям StateStore (FPS, status, latency и т.п.).
         """
         return self.extras.get("bindings")
+
+    def action_bus(self) -> "ActionBus | None":
+        """Вернуть ActionBus из extras, если был создан в run_gui().
+
+        Используется табами Phase 11 для undo/redo изменений параметров.
+        """
+        return self.extras.get("action_bus")
+
+    def topology_holder(self) -> "TopologyHolder | None":
+        """Вернуть TopologyHolder из extras, если был создан в run_gui().
+
+        Содержит текущую topology dict с уведомлениями об изменении.
+        """
+        return self.extras.get("topology_holder")
+
+    def topology_bridge(self) -> "TopologyBridge | None":
+        """Вернуть TopologyBridge из extras (Phase 12).
+
+        Единый мост GUI ↔ Runtime: field_set → IPC, state_delta → rm sync.
+        """
+        return self.extras.get("topology_bridge")
+
+    def command_catalog(self) -> "CommandCatalog | None":
+        """Вернуть CommandCatalog из extras (Phase 12).
+
+        Каталог IPC-команд, собранный из PluginRegistry + ConnectionMap.
+        """
+        return self.extras.get("command_catalog")
 
 
 def build_app_context(

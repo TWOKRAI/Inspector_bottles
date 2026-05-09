@@ -1,7 +1,7 @@
 """ViewMode enum + ViewModeToggle — переключатель между Cards и Table.
 
-ViewModeToggle — два QPushButton в QHBoxLayout. При клике или программном
-set_mode() эмитит signal ``mode_changed``.
+ViewModeToggle — QCheckBox-тумблер. Unchecked = Cards, Checked = Table.
+При смене или программном set_mode() эмитит signal ``mode_changed``.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import StrEnum
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget
 
 
 class ViewMode(StrEnum):
@@ -20,10 +20,12 @@ class ViewMode(StrEnum):
 
 
 class ViewModeToggle(QWidget):
-    """Маленький переключатель Cards / Table.
+    """Переключатель Cards / Table на основе QCheckBox.
+
+    Unchecked = Cards, Checked = Table.
 
     Сигнал ``mode_changed`` эмитится:
-    - при клике на кнопку;
+    - при клике на чекбокс;
     - при программном вызове ``set_mode()``.
     """
 
@@ -40,22 +42,13 @@ class ViewModeToggle(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addStretch()
 
-        self._btn_cards = QPushButton("Cards", self)
-        self._btn_table = QPushButton("Table", self)
+        self._checkbox = QCheckBox("Table", self)
+        self._checkbox.setChecked(self._mode == ViewMode.TABLE)
 
-        self._btn_cards.setCheckable(True)
-        self._btn_table.setCheckable(True)
+        layout.addWidget(self._checkbox)
 
-        layout.addWidget(self._btn_cards)
-        layout.addWidget(self._btn_table)
-
-        self._btn_cards.clicked.connect(lambda: self.set_mode(ViewMode.CARDS))
-        self._btn_table.clicked.connect(lambda: self.set_mode(ViewMode.TABLE))
-
-        # Установить начальное состояние (без эмита)
-        self._update_buttons()
+        self._checkbox.toggled.connect(self._on_toggled)
 
     # ------------------------------------------------------------------
     # Публичный API
@@ -67,16 +60,18 @@ class ViewModeToggle(QWidget):
 
     def set_mode(self, mode: ViewMode) -> None:
         """Установить режим и эмитить mode_changed."""
-        mode = ViewMode(mode)  # нормализация str → ViewMode
+        mode = ViewMode(mode)
         self._mode = mode
-        self._update_buttons()
+        self._checkbox.blockSignals(True)
+        self._checkbox.setChecked(mode == ViewMode.TABLE)
+        self._checkbox.blockSignals(False)
         self.mode_changed.emit(mode.value)
 
     # ------------------------------------------------------------------
     # Внутренние
     # ------------------------------------------------------------------
 
-    def _update_buttons(self) -> None:
-        """Обновить checked-состояние кнопок."""
-        self._btn_cards.setChecked(self._mode == ViewMode.CARDS)
-        self._btn_table.setChecked(self._mode == ViewMode.TABLE)
+    def _on_toggled(self, checked: bool) -> None:
+        """Обработчик переключения чекбокса."""
+        self._mode = ViewMode.TABLE if checked else ViewMode.CARDS
+        self.mode_changed.emit(self._mode.value)

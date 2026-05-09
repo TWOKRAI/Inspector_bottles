@@ -180,15 +180,15 @@ class TestGuiProcessInstantiation:
 # ============================================================================
 
 class TestTopologyParses:
-    """Проверяем валидность phase4_gui.yaml."""
+    """Проверяем валидность hello_world.yaml."""
 
     def test_topology_parses(self):
-        """Загрузить phase4_gui.yaml и проверить SystemBlueprint.model_validate()."""
+        """Загрузить hello_world.yaml и проверить SystemBlueprint.model_validate()."""
         import yaml
         from multiprocess_framework.modules.process_module.generic.blueprint import SystemBlueprint
 
         topology_path = (
-            Path(__file__).parent.parent.parent / "topology" / "phase4_gui.yaml"
+            Path(__file__).parent.parent.parent / "topology" / "hello_world.yaml"
         )
         assert topology_path.exists(), f"Файл не найден: {topology_path}"
 
@@ -197,21 +197,20 @@ class TestTopologyParses:
 
         blueprint = SystemBlueprint.model_validate(data)
 
-        assert blueprint.name == "phase4_gui"
-        assert len(blueprint.processes) == 1
+        assert blueprint.name == "hello_world"
+        assert len(blueprint.processes) == 2
 
-        proc = blueprint.processes[0]
-        assert proc.process_name == "gui"
-        assert proc.process_class == "multiprocess_prototype_2.frontend.process.GuiProcess"
-        assert proc.plugins == []
+        proc_names = {p.process_name for p in blueprint.processes}
+        assert "camera_0" in proc_names
+        assert "gui" in proc_names
 
     def test_topology_check_returns_no_errors(self):
-        """blueprint.check() не возвращает ошибок для phase4_gui."""
+        """blueprint.check() не возвращает ошибок для hello_world."""
         import yaml
         from multiprocess_framework.modules.process_module.generic.blueprint import SystemBlueprint
 
         topology_path = (
-            Path(__file__).parent.parent.parent / "topology" / "phase4_gui.yaml"
+            Path(__file__).parent.parent.parent / "topology" / "hello_world.yaml"
         )
         with topology_path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)

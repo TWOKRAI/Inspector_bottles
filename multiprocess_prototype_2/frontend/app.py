@@ -1,7 +1,6 @@
 """app.py — запуск Qt event loop для GuiProcess."""
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,8 +16,6 @@ from .styles.theme_loader import apply_default_theme
 
 if TYPE_CHECKING:
     from .process import GuiProcess
-
-logger = logging.getLogger(__name__)
 
 # Папка с плагинами прототипа: multiprocess_prototype_2/plugins/
 _PLUGINS_DIR = Path(__file__).resolve().parents[1] / "plugins"
@@ -38,7 +35,7 @@ def run_gui(process: "GuiProcess") -> None:
     try:
         PluginRegistry.discover(str(_PLUGINS_DIR))
     except Exception as e:
-        logger.warning("Не удалось обнаружить плагины: %s", e)
+        process._log_warning(f"Не удалось обнаружить плагины: {e}", module="startup")
 
     registers_manager = RegistersManagerV2.from_registry(PluginRegistry)
 
@@ -57,7 +54,7 @@ def run_gui(process: "GuiProcess") -> None:
     try:
         _topology_dict = _yaml.safe_load(DEFAULT_BLUEPRINT.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.warning("Не удалось загрузить topology: %s", e)
+        process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
         _topology_dict = {}
 
     topology_holder = TopologyHolder(_topology_dict)
@@ -76,6 +73,10 @@ def run_gui(process: "GuiProcess") -> None:
     if _report.errors:
         for e in _report.errors:
             process._log_error(e, module="startup")
+        process._track_error(
+            RuntimeError(f"Startup: {len(_report.errors)} ошибок валидации"),
+            context={"errors": _report.errors},
+        )
         process._record_metric("startup.errors", len(_report.errors))
 
     # 3b. Создать GuiStateBindings — занимает слот bridge.set_state_callback

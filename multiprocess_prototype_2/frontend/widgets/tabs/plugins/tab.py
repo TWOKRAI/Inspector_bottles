@@ -35,6 +35,11 @@ class PluginsTab(QWidget):
         self._init_ui()
         self._populate()
 
+        # Подписаться на ActionBus для обновления виджетов при undo/redo
+        bus = self._ctx.action_bus()
+        if bus is not None:
+            bus.add_change_callback(self._on_bus_changed)
+
     @classmethod
     def create(cls, ctx: "AppContext") -> "PluginsTab":
         """Фабричный метод для TabFactory."""
@@ -83,6 +88,8 @@ class PluginsTab(QWidget):
             fields = self._presenter.get_register_fields(plugin_name)
             if fields:
                 detail: QWidget = RegisterView(fields)
+                # Подключить field_changed → ActionBus
+                detail.field_changed.connect(self._on_field_changed)
             else:
                 detail = PluginInfoCard(info)
         else:
@@ -91,3 +98,44 @@ class PluginsTab(QWidget):
 
         self._detail_cache[plugin_name] = detail
         self._master_detail.set_detail_widget(plugin_name, detail)
+
+    def _on_field_changed(
+        self, register_name: str, field_name: str, old_value: object, new_value: object,
+    ) -> None:
+        """Изменение параметра плагина → ActionBus.execute(field_set)."""
+        bus = self._ctx.action_bus()
+        if bus is None:
+            return
+        from multiprocess_prototype_2.frontend.actions.builder import V2ActionBuilder
+        action = V2ActionBuilder.field_set_timed(
+            register_name, field_name, new_value, old_value,
+            description=f"{register_name}.{field_name} = {new_value}",
+        )
+        bus.execute(action)
+
+    def _on_bus_changed(self) -> None:
+        """Callback от ActionBus — обновить виджеты при undo/redo."""
+        bus = self._ctx.action_bus()
+        if bus is None:
+            return
+        event = bus.last_event
+        if event is None:
+            return
+        event_type, action = event
+        if event_type not in ("undo", "redo"):
+            return
+        if action.action_type != "field_set":
+            return
+        # Найти RegisterView с этим plugin_name
+        register_name = action.register_name or ""
+        detail = self._detail_cache.get(register_name)
+        if detail is None or not isinstance(detail, RegisterView):
+            return
+        # Определить значение для восстановления
+        value = (
+            action.backward_patch.get("value")
+            if event_type == "undo"
+            else action.forward_patch.get("value")
+        )
+        key = f"{register_name}.{action.field_name}"
+        detail.set_editor_value(key, value)

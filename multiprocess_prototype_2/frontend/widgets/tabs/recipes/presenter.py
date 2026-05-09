@@ -35,6 +35,17 @@ class RecipesPresenter:
         self._recipes = {info.slot: info for info in infos}
         return self._recipes
 
+    def get_all_recipes(self) -> list[RecipeInfo]:
+        """Список всех существующих рецептов (отсортирован по slot)."""
+        return sorted(self._recipes.values(), key=lambda r: r.slot)
+
+    def next_free_slot(self) -> int:
+        """Первый свободный слот (0-based). -1 если все заняты."""
+        for i in range(1000):
+            if i not in self._recipes:
+                return i
+        return -1
+
     def get_slot_states(self) -> list[str]:
         """Состояния слотов для SlotSelector: 'occupied' / 'empty'."""
         return [
@@ -56,12 +67,46 @@ class RecipesPresenter:
     def save_to_slot(self, slot: int, name: str, description: str) -> None:
         """Сохранить текущую конфигурацию как рецепт в слот.
 
-        Snapshot = текущий topology dict из AppContext.config.
+        Snapshot = текущий topology dict из TopologyHolder (или fallback ctx.config).
         """
-        topology = self._ctx.config.get("topology", {})
+        holder = self._ctx.get("topology_holder")
+        if holder is not None:
+            topology = holder.topology
+        else:
+            topology = self._ctx.extras.get(
+                "topology", self._ctx.config.get("topology", {}),
+            )
         path = self._recipes_dir / f"recipe_{slot}.yaml"
         save_recipe(path, name, description, topology)
         self.refresh()
+
+    def apply_recipe(self, slot: int) -> dict[str, Any] | None:
+        """Применить рецепт: заменить текущую topology в контексте.
+
+        Returns:
+            dict с ключами {previous, current, recipe_name} или None при ошибке.
+        """
+        data = self.load_from_slot(slot)
+        if data is None:
+            return None
+        topology = data.get("topology", {})
+        if not topology:
+            return None
+
+        holder = self._ctx.get("topology_holder")
+        if holder is not None:
+            previous = holder.set_topology(topology)
+            # Обратная совместимость: обновить extras["topology"]
+            self._ctx.extras["topology"] = topology
+        else:
+            previous = self._ctx.extras.get("topology", {})
+            self._ctx.extras["topology"] = topology
+
+        return {
+            "previous": previous,
+            "current": topology,
+            "recipe_name": data.get("name", ""),
+        }
 
     def load_from_slot(self, slot: int) -> dict[str, Any] | None:
         """Загрузить рецепт из слота. Возвращает dict или None."""

@@ -33,16 +33,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "service": "Service — сервисы",
 }
 
-# Цвета категорий (из constants.py pipeline)
-CATEGORY_COLORS: dict[str, str] = {
-    "source": "#4caf50",
-    "processing": "#2196f3",
-    "output": "#ff9800",
-    "rendering": "#e91e63",
-    "control": "#9c27b0",
-    "utility": "#9e9e9e",
-    "service": "#00bcd4",
-}
+from ..graph.constants import CATEGORY_COLORS
 
 UNCATEGORIZED_LABEL = "Other — прочее"
 

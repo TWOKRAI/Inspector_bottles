@@ -1,6 +1,6 @@
 """Точка входа: python -m hikvision_camera_module_2
 
-Запускает тестовое GUI-приложение для отладки камеры.
+Запускает SDK App — автономное GUI для отладки камеры Hikvision.
 """
 import sys
 from pathlib import Path
@@ -11,7 +11,7 @@ if str(_root) not in sys.path:
 
 
 def main() -> None:
-    from hikvision_camera_module_2.sdk_app.camera_test import main as app_main
+    from hikvision_camera_module_2.sdk_app.main_window import main as app_main
     app_main()
 
 

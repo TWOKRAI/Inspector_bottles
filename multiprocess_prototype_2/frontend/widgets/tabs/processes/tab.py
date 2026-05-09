@@ -81,9 +81,9 @@ class ProcessesTab(QWidget):
 
         self._lbl_total = QLabel(f"Всего: {summary['total']}")
         self._lbl_active = QLabel("Активно: 0")
-        self._lbl_wires = QLabel("Broken wires: 0")
+        self._lbl_wires = QLabel("Обрывы связей: 0")
         self._lbl_wires.setTextFormat(Qt.TextFormat.RichText)
-        self._lbl_avg_fps = QLabel("Avg FPS: —")
+        self._lbl_avg_fps = QLabel("Средний FPS: —")
 
         health_layout.addWidget(self._lbl_total)
         health_layout.addWidget(self._lbl_active)
@@ -201,16 +201,16 @@ class ProcessesTab(QWidget):
             self._lbl_wires,
             "text",
             formatter=lambda v: (
-                f"<span style='color: #dc2626;'>Broken wires: {v}</span>"
+                f"<span style='color: #dc2626;'>Обрывы связей: {v}</span>"
                 if isinstance(v, (int, float)) and v > 0
-                else "Broken wires: 0"
+                else "Обрывы связей: 0"
             ),
         )
         bindings.bind(
             "system.health.avg_fps",
             self._lbl_avg_fps,
             "text",
-            formatter=lambda v: f"Avg FPS: {v:.1f}" if isinstance(v, (int, float)) else "Avg FPS: —",
+            formatter=lambda v: f"Средний FPS: {v:.1f}" if isinstance(v, (int, float)) else "Средний FPS: —",
         )
 
     # ------------------------------------------------------------------ #
