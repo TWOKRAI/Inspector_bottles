@@ -49,22 +49,107 @@ def run_gui(process: "GuiProcess") -> None:
         registers_manager=registers_manager,
     )
 
-    # 3a. Создать GuiStateBindings — занимает слот bridge.set_state_callback
+    # 3a. Загрузить topology для GUI и создать TopologyHolder
+    import yaml as _yaml
+    from multiprocess_prototype_2.main import DEFAULT_BLUEPRINT
+    from .topology_holder import TopologyHolder
+
+    try:
+        _topology_dict = _yaml.safe_load(DEFAULT_BLUEPRINT.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Не удалось загрузить topology: %s", e)
+        _topology_dict = {}
+
+    topology_holder = TopologyHolder(_topology_dict)
+    ctx.extras["topology_holder"] = topology_holder
+    ctx.extras["topology"] = _topology_dict  # обратная совместимость
+
+    # 3a.1. Startup validation
+    from .startup_checks import StartupChecker
+
+    _checker = StartupChecker()
+    _report = _checker.check_all(_topology_dict, registry=PluginRegistry)
+
+    if _report.warnings:
+        for w in _report.warnings:
+            process._log_warning(w, module="startup")
+    if _report.errors:
+        for e in _report.errors:
+            process._log_error(e, module="startup")
+        process._record_metric("startup.errors", len(_report.errors))
+
+    # 3b. Создать GuiStateBindings — занимает слот bridge.set_state_callback
     #     (Phase 10B: табы обращаются через ctx.bindings().bind(...))
     from .state.bindings import GuiStateBindings
     bindings = GuiStateBindings(process._bridge)
     ctx.extras["bindings"] = bindings
 
+    # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
+    from .bridge.command_catalog import CommandCatalog
+    from .bridge.command_validator import CommandValidator
+    from .bridge.topology_bridge import TopologyBridge
+    from multiprocess_prototype_2.registers.connection_map import ConnectionMap
+
+    connection_map = ConnectionMap.from_topology(_topology_dict)
+    command_catalog = CommandCatalog.from_registry_and_map(PluginRegistry, connection_map)
+    command_validator = CommandValidator(command_catalog, registers_manager)
+    topology_bridge = TopologyBridge(
+        command_sender=ctx.command_sender,
+        command_catalog=command_catalog,
+        command_validator=command_validator,
+        registers_manager=registers_manager,
+        topology_holder=topology_holder,
+    )
+
+    ctx.extras["command_catalog"] = command_catalog
+    ctx.extras["topology_bridge"] = topology_bridge
+
+    # Подписка: topology_holder.on_changed → bridge.on_topology_changed
+    topology_holder.on_changed(topology_bridge.on_topology_changed)
+
+    # Phase 12: мультиплексор state_callback → bindings + topology_bridge
+    # GuiStateBindings уже занял set_state_callback. Теперь ставим обёртку,
+    # которая вызывает и bindings, и bridge.on_state_delta.
+    _original_state_cb = bindings._on_state_msg
+
+    def _state_multiplexer(msg_dict: dict) -> None:
+        _original_state_cb(msg_dict)
+        if msg_dict.get("data_type") == "state_delta":
+            path = msg_dict.get("path", "")
+            value = msg_dict.get("value")
+            if path:
+                topology_bridge.on_state_delta(path, value)
+
+    process._bridge.set_state_callback(_state_multiplexer)
+
+    # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
+    from .actions.bus_factory import create_action_bus
+
+    action_bus = create_action_bus(
+        registers_manager, topology_holder, topology_bridge=topology_bridge,
+    )
+    ctx.extras["action_bus"] = action_bus
+
     # 4. Создать MainWindow
     window = MainWindow()
+
+    # Показать startup ошибки в StatusBar
+    if not _report.ok:
+        window.statusBar().showMessage(_report.summary(), 10000)
+
+    # 4a. Привязать ActionBus shortcuts (Ctrl+Z / Ctrl+Y)
+    window.set_action_bus(action_bus)
+
+    # 4a2. Phase 12: StatusBar live bindings
+    window.connect_bindings(bindings)
 
     # 4b. Создать и установить ImagePanel
     image_panel = ImagePanelWidget()
     window.set_image_panel(image_panel)
 
-    # 5. Создать TabFactory и заполнить табы
-    from .widgets.tabs.settings import SettingsTab
-    tab_factory = TabFactory(ctx, custom_factories={"settings": SettingsTab.create})
+    # 5. Создать TabFactory и заполнить табы (Phase 10: все 7 табов)
+    from .widgets.tabs import register_all_tabs
+    tab_factory = TabFactory(ctx, custom_factories=register_all_tabs())
     tab_factory.create_tabs(window.tab_widget)
 
     # 6. Подключить bridge callbacks
