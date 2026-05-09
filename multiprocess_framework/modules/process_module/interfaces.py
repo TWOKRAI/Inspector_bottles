@@ -7,7 +7,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from .types import ProcessStatus, ProcessConfigDict, ProcessStatsDict
 
@@ -112,7 +112,8 @@ class ISharedResources:
         ...
 
 
-class IProcessCommunication:
+@runtime_checkable
+class IProcessCommunication(Protocol):
     """
     Protocol-контракт для ProcessCommunication.
 

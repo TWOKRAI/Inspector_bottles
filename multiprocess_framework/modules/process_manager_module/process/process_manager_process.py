@@ -23,6 +23,13 @@ from ..platforms import get_platform_adapter
 from .topology_manager import TopologyManager
 
 
+def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
+    """Унифицировать вызов из Dispatcher(data_dict) и прямой(kwargs)."""
+    if isinstance(data, dict):
+        kwargs.update(data)
+    return kwargs
+
+
 class ProcessManagerProcess(ProcessModule):
     """
     Процесс-оркестратор: управляет всеми процессами системы.
@@ -235,7 +242,7 @@ class ProcessManagerProcess(ProcessModule):
         # запускаем немедленный broadcast через ProcessMonitor.
         # GUI получит данные через существующий push-канал process_full_status.
         if getattr(self, "_process_monitor", None):
-            self._process_monitor._broadcast_full_status()
+            self._process_monitor.broadcast_full_status()
         return {"success": True, "triggered_broadcast": True}
 
     def _cmd_process_create(self, data=None, **kwargs) -> dict:
@@ -279,93 +286,46 @@ class ProcessManagerProcess(ProcessModule):
         }
 
     def _cmd_process_start(self, data=None, **kwargs) -> dict:
-        """Запустить именованный процесс.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        process_name = kwargs.get("process_name", "")
-
-        if not process_name:
+        """Запустить именованный процесс."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        success = self.start_process(process_name)
-        return {"success": success, "process_name": process_name}
+        return {"success": self.start_process(pn), "process_name": pn}
 
     def _cmd_process_stop(self, data=None, **kwargs) -> dict:
-        """Остановить именованный процесс.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        process_name = kwargs.get("process_name", "")
-
-        if not process_name:
+        """Остановить именованный процесс."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        success = self.stop_process(process_name)
-        return {"success": success, "process_name": process_name}
+        return {"success": self.stop_process(pn), "process_name": pn}
 
     def _cmd_process_pause(self, data=None, **kwargs) -> dict:
-        """Поставить именованный процесс на паузу.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        process_name = kwargs.get("process_name", "")
-
-        if not process_name:
+        """Поставить именованный процесс на паузу."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        success = self.pause_process(process_name)
-        return {"success": success, "process_name": process_name}
+        return {"success": self.pause_process(pn), "process_name": pn}
 
     def _cmd_process_resume(self, data=None, **kwargs) -> dict:
-        """Возобновить именованный процесс.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        process_name = kwargs.get("process_name", "")
-
-        if not process_name:
+        """Возобновить именованный процесс."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        success = self.resume_process(process_name)
-        return {"success": success, "process_name": process_name}
+        return {"success": self.resume_process(pn), "process_name": pn}
 
     def _cmd_process_restart(self, data=None, **kwargs) -> dict:
-        """Перезапустить именованный процесс.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        process_name = kwargs.get("process_name", "")
-
-        if not process_name:
+        """Перезапустить именованный процесс."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        success = self.restart_process(process_name)
-        return {"success": success, "process_name": process_name}
+        return {"success": self.restart_process(pn), "process_name": pn}
 
     def _cmd_process_status(self, data=None, **kwargs) -> dict:
-        """Статус именованного процесса.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        process_name = kwargs.get("process_name", "")
-
-        if not process_name:
+        """Статус именованного процесса."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        return self.get_process_status(process_name)
+        return self.get_process_status(pn)
 
     def _cmd_system_shutdown(self, data=None, **kwargs) -> dict:
         """Запустить завершение системы.
@@ -392,20 +352,13 @@ class ProcessManagerProcess(ProcessModule):
     # -------------------------------------------------------------------------
 
     def _cmd_topology_apply(self, data=None, **kwargs) -> dict:
-        """Применить новую топологию процессов.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        topology_dict = kwargs.get("topology_dict")
-
-        if not topology_dict:
+        """Применить новую топологию процессов."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (td := args.get("topology_dict")):
             return {"error": "topology_dict required"}
         if self._topology_manager is None:
             return {"error": "TopologyManager not initialized"}
-        return self._topology_manager.apply(topology_dict)
+        return self._topology_manager.apply(td)
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:
         """Получить текущую топологию.
@@ -417,20 +370,13 @@ class ProcessManagerProcess(ProcessModule):
         return self._topology_manager.get()
 
     def _cmd_topology_diff(self, data=None, **kwargs) -> dict:
-        """Dry-run: вычислить diff без применения.
-
-        Поддерживает вызов через Dispatcher(data_dict) и прямой вызов(kwargs).
-        """
-        # Поддержка вызова из Dispatcher(data_dict)
-        if isinstance(data, dict):
-            kwargs.update(data)
-        topology_dict = kwargs.get("topology_dict")
-
-        if not topology_dict:
+        """Dry-run: вычислить diff без применения."""
+        args = _merge_cmd_args(data, kwargs)
+        if not (td := args.get("topology_dict")):
             return {"error": "topology_dict required"}
         if self._topology_manager is None:
             return {"error": "TopologyManager not initialized"}
-        return self._topology_manager.diff(topology_dict)
+        return self._topology_manager.diff(td)
 
     # -------------------------------------------------------------------------
     # Wire commands — runtime-настройка SHM-каналов между процессами
@@ -448,8 +394,7 @@ class ProcessManagerProcess(ProcessModule):
             transport: тип транспорта ("router" для SHM)
             shm_config: dict с параметрами SHM (shm_name, buffer_slots, owner_process)
         """
-        if isinstance(data, dict):
-            kwargs.update(data)
+        kwargs = _merge_cmd_args(data, kwargs)
 
         wire_key = kwargs.get("wire_key", "")
         source_process = kwargs.get("source_process", "")
@@ -471,10 +416,11 @@ class ProcessManagerProcess(ProcessModule):
             mm = getattr(self.shared_resources, "memory_manager", None) if self.shared_resources else None
             if mm and hasattr(mm, "create_memory_dict"):
                 try:
-                    # Размеры 480x640x3 uint8 — defaults для MVP
+                    frame_shape = tuple(shm_config.get("frame_shape", (480, 640, 3)))
+                    dtype = shm_config.get("dtype", "uint8")
                     mm.create_memory_dict(
                         owner,
-                        {shm_name: (1, (480, 640, 3), "uint8")},
+                        {shm_name: (1, frame_shape, dtype)},
                         buffer_slots,
                     )
                     self._log_info(
@@ -545,8 +491,7 @@ class ProcessManagerProcess(ProcessModule):
             source_process: имя процесса-отправителя
             target_process: имя процесса-получателя
         """
-        if isinstance(data, dict):
-            kwargs.update(data)
+        kwargs = _merge_cmd_args(data, kwargs)
 
         wire_key = kwargs.get("wire_key", "")
         if not wire_key:
@@ -734,11 +679,9 @@ class ProcessManagerProcess(ProcessModule):
             3. ConsoleManager
             4. super().shutdown() (WorkerManager, RouterManager и т.д.)
         """
-        if hasattr(self, "_process_monitor"):
-            self._process_monitor.stop()
-        if hasattr(self, "_process_registry"):
-            shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
-            self._process_registry.stop_all(timeout=shutdown_timeout)
+        self._process_monitor.stop()
+        shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
+        self._process_registry.stop_all(timeout=shutdown_timeout)
         if self._console_manager is not None:
             if hasattr(self._console_manager, "close_all"):
                 self._console_manager.close_all()
@@ -826,75 +769,34 @@ class ProcessManagerProcess(ProcessModule):
         self._log_info(f"Process '{process_name}' restarted")
         return True
 
-    def pause_process(self, process_name: str) -> bool:
-        """Поставить процесс на паузу через IPC-команду worker.pause_all.
+    def _send_worker_command(self, process_name: str, command: str) -> bool:
+        """Отправить worker-команду процессу (pause/resume/etc).
 
-        Проверяет, что процесс существует и жив, затем отправляет
-        команду worker.pause_all в целевой процесс через его system-очередь.
-
-        Args:
-            process_name: Имя целевого процесса
-
-        Returns:
-            bool: True если команда отправлена успешно
+        Проверяет что процесс существует и жив, отправляет IPC-команду.
         """
         process = self._process_registry.get_process_by_name(process_name)
         if not process:
-            self._log_warning(f"pause_process: процесс '{process_name}' не найден")
+            self._log_warning(f"{command}: процесс '{process_name}' не найден")
             return False
         if not process.is_alive():
-            self._log_warning(
-                f"pause_process: процесс '{process_name}' не жив — пауза невозможна"
-            )
+            self._log_warning(f"{command}: процесс '{process_name}' не жив")
             return False
-
-        pause_cmd = {
-            "type": "system",
-            "command": "worker.pause_all",
-            "sender": self.name,
-        }
+        cmd = {"type": "system", "command": command, "sender": self.name}
         try:
-            self.send_message(process_name, pause_cmd)
-            self._log_info(f"Команда worker.pause_all отправлена процессу '{process_name}'")
+            self.send_message(process_name, cmd)
+            self._log_info(f"Команда {command} отправлена процессу '{process_name}'")
             return True
         except Exception as exc:
-            self._log_error(f"Не удалось отправить pause процессу '{process_name}': {exc}")
+            self._log_error(f"Не удалось отправить {command} процессу '{process_name}': {exc}")
             return False
+
+    def pause_process(self, process_name: str) -> bool:
+        """Поставить процесс на паузу через IPC-команду worker.pause_all."""
+        return self._send_worker_command(process_name, "worker.pause_all")
 
     def resume_process(self, process_name: str) -> bool:
-        """Возобновить процесс через IPC-команду worker.resume_all.
-
-        Проверяет, что процесс существует и жив, затем отправляет
-        команду worker.resume_all в целевой процесс через его system-очередь.
-
-        Args:
-            process_name: Имя целевого процесса
-
-        Returns:
-            bool: True если команда отправлена успешно
-        """
-        process = self._process_registry.get_process_by_name(process_name)
-        if not process:
-            self._log_warning(f"resume_process: процесс '{process_name}' не найден")
-            return False
-        if not process.is_alive():
-            self._log_warning(
-                f"resume_process: процесс '{process_name}' не жив — resume невозможен"
-            )
-            return False
-
-        resume_cmd = {
-            "type": "system",
-            "command": "worker.resume_all",
-            "sender": self.name,
-        }
-        try:
-            self.send_message(process_name, resume_cmd)
-            self._log_info(f"Команда worker.resume_all отправлена процессу '{process_name}'")
-            return True
-        except Exception as exc:
-            self._log_error(f"Не удалось отправить resume процессу '{process_name}': {exc}")
-            return False
+        """Возобновить процесс через IPC-команду worker.resume_all."""
+        return self._send_worker_command(process_name, "worker.resume_all")
 
     def get_process_status(self, process_name: str | None = None) -> dict[str, Any]:
         """Статус процесса или всех."""
@@ -902,7 +804,7 @@ class ProcessManagerProcess(ProcessModule):
             process = self._process_registry.get_process_by_name(process_name)
             if not process:
                 return {}
-            status = self._status._get_status(process)
+            status = self._status.get_status_for_process(process)
             if self.shared_resources:
                 process_data = self.shared_resources.get_process_data(process_name)
                 if process_data:

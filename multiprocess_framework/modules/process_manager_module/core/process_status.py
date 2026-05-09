@@ -46,7 +46,7 @@ class ProcessStatusMonitor:
         """
         for process in self.os_processes:
             if process.name == process_name:
-                return self._get_status(process)
+                return self.get_status_for_process(process)
         return None
     
     def get_all_status(self) -> Dict[str, Dict[str, Any]]:
@@ -58,10 +58,10 @@ class ProcessStatusMonitor:
         """
         status = {}
         for process in self.os_processes:
-            status[process.name] = self._get_status(process)
+            status[process.name] = self.get_status_for_process(process)
         return status
     
-    def _get_status(self, process: Process) -> Dict[str, Any]:
+    def get_status_for_process(self, process: Process) -> Dict[str, Any]:
         """
         Получить статус процесса.
         

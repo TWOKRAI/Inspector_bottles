@@ -206,7 +206,7 @@ class ProcessMonitor:
                 self._full_broadcast_counter += 1
                 if self._full_broadcast_counter >= self._full_broadcast_interval:
                     self._full_broadcast_counter = 0
-                    self._broadcast_full_status()
+                    self.broadcast_full_status()
 
                 time.sleep(self.poll_interval)
             except Exception as e:
@@ -447,7 +447,7 @@ class ProcessMonitor:
     # Полный broadcast статуса (для синхронизации с GUI)
     # ----------------------------------------------------------------
 
-    def _broadcast_full_status(self) -> None:
+    def broadcast_full_status(self) -> None:
         """Бродкаст текущего статуса всех процессов.
 
         Используется для синхронизации с подписчиками, которые подключились
@@ -484,7 +484,7 @@ class ProcessMonitor:
             }
             self.process.communication.broadcast(msg, exclude_self=True)
         except Exception as exc:
-            self.process._log_debug(f"_broadcast_full_status ошибка: {exc}")
+            self.process._log_debug(f"broadcast_full_status ошибка: {exc}")
 
     # ----------------------------------------------------------------
     # Обработка изменений состояния
