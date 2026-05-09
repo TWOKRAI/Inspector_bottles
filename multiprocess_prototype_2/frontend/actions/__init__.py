@@ -19,6 +19,7 @@ from .action_types import (
 from .builder import V2ActionBuilder
 from .bus_factory import create_action_bus
 from .handlers.topology_mutation_handler import TopologyMutationHandler
+from .handlers.node_move_handler import NodeMoveHandler
 
 __all__ = [
     "ActionBus",
@@ -34,4 +35,5 @@ __all__ = [
     "WIRE_REMOVE",
     "NODE_MOVE",
     "TopologyMutationHandler",
+    "NodeMoveHandler",
 ]

@@ -2,5 +2,6 @@
 from .field_set_handler import FieldSetHandler
 from .recipe_handler import RecipeApplyHandler
 from .topology_mutation_handler import TopologyMutationHandler
+from .node_move_handler import NodeMoveHandler
 
-__all__ = ["FieldSetHandler", "RecipeApplyHandler", "TopologyMutationHandler"]
+__all__ = ["FieldSetHandler", "RecipeApplyHandler", "TopologyMutationHandler", "NodeMoveHandler"]
