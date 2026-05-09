@@ -16,26 +16,21 @@ from PySide6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from multiprocess_prototype_2.frontend.app_context import AppContext
+    from multiprocess_prototype_2.frontend.forms.field_editor import FieldEditor
+
+from ..graph.constants import CATEGORY_COLORS
 
 logger = logging.getLogger(__name__)
-
-# Цвета категорий (повтор из constants — для badge)
-CATEGORY_COLORS: dict[str, str] = {
-    "source": "#4caf50",
-    "processing": "#2196f3",
-    "output": "#ff9800",
-    "rendering": "#e91e63",
-    "control": "#9c27b0",
-    "utility": "#9e9e9e",
-    "service": "#00bcd4",
-}
 
 
 class NodeInspectorPanel(QWidget):
     """Панель параметров выбранного узла pipeline.
 
     Показывает: имя процесса, категория, список плагинов, параметры.
+    Если RegistersManager доступен — создаёт типизированные виджеты
+    через CardsFieldFactory. Иначе — QLineEdit (fallback).
+
     При отсутствии выбора — placeholder.
 
     Signals:
@@ -49,8 +44,17 @@ class NodeInspectorPanel(QWidget):
         super().__init__(parent)
         self._current_process: str = ""
         self._suppress_changes: bool = False
-        self._field_editors: dict[str, QLineEdit] = {}
+        # Хранит и QLineEdit (fallback) и FieldEditor (cards-режим)
+        self._field_editors: dict[str, Any] = {}
+        # Флаг: используем типизированные виджеты из CardsFieldFactory
+        self._use_cards: bool = False
+        # AppContext — задаётся через set_context()
+        self._ctx: AppContext | None = None
         self._init_ui()
+
+    def set_context(self, ctx: "AppContext") -> None:
+        """Передать AppContext для доступа к RegistersManager."""
+        self._ctx = ctx
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -109,6 +113,9 @@ class NodeInspectorPanel(QWidget):
     ) -> None:
         """Показать параметры узла.
 
+        Если AppContext + RegistersManager доступны — создаёт типизированные
+        виджеты через CardsFieldFactory. Иначе fallback на QLineEdit.
+
         Args:
             process_name: имя процесса.
             category: категория плагина.
@@ -143,18 +150,77 @@ class NodeInspectorPanel(QWidget):
                     label.setStyleSheet("font-weight: bold; color: #ccc; margin-top: 4px;")
                     self._params_layout.addRow(label)
 
-            # Параметры
-            if params:
-                for field_name, value in params.items():
-                    editor = QLineEdit(str(value))
-                    editor.setProperty("field_name", field_name)
-                    editor.editingFinished.connect(
-                        lambda fn=field_name, ed=editor: self._on_field_edited(fn, ed)
-                    )
-                    self._field_editors[field_name] = editor
-                    self._params_layout.addRow(field_name, editor)
+            # Попытаться получить FieldInfo из RegistersManager
+            fields_used = self._try_build_cards_editors(process_name, params)
+            self._use_cards = bool(fields_used)
+
+            # Fallback: QLineEdit если CardsFieldFactory не применился
+            if not self._use_cards and params:
+                self._build_lineedit_editors(params)
+
         finally:
             self._suppress_changes = False
+
+    def _try_build_cards_editors(
+        self,
+        process_name: str,
+        params: dict[str, Any] | None,
+    ) -> bool:
+        """Попытаться создать типизированные виджеты через CardsFieldFactory.
+
+        Returns:
+            True если виджеты успешно созданы, False — нужен fallback.
+        """
+        if self._ctx is None:
+            return False
+
+        rm = self._ctx.registers_manager()
+        if rm is None:
+            return False
+
+        # Получить FieldInfo из RegistersManager по имени процесса
+        fields = rm.get_fields(process_name)
+        if not fields:
+            return False
+
+        from multiprocess_prototype_2.frontend.forms.factory import CardsFieldFactory
+
+        for field_info in fields:
+            editor = CardsFieldFactory.create(field_info, parent=self._params_widget)
+
+            # Установить значение из params если передан
+            if params and field_info.field_name in params:
+                try:
+                    editor.setter(params[field_info.field_name])
+                except Exception:
+                    logger.debug(
+                        "Не удалось установить значение '%s' для поля '%s'",
+                        params[field_info.field_name],
+                        field_info.field_name,
+                    )
+
+            # Подключить сигнал изменения если есть
+            if editor.change_signal is not None:
+                fn = field_info.field_name
+                editor.change_signal.connect(
+                    lambda *_args, _fn=fn, _ed=editor: self._on_field_editor_changed(_fn, _ed)
+                )
+
+            self._field_editors[field_info.field_name] = editor
+            self._params_layout.addRow(editor.label, editor.widget)
+
+        return True
+
+    def _build_lineedit_editors(self, params: dict[str, Any]) -> None:
+        """Создать QLineEdit-редакторы (fallback если CardsFieldFactory недоступен)."""
+        for field_name, value in params.items():
+            editor = QLineEdit(str(value))
+            editor.setProperty("field_name", field_name)
+            editor.editingFinished.connect(
+                lambda fn=field_name, ed=editor: self._on_field_edited(fn, ed)
+            )
+            self._field_editors[field_name] = editor
+            self._params_layout.addRow(field_name, editor)
 
     def clear(self) -> None:
         """Очистить inspector (показать placeholder)."""
@@ -167,12 +233,27 @@ class NodeInspectorPanel(QWidget):
         """Обновить значение поля programmatically (undo/redo).
 
         Использует signal suppression чтобы не тригерить field_changed.
+        Работает для обоих типов редакторов: FieldEditor и QLineEdit.
         """
         self._suppress_changes = True
         try:
             editor = self._field_editors.get(field_name)
-            if editor:
+            if editor is None:
+                return
+
+            if isinstance(editor, QLineEdit):
+                # Fallback-режим: QLineEdit
                 editor.setText(str(value))
+            else:
+                # Cards-режим: FieldEditor с setter
+                try:
+                    editor.setter(value)
+                except Exception:
+                    logger.warning(
+                        "update_field: не удалось установить значение '%s' для поля '%s'",
+                        value,
+                        field_name,
+                    )
         finally:
             self._suppress_changes = False
 
@@ -182,15 +263,42 @@ class NodeInspectorPanel(QWidget):
         return self._current_process
 
     def _on_field_edited(self, field_name: str, editor: QLineEdit) -> None:
-        """Обработчик изменения поля пользователем."""
+        """Обработчик изменения поля пользователем (QLineEdit fallback)."""
         if self._suppress_changes:
             return
         value = editor.text()
         self.field_changed.emit(self._current_process, field_name, value)
 
+    def _on_field_editor_changed(self, field_name: str, editor: "FieldEditor") -> None:
+        """Обработчик изменения поля через FieldEditor (cards-режим).
+
+        Args:
+            field_name: имя поля.
+            editor: FieldEditor, у которого сработал change_signal.
+        """
+        if self._suppress_changes:
+            return
+        value = editor.getter()
+        self.field_changed.emit(self._current_process, field_name, value)
+
     def _clear_params(self) -> None:
-        """Удалить все виджеты параметров."""
+        """Удалить все виджеты параметров.
+
+        Для FieldEditor: отключаем change_signal перед удалением
+        чтобы избежать утечек сигналов при переключении нод.
+        """
+        for field_name, editor in self._field_editors.items():
+            if not isinstance(editor, QLineEdit):
+                # FieldEditor — отключаем change_signal
+                try:
+                    if editor.change_signal is not None:
+                        editor.change_signal.disconnect()
+                except (RuntimeError, TypeError):
+                    pass  # Уже отключён или C++ объект удалён
+
         self._field_editors.clear()
+        self._use_cards = False
+
         while self._params_layout.count():
             item = self._params_layout.takeAt(0)
             widget = item.widget()

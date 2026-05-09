@@ -12,12 +12,14 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 from .graph.node_item import NodeData
 from .graph.edge_item import EdgeData
+from .graph.port_schema import PortSchema
 from .model import PipelineModel
 from .layout import auto_layout
 
 if TYPE_CHECKING:
     from multiprocess_prototype_2.frontend.app_context import AppContext
     from .graph.graph_scene import GraphScene
+    from .inspector.inspector_panel import NodeInspectorPanel
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,65 @@ class PipelinePresenter:
     def set_scene(self, scene: "GraphScene") -> None:
         """Привязать GraphScene для обновления визуализации."""
         self._scene = scene
+
+    def set_inspector(self, panel: "NodeInspectorPanel") -> None:
+        """Привязать NodeInspectorPanel и настроить интеграцию с ActionBus.
+
+        Передаёт AppContext в panel и подписывается на field_changed.
+        """
+        panel.set_context(self._ctx)
+        panel.field_changed.connect(self._on_inspector_field_changed)
+
+    def _on_inspector_field_changed(
+        self,
+        process_name: str,
+        field_name: str,
+        new_value: Any,
+    ) -> None:
+        """Обработчик изменения поля из NodeInspectorPanel.
+
+        Получает old_value из RegistersManager, затем:
+        - Если ActionBus доступен: создаёт undoable Action через V2ActionBuilder.
+        - Иначе: прямой вызов rm.set_value() если rm доступен.
+        - Warning если ни ActionBus ни rm недоступны.
+        """
+        rm = self._ctx.registers_manager()
+        bus = self._ctx.action_bus()
+
+        # Получить старое значение для undo
+        old_value: Any = None
+        if rm is not None:
+            register = rm.get_register(process_name)
+            if register is not None:
+                old_value = getattr(register, field_name, None)
+
+        if bus is not None:
+            from multiprocess_prototype_2.frontend.actions.builder import V2ActionBuilder
+            action = V2ActionBuilder.field_set_timed(
+                register_name=process_name,
+                field_name=field_name,
+                new_value=new_value,
+                old_value=old_value,
+                description=f"Изменить {process_name}.{field_name}",
+            )
+            bus.execute(action)
+        elif rm is not None:
+            ok = rm.set_value(process_name, field_name, new_value)
+            if not ok:
+                logger.warning(
+                    "Не удалось установить %s.%s = %s через RegistersManager",
+                    process_name,
+                    field_name,
+                    new_value,
+                )
+        else:
+            logger.warning(
+                "field_changed: ни ActionBus ни RegistersManager недоступны "
+                "для %s.%s = %s",
+                process_name,
+                field_name,
+                new_value,
+            )
 
     # ------------------------------------------------------------------ #
     #  Signal suppression (из v1)                                         #
@@ -105,9 +166,7 @@ class PipelinePresenter:
 
         # Обновить позиции из scene (если привязана)
         if self._scene:
-            for node_id, node_item in self._scene._nodes.items():
-                pos = node_item.pos()
-                self._gui_positions[node_id] = (pos.x(), pos.y())
+            self._gui_positions.update(self._scene.get_all_node_positions())
 
         # Записать позиции в metadata
         topo.setdefault("metadata", {})
@@ -144,13 +203,34 @@ class PipelinePresenter:
             name = f"{base_name}_{counter}"
             counter += 1
 
-        # Определить категорию
+        # Определить категорию и собрать port_schemas
         category = "utility"
+        port_schemas: list[PortSchema] | None = None
         registry = self._ctx.plugin_registry()
         if registry:
             entry = registry.get(plugin_name)
             if entry:
                 category = getattr(entry, "category", "utility")
+                # Graceful fallback: если entry недоступен — port_schemas=None
+                try:
+                    schemas: list[PortSchema] = []
+                    for port in entry.inputs:
+                        schemas.append(PortSchema(
+                            name=port.name,
+                            direction="input",
+                            dtype=port.dtype,
+                            optional=port.optional,
+                        ))
+                    for port in entry.outputs:
+                        schemas.append(PortSchema(
+                            name=port.name,
+                            direction="output",
+                            dtype=port.dtype,
+                            optional=port.optional,
+                        ))
+                    port_schemas = schemas if schemas else None
+                except Exception:
+                    port_schemas = None
 
         old_topo, new_topo = self._model.add_process(name, plugin_name, category)
         self._gui_positions[name] = (x, y)
@@ -171,7 +251,7 @@ class PipelinePresenter:
         if self._scene:
             with self._block_signals():
                 node_data = NodeData(name, name, category, category, x, y)
-                self._scene.add_node(node_data)
+                self._scene.add_node(node_data, port_schemas=port_schemas)
 
         return name
 
