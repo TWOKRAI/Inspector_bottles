@@ -101,7 +101,25 @@ class ProcessesPresenter:
         return processes
 
     def on_process_action(self, process_name: str, action_id: str) -> None:
-        """Обработать действие пользователя (Start/Stop/Restart)."""
+        """Обработать действие пользователя (Start/Stop/Restart).
+
+        Phase 12: если TopologyBridge доступен — использует его
+        (валидация + маршрутизация). Иначе — прямой CommandSender.
+        """
+        bridge = self._ctx.extras.get("topology_bridge")
+
+        if bridge is not None:
+            bridge_methods = {
+                "start": bridge.start_process,
+                "stop": bridge.stop_process,
+                "restart": bridge.restart_process,
+            }
+            method = bridge_methods.get(action_id)
+            if method is not None:
+                method(process_name)
+                return
+
+        # Fallback: прямой CommandSender (обратная совместимость)
         cmd_map = {
             "start": "process.start",
             "stop": "process.stop",
@@ -109,6 +127,24 @@ class ProcessesPresenter:
         }
         command = cmd_map.get(action_id, action_id)
         self._ctx.command_sender.send_command(process_name, command, {})
+
+    def get_health_summary(self) -> dict[str, Any]:
+        """Сводка здоровья системы.
+
+        Returns:
+            dict с ключами: total, active, broken_wires, avg_fps.
+            Все значения — начальные (обновляются через bindings).
+        """
+        processes = self.get_processes()
+        total = len(processes)
+
+        # Начальные значения — будут обновляться через bindings
+        return {
+            "total": total,
+            "active": 0,        # обновляется через state_delta
+            "broken_wires": 0,  # обновляется через WireStatusMonitor
+            "avg_fps": 0.0,     # обновляется через state_delta
+        }
 
     def group_by_category(self, processes: list[ProcessInfo]) -> dict[str, list[ProcessInfo]]:
         """Группировать процессы по категории."""

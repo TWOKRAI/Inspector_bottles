@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QScrollArea,
     QVBoxLayout,
@@ -71,6 +72,27 @@ class ProcessesTab(QWidget):
         self._toolbar.action_triggered.connect(self._on_toolbar_action)
         layout.addWidget(self._toolbar)
 
+        # Health панель — сводка состояния системы
+        self._health_panel = QGroupBox("Здоровье системы")
+        health_layout = QHBoxLayout(self._health_panel)
+        health_layout.setContentsMargins(8, 4, 8, 4)
+
+        summary = self._presenter.get_health_summary()
+
+        self._lbl_total = QLabel(f"Всего: {summary['total']}")
+        self._lbl_active = QLabel("Активно: 0")
+        self._lbl_wires = QLabel("Broken wires: 0")
+        self._lbl_wires.setTextFormat(Qt.TextFormat.RichText)
+        self._lbl_avg_fps = QLabel("Avg FPS: —")
+
+        health_layout.addWidget(self._lbl_total)
+        health_layout.addWidget(self._lbl_active)
+        health_layout.addWidget(self._lbl_wires)
+        health_layout.addWidget(self._lbl_avg_fps)
+        health_layout.addStretch()
+
+        layout.addWidget(self._health_panel)
+
         # Scroll area с карточками
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -131,17 +153,65 @@ class ProcessesTab(QWidget):
             self._scroll_layout.insertWidget(idx, group_box)
 
     def _connect_bindings(self) -> None:
-        """Подключить реактивные обновления из StateStore."""
+        """Подключить реактивные обновления из StateStore (Phase 12)."""
         bindings = self._ctx.bindings()
         if bindings is None:
             return
 
         for name, card in self._cards.items():
-            # Подписка на статус процесса
-            # GuiStateBindings ожидает state_delta с path вида processes.{name}.state.status
-            # Пока StateStore не broadcasting — это noop, но готово к Phase 12
-            pass
-            # TODO Phase 12: bindings.bind(f"processes.{name}.state.status", ...)
+            # Добавить метрики-labels для live-обновлений
+            card.set_metrics({"FPS": "—", "Latency": "—"})
+
+            # Статус → StatusIndicator
+            bindings.bind(
+                f"processes.{name}.state.status",
+                card._indicator,
+                "set_state",
+            )
+
+            # FPS → metric label
+            fps_label = card._metric_labels.get("FPS")
+            if fps_label is not None:
+                bindings.bind(
+                    f"processes.{name}.state.fps",
+                    fps_label,
+                    "text",
+                    formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
+                )
+
+            # Latency → metric label
+            latency_label = card._metric_labels.get("Latency")
+            if latency_label is not None:
+                bindings.bind(
+                    f"processes.{name}.state.latency_ms",
+                    latency_label,
+                    "text",
+                    formatter=lambda v: f"{v:.0f} ms" if isinstance(v, (int, float)) else "—",
+                )
+
+        # Health panel bindings
+        bindings.bind(
+            "system.health.active",
+            self._lbl_active,
+            "text",
+            formatter=lambda v: f"Активно: {v}" if isinstance(v, (int, float)) else "Активно: 0",
+        )
+        bindings.bind(
+            "system.health.broken_wires",
+            self._lbl_wires,
+            "text",
+            formatter=lambda v: (
+                f"<span style='color: #dc2626;'>Broken wires: {v}</span>"
+                if isinstance(v, (int, float)) and v > 0
+                else "Broken wires: 0"
+            ),
+        )
+        bindings.bind(
+            "system.health.avg_fps",
+            self._lbl_avg_fps,
+            "text",
+            formatter=lambda v: f"Avg FPS: {v:.1f}" if isinstance(v, (int, float)) else "Avg FPS: —",
+        )
 
     # ------------------------------------------------------------------ #
     #  Обработчики                                                         #
