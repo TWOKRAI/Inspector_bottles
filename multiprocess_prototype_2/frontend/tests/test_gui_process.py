@@ -269,3 +269,182 @@ class TestProcessClassField:
 
         # Дефолт из GenericProcessConfig
         assert "GenericProcess" in generic.process_class
+
+
+# ============================================================================
+# TestDataReceiverErrorRecovery
+# ============================================================================
+
+class TestDataReceiverErrorRecovery:
+    """Тесты exponential backoff и error recovery в data_receiver_loop."""
+
+    def _make_process(self):
+        """Создать mock GuiProcess с нужными атрибутами."""
+        from multiprocess_prototype_2.frontend.process import GuiProcess
+
+        process = MagicMock()
+        process.name = "gui_test"
+        process._bridge = MagicMock()
+        process._log_error = MagicMock()
+        process._log_info = MagicMock()
+        process._log_critical = MagicMock()
+        process._track_error = MagicMock()
+        process._record_metric = MagicMock()
+        # Привязываем реальный метод
+        process._data_receiver_loop = GuiProcess._data_receiver_loop.__get__(process)
+        return process
+
+    def _make_stop_event(self, delay: float = 0.0):
+        """Создать stop_event, который сработает через delay секунд."""
+        import threading
+        stop_event = threading.Event()
+        if delay > 0:
+            threading.Timer(delay, stop_event.set).start()
+        return stop_event
+
+    def test_backoff_increases_on_errors(self):
+        """Backoff растёт при последовательных ошибках."""
+        import threading
+        import time as time_module
+
+        process = self._make_process()
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+
+        call_count = [0]
+        sleep_calls = []
+
+        # Router всегда бросает исключение
+        process.router_manager.receive.side_effect = RuntimeError("сетевая ошибка")
+
+        original_sleep = time_module.sleep
+
+        def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+            # После 3-й ошибки останавливаем цикл
+            if len(sleep_calls) >= 3:
+                stop_event.set()
+
+        with patch("multiprocess_prototype_2.frontend.process.time") as mock_time:
+            mock_time.sleep.side_effect = fake_sleep
+            process._data_receiver_loop(stop_event, pause_event)
+
+        # Проверяем что backoff растёт: 0.1 → 0.2 → 0.4
+        assert len(sleep_calls) >= 2
+        assert sleep_calls[0] < sleep_calls[1], "Backoff должен расти"
+
+    def test_counter_resets_on_success(self):
+        """Counter сбрасывается после успешного получения сообщений."""
+        import threading
+
+        process = self._make_process()
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+
+        # Сценарий: ошибка → успех → стоп
+        # После sleep (ошибка) — не останавливаем; останавливаем только после успеха
+        step = [0]
+
+        def side_effect(**kwargs):
+            step[0] += 1
+            if step[0] == 1:
+                raise RuntimeError("ошибка")
+            # шаг 2: успешный receive → после этого ставим stop
+            stop_event.set()
+            return [{"data_type": "frame"}]
+
+        process.router_manager.receive.side_effect = side_effect
+
+        with patch("multiprocess_prototype_2.frontend.process.time") as mock_time:
+            mock_time.sleep.return_value = None  # sleep ничего не делает
+            process._data_receiver_loop(stop_event, pause_event)
+
+        # _log_info должен быть вызван с сообщением о восстановлении
+        recovery_calls = [
+            call for call in process._log_info.call_args_list
+            if "восстановление" in str(call)
+        ]
+        assert len(recovery_calls) == 1
+
+    def test_critical_after_threshold(self):
+        """_log_critical вызывается ровно при достижении порога 5 ошибок подряд."""
+        import threading
+
+        process = self._make_process()
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+
+        error_count = [0]
+
+        process.router_manager.receive.side_effect = RuntimeError("постоянная ошибка")
+
+        with patch("multiprocess_prototype_2.frontend.process.time") as mock_time:
+            def fake_sleep(seconds):
+                error_count[0] += 1
+                if error_count[0] >= 6:
+                    stop_event.set()
+            mock_time.sleep.side_effect = fake_sleep
+            process._data_receiver_loop(stop_event, pause_event)
+
+        # _log_critical должен быть вызван ровно 1 раз (при consecutive == 5)
+        assert process._log_critical.call_count == 1
+        call_args = process._log_critical.call_args
+        assert "5" in str(call_args)
+
+    def test_track_error_called(self):
+        """_track_error вызывается при каждой ошибке с правильным контекстом."""
+        import threading
+
+        process = self._make_process()
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+
+        process.router_manager.receive.side_effect = ValueError("тест")
+
+        with patch("multiprocess_prototype_2.frontend.process.time") as mock_time:
+            call_cnt = [0]
+            def fake_sleep(seconds):
+                call_cnt[0] += 1
+                if call_cnt[0] >= 2:
+                    stop_event.set()
+            mock_time.sleep.side_effect = fake_sleep
+            process._data_receiver_loop(stop_event, pause_event)
+
+        # _track_error вызван для каждой ошибки
+        assert process._track_error.call_count >= 2
+
+        # Проверяем контекст первого вызова
+        first_call = process._track_error.call_args_list[0]
+        exc_arg = first_call[0][0]
+        ctx_arg = first_call[1].get("context") or first_call[0][1]
+        assert isinstance(exc_arg, ValueError)
+        assert ctx_arg["loop"] == "data_receiver"
+        assert "consecutive" in ctx_arg
+
+    def test_record_metric_on_error_and_success(self):
+        """_record_metric вызывается при ошибках ('data_receiver.errors') и успехе ('data_receiver.success')."""
+        import threading
+
+        process = self._make_process()
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+
+        # Ошибка → потом успех → стоп
+        step = [0]
+
+        def side_effect(**kwargs):
+            step[0] += 1
+            if step[0] == 1:
+                raise RuntimeError("ошибка")
+            stop_event.set()
+            return [{"data_type": "status"}]
+
+        process.router_manager.receive.side_effect = side_effect
+
+        with patch("multiprocess_prototype_2.frontend.process.time") as mock_time:
+            mock_time.sleep.return_value = None  # sleep мгновенный
+            process._data_receiver_loop(stop_event, pause_event)
+
+        metric_names = [call[0][0] for call in process._record_metric.call_args_list]
+        assert "data_receiver.errors" in metric_names
+        assert "data_receiver.success" in metric_names

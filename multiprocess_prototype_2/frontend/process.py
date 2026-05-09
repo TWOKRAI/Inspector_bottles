@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import time
+
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
@@ -62,9 +64,13 @@ class GuiProcess(ProcessModule):
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
         _trace_cnt = 0
+        _consecutive_errors = 0
+        _backoff = 0.1       # начальный backoff (секунды)
+        _MAX_BACKOFF = 5.0
+        _ERROR_THRESHOLD = 5  # порог для вызова _log_critical
+
         while not stop_event.is_set():
             if pause_event.is_set():
-                import time
                 time.sleep(0.05)
                 continue
             try:
@@ -84,11 +90,41 @@ class GuiProcess(ProcessModule):
                             module="gui",
                         )
                     self._bridge.dispatch(msg_dict)
+
+                # При успешном получении — сбрасываем счётчик ошибок
+                if msgs:
+                    if _consecutive_errors > 0:
+                        self._log_info(
+                            f"data_receiver: восстановление после {_consecutive_errors} ошибок подряд",
+                            module="gui",
+                        )
+                    _consecutive_errors = 0
+                    _backoff = 0.1
+                    self._record_metric("data_receiver.success")
+
             except Exception as exc:
-                self._log_error(
-                    f"GuiProcess '{self.name}': ошибка в data_receiver_loop: {exc}",
-                    module="gui",
-                )
+                _consecutive_errors += 1
+
+                # Трекинг через ErrorManager (единый паттерн)
+                self._track_error(exc, context={
+                    "loop": "data_receiver",
+                    "consecutive": _consecutive_errors,
+                })
+
+                # Метрика через StatsManager
+                self._record_metric("data_receiver.errors")
+
+                # После порога — critical лог
+                if _consecutive_errors == _ERROR_THRESHOLD:
+                    self._log_critical(
+                        f"data_receiver: {_consecutive_errors} ошибок подряд, "
+                        f"последняя: {exc}",
+                        module="gui",
+                    )
+
+                # Exponential backoff
+                time.sleep(min(_backoff, _MAX_BACKOFF))
+                _backoff = min(_backoff * 2, _MAX_BACKOFF)
 
     def run(self) -> None:
         """Запустить базовый ProcessModule (воркеры), затем Qt event loop."""
