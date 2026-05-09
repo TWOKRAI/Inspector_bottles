@@ -104,3 +104,27 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - `GenericProcess` → deprecated shim → будет удалён после миграции прикладного кода
 - Data pipeline (`DataReceiver`, `PipelineExecutor`), пока живущий в `GenericProcess`, станет `DataPipelinePlugin` — future work
 - Прикладной код (`multiprocess_prototype/`) не обязан следовать этому правилу — запрет касается только фреймворка
+
+---
+
+## ADR-PM-009: Return-based composition (ManagersBundle)
+
+**Статус:** принято  
+**Дата:** 2026-05-09
+
+**Контекст:** Composition-объекты (`ProcessManagers`, `ProcessLifecycle`) напрямую мутировали атрибуты `ProcessModule` (`self.process.worker_manager = ...`). Это нарушало SRP — composition-объект знал внутреннее устройство хоста и осуществлял побочные эффекты, что усложняло тестирование и делало граница ответственности размытой.
+
+**Решение:**
+1. `ProcessManagers.create_all()` возвращает `ManagersBundle` dataclass вместо записи в `self.process.*`
+2. `ProcessLifecycle.init_configuration()` / `init_queues()` возвращают `tuple` вместо записи в атрибуты
+3. `ProcessModule.initialize()` стал оркестратором — сам вызывает шаги и присваивает атрибуты через `_apply_managers_bundle()`
+4. `ProcessLifecycle.initialize()` удалён — оркестрация переехала в `ProcessModule`, делегаты остались
+5. `IProcessCommunication` стал Protocol (structural typing) вместо ABC
+
+**Принцип:** «Read — don't write» — composition-объекты ЧИТАЮТ из хоста (через properties), но НЕ ПИШУТ в его атрибуты. Запись осуществляется исключительно хостом через return-values.
+
+**Последствия:**
+- Добавление нового менеджера: одно поле в `ManagersBundle` + одна строка в `_apply_managers_bundle()` (было: изменения в 3+ файлах)
+- Тесты: имена методов `_init_configuration()` / `_init_queues()` сохранены на `ProcessModule` → моки продолжают работать
+- `ProcessManagerProcess.initialize()` → `super().initialize()` chain сохранён
+- Composition class теперь предсказуемо работают: input = конфиг, output = структурированные данные, побочные эффекты = отсутствуют

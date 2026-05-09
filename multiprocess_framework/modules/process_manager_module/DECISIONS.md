@@ -43,3 +43,29 @@
 - **Решение:** При `initialize()` регистрируется `register_message_handler("process.command", _handle_process_command)`. Handler извлекает из `msg["data"]` вложенную команду (`cmd`), делегирует в `command_manager.handle_command()` и отправляет ответ `process.command.response` с `correlation_id` обратно через Router. Добавлена команда `process.create` для создания процессов из inline-конфига.
 - **Отклонённые альтернативы:** (1) Прямой вызов методов `start_process/stop_process` без CommandManager — теряется единообразие и метрики. (2) Отдельный endpoint на каждую команду (`process.start`, `process.stop`) — избыточное количество handlers, сложнее расширять.
 - **Следствие:** Любой процесс может динамически управлять другими через стандартный Router. ACL whitelist — отложен (можно добавить позже без изменения контракта).
+
+## ADR-PMM-008: Command args helper + public API cleanup
+
+**Статус:** принято  
+**Дата:** 2026-05-09
+
+**Контекст:** 6+ command-методов дублировали блок `if isinstance(data, dict): kwargs.update(data)` для слияния Dispatcher args и inline dict. Методы `pause()` / `resume()` содержали ~30 дублирующихся строк. Приватные методы `_get_status()` / `_broadcast_full_status()` вызывались публично из других модулей. SHM размеры (`frame_shape`, `dtype`) хардкодились (480×640×3) вместо чтения из `shm_config`.
+
+**Решение:**
+1. `_merge_cmd_args(dispatcher_kwargs: dict, data: Optional[dict]) -> dict` — module-level helper для унификации слияния kwargs (используется 6+ раз)
+2. `_send_worker_command(worker_id: int, cmd: str, **kwargs)` — helper для IPC-команд к воркерам (pause/resume/set_interval/etc)
+3. `ProcessStatusMonitor._get_status()` → `get_status_for_process(pid: int)` — public метод (module-level), убрана подчёркивание
+4. `ProcessMonitor._broadcast_full_status()` → `broadcast_full_status()` — public метод, обновляет процесс в реестре и broadcasting
+5. SHM `frame_shape` / `dtype` читаются из `self.shm_config` вместо хардкода `(480, 640, 3)` / `np.uint8`
+6. `hasattr`-guards убраны из `shutdown()` — гарантируется, что все компоненты созданы в `__init__()`
+
+**Отклонённые альтернативы:**
+- (1) Оставить `_merge_cmd_args` микро-логикой в каждом методе — дублирование кода и усложнение поддержки при изменении контракта
+- (2) Сохранить `_get_status()` приватным, добавить wrapper — лишний уровень indirection
+
+**Последствия:**
+- LOC `ProcessManagerProcess`: 917 → ~800 (снижение на 117 строк за счёт удаления дублирования)
+- Дублирование кода: ~90 строк → 0 (pause/resume и другие методы используют единый `_send_worker_command`)
+- Новые `_cmd_*` методы: 3-4 строки вместо 8-10
+- Public API чище: внешние модули вызывают явные public методы `get_status_for_process()`, `broadcast_full_status()`
+- SHM конфигурация динамична: изменение размеров в `shm_config` автоматически применяется без правок в коде
