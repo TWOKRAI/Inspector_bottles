@@ -1,6 +1,7 @@
 """MainWindow — главное окно: AppHeader + ImagePanel-placeholder + TabWidget + StatusBar."""
 from __future__ import annotations
 
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..widgets.chrome.app_header import AppHeaderWidget
+from ..widgets.chrome.error_banner import ErrorBannerWidget
 from .config import MainWindowConfig
 
 
@@ -44,6 +46,10 @@ class MainWindow(QMainWindow):
         self._header.setFixedHeight(60)
         self._layout.addWidget(self._header)
 
+        # 1.5. Баннер ошибок/предупреждений (скрыт по умолчанию)
+        self._error_banner = ErrorBannerWidget()
+        self._layout.addWidget(self._error_banner)
+
         # 2. Image panel placeholder — будет заменён реальным ImagePanel
         self._image_panel_placeholder = QWidget()
         self._image_panel_placeholder.setObjectName("ImagePanelPlaceholder")
@@ -56,13 +62,18 @@ class MainWindow(QMainWindow):
         self._layout.addWidget(self._tab_widget)
 
         # StatusBar
-        self._fps_label = QLabel("FPS: --")
-        self._latency_label = QLabel("Latency: -- ms")
+        self._fps_label = QLabel("FPS: —")
+        self._latency_label = QLabel("Latency: —")
+        self._frames_label = QLabel("Frames: —")
         self.statusBar().addPermanentWidget(self._fps_label)
         self.statusBar().addPermanentWidget(self._latency_label)
+        self.statusBar().addPermanentWidget(self._frames_label)
 
         # Счётчик кадров для расчёта FPS
         self._frame_count = 0
+
+        # ActionBus (Phase 11) — устанавливается через set_action_bus()
+        self._action_bus = None
 
     # -- Properties --
 
@@ -76,6 +87,11 @@ class MainWindow(QMainWindow):
         """Виджет вкладок."""
         return self._tab_widget
 
+    @property
+    def error_banner(self) -> ErrorBannerWidget:
+        """Виджет баннера ошибок/предупреждений."""
+        return self._error_banner
+
     # -- Image panel --
 
     def set_image_panel(self, widget: QWidget) -> None:
@@ -88,6 +104,80 @@ class MainWindow(QMainWindow):
         self._image_panel_placeholder.deleteLater()
         self._layout.insertWidget(idx, widget, stretch=1)
         self._image_panel = widget
+
+    # -- ActionBus (Phase 11) --
+
+    def set_action_bus(self, bus: object) -> None:
+        """Установить ActionBus и привязать Ctrl+Z / Ctrl+Y shortcuts."""
+        self._action_bus = bus
+
+        undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        undo_shortcut.activated.connect(self._on_undo)
+        self._undo_shortcut = undo_shortcut  # prevent GC
+
+        redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        redo_shortcut.activated.connect(self._on_redo)
+        self._redo_shortcut = redo_shortcut  # prevent GC
+
+    def _on_undo(self) -> None:
+        """Отменить последнее действие."""
+        if self._action_bus is None:
+            return
+        action = self._action_bus.undo()
+        if action:
+            self.statusBar().showMessage(f"Отменено: {action.description}", 3000)
+
+    def _on_redo(self) -> None:
+        """Повторить отменённое действие."""
+        if self._action_bus is None:
+            return
+        action = self._action_bus.redo()
+        if action:
+            self.statusBar().showMessage(f"Повторено: {action.description}", 3000)
+
+    # -- Live bindings (Phase 12) --
+
+    def connect_bindings(self, bindings: object) -> None:
+        """Подключить StatusBar к live state_delta через GuiStateBindings.
+
+        Args:
+            bindings: GuiStateBindings (принимает object для обратной совместимости).
+        """
+        if bindings is None or not hasattr(bindings, "bind"):
+            return
+
+        bindings.bind(
+            "system.fps",
+            self._fps_label,
+            "text",
+            formatter=lambda v: f"FPS: {v:.1f}" if isinstance(v, (int, float)) else "FPS: —",
+        )
+        bindings.bind(
+            "system.latency_ms",
+            self._latency_label,
+            "text",
+            formatter=lambda v: f"Latency: {v:.0f} ms" if isinstance(v, (int, float)) else "Latency: —",
+        )
+        bindings.bind(
+            "system.total_frames",
+            self._frames_label,
+            "text",
+            formatter=lambda v: f"Frames: {v}" if isinstance(v, (int, float)) else "Frames: —",
+        )
+
+        # Привязка баннера к системным ошибкам и предупреждениям.
+        # Fallback в GuiStateBindings (getattr + callable) вызывает
+        # show_error(value) / show_warning(value) напрямую.
+        bindings.bind(
+            "system.error",
+            self._error_banner,
+            "show_error",
+        )
+        bindings.bind(
+            "system.warning",
+            self._error_banner,
+            "show_warning",
+        )
 
     # -- Обратная совместимость (старый API) --
 
