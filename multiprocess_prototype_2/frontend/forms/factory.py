@@ -335,7 +335,7 @@ def _build_path(field_info: FieldInfo, parent: QWidget | None = None) -> FieldEd
     """QLineEdit для Path (полный picker — Phase 10B)."""
     le = QLineEdit(parent)
     default = _safe_default(field_info, "")
-    le.setText(str(default))
+    le.setText(default.as_posix() if isinstance(default, Path) else str(default))
     label = _make_label(field_info)
     return FieldEditor(
         field_info=field_info,

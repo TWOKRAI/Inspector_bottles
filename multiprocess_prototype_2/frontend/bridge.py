@@ -22,6 +22,11 @@ class DataReceiverBridge(QObject):
     # Сигнал-транспорт: worker emit → main thread slot
     _deliver = Signal(object)
 
+    # Публичные сигналы для подписки извне
+    frame_received = Signal(object)
+    state_updated = Signal(object)
+    command_response = Signal(object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._frame_cb: Callable | None = None
@@ -52,11 +57,17 @@ class DataReceiverBridge(QObject):
 
     @Slot(object)
     def _on_deliver(self, payload: tuple) -> None:
-        """Slot в main thread — вызвать нужный callback."""
+        """Slot в main thread — вызвать нужный callback и emit публичный signal."""
         kind, msg_dict = payload
-        if kind == "frame" and self._frame_cb:
-            self._frame_cb(msg_dict)
-        elif kind == "state" and self._state_cb:
-            self._state_cb(msg_dict)
-        elif kind == "command" and self._command_cb:
-            self._command_cb(msg_dict)
+        if kind == "frame":
+            if self._frame_cb:
+                self._frame_cb(msg_dict)
+            self.frame_received.emit(msg_dict)
+        elif kind == "state":
+            if self._state_cb:
+                self._state_cb(msg_dict)
+            self.state_updated.emit(msg_dict)
+        elif kind == "command":
+            if self._command_cb:
+                self._command_cb(msg_dict)
+            self.command_response.emit(msg_dict)

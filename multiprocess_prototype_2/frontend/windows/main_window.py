@@ -1,10 +1,13 @@
 """MainWindow — главное окно: AppHeader + ImagePanel-placeholder + TabWidget + StatusBar."""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -59,7 +62,36 @@ class MainWindow(QMainWindow):
 
         # 3. TabWidget
         self._tab_widget = QTabWidget()
+        self._tabs_visible = True
         self._layout.addWidget(self._tab_widget)
+
+        # Угловые кнопки: Undo / Redo / Скрыть
+        corner = QWidget()
+        corner_layout = QHBoxLayout(corner)
+        corner_layout.setContentsMargins(0, 0, 4, 0)
+        corner_layout.setSpacing(2)
+
+        self._undo_btn = QPushButton("◀")
+        self._undo_btn.setToolTip("Отменить (Ctrl+Z)")
+        self._undo_btn.setFixedSize(32, 28)
+        self._undo_btn.setEnabled(False)
+        self._undo_btn.clicked.connect(self._on_undo)
+
+        self._redo_btn = QPushButton("▶")
+        self._redo_btn.setToolTip("Повторить (Ctrl+Y)")
+        self._redo_btn.setFixedSize(32, 28)
+        self._redo_btn.setEnabled(False)
+        self._redo_btn.clicked.connect(self._on_redo)
+
+        self._toggle_btn = QPushButton("Скрыть")
+        self._toggle_btn.setToolTip("Скрыть/показать вкладки")
+        self._toggle_btn.setFixedSize(80, 28)
+        self._toggle_btn.clicked.connect(self._toggle_tabs)
+
+        corner_layout.addWidget(self._undo_btn)
+        corner_layout.addWidget(self._redo_btn)
+        corner_layout.addWidget(self._toggle_btn)
+        self._tab_widget.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
         # StatusBar
         self._fps_label = QLabel("FPS: —")
@@ -110,6 +142,8 @@ class MainWindow(QMainWindow):
     def set_action_bus(self, bus: object) -> None:
         """Установить ActionBus и привязать Ctrl+Z / Ctrl+Y shortcuts."""
         self._action_bus = bus
+        self._undo_btn.setEnabled(True)
+        self._redo_btn.setEnabled(True)
 
         undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         undo_shortcut.activated.connect(self._on_undo)
@@ -134,6 +168,30 @@ class MainWindow(QMainWindow):
         action = self._action_bus.redo()
         if action:
             self.statusBar().showMessage(f"Повторено: {action.description}", 3000)
+
+    # -- Toggle tabs --
+
+    def _toggle_tabs(self) -> None:
+        """Скрыть/показать содержимое всех вкладок."""
+        self._tabs_visible = not self._tabs_visible
+        if self._tabs_visible:
+            self._tab_widget.setMinimumHeight(0)
+            self._tab_widget.setMaximumHeight(16777215)
+            for i in range(self._tab_widget.count()):
+                w = self._tab_widget.widget(i)
+                if w:
+                    w.setVisible(True)
+            self._toggle_btn.setText("Скрыть")
+        else:
+            tab_bar_h = self._tab_widget.tabBar().sizeHint().height()
+            corner_h = self._toggle_btn.sizeHint().height()
+            total_h = max(tab_bar_h, corner_h) + 4
+            self._tab_widget.setFixedHeight(total_h)
+            for i in range(self._tab_widget.count()):
+                w = self._tab_widget.widget(i)
+                if w:
+                    w.setVisible(False)
+            self._toggle_btn.setText("Показать")
 
     # -- Live bindings (Phase 12) --
 

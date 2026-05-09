@@ -34,17 +34,18 @@ def test_custom_config(qtbot):
 # -- Layout содержит 3 компонента --
 
 def test_layout_has_three_zones(qtbot):
-    """Central layout содержит 3 виджета: header, placeholder, tab_widget."""
+    """Central layout содержит 4 виджета: header, error_banner, placeholder, tab_widget."""
     window = MainWindow()
     qtbot.addWidget(window)
 
     layout = window._layout
-    assert layout.count() == 3
+    assert layout.count() == 4
 
-    # Порядок: header (0), placeholder (1), tab_widget (2)
+    # Порядок: header (0), error_banner (1), placeholder (2), tab_widget (3)
     assert layout.itemAt(0).widget() is window._header
-    assert layout.itemAt(1).widget() is window._image_panel_placeholder
-    assert layout.itemAt(2).widget() is window._tab_widget
+    assert layout.itemAt(1).widget() is window._error_banner
+    assert layout.itemAt(2).widget() is window._image_panel_placeholder
+    assert layout.itemAt(3).widget() is window._tab_widget
 
 
 # -- Header property --
@@ -149,10 +150,10 @@ def test_set_image_panel(qtbot):
 
     window.set_image_panel(real_panel)
 
-    # Виджет на позиции 1 теперь — real_panel
+    # Виджет на позиции 2 теперь — real_panel (header=0, error_banner=1, image=2, tabs=3)
     layout = window._layout
-    assert layout.itemAt(1).widget() is real_panel
+    assert layout.itemAt(2).widget() is real_panel
     assert window._image_panel is real_panel
 
-    # Общее количество виджетов в layout осталось 3
-    assert layout.count() == 3
+    # Общее количество виджетов в layout осталось 4
+    assert layout.count() == 4

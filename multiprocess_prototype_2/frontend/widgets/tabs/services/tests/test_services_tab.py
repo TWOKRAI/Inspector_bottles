@@ -121,7 +121,7 @@ class TestServicesTab:
         tab = ServicesTab(ctx)
         qtbot.addWidget(tab)
         # Секция "Нейронные сети" всегда есть (+2 сервисных = 3 итого)
-        assert tab._form.section_count() >= 1  # минимум placeholder
+        assert tab._side_nav.section_count() >= 1  # минимум placeholder
 
     def test_empty_services(self, qtbot):
         ctx = MagicMock()
@@ -133,11 +133,11 @@ class TestServicesTab:
         tab = ServicesTab(ctx)
         qtbot.addWidget(tab)
         # Только placeholder нейронок
-        assert tab._form.section_count() == 1
+        assert tab._side_nav.section_count() == 1
 
     def test_sections_with_fields(self, qtbot):
         ctx = _make_mock_ctx()
         tab = ServicesTab(ctx)
         qtbot.addWidget(tab)
         # 2 сервисных секции + 1 нейронки
-        assert tab._form.section_count() == 3
+        assert tab._side_nav.section_count() == 3
