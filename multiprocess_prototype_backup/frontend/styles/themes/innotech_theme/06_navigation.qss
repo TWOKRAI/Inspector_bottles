@@ -1,0 +1,109 @@
+/* 06_navigation — QMenuBar, QMenu, QStatusBar, QScrollBar, NavList, RecipeSlotList */
+
+/* ---- MENU / MENUBAR ---- */
+QMenuBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:1 #353b47);
+    color: @text_0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.5);
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+QMenuBar::item:selected {
+    background: rgba(43, 127, 255, 0.25);
+    color: #ffffff;
+}
+QMenu {
+    background: @bg_mid;
+    color: @text_0;
+    border: 1px solid rgba(0, 0, 0, 0.6);
+    padding: 4px;
+}
+QMenu::item {
+    padding: 6px 24px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    background: @accent;
+    color: #ffffff;
+}
+QMenu::separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 4px 8px;
+}
+
+/* ---- STATUS BAR ---- */
+QStatusBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #353b47, stop:1 #2a303b);
+    color: @text_1;
+    border-top: 1px solid rgba(0, 0, 0, 0.55);
+}
+QStatusBar::item {
+    border: none;
+}
+
+/* ---- SCROLLBARS ---- */
+QScrollBar:vertical {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #1b1f27, stop:1 #2a3040);
+    width: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.45);
+    border-radius: 7px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 #3d4e74, stop:1 #9ab0d5);
+    border-radius: 5px;
+    min-height: 30px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical:hover {
+    background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 #4a5b85, stop:1 #abbfe0);
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+
+QScrollBar:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #1b1f27, stop:1 #2a3040);
+    height: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.45);
+    border-radius: 7px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 #3d4e74, stop:1 #9ab0d5);
+    border-radius: 5px;
+    min-width: 30px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 #4a5b85, stop:1 #abbfe0);
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+
+/* ---- Навигационные списки (objectName) ---- */
+QListWidget#NavList { font-size: 15px; }
+QListWidget#NavList::item { padding: 10px 12px; }
+
+QListWidget#RecipeSlotList { font-size: 15px; }
+QListWidget#RecipeSlotList::item { padding: 10px 12px; }
+QListWidget#RecipeSlotList::item:selected { background-color: #d5e8fb; color: #000; font-weight: bold; }

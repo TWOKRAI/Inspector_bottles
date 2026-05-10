@@ -1,0 +1,90 @@
+/* 02_buttons — QPushButton: default, primary, danger, ghost, checked */
+
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #6a7284, stop:0.5 #4b5261, stop:1 #3a4150);
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    color: @text_0;
+    font-weight: 600;
+    padding: 8px 20px;
+    min-height: 22px;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #788092, stop:0.5 #566075, stop:1 #434a5a);
+    color: #ffffff;
+}
+QPushButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #3a4150, stop:0.5 #4b5261, stop:1 #6a7284);
+    border-top: 1px solid rgba(0, 0, 0, 0.25);
+}
+QPushButton:disabled {
+    color: @text_3;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 #353b47);
+    border-color: rgba(0, 0, 0, 0.4);
+}
+QPushButton:focus {
+    outline: 0;
+    border: 1px solid @accent;
+}
+
+/* primary — насыщенный синий (CTA, START, ПРИМЕНИТЬ) */
+QPushButton[role="primary"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #5ea3ff, stop:0.5 @accent, stop:1 @accent_lo);
+    border: 1px solid rgba(0, 0, 0, 0.45);
+    border-top: 1px solid rgba(255, 255, 255, 0.22);
+}
+QPushButton[role="primary"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #7ab3ff, stop:0.5 #3d8cff, stop:1 #2870e0);
+}
+QPushButton[role="primary"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_lo, stop:0.5 #1a51ad, stop:1 #133a82);
+    border-top: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+/* danger — красная (ОЧИСТИТЬ, СТОП) */
+QPushButton[role="danger"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #b84050, stop:0.5 #8a2d3d, stop:1 #5f1f28);
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+}
+QPushButton[role="danger"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #c8505f, stop:0.5 #9a3548, stop:1 #6e2530);
+}
+QPushButton[role="danger"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #5f1f28, stop:0.5 #8a2d3d, stop:1 #b84050);
+}
+
+/* ghost — почти прозрачная для второстепенных действий */
+QPushButton[role="ghost"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 0.08), stop:1 rgba(0, 0, 0, 0.15));
+    color: @text_1;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+QPushButton[role="ghost"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 0.14), stop:1 rgba(0, 0, 0, 0.10));
+    color: @text_0;
+}
+
+/* checkable / toggle */
+QPushButton:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #5ea3ff, stop:0.5 @accent, stop:1 @accent_lo);
+    color: #ffffff;
+    border: 1px solid @accent_lo;
+    border-top: 1px solid rgba(255, 255, 255, 0.22);
+}

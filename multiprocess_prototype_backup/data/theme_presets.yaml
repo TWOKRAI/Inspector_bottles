@@ -1,0 +1,28 @@
+# Пресеты переменных тем — пользовательские наборы цветов/шрифтов.
+# Файл управляется через ThemePresetsManager, но можно редактировать вручную.
+
+default:
+  bg_deep: "#1a1f28"
+  bg_mid: "#2d3440"
+  bg_hi: "#4a5362"
+  bg_hi2: "#5c6573"
+  surf_0: "#3a414e"
+  surf_1: "#5a6370"
+  surf_2: "#6e7886"
+  surf_deep: "#252a33"
+  silver_hi: "#c8ccd4"
+  silver: "#9ea6b2"
+  silver_lo: "#6a7280"
+  text_0: "#f2f5fa"
+  text_1: "#c0c7d2"
+  text_2: "#8a93a1"
+  text_3: "#5e6674"
+  accent: "#2b7fff"
+  accent_hi: "#4a95ff"
+  accent_lo: "#1f5fcc"
+  accent_deep: "#153f8a"
+  danger: "#e54863"
+  success: "#2ecc8f"
+  warn: "#f0a23a"
+  font_family: "Rajdhani"
+  font_family_mono: "JetBrains Mono"

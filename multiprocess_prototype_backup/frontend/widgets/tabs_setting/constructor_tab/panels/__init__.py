@@ -1,0 +1,17 @@
+"""Правые панели конструктора — Фаза 3."""
+
+from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.shm_config_panel import (
+    ShmConfigPanel,
+)
+from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.shm_dashboard_panel import (
+    ShmDashboardPanel,
+)
+from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.wire_inspector import (
+    WireInspectorPanel,
+)
+
+from multiprocess_prototype.frontend.widgets.tabs_setting.constructor_tab.panels.process_plugin_panel import (
+    ProcessPluginPanel,
+)
+
+__all__ = ["ProcessPluginPanel", "ShmConfigPanel", "ShmDashboardPanel", "WireInspectorPanel"]

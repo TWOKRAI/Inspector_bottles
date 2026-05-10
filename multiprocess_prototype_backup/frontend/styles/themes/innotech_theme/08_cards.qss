@@ -1,0 +1,70 @@
+/* 08_cards — ImageSlot, ds-card, Note-блок, R/G/B каналы, метрики */
+
+/* ---- FRAME / IMAGE SLOT ---- */
+QFrame#ImageSlot, QWidget#ImageSlot {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #14171d, stop:1 #0a0c10);
+    border: 1px solid rgba(0, 0, 0, 0.55);
+    border-radius: 12px;
+}
+
+QFrame#ImageSlot[role="accent-edges"],
+QWidget#ImageSlot[role="accent-edges"] {
+    border-left: 2px solid rgba(43, 127, 255, 0.75);
+    border-bottom: 2px solid rgba(43, 127, 255, 0.75);
+    border-top: 1px solid rgba(0, 0, 0, 0.55);
+    border-right: 1px solid rgba(0, 0, 0, 0.55);
+}
+
+/* ---- ds-card ---- */
+QFrame[role="ds-card"], QWidget[role="ds-card"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #4c5464, stop:1 #383e4a);
+    border: 1px solid rgba(0, 0, 0, 0.4);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 16px;
+}
+
+/* ---- Note-блок ---- */
+QFrame[role="note"], QLabel[role="note"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(43, 127, 255, 0.15), stop:1 rgba(43, 127, 255, 0.05));
+    border: 1px solid rgba(43, 127, 255, 0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: #c0d4ff;
+}
+
+/* ---- Объектные имена: Mono, Caption, Metric ---- */
+QLabel#Mono {
+    font-family: "@font_family_mono", monospace;
+    font-size: 12px;
+    color: @text_1;
+}
+QLabel#Caption {
+    font-size: 11px;
+    color: @text_1;
+    font-weight: 500;
+}
+QLabel#MetricValue {
+    font-family: "@font_family_mono", monospace;
+    font-size: 17px;
+    color: @accent_hi;
+    font-weight: 500;
+}
+QLabel#MetricKey {
+    font-size: 10px;
+    color: @text_2;
+}
+
+/* ---- Метки каналов R/G/B ---- */
+QLabel[role="ch-r"] { color: #ff7894; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-g"] { color: #6ae0a8; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-b"] { color: #6aa8ff; font-family: "@font_family_mono", monospace; font-weight: 600; }
+
+QLabel[role="ch-value"] {
+    color: @accent_hi;
+    font-family: "@font_family_mono", monospace;
+    font-size: 13px;
+    font-weight: 500;
+}
