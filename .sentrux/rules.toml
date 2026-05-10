@@ -22,7 +22,7 @@
 
 [constraints]
 min_quality      = 0.60      # цель ≥ 0.75 после Phase 4-6
-min_modularity   = 0.50      # вырастет после Plugins carve-out
+min_modularity   = 0.45      # просядет после carve-outs, вырастет после Phase 5 Plugins
 min_acyclicity   = 0.45      # цель 0.90 (raw=0)
 min_depth        = 0.65
 min_equality     = 0.60

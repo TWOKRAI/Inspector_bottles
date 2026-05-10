@@ -105,7 +105,8 @@ from multiprocess_framework.modules.process_manager_module import (
 from multiprocess_framework.modules.base_manager import ProcessStatus
 
 # === LAYER 9: STORAGE ===
-from multiprocess_framework.modules.sql_module import SQLManager
+# SQLManager переехал в Services/sql (Phase 4.1) — импортируйте напрямую:
+#   from Services.sql import SQLManager
 
 # === LAYER 10: APPLICATION KIT ===
 from multiprocess_framework.modules.registers_module import RegistersManager

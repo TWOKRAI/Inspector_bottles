@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig
+from Services.sql import SQLManager, SQLManagerConfig
 
 try:
     import pytest_asyncio  # noqa: F401
@@ -142,7 +142,7 @@ class TestSQLManager:
 
     def test_no_metrics_collector_export(self):
         """IMetricsCollector не экспортируется из sql_module верхнего уровня."""
-        import multiprocess_framework.modules.sql_module as sql_module
+        import Services.sql as sql_module
         assert not hasattr(sql_module, "IMetricsCollector"), (
             "IMetricsCollector не должен быть в публичном API sql_module"
         )

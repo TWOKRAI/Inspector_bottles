@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 
-from multiprocess_framework.modules.sql_module.interfaces import (
+from Services.sql.interfaces import (
     IAsyncEngineAdapter,
     IAsyncUnitOfWork,
     IRepository,
@@ -21,12 +21,12 @@ from multiprocess_framework.modules.sql_module.interfaces import (
     ISyncEngineAdapter,
     IUnitOfWork,
 )
-from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
-from multiprocess_framework.modules.sql_module.core.engine_factory import create_async_adapter, create_sync_adapter
-from multiprocess_framework.modules.sql_module.core.base_repository import GenericRepository
-from multiprocess_framework.modules.sql_module.core.ddl_builder import DDLBuilder
-from multiprocess_framework.modules.sql_module.core.queryset import AsyncQuerySet, QuerySet
-from multiprocess_framework.modules.sql_module.adapters.schema_mapper import SchemaBaseMapper
+from Services.sql.configs import SQLManagerConfig
+from Services.sql.core.engine_factory import create_async_adapter, create_sync_adapter
+from Services.sql.core.base_repository import GenericRepository
+from Services.sql.core.ddl_builder import DDLBuilder
+from Services.sql.core.queryset import AsyncQuerySet, QuerySet
+from Services.sql.adapters.schema_mapper import SchemaBaseMapper
 
 
 class SQLManager(BaseManager, ObservableMixin):
@@ -159,7 +159,7 @@ class SQLManager(BaseManager, ObservableMixin):
 
     def uow(self) -> IUnitOfWork:
         """Контекстный менеджер для транзакций (sync)."""
-        from multiprocess_framework.modules.sql_module.core.unit_of_work import SQLAlchemyUnitOfWork
+        from Services.sql.core.unit_of_work import SQLAlchemyUnitOfWork
 
         if not self._adapter:
             raise RuntimeError("SQLManager not initialized")
@@ -167,7 +167,7 @@ class SQLManager(BaseManager, ObservableMixin):
 
     def uow_async(self) -> IAsyncUnitOfWork:
         """Асинхронный Unit of Work. Адаптер создаётся лениво при первом вызове."""
-        from multiprocess_framework.modules.sql_module.core.unit_of_work import AsyncSQLAlchemyUnitOfWork
+        from Services.sql.core.unit_of_work import AsyncSQLAlchemyUnitOfWork
 
         adapter = self._ensure_async_adapter()
         return AsyncSQLAlchemyUnitOfWork(adapter)
@@ -275,17 +275,17 @@ class SQLManager(BaseManager, ObservableMixin):
             cmd_flat = self._normalize_command(cmd)
             command = cmd_flat.get("command")
             if command == "db.query":
-                from multiprocess_framework.modules.sql_module.commands import DBQueryCommand
+                from Services.sql.commands import DBQueryCommand
 
                 validated = DBQueryCommand.model_validate(cmd_flat)
                 return self._handle_query(validated)
             if command == "db.execute":
-                from multiprocess_framework.modules.sql_module.commands import DBExecuteCommand
+                from Services.sql.commands import DBExecuteCommand
 
                 validated = DBExecuteCommand.model_validate(cmd_flat)
                 return self._handle_execute(validated)
             if command == "db.insert":
-                from multiprocess_framework.modules.sql_module.commands import DBInsertCommand
+                from Services.sql.commands import DBInsertCommand
 
                 validated = DBInsertCommand.model_validate(cmd_flat)
                 return self._handle_insert(validated)

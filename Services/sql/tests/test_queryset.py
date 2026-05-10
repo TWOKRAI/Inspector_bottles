@@ -6,7 +6,7 @@ Uses mock adapter/mapper to test SQL generation and immutability.
 import pytest
 from typing import Any, Dict, List, Optional, Type
 
-from multiprocess_framework.modules.sql_module.core.queryset import QuerySet
+from Services.sql.core.queryset import QuerySet
 
 
 # =============================================================================

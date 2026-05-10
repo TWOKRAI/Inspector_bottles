@@ -11,7 +11,7 @@ from typing import Annotated, Optional
 from pydantic import BaseModel
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta
-from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig
+from Services.sql import SQLManager, SQLManagerConfig
 
 
 class UserSchema(BaseModel):

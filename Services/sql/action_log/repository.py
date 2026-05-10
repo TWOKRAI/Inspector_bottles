@@ -10,10 +10,10 @@ ActionLogRepository -- репозиторий для персистентног�
 
 from __future__ import annotations
 
-from multiprocess_framework.modules.sql_module.core.base_repository import GenericRepository
-from multiprocess_framework.modules.sql_module.interfaces import ISyncEngineAdapter
+from Services.sql.core.base_repository import GenericRepository
+from Services.sql.interfaces import ISyncEngineAdapter
 
-from ..schemas import Action
+from multiprocess_framework.modules.frontend_module.actions.schemas import Action
 from .schema_ext import ActionLogRow, from_action_log_row, to_action_log_row
 
 

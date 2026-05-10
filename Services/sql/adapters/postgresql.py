@@ -7,9 +7,9 @@ Async: postgresql+asyncpg://...
 """
 from typing import Any, Dict, Union
 
-from multiprocess_framework.modules.sql_module.adapters.sync_adapter import BaseSyncAdapter
-from multiprocess_framework.modules.sql_module.adapters.async_adapter import BaseAsyncAdapter
-from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
+from Services.sql.adapters.sync_adapter import BaseSyncAdapter
+from Services.sql.adapters.async_adapter import BaseAsyncAdapter
+from Services.sql.configs import SQLManagerConfig
 
 
 class PostgreSQLSyncAdapter(BaseSyncAdapter):

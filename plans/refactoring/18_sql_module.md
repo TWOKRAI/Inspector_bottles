@@ -149,10 +149,10 @@ From `SchemaBase.model_fields` (Pydantic v2):
 **Goal:** Delete unused metrics/ package and IMetricsCollector references.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/metrics/sql_metrics.py` -- DELETE
-- `multiprocess_framework/modules/sql_module/metrics/__init__.py` -- DELETE
-- `multiprocess_framework/modules/sql_module/interfaces.py` -- remove IMetricsCollector (lines 165-182)
-- `multiprocess_framework/modules/sql_module/__init__.py` -- remove IMetricsCollector from imports and __all__
+- `Services/sql/metrics/sql_metrics.py` -- DELETE
+- `Services/sql/metrics/__init__.py` -- DELETE
+- `Services/sql/interfaces.py` -- remove IMetricsCollector (lines 165-182)
+- `Services/sql/__init__.py` -- remove IMetricsCollector from imports and __all__
 
 **Steps:**
 1. Delete `metrics/sql_metrics.py` and `metrics/__init__.py` (entire `metrics/` directory)
@@ -163,7 +163,7 @@ From `SchemaBase.model_fields` (Pydantic v2):
 - [ ] `metrics/` directory no longer exists
 - [ ] `grep -r "IMetricsCollector" sql_module/` returns 0 results
 - [ ] `grep -r "SQLMetricsCollector" sql_module/` returns 0 results
-- [ ] ` && python -m pytest multiprocess_framework/modules/sql_module/tests -v` -- all pass
+- [ ] ` && python -m pytest Services/sql/tests -v` -- all pass
 - [ ] `python -c "from sql_module import SQLManager"` -- no import errors
 
 **Out of scope:** Do NOT remove ObservableMixin integration (_record_timing, _log_info etc.) -- that is the active metrics path.
@@ -179,7 +179,7 @@ From `SchemaBase.model_fields` (Pydantic v2):
 **Goal:** Replace deprecated asyncio.get_event_loop() with safe pattern in BaseAsyncAdapter.dispose().
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/adapters/async_adapter.py` -- modify dispose() (lines 77-89)
+- `Services/sql/adapters/async_adapter.py` -- modify dispose() (lines 77-89)
 
 **Steps:**
 1. Replace the current `dispose()` method (lines 77-89) with:
@@ -202,7 +202,7 @@ From `SchemaBase.model_fields` (Pydantic v2):
 **Acceptance criteria:**
 - [ ] No usage of `asyncio.get_event_loop()` in `async_adapter.py`
 - [ ] `grep "get_event_loop" sql_module/adapters/async_adapter.py` returns 0
-- [ ] Existing async tests pass: ` && python -m pytest multiprocess_framework/modules/sql_module/tests/test_adapters.py -v`
+- [ ] Existing async tests pass: ` && python -m pytest Services/sql/tests/test_adapters.py -v`
 
 **Out of scope:** Do not refactor the entire async adapter pattern.
 **Edge cases:** dispose() called when no event loop exists at all; dispose() called from within an async context.
@@ -218,7 +218,7 @@ From `SchemaBase.model_fields` (Pydantic v2):
 **Goal:** Validate table and order_by identifiers in query_range() to prevent SQL injection.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/core/sql_manager.py` -- modify query_range() (lines 127-154)
+- `Services/sql/core/sql_manager.py` -- modify query_range() (lines 127-154)
 
 **Steps:**
 1. Add a private method `_validate_identifier(name: str) -> str` to SQLManager that:
@@ -247,7 +247,7 @@ From `SchemaBase.model_fields` (Pydantic v2):
 **Goal:** Fix `config/` -> `configs/` in README structure section.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/README.md` -- line ~170, change `config/` to `configs/`
+- `Services/sql/README.md` -- line ~170, change `config/` to `configs/`
 
 **Steps:**
 1. Find `config/` in the "Structure" section and replace with `configs/`
@@ -266,7 +266,7 @@ From `SchemaBase.model_fields` (Pydantic v2):
 **Goal:** Create SQLMeta as a declarative ClassVar nested class pattern, plus a utility to extract it from any SchemaBase subclass.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/adapters/sql_meta.py` -- CREATE new file
+- `Services/sql/adapters/sql_meta.py` -- CREATE new file
 
 **Steps:**
 1. Create `sql_meta.py` with:
@@ -315,7 +315,7 @@ class UserSchema(SchemaBase):
 **Goal:** SchemaBaseMapper.schema_to_table_meta() reads FieldMeta constraints and SQLMeta, producing rich table metadata.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/adapters/schema_mapper.py` -- major rewrite of SchemaBaseMapper
+- `Services/sql/adapters/schema_mapper.py` -- major rewrite of SchemaBaseMapper
 
 **Steps:**
 1. Import `extract_sql_meta` from `sql_module.adapters.sql_meta`
@@ -354,8 +354,8 @@ class UserSchema(SchemaBase):
 **Goal:** Auto-generate CREATE TABLE from SchemaBase metadata, supporting SQLite/PostgreSQL/MySQL dialects.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/core/ddl_builder.py` -- CREATE new file
-- `multiprocess_framework/modules/sql_module/core/sql_manager.py` -- add `create_tables()` method
+- `Services/sql/core/ddl_builder.py` -- CREATE new file
+- `Services/sql/core/sql_manager.py` -- add `create_tables()` method
 
 **Steps:**
 1. Create `ddl_builder.py` with class `DDLBuilder`:
@@ -407,8 +407,8 @@ class UserSchema(SchemaBase):
 **Goal:** Django-style QuerySet with chained API generating parameterized SQL.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/core/queryset.py` -- CREATE new file
-- `multiprocess_framework/modules/sql_module/core/sql_manager.py` -- add `objects()` method
+- `Services/sql/core/queryset.py` -- CREATE new file
+- `Services/sql/core/sql_manager.py` -- add `objects()` method
 
 **Steps:**
 1. Create `queryset.py` with class `QuerySet[T]`:
@@ -473,8 +473,8 @@ class UserSchema(SchemaBase):
 **Goal:** Add readonly field protection, bulk operations, and find_by to GenericRepository.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/core/base_repository.py` -- extend GenericRepository
-- `multiprocess_framework/modules/sql_module/interfaces.py` -- extend IRepository with new methods
+- `Services/sql/core/base_repository.py` -- extend GenericRepository
+- `Services/sql/interfaces.py` -- extend IRepository with new methods
 
 **Steps:**
 1. In `GenericRepository.__init__()`:
@@ -522,10 +522,10 @@ class UserSchema(SchemaBase):
 **Goal:** Expose create_tables(), objects(), and updated get_repository() through SQLManager.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/core/sql_manager.py` -- add methods
-- `multiprocess_framework/modules/sql_module/__init__.py` -- update exports
-- `multiprocess_framework/modules/sql_module/core/__init__.py` -- update exports
-- `multiprocess_framework/modules/sql_module/interfaces.py` -- extend ISQLManager
+- `Services/sql/core/sql_manager.py` -- add methods
+- `Services/sql/__init__.py` -- update exports
+- `Services/sql/core/__init__.py` -- update exports
+- `Services/sql/interfaces.py` -- extend ISQLManager
 
 **Steps:**
 1. In `sql_manager.py`:
@@ -560,8 +560,8 @@ class UserSchema(SchemaBase):
 **Goal:** Test coverage for legacy cleanup and security fixes.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/tests/test_sql_manager.py` -- add tests
-- `multiprocess_framework/modules/sql_module/tests/test_adapters.py` -- add tests
+- `Services/sql/tests/test_sql_manager.py` -- add tests
+- `Services/sql/tests/test_adapters.py` -- add tests
 
 **Steps:**
 1. In `test_sql_manager.py` add:
@@ -589,7 +589,7 @@ class UserSchema(SchemaBase):
 **Goal:** Test SQLMeta extraction and enhanced SchemaBaseMapper.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/tests/test_schema_mapper.py` -- CREATE new file
+- `Services/sql/tests/test_schema_mapper.py` -- CREATE new file
 
 **Steps:**
 1. Define test schemas:
@@ -622,7 +622,7 @@ class UserSchema(SchemaBase):
 **Goal:** Test DDLBuilder SQL generation and create_tables() integration.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/tests/test_ddl_builder.py` -- CREATE new file
+- `Services/sql/tests/test_ddl_builder.py` -- CREATE new file
 
 **Steps:**
 1. Tests:
@@ -652,7 +652,7 @@ class UserSchema(SchemaBase):
 **Goal:** Comprehensive tests for QuerySet chained API.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/tests/test_queryset.py` -- CREATE new file
+- `Services/sql/tests/test_queryset.py` -- CREATE new file
 
 **Steps:**
 1. Setup: create table `users` with id, name, age, score columns. Insert test data (Alice/25/90, Bob/30/85, Carol/20/95).
@@ -698,7 +698,7 @@ class UserSchema(SchemaBase):
 **Goal:** Test readonly field protection, bulk operations, and find_by.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/tests/test_repositories.py` -- extend existing file
+- `Services/sql/tests/test_repositories.py` -- extend existing file
 
 **Steps:**
 1. Define a schema with FieldMeta(readonly=True) on one field
@@ -728,7 +728,7 @@ class UserSchema(SchemaBase):
 **Goal:** Document all architectural decisions for sql_module.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/DECISIONS.md` -- CREATE
+- `Services/sql/DECISIONS.md` -- CREATE
 
 **Steps:**
 1. Create DECISIONS.md with the following ADRs:
@@ -787,9 +787,9 @@ class UserSchema(SchemaBase):
 **Goal:** Update all documentation files to reflect new features.
 
 **Files:**
-- `multiprocess_framework/modules/sql_module/README.md` -- add sections for create_tables, objects, SQLMeta, find_by, insert_many
-- `multiprocess_framework/modules/sql_module/STATUS.md` -- update stage, add new checklist items
-- `multiprocess_framework/modules/sql_module/__init__.py` -- verify all new exports present
+- `Services/sql/README.md` -- add sections for create_tables, objects, SQLMeta, find_by, insert_many
+- `Services/sql/STATUS.md` -- update stage, add new checklist items
+- `Services/sql/__init__.py` -- verify all new exports present
 
 **Steps:**
 1. README.md:
@@ -873,6 +873,6 @@ class UserSchema(SchemaBase):
 - [ ] STATUS.md updated
 
 ### Final
-- [ ] ` && python -m pytest multiprocess_framework/modules/sql_module/tests -v` -- ALL GREEN
+- [ ] ` && python -m pytest Services/sql/tests -v` -- ALL GREEN
 - [ ] `python -c "from sql_module import SQLManager, DDLBuilder, QuerySet"` -- no errors
 - [ ] No existing consumer broken (database_process.py, export_detections.py)

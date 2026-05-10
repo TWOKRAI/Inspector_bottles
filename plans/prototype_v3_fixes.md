@@ -277,7 +277,7 @@ Flat imports (`from <module>`) работают только если `multiproc
 from multiprocess_framework.modules.registers_module import RegistersManager, build_connection_map_from_registers
 
 # aggregator/process.py
-from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig
+from Services.sql import SQLManager, SQLManagerConfig
 ```
 
 **Файлы:** `registers/factory.py`, `backend/processes/aggregator/process.py`.

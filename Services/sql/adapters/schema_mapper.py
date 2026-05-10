@@ -16,8 +16,8 @@ from pydantic_core import PydanticUndefined
 from sqlalchemy import Integer, String, Float, Boolean, DateTime, Date
 from sqlalchemy.sql.sqltypes import TypeEngine
 
-from multiprocess_framework.modules.sql_module.interfaces import ISchemaMapper
-from multiprocess_framework.modules.sql_module.adapters.sql_meta import extract_sql_meta
+from Services.sql.interfaces import ISchemaMapper
+from Services.sql.adapters.sql_meta import extract_sql_meta
 
 try:
     from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta

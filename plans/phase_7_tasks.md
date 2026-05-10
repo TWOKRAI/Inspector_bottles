@@ -1077,10 +1077,10 @@ SQLite не поддерживает RENAME TABLE из коробки — исп
 |-----|------|---------------|
 | SchemaBase | `../../multiprocess_framework/modules/data_schema_module/` | Базовый класс Action |
 | Dispatcher | `../../multiprocess_framework/modules/dispatch_module/` | Паттерн для ActionBus handlers |
-| GenericRepository | `../../multiprocess_framework/modules/sql_module/core/base_repository.py` | ActionLogRepository |
-| SchemaBaseMapper | `../../multiprocess_framework/modules/sql_module/adapters/schema_mapper.py` | Маппинг ActionLogRow |
-| UnitOfWork | `../../multiprocess_framework/modules/sql_module/core/unit_of_work.py` | Batched writes |
-| SQLManager | `../../multiprocess_framework/modules/sql_module/core/sql_manager.py` | DDL для action_log |
+| GenericRepository | `../../Services/sql/core/base_repository.py` | ActionLogRepository |
+| SchemaBaseMapper | `../../Services/sql/adapters/schema_mapper.py` | Маппинг ActionLogRow |
+| UnitOfWork | `../../Services/sql/core/unit_of_work.py` | Batched writes |
+| SQLManager | `../../Services/sql/core/sql_manager.py` | DDL для action_log |
 | DatabaseProcess | `backend/processes/database/process.py` | action_log_setup |
 | FrontendAppContext | `frontend/app_context.py` | Добавить action_bus |
 | RegisterBindingContext | `../../multiprocess_framework/modules/frontend_module/widgets/tabs/binding_context.py` | Добавить action_bus |

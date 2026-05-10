@@ -15,7 +15,7 @@ import json
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase
 
-from ..schemas import Action
+from multiprocess_framework.modules.frontend_module.actions.schemas import Action
 
 
 class ActionLogRow(SchemaBase):

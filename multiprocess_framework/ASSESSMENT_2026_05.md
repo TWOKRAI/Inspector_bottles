@@ -54,7 +54,7 @@
    # state_store, chain, sql, frontend — только по полному пути
    from multiprocess_framework.modules.state_store_module import StateStoreManager
    from multiprocess_framework.modules.chain_module import ChainRunnable
-   from multiprocess_framework.modules.sql_module import SQLManager
+   from Services.sql import SQLManager
    from multiprocess_framework.modules.frontend_module import FrontendManager
    ```
    Это **фасадный дрейф**: пользователь должен знать, какие модули «свежие» и требуют полного пути, а какие — старые и доступны с корня. Это противоречит R-1 (каноничные импорты).

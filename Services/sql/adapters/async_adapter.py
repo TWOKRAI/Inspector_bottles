@@ -11,8 +11,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
-from multiprocess_framework.modules.sql_module.interfaces import IAsyncEngineAdapter
-from multiprocess_framework.modules.sql_module.configs import SQLManagerConfig
+from Services.sql.interfaces import IAsyncEngineAdapter
+from Services.sql.configs import SQLManagerConfig
 
 
 def _create_async_engine_from_config(config: Union[SQLManagerConfig, Dict[str, Any]]) -> AsyncEngine:

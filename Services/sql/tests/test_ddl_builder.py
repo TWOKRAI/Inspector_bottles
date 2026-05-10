@@ -4,7 +4,7 @@ import pytest
 
 from sqlalchemy import Integer, String, Float, Boolean, DateTime, Date
 
-from multiprocess_framework.modules.sql_module.core.ddl_builder import DDLBuilder
+from Services.sql.core.ddl_builder import DDLBuilder
 
 
 # ---------------------------------------------------------------------------

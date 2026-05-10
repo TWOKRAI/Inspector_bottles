@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Type
 
-from multiprocess_framework.modules.sql_module.interfaces import (
+from Services.sql.interfaces import (
     IAsyncEngineAdapter,
     IAsyncUnitOfWork,
     ISyncEngineAdapter,

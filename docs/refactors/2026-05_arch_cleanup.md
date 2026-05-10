@@ -11,7 +11,7 @@ Inspector_bottles/
 ├── multiprocess_framework/     # Чистый backend-фреймворк (process/IPC/state/UI-toolkit)
 │   └── modules/                #   sql_module — выехал в Services
 ├── Services/                   # Прикладные сервисы с тяжёлыми внешними deps
-│   ├── sql_module/             #   ← из multiprocess_framework/modules/sql_module
+│   ├── sql_module/             #   ← из Services/sql
 │   └── hikvision_camera_module_2/  # ← хардварный driver (рефакторинг уже выполнен)
 ├── Plugins/                    # Vocabulary плагинов — переиспользуется между приложениями
 │   ├── capture/, grayscale/, region_split/, ...  # ← из multiprocess_prototype/plugins
@@ -208,14 +208,14 @@ forbid_imports_to_pattern = "multiprocess_prototype_v2"
 ### Task 4.1 — `sql_module` → `Services/sql/`
 
 **Что переезжает:**
-- `multiprocess_framework/modules/sql_module/` → `Services/sql/`
+- `Services/sql/` → `Services/sql/`
 - Содержимое: core, adapters (sync/async), commands, configs, export, interfaces, tests
 - Папка `interfaces.py` имеет fan-in 8, `adapters/*` — fan-in 3
 
 **Подход:**
-1. `git mv multiprocess_framework/modules/sql_module/ Services/sql/`
-2. Replace импортов: `from multiprocess_framework.modules.sql_module` → `from Services.sql`
-   - Замер до: `grep -rn "from multiprocess_framework.modules.sql_module" --include="*.py" | wc -l`
+1. `git mv Services/sql/ Services/sql/`
+2. Replace импортов: `from Services.sql` → `from Services.sql`
+   - Замер до: `grep -rn "from Services.sql" --include="*.py" | wc -l`
    - sed по результатам.
 3. Если `sql_module` импортирует что-то из framework — оставить как есть (Services → framework OK).
 4. Запустить тесты `pytest Services/sql/`.
@@ -225,7 +225,7 @@ forbid_imports_to_pattern = "multiprocess_prototype_v2"
 
 **Acceptance:**
 - [ ] `Services/sql/` существует, тесты green
-- [ ] `grep -rn "from multiprocess_framework.modules.sql_module" --include="*.py"` → пусто
+- [ ] `grep -rn "from Services.sql" --include="*.py"` → пусто
 - [ ] `mcp__sentrux__scan` → `quality_signal` не упал
 
 **Эстимейт:** 3-4ч.

@@ -23,7 +23,7 @@ except ImportError:
 from .schemas import Action
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.actions.persistence.log_writer import ActionLogWriter
+    from multiprocess_framework.modules.frontend_module.actions.persistence.interfaces import IActionLogWriter
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class ActionBus:
         self._last_event: tuple[str, Action] | None = None
 
         # Опциональный writer для персистентного логирования действий
-        self._log_writer: ActionLogWriter | None = None
+        self._log_writer: IActionLogWriter | None = None
 
     # ------------------------------------------------------------------
     # Регистрация обработчиков
@@ -109,7 +109,7 @@ class ActionBus:
     # Log writer
     # ------------------------------------------------------------------
 
-    def set_log_writer(self, writer: ActionLogWriter | None) -> None:
+    def set_log_writer(self, writer: IActionLogWriter | None) -> None:
         """Установить ActionLogWriter для персистентного логирования действий.
 
         writer=None отключает логирование (полезно в тестах или при выключенной БД).

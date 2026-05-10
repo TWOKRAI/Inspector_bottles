@@ -6,9 +6,9 @@ sql_module — универсальный SQL-менеджер для multiproce
 Dual sync/async через адаптеры, Unit of Work, fork-safety, typed commands.
 
 Импорты:
-    from multiprocess_framework.modules.sql_module import SQLManagerConfig, DBQueryCommand, SchemaBaseMapper, ExportFormat
-    from multiprocess_framework.modules.sql_module.interfaces import ISQLManager, IRepository
-    from multiprocess_framework.modules.sql_module.commands import DBQueryCommand, DBExecuteCommand
+    from Services.sql import SQLManagerConfig, DBQueryCommand, SchemaBaseMapper, ExportFormat
+    from Services.sql.interfaces import ISQLManager, IRepository
+    from Services.sql.commands import DBQueryCommand, DBExecuteCommand
 """
 from .adapters.schema_mapper import SchemaBaseMapper
 from .configs import SQLManagerConfig

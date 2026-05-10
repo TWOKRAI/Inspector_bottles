@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..bus import ActionBus, IRegistersManagerGui
+    from multiprocess_framework.modules.frontend_module.actions.bus import ActionBus, IRegistersManagerGui
     from .repository import ActionLogRepository
 
 logger = logging.getLogger(__name__)

@@ -236,7 +236,7 @@ UI (опционально)   L11  frontend_module (PySide6)
 ## L9 — Storage
 
 ### `sql_module` — SQL поверх SchemaBase
-**Импорт:** `from multiprocess_framework.modules.sql_module import SQLManager, SQLManagerConfig`
+**Импорт:** `from Services.sql import SQLManager, SQLManagerConfig`
 **Когда применять:** работа с БД (SQLite / PostgreSQL / MySQL) — DDL из `SchemaBase`, типизированные репозитории, Django-style `QuerySet`, `UnitOfWork`, экспорт в TXT/CSV/XLSX. Dict at Boundary для команд.
 **Ключевое:** `SQLManager`, `DDLBuilder`, `QuerySet[T]`, `GenericRepository[T, ID]`, `SchemaBaseMapper`, `SQLMeta`, `UnitOfWork`/`AsyncUnitOfWork`, `TableExporter`.
 **Зависимости:** `base_manager`, `data_schema_module`.
