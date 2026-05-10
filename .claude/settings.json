@@ -7,6 +7,7 @@
       "Glob",
       "Grep",
       "Agent",
+
       "Bash(ruff *)",
       "Bash(pytest *)",
       "Bash(mypy *)",
@@ -14,6 +15,7 @@
       "Bash(python3 *)",
       "Bash(uv run *)",
       "Bash(uv sync*)",
+
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -24,17 +26,15 @@
       "Bash(git checkout *)",
       "Bash(git stash*)",
       "Bash(git merge *)",
-      "Bash(docker ps*)",
-      "Bash(docker logs *)",
-      "Bash(docker start *)",
-      "Bash(docker compose *)",
-      "Bash(docker-compose *)",
-      "Bash(docker inspect *)",
+
       "Bash(ollama *)",
-      "Bash(curl http://localhost*)",
-      "Bash(curl -s http://localhost*)",
-      "Bash(curl -X DELETE http://localhost:6333*)",
-      "Bash(curl -X PUT http://localhost:6333*)",
+      "Bash(curl http://localhost:11434*)",
+      "Bash(curl -s http://localhost:11434*)",
+      "Bash(curl -s --max-time * http://localhost:11434*)",
+
+      "Bash(sentrux *)",
+      "Bash(qex *)",
+
       "Bash(mkdir -p *)",
       "Bash(ls *)",
       "Bash(find *)",
@@ -43,31 +43,23 @@
       "Bash(cat *.json)",
       "Bash(which *)",
       "Bash(wc *)",
+      "Bash(grep *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(cp *)",
+      "Bash(echo *)",
+      "Bash(chmod +x*)",
+
       "Bash(cd * && python -m pytest *)",
       "Bash(cd * && python -m pytest*)",
       "Bash(pip install *)",
       "Bash(pip list*)",
       "Bash(pip show *)",
       "Bash(uv add *)",
-      "Bash(uv pip install *)",
-      "Bash(grep *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(cp *)",
-      "Bash(echo *)",
-      "Bash(python3 workspace/scripts/check_wiki_llm_sync.py*)",
-      "Bash(python3 workspace/scripts/fix_l3_hashes.py*)",
-      "Bash(chmod +x*)"
+      "Bash(uv pip install *)"
     ],
     "ask": [
       "Bash(git push *)",
-      "Bash(docker run *)",
-      "Bash(docker exec *)",
-      "Bash(docker stop *)",
-      "Bash(docker rm *)",
-      "Bash(docker rmi *)",
-      "Bash(docker kill *)",
-      "Bash(docker system *)",
       "Bash(rm *)",
       "Bash(mv *)",
       "Bash(curl *)",
@@ -80,8 +72,7 @@
       "Bash(git push -f *)",
       "Bash(git reset --hard *)",
       "Bash(git clean -fd *)",
-      "Bash(git clean -f *)",
-      "Bash(docker system prune *)"
+      "Bash(git clean -f *)"
     ]
   },
   "hooks": {
@@ -93,16 +84,6 @@
             "type": "command",
             "command": ".claude/hooks/validate-safe-command.sh",
             "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/protect-raw.sh",
-            "timeout": 10
           }
         ]
       }
@@ -120,54 +101,6 @@
             "type": "command",
             "command": ".claude/hooks/check-imports.sh",
             "timeout": 20
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/wiki-changed.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/append-wiki-log.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/check-compress-queue.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/check-wiki-sync.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/session-end-daily-log.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/session-end-daily-log.sh",
-            "timeout": 10
           }
         ]
       }

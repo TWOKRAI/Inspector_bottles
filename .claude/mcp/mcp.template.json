@@ -1,0 +1,13 @@
+{
+  "_comment": "Шаблон проектного .mcp.json. Копируется в корень проекта через `python3 .claude/mcp/bootstrap.py`. Context7 ставится отдельно (user-level через `npx -y ctx7 setup --claude`).",
+  "mcpServers": {
+    "qex": {
+      "command": "python3",
+      "args": [".claude/mcp/qex-launcher.py"]
+    },
+    "sentrux": {
+      "command": "sentrux",
+      "args": ["mcp"]
+    }
+  }
+}

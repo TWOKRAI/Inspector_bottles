@@ -1,47 +1,70 @@
-# Platform-specific configs
+# Platform-specific конфиги
 
-Machine-specific configs that differ between macOS and Windows.
-Active configs (`.claude/mcp.json`, `.claude/settings.local.json`) are gitignored.
+Заготовки для machine-specific overrides — отдельно для **macOS** и **Windows**.
 
-## Setup
+> **MCP-сервера НЕ нужно копировать руками под платформу** — кросс-платформенность решает [`../mcp/qex-launcher.py`](../mcp/qex-launcher.py) (auto-detect ОС → правильная модель Ollama). Для bootstrap нового проекта:
+>
+> ```bash
+> python3 .claude/mcp/bootstrap.py    # macOS / Linux
+> python .claude/mcp/bootstrap.py     # Windows
+> ```
 
-Copy the config for your platform:
+---
 
-**macOS:**
+## Содержимое
+
+| Файл | Платформа | Назначение |
+|------|-----------|------------|
+| [`settings.local.macos.json`](settings.local.macos.json) | macOS | Заготовка `.claude/settings.local.json` для macOS |
+| [`settings.local.windows.json`](settings.local.windows.json) | Windows | Заготовка `.claude/settings.local.json` для Windows |
+| [`README.md`](README.md) | — | Этот файл |
+
+`settings.local.json` — gitignored, поэтому на каждой машине должен создаваться отдельно. Заготовки в этой папке — стартовая точка.
+
+---
+
+## Как использовать
+
+### На macOS-машине
+
 ```bash
-cp .claude/platforms/mcp.macos.json .mcp.json
 cp .claude/platforms/settings.local.macos.json .claude/settings.local.json
 ```
 
-**Windows (Git Bash):**
-```bash
-cp .claude/platforms/mcp.windows.json .mcp.json
+### На Windows-машине
+
+```powershell
+copy .claude\platforms\settings.local.windows.json .claude\settings.local.json
 ```
 
-> **Важно:** файл `.mcp.json` лежит в **корне проекта**, не в `.claude/`.
+После этого `settings.local.json` будет содержать allowlist для qex MCP-тулов и не попадёт в git.
 
-### Post-copy checklist
-- [ ] Verify qex binary exists: `which qex` (macOS) or `ls ~/.cargo/bin/qex.exe` (Windows)
-- [ ] Verify Ollama running: `curl -s http://localhost:11434/ | grep running`
-- [ ] Test MCP: restart Claude Code, check status line shows no MCP errors
+---
 
-### Important
-- Server name is `qex` on BOTH platforms (agents reference `mcp:qex:search_code`)
-- WORKSPACE_PATH = project root (full vault, not just apps/)
-- qex 0.0.2 (feature `vector`) — Docker/Qdrant не нужны, вектора хранятся в `~/.qex/`
+## Двух-машинный workflow
 
-## MCP zones (future, Phase 3)
+Сценарий: днём работаю на Windows, вечером — на macOS.
 
-Single `qex` server indexes full vault today. Planned zones to add later:
-- `qex-projects` — `projects/` (all portable projects)
+| Что | Где | Синхронизация |
+|-----|-----|---------------|
+| `.claude/settings.json` | в git | автоматом через `git pull` |
+| `.claude/settings.local.json` | gitignored | заготовка из `platforms/settings.local.{os}.json` |
+| `.mcp.json` | в git | автоматом через `git pull` |
+| `~/.claude.json` (Context7) | user-level | OAuth один раз на машину |
+| `~/.qex/` (qex-индекс) | у каждой машины свой | `/qex-reindex` после `git pull` |
+| `~/.ollama/` (Ollama-модели) | у каждой машины свои | `ollama pull qwen3-embedding:{8b\|4b}` |
+
+---
+
+## Phase 3 — MCP zones (на будущее)
+
+Сейчас один `qex` сервер индексирует весь проект. В будущем планируется раздробить на зоны:
+
+- `qex-projects` — `projects/`
 - `qex-knowledge` — `knowledge/wiki/`
 - `qex-areas-work` — `areas/work/`
 - `qex-areas-study` — `areas/study/`
 
-Each zone = separate `mcpServers.*` entry with own `WORKSPACE_PATH`.
+Каждая зона = отдельный блок `mcpServers.*` с собственным `WORKSPACE_PATH`.
 
-## Original locations
-
-These files were extracted from:
-- `mcp.json` → `.claude/mcp.json` (was tracked in git, now gitignored)
-- `settings.local.json` → `.claude/settings.local.json` (was tracked in git, now gitignored)
+Это будет разворачиваться в `mcp.template.json` (и автоматически работать на обеих платформах через `qex-launcher.py`).

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "qex": {
-      "command": "python3",
-      "args": ["scripts/qex-launcher.py"]
-    }
-  }
-}
