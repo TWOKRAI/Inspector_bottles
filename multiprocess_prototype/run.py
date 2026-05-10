@@ -5,6 +5,12 @@
   1. Находим Inspector_bottles/.venv/Scripts/python.exe (или bin/python).
   2. Если это НЕ текущий интерпретатор — re-exec через него.
   3. Прямой вызов main.main() (без subprocess).
+
+Замечание о sys.path: добавление PROJECT_ROOT — это **намеренный bootstrap
+launcher'а**, а не legacy-хак. При прямом запуске (`python multiprocess_prototype/run.py`)
+Python кладёт в `sys.path[0]` директорию скрипта, а не корень проекта,
+поэтому `from multiprocess_prototype.main import main` иначе не разрешается
+без `pip install -e .`. validate.py знает об этом исключении (см. PRODUCTION_DIRS-фильтр).
 """
 
 from __future__ import annotations

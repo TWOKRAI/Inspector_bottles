@@ -1,8 +1,10 @@
 # Статус модулей — MODULES_STATUS.md
 
-Сводка по 21 модулю фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
+Сводка по 20 модулям фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
+Прикладные сервисы (`Services/`) — см. [`Services/STATUS.md`](../Services/STATUS.md).
 
-**Обновлено:** 2026-05-07 — `state_store_module` допилен (ADR-SS-011..013: доменно-нейтральный PersistenceManager, per-pattern фильтрация callbacks, публичные snapshot-методы SubscriptionManager); `chain_module` допилен (ADR-CHN-006/007: явный `IRemoteExecutable`, общая on_error политика, ObservableMixin для WorkerPoolDispatcher и LatencyTracker; коды ADR-CM-* переименованы в ADR-CHN-*).
+**Обновлено:** 2026-05-10 — `sql_module` выехал в [`Services/sql/`](../Services/sql/) (Phase 4.1, ADR-121). `hikvision_camera` — в [`Services/hikvision_camera/`](../Services/hikvision_camera/) (Phase 4.2, ADR-122).
+Ранее: 2026-05-07 — `state_store_module` допилен (ADR-SS-011..013: доменно-нейтральный PersistenceManager, per-pattern фильтрация callbacks, публичные snapshot-методы SubscriptionManager); `chain_module` допилен (ADR-CHN-006/007: явный `IRemoteExecutable`, общая on_error политика, ObservableMixin для WorkerPoolDispatcher и LatencyTracker; коды ADR-CM-* переименованы в ADR-CHN-*).
 
 | Модуль | Готовность | LOC | Тестов | Комментарий |
 |--------|-----------|-----|-------:|-------------|
@@ -25,10 +27,10 @@
 | `process_manager_module` | production | 4 612 | + | SystemLauncher, ProcessRegistry, Monitor |
 | `registers_module` | production | 1 169 | + | Runtime вокруг экземпляров регистров |
 | `statistics_module` | production | 1 500 | + | StatsManager, AggregationWindow |
-| `sql_module` | production | 3 775 | + | SQLManager, Repository, UoW, QuerySet |
 | `frontend_module` | production | 12 039 | + | PySide6-виджеты с привязкой к регистрам |
 
-**Итого:** 21 пакет, ~77 269 LOC (с тестами), 670+ файлов `.py`.
+**Итого framework:** 20 пакетов, ~73 494 LOC (с тестами).
+**Прикладной слой (Services):** `sql` (~3 775 LOC), `hikvision_camera` — см. [`Services/STATUS.md`](../Services/STATUS.md).
 
 **Тесты:** 2 465 passed / 29 skipped / 0 failed (см. PROBLEMS.md). Полный прогон:
 

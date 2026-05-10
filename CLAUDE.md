@@ -15,16 +15,18 @@
 - **Pipeline-исполнители:** `chain_module` — DAG/Chain engine (ChainRunnable, DagRunnable, WorkerPoolDispatcher)
 - **GUI:** `frontend_module` (PySide6), схемы регистров в приложении. Виджеты v3 сгруппированы по доменам (`chrome/`, `sources/`, `recipes/`, `processing/`, `settings/`, `pipeline/`, `tabs_setting/`, `base/`) — детали в [`docs/refactors/2026-04_widgets_reorg.md`](docs/refactors/2026-04_widgets_reorg.md).
 - **Роутинг:** НЕ путать **имя процесса** (`targets`, `send_message`) и **канал Router** (`FieldRouting.channel`, `msg["channel"]`). См. `ROUTING_GLOSSARY.md`
-- **Всего модулей в `multiprocess_framework/modules/`:** 21 (см. [`MODULES_STATUS.md`](multiprocess_framework/MODULES_STATUS.md), [`docs/MODULES_OVERVIEW.md`](multiprocess_framework/docs/MODULES_OVERVIEW.md))
+- **Всего модулей в `multiprocess_framework/modules/`:** 20 (после Phase 4 carve-out `sql_module` → `Services/sql`). См. [`MODULES_STATUS.md`](multiprocess_framework/MODULES_STATUS.md), [`Services/STATUS.md`](Services/STATUS.md), [`docs/MODULES_OVERVIEW.md`](multiprocess_framework/docs/MODULES_OVERVIEW.md).
 
 ## Ключевые пути
 
 | Что | Путь |
 |-----|------|
-| **АКТИВНЫЙ прототип** | `multiprocess_prototype/` ← **только сюда вносить изменения** |
+| **АКТИВНЫЙ прототип** | `multiprocess_prototype/` ← **только сюда вносить app-specific изменения** |
 | Фреймворк | `multiprocess_framework/` |
+| Прикладные сервисы (sql, hikvision, …) | `Services/` ← Phase 4 carve-out |
+| Vocabulary плагинов (19 шт., reuse между приложениями) | `Plugins/` ← Phase 5 carve-out (см. ADR-120) |
 | Документация фреймворка | `multiprocess_framework/docs/` (`MODULES_OVERVIEW.md`, `MODULE_CONTRACTS.md`, `DIAGRAMS.md`) |
-| Конструктор-blueprint фреймворка (21 модуль) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
+| Конструктор-blueprint фреймворка (20 модулей) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
 | Точка входа v3 | `multiprocess_prototype/run.py` |
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |
@@ -32,14 +34,11 @@
 | Настройка qex | `docs/claude/qex/README.md` (quick-start), `docs/claude/qex/SETUP_GUIDE.md` (полный) |
 | Гайд по sentrux | [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md) (метрики, slash-команды, сценарии) |
 
-## АРХИВ — НЕ ТРОГАТЬ
+## История версий и архив
 
-> **CRITICAL:** Директории ниже — архивные версии прототипа. Агентам запрещено вносить в них изменения. Для любой задачи использовать только `multiprocess_prototype/`.
+Активный прототип — **`multiprocess_prototype/`** (единственный). Старые v1/v2 директории физически удалены, см. git log.
 
-| Директория | Статус |
-|-----------|--------|
-| `multiprocess_prototype/` | АРХИВ v1 — только чтение |
-| `multiprocess_prototype_v2/` | АРХИВ v2 — только чтение |
+> **CRITICAL:** `multiprocess_prototype_backup/` — снэпшот предыдущей структуры (хранится по решению владельца проекта). Агентам **запрещено** вносить в него изменения; grep/sentrux/qex его игнорируют.
 
 ## Стек
 
@@ -59,6 +58,7 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 6. Логи через `ObservableMixin`, пути из env (`MULTIPROCESS_LOG_DIR` / `INSPECTOR_LOG_DIR`)
 7. Индекс ADR: `multiprocess_framework/DECISIONS.md` → ссылки на локальные DECISIONS.md
 8. **Документация — auto-sync:** при правках `multiprocess_framework/DECISIONS.md` или `multiprocess_framework/modules/*/DECISIONS.md` запусти `python -m scripts.sync` для пересборки сводных разделов («Оглавление», «Модульные решения», «Устарело», «Коды модулей»). CI ловит дрифт через `python scripts/validate.py`. Список синхронизируемых разделов: `python -m scripts.sync --list`.
+9. **Слои импортов:** `multiprocess_framework → Services → Plugins → multiprocess_prototype` (composition root). Обратные импорты запрещены и enforced через `.sentrux/rules.toml` (boundaries `framework → prototype/Services/Plugins`, `Services → prototype/Plugins`, `Plugins → prototype`). Плагин знает только `PluginContext` и не должен импортировать `multiprocess_prototype.*` — см. ADR-120.
 
 ## MCP: qex (семантический поиск)
 

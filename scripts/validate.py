@@ -17,6 +17,7 @@ from pathlib import Path
 
 BASE = Path(__file__).parent.parent
 MODULES_ROOT = BASE / "multiprocess_framework" / "modules"
+SERVICES_ROOT = BASE / "Services"
 
 # Как в pytest conftest модулей: плоские импорты (data_schema_module) + пакет multiprocess_framework
 for _p in (MODULES_ROOT, BASE):
@@ -41,7 +42,6 @@ MODULES = [
     "registers_module",
     "router_module",
     "shared_resources_module",
-    "sql_module",
     "statistics_module",
     "worker_module",
 ]
@@ -59,8 +59,20 @@ REQUIRED_INTERFACES = [
     "registers_module",
     "router_module",
     "shared_resources_module",
-    "sql_module",
     "statistics_module",
+]
+
+# Сервисы прикладного слоя (Phase 4 carve-out)
+# Каждый сервис ожидаемо имеет __init__.py, interfaces.py, STATUS.md, README.md, tests/.
+SERVICES = [
+    "sql",
+    "hikvision_camera",
+]
+
+# Сервисы, для которых требуется interfaces.py (Protocol-контракт)
+SERVICES_REQUIRED_INTERFACES = [
+    "sql",
+    "hikvision_camera",
 ]
 
 # Файлы production-кода (без тестов), где нельзя sys.path.insert
@@ -106,8 +118,9 @@ def check_no_syspath() -> None:
             if py_file.name.startswith("test_") or py_file.name == "conftest.py":
                 continue
             text = py_file.read_text(encoding="utf-8", errors="ignore")
-            # main.py — единственное исключение: точка входа для прямого запуска
-            if py_file.name == "main.py" and "multiprocess_prototype" in str(py_file):
+            # Исключения: точки входа (launcher + main). Они обязаны
+            # бутстрапить sys.path до того, как пакет станет импортируемым.
+            if py_file.name in ("main.py", "run.py") and "multiprocess_prototype" in str(py_file):
                 continue
             if "sys.path.insert" in text or "sys.path.append" in text:
                 rel = py_file.relative_to(BASE)
@@ -155,6 +168,42 @@ def check_status_files() -> None:
             warnings.append(msg)
 
 
+def check_services() -> None:
+    """Проверка структуры Services/ (Phase 4 carve-out)."""
+    check_header("5b. Проверка Services/ (прикладной слой)")
+    for svc in SERVICES:
+        svc_dir = SERVICES_ROOT / svc
+        # __init__.py
+        if (svc_dir / "__init__.py").exists():
+            print(f"  [OK] Services/{svc}/__init__.py")
+        else:
+            msg = f"  [FAIL] Отсутствует: Services/{svc}/__init__.py"
+            print(msg)
+            errors.append(msg)
+        # interfaces.py
+        if svc in SERVICES_REQUIRED_INTERFACES:
+            if (svc_dir / "interfaces.py").exists():
+                print(f"  [OK] Services/{svc}/interfaces.py")
+            else:
+                msg = f"  [MISS] Нет interfaces.py: Services/{svc}"
+                print(msg)
+                warnings.append(msg)
+        # STATUS.md
+        if (svc_dir / "STATUS.md").exists():
+            print(f"  [OK] Services/{svc}/STATUS.md")
+        else:
+            msg = f"  [MISS] Нет STATUS.md: Services/{svc}"
+            print(msg)
+            warnings.append(msg)
+        # README.md
+        if (svc_dir / "README.md").exists():
+            print(f"  [OK] Services/{svc}/README.md")
+        else:
+            msg = f"  [MISS] Нет README.md: Services/{svc}"
+            print(msg)
+            warnings.append(msg)
+
+
 def check_adr_sync() -> None:
     check_header("6. Проверка синхронизации ADR-документации (scripts/sync --check)")
     result = subprocess.run(
@@ -184,6 +233,7 @@ def main() -> int:
     check_init_files()
     check_interfaces()
     check_status_files()
+    check_services()
     check_adr_sync()
 
     print(f"\n{'='*60}")
