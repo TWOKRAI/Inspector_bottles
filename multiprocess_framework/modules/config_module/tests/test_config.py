@@ -127,7 +127,8 @@ def test_unsubscribe(cfg):
 # ---------------------------------------------------------------------------
 
 def test_section_get_set(cfg):
-    sec = cfg.section("db")
+    from multiprocess_framework.modules.config_module.sections.config_section import ConfigSection
+    sec = ConfigSection(cfg, "db")
     sec.set("host", "localhost")
     assert sec.get("host") == "localhost"
     assert cfg.get("db.host") == "localhost"

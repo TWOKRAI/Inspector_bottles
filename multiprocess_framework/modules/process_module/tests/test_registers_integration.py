@@ -1,28 +1,26 @@
-"""Тесты Task 5.9 — интеграция RegistersManager с plugin system.
+"""Framework-тесты Task 5.9 — интеграция RegistersManager с plugin system.
 
-Тестируем:
+Тестируем только framework-уровень (без зависимости от прикладных плагинов):
 1. register_schema() — default None, override в плагине
 2. PluginContext.registers — передача RegistersManager
-3. ColorMaskRegisters — schema с FieldMeta
-4. PluginOrchestrator._init_registers — bootstrap из register_schema()
-5. Graceful degradation — плагин без регистра работает на defaults
-6. register_update handler — set_field_value через IPC
+3. PluginOrchestrator._init_registers — bootstrap из register_schema()
+4. Graceful degradation — плагин без регистра работает на defaults
+
+ColorMask-specific интеграция вынесена в
+multiprocess_prototype/plugins/color_mask/tests/test_registers_integration.py
+по плану docs/refactors/2026-05_arch_cleanup.md (Task 1.1).
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-import pytest
+from typing import Annotated
+from unittest.mock import MagicMock
 
 from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
 from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
-    for_each,
 )
 
 
@@ -154,52 +152,6 @@ class TestPluginContextRegisters:
         assert child.config == {"key": "value"}
 
 
-# --- Tests: ColorMaskRegisters ---
-
-
-class TestColorMaskRegisters:
-    """ColorMaskRegisters schema (V3_MY_PURE — живёт в plugins/color_mask/registers.py)."""
-
-    def test_create_with_defaults(self):
-        """Schema создаётся с defaults."""
-        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-
-        reg = ColorMaskRegisters()
-        assert reg.h_min == 0
-        assert reg.h_max == 179
-        assert reg.s_min == 50
-        assert reg.s_max == 255
-        assert reg.v_min == 50
-        assert reg.v_max == 255
-
-    def test_field_meta_present(self):
-        """Все 6 HSV-полей имеют FieldMeta."""
-        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-
-        reg = ColorMaskRegisters()
-        for field_name in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]:
-            meta = reg.get_field_meta(field_name)
-            assert meta is not None, f"FieldMeta отсутствует для {field_name}"
-
-    def test_hue_range(self):
-        """Hue поля: min=0, max=179."""
-        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-
-        reg = ColorMaskRegisters()
-        meta_h = reg.get_field_meta("h_min")
-        assert meta_h.min == 0
-        assert meta_h.max == 179
-
-    def test_mutable(self):
-        """Значения можно менять."""
-        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-
-        reg = ColorMaskRegisters()
-        reg.h_min = 30
-        assert reg.h_min == 30
-
-
-
 # --- Tests: RegistersManager bootstrap ---
 
 
@@ -275,69 +227,3 @@ class TestGracefulDegradation:
         )
         plugin.configure(ctx)
         assert plugin._value == 99
-
-    def test_color_mask_without_register(self):
-        """ColorMaskPlugin без RegistersManager — локальный register с YAML overrides."""
-        from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
-
-        plugin = ColorMaskPlugin()
-        ctx = PluginContext(
-            process_name="test",
-            config={"h_min": 10, "h_max": 90},
-            process=_DummyProcess(),
-            io=MagicMock(),
-            registers=None,
-        )
-        plugin.configure(ctx)
-        # V3_MY_PURE: _reg всегда существует (локальный ColorMaskRegisters)
-        assert plugin._reg is not None
-        assert plugin._reg.h_min == 10
-        assert plugin._reg.h_max == 90
-
-    def test_color_mask_with_register(self):
-        """ColorMaskPlugin с managed регистром — читает пороги из него."""
-        from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
-        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-        from multiprocess_framework.modules.registers_module import RegistersManager
-
-        reg_instance = ColorMaskRegisters(h_min=20, h_max=100)
-        rm = RegistersManager(registers={"color_mask": reg_instance})
-
-        plugin = ColorMaskPlugin()
-        ctx = PluginContext(
-            process_name="test",
-            config={},
-            process=_DummyProcess(),
-            io=MagicMock(),
-            registers=rm,
-        )
-        plugin.configure(ctx)
-        assert plugin._reg is not None
-        assert plugin._reg.h_min == 20
-        assert plugin._reg.h_max == 100
-
-    def test_color_mask_process_with_register(self):
-        """ColorMaskPlugin.process() использует регистр для HSV."""
-        from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
-        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-        from multiprocess_framework.modules.registers_module import RegistersManager
-
-        reg_instance = ColorMaskRegisters(h_min=0, h_max=179, s_min=0, s_max=255, v_min=0, v_max=255)
-        rm = RegistersManager(registers={"color_mask": reg_instance})
-
-        plugin = ColorMaskPlugin()
-        ctx = PluginContext(
-            process_name="test",
-            config={},
-            process=_DummyProcess(),
-            io=MagicMock(),
-            registers=rm,
-        )
-        plugin.configure(ctx)
-
-        # Белый кадр 2x2 — HSV [0,0,255], все пороги открыты → маска полная
-        white_frame = np.ones((2, 2, 3), dtype=np.uint8) * 255
-        items = [{"frame": white_frame, "camera_id": 0}]
-        result = plugin.process(items)
-        assert len(result) == 1
-        assert result[0]["frame"] is not None

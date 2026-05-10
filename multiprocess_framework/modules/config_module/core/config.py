@@ -22,8 +22,12 @@ class Config:
     - Вложенные ключи через точку: ``config.get("database.host")``
     - Потокобезопасность через RLock
     - Подписки на изменения (конкретный ключ или ``"*"`` для всех)
-    - Доступ к секциям: ``config.section("database")``
     - Env-fallback: если ключ не найден, ищет в ``{env_prefix}_{KEY}``
+
+    Для работы с секцией данных создавайте :class:`ConfigSection` напрямую::
+
+        from multiprocess_framework.modules.config_module.sections.config_section import ConfigSection
+        section = ConfigSection(config, "database")
     """
 
     def __init__(
@@ -94,15 +98,6 @@ class Config:
             self._data.clear()
             self._notify("*", old, {})
         return self
-
-    # -------------------------------------------------------------------------
-    # Секции
-    # -------------------------------------------------------------------------
-
-    def section(self, section_key: str):
-        """Вернуть ConfigSection для работы с частью конфигурации."""
-        from multiprocess_framework.modules.config_module.sections.config_section import ConfigSection
-        return ConfigSection(self, section_key)
 
     # -------------------------------------------------------------------------
     # Подписки на изменения

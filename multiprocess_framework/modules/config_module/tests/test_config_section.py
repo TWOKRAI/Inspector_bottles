@@ -14,7 +14,7 @@ from multiprocess_framework.modules.config_module.sections.config_section import
 @pytest.fixture
 def cfg_and_sec():
     cfg = Config()
-    sec = cfg.section("database")
+    sec = ConfigSection(cfg, "database")
     return cfg, sec
 
 
