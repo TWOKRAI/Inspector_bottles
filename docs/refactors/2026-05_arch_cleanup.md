@@ -379,20 +379,20 @@ to = "multiprocess_prototype"
 
 ## Сводная таблица
 
-| Phase | Task | Срок | Кто | Зависит от |
+| Phase | Task | Срок | Статус | Commit |
 |---|---|---|---|---|
-| 1 | 1.1 — миграция теста registers_integration | 1-2ч | developer | — |
-| 1 | 1.2 — разрыв цикла config_module | 3-5ч | teamlead | — |
-| 2 | 2.1 — `.sentrux/rules.toml` (базовые правила) | 1-2ч | developer | 1.1 |
-| 2 | 2.2 — выпилить backward-compat | 2-4ч | developer | — |
-| 3 | 3.1 — тесты топ-7 файлов | 6-10ч | tester (×7) | — |
-| 4 | 4.1 — `sql_module` → `Services/` | 3-4ч | developer | 1.x, 2.x |
-| 4 | 4.2 — `hikvision_camera_module_2` в `Services/` | 1-2ч | developer | — |
-| 4 | 4.3 — rule: framework ∌ Services | 30мин | developer | 4.1 |
-| 5 | 5.1 — `prototype_2/plugins/` → `Plugins/` | 4-6ч | developer | 4.x |
-| 5 | 5.2 — rule: Plugins ∌ prototype_2 | 30мин | developer | 5.1 |
-| 5 | 5.3 — ADR «Plugins vocabulary» | 1ч | tech-writer | 5.1 |
-| 6 | 6.1 — baseline + ADR + CLAUDE.md update | 2-3ч | docs-writer | все |
+| 1 | 1.1 — миграция теста registers_integration | 1-2ч | ✅ Done | `c35b8ac` |
+| 1 | 1.2 — разрыв цикла config_module | 3-5ч | ✅ Done | `c35b8ac` + `e77f597` |
+| 2 | 2.1 — `.sentrux/rules.toml` | 1-2ч | ✅ Done | `7a342a2` |
+| 2 | 2.2 — выпилить backward-compat | 2-4ч | ✅ Done | `7a342a2` |
+| 3 | 3.1 — тесты топ-7 файлов | 6-10ч | ⏳ Skipped (отложено) | — |
+| 4 | 4.1 — `sql_module` → `Services/sql` + Protocol bridge | 3-4ч | ✅ Done | `a3b525c` |
+| 4 | 4.2 — `hikvision_camera_module_2` в `Services/` | 1-2ч | ✅ Done | `4db04d3` |
+| 4 | 4.3 — rule: framework ∌ Services | 30мин | ✅ Done | `7a342a2` |
+| 5 | 5.1 — `prototype/plugins/` → `Plugins/` | 4-6ч | ⏳ TODO | — |
+| 5 | 5.2 — rule: Plugins ∌ prototype | 30мин | ⏳ TODO | — |
+| 5 | 5.3 — ADR «Plugins vocabulary» | 1ч | ⏳ TODO | — |
+| 6 | 6.1 — финал + ADR + CLAUDE.md update | 2-3ч | ⏳ TODO | — |
 
 **Итого:** 25-44 часа. Реалистично — **5-7 дней focused work** или 2-3 недели в фоне.
 
