@@ -66,6 +66,23 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 
 **qex-first правило:** при рефакторинге, анализе «где используется», смене API/IPC-контракта — **сначала `mcp__qex__search_code`**, потом `Grep`. Подробная логика: `/qex-search`.
 
+## MCP: sentrux (архитектурный анализ)
+
+**sentrux** (`brew install sentrux/tap/sentrux`, бинарь `/opt/homebrew/bin/sentrux`) — структурный health-gate. Метрики modularity / acyclicity / depth / equality / redundancy → score 0–10000. Девять MCP-инструментов: `scan`, `health`, `dsm`, `test_gaps`, `check_rules`, `session_start`, `session_end`, `evolution`, `rescan`.
+
+**sentrux-first правило:** при работе с **архитектурой и связями между модулями** (не отдельными строками) — звать sentrux, не qex/Grep:
+
+| Задача | Инструмент |
+|--------|------------|
+| «Где используется `X`?», поиск по семантике кода | `mcp__qex__search_code` |
+| «Насколько модули связаны?», поиск циклов | `mcp__sentrux__dsm` |
+| Baseline перед рефакторингом → дельта после | `session_start` → правки → `session_end` |
+| «Что не покрыто тестами?» перед `/ship` | `mcp__sentrux__test_gaps` |
+| Проверка инвариантов (`process_module` не импортирует `frontend_module` и т.п.) | `mcp__sentrux__check_rules` (через `.sentrux/rules.toml`) |
+| Снимок здоровья проекта целиком | `mcp__sentrux__scan` + `health` |
+
+**qex и sentrux ортогональны:** qex отвечает «*где*», sentrux — «*насколько здорово*». Не дублируют.
+
 ## Проектные команды
 
 | Команда | Действие |
