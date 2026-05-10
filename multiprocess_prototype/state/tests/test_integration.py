@@ -335,23 +335,19 @@ class TestPluginContextStateProxy:
         # Проверяем что state_proxy установлен
         assert gp._state_proxy is not None
 
-        # Проверяем что если бы PluginContext создавался, он бы получил proxy
+        # Проверяем что PluginContext получает proxy через services (Phase 2.2 API)
         from multiprocess_framework.modules.process_module.plugins.base import (
             PluginContext,
         )
-        from multiprocess_framework.modules.process_module.io import ProcessIO
-
-        io_mock = MagicMock(spec=ProcessIO)
-        ctx = PluginContext(
-            process_name="test_process",
-            config={},
-            process=gp,
-            io=io_mock,
+        from multiprocess_framework.modules.process_module.plugins.testing import (
+            MockProcessServices,
         )
-        # Имитируем то, что делает GenericProcess._init_custom_managers
-        state_proxy = getattr(gp, "_state_proxy", None)
-        if state_proxy is not None:
-            ctx.state_proxy = state_proxy
+
+        services = MockProcessServices(
+            name="test_process",
+            state_proxy=gp._state_proxy,
+        )
+        ctx = PluginContext(services=services, config={})
 
         assert ctx.state_proxy is not None
         assert ctx.state_proxy is gp._state_proxy
