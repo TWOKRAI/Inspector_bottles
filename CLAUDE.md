@@ -30,6 +30,7 @@
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |
 | Нарратив «конструктор» | `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` |
 | Настройка qex | `docs/claude/qex/README.md` (quick-start), `docs/claude/qex/SETUP_GUIDE.md` (полный) |
+| Гайд по sentrux | [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md) (метрики, slash-команды, сценарии) |
 
 ## АРХИВ — НЕ ТРОГАТЬ
 
@@ -93,3 +94,13 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 | `/qex-reindex` | Переиндексация кодовой базы |
 | `/run-proto` | Запуск прототипа |
 | `/cold-start` | Холодный старт: Ollama + venv |
+| `/sentrux-health` | Снимок quality_signal + 5 метрик + bottleneck |
+| `/sentrux-dsm` | DSM: связи между модулями, поиск циклов |
+| `/sentrux-gaps` | Модули без тестов (приоритет по связности) |
+| `/sentrux-baseline` | Зафиксировать baseline качества перед рефакторингом |
+| `/sentrux-diff` | Сравнить с baseline: дельта качества (pass/fail) |
+| `/sentrux-rules` | Проверить `.sentrux/rules.toml` (MCP, интерактивно) |
+| `/sentrux-check` | `sentrux check` (CLI, exit 0/1, для CI) |
+| `/sentrux-evolution` | Тренды метрик во времени |
+
+Подробный гайд: [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md).

@@ -16,10 +16,20 @@ _script_dir = os.path.dirname(os.path.realpath(__file__))
 workspace = os.path.dirname(os.path.dirname(_script_dir))
 
 if platform.system() == "Windows":
+    base_url = "http://localhost:11434/v1"
+    api_key = "ollama"
     model = "qwen3-embedding:4b"
     dimensions = "2560"
     default_bin = os.path.join(os.path.expanduser("~"), ".cargo", "bin", "qex.exe")
 else:
+    # macOS: Ollama (qwen3-embedding:8b, dim=4096) на :11434 (GUI Ollama.app).
+    # Эксперименты 2026-05-10:
+    # - mlx-openai-server :1235 → 2.5× медленнее (single inference worker).
+    # - OLLAMA_NUM_PARALLEL=4 на CLI Ollama → 0% эффекта (Metal не масштабируется
+    #   по parallel calls на одну модель; Ollama embedding-runner грузится с Parallel:1
+    #   независимо от env). См. handoff 2026-05-10.
+    base_url = "http://localhost:11434/v1"
+    api_key = "ollama"
     model = "qwen3-embedding:8b"
     dimensions = "4096"
     default_bin = os.path.join(os.path.expanduser("~"), ".local", "bin", "qex")
@@ -31,8 +41,8 @@ env = {
     "RUST_LOG": "info",
     "WORKSPACE_PATH": workspace,
     "QEX_EMBEDDING_PROVIDER": "openai",
-    "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
-    "QEX_OPENAI_API_KEY": "ollama",
+    "QEX_OPENAI_BASE_URL": base_url,
+    "QEX_OPENAI_API_KEY": api_key,
     "QEX_OPENAI_MODEL": model,
     "QEX_OPENAI_DIMENSIONS": dimensions,
 }
