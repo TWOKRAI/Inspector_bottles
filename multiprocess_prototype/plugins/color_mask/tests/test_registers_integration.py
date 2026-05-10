@@ -18,23 +18,11 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
+from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.registers_module import RegistersManager
 
 from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
 from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
-
-
-class _DummyProcess:
-    """Мок-процесс для PluginContext."""
-    name = "test_process"
-    worker_manager = MagicMock()
-    command_manager = MagicMock()
-    router_manager = MagicMock()
-    memory_manager = MagicMock()
-    _log_info = MagicMock()
-    _log_error = MagicMock()
-    send_message = MagicMock()
-    receive_message = MagicMock()
 
 
 # --- Tests: ColorMaskRegisters schema ---
@@ -84,9 +72,8 @@ class TestColorMaskPluginIntegration:
         """ColorMaskPlugin без RegistersManager — локальный register с YAML overrides."""
         plugin = ColorMaskPlugin()
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={"h_min": 10, "h_max": 90},
-            process=_DummyProcess(),
             io=MagicMock(),
             registers=None,
         )
@@ -103,9 +90,8 @@ class TestColorMaskPluginIntegration:
 
         plugin = ColorMaskPlugin()
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={},
-            process=_DummyProcess(),
             io=MagicMock(),
             registers=rm,
         )
@@ -121,9 +107,8 @@ class TestColorMaskPluginIntegration:
 
         plugin = ColorMaskPlugin()
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={},
-            process=_DummyProcess(),
             io=MagicMock(),
             registers=rm,
         )

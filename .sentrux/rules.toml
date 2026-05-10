@@ -1,0 +1,104 @@
+# Inspector_bottles — архитектурные инварианты sentrux
+#
+# Проверка:
+#   /sentrux-check        (CLI, exit 0/1, для CI)
+#   /sentrux-rules        (MCP, интерактивно)
+#
+# Структура слоёв (см. docs/refactors/2026-05_arch_cleanup.md):
+#   framework  → чистый backend-фреймворк (process/IPC/state/UI-toolkit)
+#   Services   → прикладные сервисы с внешними зависимостями (sql, hikvision)
+#   Plugins    → vocabulary плагинов, переиспользуется между приложениями
+#   app        → конкретное приложение (multiprocess_prototype)
+#
+# Направление импортов: app → Plugins → Services → framework. Обратные импорты запрещены.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quality gates (scores в шкале 0.0-1.0 — sentrux принимает именно так)
+# ──────────────────────────────────────────────────────────────────────────────
+# Текущее (2026-05-10 после Phase 1):
+#   quality=0.62, modularity=0.51, acyclicity=0.50, depth=0.67,
+#   equality=0.62, redundancy=0.88
+# Мягкие пороги чуть ниже текущих — ужесточаем по мере прогресса (Phase 4-6).
+
+[constraints]
+min_quality      = 0.60      # цель ≥ 0.75 после Phase 4-6
+min_modularity   = 0.50      # вырастет после Plugins carve-out
+min_acyclicity   = 0.45      # цель 0.90 (raw=0)
+min_depth        = 0.65
+min_equality     = 0.60
+min_redundancy   = 0.80
+
+max_cycles       = 2         # текущее 1; запас на backup-папки, цель 0
+no_god_files     = true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Слои (порядок снизу вверх)
+# ──────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name  = "framework"
+paths = ["multiprocess_framework/*"]
+order = 0
+
+[[layers]]
+name  = "services"
+paths = ["Services/*"]
+order = 1
+
+[[layers]]
+name  = "plugins"
+paths = ["Plugins/*"]   # ← пока пусто, наполнится в Phase 5
+order = 2
+
+[[layers]]
+name  = "application"
+paths = ["multiprocess_prototype/*"]
+order = 3
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Жёсткие границы (deny-patterns)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# framework → ничто прикладное
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "multiprocess_prototype/*"
+reason = "framework не знает про конкретное приложение (Phase 1.1 закрыта)"
+
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "Services/*"
+reason = "framework не знает про Services (Phase 4.3 после carve-out sql)"
+
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "Plugins/*"
+reason = "framework не знает про vocabulary плагинов (Phase 5)"
+
+# Services → не знают про вышестоящие слои
+[[boundaries]]
+from   = "Services/*"
+to     = "multiprocess_prototype/*"
+reason = "Service-слой не зависит от приложения"
+
+[[boundaries]]
+from   = "Services/*"
+to     = "Plugins/*"
+reason = "Service не зависит от плагинов"
+
+# Plugins → не знают про конкретное приложение
+[[boundaries]]
+from   = "Plugins/*"
+to     = "multiprocess_prototype/*"
+reason = "плагин — переиспользуемая единица, не должен зависеть от конкретного app (Phase 5.2)"
+
+# Архивные / удалённые модули — никто не должен импортировать
+[[boundaries]]
+from   = "*"
+to     = "multiprocess_prototype_v2/*"
+reason = "архивный прототип v2 удалён, импорты запрещены"
+
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "hikvision_camera_module*/*"
+reason = "старые draft-папки hikvision удалены, framework не должен импортировать"

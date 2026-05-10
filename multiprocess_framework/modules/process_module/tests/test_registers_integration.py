@@ -22,22 +22,10 @@ from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,
 )
+from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 
 
 # --- Fixtures ---
-
-
-class _DummyProcess:
-    """Мок-процесс для PluginContext."""
-    name = "test_process"
-    worker_manager = MagicMock()
-    command_manager = MagicMock()
-    router_manager = MagicMock()
-    memory_manager = MagicMock()
-    _log_info = MagicMock()
-    _log_error = MagicMock()
-    send_message = MagicMock()
-    receive_message = MagicMock()
 
 
 class SimplePlugin(ProcessModulePlugin):
@@ -118,9 +106,8 @@ class TestPluginContextRegisters:
     def test_registers_default_none(self):
         """registers по умолчанию None."""
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={},
-            process=_DummyProcess(),
             io=MagicMock(),
         )
         assert ctx.registers is None
@@ -129,9 +116,8 @@ class TestPluginContextRegisters:
         """registers передаётся в конструктор."""
         mock_rm = MagicMock()
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={},
-            process=_DummyProcess(),
             io=MagicMock(),
             registers=mock_rm,
         )
@@ -141,9 +127,8 @@ class TestPluginContextRegisters:
         """with_config() передаёт registers в копию."""
         mock_rm = MagicMock()
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={},
-            process=_DummyProcess(),
             io=MagicMock(),
             registers=mock_rm,
         )
@@ -219,9 +204,8 @@ class TestGracefulDegradation:
         """SimplePlugin работает с registers=None."""
         plugin = SimplePlugin()
         ctx = PluginContext(
-            process_name="test",
+            services=MockProcessServices(name="test"),
             config={"value": 99},
-            process=_DummyProcess(),
             io=MagicMock(),
             registers=None,
         )

@@ -68,23 +68,13 @@ class PluginContext:
 
     def __init__(
         self,
-        services: IProcessServices | None = None,
+        services: IProcessServices,
         config: dict[str, Any] | None = None,
         io: Any | None = None,
         registers: Any | None = None,
-        # Backward-compat kwargs (deprecated — используйте services)
-        process_name: str | None = None,
-        process: Any = None,
-        state_proxy: Any = None,
     ) -> None:
-        # Backward-compat: если передан process вместо services (старый API)
-        if services is None and process is not None:
-            services = process
-            if process_name is None:
-                process_name = getattr(process, "name", "unknown")
-
-        # Имя процесса: из аргумента (deprecated) или из services
-        self.process_name = process_name if process_name is not None else services.name  # type: ignore[union-attr]
+        self.services = services
+        self.process_name = services.name
         self.config = config or {}
 
         # Менеджеры через Protocol (плагин использует только то, что ему нужно)
@@ -100,27 +90,14 @@ class PluginContext:
         # Плагин читает self._reg = ctx.registers.get_register("plugin_name")
         self.registers = registers
 
-        # StateProxy: из deprecated аргумента или из services
-        self.state_proxy = state_proxy if state_proxy is not None else getattr(services, "state_proxy", None)
+        # StateProxy (Phase 8) — из services
+        self.state_proxy = getattr(services, "state_proxy", None)
 
-        # Логирование — публичные методы (не приватные _log_*)
-        # Backward-compat: ProcessModule имеет _log_info/_log_error, MockProcessServices — log_info/log_error
-        self.log_info: Callable[[str], None] = (
-            getattr(services, "log_info", None)
-            or getattr(services, "_log_info", None)
-        )
-        self.log_error: Callable[[str], None] = (
-            getattr(services, "log_error", None)
-            or getattr(services, "_log_error", None)
-        )
-
-        # IPC через Protocol
+        # Логирование и IPC — публичные методы Protocol
+        self.log_info: Callable[[str], None] = services.log_info
+        self.log_error: Callable[[str], None] = services.log_error
         self.send_message: Callable = getattr(services, "send_message", None)  # type: ignore[assignment]
         self.receive_message: Callable = getattr(services, "receive_message", None)  # type: ignore[assignment]
-
-        # Backward-compat: _process для продвинутых плагинов (SHM middleware и т.д.)
-        # DEPRECATED: используйте services напрямую
-        self._process = services
 
     def with_config(
         self,
@@ -129,7 +106,7 @@ class PluginContext:
     ) -> PluginContext:
         """Создать копию контекста с plugin-specific конфигом."""
         return PluginContext(
-            services=self._process,  # _process хранит services (или process при backward-compat)
+            services=self.services,
             config=plugin_config,
             io=self.io,
             registers=registers,

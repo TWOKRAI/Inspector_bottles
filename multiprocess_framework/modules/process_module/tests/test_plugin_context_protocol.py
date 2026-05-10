@@ -5,7 +5,6 @@
 - process_name привязан к services.name
 - Менеджеры передаются корректно
 - Логирование делегируется services
-- Backward-compat: старый API (process=, process_name=)
 - with_config() создаёт новый контекст с тем же services
 """
 
@@ -102,29 +101,6 @@ def test_context_logging_log_error_from_services():
     ctx.log_error("тест error через контекст")
     assert services.logs[0]["level"] == "ERROR"
     assert services.logs[0]["msg"] == "тест error через контекст"
-
-
-# ---------------------------------------------------------------------------
-# Backward-compat: старый API (process=, process_name=)
-# ---------------------------------------------------------------------------
-
-
-def test_context_backward_compat_process_kwarg():
-    """PluginContext(process=mock, process_name='test', config={}) — старый API работает."""
-    services = MockProcessServices(name="legacy")
-    # Передаём через устаревший аргумент process=
-    ctx = PluginContext(process=services, process_name="test_override", config={})
-    # process_name передан явно — должен использоваться он
-    assert ctx.process_name == "test_override"
-    # Менеджеры всё равно берутся из services (process)
-    assert ctx.worker_manager is services.worker_manager
-
-
-def test_context_backward_compat_process_without_name():
-    """PluginContext(process=mock, config={}) без process_name — берёт services.name."""
-    services = MockProcessServices(name="auto_name")
-    ctx = PluginContext(process=services, config={})
-    assert ctx.process_name == "auto_name"
 
 
 # ---------------------------------------------------------------------------
