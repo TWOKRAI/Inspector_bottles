@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from multiprocess_framework.modules.process_module.plugins.base import PluginContext
+from multiprocess_framework.modules.process_module.plugins import PluginContext
 from Plugins.runtime.chain_executor.plugin import ChainExecutorPlugin
 
 

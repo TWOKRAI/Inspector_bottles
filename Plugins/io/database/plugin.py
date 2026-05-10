@@ -14,12 +14,12 @@ import threading
 import time
 from pathlib import Path
 
-from multiprocess_framework.modules.process_module.plugins.base import (
+from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
 )
-from multiprocess_framework.modules.process_module.plugins.port import Port
-from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+from multiprocess_framework.modules.process_module.plugins import Port
+from multiprocess_framework.modules.process_module.plugins import register_plugin
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
 
 from .registers import DatabaseRegisters

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from multiprocess_framework.modules.data_schema_module import register_schema
-from multiprocess_framework.modules.process_module.generic.generic_process_config import PluginConfig
+from multiprocess_framework.modules.process_module.plugins import register_schema
+from multiprocess_framework.modules.process_module.plugins import PluginConfig
 
 
 @register_schema("FlipPluginConfigV2")

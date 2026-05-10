@@ -14,12 +14,12 @@ import cv2
 # Максимальное значение счётчика кадров (с rollover как в camera_service)
 _FRAME_ID_MODULO = 100_000
 
-from multiprocess_framework.modules.process_module.plugins.base import (
+from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
 )
-from multiprocess_framework.modules.process_module.plugins.port import Port
-from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+from multiprocess_framework.modules.process_module.plugins import Port
+from multiprocess_framework.modules.process_module.plugins import register_plugin
 
 
 @register_plugin("capture", category="source", description="Захват кадров с вебкамеры (cv2)")

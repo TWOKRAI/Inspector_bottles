@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from multiprocess_framework.modules.process_module.plugins.base import PluginContext
+from multiprocess_framework.modules.process_module.plugins import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.registers_module import RegistersManager
 

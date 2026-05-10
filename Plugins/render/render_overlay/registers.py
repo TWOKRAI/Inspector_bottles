@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from multiprocess_framework.modules.data_schema_module import register_schema
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
-from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
+from multiprocess_framework.modules.process_module.plugins import register_schema
+from multiprocess_framework.modules.process_module.plugins import FieldMeta
+from multiprocess_framework.modules.process_module.plugins import SchemaBase
 
 
 @register_schema("RenderOverlayRegistersV1")

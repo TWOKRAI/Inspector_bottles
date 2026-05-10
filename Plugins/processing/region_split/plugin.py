@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from multiprocess_framework.modules.process_module.plugins.base import (
+from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
     for_each,
 )
-from multiprocess_framework.modules.process_module.plugins.port import Port
-from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+from multiprocess_framework.modules.process_module.plugins import Port
+from multiprocess_framework.modules.process_module.plugins import register_plugin
 
 
 @register_plugin("region_split", category="processing", description="Нарезка кадра на регионы + fan-out")

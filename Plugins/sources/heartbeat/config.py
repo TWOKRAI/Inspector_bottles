@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from multiprocess_framework.modules.data_schema_module import register_schema
-from multiprocess_framework.modules.data_schema_module.core.field_meta import (
+from multiprocess_framework.modules.process_module.plugins import register_schema
+from multiprocess_framework.modules.process_module.plugins import (
     FieldMeta,
 )
-from multiprocess_framework.modules.process_module.generic.generic_process_config import (
+from multiprocess_framework.modules.process_module.plugins import (
     PluginConfig,
 )
 

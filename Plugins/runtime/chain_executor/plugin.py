@@ -19,13 +19,13 @@ import importlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from multiprocess_framework.modules.process_module.plugins.base import (
+from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
     SubPluginContext,
 )
-from multiprocess_framework.modules.process_module.plugins.port import Port
-from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+from multiprocess_framework.modules.process_module.plugins import Port
+from multiprocess_framework.modules.process_module.plugins import register_plugin
 
 from .registers import ChainExecutorRegisters
 

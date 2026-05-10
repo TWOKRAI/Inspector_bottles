@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import time
 
-from multiprocess_framework.modules.process_module.plugins.base import (
+from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
 )
-from multiprocess_framework.modules.process_module.plugins.port import Port
-from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
+from multiprocess_framework.modules.process_module.plugins import Port
+from multiprocess_framework.modules.process_module.plugins import register_plugin
 
 
 @register_plugin(
