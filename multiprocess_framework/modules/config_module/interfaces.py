@@ -49,10 +49,6 @@ class IConfig(ABC):
         """Очистить все данные."""
 
     @abstractmethod
-    def section(self, section_key: str) -> Any:
-        """Вернуть ConfigSection для работы с секцией."""
-
-    @abstractmethod
     def subscribe(
         self,
         callback: Optional[Callable] = None,
