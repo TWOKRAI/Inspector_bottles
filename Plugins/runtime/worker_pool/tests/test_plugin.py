@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from Plugins.worker_pool.plugin import WorkerPoolPlugin
+from Plugins.runtime.worker_pool.plugin import WorkerPoolPlugin
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def _grayscale_config() -> dict:
         "queue_timeout": 5.0,
         "balancing": "round_robin",
         "worker_plugin_class": (
-            "Plugins.grayscale.plugin.GrayscalePlugin"
+            "Plugins.processing.grayscale.plugin.GrayscalePlugin"
         ),
         "worker_plugin_config": {},
     }
@@ -55,7 +55,7 @@ def _negative_config(pool_size: int = 2) -> dict:
         "queue_timeout": 5.0,
         "balancing": "round_robin",
         "worker_plugin_class": (
-            "Plugins.negative.plugin.NegativePlugin"
+            "Plugins.processing.negative.plugin.NegativePlugin"
         ),
         "worker_plugin_config": {},
     }

@@ -160,7 +160,7 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
 
 **Последствия:**
 - Все три параметра — keyword, со значением `None` по умолчанию → старые места
-  создания (например `multiprocess_prototype/plugins/services/processor_service/plugin.py`)
+  создания (например `Plugins/services/processor_service/plugin.py`)
   работают без изменений.
 - `StatsManager.percentiles("chain.latency_ms")` — теперь основной источник истины
   для p50/p95/p99 latency (не парсинг лога). GUI / Inspector могут читать оттуда.

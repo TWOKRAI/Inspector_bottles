@@ -279,6 +279,16 @@ def _restore_plugin_configs(plugins_dicts: list[dict]) -> list[PluginConfig]:
     configs = []
     for pdict in plugins_dicts:
         plugin_class_path = pdict.get("plugin_class", "")
+        plugin_name = pdict.get("plugin_name", "")
+
+        # Short-name resolution через PluginRegistry: если plugin_class пуст
+        # или короткое имя — пытаемся найти entry.class_path.
+        if not plugin_class_path or "." not in plugin_class_path:
+            candidate = plugin_class_path or plugin_name
+            entry = PluginRegistry.get(candidate) if candidate else None
+            if entry is not None:
+                plugin_class_path = entry.class_path
+
         if not plugin_class_path:
             continue
 

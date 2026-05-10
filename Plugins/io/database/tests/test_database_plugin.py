@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from Plugins.database.plugin import DatabasePlugin
+from Plugins.io.database.plugin import DatabasePlugin
 
 
 # ---------------------------------------------------------------------------

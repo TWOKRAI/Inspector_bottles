@@ -7,7 +7,7 @@
 
 ## 1. Добавить новый плагин
 
-1. Создать класс наследник `ProcessModulePlugin` в `multiprocess_prototype/plugins/`
+1. Создать класс наследник `ProcessModulePlugin` в `Plugins/`
 2. Реализовать `configure(ctx)`, опционально `start(ctx)`, `shutdown(ctx)`, `process(items)`
 3. Зарегистрировать через `@register_plugin` или добавить в blueprint
 4. **Файлы:** `modules/process_module/plugins/base.py` (контракт), `modules/process_module/plugins/interfaces.py` (IProcessServices Protocol)

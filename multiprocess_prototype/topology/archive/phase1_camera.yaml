@@ -15,7 +15,7 @@ processes:
   - process_name: camera_0
     priority: high          # камера = real-time, выше приоритет
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.capture.plugin.CapturePlugin
+      - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
         plugin_name: capture
         category: source
         # Override defaults из system.yaml:
@@ -27,7 +27,7 @@ processes:
   - process_name: processor_0
     priority: normal
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.frame_counter.plugin.FrameCounterPlugin
+      - plugin_class: Plugins.sources.frame_counter.plugin.FrameCounterPlugin
         plugin_name: frame_counter
         category: processing
         log_interval_sec: 3.0   # логировать FPS каждые 3 секунды

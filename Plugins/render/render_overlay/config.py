@@ -23,7 +23,7 @@ class RenderOverlayConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.render_overlay.plugin.RenderOverlayPlugin"
+        "Plugins.render.render_overlay.plugin.RenderOverlayPlugin"
     )
 
     # Привязка к register-классам

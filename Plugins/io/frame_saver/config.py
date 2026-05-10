@@ -23,7 +23,7 @@ class FrameSaverPluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.frame_saver.plugin.FrameSaverPlugin"
+        "Plugins.io.frame_saver.plugin.FrameSaverPlugin"
     )
 
     # Привязка к register-классам

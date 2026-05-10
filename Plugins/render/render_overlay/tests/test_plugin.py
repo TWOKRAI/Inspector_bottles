@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from Plugins.render_overlay.plugin import RenderOverlayPlugin
+from Plugins.render.render_overlay.plugin import RenderOverlayPlugin
 
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:

@@ -25,7 +25,7 @@ class ColorMaskPluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.color_mask.plugin.ColorMaskPlugin"
+        "Plugins.processing.color_mask.plugin.ColorMaskPlugin"
     )
 
     # Привязка к register-классам

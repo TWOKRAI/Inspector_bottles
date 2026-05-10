@@ -17,7 +17,7 @@ class FrameCounterPluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.frame_counter.plugin.FrameCounterPlugin"
+        "Plugins.sources.frame_counter.plugin.FrameCounterPlugin"
     )
 
     log_interval_sec: Annotated[

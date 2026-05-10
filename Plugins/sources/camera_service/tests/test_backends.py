@@ -10,17 +10,17 @@ import cv2
 import numpy as np
 import pytest
 
-from Plugins.camera_service.backends import (
+from Plugins.sources.camera_service.backends import (
     CAMERA_TYPES,
     create_backend,
 )
-from Plugins.camera_service.backends.file_source import (
+from Plugins.sources.camera_service.backends.file_source import (
     FileSourceBackend,
 )
-from Plugins.camera_service.backends.simulator import (
+from Plugins.sources.camera_service.backends.simulator import (
     SimulatorBackend,
 )
-from Plugins.camera_service.backends.webcam import (
+from Plugins.sources.camera_service.backends.webcam import (
     WebcamBackend,
     _enum_webcam_devices,
 )
@@ -146,7 +146,7 @@ class TestWebcamMock:
 
         backend = WebcamBackend(width=640, height=480, device_id=0)
 
-        with patch("Plugins.camera_service.backends.webcam.cv2") as mock_cv2:
+        with patch("Plugins.sources.camera_service.backends.webcam.cv2") as mock_cv2:
             mock_cv2.VideoCapture.return_value = mock_cap
             mock_cv2.CAP_DSHOW = 700
             mock_cv2.CAP_PROP_FRAME_WIDTH = 3
@@ -171,7 +171,7 @@ class TestWebcamMock:
         mock_cap.isOpened.side_effect = [True, False, False]
 
         with patch(
-            "Plugins.camera_service.backends.webcam.cv2"
+            "Plugins.sources.camera_service.backends.webcam.cv2"
         ) as mock_cv2:
             mock_cv2.VideoCapture.return_value = mock_cap
             mock_cv2.CAP_DSHOW = 700

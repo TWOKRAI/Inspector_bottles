@@ -31,7 +31,6 @@
 | **PMM** | `process_manager_module` | `modules/process_manager_module/DECISIONS.md` |
 | **EM** | `error_module` | `modules/error_module/DECISIONS.md` |
 | **SM** | `statistics_module` | `modules/statistics_module/DECISIONS.md` |
-| **SQL** | `sql_module` | `modules/sql_module/DECISIONS.md` |
 | **RM** | `registers_module` | `modules/registers_module/DECISIONS.md` |
 | **CM** | `console_module` | `modules/console_module/DECISIONS.md` |
 | **SS** | `state_store_module` | `modules/state_store_module/DECISIONS.md` |

@@ -19,7 +19,7 @@ processes:
       - processor_0
     source_target_fps: 25
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.capture.plugin.CapturePlugin
+      - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
         plugin_name: capture
         category: source
         camera_id: 0
@@ -31,7 +31,7 @@ processes:
     chain_targets:
       - output_0
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.grayscale.plugin.GrayscalePlugin
+      - plugin_class: Plugins.processing.grayscale.plugin.GrayscalePlugin
         plugin_name: grayscale
         category: processing
 
@@ -39,14 +39,14 @@ processes:
   - process_name: output_0
     priority: normal
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.database.plugin.DatabasePlugin
+      - plugin_class: Plugins.io.database.plugin.DatabasePlugin
         plugin_name: database
         category: output
         db_path: data/inspector.db
         batch_size: 50
         flush_interval_sec: 2.0
 
-      - plugin_class: multiprocess_prototype.plugins.frame_saver.plugin.FrameSaverPlugin
+      - plugin_class: Plugins.io.frame_saver.plugin.FrameSaverPlugin
         plugin_name: frame_saver
         category: output
         camera_id: 0

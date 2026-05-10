@@ -53,7 +53,7 @@ def topology_one_process() -> dict:
                 "chain_targets": ["preprocessor"],
                 "plugins": [
                     {
-                        "plugin_class": "multiprocess_prototype.plugins.capture.plugin.CapturePlugin",
+                        "plugin_class": "Plugins.sources.capture.plugin.CapturePlugin",
                         "plugin_name": "capture",
                         "category": "source",
                         "camera_id": 0,

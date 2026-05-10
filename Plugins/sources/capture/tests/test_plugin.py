@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from Plugins.capture.plugin import (
+from Plugins.sources.capture.plugin import (
     CapturePlugin,
     _FRAME_ID_MODULO,
 )

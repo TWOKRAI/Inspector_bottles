@@ -23,7 +23,7 @@ class DatabasePluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.database.plugin.DatabasePlugin"
+        "Plugins.io.database.plugin.DatabasePlugin"
     )
 
     # Привязка к register-классам

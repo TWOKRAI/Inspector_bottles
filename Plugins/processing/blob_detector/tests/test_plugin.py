@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import pytest
 
-from Plugins.blob_detector.plugin import BlobDetectorPlugin
+from Plugins.processing.blob_detector.plugin import BlobDetectorPlugin
 
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:

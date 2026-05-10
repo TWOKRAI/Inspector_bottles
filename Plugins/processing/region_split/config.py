@@ -17,7 +17,7 @@ class RegionSplitPluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.region_split.plugin.RegionSplitPlugin"
+        "Plugins.processing.region_split.plugin.RegionSplitPlugin"
     )
 
     camera_id: int = 0

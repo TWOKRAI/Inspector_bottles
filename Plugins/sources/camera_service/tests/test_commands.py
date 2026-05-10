@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from Plugins.camera_service.plugin import CameraServicePlugin
+from Plugins.sources.camera_service.plugin import CameraServicePlugin
 
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:

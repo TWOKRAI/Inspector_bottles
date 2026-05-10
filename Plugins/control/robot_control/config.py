@@ -23,7 +23,7 @@ class RobotControlConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.robot_control.plugin.RobotControlPlugin"
+        "Plugins.control.robot_control.plugin.RobotControlPlugin"
     )
 
     # Привязка к register-классам

@@ -20,7 +20,7 @@ class CameraServiceConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.camera_service.plugin.CameraServicePlugin"
+        "Plugins.sources.camera_service.plugin.CameraServicePlugin"
     )
 
     # Тип backend'а

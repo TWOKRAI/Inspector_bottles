@@ -14,7 +14,7 @@ class GrayscalePluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.grayscale.plugin.GrayscalePlugin"
+        "Plugins.processing.grayscale.plugin.GrayscalePlugin"
     )
 
     # Привязка к камере

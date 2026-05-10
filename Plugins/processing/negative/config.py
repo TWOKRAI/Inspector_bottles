@@ -14,7 +14,7 @@ class NegativePluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.negative.plugin.NegativePlugin"
+        "Plugins.processing.negative.plugin.NegativePlugin"
     )
 
     camera_id: int = 0

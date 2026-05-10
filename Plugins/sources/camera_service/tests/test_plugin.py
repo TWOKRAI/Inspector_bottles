@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from Plugins.camera_service.plugin import (
+from Plugins.sources.camera_service.plugin import (
     CameraServicePlugin,
     _FRAME_ID_MODULO,
 )

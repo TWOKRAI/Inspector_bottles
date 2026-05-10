@@ -23,7 +23,7 @@ class WorkerPoolConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.worker_pool.plugin.WorkerPoolPlugin"
+        "Plugins.runtime.worker_pool.plugin.WorkerPoolPlugin"
     )
 
     # Привязка к register-классам

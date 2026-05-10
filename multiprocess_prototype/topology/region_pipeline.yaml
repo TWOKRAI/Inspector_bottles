@@ -27,7 +27,7 @@ processes:
       - preprocessor
     source_target_fps: 25
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.capture.plugin.CapturePlugin
+      - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
         plugin_name: capture
         category: source
         camera_id: 0
@@ -43,7 +43,7 @@ processes:
     chain_targets:
       - region_splitter
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.resize.plugin.ResizePlugin
+      - plugin_class: Plugins.processing.resize.plugin.ResizePlugin
         plugin_name: resize
         category: processing
         scale_factor: 1.0
@@ -55,7 +55,7 @@ processes:
     priority: normal
     # chain_targets не нужен: region_split ставит item["target"] per-item
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.region_split.plugin.RegionSplitPlugin
+      - plugin_class: Plugins.processing.region_split.plugin.RegionSplitPlugin
         plugin_name: region_split
         category: processing
         camera_id: 0
@@ -83,7 +83,7 @@ processes:
     chain_targets:
       - stitcher
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.negative.plugin.NegativePlugin
+      - plugin_class: Plugins.processing.negative.plugin.NegativePlugin
         plugin_name: negative
         category: processing
 
@@ -94,7 +94,7 @@ processes:
     chain_targets:
       - stitcher
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.grayscale.plugin.GrayscalePlugin
+      - plugin_class: Plugins.processing.grayscale.plugin.GrayscalePlugin
         plugin_name: grayscale
         category: processing
 
@@ -105,7 +105,7 @@ processes:
     chain_targets:
       - stitcher
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.flip.plugin.FlipPlugin
+      - plugin_class: Plugins.processing.flip.plugin.FlipPlugin
         plugin_name: flip
         category: processing
 
@@ -116,7 +116,7 @@ processes:
     chain_targets:
       - gui
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.stitcher.plugin.StitcherPlugin
+      - plugin_class: Plugins.processing.stitcher.plugin.StitcherPlugin
         plugin_name: stitcher
         category: processing
         camera_id: 0

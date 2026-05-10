@@ -15,7 +15,7 @@ class StitcherPluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.stitcher.plugin.StitcherPlugin"
+        "Plugins.processing.stitcher.plugin.StitcherPlugin"
     )
 
     camera_id: int = 0

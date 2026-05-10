@@ -14,7 +14,7 @@ class FlipPluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.flip.plugin.FlipPlugin"
+        "Plugins.processing.flip.plugin.FlipPlugin"
     )
 
     camera_id: int = 0

@@ -21,8 +21,8 @@ from multiprocess_framework.modules.process_module.plugins.base import PluginCon
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.registers_module import RegistersManager
 
-from Plugins.color_mask.plugin import ColorMaskPlugin
-from Plugins.color_mask.registers import ColorMaskRegisters
+from Plugins.processing.color_mask.plugin import ColorMaskPlugin
+from Plugins.processing.color_mask.registers import ColorMaskRegisters
 
 
 # --- Tests: ColorMaskRegisters schema ---

@@ -18,7 +18,7 @@ class HeartbeatPluginConfig(PluginConfig):
     """Конфиг heartbeat-плагина: интервал и сообщение."""
 
     plugin_class: str = (
-        "Plugins.heartbeat.plugin.HeartbeatPlugin"
+        "Plugins.sources.heartbeat.plugin.HeartbeatPlugin"
     )
 
     interval_sec: Annotated[

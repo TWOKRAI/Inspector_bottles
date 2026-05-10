@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
-from Plugins.chain_executor.plugin import ChainExecutorPlugin
+from Plugins.runtime.chain_executor.plugin import ChainExecutorPlugin
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +40,9 @@ def _make_items(frame: np.ndarray | None = None) -> list[dict]:
 
 
 # Полные пути к реальным плагинам
-GRAYSCALE_CLASS = "Plugins.grayscale.plugin.GrayscalePlugin"
-NEGATIVE_CLASS = "Plugins.negative.plugin.NegativePlugin"
-FLIP_CLASS = "Plugins.flip.plugin.FlipPlugin"
+GRAYSCALE_CLASS = "Plugins.processing.grayscale.plugin.GrayscalePlugin"
+NEGATIVE_CLASS = "Plugins.processing.negative.plugin.NegativePlugin"
+FLIP_CLASS = "Plugins.processing.flip.plugin.FlipPlugin"
 
 
 def _grayscale_step(name: str = "gray") -> dict:
@@ -182,7 +182,7 @@ class TestSequentialProcess:
         # Добавляем рабочий шаг после сломанного
         import importlib
         mod = importlib.import_module(
-            "Plugins.grayscale.plugin"
+            "Plugins.processing.grayscale.plugin"
         )
         gray_plugin = mod.GrayscalePlugin()
         mock_ctx = MagicMock(spec=PluginContext)

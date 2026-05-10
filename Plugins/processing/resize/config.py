@@ -14,7 +14,7 @@ class ResizePluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.resize.plugin.ResizePlugin"
+        "Plugins.processing.resize.plugin.ResizePlugin"
     )
 
     # Привязка к камере

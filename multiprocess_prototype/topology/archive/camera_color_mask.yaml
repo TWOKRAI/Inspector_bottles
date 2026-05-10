@@ -16,7 +16,7 @@ processes:
       - processor_0
     source_target_fps: 25
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.capture.plugin.CapturePlugin
+      - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
         plugin_name: capture
         category: source
         camera_id: 0
@@ -25,7 +25,7 @@ processes:
   - process_name: processor_0
     priority: normal
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.color_mask.plugin.ColorMaskPlugin
+      - plugin_class: Plugins.processing.color_mask.plugin.ColorMaskPlugin
         plugin_name: color_mask
         category: processing
         h_min: 35

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from Plugins.robot_control.plugin import RobotControlPlugin
+from Plugins.control.robot_control.plugin import RobotControlPlugin
 
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:

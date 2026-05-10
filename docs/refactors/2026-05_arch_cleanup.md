@@ -389,9 +389,9 @@ to = "multiprocess_prototype"
 | 4 | 4.1 — `sql_module` → `Services/sql` + Protocol bridge | 3-4ч | ✅ Done | `a3b525c` |
 | 4 | 4.2 — `hikvision_camera_module_2` в `Services/` | 1-2ч | ✅ Done | `4db04d3` |
 | 4 | 4.3 — rule: framework ∌ Services | 30мин | ✅ Done | `7a342a2` |
-| 5 | 5.1 — `prototype/plugins/` → `Plugins/` | 4-6ч | ⏳ TODO | — |
-| 5 | 5.2 — rule: Plugins ∌ prototype | 30мин | ⏳ TODO | — |
-| 5 | 5.3 — ADR «Plugins vocabulary» | 1ч | ⏳ TODO | — |
+| 5 | 5.1 — `prototype/plugins/` → `Plugins/` | 4-6ч | ✅ Done | (этот PR) |
+| 5 | 5.2 — rule: Plugins ∌ prototype | 30мин | ✅ Done | `7a342a2` (включено в Task 2.1) |
+| 5 | 5.3 — ADR «Plugins vocabulary» | 1ч | ✅ Done | (этот PR) — ADR-120 |
 | 6 | 6.1 — финал + ADR + CLAUDE.md update | 2-3ч | ⏳ TODO | — |
 
 **Итого:** 25-44 часа. Реалистично — **5-7 дней focused work** или 2-3 недели в фоне.

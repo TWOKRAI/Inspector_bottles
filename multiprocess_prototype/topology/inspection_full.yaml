@@ -23,7 +23,7 @@ processes:
       - processor
     source_target_fps: 25
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.camera_service.plugin.CameraServicePlugin
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service
         category: source
         camera_type: simulator
@@ -40,7 +40,7 @@ processes:
       - renderer
     plugins:
       # Шаг 1: HSV-маска красного диапазона (H: 0-30, насыщенный цвет)
-      - plugin_class: multiprocess_prototype.plugins.color_mask.plugin.ColorMaskPlugin
+      - plugin_class: Plugins.processing.color_mask.plugin.ColorMaskPlugin
         plugin_name: color_mask
         category: processing
         h_min: 0
@@ -50,7 +50,7 @@ processes:
         v_min: 100
         v_max: 255
       # Шаг 2: Детекция контуров — красные контуры, фильтр по площади
-      - plugin_class: multiprocess_prototype.plugins.blob_detector.plugin.BlobDetectorPlugin
+      - plugin_class: Plugins.processing.blob_detector.plugin.BlobDetectorPlugin
         plugin_name: blob_detector
         category: processing
         min_area: 200
@@ -65,7 +65,7 @@ processes:
     chain_targets:
       - inspector
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.render_overlay.plugin.RenderOverlayPlugin
+      - plugin_class: Plugins.render.render_overlay.plugin.RenderOverlayPlugin
         plugin_name: render_overlay
         category: processing
         mask_alpha: 0.4
@@ -82,7 +82,7 @@ processes:
       - storage
       - gui
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.robot_control.plugin.RobotControlPlugin
+      - plugin_class: Plugins.control.robot_control.plugin.RobotControlPlugin
         plugin_name: robot_control
         category: processing
         enabled: true
@@ -93,7 +93,7 @@ processes:
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
     priority: low
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.database.plugin.DatabasePlugin
+      - plugin_class: Plugins.io.database.plugin.DatabasePlugin
         plugin_name: database
         category: output
         db_path: "data/inspection_results.db"

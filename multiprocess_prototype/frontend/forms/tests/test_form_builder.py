@@ -96,7 +96,7 @@ class TestBuildFormForRegister:
 
     def test_integration_with_capture_plugin(self, qtbot):
         """build_form_for_register с реальным CapturePluginConfig."""
-        from multiprocess_prototype.plugins.capture.config import CapturePluginConfig
+        from Plugins.sources.capture.config import CapturePluginConfig
         from multiprocess_prototype.registers.field_info import extract_fields
 
         fields = extract_fields("capture", CapturePluginConfig)

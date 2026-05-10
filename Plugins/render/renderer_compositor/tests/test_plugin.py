@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from Plugins.renderer_compositor.plugin import RendererCompositorPlugin
+from Plugins.render.renderer_compositor.plugin import RendererCompositorPlugin
 
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:

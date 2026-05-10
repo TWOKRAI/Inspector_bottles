@@ -18,7 +18,7 @@ processes:
       - gui
     source_target_fps: 10
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.camera_service.plugin.CameraServicePlugin
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service
         category: source
         camera_type: simulator

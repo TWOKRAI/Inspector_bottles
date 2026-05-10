@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
+from Plugins.processing.color_mask.plugin import ColorMaskPlugin
 
 
 # ---------------------------------------------------------------------------

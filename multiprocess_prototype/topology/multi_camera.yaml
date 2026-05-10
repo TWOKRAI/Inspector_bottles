@@ -26,7 +26,7 @@ processes:
       - processor_0
     source_target_fps: 25
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.camera_service.plugin.CameraServicePlugin
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service
         category: source
         camera_type: simulator
@@ -43,7 +43,7 @@ processes:
       - processor_1
     source_target_fps: 25
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.camera_service.plugin.CameraServicePlugin
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service
         category: source
         camera_type: simulator
@@ -59,7 +59,7 @@ processes:
     chain_targets:
       - compositor
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.color_mask.plugin.ColorMaskPlugin
+      - plugin_class: Plugins.processing.color_mask.plugin.ColorMaskPlugin
         plugin_name: color_mask
         category: processing
         h_min: 0
@@ -76,7 +76,7 @@ processes:
     chain_targets:
       - compositor
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.blob_detector.plugin.BlobDetectorPlugin
+      - plugin_class: Plugins.processing.blob_detector.plugin.BlobDetectorPlugin
         plugin_name: blob_detector
         category: processing
         min_area: 100
@@ -90,7 +90,7 @@ processes:
     chain_targets:
       - gui
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.renderer_compositor.plugin.RendererCompositorPlugin
+      - plugin_class: Plugins.render.renderer_compositor.plugin.RendererCompositorPlugin
         plugin_name: renderer_compositor
         category: processing
         layout_mode: grid

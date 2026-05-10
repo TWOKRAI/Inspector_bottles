@@ -5,7 +5,7 @@
 #   2. Замените placeholder-значения на реальные
 #   3. Запустите: python multiprocess_prototype/run.py topology/<ваше_имя>.yaml
 #
-# Документация плагинов: см. multiprocess_prototype/plugins/*/README.md
+# Документация плагинов: см. Plugins/*/README.md
 
 # --- Метаданные ---
 name: my_pipeline              # Уникальное имя topology
@@ -24,7 +24,7 @@ processes:
       - processor
     source_target_fps: 25             # Целевой FPS (только для source-процессов)
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.camera_service.plugin.CameraServicePlugin
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service   # Уникальное имя плагина в процессе
         category: source              # source | processing | rendering | control | output | service | utility
         # Параметры плагина (см. plugin config_schema):
@@ -46,7 +46,7 @@ processes:
       # - blob_detector, region_split, stitcher
       # - render_overlay, renderer_compositor
       # Пример:
-      - plugin_class: multiprocess_prototype.plugins.grayscale.plugin.GrayscalePlugin
+      - plugin_class: Plugins.processing.grayscale.plugin.GrayscalePlugin
         plugin_name: grayscale
         category: processing
 

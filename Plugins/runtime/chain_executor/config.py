@@ -23,7 +23,7 @@ class ChainExecutorConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.chain_executor.plugin.ChainExecutorPlugin"
+        "Plugins.runtime.chain_executor.plugin.ChainExecutorPlugin"
     )
 
     # Привязка к register-классам

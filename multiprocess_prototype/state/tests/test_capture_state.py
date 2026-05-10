@@ -47,7 +47,7 @@ def _make_ctx(
 
 def _make_plugin_with_open_camera(state_proxy=None, process_name="test_process"):
     """Создать плагин с настроенной mock-камерой, которая всегда открыта."""
-    from multiprocess_prototype.plugins.capture.plugin import CapturePlugin
+    from Plugins.sources.capture.plugin import CapturePlugin
 
     ctx = _make_ctx(state_proxy=state_proxy, process_name=process_name)
     plugin = CapturePlugin()
@@ -58,7 +58,7 @@ def _make_plugin_with_open_camera(state_proxy=None, process_name="test_process")
     mock_cap.read.return_value = (True, _FAKE_FRAME)
     mock_cap.get.return_value = 640.0  # CAP_PROP_FRAME_WIDTH / HEIGHT
 
-    with patch("multiprocess_prototype.plugins.capture.plugin.cv2.VideoCapture", return_value=mock_cap):
+    with patch("Plugins.sources.capture.plugin.cv2.VideoCapture", return_value=mock_cap):
         plugin.configure(ctx)
         plugin._start_capture(ctx)
 

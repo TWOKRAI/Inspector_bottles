@@ -23,7 +23,7 @@ class RendererCompositorConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.renderer_compositor.plugin.RendererCompositorPlugin"
+        "Plugins.render.renderer_compositor.plugin.RendererCompositorPlugin"
     )
 
     # Привязка к register-классам

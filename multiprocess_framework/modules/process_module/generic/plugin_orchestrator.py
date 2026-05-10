@@ -63,10 +63,15 @@ class PluginOrchestrator:
         for pdef in plugin_defs:
             plugin_class_path = pdef.get("plugin_class", "")
             plugin_name = pdef.get("plugin_name", "unknown")
-            if not plugin_class_path:
+            # Short-name resolution: если plugin_class пуст или это короткое имя
+            # (без точки) — резолвим через PluginRegistry по plugin_name.
+            resolved_class_path = self._resolve_plugin_class(
+                plugin_class_path, plugin_name,
+            )
+            if not resolved_class_path:
                 continue
             try:
-                plugin = self._load_plugin(plugin_class_path, plugin_name)
+                plugin = self._load_plugin(resolved_class_path, plugin_name)
                 plugin_config = {
                     k: v for k, v in pdef.items()
                     if k not in ("plugin_class", "plugin_name")
@@ -182,6 +187,29 @@ class PluginOrchestrator:
         if not instance.name:
             instance.name = plugin_name
         return instance
+
+    @staticmethod
+    def _resolve_plugin_class(class_path: str, plugin_name: str) -> str:
+        """Резолв коротких имён плагинов через PluginRegistry.
+
+        YAML может содержать либо полный dotted path
+        (``Plugins.sources.camera_service.plugin.CameraServicePlugin``),
+        либо короткое имя (``camera_service``) — тогда категория и путь
+        вычисляются через PluginRegistry (discover был выполнен на старте).
+
+        Если class_path пуст — резолвим по plugin_name.
+        """
+        from ..plugins.registry import PluginRegistry
+
+        candidate = class_path or plugin_name
+        if not candidate:
+            return ""
+        if "." in candidate:
+            return candidate  # full dotted path
+        entry = PluginRegistry.get(candidate)
+        if entry is None:
+            return ""
+        return entry.class_path
 
     def _init_registers(
         self, early: list[tuple[ProcessModulePlugin, PluginContext]],

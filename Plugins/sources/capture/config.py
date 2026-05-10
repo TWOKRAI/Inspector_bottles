@@ -17,7 +17,7 @@ class CapturePluginConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.capture.plugin.CapturePlugin"
+        "Plugins.sources.capture.plugin.CapturePlugin"
     )
 
     # Параметры камеры

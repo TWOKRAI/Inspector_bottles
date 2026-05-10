@@ -23,7 +23,7 @@ class BlobDetectorConfig(PluginConfig):
     """
 
     plugin_class: str = (
-        "Plugins.blob_detector.plugin.BlobDetectorPlugin"
+        "Plugins.processing.blob_detector.plugin.BlobDetectorPlugin"
     )
 
     # Привязка к register-классам
