@@ -17,8 +17,8 @@ from .styles.theme_loader import apply_default_theme
 if TYPE_CHECKING:
     from .process import GuiProcess
 
-# Папка с плагинами прототипа: multiprocess_prototype/plugins/
-_PLUGINS_DIR = Path(__file__).resolve().parents[1] / "plugins"
+# Vocabulary плагинов на уровне проекта: Plugins/ (перенесено в Phase 5)
+_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "Plugins"
 
 
 def run_gui(process: "GuiProcess") -> None:

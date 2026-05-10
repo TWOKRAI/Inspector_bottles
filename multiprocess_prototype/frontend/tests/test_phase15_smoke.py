@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 # Путь к реальной topology
 _TOPOLOGY_PATH = Path(__file__).resolve().parents[2] / "topology" / "inspection_basic.yaml"
-_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "plugins"
+_PLUGINS_DIR = Path(__file__).resolve().parents[3] / "Plugins"
 
 
 @pytest.fixture

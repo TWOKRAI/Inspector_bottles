@@ -139,6 +139,10 @@
 - [ADR-117](#adr-117-единый-processstatus-enum-унификация-из-трёх-определений): Единый ProcessStatus enum — унификация из трёх определений
 - [ADR-118](#adr-118-tabs_setting-оболочки-вкладок-vs-доменные-группы-обсуждение): `tabs_setting/` — оболочки вкладок vs. доменные группы (обсуждение)
 - [ADR-119](#adr-119-sync-framework-для-генерируемых-разделов-документации): Sync framework для генерируемых разделов документации
+- [ADR-120](#adr-120-plugins-vocabulary-плагинов-уровня-проекта-carve-out-из-multiprocess_prototypeplugins): `Plugins/` — vocabulary плагинов уровня проекта (carve-out из `multiprocess_prototype/plugins`)
+- [ADR-121](#adr-121-carve-out-sql_module-servicessql-phase-41): Carve-out `sql_module` → `Services/sql` (Phase 4.1)
+- [ADR-122](#adr-122-carve-out-hikvision_camera-serviceshikvision_camera-phase-42): Carve-out `hikvision_camera` → `Services/hikvision_camera` (Phase 4.2)
+- [ADR-123](#adr-123-категоризация-plugins-по-доменам-phase-5-follow-up): Категоризация `Plugins/` по доменам (Phase 5 follow-up)
 <!-- ADR-TOC:END -->
 
 ---
@@ -1936,6 +1940,87 @@
 
 ---
 
+## ADR-120: `Plugins/` — vocabulary плагинов уровня проекта (carve-out из `multiprocess_prototype/plugins`)
+- Дата: 2026-05-10
+- Статус: принято
+- Контекст: До Phase 5 19 плагинов жили в `multiprocess_prototype/plugins/`, что прибивало vocabulary к одному приложению. Параллельно в работе планировалось второе приложение, которому нужны те же плагины (capture, color_mask, blob_detector, render_overlay, …). Архитектурный анализ ([`docs/refactors/2026-05_arch_cleanup.md`](../docs/refactors/2026-05_arch_cleanup.md)) подтвердил готовность плагинов к выносу: 0 прямых обращений к `state_proxy.set/get` приложения, контракт замкнут на `PluginContext` (services / config / io / registers). Слои `framework → Services → Plugins → application` уже описаны в `.sentrux/rules.toml`, оставалось наполнить слой `Plugins`.
+- Решение: Перенести `multiprocess_prototype/plugins/` → `Plugins/` как top-level пакет проекта.
+  1. `git mv multiprocess_prototype/plugins Plugins` — Git-история сохранена.
+  2. Sed-замена `multiprocess_prototype.plugins` → `Plugins` во всех `.py`, `.yaml`, `.toml` (исключая `multiprocess_prototype_backup/` и historical-документы в `plans/`, `knowledge/wiki/daily/`, `workspace/handoffs/`).
+  3. `multiprocess_prototype/main.py:26` — `PLUGINS_DIR = PROJECT_ROOT / "Plugins"` (раньше `HERE / "plugins"`). `multiprocess_prototype/frontend/app.py:21` и smoke-тест `frontend/tests/test_phase15_smoke.py` — аналогично через `parents[2]/[3] / "Plugins"`.
+  4. `Plugins/__init__.py` обновлён под назначение vocabulary с явным указанием на enforced-правило в `.sentrux/rules.toml`.
+  5. Контракт плагина: знает только `PluginContext`, не знает имя процесса, ключи application state-tree, конкретное приложение. State-binding — через `ctx.state_proxy` с локальным namespace или `ctx.config`. Hard ban на `from multiprocess_prototype import …` — enforced через boundary `Plugins/* → multiprocess_prototype/*` в `.sentrux/rules.toml`.
+- Причина: Плагины — переиспользуемая vocabulary-единица; держать их под именем приложения скрывает архитектурный смысл и блокирует re-use во втором приложении. Перенос обнаруживает 19 плагинов через `PluginRegistry.discover(str(PROJECT_ROOT / "Plugins"))`; 170 plugin-тестов и 770 prototype-тестов остаются green; sentrux check всех 9 правил pass. Одна просадка — sentrux modularity упала с 0.448 → 0.242, потому что 19 плагинов теперь видятся как top-level модули; ожидается восстановление при дальнейших Phase 5+ улучшениях группировки.
+- Отклонённые альтернативы:
+  - **Оставить `multiprocess_prototype/plugins/`** — продолжает прибивать vocabulary к приложению; второе приложение получит дублирование или странный кросс-импорт через имя «прототипа».
+  - **Перенос в `multiprocess_framework/plugins/`** — нарушает направление слоёв: framework не должен знать про конкретные плагины (color_mask, blob_detector — это application-vocabulary, не runtime-фреймворк).
+  - **Singleton-репозиторий плагинов вне репо** — для двух приложений из одного git-проекта это излишний overhead; vendor-сабмодули добавят сложности развёртывания и ревью без выигрыша.
+
+---
+
+## ADR-121: Carve-out `sql_module` → `Services/sql` (Phase 4.1)
+- Дата: 2026-05-10
+- Статус: принято
+- Контекст: До Phase 4 `sql_module` жил в `multiprocess_framework/modules/sql_module/`, наравне с инфраструктурными модулями (router, logger, command, shared_resources, …). По факту он — прикладной слой: SQLAlchemy 2.0 как внешняя зависимость, бизнесовые сущности (Repository, UoW, QuerySet, action_log), не используется ядром framework. Это нарушало направление импортов «framework → ничего прикладного» и блокировало layer-boundary в `.sentrux/rules.toml`.
+- Решение: Перенести модуль в прикладной слой:
+  1. `git mv multiprocess_framework/modules/sql_module Services/sql` (Git-история сохранена; commit `a3b525c`).
+  2. В `Services/sql/__init__.py` фиксируется публичный API (см. файл): `SQLManager`, `GenericRepository`, `TableExporter`, `SchemaBaseMapper`, `SQLManagerConfig`, `DBQueryCommand`, `DBExecuteCommand`, `DBInsertCommand`, протоколы `ISQLManager`, `IRepository`, `IUnitOfWork`, и т.д.
+  3. `Services/sql/interfaces.py` — Protocol-контракты адаптеров (sync / async engine, UoW, schema mapper).
+  4. Sed-замена `multiprocess_framework.modules.sql_module` → `Services.sql` в `.py`, `.yaml`, документации (исключения: `multiprocess_prototype_backup/`, historical `plans/`).
+  5. `scripts/validate.py` — список `MODULES` сокращён до 20 модулей, добавлена секция `check_services()` со своими ожиданиями (`__init__.py`, `interfaces.py`, `STATUS.md`, `README.md`).
+  6. `multiprocess_framework/MODULES_STATUS.md` — обновлена таблица (20 модулей framework), добавлена ссылка на `Services/STATUS.md`.
+  7. `.sentrux/rules.toml` — boundary `multiprocess_framework/* → Services/*` стал реальным (раньше декларативный, теперь enforced).
+- Причина: SQLAlchemy — внешний шкаф (сетевые драйверы, ORM-фреймворк), наравне с PySide6 или OpenCV; держать его внутри `framework/modules/` маскирует архитектурный долг. После выноса framework перестаёт depend-on SQL, что облегчает поддержку (можно собрать ядро без SQL-зависимостей).
+- Отклонённые альтернативы:
+  - **Оставить в `framework/modules/sql_module/`** — продолжает нарушать слои, validate.py красный (sql_module внутри framework, но bound к app-схемам через SchemaBaseMapper).
+  - **Сделать optional dependency** — не решает архитектурную проблему: SQLAlchemy остаётся прибит к framework по импортам.
+
+---
+
+## ADR-122: Carve-out `hikvision_camera` → `Services/hikvision_camera` (Phase 4.2)
+- Дата: 2026-05-10
+- Статус: принято
+- Контекст: Драйвер Hikvision (`HikSDK`) — нативная C-библиотека с привязкой к одному вендору камер. До Phase 4 жил полу-сиротой в дереве плагинов (`Plugins/camera_service/backends/hikvision.py` + sdk-обвязка), но фактически тащил core-логику (sdk_app, command-mappers, регистры), которая выходит за рамки одного плагина.
+- Решение: Выделить Hikvision в полноценный сервис прикладного слоя.
+  1. `Services/hikvision_camera/` — содержит `sdk/` (нативные C-биндинги), `sdk_app/` (Python-обёртки), `core/` (логика камеры), `plugin/` (плагин-обёртка), `interfaces.py`, `STATUS.md`, `README.md`, `tests/`.
+  2. `Plugins/sources/camera_service/backends/hikvision.py` остаётся, но через ленивый импорт `Services.hikvision_camera.*` — backend-адаптер тонкий, а ядро интеграции в Services.
+  3. Layer `.sentrux`: рейтинг `Services → Plugins → application` сохранён; плагин `camera_service` использует `Services.hikvision_camera` через публичный API.
+- Причина: SDK-плагины с большими C-зависимостями требуют отдельной dev-цепочки (компиляция, конфликты ABI, версии runtime). Хранить эту тяжесть в директории «один плагин = одна папка» под `Plugins/` искажает vocabulary плагинов.
+- Отклонённые альтернативы:
+  - **Оставить SDK внутри `Plugins/sources/camera_service/`** — плагин становится god-package (плагин + SDK + sdk_app + регистры). Vocabulary плагинов хочется держать тонким.
+  - **Сделать pip-пакет внешним** — нативные SDK у Hikvision только под Windows/Linux, версии редкие; pip как middleman добавит проблем сборки.
+
+---
+
+## ADR-123: Категоризация `Plugins/` по доменам (Phase 5 follow-up)
+- Дата: 2026-05-11
+- Статус: принято
+- Контекст: ADR-120 вынес плагины в `Plugins/`, оставив 19 плагинов плоским списком. Это засоряло top-level листинг (`ls Plugins/` — 19 строк без визуальной иерархии), а sentrux modularity просел с 0.448 → 0.242 (плагины «видятся» как top-level модули). Пользователь явно высказался, что хочет видеть категории на файловой системе, чтобы Plugins не были «сплошным списком».
+- Решение: Разнести плагины по 6 доменным категориям через `git mv` (история сохранена). Финальная структура:
+
+  | Категория | Плагины | Назначение |
+  |-----------|---------|------------|
+  | `Plugins/sources/` | `camera_service`, `capture`, `frame_counter`, `heartbeat` | Источники данных |
+  | `Plugins/processing/` | `grayscale`, `negative`, `flip`, `color_mask`, `blob_detector`, `region_split`, `resize`, `stitcher` | Обработка кадров |
+  | `Plugins/io/` | `database`, `frame_saver` | Input/Output (БД, файлы) |
+  | `Plugins/render/` | `render_overlay`, `renderer_compositor` | Отрисовка / композитинг |
+  | `Plugins/control/` | `robot_control` | Управление внешними устройствами |
+  | `Plugins/runtime/` | `chain_executor`, `worker_pool` | Pipeline-исполнители |
+
+  1. У каждой категории — `__init__.py` с описанием домена (одна строка).
+  2. `PluginRegistry.discover` (`rglob("plugin.py")` рекурсивен) находит плагины без изменений.
+  3. Sed-замена `Plugins.<name>` → `Plugins.<cat>.<name>` во всех `.py`, `.yaml`, `.md` (47 файлов, 85 строк).
+  4. **Short-name resolution** добавлен в `PluginOrchestrator._resolve_plugin_class()` и `_restore_plugin_configs()`: если `plugin_class` пуст или это короткое имя (без точки) — вычисляется через `PluginRegistry.get(plugin_name).class_path`. YAML может теперь опционально использовать только `plugin_name: camera_service` без жёстко прибитого пути.
+  5. Слой `.sentrux/rules.toml`: glob `Plugins/*` подходит и подкатегориям — изменений не потребовалось.
+- Причина: Категории — это FS-уровень навигации (важно для контрибьюторов: где искать новый плагин), а short-name resolver делает YAML/configs нечувствительными к перемещению плагина между категориями. Это решает разрыв между «хочу видеть категории» и «не хочу пере-прибивать YAML при рефакторинге».
+- Замечание о метрике: ожидалось, что modularity вернётся к ~0.45 после группировки. По факту sentrux показывает 0.242 → 0.249 — категоризация даёт меньше, чем предсказывал план. Вероятно, sentrux считает modules на более глубоком уровне, чем top-level директории. Категоризация остаётся ценной для людей (навигация, поиск), даже если sentrux не премирует её численно. Возврат modularity к 0.45 — задача отдельного исследования.
+- Отклонённые альтернативы:
+  - **Оставить плоский список и снизить `min_modularity`** — лечение симптома, метрика теряет значение.
+  - **`plugin_class` строго fully-qualified в YAML** — категория «протекает» в каждый topology-файл; переименование категории требует sed по всем YAML.
+  - **Регистрировать плагины через манифест-файл `Plugins/manifest.toml`** — дублирование с декоратором `@register_plugin`, дополнительная точка рассинхронизации.
+
+---
+
 ## Модульные решения
 
 **Принцип локальности:** Каждый модуль может иметь свой `modules/<module>/DECISIONS.md` для решений, касающихся только его архитектуры.
@@ -1952,13 +2037,12 @@
 | `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-MSG-001…006 (Message как value object с опциональной Pydantic-схемой, ..., Message наследует SchemaBase (Pydantic v2)) |
 | `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-RTR-001…006 (RouterManager наследует ChannelRoutingManager, ..., Сохранение registration API (register_channel_handler, register_channel_scenario, cleanup)) |
 | `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-WRK-001…004 (Удаление ложного ребра worker → dispatch, ..., WorkerInfo как TypedDict (документация) + plain dict (runtime)) |
-| `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-PM-001…008 (Dual Communication API (send_message vs send), ..., ProcessModule как единственный универсальный класс процесса) |
+| `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-PM-001…009 (Dual Communication API (send_message vs send), ..., Return-based composition (ManagersBundle)) |
 | `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-CMD-001…005 (CommandManager реализует ICommandManager, ..., CommandManager vs ChannelRoutingManager — разные паттерны, синхронный by design) |
 | `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…008 (Удалён legacy API v1, ..., SharedResourcesManagerConfig — SchemaBase с параметрами модуля) |
-| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PMM-001…006 (Per-process stop events (2026-04-10), ..., stop_event оркестратора вне bundle (2026-04-10)) |
+| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PMM-001…008 (Per-process stop events (2026-04-10), ..., Command args helper + public API cleanup) |
 | `error_module` | [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md) | Observability | ADR-EM-001…006 (ErrorManager как наследник LoggerManager (не композиция), ..., Ленивый экспорт ErrorManager из `core/__init__.py`) |
 | `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…006 (StatsManager как прямой наследник ChannelRoutingManager (не LoggerManager), ..., AggregationWindow как IBufferStrategy (не BatchBuffer)) |
-| `sql_module` | [`modules/sql_module/DECISIONS.md`](modules/sql_module/DECISIONS.md) | Data & SQL | ADR-SQL-001…011 (Двойной доступ (sync/async) через адаптеры, ..., UnitOfWork делегирует адаптеру управление транзакцией) |
 | `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…006 (Композиция RegistersContainer вместо дублирования, ..., Регистры vs State Store — когда что применять) |
 | `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…012 (Три уровня использования в едином ConsoleManager, ..., `reg info` показывает FieldMeta и FieldRouting) |
 | `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…013 (IRouter Protocol для инкапсуляции router-зависимости, ..., SubscriptionManager — публичные snapshot-методы для shutdown / DevTools) |

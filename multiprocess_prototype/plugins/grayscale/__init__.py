@@ -1,1 +1,0 @@
-"""GrayscalePlugin — конвертация BGR → GRAY."""

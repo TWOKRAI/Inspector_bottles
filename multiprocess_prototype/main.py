@@ -23,7 +23,7 @@ PROJECT_ROOT = HERE.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-PLUGINS_DIR = HERE / "plugins"
+PLUGINS_DIR = PROJECT_ROOT / "Plugins"
 CONFIG_PATH = HERE / "config" / "system.yaml"
 DEFAULT_BLUEPRINT = HERE / "topology" / "region_pipeline.yaml"
 

@@ -7,7 +7,7 @@
 4. Graceful degradation — плагин без регистра работает на defaults
 
 ColorMask-specific интеграция вынесена в
-multiprocess_prototype/plugins/color_mask/tests/test_registers_integration.py
+Plugins/color_mask/tests/test_registers_integration.py
 по плану docs/refactors/2026-05_arch_cleanup.md (Task 1.1).
 """
 
