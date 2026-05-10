@@ -11,7 +11,7 @@
 - Перечислять доступные устройства (GigE, USB)
 - Настраивать параметры в реальном времени (экспозиция, усиление, fps)
 - Захватывать и конвертировать кадры (Bayer → BGR)
-- Использовать камеру как источник в `multiprocess_prototype_2` через плагин
+- Использовать камеру как источник в `multiprocess_prototype` через плагин
 
 ---
 
@@ -123,7 +123,7 @@ print(f"Exposure: {current.exposure_time} мкс")
 
 ---
 
-## Использование в multiprocess_prototype_2 (Plugin API)
+## Использование в multiprocess_prototype (Plugin API)
 
 ### Добавить в topology.yaml
 
@@ -394,14 +394,14 @@ pytest hikvision_camera_module_2/tests/test_converter.py -v
 - `pyside6` (PySide6) — для SDK App GUI (опционально, только для `__main__.py`)
 
 ### Фреймворк-зависимые (только plugin/)
-- `multiprocess_framework` — если использовать плагин в `multiprocess_prototype_2`
+- `multiprocess_framework` — если использовать плагин в `multiprocess_prototype`
 
 ### На границе (Dict at Boundary)
 - Никаких пользовательских объектов между процессами — только `dict` и примитивы
 
 ---
 
-## Интеграция с multiprocess_prototype_2
+## Интеграция с multiprocess_prototype
 
 1. **Blueprint (YAML):** добавить процесс с `HikvisionCameraPlugin` в `topology.yaml`
 2. **Команды:** отправлять через bridge (open, close, set_parameters и т.д.)
@@ -423,4 +423,4 @@ pytest hikvision_camera_module_2/tests/test_converter.py -v
 
 ## Лицензия и авторство
 
-Часть проекта `multiprocess_prototype_2` (Inspector_bottles).
+Часть проекта `multiprocess_prototype` (Inspector_bottles).

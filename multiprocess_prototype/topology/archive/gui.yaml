@@ -1,0 +1,14 @@
+# Phase 4: GUI process only (smoke test)
+#
+# Минимальная топология с одним GUI-процессом.
+# Используется для проверки GuiProcess + DataReceiverBridge.
+
+name: phase4_gui
+description: "GUI process only (smoke test)"
+
+processes:
+  - process_name: gui
+    process_class: multiprocess_prototype.frontend.process.GuiProcess
+    plugins: []
+
+wires: []

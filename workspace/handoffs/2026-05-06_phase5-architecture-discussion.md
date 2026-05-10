@@ -36,7 +36,7 @@ branch: main
 
 ## Next step
 
-**Продолжить обсуждение оставшихся открытых вопросов в плане `multiprocess_prototype_2/plans/phase5_data_pipeline.md`, начиная с Q9 (per-plugin vs централизованные регистры) — это естественное продолжение разговора про регистры.**
+**Продолжить обсуждение оставшихся открытых вопросов в плане `multiprocess_prototype/plans/phase5_data_pipeline.md`, начиная с Q9 (per-plugin vs централизованные регистры) — это естественное продолжение разговора про регистры.**
 
 Порядок дальнейшего обсуждения (по предложению из плана):
 1. Q9 — организация регистров (per-plugin vs централизованно vs гибрид)
@@ -50,7 +50,7 @@ branch: main
 
 ## Files changed
 
-- `multiprocess_prototype_2/plans/phase5_data_pipeline.md` (+481 / -58):
+- `multiprocess_prototype/plans/phase5_data_pipeline.md` (+481 / -58):
   - Раздел "Новый контракт плагина" — универсальный `process(items)` + опциональный декоратор `@for_each`
   - Task 5.1 (InspectorManager) — multi-camera изоляция через `(camera_id, seq_id)`, мотивация
   - Task 5.2 — добавлен декоратор `@for_each` в шаги, расширен ac-criteria
@@ -62,7 +62,7 @@ branch: main
 
 ## Контекст для быстрой ориентации на новой машине
 
-**Где читать:** `multiprocess_prototype_2/plans/phase5_data_pipeline.md` — целиком. Особенно раздел "Открытые архитектурные вопросы" и "Регистры".
+**Где читать:** `multiprocess_prototype/plans/phase5_data_pipeline.md` — целиком. Особенно раздел "Открытые архитектурные вопросы" и "Регистры".
 
 **Ключевые файлы для разговора про регистры:**
 - `multiprocess_framework/modules/registers_module/README.md` — полное описание API
@@ -74,10 +74,10 @@ branch: main
 **Ключевые файлы для остальных Q:**
 - `multiprocess_framework/modules/process_module/generic/generic_process.py` — текущий GenericProcess (для Q5, декомпозиция)
 - `multiprocess_framework/modules/process_module/plugins/base.py` — контракт плагина (для Q2, Q8)
-- `multiprocess_prototype_2/plugins/grayscale/plugin.py` — типичный плагин с register_message_handler boilerplate (для понимания что мигрируем)
-- `multiprocess_prototype_2/plugins/capture/plugin.py` — source плагин (target routing для Q1)
-- `multiprocess_prototype_2/plugins/region_split/plugin.py` — fan-out 1:N (для Q1, Q2)
-- `multiprocess_prototype_2/plugins/stitcher/plugin.py` — fan-in N:1 (для Q1, Q2)
+- `multiprocess_prototype/plugins/grayscale/plugin.py` — типичный плагин с register_message_handler boilerplate (для понимания что мигрируем)
+- `multiprocess_prototype/plugins/capture/plugin.py` — source плагин (target routing для Q1)
+- `multiprocess_prototype/plugins/region_split/plugin.py` — fan-out 1:N (для Q1, Q2)
+- `multiprocess_prototype/plugins/stitcher/plugin.py` — fan-in N:1 (для Q1, Q2)
 
 **Авто mode:** активирован в текущей сессии. Пользователь предпочитает действие планированию, минимизация interruptions.
 

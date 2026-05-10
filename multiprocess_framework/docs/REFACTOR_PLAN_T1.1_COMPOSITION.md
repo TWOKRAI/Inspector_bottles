@@ -339,7 +339,7 @@ self._process_registry.stop_all(...)
 ---
 
 ### Task 12 — Обновить прототип v2
-**Файлы в `multiprocess_prototype_2/`:**
+**Файлы в `multiprocess_prototype/`:**
 - `frontend/tests/test_gui_process.py` — проверить что моки на _init_* всё ещё работают
 - Остальное не должно сломаться (хуки _init_custom_managers сохранены)
 
@@ -395,9 +395,9 @@ Tasks 1–4 — ядро (псевдокомпозиция). Tasks 5–10 — cl
 ## Верификация
 
 1. `python scripts/run_framework_tests.py` — все тесты фреймворка (206 + 120)
-2. `python -m pytest multiprocess_prototype_2/ -x` — тесты прототипа v2
+2. `python -m pytest multiprocess_prototype/ -x` — тесты прототипа v2
 3. `python scripts/validate.py` — структурная валидация
-4. `python multiprocess_prototype_2/run.py` — smoke-test запуска
+4. `python multiprocess_prototype/run.py` — smoke-test запуска
 
 ---
 

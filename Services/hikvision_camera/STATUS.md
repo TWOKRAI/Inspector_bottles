@@ -89,7 +89,7 @@ cam.start_grabbing()
 frame, pixel_type = cam.capture_frame()
 ```
 
-### Как плагин в multiprocess_prototype_2
+### Как плагин в multiprocess_prototype
 ```yaml
 processes:
   - process_name: camera_0
@@ -146,7 +146,7 @@ pytest hikvision_camera_module_2/tests/ -v
 | ctypes | да | SDK bindings (встроенный в Python) |
 | opencv-python 4.13+ | опционально | FrameConverter для Bayer→BGR конвертации |
 | pyside6 6.10+ | опционально | SDK App GUI (`python -m hikvision_camera_module_2`) |
-| multiprocess_framework | опционально | Если использовать как плагин в multiprocess_prototype_2 |
+| multiprocess_framework | опционально | Если использовать как плагин в multiprocess_prototype |
 | MvCameraControl.dll | опционально | Для live capture (graceful degradation если нет) |
 
 ---
@@ -182,7 +182,7 @@ pytest hikvision_camera_module_2/tests/ -v
 |------|--------|---------|
 | 2024 | 1.0 | Оригинальный модуль (code review, mvs_sdk wrapper) |
 | 2025-Q4 | 2.0 | Рефакторинг: архитектура 3 слоя, protocol, dataclasses |
-| 2026-04 | 2.1 | Полная интеграция с multiprocess_prototype_2; tests 60+ |
+| 2026-04 | 2.1 | Полная интеграция с multiprocess_prototype; tests 60+ |
 | 2026-05-08 | 2.2 | README.md, STATUS.md; готов к production |
 
 ---
@@ -191,7 +191,7 @@ pytest hikvision_camera_module_2/tests/ -v
 
 Модуль тесно интегрирован с:
 - `multiprocess_framework` (plugin system, IPC)
-- `multiprocess_prototype_2` (процессы, GUI, фреймворк)
+- `multiprocess_prototype` (процессы, GUI, фреймворк)
 - `Inspector_vision` проект (рабочий прототип)
 
-Для questions см. main branch в `multiprocess_prototype_2/`.
+Для questions см. main branch в `multiprocess_prototype/`.

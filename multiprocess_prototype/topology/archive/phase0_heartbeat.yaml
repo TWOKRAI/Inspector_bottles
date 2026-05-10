@@ -1,0 +1,18 @@
+# Phase 0 — Heartbeat (proof of boot)
+# Минимальный proof: один процесс, один heartbeat-плагин.
+# Проверяет что фреймворк + plugin discovery + SystemLauncher работают.
+
+name: phase0_heartbeat
+description: "Минимальный proof: один процесс, один heartbeat-плагин"
+
+processes:
+  - process_name: monitor
+    priority: normal
+    plugins:
+      - plugin_class: multiprocess_prototype.plugins.heartbeat.plugin.HeartbeatPlugin
+        plugin_name: heartbeat
+        category: utility
+        interval_sec: 2.0     # логировать каждые 2 секунды
+        message: alive        # текст heartbeat-сообщения
+
+wires: []

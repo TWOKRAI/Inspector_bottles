@@ -1,4 +1,4 @@
-# Архитектурная чистка `multiprocess_framework` ↔ `multiprocess_prototype_2`
+# Архитектурная чистка `multiprocess_framework` ↔ `multiprocess_prototype`
 
 **Дата:** 2026-05-10
 **Триггер:** sentrux + qex анализ выявил 2 критичных и 2 средних архитектурных недочёта на стыке фреймворка и prototype_2 + продуктовое решение разделить **framework / Services / Plugins / application**.
@@ -14,9 +14,9 @@ Inspector_bottles/
 │   ├── sql_module/             #   ← из multiprocess_framework/modules/sql_module
 │   └── hikvision_camera_module_2/  # ← хардварный driver (рефакторинг уже выполнен)
 ├── Plugins/                    # Vocabulary плагинов — переиспользуется между приложениями
-│   ├── capture/, grayscale/, region_split/, ...  # ← из multiprocess_prototype_2/plugins
+│   ├── capture/, grayscale/, region_split/, ...  # ← из multiprocess_prototype/plugins
 │   └── (~19 плагинов)
-└── multiprocess_prototype_2/   # Application = bootstrap + topology yaml + state schema
+└── multiprocess_prototype/   # Application = bootstrap + topology yaml + state schema
     ├── topology/*.yaml
     ├── state/, config/, frontend/  # app-specific glue
     └── plugins/                # пусто или только app-specific (если останется)
@@ -52,7 +52,7 @@ Inspector_bottles/
 
 ### Task 1.1 — Вынести prototype_2-импорты из framework-теста
 
-**Файл:** [`multiprocess_framework/modules/process_module/tests/test_registers_integration.py`](../../multiprocess_framework/modules/process_module/tests/test_registers_integration.py) (343 строки, 9 импортов из `multiprocess_prototype_2.plugins.color_mask`)
+**Файл:** [`multiprocess_framework/modules/process_module/tests/test_registers_integration.py`](../../multiprocess_framework/modules/process_module/tests/test_registers_integration.py) (343 строки, 9 импортов из `multiprocess_prototype.plugins.color_mask`)
 
 **Проблема:** тест фреймворка зависит от плагина прототипа. Удалить/переименовать prototype_2 нельзя без поломки CI фреймворка → нарушение направления зависимостей.
 
@@ -60,13 +60,13 @@ Inspector_bottles/
 
 | Вариант | Что делать | Плюсы | Минусы |
 |---|---|---|---|
-| **A. Перенос (Recommended)** | Перенести файл в `multiprocess_prototype_2/state/tests/test_registers_integration.py` (или `multiprocess_prototype_2/tests/`) | минимум изменений, корректное направление зависимостей | тест перестаёт гоняться при `pytest multiprocess_framework/` — нужно убедиться что `run_framework_tests.py` отдельно ловит prototype_2-тесты или они идут через общий `pytest .` |
+| **A. Перенос (Recommended)** | Перенести файл в `multiprocess_prototype/state/tests/test_registers_integration.py` (или `multiprocess_prototype/tests/`) | минимум изменений, корректное направление зависимостей | тест перестаёт гоняться при `pytest multiprocess_framework/` — нужно убедиться что `run_framework_tests.py` отдельно ловит prototype_2-тесты или они идут через общий `pytest .` |
 | B. Локальный fixture-плагин | В `multiprocess_framework/modules/process_module/tests/fixtures/` создать минимальный `_TestColorMaskPlugin` с тем же контрактом, переписать тест | framework-тесты остаются self-contained | дублирование кода, риск дрейфа от prototype_2-плагина |
 
 **Acceptance:**
 - [ ] `grep -rn "from multiprocess_prototype" multiprocess_framework/ --include="*.py"` → пусто
 - [ ] `python scripts/run_framework_tests.py` → green
-- [ ] `pytest multiprocess_prototype_2/` → green (если выбран вариант A)
+- [ ] `pytest multiprocess_prototype/` → green (если выбран вариант A)
 
 **Эстимейт:** 1-2 часа (вариант A) / 3-4 часа (вариант B).
 
@@ -112,7 +112,7 @@ Inspector_bottles/
 name = "framework-no-prototype"
 description = "multiprocess_framework НЕ импортирует prototype_2"
 forbid_imports_from = "multiprocess_framework"
-to = "multiprocess_prototype_2"
+to = "multiprocess_prototype"
 
 [[rules]]
 name = "process-no-frontend"
@@ -162,7 +162,7 @@ forbid_imports_to_pattern = "multiprocess_prototype_v2"
 **Acceptance:**
 - [ ] `grep -rn "PluginContext(process=" --include="*.py"` → пусто
 - [ ] `pytest multiprocess_framework/modules/process_module/` → green
-- [ ] `pytest multiprocess_prototype_2/` → green
+- [ ] `pytest multiprocess_prototype/` → green
 - [ ] `/run-proto` запускается без ошибок
 
 **Эстимейт:** 2-4 часа (зависит от количества вызовов).
@@ -273,7 +273,7 @@ to = "Services"
 
 > **Триггер:** после Phase 4. Подтверждено пользователем — будут новые приложения, переиспользующие плагины. ROI вполне реальный.
 
-### Task 5.1 — Перенести `multiprocess_prototype_2/plugins/` → `Plugins/`
+### Task 5.1 — Перенести `multiprocess_prototype/plugins/` → `Plugins/`
 
 **Контекст из анализа цены миграции:**
 - 19 плагинов, 28 файлов registers/configs/schemas
@@ -283,18 +283,18 @@ to = "Services"
 - **0 прямых `state_proxy.set/get`** в плагинах ★ — плагины уже архитектурно готовы как vocabulary, не привязаны к application state-tree
 
 **Подход:**
-1. `git mv multiprocess_prototype_2/plugins/ Plugins/`
+1. `git mv multiprocess_prototype/plugins/ Plugins/`
 2. Sed по Python-импортам:
    ```bash
-   grep -rln "multiprocess_prototype_2.plugins" --include="*.py" | \
-     xargs sed -i '' 's|multiprocess_prototype_2\.plugins|Plugins|g'
+   grep -rln "multiprocess_prototype.plugins" --include="*.py" | \
+     xargs sed -i '' 's|multiprocess_prototype\.plugins|Plugins|g'
    ```
 3. Sed по topology yaml (`plugin_class`, `process_class`):
    ```bash
-   grep -rln "multiprocess_prototype_2.plugins" multiprocess_prototype_2/topology/*.yaml | \
-     xargs sed -i '' 's|multiprocess_prototype_2\.plugins|Plugins|g'
+   grep -rln "multiprocess_prototype.plugins" multiprocess_prototype/topology/*.yaml | \
+     xargs sed -i '' 's|multiprocess_prototype\.plugins|Plugins|g'
    ```
-4. Обновить [`main.py:26`](../../multiprocess_prototype_2/main.py#L26): `PLUGINS_DIR = HERE / "plugins"` → `PLUGINS_DIR = PROJECT_ROOT / "Plugins"`.
+4. Обновить [`main.py:26`](../../multiprocess_prototype/main.py#L26): `PLUGINS_DIR = HERE / "plugins"` → `PLUGINS_DIR = PROJECT_ROOT / "Plugins"`.
 5. Создать `Plugins/__init__.py` (пустой или с docstring).
 6. Прогнать `pytest Plugins/` (1108 тестов prototype_2 включали plugin-тесты — должны переехать с плагинами).
 7. Smoke-тест: `/run-proto`.
@@ -302,7 +302,7 @@ to = "Services"
 **Подводный камень:** `PluginRegistry._file_to_module` ([registry.py:175](../../multiprocess_framework/modules/process_module/plugins/registry.py#L175)) ищет ближайший `sys.path` entry. Корень репо уже в `sys.path` (см. `main.py:23-24`) → discover отработает как раньше, найдёт `Plugins/X/plugin.py`.
 
 **Acceptance:**
-- [ ] `grep -rn "multiprocess_prototype_2.plugins" --include="*.py" --include="*.yaml"` → пусто
+- [ ] `grep -rn "multiprocess_prototype.plugins" --include="*.py" --include="*.yaml"` → пусто
 - [ ] 19 плагинов discover-ятся: `mcp__qex__search_code` или smoke-тест с `PluginRegistry.list()`
 - [ ] `/run-proto` запускается и работает (frame от камеры доходит до GUI)
 - [ ] `pytest Plugins/` → green
@@ -317,10 +317,10 @@ to = "Services"
 ```toml
 [[rules]]
 name = "plugins-app-agnostic"
-description = "Plugins не импортируют из multiprocess_prototype_2/3/... — только framework + Services"
+description = "Plugins не импортируют из multiprocess_prototype/3/... — только framework + Services"
 forbid_imports_from = "Plugins"
-to = "multiprocess_prototype_2"
-# в будущем добавить: to = ["multiprocess_prototype_2", "multiprocess_prototype_3", ...]
+to = "multiprocess_prototype"
+# в будущем добавить: to = ["multiprocess_prototype", "multiprocess_prototype_3", ...]
 ```
 
 **Acceptance:**
@@ -339,7 +339,7 @@ to = "multiprocess_prototype_2"
 1. Знает только `PluginContext` (services, config, io, registers).
 2. **Не** знает имя процесса в топологии, ключи application state-tree, конкретное приложение.
 3. State-binding только через `ctx.state_proxy` с локальным namespace или `ctx.config`.
-4. Hard ban на `from multiprocess_prototype_2 import ...` — enforced правилом 5.2.
+4. Hard ban на `from multiprocess_prototype import ...` — enforced правилом 5.2.
 
 **Acceptance:**
 - [ ] ADR создан

@@ -162,7 +162,7 @@ class TestColorMaskRegisters:
 
     def test_create_with_defaults(self):
         """Schema создаётся с defaults."""
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
         assert reg.h_min == 0
@@ -174,7 +174,7 @@ class TestColorMaskRegisters:
 
     def test_field_meta_present(self):
         """Все 6 HSV-полей имеют FieldMeta."""
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
         for field_name in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]:
@@ -183,7 +183,7 @@ class TestColorMaskRegisters:
 
     def test_hue_range(self):
         """Hue поля: min=0, max=179."""
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
         meta_h = reg.get_field_meta("h_min")
@@ -192,7 +192,7 @@ class TestColorMaskRegisters:
 
     def test_mutable(self):
         """Значения можно менять."""
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
 
         reg = ColorMaskRegisters()
         reg.h_min = 30
@@ -278,7 +278,7 @@ class TestGracefulDegradation:
 
     def test_color_mask_without_register(self):
         """ColorMaskPlugin без RegistersManager — локальный register с YAML overrides."""
-        from multiprocess_prototype_2.plugins.color_mask.plugin import ColorMaskPlugin
+        from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
 
         plugin = ColorMaskPlugin()
         ctx = PluginContext(
@@ -296,8 +296,8 @@ class TestGracefulDegradation:
 
     def test_color_mask_with_register(self):
         """ColorMaskPlugin с managed регистром — читает пороги из него."""
-        from multiprocess_prototype_2.plugins.color_mask.plugin import ColorMaskPlugin
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+        from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
+        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
         from multiprocess_framework.modules.registers_module import RegistersManager
 
         reg_instance = ColorMaskRegisters(h_min=20, h_max=100)
@@ -318,8 +318,8 @@ class TestGracefulDegradation:
 
     def test_color_mask_process_with_register(self):
         """ColorMaskPlugin.process() использует регистр для HSV."""
-        from multiprocess_prototype_2.plugins.color_mask.plugin import ColorMaskPlugin
-        from multiprocess_prototype_2.plugins.color_mask.registers import ColorMaskRegisters
+        from multiprocess_prototype.plugins.color_mask.plugin import ColorMaskPlugin
+        from multiprocess_prototype.plugins.color_mask.registers import ColorMaskRegisters
         from multiprocess_framework.modules.registers_module import RegistersManager
 
         reg_instance = ColorMaskRegisters(h_min=0, h_max=179, s_min=0, s_max=255, v_min=0, v_max=255)

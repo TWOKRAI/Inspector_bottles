@@ -1,4 +1,4 @@
-"""Плагин Hikvision камеры для multiprocess_prototype_2."""
+"""Плагин Hikvision камеры для multiprocess_prototype."""
 from __future__ import annotations
 
 from .plugin import HikvisionCameraPlugin

@@ -3,11 +3,11 @@
 Чистая архитектура:
     sdk/    -- минимальные ctypes bindings к MVS SDK
     core/   -- бизнес-логика (camera state machine, discovery, parameters, converter)
-    plugin/ -- плагин для multiprocess_prototype_2 (source plugin + registers)
+    plugin/ -- плагин для multiprocess_prototype (source plugin + registers)
 
 Публичный API:
     HikvisionCamera       -- state machine камеры (core)
-    HikvisionCameraPlugin -- source plugin для multiprocess_prototype_2
+    HikvisionCameraPlugin -- source plugin для multiprocess_prototype
     HikvisionCameraConfig -- конфиг плагина
 """
 from __future__ import annotations
