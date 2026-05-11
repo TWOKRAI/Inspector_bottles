@@ -4,7 +4,7 @@ SQLManagerConfig — конфигурационная схема SQLManager.
 
 Следует паттерну SchemaBase + @register_schema (ADR-016).
 """
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Dict, Literal, Optional
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 
@@ -40,3 +40,13 @@ class SQLManagerConfig(SchemaBase):
         bool,
         FieldMeta("Использовать NullPool для multiprocess"),
     ] = False
+    connect_args: Annotated[
+        Dict[str, Any],
+        FieldMeta(
+            "Дополнительные аргументы для DBAPI connect()",
+            info=(
+                "Передаются напрямую в sqlalchemy.create_engine(connect_args=...). "
+                "Пример: {'check_same_thread': False} для SQLite в многопоточных приложениях."
+            ),
+        ),
+    ] = {}

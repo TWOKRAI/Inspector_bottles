@@ -5,6 +5,8 @@
   SideNavLayout
     «Пользователи» → UsersPanel(ctx)      (если есть право users.view)
     «Роли»         → RolesPanel(ctx)       (если есть право roles.view)
+    «Сессии»       → SessionsPanel(ctx)    (если есть право users.view)
+    «Audit log»    → AuditLogPanel(ctx)    (если есть право roles.view)
 
 Права: при отсутствии обоих permissions «users.view» и «roles.view» —
 показывает placeholder «Недостаточно прав». Содержимое перестраивается
@@ -26,15 +28,17 @@ if TYPE_CHECKING:
 
 
 class AdministrationSection(QWidget):
-    """Секция «Администрация» — SideNavLayout с подсекциями «Пользователи» и «Роли».
+    """Секция «Администрация» — SideNavLayout с четырьмя подсекциями.
 
     Содержимое перестраивается при изменении access_context (сигнал AuthState),
     поэтому корректно реагирует на login и logout даже если виджет создан до входа.
 
     Структура (при наличии прав):
       SideNavLayout
-        «Пользователи» → UsersPanel(ctx)   (только если есть users.view)
+        «Пользователи» → UsersPanel(ctx)    (только если есть users.view)
         «Роли»         → RolesPanel(ctx)    (только если есть roles.view)
+        «Сессии»       → SessionsPanel(ctx) (только если есть users.view)
+        «Audit log»    → AuditLogPanel(ctx) (только если есть roles.view)
 
     Если доступна только одна подсекция — SideNav содержит один пункт.
     Если нет ни одной — отображается placeholder «Недостаточно прав».
@@ -85,7 +89,10 @@ class AdministrationSection(QWidget):
         if not has_users and not has_roles:
             self._current = self._build_restricted_placeholder()
         else:
-            self._current = self._build_sidenav(has_users=has_users, has_roles=has_roles)
+            self._current = self._build_sidenav(
+                has_users=has_users,
+                has_roles=has_roles,
+            )
 
         self._outer_layout.addWidget(self._current)
 
@@ -93,8 +100,15 @@ class AdministrationSection(QWidget):
     # Строители содержимого
     # ------------------------------------------------------------------
 
-    def _build_sidenav(self, *, has_users: bool, has_roles: bool) -> QWidget:
-        """Построить SideNavLayout с теми подсекциями, на которые есть права."""
+    def _build_sidenav(
+        self, *, has_users: bool, has_roles: bool
+    ) -> QWidget:
+        """Построить SideNavLayout с теми подсекциями, на которые есть права.
+
+        Порядок: Пользователи → Роли → Сессии → Audit log.
+        «Сессии» видим при has_users, «Audit log» — при has_roles.
+        RolesPanel сам читает permission из ctx.access_context.
+        """
         nav = SideNavLayout()
 
         if has_users:
@@ -104,6 +118,18 @@ class AdministrationSection(QWidget):
         if has_roles:
             from .roles_panel import RolesPanel
             nav.add_section("roles", "Роли", RolesPanel(self._ctx))
+
+        # PR4 Group C: read-only панели аудита
+        has_sessions = has_users
+        has_audit = has_roles
+
+        if has_sessions:
+            from .sessions_panel import SessionsPanel
+            nav.add_section("sessions", "Сессии", SessionsPanel(self._ctx))
+
+        if has_audit:
+            from .audit_log_panel import AuditLogPanel
+            nav.add_section("audit_log", "Audit log", AuditLogPanel(self._ctx))
 
         nav.set_current("users" if has_users else "roles")
 

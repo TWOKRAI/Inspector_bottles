@@ -147,3 +147,90 @@ bcrypt с rounds=12 в production, rounds=4 в тестах.
 - Внешние потребители модуля не ломаются — API фасада не изменился.
 - `models.py`, `exceptions.py`, `interfaces.py` остаются в корне
   (слишком маленькие для отдельного sub-package).
+
+---
+
+## Auth-006: Append-only инвариант для таблицы audit_log
+
+**Статус:** Accepted (PR4, Group A — реализовано).
+
+**Контекст:**
+Аудит-лог должен быть неизменяемым: после записи событие нельзя изменить
+или удалить. Это требование compliance и целостности данных.
+
+**Решение:**
+Переопределить `update()` и `delete()` в `_AppendOnlyAuditRepo(GenericRepository)`
+так, чтобы они всегда выбрасывали `AuditImmutableError` с кодом `AUTH-007`.
+`SessionRepository` — без ограничений (logout обновляет `logout_at`).
+
+**Альтернативы отклонены:**
+- Ограничение на уровне SQLite (триггеры) — зависимость от конкретной БД,
+  сложнее тестировать.
+- Ограничение в middleware — легко обойти напрямую через репозиторий.
+
+**Последствия:**
+- `AuditEntry.update()` / `AuditEntry.delete()` через `SqliteAuditStorage` → `AuditImmutableError`.
+- Прямой SQL (обход ORM) не защищён — осознанное ограничение desktop-приложения.
+
+---
+
+## Auth-007: JSONL fallback при сбое SQLite + автовосстановление
+
+**Статус:** Accepted (PR4, Group B — реализовано).
+
+**Контекст:**
+SQLite может быть недоступен (locked, disk full, IO error). Нельзя терять
+записи аудита при сбоях хранилища.
+
+**Решение:**
+`AuditWriter._write_batch()` при `Exception` записывает каждый `AuditEntry`
+в JSONL-файл (append-mode, одна строка = одна запись).
+При следующем `AuditWriter.start()` вызывается `recover_fallback()`:
+читает JSONL построчно, мигрирует в SQLite, архивирует файл как
+`fallback.jsonl.migrated.<utc-isoformat>`.
+
+**Формат fallback:** `AuditEntry.model_dump_json()` — стандартная Pydantic-сериализация.
+
+**Альтернативы отклонены:**
+- Буфер в памяти без персистентности — риск потери при крэше процесса.
+- Отдельная SQLite-БД для fallback — излишняя сложность.
+
+**Последствия:**
+- Конфигурируемый `fallback_path` в `AuditWriter.__init__()`.
+- `recover_fallback()` идемпотентен: повторный вызов с уже мигрированным файлом
+  (архив переименован) — возвращает 0.
+- Повреждённые строки JSONL пропускаются с предупреждением в stdout.
+
+---
+
+## Auth-008: Audit через ActionBus post-execute middleware
+
+**Статус:** Accepted (PR4, Group B — реализовано).
+
+**Контекст:**
+Нужен централизованный перехват всех мутаций состояния для записи в аудит-лог.
+Альтернативы: хуки в каждом CRUD-методе AuthManager, или в каждом Handler.
+
+**Решение:**
+Добавить `add_post_execute_callback(cb: Callable[[Action], None])` в `ActionBus`
+(framework-уровень). Callback вызывается после успешного `handler.apply()` в `execute()`.
+Undo/redo — не триггерят callback (они уже учтены в аудите при первом execute).
+
+`AuditMiddleware` в `multiprocess_prototype/` реализует этот callback:
+извлекает пользователя из StateStore, формирует `AuditEntry.with_truncation()`,
+вызывает `audit_writer.log()` (non-blocking).
+
+**Регистрация:** `bus_factory.create_action_bus(..., audit_writer=..., state_store=...)`.
+
+**Альтернативы отклонены:**
+- Хуки в каждом методе AuthManager — дублирование кода, легко забыть добавить.
+- Переопределение `execute()` в подклассе ActionBus — нарушает принцип
+  единственного экземпляра шины.
+- Использование `_change_callbacks` (без аргумента Action) — недостаточно данных.
+
+**Последствия:**
+- `ActionBus` получает три новых метода: `add_post_execute_callback`,
+  `remove_post_execute_callback`, `_notify_post_execute`.
+- Framework не зависит от `Services.auth` — callback типизирован как
+  `Callable[[Action], None]` без упоминания AuditEntry.
+- Слоевая граница соблюдена: `AuditMiddleware` живёт в `multiprocess_prototype/`.

@@ -12,7 +12,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .models import AuditEntry
 
 
 # =============================================================================
@@ -209,4 +212,52 @@ class IAuthManager(Protocol):
 
         Returns:
             True если пароль верный.
+        """
+
+
+# =============================================================================
+# IAuditWriter
+# =============================================================================
+
+
+@runtime_checkable
+class IAuditWriter(Protocol):
+    """Контракт асинхронного писателя аудит-лога."""
+
+    def log(self, entry: "AuditEntry") -> None:
+        """
+        Поставить запись аудита в очередь (non-blocking).
+
+        Args:
+            entry: Экземпляр AuditEntry (рекомендуется через AuditEntry.with_truncation).
+        """
+
+
+# =============================================================================
+# ISessionTracker
+# =============================================================================
+
+
+@runtime_checkable
+class ISessionTracker(Protocol):
+    """Контракт трекера сессий пользователей."""
+
+    def open_session(self, user_id: str, username: str) -> str:
+        """
+        Открыть новую сессию.
+
+        Args:
+            user_id:  UUID пользователя.
+            username: Имя пользователя (денормализованное).
+
+        Returns:
+            session_id (UUID4 строка).
+        """
+
+    def close_session(self, session_id: str) -> None:
+        """
+        Закрыть сессию (проставить logout_at).
+
+        Args:
+            session_id: UUID4 идентификатор сессии.
         """

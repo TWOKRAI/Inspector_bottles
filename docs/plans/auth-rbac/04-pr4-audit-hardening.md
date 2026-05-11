@@ -94,14 +94,14 @@
 
 ## Definition of Done
 
-- [ ] Изменение поля любого виджета (через ActionBus) появляется в audit_log с правильным user_id.
-- [ ] SessionsPanel показывает корректную историю login/logout.
-- [ ] AuditLogPanel — фильтры работают, пагинация работает.
-- [ ] Editable PermissionMatrix — изменения сохраняются, проходят audit.
-- [ ] Coherence-инвариант UI: `edit ⇒ view` enforced.
-- [ ] Append-only тесты — зелёные.
-- [ ] Fallback-тест — SQLite симуляция падения, JSONL пишется, recovery работает.
-- [ ] `python scripts/run_framework_tests.py` зелёный.
+- [x] Изменение поля любого виджета (через ActionBus) появляется в audit_log с правильным user_id.
+- [x] SessionsPanel показывает корректную историю login/logout.
+- [x] AuditLogPanel — фильтры работают, пагинация работает.
+- [x] Editable PermissionMatrix — изменения сохраняются, проходят audit.
+- [x] Coherence-инвариант UI: `edit ⇒ view` enforced.
+- [x] Append-only тесты — зелёные.
+- [x] Fallback-тест — SQLite симуляция падения, JSONL пишется, recovery работает.
+- [x] `python scripts/run_framework_tests.py` зелёный (Group E: все 282 теста зелёные).
 
 ## Risks
 
