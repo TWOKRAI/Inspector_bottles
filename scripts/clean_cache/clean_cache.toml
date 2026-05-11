@@ -1,0 +1,68 @@
+# Конфигурация для scripts/clean_cache/clean_cache.py
+#
+# Безопасность: по умолчанию скрипт работает в режиме dry-run (только показывает,
+# что *было бы* удалено). Чтобы реально удалить — флаг --apply.
+#
+# Удаляются:
+#   - директории, имена которых матчат delete.dirs (рекурсивно, с содержимым);
+#   - файлы, имена которых матчат delete.files;
+# Сопоставление имени — fnmatch (glob: *, ?, [seq]).
+
+[scan]
+root = "."
+follow_symlinks = false
+
+[delete]
+# Директории Python-кэша и инструментов
+dirs = [
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    "htmlcov",
+    "*.egg-info",
+]
+# Файлы-артефакты компиляции и покрытия
+files = [
+    "*.pyc",
+    "*.pyo",
+    "*.pyd",
+    ".coverage",
+    ".coverage.*",
+    "coverage.xml",
+]
+
+[exclude]
+# Каталоги, в которые вообще не заходим (не сканируем, не удаляем то,
+# что внутри). Поддерживаются glob-паттерны имени каталога.
+dirs = [
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    ".qex",
+    ".sentrux",
+    "multiprocess_prototype_backup",  # snapshot owner — НЕ ТРОГАТЬ (см. CLAUDE.md)
+]
+# Glob-паттерны относительных путей (от --root) которые исключаются из удаления.
+# Пример: "vendor/**" — не трогать кэш в vendored зависимостях.
+path_patterns = []
+
+[output]
+format = "table"   # table | json
+# Сортировка строк отчёта: path | size | files
+sort_by = "size"
+sort_order = "desc"
+# Показать первые N групп (0 = все)
+limit = 0
+# Минимальный размер группы для показа в таблице, в байтах. 0 = показать всё.
+min_size = 0
+
+[safety]
+# Дополнительный slow-rails: даже при --apply отказываемся работать,
+# если корень сканирования совпадает с корнем диска или с $HOME.
+forbid_dangerous_roots = true
+# Тайм-аут общего прохода в секундах (предохранитель, не должен срабатывать).
+timeout_sec = 120

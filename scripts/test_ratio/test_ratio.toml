@@ -1,0 +1,43 @@
+# Конфигурация для scripts/test_ratio/test_ratio.py
+#
+# Считает на модуль: LOC в test-зонах ÷ LOC в продакшен-коде.
+# Цель — быстрый снимок «насколько модуль покрыт тестами по объёму».
+
+[scan]
+# Корни, в которых каждый подкаталог — отдельный модуль.
+# Можно перечислить несколько (multiprocess_framework/modules, Services, Plugins).
+module_roots = [
+    "multiprocess_framework/modules",
+    "Services",
+    "Plugins",
+]
+
+[detect]
+# Папка-маркер тестов внутри модуля.
+test_dir = "tests"
+# Дополнительные test-маркеры (используется fnmatch по имени файла).
+test_file_patterns = ["test_*.py", "*_test.py", "conftest.py"]
+
+[exclude]
+# Имена директорий внутри модуля, которые не считаем ни как тесты, ни как код.
+dirs = [
+    "__pycache__", ".git", ".venv", "venv",
+    "node_modules", ".qex", ".sentrux",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "build", "dist",
+    "docs", "archive", "_examples",  # документация и примеры не считаются "кодом" в смысле test-ratio
+]
+file_patterns = ["__init__.py"]   # __init__.py — обычно пустые, искажают ratio
+
+[count]
+# Что считать строкой "кода": non_blank | non_blank_non_comment | all
+mode = "non_blank_non_comment"
+encoding = "utf-8"
+
+[output]
+format = "table"        # table | json | csv
+sort_by = "ratio"       # ratio | code | tests | name
+sort_order = "asc"      # asc — модули с минимальным покрытием наверху
+limit = 0
+# Порог для пометки HEALTH-колонки: ratio >= warn_threshold → ✓, < warn → ⚠, нет тестов → ✗
+warn_threshold = 0.3

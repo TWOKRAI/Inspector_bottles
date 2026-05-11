@@ -1,0 +1,70 @@
+# Конфигурация для scripts/code_stats/code_stats.py
+#
+# Запуск:
+#   python scripts/code_stats/code_stats.py
+#   python scripts/code_stats/code_stats.py --config scripts/code_stats/code_stats.toml
+#   python scripts/code_stats/code_stats.py --root multiprocess_framework --format json
+#
+# CLI-аргументы перекрывают значения из этого файла.
+
+[scan]
+# Корень обхода. Относительный путь — от текущей рабочей директории.
+root = "."
+# Рекурсивный обход подпапок.
+recursive = true
+# Следовать ли по симлинкам (false безопаснее: не зациклится).
+follow_symlinks = false
+
+[formats]
+# Расширения, которые учитываем. Регистр не важен. Пустой список = все файлы.
+include = [".py", ".md", ".toml", ".yaml", ".yml", ".json", ".sh"]
+
+[exclude]
+# Имена директорий, которые пропускаем целиком (быстрый pruning).
+dirs = [
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    ".qex",
+    ".sentrux",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "*.egg-info",
+    "multiprocess_prototype_backup",
+]
+# Glob-паттерны имён файлов, которые пропускаем.
+file_patterns = ["*.pyc", "*.pyo", "*.so", "*.dylib", "*.dll", ".DS_Store"]
+# Glob-паттерны путей (полный путь относительно root) — для точечных исключений.
+path_patterns = []
+
+[count]
+# Считать ли пустые строки.
+blank_lines = false
+# Считать ли комментарии (см. правила для .py / .md / .sh ниже).
+comments = true
+# Считать ли docstring-блоки в .py (тройные кавычки на верхнем уровне модуля/функции).
+docstrings = true
+# Считать ли символы (помимо строк). Незначительные накладные расходы.
+chars = true
+# Кодировка для чтения. errors='replace' гарантирует, что бинарь-подобные файлы не уронят скрипт.
+encoding = "utf-8"
+
+[output]
+# Формат вывода: table | json | csv
+format = "table"
+# Группировка строк отчёта: extension | directory | none
+group_by = "extension"
+# Сортировка: lines | chars | files | name
+sort_by = "lines"
+# Порядок сортировки: desc | asc
+sort_order = "desc"
+# Показывать ли итоговую строку TOTAL.
+show_total = true
+# Максимум строк в выводе (0 = без ограничений). Удобно при group_by = "directory".
+limit = 0

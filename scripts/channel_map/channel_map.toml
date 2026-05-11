@@ -1,0 +1,42 @@
+# Конфигурация для scripts/channel_map/channel_map.py
+#
+# Цель: построить карту IPC — кто объявляет каналы (FieldRouting),
+# кто шлёт сообщения (send_message) и в какие targets.
+
+[scan]
+root = "."
+recursive = true
+follow_symlinks = false
+
+[exclude]
+dirs = [
+    "__pycache__", ".git", ".venv", "venv", "env",
+    "node_modules", ".qex", ".sentrux",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "build", "dist", "*.egg-info",
+    "multiprocess_prototype_backup",
+    "tests",   # обычно интересны декларации в production-коде, не в фикстурах
+]
+file_patterns = ["*_test.py", "test_*.py", "conftest.py"]
+path_patterns = []
+
+[detect]
+# Имена функций-конструкторов, чьи kwarg `channel="..."` считаем декларацией канала.
+channel_constructors = ["FieldRouting"]
+# Имена методов отправки. Извлекаем первый positional или kwarg `target=`/`targets=`.
+send_methods = ["send_message"]
+# Имена методов подписки/чтения по каналу (если используются).
+subscribe_methods = ["subscribe", "on_channel", "register_handler"]
+
+[output]
+format = "table"        # table | json | csv
+# group_by: file | module | role
+#   - file:   каждая строка = .py-файл
+#   - module: группировка по multiprocess_framework/modules/X/ и Services/X/
+#   - role:   сводка по типу события (declarations / sends / subscribes)
+group_by = "module"
+sort_by = "total"       # total | declarations | sends | subscribes | name
+sort_order = "desc"
+limit = 0
+# Показать ли строки с нулевым числом находок (обычно нет).
+show_empty = false

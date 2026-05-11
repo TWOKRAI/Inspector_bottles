@@ -102,5 +102,12 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 | `/sentrux-rules` | Проверить `.sentrux/rules.toml` (MCP, интерактивно) |
 | `/sentrux-check` | `sentrux check` (CLI, exit 0/1, для CI) |
 | `/sentrux-evolution` | Тренды метрик во времени |
+| `/code-stats` | Подсчёт файлов / строк / символов по TOML-конфигу ([`scripts/code_stats/`](scripts/code_stats/README.md)) |
+| `/code-stats-tokei` | Точный LOC через tokei (общий TOML с `/code-stats`) — [`scripts/code_stats/code_stats_tokei.py`](scripts/code_stats/code_stats_tokei.py) |
+| `/channel-map` | AST-карта IPC: `FieldRouting` декларации + `send_message` адресаты ([`scripts/channel_map/`](scripts/channel_map/README.md)) |
+| `/message-contracts` | AST-дамп `SchemaBase` / `Message` / `BaseModel` классов с полями ([`scripts/message_contracts/`](scripts/message_contracts/README.md)) |
+| `/test-ratio` | LOC тестов ÷ LOC кода на модуль ([`scripts/test_ratio/`](scripts/test_ratio/README.md)) |
+| `/todo-inventory` | Инвентаризация TODO/FIXME/HACK с `git blame` ([`scripts/todo_inventory/`](scripts/todo_inventory/README.md)) |
+| `/clean-cache` | Чистка Python-кэшей (`__pycache__`, `.pytest_cache`, `*.pyc`, `.coverage`) — dry-run по умолчанию, `--apply` для удаления ([`scripts/clean_cache/`](scripts/clean_cache/README.md)) |
 
 Подробный гайд: [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md).

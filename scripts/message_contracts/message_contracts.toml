@@ -1,0 +1,44 @@
+# Конфигурация для scripts/message_contracts/message_contracts.py
+#
+# Извлекает декларации классов, наследующих указанные базовые типы.
+# Полезно для аудита Dict-at-Boundary контрактов (Message / SchemaBase / Pydantic-модели).
+
+[scan]
+root = "."
+recursive = true
+follow_symlinks = false
+
+[exclude]
+dirs = [
+    "__pycache__", ".git", ".venv", "venv", "env",
+    "node_modules", ".qex", ".sentrux",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "build", "dist", "*.egg-info",
+    "multiprocess_prototype_backup",
+]
+file_patterns = []
+path_patterns = []
+
+[detect]
+# Базовые классы, наследников которых ищем. Сравнение по простому имени (без модуля).
+# Т.е. `class Foo(my.pkg.SchemaBase)` будет найден.
+base_classes = ["SchemaBase", "BaseModel", "Message"]
+# Игнорировать тестовые классы по префиксу имени (например, `_TestControlConfig`).
+ignore_name_prefixes = ["_Test", "Test"]
+# Считать ли вложенные классы (определённые внутри других классов).
+include_nested = false
+
+[output]
+format = "table"        # table | json | csv
+# group_by: class | module | base
+#   - class:  одна строка на класс
+#   - module: модуль → список классов
+#   - base:   базовый класс → список наследников
+group_by = "class"
+sort_by = "fields"      # fields | name | module
+sort_order = "desc"
+limit = 0
+# Показывать ли поля в выводе table (для json/csv — всегда).
+show_fields = true
+# Максимум полей в превью table-вывода.
+max_fields_preview = 8
