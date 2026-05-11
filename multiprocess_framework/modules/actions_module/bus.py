@@ -186,9 +186,10 @@ class ActionBus:
             try:
                 cb(action)
             except Exception:
-                print(
-                    f"[ActionBus] Ошибка в post-execute callback {cb!r}: "
-                    f"action_type={action.action_type!r}"
+                logger.exception(
+                    "Ошибка в post-execute callback %r, action_type=%s",
+                    cb,
+                    action.action_type,
                 )
 
     # ------------------------------------------------------------------

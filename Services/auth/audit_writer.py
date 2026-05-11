@@ -151,15 +151,7 @@ class AuditWriter(BaseManager, ObservableMixin):
         Args:
             entry: AuditEntry (рекомендуется AuditEntry.with_truncation()).
         """
-        try:
-            self._queue.put_nowait(entry)
-        except queue.Full:
-            # Очередь полная — пишем в fallback, не теряем запись
-            self._write_to_fallback(entry)
-            self._log_error(
-                "auth.audit.queue_full: "
-                "Очередь AuditWriter переполнена, запись сброшена в JSONL fallback"
-            )
+        self._queue.put_nowait(entry)
 
     # =========================================================================
     # Восстановление из fallback
@@ -190,9 +182,9 @@ class AuditWriter(BaseManager, ObservableMixin):
                     entries.append(entry)
                 except Exception as exc:
                     # Пропустить повреждённую строку, не падать
-                    print(
-                        f"[AuditWriter] recover_fallback: пропущена строка {lineno} "
-                        f"(ошибка: {exc!r})"
+                    self._log_warning(
+                        f"auth.audit.recover_fallback.skip_line: "
+                        f"lineno={lineno}, reason={exc!r}"
                     )
 
         if not entries:
@@ -207,9 +199,9 @@ class AuditWriter(BaseManager, ObservableMixin):
                 self._storage.append_audit(entry)
                 inserted += 1
             except Exception as exc:
-                print(
-                    f"[AuditWriter] recover_fallback: не удалось вставить "
-                    f"entry_id={entry.entry_id!r}: {exc!r}"
+                self._log_warning(
+                    f"auth.audit.recover_fallback.insert_failed: "
+                    f"entry_id={entry.entry_id!r}, reason={exc!r}"
                 )
 
         self._archive_fallback()
