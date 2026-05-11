@@ -18,7 +18,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 from .repository import ActionLogRepository
 
 if TYPE_CHECKING:

@@ -13,7 +13,7 @@ from __future__ import annotations
 from Services.sql.core.base_repository import GenericRepository
 from Services.sql.interfaces import ISyncEngineAdapter
 
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 from .schema_ext import ActionLogRow, from_action_log_row, to_action_log_row
 
 

@@ -143,6 +143,7 @@
 - [ADR-121](#adr-121-carve-out-sql_module-servicessql-phase-41): Carve-out `sql_module` → `Services/sql` (Phase 4.1)
 - [ADR-122](#adr-122-carve-out-hikvision_camera-serviceshikvision_camera-phase-42): Carve-out `hikvision_camera` → `Services/hikvision_camera` (Phase 4.2)
 - [ADR-123](#adr-123-категоризация-plugins-по-доменам-phase-5-follow-up): Категоризация `Plugins/` по доменам (Phase 5 follow-up)
+- [ADR-124](#adr-124-carve-out-actions_module-отдельный-top-level-модуль-фреймворка): Carve-out `actions_module` → отдельный top-level модуль фреймворка
 <!-- ADR-TOC:END -->
 
 ---
@@ -2018,6 +2019,26 @@
   - **Оставить плоский список и снизить `min_modularity`** — лечение симптома, метрика теряет значение.
   - **`plugin_class` строго fully-qualified в YAML** — категория «протекает» в каждый topology-файл; переименование категории требует sed по всем YAML.
   - **Регистрировать плагины через манифест-файл `Plugins/manifest.toml`** — дублирование с декоратором `@register_plugin`, дополнительная точка рассинхронизации.
+
+---
+
+## ADR-124: Carve-out `actions_module` → отдельный top-level модуль фреймворка
+- Дата: 2026-05-11
+- Статус: принято
+- Контекст: ADR-120 обещал восстановление modularity после Phase 5 (0.448 → 0.242). Два предыдущих коммита через фасад-адаптеры (`process_module.plugins`, `frontend_module.schema_adapter`) подняли modularity 0.249 → 0.263 (+0.014), bottleneck сместился с modularity на acyclicity. Фасадный подход на этой ветке исчерпан (плато ≤+0.002 за следующий шаг). Очередной шаг по modularity возможен только через carve-out поддерева. Разведка двух кандидатов через DSM + grep ([docs/refactors/2026-05-11_modularity_facades_next.md](../docs/refactors/2026-05-11_modularity_facades_next.md)):
+  - `frontend_module/components/_examples/` — отклонён: ≥10 обратных импортов в `frontend_module.*`, carve-out создал бы ~15 новых cross-module edges → отрицательная дельта.
+  - `frontend_module/actions/` — пригоден: 12 файлов / 1100 LOC, 0 обратных импортов в frontend, ≥14 внешних потребителей (`multiprocess_prototype/frontend/actions/*`, `Services/sql/action_log/*`), 2 внешних edge — `schema_adapter.SchemaBase` (прямой) и `frontend_module.schemas.register_binding.RegisterBinding` (TYPE_CHECKING).
+- Решение: `git mv multiprocess_framework/modules/frontend_module/actions multiprocess_framework/modules/actions_module` + перенос `tests/test_action_bus.py` → `actions_module/tests/test_bus.py`. Оба внешних edge перерезаны:
+  1. `schemas.py` теперь импортирует `SchemaBase` напрямую из `data_schema_module` (вместо `frontend_module.schema_adapter`).
+  2. `builder.py` использует локальный `Protocol RegisterBindingLike` (атрибуты `register_name`, `field_name`) вместо TYPE_CHECKING-импорта `RegisterBinding`.
+  
+  Корневой фасад `multiprocess_framework/__init__.py` экспортирует публичный API actions_module (`Action`, `ActionBuilder`, `ActionBus`, `ActionHandler`, `IRegistersManagerGui`) — правило R-1 «единый канал импортов». Sed-замена обновила импорты в 25 файлах (`multiprocess_prototype/frontend/actions/*`, `Services/sql/action_log/*`, внутренние пути actions_module). Финальная картина: единственная внешняя зависимость actions_module — `data_schema_module.SchemaBase`.
+- Причина: Action-bus (undo/redo, coalescing, persistence-Protocols) — это generic-инфраструктура поведения GUI-приложения, концептуально отдельная от UI-виджетов. До carve-out 12 файлов сидели внутри frontend_module, при этом ничего из frontend не использовали — это «спрятанный» отдельный кластер. После carve-out frontend_module становится тоньше, actions выходит в чистый top-level модуль рядом с `chain_module`/`state_store_module`. Размещение в `multiprocess_framework/modules/` (а не в `Services/actions/`) — потому что ActionBus сам по себе generic-инфраструктура без внешних зависимостей; конкретный writer лога (с зависимостью на sql) живёт в `Services/sql/action_log/`, обращаясь к Protocol-контракту `IActionLogWriter` в actions_module.
+- Отклонённые альтернативы:
+  - **`Services/actions/`** — соседство с `Services/sql/action_log` логично, но размывает границу framework/Services: actions_module не имеет внешних библиотек-зависимостей и концептуально ближе к runtime-примитивам (chain, state_store), чем к прикладным сервисам (sql, hikvision).
+  - **Carve-out `_examples/`** — отклонён проверкой DSM (см. выше). Урок: carve-out имеет смысл только при ≤2 обратных импортов внутрь родителя, иначе intra-module edges превращаются в cross-module и метрика падает.
+  - **Не делать carve-out, искать ещё фасадов** — фасадный подход исчерпан, дальше плато ≤−5 edges за итерацию.
+  - **Фасад в каждом модуле + один большой фасад фреймворка** — корневой фасад уже существует (`multiprocess_framework/__init__.py`, 11 слоёв); фасады внутри своего модуля не уменьшают cross-module edges (intra-module edges не считаются как cross). Зафиксированы критерии фасада-адаптера в [docs/refactors/2026-05-11_modularity_facades_next.md](../docs/refactors/2026-05-11_modularity_facades_next.md).
 
 ---
 

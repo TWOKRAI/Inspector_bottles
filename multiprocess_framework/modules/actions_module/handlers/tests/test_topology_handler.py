@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from multiprocess_framework.modules.frontend_module.actions.handlers.topology_handler import (
+from multiprocess_framework.modules.actions_module.handlers.topology_handler import (
     TopologyMutationHandler,
     TopologyBridgeProtocol,
     TopologyHolderProtocol,
 )
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 
 
 # ---------------------------------------------------------------------------

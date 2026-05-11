@@ -16,12 +16,22 @@ display_*, layout_change, profile_switch, recipe_switch)
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.schemas.register_binding import RegisterBinding
+from typing import Any, Protocol, runtime_checkable
 
 from .schemas import Action
+
+
+@runtime_checkable
+class RegisterBindingLike(Protocol):
+    """Минимальный контракт RegisterBinding для ActionBuilder.from_field().
+
+    Локальный Protocol вместо импорта frontend_module.schemas.register_binding —
+    actions_module не должен знать про frontend_module (ADR-124 carve-out).
+    Любой объект с двумя строковыми атрибутами совместим.
+    """
+
+    register_name: str
+    field_name: str
 
 
 class ActionBuilder:
@@ -61,14 +71,14 @@ class ActionBuilder:
 
     @staticmethod
     def from_field(
-        binding: "RegisterBinding",
+        binding: RegisterBindingLike,
         new_value: Any,
         old_value: Any,
         *,
         description: str = "",
     ) -> Action:
         """
-        Создать Action из RegisterBinding.
+        Создать Action из RegisterBinding-like объекта.
 
         Удобная обёртка над field_set() для случаев,
         когда привязка к регистру уже есть в виде RegisterBinding.

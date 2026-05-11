@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.handlers.node_move_handler import NodeMoveHandler
 from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 from multiprocess_prototype.frontend.actions.action_types import (

@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+    from multiprocess_framework.modules.actions_module.schemas import Action
 
 logger = logging.getLogger(__name__)
 

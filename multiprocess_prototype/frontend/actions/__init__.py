@@ -3,9 +3,9 @@
 Переиспользует FW ActionBus, Action, ActionBuilder.
 V2 добавляет: handlers, builder extension, bus factory.
 """
-from multiprocess_framework.modules.frontend_module.actions.bus import ActionBus
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
-from multiprocess_framework.modules.frontend_module.actions.builder import ActionBuilder
+from multiprocess_framework.modules.actions_module.bus import ActionBus
+from multiprocess_framework.modules.actions_module.schemas import Action
+from multiprocess_framework.modules.actions_module.builder import ActionBuilder
 
 from .action_types import (
     FIELD_SET,

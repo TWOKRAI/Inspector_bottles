@@ -23,7 +23,7 @@ except ImportError:
 from .schemas import Action
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.actions.persistence.interfaces import IActionLogWriter
+    from multiprocess_framework.modules.actions_module.persistence.interfaces import IActionLogWriter
 
 logger = logging.getLogger(__name__)
 

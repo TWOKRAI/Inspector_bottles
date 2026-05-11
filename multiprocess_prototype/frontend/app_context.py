@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.registers.manager import RegistersManagerV2
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
-    from multiprocess_framework.modules.frontend_module.actions.bus import ActionBus
+    from multiprocess_framework.modules.actions_module.bus import ActionBus
 
 
 @dataclass

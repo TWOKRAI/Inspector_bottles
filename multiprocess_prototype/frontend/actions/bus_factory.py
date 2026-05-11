@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from multiprocess_framework.modules.frontend_module.actions.bus import ActionBus
+from multiprocess_framework.modules.actions_module.bus import ActionBus
 
 from .action_types import (
     FIELD_SET,

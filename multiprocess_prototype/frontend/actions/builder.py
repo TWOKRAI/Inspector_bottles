@@ -4,8 +4,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from multiprocess_framework.modules.frontend_module.actions.builder import ActionBuilder
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.builder import ActionBuilder
+from multiprocess_framework.modules.actions_module.schemas import Action
 
 from .action_types import FIELD_SET, RECIPE_APPLY, PROCESS_ADD, PROCESS_REMOVE, WIRE_ADD, WIRE_REMOVE, NODE_MOVE
 

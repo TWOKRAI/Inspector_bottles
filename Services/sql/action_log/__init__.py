@@ -1,10 +1,10 @@
 """Services.sql.action_log -- персистентность Action-лога через sql.
 
-Перенесено из multiprocess_framework/modules/frontend_module/actions/persistence/
+Перенесено из multiprocess_framework/modules/actions_module/persistence/
 по плану docs/refactors/2026-05_arch_cleanup.md (Task 4.1) — реализации,
 зависящие от sql, выехали в Services вместе с самим sql-модулем.
 
-В framework (frontend_module/actions/persistence/interfaces.py) остался только
+В framework (actions_module/persistence/interfaces.py) остался только
 Protocol IActionLogWriter — composition root приложения подключает конкретные
 реализации отсюда.
 """

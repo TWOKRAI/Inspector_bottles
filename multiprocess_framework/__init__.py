@@ -130,6 +130,15 @@ from multiprocess_framework.modules.chain_module import (
     ParallelChainRunnable,
 )
 
+# === LAYER 10+: ACTION BUS (undo/redo для GUI; carve-out 2026-05-11, ADR-124) ===
+from multiprocess_framework.modules.actions_module import (
+    Action,
+    ActionBuilder,
+    ActionBus,
+    ActionHandler,
+    IRegistersManagerGui,
+)
+
 # === LAYER 11: UI (опционально — PySide6 может отсутствовать в headless-окружении) ===
 try:
     from multiprocess_framework.modules.frontend_module import FrontendManager
@@ -209,6 +218,12 @@ __all__ = [
     "ParallelChainRunnable",
     "ChainContext",
     "ChainResult",
+    # Action bus (carve-out 2026-05-11, ADR-124)
+    "Action",
+    "ActionBuilder",
+    "ActionBus",
+    "ActionHandler",
+    "IRegistersManagerGui",
     # UI (optional)
     "FrontendManager",
 ]

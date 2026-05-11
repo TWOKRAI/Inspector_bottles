@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+    from multiprocess_framework.modules.actions_module.schemas import Action
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
 
 logger = logging.getLogger(__name__)

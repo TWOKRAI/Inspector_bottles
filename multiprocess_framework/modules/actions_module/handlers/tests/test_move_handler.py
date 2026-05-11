@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from multiprocess_framework.modules.frontend_module.actions.handlers.move_handler import (
+from multiprocess_framework.modules.actions_module.handlers.move_handler import (
     NodeMoveHandler,
 )
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.handlers.field_set_handler import FieldSetHandler
 from multiprocess_prototype.frontend.actions.handlers.recipe_handler import RecipeApplyHandler
 from multiprocess_prototype.frontend.topology_holder import TopologyHolder

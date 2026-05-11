@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from multiprocess_framework.modules.frontend_module.actions.schemas import Action
+from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.handlers.topology_mutation_handler import (
     TopologyMutationHandler,
 )

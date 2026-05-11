@@ -15,7 +15,8 @@ Frontend Module — модуль UI-фреймворка (конструктор
 - frontend_module.widgets — BaseWidget, TabWidget, TableWidget, ...
 
 **Action Bus (undo/redo):**
-- frontend_module.actions — Action, ActionBuilder, ActionBus, ActionHandler
+- Вынесен в отдельный модуль `multiprocess_framework.modules.actions_module`
+  (Action, ActionBuilder, ActionBus, ActionHandler — carve-out 2026-05-11, ADR-124)
 
 **Менеджеры:**
 - frontend_module.managers — ThemeManager, ConfigSnapshotManager, YamlPersistenceStore[T],
@@ -34,7 +35,7 @@ Frontend Module — модуль UI-фреймворка (конструктор
     class MyThemeManager(ThemeManager):
         def __init__(self): super().__init__(styles_dir=..., default_variables_provider=...)
 
-    from multiprocess_framework.modules.frontend_module.actions import ActionBuilder
+    from multiprocess_framework.modules.actions_module import ActionBuilder
     class AppActionBuilder(ActionBuilder):
         @staticmethod
         def domain_action(...) -> Action: ...
