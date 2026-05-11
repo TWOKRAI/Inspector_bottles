@@ -25,8 +25,8 @@ SqliteAuditStorage — хранилище сессий и аудит-лога н
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Type
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 from sqlalchemy import text
 
@@ -128,10 +128,9 @@ class SqliteAuditStorage:
         stmts.extend(self._ddl.build_create_table(SessionEntry, dialect="sqlite"))
         stmts.extend(self._ddl.build_create_table(AuditEntry, dialect="sqlite"))
 
-        with self._adapter._engine.connect() as conn:  # type: ignore[union-attr]
+        with self._adapter.connection() as conn:
             for stmt in stmts:
                 conn.execute(text(stmt))
-            conn.commit()
 
     # =========================================================================
     # API аудит-лога (append-only)

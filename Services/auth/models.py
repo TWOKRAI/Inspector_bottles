@@ -17,7 +17,7 @@ to_dict() / model_dump() (правило «Dict at Boundary», ADR-008).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated, Optional
 
 from multiprocess_framework.modules.data_schema_module import (
