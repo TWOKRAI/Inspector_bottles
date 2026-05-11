@@ -68,6 +68,12 @@ def create_sync_engine(
     elif poolclass == NullPool:
         pass
 
+    # Дополнительные аргументы для DBAPI connect() — например,
+    # {"check_same_thread": False} для SQLite в многопоточных приложениях.
+    connect_args = cfg.get("connect_args") or {}
+    if connect_args:
+        engine_kw["connect_args"] = connect_args
+
     return create_engine(
         url,
         poolclass=poolclass,

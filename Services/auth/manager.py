@@ -41,7 +41,7 @@ from .exceptions import (
     UserNotFound,
     WeakPassword,
 )
-from .interfaces import IPasswordHasher, IUserStorage
+from .interfaces import IAuditWriter, IPasswordHasher, ISessionTracker, IUserStorage
 from .models import AuthConfig, Role, User
 from .predefined_roles import PREDEFINED_ROLES as _PREDEFINED_ROLES_SPEC
 from .security import LockoutTracker, PermissionsRegistry
@@ -132,6 +132,12 @@ class AuthManager(BaseManager, ObservableMixin):
         # Текущий залогиненный пользователь (in-memory, не персистируется)
         self._current_user: Optional[User] = None
 
+        # DI: AuditWriter и SessionTracker — инжектируются извне через сеттеры
+        self._audit_writer: Optional[IAuditWriter] = None
+        self._session_tracker: Optional[ISessionTracker] = None
+        # Текущий session_id — проставляется в login(), сбрасывается в logout()
+        self._current_session_id: Optional[str] = None
+
     # =========================================================================
     # Lifecycle (BaseManager)
     # =========================================================================
@@ -201,6 +207,26 @@ class AuthManager(BaseManager, ObservableMixin):
         self.is_initialized = False
         self._log_info("AuthManager shutdown")
         return True
+
+    # =========================================================================
+    # DI: AuditWriter и SessionTracker
+    # =========================================================================
+
+    def set_audit_writer(self, writer: IAuditWriter) -> None:
+        """Инжектировать AuditWriter (вызывается из composition root).
+
+        Args:
+            writer: Реализация IAuditWriter.
+        """
+        self._audit_writer = writer
+
+    def set_session_tracker(self, tracker: ISessionTracker) -> None:
+        """Инжектировать SessionTracker (вызывается из composition root).
+
+        Args:
+            tracker: Реализация ISessionTracker.
+        """
+        self._session_tracker = tracker
 
     @property
     def permissions(self) -> PermissionsRegistry:
@@ -285,12 +311,35 @@ class AuthManager(BaseManager, ObservableMixin):
             f"auth.login.success: username={username!r}, role_name={user.role_name!r}"
         )
 
+        # Открываем сессию (если SessionTracker подключён)
+        if self._session_tracker is not None:
+            try:
+                self._current_session_id = self._session_tracker.open_session(
+                    updated_user.user_id, updated_user.username
+                )
+            except Exception as exc:
+                self._log_error(
+                    f"auth.session.open_failed: Не удалось открыть сессию: {exc!r}"
+                )
+
         return self._build_access_context(updated_user, role)
 
     def logout(self) -> None:
         """Очистить текущую сессию."""
         username = self._current_user.username if self._current_user else "<none>"
+
+        # Закрываем сессию ДО сброса _current_user (нужен session_id)
+        if self._session_tracker is not None and self._current_session_id is not None:
+            try:
+                self._session_tracker.close_session(self._current_session_id)
+            except Exception as exc:
+                self._log_error(
+                    f"auth.session.close_failed: "
+                    f"Не удалось закрыть сессию {self._current_session_id!r}: {exc!r}"
+                )
+
         self._current_user = None
+        self._current_session_id = None
         self._log_info(f"auth.logout: username={username!r}")
 
     def verify_admin_password(self, password: str) -> bool:

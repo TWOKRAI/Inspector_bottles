@@ -38,7 +38,7 @@ from .exceptions import (
 )
 
 # --- Модели ---
-from .models import AuthConfig, Role, User
+from .models import AuditEntry, AuthConfig, Role, SessionEntry, User
 
 # --- Crypto: hasher + политики ---
 from .crypto import BcryptHasher, LockoutPolicy, PasswordPolicy
@@ -50,10 +50,14 @@ from .storage import YamlUserStorage
 from .security import LockoutTracker, PermissionDescriptor, PermissionsRegistry
 
 # --- Interfaces (Protocol) ---
-from .interfaces import IAuthManager, IPasswordHasher, IUserStorage
+from .interfaces import IAuditWriter, IAuthManager, IPasswordHasher, ISessionTracker, IUserStorage
 
 # --- Manager (Группа B) ---
 from .manager import AuthManager
+
+# --- Audit & Session (PR4 Group B) ---
+from .audit_writer import AuditWriter
+from .session_tracker import SessionTracker
 
 __all__ = [
     # Исключения
@@ -88,6 +92,14 @@ __all__ = [
     "IAuthManager",
     "IUserStorage",
     "IPasswordHasher",
+    "IAuditWriter",
+    "ISessionTracker",
     # Manager
     "AuthManager",
+    # Модели аудита
+    "AuditEntry",
+    "SessionEntry",
+    # Audit & Session (PR4)
+    "AuditWriter",
+    "SessionTracker",
 ]

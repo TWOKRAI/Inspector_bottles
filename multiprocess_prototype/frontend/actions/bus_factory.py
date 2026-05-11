@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_prototype.frontend.state.auth_state import AuthState
+    from Services.auth.interfaces import IAuditWriter
 
 
 def create_action_bus(
@@ -31,6 +32,8 @@ def create_action_bus(
     *,
     topology_bridge: "TopologyBridge | None" = None,
     auth_state: "AuthState | None" = None,
+    audit_writer: "IAuditWriter | None" = None,
+    state_store: Any = None,
     max_history: int = 50,
 ) -> ActionBus:
     """Создать ActionBus v2 с handlers для field_set и recipe_apply.
@@ -40,6 +43,9 @@ def create_action_bus(
         topology_holder: TopologyHolder для recipe_apply handler.
         topology_bridge: TopologyBridge для IPC-интеграции (Phase 12, опционально).
         auth_state: AuthState для PreAuthGuard (PR2, опционально).
+        audit_writer: IAuditWriter для AuditMiddleware (PR4, опционально).
+                      Если передан, требуется также state_store.
+        state_store: StateStore (или любой объект с .get(key)) для AuditMiddleware.
         max_history: максимальный размер undo-стека (по умолчанию 50).
 
     Returns:
@@ -69,5 +75,12 @@ def create_action_bus(
 
         guard = PreAuthGuard(auth_state)
         bus.set_pre_execute_hook(guard.hook, on_blocked=guard.show_auth_required)
+
+    # PR4 audit: AuditMiddleware — запись каждого действия в аудит-лог
+    if audit_writer is not None and state_store is not None:
+        from .middleware.audit_middleware import AuditMiddleware
+
+        middleware = AuditMiddleware(audit_writer, state_store)
+        bus.add_post_execute_callback(middleware)
 
     return bus

@@ -99,6 +99,11 @@ class ActionBus:
         self._pre_execute_hook: Callable[[Action], bool] | None = None
         self._on_blocked_callback: Callable[[Action], None] | None = None
 
+        # Post-execute callbacks: вызываются ПОСЛЕ успешного handler.apply()
+        # в execute() (не при undo/redo). Принимают Action как аргумент.
+        # Используются для audit middleware (PR4).
+        self._post_execute_callbacks: list[Callable[[Action], None]] = []
+
     # ------------------------------------------------------------------
     # Регистрация обработчиков
     # ------------------------------------------------------------------
@@ -146,6 +151,47 @@ class ActionBus:
         self._on_blocked_callback = None
 
     # ------------------------------------------------------------------
+    # Post-execute callbacks (PR4 audit)
+    # ------------------------------------------------------------------
+
+    def add_post_execute_callback(self, cb: Callable[[Action], None]) -> None:
+        """Добавить post-execute callback.
+
+        Вызывается после успешного handler.apply() в execute().
+        Undo/redo не триггерят этот callback — только новые действия.
+
+        Args:
+            cb: Вызываемый объект, принимающий Action как единственный аргумент.
+        """
+        if cb not in self._post_execute_callbacks:
+            self._post_execute_callbacks.append(cb)
+
+    def remove_post_execute_callback(self, cb: Callable[[Action], None]) -> None:
+        """Убрать post-execute callback.
+
+        Args:
+            cb: Ранее зарегистрированный callback.
+        """
+        try:
+            self._post_execute_callbacks.remove(cb)
+        except ValueError:
+            pass
+
+    def _notify_post_execute(self, action: Action) -> None:
+        """Вызвать все зарегистрированные post-execute callbacks.
+
+        Исключение из одного callback не прерывает остальные.
+        """
+        for cb in self._post_execute_callbacks:
+            try:
+                cb(action)
+            except Exception:
+                print(
+                    f"[ActionBus] Ошибка в post-execute callback {cb!r}: "
+                    f"action_type={action.action_type!r}"
+                )
+
+    # ------------------------------------------------------------------
     # Основные операции
     # ------------------------------------------------------------------
 
@@ -179,6 +225,10 @@ class ActionBus:
 
         # Применяем действие
         handler.apply(action, self._rm)
+
+        # Post-execute callbacks (audit middleware и др.)
+        # Вызываются сразу после apply, до undo-стека
+        self._notify_post_execute(action)
 
         # COMMAND -- не попадает в undo-стек
         if not action.undoable:

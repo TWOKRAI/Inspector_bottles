@@ -90,8 +90,13 @@ class SqliteAuditStorage:
         self._mapper = SchemaBaseMapper()
         self._ddl = DDLBuilder(self._mapper)
 
-        # Создаём единый адаптер — один SQLite-файл / одна memory-БД
-        config = SQLManagerConfig(url=db_url, dialect="sqlite")
+        # Создаём единый адаптер — один SQLite-файл / одна memory-БД.
+        # check_same_thread=False: AuditWriter пишет из фонового потока.
+        config = SQLManagerConfig(
+            url=db_url,
+            dialect="sqlite",
+            connect_args={"check_same_thread": False},
+        )
         self._adapter = BaseSyncAdapter(config)
         self._adapter.setup()
 
