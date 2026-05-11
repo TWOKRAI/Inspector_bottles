@@ -6,7 +6,7 @@ TODO: заменить TemplateUiConfig на имя своего виджета.
 TODO: добавить поля конфигурации (show_advanced, section_visible и т.п.).
 
 Если используется coerce_schema_config — наследовать SchemaBase (Pydantic):
-    from multiprocess_framework.modules.data_schema_module import SchemaBase
+    from multiprocess_framework.modules.frontend_module.schema_adapter import SchemaBase
     class MyUiConfig(SchemaBase): ...
 
 Для простых случаев достаточно dataclass.

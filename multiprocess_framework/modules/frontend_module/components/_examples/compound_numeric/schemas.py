@@ -6,12 +6,18 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar, Literal
 
-from multiprocess_framework.modules.data_schema_module import (
+from multiprocess_framework.modules.frontend_module.schema_adapter import (
+
     FieldMeta,
+
     FieldRouting,
+
     RegisterDispatchMeta,
+
     SchemaBase,
+
     register_schema,
+
 )
 
 EXAMPLE_BGR_ROUTING = FieldRouting(channel="control_example")

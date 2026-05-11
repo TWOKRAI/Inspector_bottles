@@ -16,7 +16,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
-from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig
+from multiprocess_framework.modules.process_module.plugins import ExecutionMode, ThreadConfig
 
 
 @register_plugin("heartbeat", category="utility", description="Периодический heartbeat-лог")

@@ -2,7 +2,7 @@
 """Тесты coerce_schema_config с SchemaBase-конфигами."""
 from typing import Annotated, Literal, Optional
 
-from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.frontend_module.schema_adapter import FieldMeta, SchemaBase, register_schema
 
 from multiprocess_framework.modules.frontend_module.core.schema_config import coerce_schema_config
 

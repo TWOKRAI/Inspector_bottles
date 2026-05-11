@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from multiprocess_framework.modules.data_schema_module import (
+from multiprocess_framework.modules.frontend_module.schema_adapter import (
+
     FieldMeta,
+
     SchemaBase,
+
     register_schema,
+
 )
 
 

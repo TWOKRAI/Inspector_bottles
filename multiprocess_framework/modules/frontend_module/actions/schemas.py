@@ -21,7 +21,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from multiprocess_framework.modules.data_schema_module import SchemaBase
+from multiprocess_framework.modules.frontend_module.schema_adapter import SchemaBase
 from pydantic import ConfigDict, Field, field_validator
 
 

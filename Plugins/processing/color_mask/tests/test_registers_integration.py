@@ -19,7 +19,7 @@ import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
-from multiprocess_framework.modules.registers_module import RegistersManager
+from multiprocess_framework.modules.process_module.plugins import RegistersManager
 
 from Plugins.processing.color_mask.plugin import ColorMaskPlugin
 from Plugins.processing.color_mask.registers import ColorMaskRegisters

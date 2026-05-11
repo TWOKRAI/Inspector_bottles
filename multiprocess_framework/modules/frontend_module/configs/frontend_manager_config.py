@@ -6,7 +6,7 @@ from typing import Annotated, Any, Dict, Optional
 
 from pydantic import Field
 
-from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
+from multiprocess_framework.modules.frontend_module.schema_adapter import FieldMeta, SchemaBase, register_schema
 
 from .thread_manager_config import ThreadManagerConfig
 from .window_manager_config import WindowManagerConfig
