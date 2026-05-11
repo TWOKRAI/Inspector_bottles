@@ -12,12 +12,27 @@ T = TypeVar("T")
 
 @dataclass
 class BaseControlConfig:
-    """Общие настройки для любого контрола."""
+    """Общие настройки для любого контрола.
+
+    Поля прав доступа (PR3 auth-rbac):
+    - `access_level`             — legacy fallback (числовой уровень).
+    - `required_view_permission` — имя permission для просмотра поля; если
+      `AccessContext.has_permission(name)` == False, контрол скрывается
+      (`setVisible(False)`).
+    - `required_edit_permission` — имя permission для редактирования; если
+      контрол виден, но permission отсутствует, переходит в
+      `setEnabled(False)` + Qt-свойство `readOnly=true` (стиль из QSS).
+
+    Coherence: edit ⇒ view. Без view контрол скрыт и edit-проверка не
+    выполняется.
+    """
 
     label: Optional[str] = None
     tooltip: Optional[str] = None
     enabled: bool = True
     access_level: int = 0
+    required_view_permission: Optional[str] = None
+    required_edit_permission: Optional[str] = None
 
 
 @dataclass
