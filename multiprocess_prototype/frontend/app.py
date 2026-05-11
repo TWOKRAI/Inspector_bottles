@@ -203,6 +203,7 @@ def run_gui(process: "GuiProcess") -> None:
         topology_holder,
         topology_bridge=topology_bridge,
         auth_state=_auth_state,
+        auth_manager=_auth_manager,
     )
     ctx.extras["action_bus"] = action_bus
 

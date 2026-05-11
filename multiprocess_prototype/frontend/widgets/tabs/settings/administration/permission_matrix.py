@@ -183,7 +183,8 @@ class PermissionMatrix(QWidget):
             self._checkboxes[perm_edit] = cb_edit
 
             # Подключаем сигналы для coherence и отслеживания изменений
-            # toggled вызывается при программной установке — используем флаг-блокировку
+            # toggled вызывается при программной установке — coherence-рекурсия безопасна
+            # (терминирует на 2-й итерации, т.к. setChecked(state) при том же state — no-op)
             cb_view.toggled.connect(lambda checked, p=perm_view: self._on_checkbox_toggled(p, checked))
             cb_edit.toggled.connect(lambda checked, p=perm_edit: self._on_checkbox_toggled(p, checked))
 

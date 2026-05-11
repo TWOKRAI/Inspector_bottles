@@ -64,8 +64,10 @@ class AuditMiddleware:
         if not user_id:
             return
 
-        # Определяем ресурс: register_name → field_name → None
-        resource: str | None = action.register_name or action.field_name
+        # Определяем ресурс: action.resource → register_name → field_name → None
+        # action.resource (например, "roles.admin") ставится первым — Group D добавила
+        # это поле для явной передачи логического ресурса из V2ActionBuilder.role_update.
+        resource: str | None = action.resource or action.register_name or action.field_name
 
         # Сериализуем патчи (если Action содержит пустые dict — None)
         before_json: str | None = None

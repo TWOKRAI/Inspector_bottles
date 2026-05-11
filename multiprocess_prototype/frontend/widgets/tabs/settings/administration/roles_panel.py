@@ -120,16 +120,8 @@ class RolesPanel(QWidget):
         )
         self._btn_create.setFixedWidth(140)
 
-        # Кнопка «Изменить права» — в editable-матрице её роль выполняет кнопка «Сохранить».
-        # Оставляем для визуального соответствия дизайну PR2.
-        self._btn_edit = QPushButton("Изменить права")
-        self._btn_edit.setEnabled(self._can_edit)
-        self._btn_edit.setToolTip(
-            "Редактируйте чекбоксы в матрице прав, затем нажмите «Сохранить»"
-            if self._can_edit
-            else "Недостаточно прав (roles.edit)"
-        )
-        self._btn_edit.setFixedWidth(140)
+        # Кнопки «Изменить права» нет: editable-матрица с кнопкой «Сохранить»
+        # внутри PermissionMatrix полностью заменяет её функциональность.
 
         self._btn_delete = QPushButton("Удалить роль")
         self._btn_delete.setEnabled(self._can_delete)
@@ -138,7 +130,7 @@ class RolesPanel(QWidget):
         )
         self._btn_delete.setFixedWidth(140)
 
-        for btn in (self._btn_create, self._btn_edit, self._btn_delete):
+        for btn in (self._btn_create, self._btn_delete):
             buttons_layout.addWidget(btn)
 
         buttons_layout.addStretch()
