@@ -93,10 +93,14 @@ class SourceProducer:
             elapsed = time.monotonic() - t_start
             sleep_time = self._target_interval - elapsed
             if sleep_time > 0:
-                # Спим порциями для отзывчивости на stop_event
+                # Спим порциями для отзывчивости на stop_event.
+                # max(0.0, ...) защищает от race: между проверкой условия
+                # while и вычислением остатка время может «проскочить»
+                # за deadline, и без max() в time.sleep() уйдёт отрицательное
+                # значение → ValueError.
                 deadline = time.monotonic() + sleep_time
                 while time.monotonic() < deadline and not stop_event.is_set():
-                    time.sleep(min(0.01, deadline - time.monotonic()))
+                    time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
 
     def _send_item(self, item: dict) -> None:
         """SHM write + IPC send одного item."""
