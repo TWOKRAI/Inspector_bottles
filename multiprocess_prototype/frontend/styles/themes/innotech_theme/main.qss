@@ -66,13 +66,14 @@ QWidget#AppHeader {
         stop:0 @bg_hi2, stop:0.55 #454c5a, stop:1 #353b47);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-bottom: 4px solid @accent;
-    min-height: 96px;
+    min-height: 60px;
+    max-height: 60px;
 }
 
 QLabel#BrandLabel {
     color: #003087;
     font-family: "Square721 BdEx BT";
-    font-size: 44px;
+    font-size: 28px;
     font-weight: 900;
     padding-left: 8px;
 }
@@ -260,6 +261,9 @@ QAbstractScrollArea > QWidget > QWidget {
 QTabBar {
     background: transparent;
     qproperty-drawBase: 0;
+    /* Прижимаем заголовки вкладок к левому краю окна. */
+    margin-left: 0;
+    padding-left: 0;
 }
 QTabBar::tab {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -527,21 +531,24 @@ QProgressBar::chunk {
     margin: 1px;
 }
 
-/* ===================== SCROLLBARS ===================== */
+/* ===================== SCROLLBARS =====================
+ * Толщина увеличена до 42px (×3 от стандартных 14px) — для удобства управления
+ * пальцем на сенсорных экранах. См. plan: lauout-cozy-sphinx.md.
+ */
 QScrollBar:vertical {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #1b1f27, stop:1 #2a3040);
-    width: 14px;
+    width: 42px;
     border: 1px solid rgba(0, 0, 0, 0.45);
-    border-radius: 7px;
-    margin: 2px;
+    border-radius: 21px;
+    margin: 4px;
 }
 QScrollBar::handle:vertical {
     background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
         stop:0 #3d4e74, stop:1 #9ab0d5);
-    border-radius: 5px;
-    min-height: 30px;
-    margin: 2px;
+    border-radius: 15px;
+    min-height: 60px;
+    margin: 4px;
 }
 QScrollBar::handle:vertical:hover {
     background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
@@ -557,17 +564,17 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
 QScrollBar:horizontal {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #1b1f27, stop:1 #2a3040);
-    height: 14px;
+    height: 42px;
     border: 1px solid rgba(0, 0, 0, 0.45);
-    border-radius: 7px;
-    margin: 2px;
+    border-radius: 21px;
+    margin: 4px;
 }
 QScrollBar::handle:horizontal {
     background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
         stop:0 #3d4e74, stop:1 #9ab0d5);
-    border-radius: 5px;
-    min-width: 30px;
-    margin: 2px;
+    border-radius: 15px;
+    min-width: 60px;
+    margin: 4px;
 }
 QScrollBar::handle:horizontal:hover {
     background: qlineargradient(x1:0, y1:1, x2:0, y2:0,

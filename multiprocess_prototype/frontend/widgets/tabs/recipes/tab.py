@@ -1,32 +1,25 @@
 """RecipesTab — таб управления рецептами.
 
-3-колоночный layout с переключением Cards / Table:
-  Левая панель (QListWidget): динамический список рецептов
-  Центр: Cards (форма одного рецепта) или Table (все рецепты в таблице)
-  Правая панель: тумблер Cards/Table + вертикальные кнопки действий
+Layout: новый шаблон ``StandardTabLayout``.
+  • Action-колонка (слева, фикс. 120px):
+      top: ViewModeToggle (Cards/Table), Загрузить, Сохранить, Удалить
+      bottom: Назад / Вперёд (Undo/Redo) — через ActionBus
+  • Sub-nav (200px): динамический список рецептов (external-content режим)
+  • Контент (в QScrollArea): QStackedWidget {Cards-форма, Table-всех}.
 
-Layout:
-    QVBoxLayout
-      +-- QLabel "Рецепты" (header)
-      +-- QHBoxLayout (stretch=1)
-            +-- QListWidget (nav, 200px)
-            +-- QStackedWidget (cards / table)
-            +-- QVBoxLayout (toggle + кнопки)
+Legacy-атрибуты ``_btn_*``, ``_nav_list``, ``_name_edit``, ``_selected_slot``,
+``_on_slot_selected``, ``_sync_slots`` сохранены для совместимости тестов.
 """
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QStackedWidget,
@@ -37,23 +30,19 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
+from multiprocess_prototype.frontend.widgets.primitives import StandardTabLayout
 
 from .presenter import RecipesPresenter
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
 
-_NAV_WIDTH = 200
-_ITEM_HEIGHT = 40
-_ITEM_SPACING = 4
-_BTN_WIDTH = 100
-
 # Колонки таблицы
 _TABLE_COLUMNS = ["Имя", "Описание", "Создан", "Изменён"]
 
 
 class RecipesTab(QWidget):
-    """Таб рецептов — динамический список + Cards/Table + вертикальные кнопки."""
+    """Таб рецептов — на основе ``StandardTabLayout``."""
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -73,72 +62,51 @@ class RecipesTab(QWidget):
     # ------------------------------------------------------------------
 
     def _init_ui(self) -> None:
+        # Заголовок отдельно над шаблоном (компактнее, чем класть в action-col).
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # Заголовок
         header = QLabel("Рецепты")
         header.setStyleSheet("font-size: 16px; font-weight: bold;")
         layout.addWidget(header)
 
-        # 3-колоночный layout
-        columns = QHBoxLayout()
-        columns.setSpacing(8)
+        # Основной шаблон вкладки.
+        self._tab_layout = StandardTabLayout(show_sub_nav=True)
 
-        # --- Левая панель: список рецептов ---
-        self._nav_list = QListWidget()
-        self._nav_list.setObjectName("SideNavList")
-        self._nav_list.setFixedWidth(_NAV_WIDTH)
-        self._nav_list.setSpacing(_ITEM_SPACING)
-        self._nav_list.currentRowChanged.connect(self._on_nav_row_changed)
-        columns.addWidget(self._nav_list)
-
-        # --- Центр: стек Cards / Table ---
-        self._center_stack = QStackedWidget()
-
-        # Page 0: Cards (форма одного рецепта)
-        self._cards_widget = self._build_cards_page()
-        self._center_stack.addWidget(self._cards_widget)
-
-        # Page 1: Table (все рецепты)
-        self._table_widget = self._build_table_page()
-        self._center_stack.addWidget(self._table_widget)
-
-        columns.addWidget(self._center_stack, stretch=1)
-
-        # --- Правая панель: тумблер + вертикальные кнопки ---
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(8)
-
-        # Тумблер Cards/Table
+        # ── Левая колонка действий ────────────────────────────────────
+        # Тумблер Cards / Table — добавляем как виджет в top-actions.
         self._toggle = ViewModeToggle(initial_mode=ViewMode.CARDS)
         self._toggle.mode_changed.connect(self._on_view_mode_changed)
-        btn_layout.addWidget(self._toggle)
+        self._tab_layout.add_top_widget(self._toggle)
 
-        self._btn_load = QPushButton("Загрузить")
-        self._btn_load.setFixedWidth(_BTN_WIDTH)
+        self._btn_load = self._tab_layout.add_top_action("load", "Загрузить")
         self._btn_load.setEnabled(False)
-        self._btn_load.clicked.connect(lambda: self._on_action("load"))
-        btn_layout.addWidget(self._btn_load)
-
-        self._btn_save = QPushButton("Сохранить")
-        self._btn_save.setFixedWidth(_BTN_WIDTH)
-        self._btn_save.clicked.connect(lambda: self._on_action("save"))
-        btn_layout.addWidget(self._btn_save)
-
-        self._btn_delete = QPushButton("Удалить")
-        self._btn_delete.setFixedWidth(_BTN_WIDTH)
+        self._btn_save = self._tab_layout.add_top_action("save", "Сохранить")
+        self._btn_delete = self._tab_layout.add_top_action("delete", "Удалить")
         self._btn_delete.setEnabled(False)
-        self._btn_delete.clicked.connect(lambda: self._on_action("delete"))
-        btn_layout.addWidget(self._btn_delete)
 
-        btn_layout.addStretch()
-        columns.addLayout(btn_layout)
+        self._tab_layout.action_triggered.connect(self._on_action)
+
+        # Undo/Redo внизу.
+        bus = self._ctx.action_bus() if hasattr(self._ctx, "action_bus") else None
+        self._tab_layout.enable_undo_redo(bus)
+
+        # ── Sub-nav (external-content режим) ─────────────────────────
+        self._tab_layout.section_changed.connect(self._on_sub_nav_selected)
+
+        # ── Контент: QStackedWidget {Cards, Table} ────────────────────
+        self._center_stack = QStackedWidget()
+        self._cards_widget = self._build_cards_page()
+        self._center_stack.addWidget(self._cards_widget)
+        self._table_widget = self._build_table_page()
+        self._center_stack.addWidget(self._table_widget)
+        self._tab_layout.set_content_widget(self._center_stack)
+
+        layout.addWidget(self._tab_layout, stretch=1)
 
         # PR3: permission-aware proxy на setEnabled — наслаивается прозрачно
-        # на selection-aware логику. Без tabs.recipes.edit все три кнопки
-        # принудительно disabled, существующие setEnabled-вызовы игнорируются.
+        # на selection-aware логику.
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
@@ -147,7 +115,8 @@ class RecipesTab(QWidget):
         for btn in (self._btn_load, self._btn_save, self._btn_delete):
             install_permission_aware_enable(btn, "tabs.recipes.edit", auth_state)
 
-        layout.addLayout(columns, stretch=1)
+        # Legacy alias: тесты обращаются к _nav_list напрямую.
+        self._nav_list = self._tab_layout.sub_nav_list
 
     def _build_cards_page(self) -> QWidget:
         """Карточный вид — форма одного рецепта."""
@@ -186,7 +155,6 @@ class RecipesTab(QWidget):
             h.setStretchLastSection(True)
             h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
 
-        # Клик по строке таблицы → выбрать рецепт
         self._recipes_table.currentCellChanged.connect(self._on_table_row_changed)
         return self._recipes_table
 
@@ -195,7 +163,6 @@ class RecipesTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_view_mode_changed(self, mode_str: str) -> None:
-        """Переключить Cards / Table."""
         mode = ViewMode(mode_str)
         if mode == ViewMode.CARDS:
             self._center_stack.setCurrentIndex(0)
@@ -204,7 +171,6 @@ class RecipesTab(QWidget):
             self._center_stack.setCurrentIndex(1)
 
     def _refresh_table(self) -> None:
-        """Перестроить табличное представление из данных presenter."""
         recipes = self._presenter.get_all_recipes()
         self._recipes_table.setRowCount(len(recipes))
         for row, info in enumerate(recipes):
@@ -214,7 +180,6 @@ class RecipesTab(QWidget):
             self._recipes_table.setItem(row, 3, QTableWidgetItem(info.modified or "—"))
 
     def _on_table_row_changed(self, row: int, _col: int, _prev_row: int, _prev_col: int) -> None:
-        """Обработать выбор строки в таблице."""
         recipes = self._presenter.get_all_recipes()
         if 0 <= row < len(recipes):
             self._selected_slot = recipes[row].slot
@@ -222,42 +187,30 @@ class RecipesTab(QWidget):
             self._btn_delete.setEnabled(True)
 
     # ------------------------------------------------------------------
-    # Навигация (левая панель)
+    # Sub-nav (список рецептов)
     # ------------------------------------------------------------------
 
     def _sync_nav(self) -> None:
         """Перестроить список рецептов из presenter."""
-        self._nav_list.blockSignals(True)
-        self._nav_list.clear()
-
+        self._tab_layout.clear_sub_nav()
         recipes = self._presenter.get_all_recipes()
         for info in recipes:
-            item = QListWidgetItem(info.name)
-            item.setSizeHint(QSize(0, _ITEM_HEIGHT))
-            item.setData(Qt.ItemDataRole.UserRole, info.slot)
-            self._nav_list.addItem(item)
+            self._tab_layout.add_sub_nav_section(
+                key=str(info.slot), title=info.name, widget=None,
+            )
+        # Элемент «+ Новый рецепт» — ключ "-1".
+        self._tab_layout.add_sub_nav_section(
+            key="-1", title="+ Новый рецепт", widget=None,
+        )
 
-        # Элемент «+ Новый рецепт»
-        new_item = QListWidgetItem("+ Новый рецепт")
-        new_item.setSizeHint(QSize(0, _ITEM_HEIGHT))
-        new_item.setData(Qt.ItemDataRole.UserRole, -1)
-        self._nav_list.addItem(new_item)
-
-        self._nav_list.blockSignals(False)
-
-    def _on_nav_row_changed(self, row: int) -> None:
-        """Обработать выбор элемента в списке."""
-        if row < 0:
+    def _on_sub_nav_selected(self, key: str) -> None:
+        """Sub-nav сменилась → обновить форму."""
+        try:
+            slot = int(key)
+        except (TypeError, ValueError):
             return
-
-        item = self._nav_list.item(row)
-        if item is None:
-            return
-
-        slot = item.data(Qt.ItemDataRole.UserRole)
 
         if slot == -1:
-            # «+ Новый рецепт»
             self._selected_slot = self._presenter.next_free_slot()
             self._name_edit.setText("")
             self._desc_edit.setPlainText("")
@@ -270,7 +223,6 @@ class RecipesTab(QWidget):
             self._show_recipe(slot)
 
     def _show_recipe(self, slot: int) -> None:
-        """Показать данные рецепта в форме."""
         info = self._presenter.get_recipe_info(slot)
         if info:
             self._name_edit.setText(info.name)
@@ -288,11 +240,10 @@ class RecipesTab(QWidget):
             self._btn_delete.setEnabled(False)
 
     # ------------------------------------------------------------------
-    # Действия
+    # Действия (callback от StandardTabLayout.action_triggered)
     # ------------------------------------------------------------------
 
     def _on_action(self, action_id: str) -> None:
-        """Обработать нажатие кнопки."""
         if self._selected_slot < 0:
             return
 
@@ -307,7 +258,6 @@ class RecipesTab(QWidget):
             result = self._presenter.apply_recipe(self._selected_slot)
             if result:
                 recipe_name = result.get("recipe_name", "")
-                # Записать в ActionBus (если доступен)
                 bus = self._ctx.get("action_bus")
                 if bus is not None:
                     from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
@@ -322,15 +272,10 @@ class RecipesTab(QWidget):
             self._clear_form()
 
     def _select_slot_in_nav(self, slot: int) -> None:
-        """Выбрать элемент списка по slot ID."""
-        for i in range(self._nav_list.count()):
-            item = self._nav_list.item(i)
-            if item and item.data(Qt.ItemDataRole.UserRole) == slot:
-                self._nav_list.setCurrentRow(i)
-                return
+        """Выбрать элемент sub-nav по slot ID."""
+        self._tab_layout.set_current_section(str(slot))
 
     def _clear_form(self) -> None:
-        """Очистить форму."""
         self._selected_slot = -1
         self._name_edit.setText("")
         self._desc_edit.setPlainText("")
@@ -344,10 +289,10 @@ class RecipesTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_slot_selected(self, slot: int) -> None:
-        """Legacy: совместимость с тестами, выбрать рецепт по slot."""
+        """Legacy API: выбрать рецепт по slot напрямую."""
         self._selected_slot = slot
         self._show_recipe(slot)
 
     def _sync_slots(self) -> None:
-        """Legacy: совместимость с тестами."""
+        """Legacy API: алиас для _sync_nav."""
         self._sync_nav()
