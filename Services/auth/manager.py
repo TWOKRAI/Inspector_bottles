@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import secrets
 import string
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 
@@ -138,6 +139,10 @@ class AuthManager(BaseManager, ObservableMixin):
         # Текущий session_id — проставляется в login(), сбрасывается в logout()
         self._current_session_id: Optional[str] = None
 
+        # StatsManager: скользящее окно попыток входа (1 час)
+        # Каждый элемент: (timestamp: datetime, success: bool)
+        self._login_attempts: Deque[Tuple[datetime, bool]] = deque()
+
     # =========================================================================
     # Lifecycle (BaseManager)
     # =========================================================================
@@ -223,15 +228,54 @@ class AuthManager(BaseManager, ObservableMixin):
     def set_session_tracker(self, tracker: ISessionTracker) -> None:
         """Инжектировать SessionTracker (вызывается из composition root).
 
+        Если tracker является экземпляром SessionTracker (конкретная реализация,
+        а не только интерфейс), дополнительно регистрирует callback для публикации
+        метрики ``auth.sessions.active`` через ObservableMixin.
+
         Args:
             tracker: Реализация ISessionTracker.
         """
+        from .session_tracker import SessionTracker as _ConcreteSessionTracker
         self._session_tracker = tracker
+        # Подключаем callback для метрики активных сессий (только конкретная реализация)
+        if isinstance(tracker, _ConcreteSessionTracker) and tracker._on_active_change is None:
+            tracker._on_active_change = lambda count: self._record_metric(
+                "auth.sessions.active", count
+            )
 
     @property
     def permissions(self) -> PermissionsRegistry:
         """Каталог зарегистрированных permissions (read+write)."""
         return self._permissions
+
+    # =========================================================================
+    # StatsManager интеграция
+    # =========================================================================
+
+    def _record_login_attempt(self, success: bool) -> None:
+        """
+        Записать попытку входа в скользящее окно (1 час) и обновить метрики.
+
+        Вызывается из login() при каждом исходе: AccountLocked,
+        InvalidCredentials, успешный вход.
+
+        Args:
+            success: True — успешный вход, False — неудача.
+        """
+        now = datetime.now(timezone.utc)
+        self._login_attempts.append((now, success))
+
+        # Удалить записи старше 1 часа
+        cutoff = now - timedelta(hours=1)
+        while self._login_attempts and self._login_attempts[0][0] < cutoff:
+            self._login_attempts.popleft()
+
+        total = len(self._login_attempts)
+        failed = sum(1 for _, ok in self._login_attempts if not ok)
+        failed_ratio = failed / total if total > 0 else 0.0
+
+        self._record_metric("auth.login.attempts.per_hour", total)
+        self._record_metric("auth.login.failed_ratio", failed_ratio)
 
     # =========================================================================
     # Auth lifecycle
@@ -258,6 +302,7 @@ class AuthManager(BaseManager, ObservableMixin):
             self._log_warning(
                 f"auth.lockout.engaged: username={username!r}, delay_sec={wait_sec}, failures={failures}"
             )
+            self._record_login_attempt(success=False)
             raise AccountLocked(
                 f"Учётная запись временно заблокирована. Ждите {wait_sec} сек.",
                 failures=failures,
@@ -270,6 +315,7 @@ class AuthManager(BaseManager, ObservableMixin):
         if user is None:
             self._lockout.record_failure(username)
             self._log_warning(f"auth.login.failed: username={username!r}, reason=user_not_found")
+            self._record_login_attempt(success=False)
             # Единое исключение для unknown user и wrong password — защита от user enumeration
             raise InvalidCredentials("Неверный логин или пароль.", username=username)
 
@@ -278,6 +324,7 @@ class AuthManager(BaseManager, ObservableMixin):
             self._log_warning(
                 f"auth.login.failed: username={username!r}, reason=account_inactive"
             )
+            self._record_login_attempt(success=False)
             raise InvalidCredentials(
                 "Учётная запись деактивирована.", username=username
             )
@@ -288,6 +335,7 @@ class AuthManager(BaseManager, ObservableMixin):
             self._log_warning(
                 f"auth.login.failed: username={username!r}, reason=wrong_password"
             )
+            self._record_login_attempt(success=False)
             raise InvalidCredentials("Неверный логин или пароль.", username=username)
 
         # Успех — сбрасываем lockout
@@ -310,6 +358,7 @@ class AuthManager(BaseManager, ObservableMixin):
         self._log_info(
             f"auth.login.success: username={username!r}, role_name={user.role_name!r}"
         )
+        self._record_login_attempt(success=True)
 
         # Открываем сессию (если SessionTracker подключён)
         if self._session_tracker is not None:
