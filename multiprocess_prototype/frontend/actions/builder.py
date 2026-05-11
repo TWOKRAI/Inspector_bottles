@@ -7,7 +7,7 @@ from typing import Any
 from multiprocess_framework.modules.actions_module.builder import ActionBuilder
 from multiprocess_framework.modules.actions_module.schemas import Action
 
-from .action_types import FIELD_SET, RECIPE_APPLY, PROCESS_ADD, PROCESS_REMOVE, WIRE_ADD, WIRE_REMOVE, NODE_MOVE
+from .action_types import FIELD_SET, RECIPE_APPLY, PROCESS_ADD, PROCESS_REMOVE, WIRE_ADD, WIRE_REMOVE, NODE_MOVE, ROLE_UPDATE
 
 
 class V2ActionBuilder(ActionBuilder):
@@ -142,4 +142,25 @@ class V2ActionBuilder(ActionBuilder):
             coalesce_key=f"move:{node_id}:{bucket}",
             undoable=True,
             description=f"Переместить узел: {node_id}",
+        )
+
+    @staticmethod
+    def role_update(
+        role_name: str,
+        old_permissions: list[str],
+        new_permissions: list[str],
+    ) -> Action:
+        """Action для обновления списка permissions роли (undoable, PR4).
+
+        forward_patch: новые permissions.
+        backward_patch: предыдущие permissions (используются при undo).
+        resource: «roles.<role_name>» для AuditMiddleware и AuditEntry.resource.
+        """
+        return Action(
+            action_type=ROLE_UPDATE,
+            forward_patch={"role_name": role_name, "permissions": new_permissions},
+            backward_patch={"role_name": role_name, "permissions": old_permissions},
+            resource=f"roles.{role_name}",
+            undoable=True,
+            description=f"Изменить права роли: {role_name}",
         )

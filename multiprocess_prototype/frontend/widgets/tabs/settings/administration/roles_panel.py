@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""RolesPanel — панель просмотра ролей (read-only в PR2).
+"""RolesPanel — панель просмотра и редактирования ролей.
 
-Отображает список ролей слева (QListWidget) и матрицу permissions
-справа (PermissionMatrix). Роли с hidden_in_ui=True (например, dev)
-не показываются в списке.
+PR2: read-only. Кнопки Создать/Изменить/Удалить disabled.
+PR4: при наличии прав roles.edit/create/delete кнопки активируются.
+     Изменения прав идут через ActionBus → AuditMiddleware → audit_log.
 
-Кнопки управления ролями (Создать / Изменить / Удалить) disabled в PR2 —
-активируются в PR4.
+Роли с hidden_in_ui=True (например, dev) не показываются в списке.
 """
 from __future__ import annotations
 
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -27,19 +27,37 @@ from .permission_matrix import PermissionMatrix
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_framework.modules.actions_module.bus import ActionBus
 
 
 class RolesPanel(QWidget):
-    """Панель просмотра ролей (read-only в PR2).
+    """Панель управления ролями.
 
-    Кнопки управления ролями disabled — активируются в PR4.
-    Роли с hidden_in_ui=True (dev) не отображаются в списке.
+    При наличии прав roles.edit матрица permissions становится редактируемой,
+    изменения отправляются в ActionBus через V2ActionBuilder.role_update.
+
+    Кнопка «Удалить роль» вызывает auth_manager.delete_role() напрямую
+    (без ActionBus), так как удаление роли является необратимой операцией
+    и не должно быть в undo-стеке.
     """
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         self._auth_manager = ctx.auth_manager()
+        self._bus: "ActionBus | None" = ctx.action_bus()
+
+        # Определяем permissions текущего пользователя
+        auth_state = ctx.auth_state()
+        if auth_state is not None:
+            access_ctx = auth_state.access_context
+            self._can_create = access_ctx.has_permission("roles.create")
+            self._can_edit = access_ctx.has_permission("roles.edit")
+            self._can_delete = access_ctx.has_permission("roles.delete")
+        else:
+            self._can_create = False
+            self._can_edit = False
+            self._can_delete = False
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
@@ -60,13 +78,14 @@ class RolesPanel(QWidget):
         title_label = QLabel("Роли")
         title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
 
-        readonly_label = QLabel("(только чтение)")
-        readonly_label.setStyleSheet("color: gray; font-size: 12px;")
-
         header_layout.addWidget(title_label)
-        header_layout.addWidget(readonly_label)
-        header_layout.addStretch()
 
+        if not self._can_edit:
+            readonly_label = QLabel("(только чтение)")
+            readonly_label.setStyleSheet("color: gray; font-size: 12px;")
+            header_layout.addWidget(readonly_label)
+
+        header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
         # --- Основная область: список + матрица + кнопки ---
@@ -80,24 +99,46 @@ class RolesPanel(QWidget):
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
         )
 
-        # Матрица прав (растягивается)
-        self._matrix = PermissionMatrix()
+        # Матрица прав (редактируемая при наличии roles.edit)
+        self._matrix = PermissionMatrix(editable=self._can_edit)
         self._matrix.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
-        # Панель кнопок управления (фиксированная ширина ~140px, все disabled)
+        # Подключаем сигнал матрицы к ActionBus (только если editable и bus доступен)
+        if self._can_edit and self._bus is not None:
+            self._matrix.permissions_changed.connect(self._on_permissions_changed)
+
+        # Панель кнопок управления (фиксированная ширина ~140px)
         buttons_layout = QVBoxLayout()
         buttons_layout.setSpacing(4)
 
-        btn_create = QPushButton("Создать роль")
-        btn_edit = QPushButton("Изменить права")
-        btn_delete = QPushButton("Удалить роль")
+        self._btn_create = QPushButton("Создать роль")
+        self._btn_create.setEnabled(self._can_create)
+        self._btn_create.setToolTip(
+            "" if self._can_create else "Недостаточно прав (roles.create)"
+        )
+        self._btn_create.setFixedWidth(140)
 
-        for btn in (btn_create, btn_edit, btn_delete):
-            btn.setEnabled(False)
-            btn.setToolTip("Доступно в PR4")
-            btn.setFixedWidth(140)
+        # Кнопка «Изменить права» — в editable-матрице её роль выполняет кнопка «Сохранить».
+        # Оставляем для визуального соответствия дизайну PR2.
+        self._btn_edit = QPushButton("Изменить права")
+        self._btn_edit.setEnabled(self._can_edit)
+        self._btn_edit.setToolTip(
+            "Редактируйте чекбоксы в матрице прав, затем нажмите «Сохранить»"
+            if self._can_edit
+            else "Недостаточно прав (roles.edit)"
+        )
+        self._btn_edit.setFixedWidth(140)
+
+        self._btn_delete = QPushButton("Удалить роль")
+        self._btn_delete.setEnabled(self._can_delete)
+        self._btn_delete.setToolTip(
+            "" if self._can_delete else "Недостаточно прав (roles.delete)"
+        )
+        self._btn_delete.setFixedWidth(140)
+
+        for btn in (self._btn_create, self._btn_edit, self._btn_delete):
             buttons_layout.addWidget(btn)
 
         buttons_layout.addStretch()
@@ -107,6 +148,9 @@ class RolesPanel(QWidget):
         content_layout.addLayout(buttons_layout)
 
         main_layout.addLayout(content_layout, stretch=1)
+
+        # Подключение сигналов кнопок
+        self._btn_delete.clicked.connect(self._on_delete_clicked)
 
         # --- Инициализация данных ---
         self._roles_by_name: dict[str, dict] = {}
@@ -157,3 +201,54 @@ class RolesPanel(QWidget):
             return
 
         self._matrix.set_role(role_dict)
+
+    # ------------------------------------------------------------------
+    # Обработчики кнопок
+    # ------------------------------------------------------------------
+
+    def _on_permissions_changed(
+        self, role_name: str, old_perms: list[str], new_perms: list[str]
+    ) -> None:
+        """Отправить role_update через ActionBus при изменении матрицы."""
+        if self._bus is None:
+            return
+
+        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
+        action = V2ActionBuilder.role_update(role_name, old_perms, new_perms)
+        self._bus.execute(action)
+
+    def _on_delete_clicked(self) -> None:
+        """Удалить выбранную роль с подтверждением.
+
+        Удаление роли — необратимая операция, поэтому выполняется напрямую
+        через auth_manager.delete_role(), а не через ActionBus (не undoable).
+        """
+        role_name = self._roles_list.currentItem()
+        if role_name is None:
+            return
+
+        name = role_name.text()
+        if not name:
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            "Подтверждение удаления",
+            f"Удалить роль «{name}»?\n\nЭто действие необратимо.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self._auth_manager.delete_role(name)
+            self._load_roles()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Ошибка удаления",
+                str(exc),
+            )

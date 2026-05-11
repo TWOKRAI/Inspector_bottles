@@ -12,3 +12,6 @@ PROCESS_REMOVE = "process_remove"
 WIRE_ADD = "wire_add"
 WIRE_REMOVE = "wire_remove"
 NODE_MOVE = "node_move"
+
+# PR4 auth-rbac: обновление списка permissions роли
+ROLE_UPDATE = "role_update"

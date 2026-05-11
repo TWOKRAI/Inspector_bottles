@@ -56,7 +56,7 @@ class Action(SchemaBase):
         description="Тип действия (конкретные значения определяются приложением)",
     )
 
-    # --- Контекст: какой регистр и поле затронуты ---
+    # --- Контекст: какой регистр, поле и ресурс затронуты ---
     register_name: Optional[str] = Field(
         default=None,
         description="Имя регистра (например, 'processing')",
@@ -64,6 +64,10 @@ class Action(SchemaBase):
     field_name: Optional[str] = Field(
         default=None,
         description="Имя поля в регистре (например, 'threshold')",
+    )
+    resource: Optional[str] = Field(
+        default=None,
+        description="Логический ресурс действия (например, 'roles.admin') — для AuditMiddleware",
     )
 
     # --- Патчи для apply/revert ---

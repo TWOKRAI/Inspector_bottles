@@ -14,16 +14,17 @@ from .action_types import (
     PROCESS_ADD,
     PROCESS_REMOVE,
     RECIPE_APPLY,
+    ROLE_UPDATE,
     WIRE_ADD,
     WIRE_REMOVE,
 )
-from .handlers import FieldSetHandler, NodeMoveHandler, RecipeApplyHandler, TopologyMutationHandler
+from .handlers import FieldSetHandler, NodeMoveHandler, RecipeApplyHandler, RoleUpdateHandler, TopologyMutationHandler
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_prototype.frontend.state.auth_state import AuthState
-    from Services.auth.interfaces import IAuditWriter
+    from Services.auth.interfaces import IAuditWriter, IAuthManager
 
 
 def create_action_bus(
@@ -34,6 +35,7 @@ def create_action_bus(
     auth_state: "AuthState | None" = None,
     audit_writer: "IAuditWriter | None" = None,
     state_store: Any = None,
+    auth_manager: "IAuthManager | None" = None,
     max_history: int = 50,
 ) -> ActionBus:
     """Создать ActionBus v2 с handlers для field_set и recipe_apply.
@@ -46,6 +48,8 @@ def create_action_bus(
         audit_writer: IAuditWriter для AuditMiddleware (PR4, опционально).
                       Если передан, требуется также state_store.
         state_store: StateStore (или любой объект с .get(key)) для AuditMiddleware.
+        auth_manager: IAuthManager для RoleUpdateHandler (PR4 Group D, опционально).
+                      Если передан, регистрируется обработчик role_update.
         max_history: максимальный размер undo-стека (по умолчанию 50).
 
     Returns:
@@ -82,5 +86,9 @@ def create_action_bus(
 
         middleware = AuditMiddleware(audit_writer, state_store)
         bus.add_post_execute_callback(middleware)
+
+    # PR4 Group D: RoleUpdateHandler — undoable изменение permissions ролей
+    if auth_manager is not None:
+        bus.register_handler(ROLE_UPDATE, RoleUpdateHandler(auth_manager))
 
     return bus

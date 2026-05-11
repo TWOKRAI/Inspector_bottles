@@ -81,13 +81,18 @@ class AdministrationSection(QWidget):
             access_ctx = self._auth_state.access_context
             has_users = access_ctx.has_permission("users.view")
             has_roles = access_ctx.has_permission("roles.view")
+            has_roles_edit = access_ctx.has_permission("roles.edit")
         else:
-            has_users = has_roles = False
+            has_users = has_roles = has_roles_edit = False
 
         if not has_users and not has_roles:
             self._current = self._build_restricted_placeholder()
         else:
-            self._current = self._build_sidenav(has_users=has_users, has_roles=has_roles)
+            self._current = self._build_sidenav(
+                has_users=has_users,
+                has_roles=has_roles,
+                has_roles_edit=has_roles_edit,
+            )
 
         self._outer_layout.addWidget(self._current)
 
@@ -95,11 +100,14 @@ class AdministrationSection(QWidget):
     # Строители содержимого
     # ------------------------------------------------------------------
 
-    def _build_sidenav(self, *, has_users: bool, has_roles: bool) -> QWidget:
+    def _build_sidenav(
+        self, *, has_users: bool, has_roles: bool, has_roles_edit: bool = False
+    ) -> QWidget:
         """Построить SideNavLayout с теми подсекциями, на которые есть права.
 
         Порядок: Пользователи → Роли → Сессии → Audit log.
         «Сессии» видим при has_users, «Audit log» — при has_roles.
+        При has_roles_edit PermissionMatrix в RolesPanel становится editable.
         """
         nav = SideNavLayout()
 

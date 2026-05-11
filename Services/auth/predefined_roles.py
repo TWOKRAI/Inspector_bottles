@@ -36,7 +36,7 @@ def _tabs(*tab_ids: str, edit: bool = False) -> list[str]:
     return out
 
 
-# admin: все табы view+edit, users CRUD, roles read.
+# admin: все табы view+edit, users CRUD, roles read + edit (PR4).
 _ADMIN_PERMISSIONS: list[str] = (
     _tabs(*_TAB_IDS_ALL_VIEW, edit=True)
     + [
@@ -46,6 +46,7 @@ _ADMIN_PERMISSIONS: list[str] = (
         "users.delete",
         "users.reset_password",
         "roles.view",
+        "roles.edit",  # PR4 Group D: admin может редактировать права ролей
     ]
 )
 
