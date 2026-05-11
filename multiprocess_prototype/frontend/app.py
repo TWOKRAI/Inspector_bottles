@@ -137,15 +137,14 @@ def run_gui(process: "GuiProcess") -> None:
 
     if not _storage.exists():
         # Bootstrap не запускался — показать блокирующий диалог и выйти
-        from PySide6.QtWidgets import QMessageBox
+        from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
 
-        QMessageBox.critical(
-            None,
-            "Ошибка инициализации",
+        _dlg = StartupBlockingDialog(
             "Хранилище пользователей не найдено.\n\n"
             "Запустите перед запуском приложения:\n"
-            "    python -m Services.auth.bootstrap",
+            "    python -m Services.auth.bootstrap"
         )
+        _dlg.exec()
         sys.exit(1)
 
     _auth_manager = AuthManager(_auth_config)
@@ -175,6 +174,12 @@ def run_gui(process: "GuiProcess") -> None:
 
     # 4a. Привязать ActionBus shortcuts (Ctrl+Z / Ctrl+Y)
     window.set_action_bus(action_bus)
+
+    # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
+    if ctx.auth_state() is not None and ctx.auth_manager() is not None:
+        from .widgets.chrome.login_button import LoginButton
+        _login_btn = LoginButton(ctx.auth_state(), ctx.auth_manager())
+        window.header.set_login_button(_login_btn)
 
     # 4a2. Phase 12: StatusBar live bindings
     window.connect_bindings(bindings)
