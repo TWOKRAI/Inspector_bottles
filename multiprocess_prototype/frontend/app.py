@@ -123,11 +123,46 @@ def run_gui(process: "GuiProcess") -> None:
 
     process._bridge.set_state_callback(_state_multiplexer)
 
+    # 3e. Auth: инициализация AuthManager + AuthState (PR2 auth-rbac)
+    import os
+    from Services.auth import AuthManager, AuthConfig, YamlUserStorage
+    from multiprocess_prototype.frontend.state.auth_state import AuthState
+
+    _users_path = os.environ.get(
+        "INSPECTOR_AUTH_USERS_PATH",
+        str(Path.home() / ".inspector_bottles" / "auth" / "users.yaml"),
+    )
+    _auth_config = AuthConfig(users_path=_users_path)
+    _storage = YamlUserStorage(_users_path)
+
+    if not _storage.exists():
+        # Bootstrap не запускался — показать блокирующий диалог и выйти
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(
+            None,
+            "Ошибка инициализации",
+            "Хранилище пользователей не найдено.\n\n"
+            "Запустите перед запуском приложения:\n"
+            "    python -m Services.auth.bootstrap",
+        )
+        sys.exit(1)
+
+    _auth_manager = AuthManager(_auth_config)
+    _auth_manager.initialize()
+    ctx.extras["auth_manager"] = _auth_manager
+
+    _auth_state = AuthState()
+    ctx.extras["auth_state"] = _auth_state
+
     # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
     from .actions.bus_factory import create_action_bus
 
     action_bus = create_action_bus(
-        registers_manager, topology_holder, topology_bridge=topology_bridge,
+        registers_manager,
+        topology_holder,
+        topology_bridge=topology_bridge,
+        auth_state=_auth_state,
     )
     ctx.extras["action_bus"] = action_bus
 

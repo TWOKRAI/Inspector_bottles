@@ -93,6 +93,12 @@ from   = "Services/auth/*"
 to     = "multiprocess_framework/modules/frontend_module/*"
 reason = "Services/auth — backend, не должен импортировать Qt-слой frontend_module (PR1 auth-rbac)"
 
+# Services/auth — чистый backend, импорт Qt-виджетов и app-кода запрещён (PR2)
+[[boundaries]]
+from   = "Services/auth/*"
+to     = "multiprocess_prototype/*"
+reason = "Services/auth — чистый backend, импорт Qt-виджетов и app-кода запрещён (PR2 auth-rbac)"
+
 # Plugins → не знают про конкретное приложение
 [[boundaries]]
 from   = "Plugins/*"

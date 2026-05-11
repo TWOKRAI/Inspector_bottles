@@ -1,0 +1,1 @@
+"""Тесты middleware для ActionBus."""

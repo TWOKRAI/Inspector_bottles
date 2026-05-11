@@ -2068,6 +2068,7 @@
 | `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…012 (Три уровня использования в едином ConsoleManager, ..., `reg info` показывает FieldMeta и FieldRouting) |
 | `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…013 (IRouter Protocol для инкапсуляции router-зависимости, ..., SubscriptionManager — публичные snapshot-методы для shutdown / DevTools) |
 | `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…008 (Protocol-based decoupling от доменных типов, ..., Публичный IChainLogger Protocol для исполнителей) |
+| `actions_module` | [`modules/actions_module/DECISIONS.md`](modules/actions_module/DECISIONS.md) | Command & Work |  |
 <!-- ADR-INDEX:END -->
 
 ---

@@ -13,8 +13,10 @@ if TYPE_CHECKING:
     from .bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.registers.manager import RegistersManagerV2
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
+    from multiprocess_prototype.frontend.state.auth_state import AuthState
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_framework.modules.actions_module.bus import ActionBus
+    from Services.auth.interfaces import IAuthManager
 
 
 @dataclass
@@ -78,6 +80,14 @@ class AppContext:
         Каталог IPC-команд, собранный из PluginRegistry + ConnectionMap.
         """
         return self.extras.get("command_catalog")
+
+    def auth_manager(self) -> "IAuthManager | None":
+        """IAuthManager из extras, если был инициализирован в run_gui()."""
+        return self.extras.get("auth_manager")
+
+    def auth_state(self) -> "AuthState | None":
+        """AuthState из extras, если был инициализирован в run_gui()."""
+        return self.extras.get("auth_state")
 
 
 def build_app_context(
