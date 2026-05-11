@@ -1,7 +1,7 @@
 """Тесты адаптеров."""
 import pytest
 
-from Services.sql.core.engine_factory import create_sync_adapter, create_async_adapter
+from Services.sql.core.adapter_factory import create_sync_adapter, create_async_adapter
 from Services.sql.configs import SQLManagerConfig
 
 try:

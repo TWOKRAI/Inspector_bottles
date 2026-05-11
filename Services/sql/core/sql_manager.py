@@ -22,7 +22,7 @@ from Services.sql.interfaces import (
     IUnitOfWork,
 )
 from Services.sql.configs import SQLManagerConfig
-from Services.sql.core.engine_factory import create_async_adapter, create_sync_adapter
+from Services.sql.core.adapter_factory import create_async_adapter, create_sync_adapter
 from Services.sql.core.base_repository import GenericRepository
 from Services.sql.core.ddl_builder import DDLBuilder
 from Services.sql.core.queryset import AsyncQuerySet, QuerySet

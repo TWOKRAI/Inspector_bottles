@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-EngineFactory — создание Engine/SyncAdapter с учётом fork-safety.
+EngineFactory — создание SQLAlchemy Engine с учётом fork-safety.
 
 В multiprocess QueuePool не fork-safe — deadlocks при SSL/PostgreSQL.
 Используем NullPool при INSPECTOR_MULTIPROCESS=1 или config.fork_safe=True.
+
+Выбор конкретного адаптера по dialect живёт в adapter_factory.py —
+разделение нужно, чтобы sync_adapter мог зависеть только от builder'а Engine,
+не подтягивая конкретные подклассы (sqlite/postgresql/mysql).
 """
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Union
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
-from Services.sql.interfaces import ISyncEngineAdapter
 from Services.sql.configs import SQLManagerConfig
 
 
@@ -79,61 +82,3 @@ def create_sync_engine(
         poolclass=poolclass,
         **engine_kw,
     )
-
-
-def create_sync_adapter(
-    config: Union[SQLManagerConfig, Dict[str, Any]],
-    dialect: Optional[str] = None,
-) -> ISyncEngineAdapter:
-    """Создать ISyncEngineAdapter по конфигу.
-
-    Args:
-        config: SQLManagerConfig или dict
-        dialect: Переопределить dialect из конфига (postgresql, mysql, sqlite)
-
-    Returns:
-        Реализация ISyncEngineAdapter для указанного dialect
-    """
-    cfg = _config_to_dict(config)
-    d = dialect or cfg.get("dialect", "sqlite")
-
-    if d == "sqlite":
-        from Services.sql.adapters.sqlite import SQLiteSyncAdapter
-
-        return SQLiteSyncAdapter(config)
-    if d in ("postgresql", "postgres"):
-        from Services.sql.adapters.postgresql import PostgreSQLSyncAdapter
-
-        return PostgreSQLSyncAdapter(config)
-    if d == "mysql":
-        from Services.sql.adapters.mysql import MySQLSyncAdapter
-
-        return MySQLSyncAdapter(config)
-
-    raise ValueError(f"Unknown dialect: {d}. Supported: sqlite, postgresql, mysql")
-
-
-def create_async_adapter(
-    config: Union[SQLManagerConfig, Dict[str, Any]],
-    dialect: Optional[str] = None,
-) -> "IAsyncEngineAdapter":
-    """Создать IAsyncEngineAdapter по конфигу."""
-    from Services.sql.interfaces import IAsyncEngineAdapter
-
-    cfg = _config_to_dict(config)
-    d = dialect or cfg.get("dialect", "sqlite")
-
-    if d == "sqlite":
-        from Services.sql.adapters.sqlite import SQLiteAsyncAdapter
-
-        return SQLiteAsyncAdapter(config)
-    if d in ("postgresql", "postgres"):
-        from Services.sql.adapters.postgresql import PostgreSQLAsyncAdapter
-
-        return PostgreSQLAsyncAdapter(config)
-    if d == "mysql":
-        from Services.sql.adapters.mysql import MySQLAsyncAdapter
-
-        return MySQLAsyncAdapter(config)
-
-    raise ValueError(f"Unknown dialect: {d}. Supported: sqlite, postgresql, mysql")
