@@ -46,3 +46,46 @@ PySide6-фреймворк виджетов с привязкой к `data_schem
 - Cookbook — `WIDGET_COOKBOOK.md` модуля (примеры компонентов).
 - Полный текст ADR — глобальный `multiprocess_framework/DECISIONS.md`.
 - Дорожная карта — `multiprocess_framework/docs/FRONTEND_COMMAND_LAUNCHER_ROADMAP.md`.
+
+---
+
+## Локальные решения (FE-серия)
+
+> Записи FE-серии охватывают тему RBAC/Auth-интеграции в frontend_module (PR1 Group C).
+> Глобальный индекс — `multiprocess_framework/DECISIONS.md` (обновляется через `python -m scripts.sync`).
+
+### FE-001: Расширение `AccessContext` — именованные permissions + role_name (2026-05-11)
+
+**Контекст.** `AccessContext` хранил только числовой `level` + булевые флаги. Для RBAC нужны именованные права.
+
+**Решение.** Добавлены поля `permissions: frozenset[str]` и `role_name: str` после существующих полей (`level, bypass_readonly, show_hidden`) — позиционные вызовы `AccessContext(5, True, True)` сохраняются без изменений. `frozenset` выбран как immutable + hashable. Сериализация через `to_dict()` / `from_dict()`: permissions → sorted list[str] (детерминизм).
+
+**Backward compat.** `from_dict({})` без ключей permissions/role_name → дефолтные значения. Конструктор без новых полей работает. Существующие тесты не тронуты.
+
+**Альтернативы.** `list[str]` — нет, не hashable. `set[str]` — нет, mutable. Отдельный класс RBAC-контекста — избыточно для PR1.
+
+---
+
+### FE-002: `AccessTrait` двухосевая модель view/edit (2026-05-11)
+
+**Контекст.** Старый `AccessTrait` знал только `can_modify()` через числовой level. RBAC требует отдельно `can_view()` и `can_modify()`.
+
+**Решение.** Добавлены параметры `required_view_permission` и `required_edit_permission`. Логика:
+- `can_view()`: если perm задан → `ctx.has_permission(perm)`, иначе `True`.
+- `can_modify()`: coherence invariant `edit ⇒ view` (нет view → нет edit); если edit_perm задан → permission check; иначе legacy `ctx.level >= N OR ctx.bypass_readonly`.
+
+**Backward compat.** Первый позиционный аргумент → `legacy_required_level`. Kwarg `required_level=N` → `DeprecationWarning` + работает. `update(int)` → `DeprecationWarning` + создаёт минимальный `AccessContext(level=N)`. `update(AccessContext)` → новый путь без warning. `set_required_level()` — сохранён.
+
+**Coherence invariant.** `can_modify() → can_view()` — enforced в коде: если `can_view() == False`, `can_modify()` возвращает `False` немедленно.
+
+---
+
+### FE-003: Централизация access policy в `BaseConfigurableWidget._apply_access` (2026-05-11)
+
+**Контекст.** До PR1 каждый виджет сам решал что делать при смене уровня доступа. Нет единого места для `setVisible/setEnabled/readOnly+QSS`.
+
+**Решение.** Добавлен метод `_apply_access()` в `BaseConfigurableWidget`. Логика: `can_view==False` → `setVisible(False)`; `can_view==True` → `setVisible(True)`, `setEnabled(can_modify())`, `setProperty("readOnly", not can_modify())` + QSS repolish через `style().unpolish/polish`. Метод защищён guard'ом `if not hasattr(self, "_trait") or self._trait is None`.
+
+`_update_access_level()` сохранён как deprecated alias с `DeprecationWarning`, внутри обновляет trait через legacy путь и вызывает `_apply_access()`.
+
+**Почему repolish.** QSS-селектор `[readOnly="true"]` читается только при repolish — без него смена свойства не отражается в стилях.

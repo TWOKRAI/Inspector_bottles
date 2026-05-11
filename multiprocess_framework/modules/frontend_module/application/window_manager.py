@@ -8,10 +8,12 @@ WindowManager — управление жизненным циклом окон.
 """
 from __future__ import annotations
 
+import warnings
 from typing import Any, Callable, Dict, Optional, Union
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, Signal
 from multiprocess_framework.modules.frontend_module.core.window_registry import WindowEntry, WindowRegistry
+from multiprocess_framework.modules.frontend_module.managers.access_context import AccessContext
 
 
 def _config_get(config: Any, key: str, default: Any = None) -> Any:
@@ -37,10 +39,12 @@ def _config_get(config: Any, key: str, default: Any = None) -> Any:
 class WindowManager(QObject):
     """
     Управление окнами приложения.
-    Сигналы: window_shown, window_hidden.
+    Сигналы: window_shown, window_hidden, update_access_context.
     """
     window_shown = Signal(str)
     window_hidden = Signal(str)
+    # PR1-Group-C: новый сигнал для RBAC — передаёт AccessContext всем подписчикам
+    update_access_context = Signal(object)
 
     def __init__(
             self,
@@ -56,6 +60,8 @@ class WindowManager(QObject):
         self._registry = WindowRegistry()
         self._current_window: Optional[str] = None
         self._access_level: int = 0
+        # PR1-Group-C: хранение текущего AccessContext
+        self._access_context: AccessContext = AccessContext()
 
     def register(
         self,
@@ -145,15 +151,44 @@ class WindowManager(QObject):
         names = self._registry.filter_names(needs_cursor=True, created_only=True)
         self._registry.apply(names, lambda w: w.setCursor(cursor))
 
-    def set_access_level(self, level: int) -> None:
-        self._access_level = level
+    def set_access_context(self, ctx: AccessContext) -> None:
+        """
+        Установить новый контекст доступа и распространить на все окна.
 
-        def apply(window: QWidget):
-            if hasattr(window, "update_access_level"):
-                window.update_access_level(level)
+        Эмитирует сигнал update_access_context(ctx).
+        Окна с методом update_access_context(ctx) получат новый контекст;
+        окна со старым методом update_access_level(level) получат ctx.level
+        для обратной совместимости.
+        """
+        self._access_context = ctx
+        self._access_level = ctx.level
+
+        def apply(window: QWidget) -> None:
+            # Новый путь: окно поддерживает AccessContext
+            if hasattr(window, "update_access_context"):
+                window.update_access_context(ctx)
+            # Legacy fallback: окно знает только числовой level
+            elif hasattr(window, "update_access_level"):
+                window.update_access_level(ctx.level)
 
         names = self._registry.filter_names(needs_access_level=True, created_only=True)
         self._registry.apply(names, apply)
+        self.update_access_context.emit(ctx)
+
+    def set_access_level(self, level: int) -> None:
+        """
+        Deprecated: используйте set_access_context(AccessContext(level=...)) вместо этого.
+
+        Сохранён для обратной совместимости. Внутри оборачивает level в AccessContext
+        и делегирует в set_access_context().
+        """
+        warnings.warn(
+            "WindowManager.set_access_level(int) is deprecated, "
+            "use set_access_context(AccessContext(level=...)) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.set_access_context(AccessContext(level=level))
 
     def _show(self, name: str) -> None:
         window = self._registry.get(name)

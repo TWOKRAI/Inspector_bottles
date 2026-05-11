@@ -12,6 +12,7 @@ BaseConfigurableWidget — базовый виджет с привязкой к 
 """
 from __future__ import annotations
 
+import warnings
 from typing import Any, Optional
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QWidget
@@ -224,9 +225,48 @@ class BaseConfigurableWidget(QWidget):
         """Обновить отображение без эмита сигналов. Переопределить в подклассе."""
         pass
 
-    def _update_access_level(self) -> None:
-        """Обновить UI при смене access_level. Переопределить в подклассе."""
-        pass
+    def _apply_access(self) -> None:
+        """
+        Централизованное применение AccessTrait к виджету.
+
+        Логика:
+        - can_view == False → скрыть виджет (setVisible(False))
+        - can_view == True, can_modify == False → disabled + QSS readOnly=true
+        - can_view == True, can_modify == True  → видим и enabled
+
+        Вызывается после update AccessTrait (например из _update_access_level или
+        set_access_context).
+        """
+        if not hasattr(self, "_trait") or self._trait is None:
+            return
+        if not self._trait.can_view():
+            self.setVisible(False)
+            return
+        self.setVisible(True)
+        self.setEnabled(self._trait.can_modify())
+        self.setProperty("readOnly", not self._trait.can_modify())
+        # Repolish — обновить QSS-стили, зависящие от свойства readOnly
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+
+    def _update_access_level(self, level: int = 0) -> None:
+        """
+        Deprecated: Обновить UI при смене access_level.
+
+        Используйте _apply_access() с AccessTrait вместо этого метода.
+        Сохранён для обратной совместимости с подклассами.
+        """
+        warnings.warn(
+            "_update_access_level() is deprecated, use _apply_access() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # Если у виджета есть _trait — обновим его через legacy path и применим
+        if hasattr(self, "_trait") and self._trait is not None:
+            self._trait.update(level)
+            self._apply_access()
 
     def _can_modify(self) -> bool:
         """Проверить, может ли пользователь изменять поле."""
