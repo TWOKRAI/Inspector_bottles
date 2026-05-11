@@ -148,6 +148,11 @@ class AuthManager(BaseManager, ObservableMixin):
         self._log_info("AuthManager shutdown")
         return True
 
+    @property
+    def permissions(self) -> PermissionsRegistry:
+        """Каталог зарегистрированных permissions (read+write)."""
+        return self._permissions
+
     # =========================================================================
     # Auth lifecycle
     # =========================================================================

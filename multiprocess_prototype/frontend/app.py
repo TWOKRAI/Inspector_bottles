@@ -158,6 +158,11 @@ def run_gui(process: "GuiProcess") -> None:
         sys.exit(1)
     ctx.extras["auth_manager"] = _auth_manager
 
+    # Заполняем декларативный каталог permissions (tabs.*, users.*, roles.*).
+    # Используется админ-панелью «Роли» и audit-трейлом (PR4).
+    from .permissions import register_all_permissions
+    register_all_permissions(_auth_manager.permissions)
+
     _auth_state = AuthState()
     ctx.extras["auth_state"] = _auth_state
 
