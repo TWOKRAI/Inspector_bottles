@@ -28,15 +28,17 @@ if TYPE_CHECKING:
 
 
 class AdministrationSection(QWidget):
-    """Секция «Администрация» — SideNavLayout с подсекциями «Пользователи» и «Роли».
+    """Секция «Администрация» — SideNavLayout с четырьмя подсекциями.
 
     Содержимое перестраивается при изменении access_context (сигнал AuthState),
     поэтому корректно реагирует на login и logout даже если виджет создан до входа.
 
     Структура (при наличии прав):
       SideNavLayout
-        «Пользователи» → UsersPanel(ctx)   (только если есть users.view)
+        «Пользователи» → UsersPanel(ctx)    (только если есть users.view)
         «Роли»         → RolesPanel(ctx)    (только если есть roles.view)
+        «Сессии»       → SessionsPanel(ctx) (только если есть users.view)
+        «Audit log»    → AuditLogPanel(ctx) (только если есть roles.view)
 
     Если доступна только одна подсекция — SideNav содержит один пункт.
     Если нет ни одной — отображается placeholder «Недостаточно прав».

@@ -321,3 +321,112 @@ class TestAuditLogPanelDetailDialog:
         # row() вернёт -1 для item'а не в таблице → _on_row_double_clicked должен молча выйти
         panel._on_row_double_clicked(item)
         # Нет исключений — тест пройден
+
+
+# ---------------------------------------------------------------------------
+# Новые тесты по замечаниям ревьюера
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLogPanelUserIdFilter:
+    """ComboBox хранит user_id, а не username — фильтр передаёт правильное значение."""
+
+    def test_user_filter_passes_user_id_not_username(
+        self, qtbot, mock_storage, mock_auth_manager
+    ):
+        """После выбора пользователя в ComboBox list_audit вызывается с user_id, не username."""
+        # Настраиваем auth_manager с одним пользователем
+        mock_auth_manager.list_users.return_value = [
+            {"username": "alice", "user_id": "u-alice"},
+        ]
+
+        ctx = MagicMock()
+        ctx.audit_storage.return_value = mock_storage
+        ctx.auth_manager.return_value = mock_auth_manager
+        ctx.auth_state.return_value = None
+
+        panel = AuditLogPanel(ctx)
+        qtbot.addWidget(panel)
+
+        # Выбираем элемент «alice» (индекс 1, так как 0 — «Все»)
+        panel._combo_user.setCurrentIndex(1)
+        mock_storage.list_audit.reset_mock()
+
+        panel._load(offset=0)
+
+        call_kwargs = mock_storage.list_audit.call_args[1]
+        # Должен передаваться user_id «u-alice», а не username «alice»
+        assert call_kwargs.get("user_id") == "u-alice"
+        assert call_kwargs.get("user_id") != "alice"
+
+    def test_user_filter_all_passes_none(
+        self, qtbot, mock_storage, mock_auth_manager
+    ):
+        """Выбор «Все» (индекс 0) → user_id=None в list_audit."""
+        mock_auth_manager.list_users.return_value = [
+            {"username": "alice", "user_id": "u-alice"},
+        ]
+
+        ctx = MagicMock()
+        ctx.audit_storage.return_value = mock_storage
+        ctx.auth_manager.return_value = mock_auth_manager
+        ctx.auth_state.return_value = None
+
+        panel = AuditLogPanel(ctx)
+        qtbot.addWidget(panel)
+
+        # «Все» — индекс 0
+        panel._combo_user.setCurrentIndex(0)
+        mock_storage.list_audit.reset_mock()
+
+        panel._load(offset=0)
+
+        call_kwargs = mock_storage.list_audit.call_args[1]
+        assert call_kwargs.get("user_id") is None
+
+
+class TestAuditDetailDialogEscapesHtml:
+    """_AuditDetailDialog экранирует HTML в пользовательских данных."""
+
+    def test_detail_dialog_escapes_html_in_username(self, qtbot):
+        """username с HTML-тегами рендерится как escape-последовательности, не разметка."""
+        entry = _make_entry(username="<script>alert(1)</script>")
+        entry.user_id = "<b>uid</b>"
+        entry.action_type = "<i>action</i>"
+        entry.resource = "<em>res</em>"
+        entry.comment = "<u>note</u>"
+
+        dlg = _AuditDetailDialog(entry)
+        qtbot.addWidget(dlg)
+
+        from PySide6.QtWidgets import QLabel
+        labels = dlg.findChildren(QLabel)
+        all_text = " ".join(lbl.text() for lbl in labels)
+
+        # Escaped-версии должны присутствовать
+        assert "&lt;script&gt;" in all_text
+        assert "&lt;b&gt;" in all_text
+        assert "&lt;i&gt;" in all_text
+        assert "&lt;em&gt;" in all_text
+        assert "&lt;u&gt;" in all_text
+
+        # Сырые теги не должны присутствовать как теги (не как текст)
+        # Проверяем что сырые строки тегов НЕ встречаются
+        assert "<script>" not in all_text
+        assert "<b>uid</b>" not in all_text
+
+    def test_detail_dialog_normal_text_unchanged(self, qtbot):
+        """Обычный текст без HTML не искажается escape."""
+        entry = _make_entry(username="alice", action_type="field_update", resource="settings.fps")
+        entry.comment = "обычный комментарий"
+
+        dlg = _AuditDetailDialog(entry)
+        qtbot.addWidget(dlg)
+
+        from PySide6.QtWidgets import QLabel
+        labels = dlg.findChildren(QLabel)
+        all_text = " ".join(lbl.text() for lbl in labels)
+
+        assert "alice" in all_text
+        assert "field_update" in all_text
+        assert "settings.fps" in all_text

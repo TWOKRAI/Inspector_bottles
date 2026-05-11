@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
+from html import escape
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QDate, Qt
@@ -30,6 +31,10 @@ from PySide6.QtWidgets import (
 )
 
 from Services.auth import AuditEntry
+
+from multiprocess_prototype.frontend.widgets.tabs.settings.administration._formatters import (
+    format_dt as _format_dt,
+)
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
@@ -187,8 +192,10 @@ class AuditLogPanel(QWidget):
 
         for user in users:
             username = user.get("username", "")
-            if username:
-                self._combo_user.addItem(username, userData=username)
+            uid = user.get("user_id", "")
+            if username and uid:
+                # Метка видна пользователю, userData — это user_id для фильтрации
+                self._combo_user.addItem(username, userData=uid)
 
     # ------------------------------------------------------------------
     # Загрузка данных
@@ -229,7 +236,7 @@ class AuditLogPanel(QWidget):
         self._table.setRowCount(len(self._entries))
         for row, entry in enumerate(self._entries):
             cells = [
-                self._format_dt(entry.ts),
+                _format_dt(entry.ts),
                 entry.username,
                 entry.action_type,
                 entry.resource or "—",
@@ -285,19 +292,6 @@ class AuditLogPanel(QWidget):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_dt(value: datetime | None) -> str:
-        """Отформатировать datetime для отображения в таблице."""
-        if value is None:
-            return "—"
-        val_str = str(value)
-        if "T" in val_str:
-            parts = val_str.split("T")
-            date_part = parts[0]
-            time_part = parts[1].split(".")[0] if len(parts) > 1 else ""
-            return f"{date_part} {time_part}".strip()
-        return val_str
-
-    @staticmethod
     def _qdate_to_datetime(qdate: QDate, *, start_of_day: bool) -> datetime:
         """Конвертировать QDate в datetime (UTC).
 
@@ -332,14 +326,15 @@ class _AuditDetailDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        # Основные поля
+        # Основные поля — пользовательские данные экранируются html.escape
+        # для защиты от HTML injection через поля записи аудита
         meta_lines = [
-            f"<b>ID:</b> {entry.entry_id}",
-            f"<b>Время:</b> {entry.ts}",
-            f"<b>Пользователь:</b> {entry.username} ({entry.user_id})",
-            f"<b>Тип действия:</b> {entry.action_type}",
-            f"<b>Ресурс:</b> {entry.resource or '—'}",
-            f"<b>Комментарий:</b> {entry.comment or '—'}",
+            f"<b>ID:</b> {escape(str(entry.entry_id))}",
+            f"<b>Время:</b> {escape(str(entry.ts))}",
+            f"<b>Пользователь:</b> {escape(entry.username)} ({escape(entry.user_id)})",
+            f"<b>Тип действия:</b> {escape(entry.action_type)}",
+            f"<b>Ресурс:</b> {escape(entry.resource) if entry.resource else '—'}",
+            f"<b>Комментарий:</b> {escape(entry.comment) if entry.comment else '—'}",
         ]
         for line in meta_lines:
             lbl = QLabel(line)

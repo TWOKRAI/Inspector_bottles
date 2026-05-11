@@ -16,6 +16,9 @@ import pytest
 from multiprocess_prototype.frontend.widgets.tabs.settings.administration.sessions_panel import (
     SessionsPanel,
 )
+from multiprocess_prototype.frontend.widgets.tabs.settings.administration._formatters import (
+    format_duration as _format_duration_fn,
+)
 
 # ---------------------------------------------------------------------------
 # Вспомогательные данные
@@ -181,41 +184,45 @@ class TestSessionsPanelRefreshButton:
 
 
 class TestDurationFormat:
-    """Метод _format_duration возвращает правильные строки."""
+    """Функция _format_duration из _formatters возвращает правильные строки.
+
+    После рефакторинга nitpick-1 (PR4 Group C iter 1) функция вынесена
+    из SessionsPanel в _formatters.format_duration.
+    """
 
     def test_active_session_returns_aktivna(self):
         """logout_at=None → «активна»."""
-        result = SessionsPanel._format_duration(_DT_LOGIN, None)
+        result = _format_duration_fn(_DT_LOGIN, None)
         assert result == "активна"
 
     def test_hours_and_minutes(self):
         """Сессия 1ч 23мин."""
         login = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
         logout = datetime(2026, 5, 1, 11, 23, 0, tzinfo=timezone.utc)
-        result = SessionsPanel._format_duration(login, logout)
+        result = _format_duration_fn(login, logout)
         assert result == "1ч 23мин"
 
     def test_only_minutes(self):
         """Сессия 45 мин (без часов)."""
         login = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
         logout = datetime(2026, 5, 1, 10, 45, 0, tzinfo=timezone.utc)
-        result = SessionsPanel._format_duration(login, logout)
+        result = _format_duration_fn(login, logout)
         assert result == "45мин"
 
     def test_less_than_minute(self):
         """Сессия менее минуты → «< 1мин»."""
         login = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
         logout = datetime(2026, 5, 1, 10, 0, 30, tzinfo=timezone.utc)
-        result = SessionsPanel._format_duration(login, logout)
+        result = _format_duration_fn(login, logout)
         assert result == "< 1мин"
 
     def test_login_at_none_returns_dash(self):
         """login_at=None → «—»."""
-        result = SessionsPanel._format_duration(None, None)
+        result = _format_duration_fn(None, None)
         assert result == "—"
 
     def test_zero_minutes_returns_less_than_minute(self):
         """Ровно 0 секунд разницы → «< 1мин»."""
         dt = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
-        result = SessionsPanel._format_duration(dt, dt)
+        result = _format_duration_fn(dt, dt)
         assert result == "< 1мин"

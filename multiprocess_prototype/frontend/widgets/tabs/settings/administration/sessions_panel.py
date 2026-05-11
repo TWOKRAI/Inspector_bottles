@@ -10,7 +10,7 @@ Scope фильтра:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -26,6 +26,11 @@ from PySide6.QtWidgets import (
 )
 
 from Services.auth import SessionEntry
+
+from multiprocess_prototype.frontend.widgets.tabs.settings.administration._formatters import (
+    format_dt as _format_dt,
+    format_duration as _format_duration,
+)
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
@@ -143,9 +148,9 @@ class SessionsPanel(QWidget):
 
             cells = [
                 entry.username,
-                self._format_dt(login_at),
-                self._format_dt(logout_at),
-                self._format_duration(login_at, logout_at),
+                _format_dt(login_at),
+                _format_dt(logout_at),
+                _format_duration(login_at, logout_at),
                 entry.host,
             ]
             for col, text in enumerate(cells):
@@ -153,52 +158,4 @@ class SessionsPanel(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self._table.setItem(row, col, item)
 
-    # ------------------------------------------------------------------
-    # Форматирование
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _format_dt(value: datetime | None) -> str:
-        """Отформатировать datetime для отображения в таблице."""
-        if value is None:
-            return "—"
-        # Нормализация к строке
-        val_str = str(value)
-        if "T" in val_str:
-            parts = val_str.split("T")
-            date_part = parts[0]
-            time_part = parts[1].split(".")[0] if len(parts) > 1 else ""
-            return f"{date_part} {time_part}".strip()
-        return val_str
-
-    @staticmethod
-    def _format_duration(login_at: datetime | None, logout_at: datetime | None) -> str:
-        """Вернуть строку длительности сессии.
-
-        Если logout_at is None — сессия ещё активна → «активна».
-        Иначе: «1ч 23мин», «45мин», «< 1мин».
-        """
-        if login_at is None:
-            return "—"
-        if logout_at is None:
-            return "активна"
-
-        # Обеспечиваем совместимость naive/aware datetime
-        if login_at.tzinfo is not None and logout_at.tzinfo is None:
-            logout_at = logout_at.replace(tzinfo=timezone.utc)
-        elif login_at.tzinfo is None and logout_at.tzinfo is not None:
-            login_at = login_at.replace(tzinfo=timezone.utc)
-
-        delta_seconds = int((logout_at - login_at).total_seconds())
-        if delta_seconds < 0:
-            return "—"
-        if delta_seconds < 60:
-            return "< 1мин"
-
-        minutes_total = delta_seconds // 60
-        hours = minutes_total // 60
-        minutes = minutes_total % 60
-
-        if hours > 0:
-            return f"{hours}ч {minutes}мин"
-        return f"{minutes}мин"
+    # Форматирование: _format_dt и _format_duration вынесены в _formatters.py
