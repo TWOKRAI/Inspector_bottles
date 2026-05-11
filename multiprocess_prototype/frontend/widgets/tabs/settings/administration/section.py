@@ -96,22 +96,16 @@ class AdministrationSection(QWidget):
     def _build_sidenav(self, *, has_users: bool, has_roles: bool) -> QWidget:
         """Построить SideNavLayout с теми подсекциями, на которые есть права."""
         nav = SideNavLayout()
-        first_key: str | None = None
 
         if has_users:
             from .users_panel import UsersPanel
             nav.add_section("users", "Пользователи", UsersPanel(self._ctx))
-            if first_key is None:
-                first_key = "users"
 
         if has_roles:
             from .roles_panel import RolesPanel
             nav.add_section("roles", "Роли", RolesPanel(self._ctx))
-            if first_key is None:
-                first_key = "roles"
 
-        if first_key is not None:
-            nav.set_current(first_key)
+        nav.set_current("users" if has_users else "roles")
 
         return nav
 

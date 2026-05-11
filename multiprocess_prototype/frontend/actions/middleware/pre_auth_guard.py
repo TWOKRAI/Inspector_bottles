@@ -68,14 +68,15 @@ class PreAuthGuard:
         Импорт QMessageBox выполняется лениво, чтобы PreAuthGuard был тестируем
         без Qt-окружения (hook() не требует Qt).
         """
-        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QApplication, QMessageBox
 
         description = action.description or action.action_type
         logger.info(
             "Действие заблокировано (требуется авторизация): %s", description
         )
+        parent = QApplication.activeWindow() if QApplication.instance() else None
         QMessageBox.information(
-            None,
+            parent,
             "Требуется вход",
             f"Для выполнения действия «{description}» необходимо войти в систему.",
         )
