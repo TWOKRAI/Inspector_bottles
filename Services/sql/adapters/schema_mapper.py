@@ -20,10 +20,10 @@ from Services.sql.interfaces import ISchemaMapper
 from Services.sql.adapters.sql_meta import extract_sql_meta
 
 try:
-    from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+    from multiprocess_framework.modules.data_schema_module import FieldMeta
 except ImportError:
     try:
-        from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+        from multiprocess_framework.modules.data_schema_module import FieldMeta
     except ImportError:
         FieldMeta = None  # type: ignore[misc,assignment]
 

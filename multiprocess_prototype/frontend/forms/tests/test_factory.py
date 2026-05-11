@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
+from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
 from multiprocess_prototype.frontend.forms.widgets.color_picker import ColorTripletWidget
 from multiprocess_prototype.registers.field_info import FieldInfo

@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import Annotated
 from unittest.mock import MagicMock
 
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
-from multiprocess_framework.modules.data_schema_module.core.schema_base import SchemaBase
+from multiprocess_framework.modules.data_schema_module import FieldMeta
+from multiprocess_framework.modules.data_schema_module import SchemaBase
 from multiprocess_framework.modules.process_module.plugins.base import (
     PluginContext,
     ProcessModulePlugin,

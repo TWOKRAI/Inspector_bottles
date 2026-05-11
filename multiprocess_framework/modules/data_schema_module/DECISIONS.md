@@ -65,3 +65,32 @@
   - **Оставить монолит** — терпимо, но затрудняет понимание границ и добавление нового интерфейса.
   - **Полностью удалить корневой `interfaces.py`** — сломает 43 файла-потребителя с импортами `from data_schema_module.interfaces import ...`. Стоимость миграции не окупается выигрышем.
   - **Использовать `__getattr__` (PEP 562) в корневом `__init__.py`** — lazy-loading через `__getattr__` сокращает import-time, но добавляет неявность; для interfaces (легковесные Protocol/ABC) overhead отсутствует.
+
+---
+
+## ADR-DS-006: Фасадный импорт — единственный канал для core-символов
+- Дата: 2026-05-11
+- Статус: принято
+- Контекст: До этой даты потребители вне `data_schema_module/` импортировали core-символы (`SchemaBase`, `RegisterBase`, `FieldMeta`) и через корневой фасад, и через прямые пути в подпакеты: `from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta` и т.п. (11 файлов в `multiprocess_prototype/`, `Services/`, `multiprocess_framework/modules/process_module/tests/`). Это создавало лишние file-to-file edges в DSM и нарушало правило R-1 «единый канал импортов»: при reorg core/ потребители ломались напрямую, минуя фасад.
+- Решение: Для core-символов, объявленных в корневом `__init__.py.__all__` (`SchemaBase`, `RegisterBase`, `FieldMeta`, `FieldRouting`, `register_schema`, `DataConverter`, …), фасадный импорт через корень модуля — **единственный разрешённый канал** из кода вне `data_schema_module/`. Прямые импорты `from data_schema_module.core.X import Y` для public API запрещены.
+
+  Sed-миграция 11 файлов выполнена: `from data_schema_module.core.field_meta import FieldMeta` → `from data_schema_module import FieldMeta` (то же для `core.schema_base import SchemaBase/RegisterBase`).
+
+  Исключения (где прямой подпакет-импорт обязателен — это **opt-in зависимости** по ADR-DS-004):
+  - `from data_schema_module.storage.storage_manager import StorageManager` — зависит от `process_module`, не в корневом фасаде.
+  - `from data_schema_module.extensions.versioning import VersionManager` — зависит от `config_module`.
+  - `from data_schema_module.extensions.factory import ModelFactory` — динамическая фабрика, opt-in.
+  - `from data_schema_module.extensions.models import ComponentDNA, BaseComponentModel` — модели компонентов.
+  - `from data_schema_module.extensions.tools import SchemaVisualizer, SchemaDocumentationGenerator` — визуализация.
+
+  Внутренние импорты внутри `data_schema_module/*` (относительные `from .core.field_meta import ...` или `from ..core.X import Y`) — нормальное явление, правило не касается них.
+
+- Причина: Единый канал импортов даёт три полезных свойства:
+  1. **Стабильный публичный контракт** — реорганизация подпакетов (move/rename внутри `core/`) не ломает потребителей.
+  2. **Меньше file-to-file edges в DSM** — sentrux modularity улучшается.
+  3. **Соответствие R-1 фреймворка** — то же правило применяется ко всему `multiprocess_framework`.
+
+- Отклонённые альтернативы:
+  - **Запретить вообще все прямые импорты подпакетов** (включая extensions/storage) — нарушает ADR-DS-004, делает зависимость от `process_module` неявной.
+  - **Не вводить правило, оставить как есть** — те же файлы при следующем рефакторинге снова разбредутся по прямым путям; cleanup без правила = временная мера.
+  - **Lint-rule на CI** — преждевременно; рекомендация в DECISIONS + grep в `validate.py` достаточны на этом этапе.
