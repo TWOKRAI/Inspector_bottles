@@ -65,11 +65,14 @@ class AdministrationSection(QWidget):
 
         nav.add_section("users", "Пользователи", users_widget)
 
-        # Подсекция «Роли» — stub (будет реализована в Group D)
-        roles_stub = QLabel("Раздел «Роли» — будет реализован в Group D")
-        roles_stub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        roles_stub.setStyleSheet("color: gray; font-size: 13px;")
-        nav.add_section("roles", "Роли", roles_stub)
+        # Подсекция «Роли» — показывать только при наличии права roles.view
+        if "roles.view" in permissions:
+            from .roles_panel import RolesPanel
+            roles_widget: QWidget = RolesPanel(ctx)
+        else:
+            roles_widget = self._build_restricted_placeholder("Роли")
+
+        nav.add_section("roles", "Роли", roles_widget)
 
         # Открываем первую доступную подсекцию
         nav.set_current("users")
