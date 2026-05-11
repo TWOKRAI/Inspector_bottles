@@ -94,8 +94,11 @@ class PluginsTab(QWidget):
                 from multiprocess_prototype.frontend.widgets.access import (
                     bind_edit_permission,
                 )
+                _auth = self._ctx.auth
                 bind_edit_permission(
-                    detail, "tabs.plugins.edit", self._ctx.auth_state()
+                    detail,
+                    "tabs.plugins.edit",
+                    _auth.state if _auth is not None else None,
                 )
             else:
                 detail = PluginInfoCard(info)

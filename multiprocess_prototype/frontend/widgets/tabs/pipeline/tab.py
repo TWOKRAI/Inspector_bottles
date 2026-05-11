@@ -152,7 +152,8 @@ class PipelineTab(QWidget):
 
     def _can_edit(self) -> bool:
         """Имеет ли текущий пользователь право на mutation в pipeline."""
-        auth_state = self._ctx.auth_state()
+        _auth = self._ctx.auth
+        auth_state = _auth.state if _auth is not None else None
         if auth_state is None:
             return True
         return auth_state.access_context.has_permission("tabs.pipeline.edit")

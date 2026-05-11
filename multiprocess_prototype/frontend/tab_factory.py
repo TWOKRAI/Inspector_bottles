@@ -8,7 +8,7 @@ custom_factories: dict[tab_id -> Callable[[AppContext], QWidget]]
     Если id отсутствует — создаётся PlaceholderTab.
 
 Фильтрация по permissions:
-    После создания всех табов фабрика читает `ctx.auth_state().access_context`
+    После создания всех табов фабрика читает `ctx.auth.state.access_context`
     и скрывает табы, у которых `view_permission` не выдан текущему пользователю
     (через `QTabBar.setTabVisible`). Подписывается на `access_context_changed`
     и пере-применяет видимость при login/logout/смене роли.
@@ -112,7 +112,7 @@ class TabFactory:
 
     Args:
         ctx: AppContext — DI-контейнер, передаётся в custom factory.
-            Если `ctx.auth_state()` не None — фабрика подписывается на
+            Если `ctx.auth` не None — фабрика подписывается на
             `access_context_changed` и применяет видимость табов по
             `view_permission` каждой записи `TAB_ORDER`.
         custom_factories: опциональный dict[tab_id -> factory(ctx) -> QWidget]
@@ -196,7 +196,8 @@ class TabFactory:
 
     def _wire_auth_state(self) -> None:
         """Подписаться на смену AccessContext в AuthState."""
-        auth_state = self._ctx.auth_state() if hasattr(self._ctx, "auth_state") else None
+        _auth = self._ctx.auth if hasattr(self._ctx, "auth") else None
+        auth_state = _auth.state if _auth is not None else None
         if auth_state is None:
             return
         # Реагируем на login/logout/смену роли — реалогиниваем видимость
@@ -215,7 +216,8 @@ class TabFactory:
         if self._tab_widget is None:
             return
 
-        auth_state = self._ctx.auth_state() if hasattr(self._ctx, "auth_state") else None
+        _auth = self._ctx.auth if hasattr(self._ctx, "auth") else None
+        auth_state = _auth.state if _auth is not None else None
         if auth_state is None:
             return
 

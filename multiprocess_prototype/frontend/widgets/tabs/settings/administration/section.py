@@ -47,7 +47,8 @@ class AdministrationSection(QWidget):
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctx = ctx
-        self._auth_state: AuthState | None = ctx.auth_state()
+        auth = ctx.auth
+        self._auth_state: AuthState | None = auth.state if auth is not None else None
 
         # Внешний layout с одним «слотом» — текущим содержимым
         self._outer_layout = QVBoxLayout(self)

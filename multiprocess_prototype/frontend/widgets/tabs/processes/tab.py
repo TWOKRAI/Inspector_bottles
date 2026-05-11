@@ -166,7 +166,8 @@ class ProcessesTab(QWidget):
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
-        auth_state = self._ctx.auth_state()
+        _auth = self._ctx.auth
+        auth_state = _auth.state if _auth is not None else None
         for btn in (self._btn_create, self._btn_delete, self._btn_start, self._btn_stop):
             install_permission_aware_enable(btn, "tabs.processes.edit", auth_state)
 

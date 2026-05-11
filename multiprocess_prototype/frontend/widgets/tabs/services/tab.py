@@ -142,7 +142,8 @@ class ServicesTab(QWidget):
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
-        auth_state = self._ctx.auth_state()
+        _auth = self._ctx.auth
+        auth_state = _auth.state if _auth is not None else None
         for btn in (start_btn, stop_btn, restart_btn):
             install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
 

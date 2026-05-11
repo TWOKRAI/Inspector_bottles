@@ -266,9 +266,9 @@ def run_gui(process: "GuiProcess") -> None:
     window.set_action_bus(action_bus)
 
     # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
-    if ctx.auth_state() is not None and ctx.auth_manager() is not None:
+    if (auth := ctx.auth) is not None:
         from .widgets.chrome.login_button import LoginButton
-        _login_btn = LoginButton(ctx.auth_state(), ctx.auth_manager())
+        _login_btn = LoginButton(auth.state, auth.manager)
         window.header.set_login_button(_login_btn)
 
     # 4a2. Phase 12: StatusBar live bindings
@@ -287,7 +287,10 @@ def run_gui(process: "GuiProcess") -> None:
     # с `_trait`/`_apply_access`/`presenter.set_access_context` под
     # MainWindow автоматически реагирует на login/logout/смену роли.
     from .widgets.access import propagate_access_context_to_tree
-    propagate_access_context_to_tree(window, ctx.auth_state())
+    _auth_for_tree = ctx.auth
+    propagate_access_context_to_tree(
+        window, _auth_for_tree.state if _auth_for_tree is not None else None
+    )
 
     # 6. Подключить bridge callbacks
     _setup_bridge_callbacks(process, image_panel, window)

@@ -54,8 +54,9 @@ class UsersPanel(QWidget):
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._auth_manager = ctx.auth_manager()
-        self._auth_state = ctx.auth_state()
+        auth = ctx.auth
+        self._auth_manager = auth.manager if auth is not None else None
+        self._auth_state = auth.state if auth is not None else None
         self._users: list[dict] = []
 
         self._setup_ui()

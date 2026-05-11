@@ -61,8 +61,9 @@ class AuditLogPanel(QWidget):
         super().__init__(parent)
 
         self._ctx = ctx
-        self._storage = ctx.audit_storage()
-        self._auth_manager = ctx.auth_manager()
+        auth = ctx.auth
+        self._storage = auth.audit if auth is not None else None
+        self._auth_manager = auth.manager if auth is not None else None
 
         self._offset: int = 0
         self._entries: list[AuditEntry] = []

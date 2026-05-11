@@ -26,13 +26,21 @@ from multiprocess_prototype.frontend.widgets.tabs.placeholder import Placeholder
 def _make_ctx(auth_state: object | None = None) -> MagicMock:
     """Создать mock AppContext.
 
-    По умолчанию `auth_state()` возвращает None — фабрика работает в legacy-режиме
+    По умолчанию `ctx.auth` is None — фабрика работает в legacy-режиме
     без фильтрации по permissions (все табы видны). Для тестов фильтрации
     передавай stub AuthState с атрибутом `access_context` и сигналом
     `access_context_changed`.
     """
     ctx = MagicMock()
+    # legacy API (для старого кода)
     ctx.auth_state.return_value = auth_state
+    # new API: ctx.auth = AuthContext | None
+    if auth_state is None:
+        ctx.auth = None
+    else:
+        _auth = MagicMock()
+        _auth.state = auth_state
+        ctx.auth = _auth
     return ctx
 
 

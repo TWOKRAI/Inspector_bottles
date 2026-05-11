@@ -44,13 +44,13 @@ class RolesPanel(QWidget):
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._auth_manager = ctx.auth_manager()
+        auth = ctx.auth
+        self._auth_manager = auth.manager if auth is not None else None
         self._bus: "ActionBus | None" = ctx.action_bus()
 
         # Определяем permissions текущего пользователя
-        auth_state = ctx.auth_state()
-        if auth_state is not None:
-            access_ctx = auth_state.access_context
+        if auth is not None:
+            access_ctx = auth.state.access_context
             self._can_create = access_ctx.has_permission("roles.create")
             self._can_edit = access_ctx.has_permission("roles.edit")
             self._can_delete = access_ctx.has_permission("roles.delete")

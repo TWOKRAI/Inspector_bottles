@@ -394,10 +394,11 @@ class SettingsTab(QWidget):
 
         # PR3: edit-кнопки доступны только при tabs.settings.edit.
         from multiprocess_prototype.frontend.widgets.access import gate_edit_widgets
+        _auth = self._ctx.auth
         gate_edit_widgets(
             [reset_btn, save_btn],
             "tabs.settings.edit",
-            self._ctx.auth_state(),
+            _auth.state if _auth is not None else None,
         )
 
         return container

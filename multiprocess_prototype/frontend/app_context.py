@@ -20,12 +20,31 @@ if TYPE_CHECKING:
     from Services.auth.storage.audit_storage import SqliteAuditStorage
 
 
+@dataclass(frozen=True)
+class AuthContext:
+    """Auth-домен: связка manager + state + audit-storage.
+
+    Группирует зависимости auth-домена в один типизированный объект.
+    Возвращается из `AppContext.auth` (property). None если auth ещё не
+    инициализирован (manager или state отсутствует в extras).
+    """
+
+    manager: "IAuthManager"
+    state: "AuthState"
+    audit: "SqliteAuditStorage | None" = None
+
+
 @dataclass
 class AppContext:
     """DI-контейнер: единая точка доступа к зависимостям GUI.
 
     Передаётся виджетам и табам вместо прямых ссылок на GuiProcess.
     Нет глобальных переменных — создаётся явно через build_app_context().
+
+    Зависимости группируются по доменам через property-аксессоры:
+    - `auth` — AuthContext (manager + state + audit)
+    Существующие методы (`auth_manager()`, `auth_state()`, ...) сохранены
+    для обратной совместимости и будут удалены после миграции всех callers.
     """
 
     process: "GuiProcess"
@@ -33,6 +52,29 @@ class AppContext:
     bridge: "DataReceiverBridge"
     config: dict[str, Any] = field(default_factory=dict)
     extras: dict[str, Any] = field(default_factory=dict)
+
+    # -- Domain-grouped accessors (новый API) --
+
+    @property
+    def auth(self) -> "AuthContext | None":
+        """Auth-домен: manager + state + audit. None если не инициализирован.
+
+        Пример:
+            if (auth := ctx.auth) is not None:
+                auth.manager.login(...)
+                auth.state.access_context
+        """
+        mgr = self.extras.get("auth_manager")
+        state = self.extras.get("auth_state")
+        if mgr is None or state is None:
+            return None
+        return AuthContext(
+            manager=mgr,
+            state=state,
+            audit=self.extras.get("audit_storage"),
+        )
+
+    # -- Legacy accessors (deprecated, удалить после миграции) --
 
     def get(self, key: str, default: Any = None) -> Any:
         """Доступ к extras по ключу."""

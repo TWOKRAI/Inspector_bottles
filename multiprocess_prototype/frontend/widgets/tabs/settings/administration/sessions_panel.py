@@ -54,13 +54,9 @@ class SessionsPanel(QWidget):
         super().__init__(parent)
 
         self._ctx = ctx
-        self._storage = ctx.audit_storage()
-        self._access_context = None
-
-        # Получаем access_context через auth_state
-        auth_state = ctx.auth_state()
-        if auth_state is not None:
-            self._access_context = auth_state.access_context
+        auth = ctx.auth
+        self._storage = auth.audit if auth is not None else None
+        self._access_context = auth.state.access_context if auth is not None else None
 
         self._sessions: list[SessionEntry] = []
         self._setup_ui()

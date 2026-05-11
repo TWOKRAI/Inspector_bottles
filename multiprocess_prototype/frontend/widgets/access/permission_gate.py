@@ -7,7 +7,7 @@
     bind_edit_permission(
         self._save_btn,
         permission="tabs.settings.edit",
-        auth_state=ctx.auth_state(),
+        auth_state=(ctx.auth.state if ctx.auth is not None else None),
     )
 
 Эффект:
