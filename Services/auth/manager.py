@@ -169,12 +169,13 @@ class AuthManager(BaseManager, ObservableMixin):
         # Проверка блокировки ДО верификации пароля
         locked, wait_sec = self._lockout.is_locked(username)
         if locked:
+            failures = self._lockout.get_failures(username)
             self._log_warning(
-                f"auth.lockout.engaged: username={username!r}, delay_sec={wait_sec}"
+                f"auth.lockout.engaged: username={username!r}, delay_sec={wait_sec}, failures={failures}"
             )
             raise AccountLocked(
                 f"Учётная запись временно заблокирована. Ждите {wait_sec} сек.",
-                failures=wait_sec,
+                failures=failures,
                 delay_sec=wait_sec,
             )
 
@@ -184,7 +185,8 @@ class AuthManager(BaseManager, ObservableMixin):
         if user is None:
             self._lockout.record_failure(username)
             self._log_warning(f"auth.login.failed: username={username!r}, reason=user_not_found")
-            raise UserNotFound(f"Пользователь '{username}' не найден.", username=username)
+            # Единое исключение для unknown user и wrong password — защита от user enumeration
+            raise InvalidCredentials("Неверный логин или пароль.", username=username)
 
         if not user.is_active:
             self._lockout.record_failure(username)
@@ -321,7 +323,6 @@ class AuthManager(BaseManager, ObservableMixin):
         # Last-admin invariant
         user = users[username]
         if user.role_name == "admin" and user.is_active:
-            roles = self._storage.load_roles()
             active_admins = [
                 u for u in users.values()
                 if u.role_name == "admin" and u.is_active
@@ -424,12 +425,10 @@ class AuthManager(BaseManager, ObservableMixin):
             password_hash исключён из каждого dict.
         """
         users = self._storage.load()
-        result = []
-        for user in sorted(users.values(), key=lambda u: u.username):
-            data = user.model_dump()
-            data.pop("password_hash", None)
-            result.append(data)
-        return result
+        return [
+            user.safe_dump()
+            for user in sorted(users.values(), key=lambda u: u.username)
+        ]
 
     # =========================================================================
     # Role CRUD

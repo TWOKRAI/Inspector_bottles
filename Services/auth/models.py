@@ -104,6 +104,12 @@ class User(SchemaBase):
         FieldMeta("Активен", info="False — учётная запись деактивирована."),
     ] = True
 
+    def safe_dump(self) -> dict:
+        """Dict-сериализация User БЕЗ password_hash — для возврата наружу/в логи."""
+        data = self.model_dump()
+        data.pop("password_hash", None)
+        return data
+
     def __repr__(self) -> str:
         """Repr без password_hash (sensitive-поле)."""
         return (

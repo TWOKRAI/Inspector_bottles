@@ -127,6 +127,22 @@ class LockoutTracker:
             remaining = int(state.next_allowed_ts - now)
             return True, max(remaining, 1)
 
+    def get_failures(self, username: str) -> int:
+        """
+        Вернуть текущий счётчик неудачных попыток для пользователя.
+
+        Returns:
+            Число накопленных неудач (0 если записи нет или был auto-reset).
+        """
+        with self._lock:
+            state = self._states.get(username)
+            if state is None:
+                return 0
+            now = time.time()
+            if self._should_auto_reset(state, now):
+                return 0
+            return state.failures
+
     def reset(self, username: str) -> None:
         """Принудительный сброс состояния пользователя (для тестов и admin-операций)."""
         with self._lock:

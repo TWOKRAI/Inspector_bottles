@@ -179,9 +179,9 @@ def test_login_wrong_password_raises(
 def test_login_unknown_user_raises(
     manager: AuthManager, storage: YamlUserStorage
 ) -> None:
-    """Несуществующий пользователь → UserNotFound."""
+    """Несуществующий пользователь → InvalidCredentials (защита от user enumeration)."""
     _seed_storage(storage, manager._config)
-    with pytest.raises(UserNotFound):
+    with pytest.raises(InvalidCredentials):
         manager.login("nobody", "ValidPass@1")
 
 

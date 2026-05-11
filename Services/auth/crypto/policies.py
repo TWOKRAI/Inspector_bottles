@@ -17,6 +17,12 @@ from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaB
 
 from ..exceptions import WeakPassword
 
+# Регулярные выражения для классов символов, скомпилированные на уровне модуля (PEP 8)
+_RE_LOWER = re.compile(r"[a-z]")
+_RE_UPPER = re.compile(r"[A-Z]")
+_RE_DIGIT = re.compile(r"[0-9]")
+_RE_SYMBOL = re.compile(r"[^a-zA-Z0-9]")
+
 
 class PasswordPolicy(SchemaBase):
     """
@@ -75,15 +81,6 @@ class PasswordPolicy(SchemaBase):
         ),
     ] = 4
 
-    # -------------------------------------------------------------------------
-    # Константы классов символов
-    # -------------------------------------------------------------------------
-
-    _RE_LOWER = re.compile(r"[a-z]")
-    _RE_UPPER = re.compile(r"[A-Z]")
-    _RE_DIGIT = re.compile(r"[0-9]")
-    _RE_SYMBOL = re.compile(r"[^a-zA-Z0-9]")
-
     def validate(self, password: str) -> None:
         """
         Проверить пароль по политике.
@@ -108,10 +105,10 @@ class PasswordPolicy(SchemaBase):
             )
 
         classes_present = sum([
-            bool(self._RE_LOWER.search(password)),
-            bool(self._RE_UPPER.search(password)),
-            bool(self._RE_DIGIT.search(password)),
-            bool(self._RE_SYMBOL.search(password)),
+            bool(_RE_LOWER.search(password)),
+            bool(_RE_UPPER.search(password)),
+            bool(_RE_DIGIT.search(password)),
+            bool(_RE_SYMBOL.search(password)),
         ])
 
         if classes_present < self.require_classes:
@@ -123,10 +120,6 @@ class PasswordPolicy(SchemaBase):
                 actual=classes_present,
             )
 
-    model_config = {
-        **SchemaBase.model_config,
-        "arbitrary_types_allowed": True,
-    }
 
 
 class LockoutPolicy(SchemaBase):

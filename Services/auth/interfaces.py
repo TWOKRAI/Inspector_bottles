@@ -121,29 +121,34 @@ class IAuthManager(Protocol):
             dict с полями: success, user_id, message.
         """
 
-    def delete_user(self, username: str) -> dict[str, Any]:
+    def delete_user(self, username: str) -> None:
         """
         Удалить пользователя. Проверяет last-admin invariant.
 
-        Returns:
-            dict с полями: success, message.
+        Raises:
+            UserNotFound   — пользователь не существует
+            LastAdminError — нельзя удалить последнего активного admin
         """
 
-    def update_user_role(self, username: str, role_name: str) -> dict[str, Any]:
+    def update_user_role(self, username: str, role_name: str) -> None:
         """
         Изменить роль пользователя. Проверяет last-admin invariant.
 
-        Returns:
-            dict с полями: success, message.
+        Raises:
+            UserNotFound   — пользователь не существует
+            RoleNotFound   — роль не существует
+            LastAdminError — нельзя снять роль admin с последнего активного admin
         """
 
-    def reset_password(self, username: str) -> dict[str, Any]:
+    def reset_password(self, username: str) -> str:
         """
         Сбросить пароль пользователя (генерирует новый).
 
         Returns:
-            dict с полями: success, new_password (plain-text!), message.
-            Примечание: new_password возвращается один раз и не логируется.
+            Новый пароль в plain-text (возвращается один раз, не логируется).
+
+        Raises:
+            UserNotFound — пользователь не существует
         """
 
     def list_users(self) -> list[dict[str, Any]]:
@@ -160,6 +165,42 @@ class IAuthManager(Protocol):
 
         Returns:
             Список dict (Dict at Boundary).
+        """
+
+    def create_role(
+        self,
+        name: str,
+        permissions: list[str],
+        level: int = 0,
+        hidden_in_ui: bool = False,
+        bypass_readonly: bool = False,
+        show_hidden: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Создать новую роль.
+
+        Returns:
+            dict с полями роли.
+
+        Raises:
+            AuthError — роль с таким именем уже существует
+        """
+
+    def update_role_permissions(self, name: str, permissions: list[str]) -> None:
+        """
+        Обновить список permissions роли.
+
+        Raises:
+            RoleNotFound — роль не существует
+        """
+
+    def delete_role(self, name: str) -> None:
+        """
+        Удалить роль.
+
+        Raises:
+            AuthError    — роль является predefined (dev/admin/operator/viewer)
+            RoleNotFound — роль не существует
         """
 
     def verify_admin_password(self, password: str) -> bool:

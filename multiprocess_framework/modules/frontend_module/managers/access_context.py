@@ -29,7 +29,7 @@ class AccessContext:
     bypass_readonly: bool = False
     show_hidden: bool = False
     # Новые поля ПОСЛЕ старых — позиционные AccessContext(5, True, True) не ломаются
-    permissions: frozenset = frozenset()
+    permissions: frozenset[str] = frozenset()
     role_name: str = ""
 
     def has_permission(self, name: str) -> bool:

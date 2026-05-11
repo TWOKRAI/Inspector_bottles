@@ -183,7 +183,8 @@ from Services.auth import BcryptHasher, PasswordPolicy, ...
 
 ## Примечания
 
-- `auth_manager.py` и `bootstrap.py` — Группа B (следующий PR-этап).
+- `AuthManager` реализован (коммит f9e9ed6): `AuthManager(config).initialize()` → `login/logout`, CRUD пользователей (`create_user`, `delete_user`, `update_user_role`, `reset_password`, `list_users`) и ролей (`create_role`, `update_role_permissions`, `delete_role`, `list_roles`). Все методы принимают/возвращают `dict` (Dict at Boundary).
+- `bootstrap.py` реализован: CLI для первичного заполнения хранилища через `python -m Services.auth.bootstrap`.
 - `password_hash` помечен `FieldMeta(hidden=True)` и исключён из `__repr__` модели User.
 - `LockoutTracker` — in-memory: перезапуск сбрасывает счётчики (намеренно, см. Auth-004).
 - Atomic write в `YamlUserStorage`: `tempfile.mkstemp` → `os.replace` (POSIX и Windows).
