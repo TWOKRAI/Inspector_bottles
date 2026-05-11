@@ -33,8 +33,12 @@ class AccessContext:
     role_name: str = ""
 
     def has_permission(self, name: str) -> bool:
-        """Проверить наличие именованного права."""
-        return name in self.permissions
+        """Проверить наличие именованного права.
+
+        Wildcard `*` в permissions означает «все права» — используется
+        для роли dev (см. Services/auth/bootstrap.py).
+        """
+        return "*" in self.permissions or name in self.permissions
 
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> "AccessContext":

@@ -75,12 +75,12 @@ class AdministrationSection(QWidget):
             self._current.deleteLater()
             self._current = None
 
-        permissions: frozenset[str] = frozenset()
         if self._auth_state is not None:
-            permissions = self._auth_state.access_context.permissions
-
-        has_users = "users.view" in permissions
-        has_roles = "roles.view" in permissions
+            access_ctx = self._auth_state.access_context
+            has_users = access_ctx.has_permission("users.view")
+            has_roles = access_ctx.has_permission("roles.view")
+        else:
+            has_users = has_roles = False
 
         if not has_users and not has_roles:
             self._current = self._build_restricted_placeholder()

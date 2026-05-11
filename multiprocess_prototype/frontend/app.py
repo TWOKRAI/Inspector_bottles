@@ -161,6 +161,23 @@ def run_gui(process: "GuiProcess") -> None:
     _auth_state = AuthState()
     ctx.extras["auth_state"] = _auth_state
 
+    # 3c-bis. Dev-mode автологин (временно, для разработки).
+    # Если INSPECTOR_DEV_PASSWORD задан и есть пользователь dev — логинимся
+    # автоматически при старте. Кнопка «Выйти» в LoginButton работает
+    # как обычно; повторный вход — через LoginDialog.
+    _dev_password = os.environ.get("INSPECTOR_DEV_PASSWORD", "").strip()
+    if _dev_password:
+        try:
+            from multiprocess_framework.modules.frontend_module.managers.access_context import (
+                AccessContext,
+            )
+
+            _result = _auth_manager.login("dev", _dev_password)
+            _auth_state.set_user(_result, AccessContext.from_dict(_result))
+            process._log_info("auth.auto_login: dev", module="startup")
+        except Exception as exc:
+            process._log_error(f"auth.auto_login.failed: {exc}", module="startup")
+
     # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
     from .actions.bus_factory import create_action_bus
 
