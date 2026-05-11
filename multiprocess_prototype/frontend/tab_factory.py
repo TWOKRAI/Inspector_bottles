@@ -221,6 +221,7 @@ class TabFactory:
 
         ctx = auth_state.access_context
         bar = self._tab_widget.tabBar()
+        visible_count = 0
         for tab_info in TAB_ORDER:
             tab_id = tab_info["id"]
             index = self._tab_index.get(tab_id)
@@ -229,6 +230,16 @@ class TabFactory:
             view_perm = tab_info.get("view_permission")
             visible = view_perm is None or ctx.has_permission(view_perm)
             bar.setTabVisible(index, visible)
+            if visible:
+                visible_count += 1
+
+        if visible_count == 0:
+            logger.warning(
+                "TabFactory: ВСЕ табы скрыты — у текущего пользователя нет ни одного "
+                "tabs.*.view permission. role_name=%r, permissions=%s",
+                ctx.role_name,
+                sorted(ctx.permissions),
+            )
 
     @staticmethod
     def _make_placeholder(tab_info: dict) -> PlaceholderTab:

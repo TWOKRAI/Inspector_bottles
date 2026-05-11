@@ -203,13 +203,13 @@ def run_gui(process: "GuiProcess") -> None:
     # Источники (по приоритету): env-переменные → multiprocess_prototype/dev_settings.py → дефолты.
     # Env используется в prod / CI; dev_settings.py — для локальной разработки
     # (файл в .gitignore, не попадает в репо). См. dev_settings.example.py.
+    from multiprocess_framework.modules.frontend_module.managers.access_context import (
+        AccessContext,
+    )
+
     _dev_auto_login_enabled, _dev_username, _dev_password = _resolve_dev_login_settings()
     if _dev_auto_login_enabled and _dev_password:
         try:
-            from multiprocess_framework.modules.frontend_module.managers.access_context import (
-                AccessContext,
-            )
-
             _result = _auth_manager.login(_dev_username, _dev_password)
             _auth_state.set_user(_result, AccessContext.from_dict(_result))
             process._log_info(
@@ -223,6 +223,25 @@ def run_gui(process: "GuiProcess") -> None:
             "DEV_AUTO_LOGIN=False",
             module="startup",
         )
+    elif _dev_auto_login_enabled and not _dev_password:
+        process._log_warning(
+            "auth.auto_login.no_password: DEV_AUTO_LOGIN=True, но DEV_PASSWORD пустой. "
+            "Впиши пароль в multiprocess_prototype/dev_settings.py",
+            module="startup",
+        )
+
+    # 3c-ter. Fallback: если автологин не дал access_context — показать
+    # модальный LoginDialog при старте. Иначе TabFactory скроет все табы
+    # (нет permissions) и UI будет пустым, что путает пользователя.
+    if not _auth_state.is_authenticated:
+        from .widgets.dialogs.login_dialog import LoginDialog
+
+        _login_dlg = LoginDialog(_auth_manager, _auth_state)
+        if _login_dlg.exec() != LoginDialog.DialogCode.Accepted:
+            process._log_warning(
+                "auth.startup_login.cancelled: пользователь закрыл LoginDialog без входа — все табы будут скрыты",
+                module="startup",
+            )
 
     # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
     from .actions.bus_factory import create_action_bus
