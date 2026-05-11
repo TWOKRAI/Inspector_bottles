@@ -59,6 +59,29 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 7. Индекс ADR: `multiprocess_framework/DECISIONS.md` → ссылки на локальные DECISIONS.md
 8. **Документация — auto-sync:** при правках `multiprocess_framework/DECISIONS.md` или `multiprocess_framework/modules/*/DECISIONS.md` запусти `python -m scripts.sync` для пересборки сводных разделов («Оглавление», «Модульные решения», «Устарело», «Коды модулей»). CI ловит дрифт через `python scripts/validate.py`. Список синхронизируемых разделов: `python -m scripts.sync --list`.
 9. **Слои импортов:** `multiprocess_framework → Services → Plugins → multiprocess_prototype` (composition root). Обратные импорты запрещены и enforced через `.sentrux/rules.toml` (boundaries `framework → prototype/Services/Plugins`, `Services → prototype/Plugins`, `Plugins → prototype`). Плагин знает только `PluginContext` и не должен импортировать `multiprocess_prototype.*` — см. ADR-120.
+10. **Commit-сообщения:** Conventional Commits + обязательные trailers `Why:` и `Layer:`. Опциональные — `Refs:`, `Risk:`, `Reversible:`, `Tested:`, `Rejected:`. Шаблон в `.gitmessage`, гайд в [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md), валидирует hook `.git/hooks/commit-msg` (установка `bash scripts/validate_commit/install_hook.sh`). Агенты обязаны генерировать trailers — иначе commit будет отклонён.
+
+## Формат commit-сообщений (для агентов)
+
+Каждый коммит:
+
+```
+<type>(<scope>): краткое описание в императиве (≤72 симв)
+
+- что сделано (буллетами, файлы/классы/числа тестов)
+
+Why: одна-две строки про мотивацию (не реализацию)
+Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
+Refs: docs/plans/.../*.md, ADR-XXX, PR#NN  (опц., если есть связь)
+Risk: low|medium|high — короткое почему  (опц.)
+Reversible: yes | migration-needed | no  (опц.)
+Tested: scope/N passed, например auth/120  (опц., при изменении кода)
+Rejected: альтернатива X — отвергнута, потому что Y  (опц., но ценно)
+
+Co-Authored-By: ...
+```
+
+**Обязательны:** `Why:` и `Layer:`. Без них hook отклонит коммит. Полный гайд — [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md). Whitelist'ы значений в [`scripts/validate_commit/validate_commit.py`](scripts/validate_commit/validate_commit.py).
 
 ## MCP: qex (семантический поиск)
 

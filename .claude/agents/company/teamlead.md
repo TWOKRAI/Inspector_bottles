@@ -70,15 +70,35 @@ When arriving on escalation:
 - For architectural changes — DECISIONS.md entry is mandatory (or hand off to `tech-writer`)
 - Commit with meaningful message
 
-## Commit format
+## Commit format (STRICT — hook rejects invalid)
+
+Полный гайд: `docs/claude/COMMIT_GUIDE.md`. Validator: `scripts/validate_commit/validate_commit.py`.
 
 ```
-<type>: brief description
+<type>(<scope>): краткое описание (≤72 симв)
 
-- what was done
-- ADR: ADR-NNN (if applicable)
+- что сделано (буллеты)
+- ADR: ADR-NNN (если применимо)
 - Task X.Y — task name
+
+Why: мотивация (для архитектурных изменений — обязательно с обоснованием)
+Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
+Refs: docs/plans/.../*.md, ADR-NNN, PR#NN
+Risk: low|medium|high — короткое почему  (для архитектурных всегда заполняй)
+Reversible: yes | migration-needed | no  (для архитектурных всегда заполняй)
+Tested: scope/N passed
+Rejected: альтернатива X — отвергнута, потому что Y  (для архитектурных всегда заполняй)
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
+
+**ОБЯЗАТЕЛЬНО:** `Why:` и `Layer:`. Без них commit-msg hook отклонит коммит.
+
+Для **архитектурных** коммитов (Senior+ implementation, ADR-touch) дополнительно
+обязательны: `Refs:` (на ADR/план), `Risk:`, `Reversible:`, `Rejected:` (хотя бы
+одну отвергнутую альтернативу). Это knowledge, который иначе исчезнет.
+
+НЕ использовать `--no-verify` для обхода валидации — это для merge/rebase.
 
 ## What NOT to do
 

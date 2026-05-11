@@ -14,6 +14,7 @@
 |--------|---------------|------------|-------------|
 | [`validate.py`](validate.py) | `/validate` | Структурная валидация фреймворка: импорты модулей, наличие `interfaces.py`, ADR-индекс, sync-дрифт. Exit 0/1. | docstring в [`validate.py`](validate.py) |
 | [`run_framework_tests.py`](run_framework_tests.py) | `/fw-test` | Pytest по `multiprocess_framework/modules/*/tests/` (editable install). | docstring в [`run_framework_tests.py`](run_framework_tests.py) |
+| [`validate_commit/`](validate_commit/) | — (git hook) | Валидация commit-сообщения: Conventional Commits + обязательные trailers `Why:` / `Layer:`. Hook в `.git/hooks/commit-msg` ставит `install_hook.sh`. Формат: [`docs/claude/COMMIT_GUIDE.md`](../docs/claude/COMMIT_GUIDE.md). | [README](validate_commit/README.md) |
 
 ---
 

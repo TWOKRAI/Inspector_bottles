@@ -1,0 +1,40 @@
+# <type>(<scope>): краткое описание в императиве (≤72 симв)
+#
+# Types: feat | fix | refactor | docs | test | chore | perf | build | ci
+# Scope: модуль или подсистема (auth, framework, data_schema, plugins, …)
+#
+# Body — что сделано (буллетами). Имена файлов, классы, числа тестов.
+# Перенос на 72 символа. Связывать с реализацией, не мотивацией.
+#
+# ────────────────────────────────────────────────────────────────────
+# Trailers (machine-readable, агентам и git interpret-trailers)
+# Обязательные: Why, Layer.
+# Опциональные: Refs, Risk, Reversible, Tested, Rejected.
+# ────────────────────────────────────────────────────────────────────
+#
+# Why: одна-две строки про мотивацию (не реализацию)
+# Layer: framework | services | plugins | prototype | docs | scripts | tests
+# Refs: docs/plans/.../*.md, ADR-XXX, PR#NN, issue#NN  (через запятую)
+# Risk: low | medium | high — короткое почему
+# Reversible: yes | migration-needed | no
+# Tested: scope/N passed, например auth/120, framework/2587
+# Rejected: альтернатива X — отвергнута, потому что Y
+#
+# Co-Authored-By: ... (если применимо)
+#
+# ──── ПРИМЕР ────
+# feat(auth): добавить wildcard-permission в has_permission
+#
+# - AccessContext.has_permission учитывает "*" в permissions
+# - AdministrationSection использует has_permission вместо in
+# - 4 новых теста (wildcard, empty, exact, partial)
+#
+# Why: dev-роль должна получать все права без перечисления
+# Layer: services
+# Refs: docs/plans/auth-rbac/03-pr3-permissions.md, ADR-Auth-005
+# Risk: low — изменение в одной функции, покрыто тестами
+# Reversible: yes
+# Tested: auth/120, framework/2587
+# Rejected: hardcoded role-check — отвергнут, негибко для custom-ролей
+#
+# Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

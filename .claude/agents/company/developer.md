@@ -35,16 +35,41 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
 - Don't touch files not listed in the spec
 - New dependencies — only if explicitly stated in the spec
 
-## Commit format
+## Commit format (STRICT — hook rejects invalid)
+
+Полный гайд: `docs/claude/COMMIT_GUIDE.md`. Validator: `scripts/validate_commit/validate_commit.py`.
 
 ```
-<type>: brief description
+<type>(<scope>): краткое описание (≤72 симв)
 
-- what was done
+- что сделано (буллеты: файлы, классы, числа тестов)
 - Task X.Y — task name
+
+Why: мотивация одной-двумя строками (не реализация)
+Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
+Refs: docs/plans/.../*.md, ADR-XXX, PR#NN  (если есть связь — заполняй)
+Risk: low|medium|high — короткое почему  (если non-trivial)
+Reversible: yes | migration-needed | no  (если non-trivial)
+Tested: scope/N passed, e.g. auth/120  (всегда при изменении кода)
+Rejected: альтернатива X — отвергнута, потому что Y  (если было сравнение)
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `build`, `ci`.
+
+**ОБЯЗАТЕЛЬНО:** `Why:` и `Layer:`. Без них commit-msg hook отклонит коммит.
+
+`Layer:` определяется по тому, какие пути затронуты:
+- `multiprocess_framework/` → `framework`
+- `Services/` → `services`
+- `Plugins/` → `plugins`
+- `multiprocess_prototype/` → `prototype`
+- 3+ слоя одновременно → `mixed`
+
+`Refs:` — обязательно если задача связана с планом (`docs/plans/...`) или ADR.
+
+НЕ использовать `--no-verify` для обхода валидации — это для merge/rebase.
 
 ## Blockers
 
