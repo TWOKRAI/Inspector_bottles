@@ -144,6 +144,7 @@
 - [ADR-122](#adr-122-carve-out-hikvision_camera-serviceshikvision_camera-phase-42): Carve-out `hikvision_camera` → `Services/hikvision_camera` (Phase 4.2)
 - [ADR-123](#adr-123-категоризация-plugins-по-доменам-phase-5-follow-up): Категоризация `Plugins/` по доменам (Phase 5 follow-up)
 - [ADR-124](#adr-124-carve-out-actions_module-отдельный-top-level-модуль-фреймворка): Carve-out `actions_module` → отдельный top-level модуль фреймворка
+- [ADR-125](#adr-125-commit-сообщения-conventional-commits-обязательные-trailers-why-layer-с-hook-валидацией): Commit-сообщения — Conventional Commits + обязательные trailers `Why:` / `Layer:` с hook-валидацией
 <!-- ADR-TOC:END -->
 
 ---
@@ -2039,6 +2040,40 @@
   - **Carve-out `_examples/`** — отклонён проверкой DSM (см. выше). Урок: carve-out имеет смысл только при ≤2 обратных импортов внутрь родителя, иначе intra-module edges превращаются в cross-module и метрика падает.
   - **Не делать carve-out, искать ещё фасадов** — фасадный подход исчерпан, дальше плато ≤−5 edges за итерацию.
   - **Фасад в каждом модуле + один большой фасад фреймворка** — корневой фасад уже существует (`multiprocess_framework/__init__.py`, 11 слоёв); фасады внутри своего модуля не уменьшают cross-module edges (intra-module edges не считаются как cross). Зафиксированы критерии фасада-адаптера в [docs/refactors/2026-05-11_modularity_facades_next.md](../docs/refactors/2026-05-11_modularity_facades_next.md).
+
+## ADR-125: Commit-сообщения — Conventional Commits + обязательные trailers `Why:` / `Layer:` с hook-валидацией
+- Дата: 2026-05-11
+- Статус: принято
+- Контекст: Проект в значительной мере ведётся через AI-агентов (Claude Opus/Sonnet в роли developer/teamlead). История git — единственное место в проекте, где знание **необратимо привязано к коду** (в отличие от ADR, wiki, STATUS.md, которые могут устареть или потерять связь). Текущий стиль коммитов (`feat(scope): …` + буллеты + `Co-Authored-By:`) уже выше среднего, но не позволяет агенту в новой сессии за секунду собрать срез истории по плану/ADR/слою: `Why` смешан с `What` в прозе, нет машино-читаемых ссылок на план/ADR, нет указания scope/risk/reversibility, нет фиксации отвергнутых альтернатив. Bot-обзор индустрии (2026-05-11): Conventional Commits + git trailers — нативный механизм Git с 2.32 (`git interpret-trailers`); arXiv «Lore Protocol» (март 2026) предложил 9 trailer'ов для AI-агентов, из которых половина субъективны.
+- Решение: Формат commit-сообщения:
+  ```
+  <type>(<scope>): краткое описание (≤72 симв)
+
+  - буллеты body
+
+  Why: одна-две строки про мотивацию (обязательно)
+  Layer: framework|services|plugins|prototype|docs|scripts|tests|infra|mixed (обязательно)
+  Refs: docs/plans/.../*.md, ADR-XXX, PR#NN  (опц.)
+  Risk: low|medium|high — короткое почему  (опц.)
+  Reversible: yes | migration-needed | no  (опц.)
+  Tested: scope/N passed  (опц.)
+  Rejected: альтернатива X — отвергнута, потому что Y  (опц.)
+  ```
+  **Layered defense** для надёжности у агентов:
+  1. `.gitmessage` шаблон + `git config commit.template` (видим при `git commit`).
+  2. CLAUDE.md правило #10 + новая секция «Формат commit-сообщений» (всегда в контексте Claude).
+  3. `.git/hooks/commit-msg` → [`scripts/validate_commit/validate_commit.py`](../scripts/validate_commit/validate_commit.py) (физически блокирует невалидные коммиты).
+  4. Обновлены промпты [`developer.md`](../.claude/agents/company/developer.md) и [`teamlead.md`](../.claude/agents/company/teamlead.md) — strict commit format.
+  5. Slash-команды [`/ship`](../.claude/commands/ship.md) и [`/pipeline`](../.claude/commands/pipeline.md) показывают формат в выводе.
+  6. Гайд [`docs/claude/COMMIT_GUIDE.md`](../docs/claude/COMMIT_GUIDE.md) — единый источник истины для людей и агентов.
+  Историю **не переписываем** — правило только forward (с 2026-05-11). Bypass `--no-verify` только для merge/rebase.
+- Причина: ROI ~5-10% на средних задачах, до 30% на археологии / откатах / миграциях (`Why:` + `Rejected:` дают ответ за секунды вместо часа). `Layer:` маппится 1-в-1 на слои из правила #9 (`.sentrux/rules.toml`) — даёт sentrux/qex новый сигнал поверх кода. Накопительный эффект: через год истории срез по `Refs:.*ADR-XXX` через `git log --grep` или `git log --pretty='%(trailers:key=Refs,valueonly)'` заменит ручное чтение прозы. Инвестиция маленькая (один раз настроили — работает вечно), hook гарантирует исполнение без напоминаний агентам.
+- Отклонённые альтернативы:
+  - **Полный набор Lore Protocol (9 trailer'ов)** — отклонён. `Confidence: low/med/high` субъективен и бесполезен агенту; `Directive:` и `Constraint:` пересекаются с ADR-территорией (forward-looking instructions должны жить в ADR/коде, не в commit). Оставили 7 trailer'ов с конкретным machine-readable значением.
+  - **Только Conventional Commits без trailers** — текущий стиль. Покрывает `type/scope/breaking`, но не решает проблему `Why ↔ What` смешения и связи `commit ↔ план ↔ ADR`.
+  - **Структурированный JSON/YAML в body** — отклонён. `git interpret-trailers` ожидает RFC-822 `Key: Value`; JSON ломает совместимость с GitHub UI, `git log --pretty`, hook-парсингом. Trailer'ы — нативная фича Git.
+  - **Custom commit-msg парсер без hook'а** — отклонён. Без блокировки агент забудет через 2-3 коммита. Hook — единственный гарантированный механизм.
+  - **Переписать историю с применением правила ретроспективно** — отклонён. Стоимость (rebase + потеря Co-Authored-By + сломанные ссылки в `git log -S`) больше выгоды. Forward-only.
 
 ---
 
