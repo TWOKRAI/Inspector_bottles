@@ -28,6 +28,8 @@ dependencies = [
     "openpyxl>=3.1",
     # Camera (GigE Vision) — нет ARM-колёс genicam, пропускаем на macOS ARM
     "harvesters>=1.4; sys_platform != 'darwin' or platform_machine != 'arm64'",
+    # Auth
+    "bcrypt>=4.1",
     # Logging
     "loguru>=0.7",
     # Network / utils

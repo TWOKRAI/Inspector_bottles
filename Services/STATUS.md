@@ -10,6 +10,7 @@
 |--------|-----------|-------------|-----|
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
+| `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |
 | `Operation_crop` | utility | Утилита для нарезки кадров | — |
 | `Region_processors` | utility | Регион-процессоры (заготовки для пайплайнов) | — |
 
