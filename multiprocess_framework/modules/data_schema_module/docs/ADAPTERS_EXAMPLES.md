@@ -516,7 +516,6 @@ if __name__ == "__main__":
 - **README.md** — Основная документация
 - **interfaces.py** — Определение `ISchemaAdapter` протокола
 - **docs/examples/** — Примеры использования компонентов
-- **MIGRATION.md** — Миграция на новый API
 
 ---
 

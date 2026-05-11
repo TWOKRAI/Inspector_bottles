@@ -16,7 +16,7 @@
 | test_schema_visualizer.py | SchemaVisualizer | Форматы text/json/html/mermaid, опции, отсутствующая схема, неподдерживаемый формат |
 | test_schema_documentation_generator.py | SchemaDocumentationGenerator | markdown/rst/html, с примерами/без, все схемы, API reference, ошибки |
 
-Подробная матрица и оценка модуля — в [docs/EVALUATION.md](../docs/EVALUATION.md).
+Архитектурный обзор — в [README.md](../README.md), статус — в [STATUS.md](../STATUS.md).
 
 ## Комментарии в тестах
 

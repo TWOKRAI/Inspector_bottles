@@ -42,7 +42,7 @@
 - [x] **Шаг 8:** Тесты — полное покрытие ядра + интеграционные тесты (13+ тест-модулей)
 - [x] **Шаг 9:** Обновление потребляющих модулей — все работают без breakage
 - [x] **Шаг 10:** Обновлена документация — README, STATUS
-- [x] **Шаг 11:** Cleanup shims — удалены `fields/`, `utils/`, `_compat.py`, `MIGRATION.md`, `tests_backup/`, re-export в `registry/` и `extensions/` для StorageManager/ProcessDataContainer; канон `storage/`, `registry/discovery.py`; см. `DECISIONS.md` (ADR-120…123)
+- [x] **Шаг 11:** Cleanup shims — удалены `fields/`, `utils/`, `_compat.py`, `MIGRATION.md`, `tests_backup/`, re-export в `registry/` и `extensions/` для StorageManager/ProcessDataContainer; канон `storage/`, `registry/discovery.py`; см. `DECISIONS.md` (ADR-DS-001…004)
 
 - **SchemaMixin.build():** `(manager_name, model_dump())` для Dict at Boundary; см. ADR-105
 
@@ -54,7 +54,7 @@
 data_schema_module/
 ├── interfaces.py              # ✅ Публичный контракт (протоколы + ABC)
 ├── __init__.py                # ✅ Минимальный API (~50 экспортов)
-├── DECISIONS.md               # ✅ Локальные ADR (ADR-120…123)
+├── DECISIONS.md               # ✅ Локальные ADR (ADR-DS-001…004)
 ├── README.md                  # ✅ Comprehensive (500+ строк)
 ├── STATUS.md                  # ✅ Этот файл
 │
@@ -257,23 +257,23 @@ from data_schema_module import SchemaBase, SchemaMixin, ISchemaStorage  # рек
 |------|--------|---------|
 | **README.md** | ✅ | Comprehensive guide (500+ строк), архитектура, примеры, API справочник |
 | **STATUS.md** | ✅ | Этот файл, статус рефакторинга |
-| **DECISIONS.md** | ✅ | Локальные ADR модуля (ADR-120…123) |
+| **DECISIONS.md** | ✅ | Локальные ADR модуля (ADR-DS-001…004) |
 | **interfaces.py** | ✅ | Публичный контракт (595 строк, 30+ протоколов/ABC) |
 
-### Документация в docs/ (унаследованные файлы)
+### Документация в docs/ (текущий состав)
 
-| Файл | Статус | Действие |
-|------|--------|---------|
-| QUICK_REFERENCE.md | 📦 | Сохранить (использует для краткой справки) |
-| STRUCTURE.md | 📦 | Сохранить (описание структуры) |
-| DIAGRAMS.md | 📦 | Сохранить (диаграммы) |
-| USER_GUIDE.md | ⚠️ | Частично устаревший (обновить ссылки) |
-| EXTENDING_GUIDE.md | ✅ | Актуально (расширяемость через адаптеры) |
-| TOOLS_GUIDE.md | 📦 | Сохранить (инструменты визуализации) |
-| DNA_USAGE_EXAMPLES.md | 📦 | Сохранить (примеры ДНК) |
-| EVALUATION.md | ❌ | **УДАЛИТЬ** (старая версия 1.0) |
-| DISCOVERY_AND_PACKAGES.md | ❌ | **УДАЛИТЬ** (старая версия 1.0) |
-| EVALUATION_FRAMEWORK_AND_REGISTERS.md | ❌ | **УДАЛИТЬ** (старая версия 1.0) |
+| Файл | Статус | Назначение |
+|------|--------|-----------|
+| README.md | ✅ | Точка входа в docs/ |
+| QUICK_REFERENCE.md | ✅ | Краткая справка по принципам |
+| STRUCTURE.md | ✅ | Детальная структура пакетов |
+| DIAGRAMS.md | ✅ | Диаграммы связей |
+| USER_GUIDE.md | ✅ | Гайд для пользователей API |
+| EXTENDING_GUIDE.md | ✅ | Расширяемость через адаптеры |
+| TOOLS_GUIDE.md | ✅ | Инструменты визуализации |
+| DNA_USAGE_EXAMPLES.md | ✅ | Примеры ComponentDNA |
+| ADAPTERS_EXAMPLES.md | ✅ | Примеры адаптеров |
+| examples/ | ✅ | Runnable Python-примеры (00_quickstart…04_field_meta) |
 
 ---
 
