@@ -166,12 +166,18 @@ def run_gui(process: "GuiProcess") -> None:
     _auth_state = AuthState()
     ctx.extras["auth_state"] = _auth_state
 
-    # 3c-bis. Dev-mode автологин (временно, для разработки).
-    # Если INSPECTOR_DEV_PASSWORD задан и есть пользователь dev — логинимся
-    # автоматически при старте. Кнопка «Выйти» в LoginButton работает
-    # как обычно; повторный вход — через LoginDialog.
+    # 3c-bis. Dev-mode автологин — только в явном dev-режиме.
+    # Активируется, если выполняются ВСЕ условия:
+    #   1. Env-флаг INSPECTOR_AUTH_DEV_AUTO_LOGIN=1 (явное opt-in).
+    #   2. Env INSPECTOR_DEV_PASSWORD непустой.
+    #   3. В хранилище есть пользователь dev.
+    # Любое нарушение → штатный login через LoginDialog. В prod-сборках
+    # env-флаг не задаётся, dev-автологин не срабатывает.
+    _dev_auto_login_enabled = os.environ.get(
+        "INSPECTOR_AUTH_DEV_AUTO_LOGIN", "0"
+    ).strip().lower() in ("1", "true", "yes")
     _dev_password = os.environ.get("INSPECTOR_DEV_PASSWORD", "").strip()
-    if _dev_password:
+    if _dev_auto_login_enabled and _dev_password:
         try:
             from multiprocess_framework.modules.frontend_module.managers.access_context import (
                 AccessContext,
@@ -182,6 +188,12 @@ def run_gui(process: "GuiProcess") -> None:
             process._log_info("auth.auto_login: dev", module="startup")
         except Exception as exc:
             process._log_error(f"auth.auto_login.failed: {exc}", module="startup")
+    elif _dev_password and not _dev_auto_login_enabled:
+        process._log_info(
+            "auth.auto_login.disabled: INSPECTOR_DEV_PASSWORD set, "
+            "INSPECTOR_AUTH_DEV_AUTO_LOGIN=0",
+            module="startup",
+        )
 
     # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
     from .actions.bus_factory import create_action_bus
