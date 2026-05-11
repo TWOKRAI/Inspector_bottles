@@ -2,7 +2,7 @@
 
 Использование:
     guard = PreAuthGuard(auth_state)
-    bus.set_pre_execute_hook(guard.hook, on_blocked=guard.on_blocked)
+    bus.set_pre_execute_hook(guard.hook, on_blocked=guard.show_auth_required)
 
 Определение WriteAction: action блокируется, если action.undoable == True
 ИЛИ если action.action_type входит в WRITE_ACTION_TYPES.
@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.action_types import (
@@ -46,13 +46,8 @@ class PreAuthGuard:
     Read-only действия (node_move и другие не-undoable вне WRITE_ACTION_TYPES) проходят.
     """
 
-    def __init__(
-        self,
-        auth_state: "AuthState",
-        on_blocked_callback: Callable[[Action], None] | None = None,
-    ) -> None:
+    def __init__(self, auth_state: "AuthState") -> None:
         self._auth_state = auth_state
-        self._custom_on_blocked = on_blocked_callback
 
     def hook(self, action: Action) -> bool:
         """True — разрешить выполнение, False — заблокировать.
@@ -67,21 +62,28 @@ class PreAuthGuard:
         is_write = action.undoable or action.action_type in WRITE_ACTION_TYPES
         return not is_write
 
-    def on_blocked(self, action: Action) -> None:
-        """Обработчик блокировки: эмитирует сигнал action_blocked на AuthState.
+    def show_auth_required(self, action: Action) -> None:
+        """Показать диалог «Требуется вход». Вызывается ActionBus при блокировке.
 
-        Если задан custom callback — вызывает его вместо стандартного поведения.
+        Импорт QMessageBox выполняется лениво, чтобы PreAuthGuard был тестируем
+        без Qt-окружения (hook() не требует Qt).
         """
+        from PySide6.QtWidgets import QMessageBox
+
         description = action.description or action.action_type
         logger.info(
             "Действие заблокировано (требуется авторизация): %s", description
         )
-
-        if self._custom_on_blocked is not None:
-            self._custom_on_blocked(action)
-            return
-
-        # Эмитируем сигнал на AuthState для UI-уведомления
-        self._auth_state.action_blocked.emit(
-            f"Для выполнения действия \"{description}\" необходимо войти в систему."
+        QMessageBox.information(
+            None,
+            "Требуется вход",
+            f"Для выполнения действия «{description}» необходимо войти в систему.",
         )
+
+    # ------------------------------------------------------------------
+    # Обратная совместимость: on_blocked как псевдоним show_auth_required
+    # ------------------------------------------------------------------
+
+    def on_blocked(self, action: Action) -> None:
+        """Псевдоним show_auth_required для обратной совместимости."""
+        self.show_auth_required(action)

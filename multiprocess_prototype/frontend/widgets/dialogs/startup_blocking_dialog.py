@@ -47,5 +47,6 @@ class StartupBlockingDialog(QDialog):
 
         # Только кнопка «Выход»
         _buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        _buttons.button(QDialogButtonBox.StandardButton.Close).setText("Выход")
         _buttons.rejected.connect(self.reject)
         layout.addWidget(_buttons)

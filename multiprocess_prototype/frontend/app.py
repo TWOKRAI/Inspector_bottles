@@ -148,7 +148,14 @@ def run_gui(process: "GuiProcess") -> None:
         sys.exit(1)
 
     _auth_manager = AuthManager(_auth_config)
-    _auth_manager.initialize()
+    try:
+        _auth_manager.initialize()
+    except Exception as exc:  # включая StorageCorrupted
+        process._log_error(f"auth.init.failed: {exc}", module="startup")
+        from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
+        _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
+        _dlg.exec()
+        sys.exit(1)
     ctx.extras["auth_manager"] = _auth_manager
 
     _auth_state = AuthState()

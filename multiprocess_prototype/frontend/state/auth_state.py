@@ -46,10 +46,6 @@ class AuthState(QObject):
     # один аргумент AccessContext — прямой connect без адаптера.
     access_context_changed = Signal(AccessContext)
 
-    # Эмитируется при блокировке действия (PreAuthGuard blocked action).
-    # Аргумент: str — описание заблокированного действия.
-    action_blocked = Signal(str)
-
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._current_user: dict | None = None

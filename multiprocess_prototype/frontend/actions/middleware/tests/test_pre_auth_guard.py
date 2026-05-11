@@ -100,28 +100,33 @@ class TestPreAuthGuardHook:
         assert guard.hook(action) is False
 
 
-class TestPreAuthGuardOnBlocked:
-    """Тесты on_blocked()."""
+class TestPreAuthGuardShowAuthRequired:
+    """Тесты show_auth_required() — показ диалога при блокировке действия."""
 
-    def test_on_blocked_emits_action_blocked_signal(self, guard, auth_state, qtbot):
-        """on_blocked эмитирует action_blocked сигнал на AuthState."""
+    def test_show_auth_required_calls_qmessagebox(self, guard, auth_state):
+        """show_auth_required вызывает QMessageBox.information с нужным текстом."""
+        import unittest.mock as mock_module
+
         action = _make_action("field_set")
         action_model = action.model_copy(update={"description": "Установить значение"})
 
-        with qtbot.waitSignal(auth_state.action_blocked, timeout=1000) as blocker:
-            guard.on_blocked(action_model)
+        with mock_module.patch("PySide6.QtWidgets.QMessageBox.information") as patched:
+            guard.show_auth_required(action_model)
 
-        assert "Установить значение" in blocker.args[0]
+        patched.assert_called_once()
+        _args = patched.call_args[0]
+        assert _args[1] == "Требуется вход"
+        assert "Установить значение" in _args[2]
 
-    def test_custom_on_blocked_callback(self, auth_state):
-        """Custom callback вызывается вместо сигнала."""
-        custom_cb = MagicMock()
-        guard = PreAuthGuard(auth_state, on_blocked_callback=custom_cb)
+    def test_on_blocked_is_alias_for_show_auth_required(self, guard, auth_state):
+        """on_blocked — псевдоним show_auth_required, вызывает тот же код."""
+        import unittest.mock as mock_module
 
         action = _make_action("field_set")
-        guard.on_blocked(action)
+        with mock_module.patch("PySide6.QtWidgets.QMessageBox.information") as patched:
+            guard.on_blocked(action)
 
-        custom_cb.assert_called_once_with(action)
+        patched.assert_called_once()
 
 
 class TestActionBusIntegration:

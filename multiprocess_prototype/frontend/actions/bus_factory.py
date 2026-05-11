@@ -68,6 +68,6 @@ def create_action_bus(
         from .middleware.pre_auth_guard import PreAuthGuard
 
         guard = PreAuthGuard(auth_state)
-        bus.set_pre_execute_hook(guard.hook, on_blocked=guard.on_blocked)
+        bus.set_pre_execute_hook(guard.hook, on_blocked=guard.show_auth_required)
 
     return bus

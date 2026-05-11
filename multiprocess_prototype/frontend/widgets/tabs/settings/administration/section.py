@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """AdministrationSection — секция «Администрация» в табе настроек.
 
-Структура:
+Структура (при наличии прав):
   SideNavLayout
-    «Пользователи» → UsersPanel(ctx)
-    «Роли»         → заглушка (будет реализована в Group D)
+    «Пользователи» → UsersPanel(ctx)      (если есть право users.view)
+    «Роли»         → RolesPanel(ctx)       (если есть право roles.view)
 
-Права: секция отображает содержимое только при наличии хотя бы одного
-из permissions «users.view» или «roles.view». При отсутствии обоих —
-показывает placeholder «Недостаточно прав».
+Права: при отсутствии обоих permissions «users.view» и «roles.view» —
+показывает placeholder «Недостаточно прав». Содержимое перестраивается
+при каждом изменении access_context (login / logout / смена роли).
 """
 from __future__ import annotations
 
@@ -20,96 +20,108 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from multiprocess_prototype.frontend.widgets.primitives import SideNavLayout
 
 if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.managers.access_context import AccessContext
     from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.state.auth_state import AuthState
 
 
 class AdministrationSection(QWidget):
-    """Секция «Администрация» — SideNavLayout с двумя подсекциями.
+    """Секция «Администрация» — SideNavLayout с подсекциями «Пользователи» и «Роли».
 
-    Структура:
+    Содержимое перестраивается при изменении access_context (сигнал AuthState),
+    поэтому корректно реагирует на login и logout даже если виджет создан до входа.
+
+    Структура (при наличии прав):
       SideNavLayout
-        «Пользователи» → UsersPanel(ctx)
-        «Роли»         → RolesPanel(ctx)  # Group D — пока stub
+        «Пользователи» → UsersPanel(ctx)   (только если есть users.view)
+        «Роли»         → RolesPanel(ctx)    (только если есть roles.view)
 
-    Права: секция видима только при наличии хотя бы одного permission
-    «users.view» или «roles.view». При отсутствии обоих — placeholder
-    «Недостаточно прав».
+    Если доступна только одна подсекция — SideNav содержит один пункт.
+    Если нет ни одной — отображается placeholder «Недостаточно прав».
     """
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._ctx = ctx
+        self._auth_state: AuthState | None = ctx.auth_state()
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        # Внешний layout с одним «слотом» — текущим содержимым
+        self._outer_layout = QVBoxLayout(self)
+        self._outer_layout.setContentsMargins(0, 0, 0, 0)
+        self._outer_layout.setSpacing(0)
+        self._current: QWidget | None = None
 
-        # Проверяем наличие прав для отображения содержимого
-        if not self._has_access(ctx):
-            layout.addWidget(self._build_no_access_placeholder())
-            return
+        self._rebuild()
 
-        # Боковая навигация с двумя подсекциями
-        nav = SideNavLayout()
+        if self._auth_state is not None:
+            self._auth_state.access_context_changed.connect(self._on_access_changed)
 
-        # Подсекция «Пользователи» — только если есть право users.view
-        auth_state = ctx.auth_state()
+    # ------------------------------------------------------------------
+    # Слоты
+    # ------------------------------------------------------------------
+
+    def _on_access_changed(self, _ctx: "AccessContext") -> None:
+        """Перестроить содержимое при смене контекста прав."""
+        self._rebuild()
+
+    # ------------------------------------------------------------------
+    # Rebuild
+    # ------------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        """Удалить старое содержимое и построить новое по текущим правам."""
+        if self._current is not None:
+            self._outer_layout.removeWidget(self._current)
+            self._current.deleteLater()
+            self._current = None
+
         permissions: frozenset[str] = frozenset()
-        if auth_state is not None:
-            permissions = auth_state.access_context.permissions
+        if self._auth_state is not None:
+            permissions = self._auth_state.access_context.permissions
 
-        if "users.view" in permissions:
+        has_users = "users.view" in permissions
+        has_roles = "roles.view" in permissions
+
+        if not has_users and not has_roles:
+            self._current = self._build_restricted_placeholder()
+        else:
+            self._current = self._build_sidenav(has_users=has_users, has_roles=has_roles)
+
+        self._outer_layout.addWidget(self._current)
+
+    # ------------------------------------------------------------------
+    # Строители содержимого
+    # ------------------------------------------------------------------
+
+    def _build_sidenav(self, *, has_users: bool, has_roles: bool) -> QWidget:
+        """Построить SideNavLayout с теми подсекциями, на которые есть права."""
+        nav = SideNavLayout()
+        first_key: str | None = None
+
+        if has_users:
             from .users_panel import UsersPanel
-            users_widget: QWidget = UsersPanel(ctx)
-        else:
-            users_widget = self._build_restricted_placeholder("Пользователи")
+            nav.add_section("users", "Пользователи", UsersPanel(self._ctx))
+            if first_key is None:
+                first_key = "users"
 
-        nav.add_section("users", "Пользователи", users_widget)
-
-        # Подсекция «Роли» — показывать только при наличии права roles.view
-        if "roles.view" in permissions:
+        if has_roles:
             from .roles_panel import RolesPanel
-            roles_widget: QWidget = RolesPanel(ctx)
-        else:
-            roles_widget = self._build_restricted_placeholder("Роли")
+            nav.add_section("roles", "Роли", RolesPanel(self._ctx))
+            if first_key is None:
+                first_key = "roles"
 
-        nav.add_section("roles", "Роли", roles_widget)
+        if first_key is not None:
+            nav.set_current(first_key)
 
-        # Открываем первую доступную подсекцию
-        nav.set_current("users")
-
-        layout.addWidget(nav)
-
-    # ------------------------------------------------------------------
-    # Вспомогательные методы
-    # ------------------------------------------------------------------
+        return nav
 
     @staticmethod
-    def _has_access(ctx: "AppContext") -> bool:
-        """Проверить наличие хотя бы одного из прав users.view / roles.view."""
-        auth_state = ctx.auth_state()
-        if auth_state is None:
-            return False
-        permissions = auth_state.access_context.permissions
-        return bool(permissions & {"users.view", "roles.view"})
-
-    @staticmethod
-    def _build_no_access_placeholder() -> QWidget:
+    def _build_restricted_placeholder() -> QWidget:
         """Плейсхолдер «Недостаточно прав» для всей секции."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         label = QLabel("Недостаточно прав для просмотра раздела «Администрация»")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("color: gray; font-size: 14px;")
-        layout.addWidget(label)
-        return widget
-
-    @staticmethod
-    def _build_restricted_placeholder(section_title: str) -> QWidget:
-        """Плейсхолдер для отдельной подсекции при недостаточных правах."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        label = QLabel(f"Недостаточно прав для доступа к разделу «{section_title}»")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: gray; font-size: 13px;")
         layout.addWidget(label)
         return widget
