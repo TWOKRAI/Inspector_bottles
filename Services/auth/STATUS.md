@@ -17,10 +17,11 @@
 | `security/permissions.py` | ✓ готово | PermissionsRegistry, thread-safe |
 | `interfaces.py` | ✓ готово | IAuthManager / IUserStorage / IPasswordHasher (Protocol) |
 | Sub-package reorg | ✓ готово | crypto/ + storage/ + security/; фасад __init__.py; Auth-005 |
-| `manager.py` | ⏳ Группа B | AuthManager(BaseManager, ObservableMixin) |
-| `bootstrap.py` | ⏳ Группа B | CLI bootstrap + env var INSPECTOR_DEV_PASSWORD |
+| `manager.py` | ✓ готово | AuthManager(BaseManager, ObservableMixin) — Группа B |
+| `bootstrap.py` | ✓ готово | CLI bootstrap + env var INSPECTOR_DEV_PASSWORD — Группа B |
 | Тесты (Группа A) | ✓ 62/62 | hasher / policies / lockout / storage |
-| Тесты auth_manager | ⏳ Группа B | login/logout/CRUD/last-admin invariant |
+| Тесты (Группа B) | ✓ 48/48 | auth_manager (41) / bootstrap (7) |
+| Тесты (всего) | ✓ 110/110 | все зелёные |
 
 ## ADR
 
@@ -38,4 +39,4 @@
 
 ## Следующий шаг
 
-Группа B: `manager.py` (AuthManager) + `bootstrap.py` + тесты AuthManager.
+Группа C (PR1): расширение AccessContext/AccessTrait во frontend_module.

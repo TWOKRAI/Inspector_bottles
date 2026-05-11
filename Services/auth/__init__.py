@@ -52,6 +52,9 @@ from .security import LockoutTracker, PermissionDescriptor, PermissionsRegistry
 # --- Interfaces (Protocol) ---
 from .interfaces import IAuthManager, IPasswordHasher, IUserStorage
 
+# --- Manager (Группа B) ---
+from .manager import AuthManager
+
 __all__ = [
     # Исключения
     "AuthError",
@@ -85,4 +88,6 @@ __all__ = [
     "IAuthManager",
     "IUserStorage",
     "IPasswordHasher",
+    # Manager
+    "AuthManager",
 ]
