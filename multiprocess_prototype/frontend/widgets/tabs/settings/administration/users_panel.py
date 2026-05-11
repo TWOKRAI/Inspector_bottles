@@ -1,0 +1,384 @@
+# -*- coding: utf-8 -*-
+"""UsersPanel — панель управления пользователями.
+
+Отображает таблицу пользователей с кнопками:
+  «Добавить», «Удалить», «Сменить роль», «Сбросить пароль».
+
+Использует IAuthManager через AppContext.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QHeaderView,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from Services.auth.exceptions import AuthError, LastAdminError, UserNotFound, WeakPassword
+
+from .user_form import UserForm
+
+if TYPE_CHECKING:
+    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.widgets.dialogs.confirm_with_password import (
+        ConfirmWithPasswordDialog,
+    )
+
+
+class UsersPanel(QWidget):
+    """Панель управления пользователями.
+
+    Колонки таблицы: Логин | Роль | Создан | Последний вход | Входов | Активен
+    """
+
+    _TABLE_COLUMNS = [
+        ("username",      "Логин",           160),
+        ("role_name",     "Роль",            100),
+        ("created_at",    "Создан",          120),
+        ("last_login_at", "Последний вход",  120),
+        ("login_count",   "Входов",           60),
+        ("is_active",     "Активен",          70),
+    ]
+
+    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        self._auth_manager = ctx.auth_manager()
+        self._users: list[dict] = []
+
+        self._setup_ui()
+        self._load_users()
+
+    # ------------------------------------------------------------------
+    # Построение интерфейса
+    # ------------------------------------------------------------------
+
+    def _setup_ui(self) -> None:
+        """Построить layout панели."""
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+
+        # Заголовок
+        header_layout = QHBoxLayout()
+        header_label = QLabel("Пользователи")
+        font = header_label.font()
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 2)
+        header_label.setFont(font)
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        root.addLayout(header_layout)
+
+        # Основная область: таблица + кнопки
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(8)
+
+        # Таблица пользователей
+        column_keys = [col[0] for col in self._TABLE_COLUMNS]
+        column_titles = [col[1] for col in self._TABLE_COLUMNS]
+        column_widths = [col[2] for col in self._TABLE_COLUMNS]
+
+        self._table = QTableWidget(0, len(self._TABLE_COLUMNS))
+        self._table.setHorizontalHeaderLabels(column_titles)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setAlternatingRowColors(True)
+
+        h = self._table.horizontalHeader()
+        for i, width in enumerate(column_widths):
+            if i == len(column_widths) - 1:
+                # Последняя колонка — растянуть
+                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            else:
+                self._table.setColumnWidth(i, width)
+                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+
+        # Хранить ключ-имена колонок для _fill_table
+        self._column_keys = column_keys
+
+        content_layout.addWidget(self._table, stretch=1)
+
+        # Кнопки справа
+        btn_layout = QVBoxLayout()
+        btn_layout.setSpacing(6)
+
+        self._btn_add = QPushButton("Добавить")
+        self._btn_add.setFixedWidth(120)
+        self._btn_add.setToolTip("Создать нового пользователя")
+        self._btn_add.clicked.connect(self._on_add_clicked)
+        btn_layout.addWidget(self._btn_add)
+
+        self._btn_delete = QPushButton("Удалить")
+        self._btn_delete.setFixedWidth(120)
+        self._btn_delete.setToolTip("Удалить выбранного пользователя")
+        self._btn_delete.clicked.connect(self._on_delete_clicked)
+        btn_layout.addWidget(self._btn_delete)
+
+        self._btn_change_role = QPushButton("Сменить роль")
+        self._btn_change_role.setFixedWidth(120)
+        self._btn_change_role.setToolTip("Изменить роль выбранного пользователя")
+        self._btn_change_role.clicked.connect(self._on_change_role_clicked)
+        btn_layout.addWidget(self._btn_change_role)
+
+        self._btn_reset_pwd = QPushButton("Сбросить пароль")
+        self._btn_reset_pwd.setFixedWidth(120)
+        self._btn_reset_pwd.setToolTip("Сгенерировать новый пароль для выбранного пользователя")
+        self._btn_reset_pwd.clicked.connect(self._on_reset_password_clicked)
+        btn_layout.addWidget(self._btn_reset_pwd)
+
+        btn_layout.addStretch()
+
+        content_layout.addLayout(btn_layout)
+        root.addLayout(content_layout, stretch=1)
+
+    # ------------------------------------------------------------------
+    # Загрузка данных
+    # ------------------------------------------------------------------
+
+    def _load_users(self) -> None:
+        """Загрузить список через auth_manager.list_users() и заполнить таблицу."""
+        if self._auth_manager is None:
+            return
+        try:
+            self._users = self._auth_manager.list_users()
+        except AuthError as e:
+            QMessageBox.critical(self, "Ошибка загрузки", str(e))
+            self._users = []
+        self._fill_table()
+
+    def _fill_table(self) -> None:
+        """Заполнить таблицу из self._users."""
+        self._table.setRowCount(len(self._users))
+        for row, user in enumerate(self._users):
+            for col, key in enumerate(self._column_keys):
+                value = user.get(key, "")
+                # Форматирование специальных полей
+                if key == "is_active":
+                    display = "Да" if value else "Нет"
+                elif key == "last_login_at":
+                    display = self._format_datetime(value)
+                elif key == "created_at":
+                    display = self._format_datetime(value)
+                else:
+                    display = str(value) if value is not None else "—"
+
+                item = QTableWidgetItem(display)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._table.setItem(row, col, item)
+
+    @staticmethod
+    def _format_datetime(value: object) -> str:
+        """Отформатировать datetime-значение для отображения в таблице."""
+        if value is None or value == "" or value == "None":
+            return "—"
+        # Значение может прийти как строка ISO-8601 или datetime
+        val_str = str(value)
+        # Обрезаем до даты+времени без микросекунд если строка длинная
+        if "T" in val_str:
+            # ISO-формат: 2024-01-15T10:30:00.123456
+            parts = val_str.split("T")
+            date_part = parts[0]
+            time_part = parts[1].split(".")[0] if len(parts) > 1 else ""
+            return f"{date_part} {time_part}".strip()
+        return val_str
+
+    # ------------------------------------------------------------------
+    # Вспомогательные методы
+    # ------------------------------------------------------------------
+
+    def _get_selected_username(self) -> str | None:
+        """Вернуть username выбранной строки или None если ничего не выбрано."""
+        row = self._table.currentRow()
+        if row < 0 or row >= len(self._users):
+            return None
+        return self._users[row].get("username")
+
+    def _set_buttons_enabled(self, enabled: bool) -> None:
+        """Включить/отключить все кнопки действий."""
+        self._btn_add.setEnabled(enabled)
+        self._btn_delete.setEnabled(enabled)
+        self._btn_change_role.setEnabled(enabled)
+        self._btn_reset_pwd.setEnabled(enabled)
+
+    def _open_confirm_dialog(self, action_text: str) -> bool:
+        """Открыть ConfirmWithPasswordDialog и вернуть True если подтверждено."""
+        from multiprocess_prototype.frontend.widgets.dialogs.confirm_with_password import (
+            ConfirmWithPasswordDialog,
+        )
+        dlg = ConfirmWithPasswordDialog(
+            self._auth_manager,
+            action_text=action_text,
+            parent=self,
+        )
+        dlg.exec()
+        return dlg.confirmed
+
+    # ------------------------------------------------------------------
+    # Обработчики кнопок
+    # ------------------------------------------------------------------
+
+    def _on_add_clicked(self) -> None:
+        """Открыть UserForm в диалоге. При accept → auth_manager.create_user() → reload."""
+        if self._auth_manager is None:
+            return
+
+        form = UserForm(self._auth_manager, parent=self)
+        if form.exec() != UserForm.DialogCode.Accepted:
+            return
+
+        data = form.result_data
+        if data is None:
+            return
+
+        self._set_buttons_enabled(False)
+        try:
+            self._auth_manager.create_user(
+                username=data["username"],
+                password=data["password"],
+                role_name=data["role_name"],
+            )
+            self._load_users()
+        except WeakPassword as e:
+            QMessageBox.warning(
+                self,
+                "Слабый пароль",
+                f"Пароль не соответствует требованиям безопасности:\n\n{e}",
+            )
+        except AuthError as e:
+            QMessageBox.critical(self, "Ошибка создания пользователя", str(e))
+        finally:
+            self._set_buttons_enabled(True)
+
+    def _on_delete_clicked(self) -> None:
+        """ConfirmWithPasswordDialog → auth_manager.delete_user(selected) → reload."""
+        if self._auth_manager is None:
+            return
+
+        username = self._get_selected_username()
+        if username is None:
+            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для удаления")
+            return
+
+        confirmed = self._open_confirm_dialog(f'Удалить пользователя «{username}»')
+        if not confirmed:
+            return
+
+        self._set_buttons_enabled(False)
+        try:
+            self._auth_manager.delete_user(username)
+            self._load_users()
+        except LastAdminError as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+        except UserNotFound as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+        except AuthError as e:
+            QMessageBox.critical(self, "Ошибка", str(e))
+        finally:
+            self._set_buttons_enabled(True)
+
+    def _on_change_role_clicked(self) -> None:
+        """Диалог смены роли (QInputDialog.getItem с list_roles()) → auth_manager.update_user_role() → reload."""
+        if self._auth_manager is None:
+            return
+
+        username = self._get_selected_username()
+        if username is None:
+            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для смены роли")
+            return
+
+        # Получить роли, исключая hidden_in_ui=True
+        try:
+            all_roles = self._auth_manager.list_roles()
+        except AuthError as e:
+            QMessageBox.critical(self, "Ошибка загрузки ролей", str(e))
+            return
+
+        visible_roles = [r["name"] for r in all_roles if not r.get("hidden_in_ui", False)]
+        if not visible_roles:
+            QMessageBox.warning(self, "Нет доступных ролей", "Нет ролей для назначения")
+            return
+
+        # Найти текущую роль выбранного пользователя
+        current_role = ""
+        row = self._table.currentRow()
+        if 0 <= row < len(self._users):
+            current_role = self._users[row].get("role_name", "")
+
+        current_index = visible_roles.index(current_role) if current_role in visible_roles else 0
+
+        new_role, ok = QInputDialog.getItem(
+            self,
+            "Сменить роль",
+            f"Роль для «{username}»:",
+            visible_roles,
+            current=current_index,
+            editable=False,
+        )
+        if not ok or new_role == current_role:
+            return
+
+        self._set_buttons_enabled(False)
+        try:
+            self._auth_manager.update_user_role(username, new_role)
+            self._load_users()
+        except LastAdminError as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+        except UserNotFound as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+        except AuthError as e:
+            QMessageBox.critical(self, "Ошибка", str(e))
+        finally:
+            self._set_buttons_enabled(True)
+
+    def _on_reset_password_clicked(self) -> None:
+        """ConfirmWithPasswordDialog → auth_manager.reset_password(selected)
+           → QMessageBox с новым паролем + автоматически копируется в clipboard.
+        """
+        if self._auth_manager is None:
+            return
+
+        username = self._get_selected_username()
+        if username is None:
+            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для сброса пароля")
+            return
+
+        confirmed = self._open_confirm_dialog(f'Сбросить пароль пользователя «{username}»')
+        if not confirmed:
+            return
+
+        self._set_buttons_enabled(False)
+        try:
+            new_password = self._auth_manager.reset_password(username)
+
+            # Копировать в буфер обмена
+            clipboard = QApplication.clipboard()
+            if clipboard is not None:
+                clipboard.setText(new_password)
+
+            QMessageBox.information(
+                self,
+                "Новый пароль",
+                f"Новый пароль для «{username}»:\n\n{new_password}\n\n"
+                "(Пароль скопирован в буфер обмена. Сохраните его — он больше не отобразится.)",
+            )
+            self._load_users()
+        except UserNotFound as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+        except AuthError as e:
+            QMessageBox.critical(self, "Ошибка", str(e))
+        finally:
+            self._set_buttons_enabled(True)

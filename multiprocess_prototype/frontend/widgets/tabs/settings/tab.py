@@ -323,6 +323,7 @@ class SettingsTab(QWidget):
 
         # Виджеты секций
         section_widgets: dict[str, QWidget] = {
+            "administration": self._build_administration_section(),
             "system_settings": self._build_system_section(),
             "history": self._build_history_section(),
         }
@@ -333,6 +334,13 @@ class SettingsTab(QWidget):
 
         self._side_nav.set_current(_DEFAULT_SECTION)
         main_layout.addWidget(self._side_nav, stretch=1)
+
+    def _build_administration_section(self) -> QWidget:
+        """Секция «Администрация» — AdministrationSection или placeholder если нет ctx."""
+        if self._ctx is None:
+            return self._build_placeholder("Администрация")
+        from .administration.section import AdministrationSection
+        return AdministrationSection(self._ctx)
 
     def _build_system_section(self) -> QWidget:
         """Секция «Настройки системы» — RegisterView + вертикальные кнопки справа."""
