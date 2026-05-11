@@ -86,6 +86,13 @@ from   = "Services/*"
 to     = "Plugins/*"
 reason = "Service не зависит от плагинов"
 
+# Services/auth — чистый backend без UI (PR1 auth-rbac, ADR-Auth-001..005).
+# UI логина и админ-панель — в multiprocess_prototype (PR2), не в auth.
+[[boundaries]]
+from   = "Services/auth/*"
+to     = "multiprocess_framework/modules/frontend_module/*"
+reason = "Services/auth — backend, не должен импортировать Qt-слой frontend_module (PR1 auth-rbac)"
+
 # Plugins → не знают про конкретное приложение
 [[boundaries]]
 from   = "Plugins/*"
