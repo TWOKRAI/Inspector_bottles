@@ -70,8 +70,12 @@ testpaths = [
     "multiprocess_prototype/tests",
     "multiprocess_prototype/state_store/tests",
 ]
+# multiprocess_prototype_backup/ — frozen snapshot предыдущей структуры (см. CLAUDE.md).
+# Имена тестов совпадают с актуальным multiprocess_prototype/tests/, что вызывает
+# file-collision при ручном указании файла или IDE discovery → исключаем явно.
+norecursedirs = ["multiprocess_prototype_backup", ".git", "__pycache__", ".venv"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --ignore=multiprocess_prototype_backup"
 qt_api = "pyside6"

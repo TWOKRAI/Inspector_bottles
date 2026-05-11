@@ -55,14 +55,12 @@ multiprocess_framework/
 │   ├── ADR_REGISTRY.md
 │   ├── MODULE_README_TEMPLATE.md
 │   └── archive/                # Устаревшие документы
-├── tests/                      # Интеграционные тесты
-│   ├── integration/
-│   ├── run_all_tests.py
-│   └── run_unit_tests.py
-└── tools/
-    ├── module_validator.py
-    └── validate_all_modules.py
+└── tests/                      # Интеграционные тесты
+    ├── integration/
+    └── run_unit_tests.py
 ```
+
+Валидация структуры и инвариантов — `python scripts/validate.py` (импорты, `__init__.py`, `interfaces.py`, `README.md`, `STATUS.md`, ADR-sync) + `sentrux check` для архитектурных границ.
 
 **Всего пакетов под `modules/`:** 21. Список и краткая роль — [`docs/MODULES_OVERVIEW.md`](docs/MODULES_OVERVIEW.md).
 

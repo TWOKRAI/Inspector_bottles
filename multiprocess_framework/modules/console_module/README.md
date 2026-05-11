@@ -293,10 +293,10 @@ mgr.shutdown()
 ## Запуск тестов
 
 ```bash
-# Из корня Inspector_bottles (с активированным venv)
-python multiprocess_framework/tests/run_all_tests.py --module console_module
+# Из корня Inspector_bottles (с активированным venv) — все тесты модулей фреймворка
+python scripts/run_framework_tests.py
 
-# Или напрямую pytest
+# Только тесты console_module через pytest
 python -m pytest multiprocess_framework/modules/console_module/tests/ -v
 ```
 

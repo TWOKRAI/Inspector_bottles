@@ -6,6 +6,12 @@
 2. Нет sys.path.insert в production-коде
 3. Все __init__.py существуют
 4. interfaces.py существует в модулях из REQUIRED_INTERFACES
+5. STATUS.md в каждом модуле
+5a. README.md в каждом модуле
+5b. Структура Services/ (__init__.py, interfaces.py, STATUS.md, README.md)
+6. ADR-документация синхронизирована (python -m scripts.sync --check)
+
+Архитектурные границы между слоями (framework → Services → Plugins → app) — sentrux check.
 
 Запуск: python scripts/validate.py
 """
@@ -168,6 +174,18 @@ def check_status_files() -> None:
             warnings.append(msg)
 
 
+def check_readme_files() -> None:
+    check_header("5a. Проверка README.md в каждом модуле")
+    for module_name in MODULES:
+        readme_file = MODULES_ROOT / module_name / "README.md"
+        if readme_file.exists():
+            print(f"  [OK] {module_name}/README.md")
+        else:
+            msg = f"  [MISS] Нет README.md: {module_name}"
+            print(msg)
+            warnings.append(msg)
+
+
 def check_services() -> None:
     """Проверка структуры Services/ (Phase 4 carve-out)."""
     check_header("5b. Проверка Services/ (прикладной слой)")
@@ -233,6 +251,7 @@ def main() -> int:
     check_init_files()
     check_interfaces()
     check_status_files()
+    check_readme_files()
     check_services()
     check_adr_sync()
 

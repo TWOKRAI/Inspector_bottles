@@ -17,13 +17,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from multiprocess_framework.modules.process_module.plugins.port import Port
-from multiprocess_prototype.frontend.widgets.tabs_setting.processes_tab.plugin_card_widget import (
+from multiprocess_prototype_backup.frontend.widgets.tabs_setting.processes_tab.plugin_card_widget import (
     PluginCardWidget,
 )
-from multiprocess_prototype.frontend.widgets.tabs_setting.processes_tab import (
+from multiprocess_prototype_backup.frontend.widgets.tabs_setting.processes_tab import (
     plugin_chain_editor as pce_mod,
 )
-from multiprocess_prototype.frontend.widgets.tabs_setting.processes_tab.plugin_chain_editor import (
+from multiprocess_prototype_backup.frontend.widgets.tabs_setting.processes_tab.plugin_chain_editor import (
     PluginChainEditor,
 )
 

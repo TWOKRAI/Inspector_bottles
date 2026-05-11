@@ -98,6 +98,28 @@ from   = "*"
 to     = "multiprocess_prototype_v2/*"
 reason = "архивный прототип v2 удалён, импорты запрещены"
 
+# Frozen snapshot предыдущей структуры — read-only архив для возможного переноса
+# кусков в multiprocess_prototype/. Активный код не должен ничего из него тянуть.
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "multiprocess_prototype_backup/*"
+reason = "framework не должен импортировать архивный backup-прототип"
+
+[[boundaries]]
+from   = "Services/*"
+to     = "multiprocess_prototype_backup/*"
+reason = "Services не должен импортировать архивный backup-прототип"
+
+[[boundaries]]
+from   = "Plugins/*"
+to     = "multiprocess_prototype_backup/*"
+reason = "Plugins не должен импортировать архивный backup-прототип"
+
+[[boundaries]]
+from   = "multiprocess_prototype/*"
+to     = "multiprocess_prototype_backup/*"
+reason = "актуальный прототип не должен импортировать архивный backup — куски копируются явно"
+
 [[boundaries]]
 from   = "multiprocess_framework/*"
 to     = "hikvision_camera_module*/*"

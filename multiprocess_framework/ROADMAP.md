@@ -10,7 +10,7 @@
 
 | # | Где теряется балл | Что добавить | Усилие |
 |---|-------------------|--------------|--------|
-| 1 | **CI отсутствует** | GitHub Actions matrix: `os: [ubuntu, windows, macos] × python: [3.11, 3.12]`. Прогон тестов + `tools/validate_all_modules.py` + lint | 1 день |
+| 1 | **CI отсутствует** | GitHub Actions matrix: `os: [ubuntu, windows, macos] × python: [3.11, 3.12]`. Прогон `python scripts/run_framework_tests.py` + `python scripts/validate.py` + `sentrux check` + lint | 1 день |
 | 2 | **Performance baseline отсутствует** | `tests/performance/` с `pytest-benchmark`: throughput RouterManager, latency end-to-end IPC, BatchBuffer overhead, ConfigStore sync. Цифры в CI как regression-guard | 2 дня |
 | 3 | **2 failing-теста** в зелёной зоне | Починить `test_init_creates_components` (нужен `config_handler` defensive guard) и `test_console_process_config_build_and_process_helper` (обновить ожидаемый contract `proc_dict`) | 30 мин каждый |
 | 4 | **Editable installation хрупкая** | В `pyproject.toml` корня проекта добавить `[tool.setuptools]` или `[tool.uv.sources]` с явным указанием пакета `multiprocess_framework`. Сейчас работает только из текущего каталога | 1 час |

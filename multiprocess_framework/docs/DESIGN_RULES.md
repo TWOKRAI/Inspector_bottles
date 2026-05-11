@@ -301,9 +301,9 @@ for name in self.__class__.model_fields: # ✅
 | R-14 | Backward compat | `grep` `_compat\|legacy\|deprecated` |
 | R-15 | Pydantic v2 | `grep` `self.model_fields` |
 | R-16 | Регистры в app | ревью |
-| R-17 | Структура папок | `tools/validate_all_modules.py` |
+| R-17 | Структура папок | `python scripts/validate.py` |
 | R-18 | `model_dump` | ревью |
 | R-19 | Конфиг на границе | `normalize_config()` в каждом менеджере |
 | R-20 | Value objects | ревью |
 
-Автоматическая проверка структурных правил — `tools/validate_all_modules.py` (запускается через `python scripts/validate.py` из текущий каталог).
+Автоматическая проверка структурных правил — `python scripts/validate.py` (импорты модулей, `__init__.py`, `interfaces.py`, `README.md`, `STATUS.md`, Services, ADR-sync). Архитектурные границы между слоями (framework/Services/Plugins/app) — `sentrux check` + [.sentrux/rules.toml](../../.sentrux/rules.toml).
