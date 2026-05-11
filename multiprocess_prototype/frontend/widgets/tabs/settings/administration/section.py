@@ -111,14 +111,16 @@ class AdministrationSection(QWidget):
         RolesPanel сам читает permission из ctx.access_context.
         """
         nav = SideNavLayout()
+        auth = self._ctx.auth
+        bus = self._ctx.action_bus()
 
         if has_users:
             from .users_panel import UsersPanel
-            nav.add_section("users", "Пользователи", UsersPanel(self._ctx))
+            nav.add_section("users", "Пользователи", UsersPanel(auth))
 
         if has_roles:
             from .roles_panel import RolesPanel
-            nav.add_section("roles", "Роли", RolesPanel(self._ctx))
+            nav.add_section("roles", "Роли", RolesPanel(auth, bus))
 
         # PR4 Group C: read-only панели аудита
         has_sessions = has_users
@@ -126,11 +128,11 @@ class AdministrationSection(QWidget):
 
         if has_sessions:
             from .sessions_panel import SessionsPanel
-            nav.add_section("sessions", "Сессии", SessionsPanel(self._ctx))
+            nav.add_section("sessions", "Сессии", SessionsPanel(auth))
 
         if has_audit:
             from .audit_log_panel import AuditLogPanel
-            nav.add_section("audit_log", "Audit log", AuditLogPanel(self._ctx))
+            nav.add_section("audit_log", "Audit log", AuditLogPanel(auth))
 
         nav.set_current("users" if has_users else "roles")
 

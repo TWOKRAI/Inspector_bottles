@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
+from .auth_context import AuthContext  # noqa: F401 — re-export для backward-compat
 from .bridge.command_sender import CommandSender
 
 if TYPE_CHECKING:
@@ -18,20 +19,6 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.actions_module.bus import ActionBus
     from Services.auth.interfaces import IAuthManager
     from Services.auth.storage.audit_storage import SqliteAuditStorage
-
-
-@dataclass(frozen=True)
-class AuthContext:
-    """Auth-домен: связка manager + state + audit-storage.
-
-    Группирует зависимости auth-домена в один типизированный объект.
-    Возвращается из `AppContext.auth` (property). None если auth ещё не
-    инициализирован (manager или state отсутствует в extras).
-    """
-
-    manager: "IAuthManager"
-    state: "AuthState"
-    audit: "SqliteAuditStorage | None" = None
 
 
 @dataclass

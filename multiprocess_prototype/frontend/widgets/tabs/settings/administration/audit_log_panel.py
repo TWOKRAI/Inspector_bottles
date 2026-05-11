@@ -37,7 +37,7 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.administration._forma
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.auth_context import AuthContext
 
 
 class AuditLogPanel(QWidget):
@@ -57,11 +57,9 @@ class AuditLogPanel(QWidget):
     ]
     _PAGE_SIZE = 100
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._ctx = ctx
-        auth = ctx.auth
         self._storage = auth.audit if auth is not None else None
         self._auth_manager = auth.manager if auth is not None else None
 

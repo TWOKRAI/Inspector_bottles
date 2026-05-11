@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from .permission_matrix import PermissionMatrix
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.auth_context import AuthContext
     from multiprocess_framework.modules.actions_module.bus import ActionBus
 
 
@@ -41,12 +41,16 @@ class RolesPanel(QWidget):
     и не должно быть в undo-стеке.
     """
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        auth: "AuthContext | None",
+        bus: "ActionBus | None",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
 
-        auth = ctx.auth
         self._auth_manager = auth.manager if auth is not None else None
-        self._bus: "ActionBus | None" = ctx.action_bus()
+        self._bus: "ActionBus | None" = bus
 
         # Определяем permissions текущего пользователя
         if auth is not None:

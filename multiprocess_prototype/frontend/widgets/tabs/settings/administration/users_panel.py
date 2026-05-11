@@ -30,7 +30,7 @@ from Services.auth.exceptions import AuthError, LastAdminError, UserNotFound, We
 from .user_form import UserForm
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.auth_context import AuthContext
     from multiprocess_prototype.frontend.widgets.dialogs.confirm_with_password import (
         ConfirmWithPasswordDialog,
     )
@@ -51,10 +51,9 @@ class UsersPanel(QWidget):
         ("is_active",     "Активен",          70),
     ]
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        auth = ctx.auth
         self._auth_manager = auth.manager if auth is not None else None
         self._auth_state = auth.state if auth is not None else None
         self._users: list[dict] = []

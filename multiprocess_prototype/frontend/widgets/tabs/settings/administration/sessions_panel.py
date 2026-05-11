@@ -33,7 +33,7 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.administration._forma
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.auth_context import AuthContext
 
 
 class SessionsPanel(QWidget):
@@ -50,11 +50,9 @@ class SessionsPanel(QWidget):
         ("host",      "Хост",          120),
     ]
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._ctx = ctx
-        auth = ctx.auth
         self._storage = auth.audit if auth is not None else None
         self._access_context = auth.state.access_context if auth is not None else None
 
