@@ -138,6 +138,14 @@ class ServicesTab(QWidget):
         btn_layout.addStretch()
         columns.addLayout(btn_layout)
 
+        # PR3: tabs.services.edit gating через permission-aware proxy.
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+        auth_state = self._ctx.auth_state()
+        for btn in (start_btn, stop_btn, restart_btn):
+            install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
+
         return container
 
     @staticmethod

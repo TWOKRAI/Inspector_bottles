@@ -105,3 +105,73 @@ class TestGateEditWidgets:
         )
         assert b1.isEnabled() is True
         assert b2.isEnabled() is True
+
+
+class TestInstallPermissionAwareEnable:
+    def test_no_auth_state_noop(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+
+        btn = QPushButton()
+        qtbot.addWidget(btn)
+        btn.setEnabled(True)
+        install_permission_aware_enable(btn, "tabs.recipes.edit", None)
+        # setEnabled остался оригинальным, состояние не изменилось
+        assert btn.isEnabled() is True
+
+    def test_proxy_intercepts_setEnabled(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+
+        btn = QPushButton()
+        qtbot.addWidget(btn)
+        stub = _StubAuthState()  # без permission
+
+        install_permission_aware_enable(btn, "tabs.recipes.edit", stub)
+
+        # Без permission даже base_enabled=True не включит кнопку
+        btn.setEnabled(True)
+        assert btn.isEnabled() is False
+
+        # После получения permission — таб-код вызывает setEnabled(True) — теперь работает
+        stub.set_context(
+            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
+        )
+        assert btn.isEnabled() is True
+
+    def test_base_false_always_disabled(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+
+        btn = QPushButton()
+        qtbot.addWidget(btn)
+        stub = _StubAuthState(
+            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
+        )
+        install_permission_aware_enable(btn, "tabs.recipes.edit", stub)
+        # base=True + permission → enabled
+        btn.setEnabled(True)
+        assert btn.isEnabled() is True
+        # selection drops → base=False → disabled
+        btn.setEnabled(False)
+        assert btn.isEnabled() is False
+
+    def test_revoked_permission_disables(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+
+        btn = QPushButton()
+        qtbot.addWidget(btn)
+        stub = _StubAuthState(
+            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
+        )
+        install_permission_aware_enable(btn, "tabs.recipes.edit", stub)
+        btn.setEnabled(True)
+        assert btn.isEnabled() is True
+        # logout → пустой контекст → disabled даже при base=True
+        stub.set_context(AccessContext())
+        assert btn.isEnabled() is False

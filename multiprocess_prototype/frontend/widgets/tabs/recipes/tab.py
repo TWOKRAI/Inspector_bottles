@@ -136,6 +136,16 @@ class RecipesTab(QWidget):
         btn_layout.addStretch()
         columns.addLayout(btn_layout)
 
+        # PR3: permission-aware proxy на setEnabled — наслаивается прозрачно
+        # на selection-aware логику. Без tabs.recipes.edit все три кнопки
+        # принудительно disabled, существующие setEnabled-вызовы игнорируются.
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+        auth_state = self._ctx.auth_state()
+        for btn in (self._btn_load, self._btn_save, self._btn_delete):
+            install_permission_aware_enable(btn, "tabs.recipes.edit", auth_state)
+
         layout.addLayout(columns, stretch=1)
 
     def _build_cards_page(self) -> QWidget:

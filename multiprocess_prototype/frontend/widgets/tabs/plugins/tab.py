@@ -90,6 +90,13 @@ class PluginsTab(QWidget):
                 detail: QWidget = RegisterView(fields)
                 # Подключить field_changed → ActionBus
                 detail.field_changed.connect(self._on_field_changed)
+                # PR3: весь RegisterView — read-only без tabs.plugins.edit.
+                from multiprocess_prototype.frontend.widgets.access import (
+                    bind_edit_permission,
+                )
+                bind_edit_permission(
+                    detail, "tabs.plugins.edit", self._ctx.auth_state()
+                )
             else:
                 detail = PluginInfoCard(info)
         else:

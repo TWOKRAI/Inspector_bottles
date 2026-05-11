@@ -162,6 +162,14 @@ class ProcessesTab(QWidget):
         self._btn_stop.clicked.connect(lambda: self._on_button_action("stop"))
         btn_layout.addWidget(self._btn_stop)
 
+        # PR3: tabs.processes.edit gating через permission-aware proxy.
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
+        )
+        auth_state = self._ctx.auth_state()
+        for btn in (self._btn_create, self._btn_delete, self._btn_start, self._btn_stop):
+            install_permission_aware_enable(btn, "tabs.processes.edit", auth_state)
+
         btn_layout.addStretch()
         columns.addLayout(btn_layout)
 

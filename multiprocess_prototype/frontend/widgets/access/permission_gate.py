@@ -76,3 +76,51 @@ def gate_edit_widgets(
     """Batch-применить permission к набору виджетов с одним правом."""
     for w in widgets:
         bind_edit_permission(w, permission, auth_state)
+
+
+def install_permission_aware_enable(
+    widget: "QWidget",
+    permission: str,
+    auth_state: "AuthState | None",
+) -> None:
+    """Подменить `widget.setEnabled` на permission-aware proxy.
+
+    После установки вызовы `widget.setEnabled(True)` со стороны selection-aware
+    логики таба автоматически учитывают наличие permission: enabled только
+    если `base_enabled AND has_permission`. `setEnabled(False)` всегда
+    отключает. Дополнительно подписка на `access_context_changed`
+    пересчитывает состояние при смене роли.
+
+    Без `auth_state` — no-op (legacy/тесты).
+
+    Use case: вкладки с selection-driven кнопками (Load/Delete), которые
+    управляют enabled по выбору строки. Permission-driven gating
+    наслаивается прозрачно — таб-код не меняется.
+    """
+    if auth_state is None:
+        return
+
+    original_set_enabled = widget.setEnabled
+    state = {"base": bool(widget.isEnabled())}
+
+    def _refresh() -> None:
+        base = state["base"]
+        if not base:
+            original_set_enabled(False)
+            widget.setProperty("readOnly", False)
+            return
+        allowed = auth_state.access_context.has_permission(permission)
+        original_set_enabled(allowed)
+        widget.setProperty("readOnly", not allowed)
+        style = widget.style()
+        if style is not None:
+            style.unpolish(widget)
+            style.polish(widget)
+
+    def proxy(enabled: bool) -> None:
+        state["base"] = bool(enabled)
+        _refresh()
+
+    widget.setEnabled = proxy  # type: ignore[method-assign]
+    auth_state.access_context_changed.connect(lambda _ctx: _refresh())
+    _refresh()
