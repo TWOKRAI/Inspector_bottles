@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_framework.modules.actions_module.bus import ActionBus
     from Services.auth.interfaces import IAuthManager
+    from Services.auth.storage.audit_storage import SqliteAuditStorage
 
 
 @dataclass
@@ -88,6 +89,14 @@ class AppContext:
     def auth_state(self) -> "AuthState | None":
         """AuthState из extras, если был инициализирован в run_gui()."""
         return self.extras.get("auth_state")
+
+    def audit_storage(self) -> "SqliteAuditStorage | None":
+        """SqliteAuditStorage из extras, если был инициализирован в run_gui().
+
+        Используется панелями SessionsPanel и AuditLogPanel (PR4 Group C)
+        для чтения сессий и аудит-лога.
+        """
+        return self.extras.get("audit_storage")
 
 
 def build_app_context(
