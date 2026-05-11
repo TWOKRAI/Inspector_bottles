@@ -21,6 +21,39 @@ if TYPE_CHECKING:
 _PLUGINS_DIR = Path(__file__).resolve().parents[2] / "Plugins"
 
 
+def _resolve_dev_login_settings() -> tuple[bool, str, str]:
+    """Получить (auto_login_enabled, username, password) из env и dev_settings.py.
+
+    Приоритет: env-переменные → multiprocess_prototype/dev_settings.py → дефолты.
+
+    Returns:
+        (auto_login_enabled, username, password)
+    """
+    import os
+
+    enabled_env = os.environ.get("INSPECTOR_AUTH_DEV_AUTO_LOGIN", "").strip().lower()
+    password_env = os.environ.get("INSPECTOR_DEV_PASSWORD", "").strip()
+    username_env = os.environ.get("INSPECTOR_DEV_USERNAME", "").strip()
+
+    # dev_settings.py — опциональный локальный конфиг (в .gitignore)
+    try:
+        from multiprocess_prototype import dev_settings  # type: ignore[import-not-found]
+        ds_enabled = bool(getattr(dev_settings, "DEV_AUTO_LOGIN", False))
+        ds_username = str(getattr(dev_settings, "DEV_USERNAME", "dev"))
+        ds_password = str(getattr(dev_settings, "DEV_PASSWORD", ""))
+    except ImportError:
+        ds_enabled, ds_username, ds_password = False, "dev", ""
+
+    enabled = (
+        enabled_env in ("1", "true", "yes")
+        if enabled_env
+        else ds_enabled
+    )
+    username = username_env or ds_username or "dev"
+    password = password_env or ds_password
+    return enabled, username, password
+
+
 def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
@@ -166,32 +199,28 @@ def run_gui(process: "GuiProcess") -> None:
     _auth_state = AuthState()
     ctx.extras["auth_state"] = _auth_state
 
-    # 3c-bis. Dev-mode автологин — только в явном dev-режиме.
-    # Активируется, если выполняются ВСЕ условия:
-    #   1. Env-флаг INSPECTOR_AUTH_DEV_AUTO_LOGIN=1 (явное opt-in).
-    #   2. Env INSPECTOR_DEV_PASSWORD непустой.
-    #   3. В хранилище есть пользователь dev.
-    # Любое нарушение → штатный login через LoginDialog. В prod-сборках
-    # env-флаг не задаётся, dev-автологин не срабатывает.
-    _dev_auto_login_enabled = os.environ.get(
-        "INSPECTOR_AUTH_DEV_AUTO_LOGIN", "0"
-    ).strip().lower() in ("1", "true", "yes")
-    _dev_password = os.environ.get("INSPECTOR_DEV_PASSWORD", "").strip()
+    # 3c-bis. Dev-mode автологин.
+    # Источники (по приоритету): env-переменные → multiprocess_prototype/dev_settings.py → дефолты.
+    # Env используется в prod / CI; dev_settings.py — для локальной разработки
+    # (файл в .gitignore, не попадает в репо). См. dev_settings.example.py.
+    _dev_auto_login_enabled, _dev_username, _dev_password = _resolve_dev_login_settings()
     if _dev_auto_login_enabled and _dev_password:
         try:
             from multiprocess_framework.modules.frontend_module.managers.access_context import (
                 AccessContext,
             )
 
-            _result = _auth_manager.login("dev", _dev_password)
+            _result = _auth_manager.login(_dev_username, _dev_password)
             _auth_state.set_user(_result, AccessContext.from_dict(_result))
-            process._log_info("auth.auto_login: dev", module="startup")
+            process._log_info(
+                f"auth.auto_login: {_dev_username}", module="startup"
+            )
         except Exception as exc:
             process._log_error(f"auth.auto_login.failed: {exc}", module="startup")
     elif _dev_password and not _dev_auto_login_enabled:
         process._log_info(
-            "auth.auto_login.disabled: INSPECTOR_DEV_PASSWORD set, "
-            "INSPECTOR_AUTH_DEV_AUTO_LOGIN=0",
+            "auth.auto_login.disabled: DEV_PASSWORD set, "
+            "DEV_AUTO_LOGIN=False",
             module="startup",
         )
 
