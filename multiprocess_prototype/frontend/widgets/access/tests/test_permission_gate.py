@@ -107,6 +107,196 @@ class TestGateEditWidgets:
         assert b2.isEnabled() is True
 
 
+class TestPropagateAccessContextToTree:
+    """propagate_access_context_to_tree применяет AccessContext рекурсивно к виджетам с _trait или presenter."""
+
+    def _make_tree(self, qtbot):
+        """Создать root QWidget с двумя children: один с _trait, один с _presenter."""
+        from PySide6.QtWidgets import QWidget
+        from multiprocess_framework.modules.frontend_module.components.base.traits.access_trait import (
+            AccessTrait,
+        )
+
+        root = QWidget()
+        qtbot.addWidget(root)
+
+        # Child 1: с _trait + _apply_access
+        child1 = QWidget(root)
+        child1._trait = AccessTrait(
+            legacy_required_level=0,
+            required_view_permission="tabs.x.view",
+            required_edit_permission="tabs.x.edit",
+        )
+        applied_flag = {"count": 0}
+
+        def _apply_access():
+            applied_flag["count"] += 1
+            child1.setEnabled(child1._trait.can_modify())
+
+        child1._apply_access = _apply_access
+
+        # Child 2: с _presenter имеющим set_access_context
+        child2 = QWidget(root)
+        presenter_calls = []
+
+        class _StubPresenter:
+            def set_access_context(self, ctx):
+                presenter_calls.append(ctx)
+
+        child2._presenter = _StubPresenter()
+
+        return root, child1, child2, applied_flag, presenter_calls
+
+    def test_no_auth_state_noop(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            propagate_access_context_to_tree,
+        )
+
+        root, child1, _, applied_flag, _ = self._make_tree(qtbot)
+        propagate_access_context_to_tree(root, None)
+        assert applied_flag["count"] == 0
+
+    def test_initial_apply_runs(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            propagate_access_context_to_tree,
+        )
+
+        root, child1, child2, applied_flag, presenter_calls = self._make_tree(qtbot)
+        stub = _StubAuthState(
+            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
+        )
+        propagate_access_context_to_tree(root, stub)
+
+        # child1._trait получил ctx через update + _apply_access вызван
+        assert applied_flag["count"] >= 1
+        assert child1._trait.can_modify() is True
+        # child2 presenter получил ctx
+        assert len(presenter_calls) == 1
+        assert presenter_calls[0].has_permission("tabs.x.edit") is True
+
+    def test_reactive_on_change(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import (
+            propagate_access_context_to_tree,
+        )
+
+        root, child1, _, applied_flag, presenter_calls = self._make_tree(qtbot)
+        stub = _StubAuthState()  # пустой
+        propagate_access_context_to_tree(root, stub)
+        initial_apply_count = applied_flag["count"]
+
+        # Login → re-apply
+        stub.set_context(
+            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
+        )
+        assert applied_flag["count"] > initial_apply_count
+        assert child1._trait.can_modify() is True
+        assert len(presenter_calls) >= 2  # initial + login
+
+
+class TestGateRegisterView:
+    """gate_register_view применяет permission ко всем editor.widget внутри RegisterView."""
+
+    def _make_view(self, qtbot, editors_count: int = 3):
+        """Минимальный stub RegisterView с editors() -> dict."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Editor:
+            widget: QPushButton
+
+        from PySide6.QtWidgets import QWidget
+
+        class _View(QWidget):
+            def __init__(self) -> None:
+                super().__init__()
+                self._editors = {
+                    f"e{i}": _Editor(widget=QPushButton())
+                    for i in range(editors_count)
+                }
+
+            def editors(self):
+                return self._editors
+
+        view = _View()
+        qtbot.addWidget(view)
+        for ed in view._editors.values():
+            qtbot.addWidget(ed.widget)
+        return view
+
+    def test_no_auth_state_noop(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import gate_register_view
+
+        view = self._make_view(qtbot)
+        for ed in view.editors().values():
+            ed.widget.setEnabled(True)
+        gate_register_view(view, "tabs.plugins.edit", None)
+        # Состояние сохранено — функция no-op
+        for ed in view.editors().values():
+            assert ed.widget.isEnabled() is True
+
+    def test_disables_widgets_without_permission(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import gate_register_view
+
+        view = self._make_view(qtbot)
+        stub = _StubAuthState()  # без permission
+        gate_register_view(view, "tabs.plugins.edit", stub)
+
+        for ed in view.editors().values():
+            assert ed.widget.isEnabled() is False
+            assert ed.widget.property("readOnly") is True
+
+    def test_enables_with_edit_permission(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import gate_register_view
+
+        view = self._make_view(qtbot)
+        stub = _StubAuthState(
+            AccessContext(permissions=frozenset({"tabs.plugins.edit"}))
+        )
+        gate_register_view(view, "tabs.plugins.edit", stub)
+
+        for ed in view.editors().values():
+            assert ed.widget.isEnabled() is True
+
+    def test_view_permission_hides_whole_view(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import gate_register_view
+
+        view = self._make_view(qtbot)
+        view.show()
+        stub = _StubAuthState(
+            AccessContext(permissions=frozenset({"tabs.plugins.view"}))
+        )
+        gate_register_view(
+            view,
+            edit_permission="tabs.plugins.edit",
+            auth_state=stub,
+            view_permission="tabs.plugins.view",
+        )
+        assert view.isVisible() is True
+
+        # Logout → view_permission уходит → setVisible(False)
+        stub.set_context(AccessContext())
+        assert view.isVisible() is False
+
+    def test_reactive_on_login(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.access import gate_register_view
+
+        view = self._make_view(qtbot)
+        stub = _StubAuthState()
+        gate_register_view(view, "tabs.plugins.edit", stub)
+
+        # Login → permission получен
+        stub.set_context(
+            AccessContext(permissions=frozenset({"tabs.plugins.edit"}))
+        )
+        for ed in view.editors().values():
+            assert ed.widget.isEnabled() is True
+
+        # Logout
+        stub.set_context(AccessContext())
+        for ed in view.editors().values():
+            assert ed.widget.isEnabled() is False
+
+
 class TestInstallPermissionAwareEnable:
     def test_no_auth_state_noop(self, qtbot):
         from multiprocess_prototype.frontend.widgets.access import (

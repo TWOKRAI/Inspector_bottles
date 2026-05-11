@@ -234,6 +234,12 @@ def run_gui(process: "GuiProcess") -> None:
     tab_factory = TabFactory(ctx, custom_factories=register_all_tabs())
     tab_factory.create_tabs(window.tab_widget)
 
+    # 5a. PR3: подключить tree-propagator AccessContext — любой виджет
+    # с `_trait`/`_apply_access`/`presenter.set_access_context` под
+    # MainWindow автоматически реагирует на login/logout/смену роли.
+    from .widgets.access import propagate_access_context_to_tree
+    propagate_access_context_to_tree(window, ctx.auth_state())
+
     # 6. Подключить bridge callbacks
     _setup_bridge_callbacks(process, image_panel, window)
 

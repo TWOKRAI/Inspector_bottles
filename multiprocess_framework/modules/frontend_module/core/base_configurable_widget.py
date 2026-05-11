@@ -66,6 +66,13 @@ class BaseConfigurableWidget(QWidget):
 
     Подклассы переопределяют _load_metadata(), _update_value_silent(), _update_access_level().
     Используют self._resolved_meta для построения UI.
+
+    PR3 auth-rbac: опциональный параметр `auth_source` (duck-typed). Если
+    передан и имеет сигнал `access_context_changed` + атрибут
+    `access_context`, виджет автоматически подписывается и при изменении
+    обновляет `self._trait` через `update(ctx)` + вызывает `_apply_access()`.
+    Tab-коду не нужно вручную пропагировать AccessContext в дочерние
+    виджеты, построенные на этом классе.
     """
 
     def __init__(
@@ -76,6 +83,7 @@ class BaseConfigurableWidget(QWidget):
         registers_manager: Optional[Any] = None,
         access_level: Optional[int] = None,
         parent: Optional[Any] = None,
+        auth_source: Optional[Any] = None,
     ) -> None:
         super().__init__(parent)
 
@@ -86,6 +94,7 @@ class BaseConfigurableWidget(QWidget):
         self._access_level: int = 0
         self._resolved_meta: Optional[ResolvedMeta] = None
         self._is_initialized: bool = False
+        self._auth_source: Optional[Any] = auth_source
 
         _reg = register_name
         _field = field_name
@@ -120,6 +129,41 @@ class BaseConfigurableWidget(QWidget):
 
         if self._register_name and self._field_name and self._registers_manager:
             self._apply_configuration()
+
+        # PR3: подписка на AuthState (duck-typed) — реактивное применение
+        # AccessContext к self._trait + _apply_access(). Если auth_source
+        # не передан или не имеет нужных атрибутов — no-op.
+        if auth_source is not None:
+            self._wire_auth_source(auth_source)
+
+    def _wire_auth_source(self, auth_source: Any) -> None:
+        """Подписка на сигнал access_context_changed и применение текущего контекста.
+
+        Duck-typing: `auth_source` должен иметь сигнал
+        `access_context_changed` и атрибут `access_context`. Любой из
+        отсутствующих — функция корректно ничего не делает.
+        """
+        signal = getattr(auth_source, "access_context_changed", None)
+        if signal is None or not hasattr(signal, "connect"):
+            return
+        signal.connect(self._on_auth_context_changed)
+        # Применить текущий контекст сразу
+        current = getattr(auth_source, "access_context", None)
+        if current is not None:
+            self._on_auth_context_changed(current)
+
+    def _on_auth_context_changed(self, ctx: Any) -> None:
+        """Применить AccessContext к self._trait и обновить view.
+
+        Защита от частичной инициализации: если у наследника нет _trait
+        или _apply_access — пропустить.
+        """
+        trait = getattr(self, "_trait", None)
+        if trait is not None and hasattr(trait, "update"):
+            trait.update(ctx)
+        apply_access = getattr(self, "_apply_access", None)
+        if callable(apply_access):
+            apply_access()
 
     @staticmethod
     def _config_to_dict(config: Any) -> dict:

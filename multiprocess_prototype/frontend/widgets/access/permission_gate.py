@@ -78,6 +78,126 @@ def gate_edit_widgets(
         bind_edit_permission(w, permission, auth_state)
 
 
+def propagate_access_context_to_tree(
+    root: "QWidget",
+    auth_state: "AuthState | None",
+) -> None:
+    """Подписать дерево виджетов под `root` на изменения AccessContext.
+
+    Алгоритм:
+    1. Подписаться на `auth_state.access_context_changed`.
+    2. При каждом сигнале (и сразу при подключении) рекурсивно обойти
+       `root.findChildren(QWidget)`:
+       - если у виджета есть атрибут `_trait` с методом `update` —
+         вызвать `_trait.update(ctx)`.
+       - если есть `_apply_access` — вызвать.
+       - если есть `_presenter.set_access_context` — вызвать (через
+         любой подходящий атрибут: `_presenter`, `presenter`, `_access`).
+
+    Используется в `app.py` сразу после создания `MainWindow`. Tab-код
+    ничего дополнительно не должен делать — любой виджет с `_trait`
+    или presenter автоматически реагирует на login/logout/смену роли.
+
+    Без `auth_state` — no-op (legacy/тесты).
+    """
+    if auth_state is None:
+        return
+
+    def _apply(ctx: "AccessContext") -> None:
+        from PySide6.QtWidgets import QWidget as _QWidget
+
+        for widget in root.findChildren(_QWidget):
+            trait = getattr(widget, "_trait", None)
+            if trait is not None and hasattr(trait, "update"):
+                try:
+                    trait.update(ctx)
+                except Exception:
+                    pass
+            apply_access = getattr(widget, "_apply_access", None)
+            if callable(apply_access):
+                try:
+                    apply_access()
+                except Exception:
+                    pass
+            for attr in ("_presenter", "presenter"):
+                presenter = getattr(widget, attr, None)
+                if presenter is None:
+                    continue
+                set_ctx = getattr(presenter, "set_access_context", None)
+                if callable(set_ctx):
+                    try:
+                        set_ctx(ctx)
+                    except Exception:
+                        pass
+                break  # достаточно одного presenter-атрибута
+
+    _apply(auth_state.access_context)
+    auth_state.access_context_changed.connect(_apply)
+
+
+def gate_register_view(
+    view: "QWidget",
+    edit_permission: str,
+    auth_state: "AuthState | None",
+    *,
+    view_permission: str | None = None,
+) -> None:
+    """Применить permission gating ко всем editors в RegisterView.
+
+    Args:
+        view: экземпляр RegisterView (с методом `editors() -> dict[str, FieldEditor]`).
+        edit_permission: permission на редактирование полей (`tabs.<id>.edit`).
+        auth_state: текущий AuthState. None → no-op.
+        view_permission: опционально — permission на показ всего RegisterView
+            (`tabs.<id>.view`). Если задан и отсутствует — RegisterView
+            скрывается через `setVisible(False)`.
+
+    Эффект:
+    - `view_permission` (если задан) отсутствует → весь RegisterView скрыт.
+    - `edit_permission` отсутствует → каждый `editor.widget` переходит в
+      `setEnabled(False)` + `readOnly=true` (QSS — приглушённый стиль).
+    - Подписка на `access_context_changed` пересчитывает состояние при
+      login/logout/смене роли.
+
+    Используется в табах, у которых master-detail построен на RegisterView
+    (Plugins, Services, Recipes cards-страница).
+    """
+    if auth_state is None:
+        return
+
+    def _apply(ctx: "AccessContext") -> None:
+        if view_permission is not None:
+            visible = ctx.has_permission(view_permission)
+            view.setVisible(visible)
+            if not visible:
+                return
+        else:
+            view.setVisible(True)
+
+        allowed = ctx.has_permission(edit_permission)
+        # Достучаться до editors через публичный API; gracefully fall back,
+        # если структура RegisterView другая.
+        editors_fn = getattr(view, "editors", None)
+        if editors_fn is None:
+            return
+        editors = editors_fn() if callable(editors_fn) else editors_fn
+        if not isinstance(editors, dict):
+            return
+        for editor in editors.values():
+            widget = getattr(editor, "widget", None)
+            if widget is None:
+                continue
+            widget.setEnabled(allowed)
+            widget.setProperty("readOnly", not allowed)
+            style = widget.style()
+            if style is not None:
+                style.unpolish(widget)
+                style.polish(widget)
+
+    _apply(auth_state.access_context)
+    auth_state.access_context_changed.connect(_apply)
+
+
 def install_permission_aware_enable(
     widget: "QWidget",
     permission: str,
