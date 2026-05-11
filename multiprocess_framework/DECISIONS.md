@@ -2050,7 +2050,7 @@
 | Модуль | Файл | Слой | Статус |
 |--------|------|------|--------|
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…004 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., Удаление BaseManager.on_event/emit_event (дублирует dispatch_module)) |
-| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…004 (Удаление `_compat.py`, ..., `extensions/` — только явный импорт) |
+| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…005 (Удаление `_compat.py`, ..., Декомпозиция `interfaces.py` по sub-package'ам) |
 | `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…003 (Извлечение ScenarioManager из Dispatcher, ..., Удаление AdvancedDispatcher alias) |
 | `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…005 (Паттерн CRM (ChannelRoutingManager), ..., Две роли конфигов (ChannelRoutingConfig vs ChannelRoutingManagerConfig)) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…003 (Удаление LogDispatcher, ..., LogRecord как отдельный тип) |

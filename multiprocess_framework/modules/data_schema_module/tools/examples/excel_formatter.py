@@ -12,7 +12,7 @@ from typing import Dict, Any
 from pathlib import Path
 from io import BytesIO
 
-from ...core.interfaces import IVisualizationFormatter
+from ..interfaces import IVisualizationFormatter
 
 
 class ExcelVisualizationFormatter(IVisualizationFormatter):

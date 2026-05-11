@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from ..registry.schema_registry import SchemaManager
 from ..core.exceptions import SchemaNotFoundError
-from ..core.interfaces import ISchemaVisualizer, IVisualizationFormatter
+from .interfaces import ISchemaVisualizer, IVisualizationFormatter
 from .formatters import (
     TextVisualizationFormatter,
     JsonVisualizationFormatter,

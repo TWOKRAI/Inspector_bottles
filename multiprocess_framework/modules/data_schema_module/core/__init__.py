@@ -7,29 +7,16 @@
     - SchemaMixin / RegisterMixin (backward compat alias)
     - FieldMeta, FieldRouting, field_types
     - Exceptions, Validators
-    - Interfaces (re-export из корневого interfaces.py)
+    - Interfaces ядра (ISchema, ISchemaAdapter, HasBuild, IDataValidator);
+      контракты других слоёв — в `<sub_package>/interfaces.py` (ADR-DS-005).
     - Metrics
 """
-# Интерфейсы (re-export из корня)
+# Интерфейсы ядра (другие — в registry/, serialization/, storage/, versioning/, tools/)
 from .interfaces import (
-    ISchema,
-    ISchemaRegistry,
-    ISchemaAdapter,
-    ISchemaStorage,
-    IAsyncSchemaStorage,
     HasBuild,
-    IDataConverter,
     IDataValidator,
-    IVisualizationFormatter,
-    IDocumentationFormatter,
-    ISchemaVisualizer,
-    ISchemaDocumentationGenerator,
-    IStorageManager,
-    IVersionManager,
-    # Backward compat
-    IRegisterStorage,
-    IAsyncRegisterStorage,
-    ISchemaManager,
+    ISchema,
+    ISchemaAdapter,
 )
 
 # Исключения
@@ -77,24 +64,11 @@ from .metrics import (
 )
 
 __all__ = [
-    # Интерфейсы
+    # Интерфейсы ядра (другие слои — в <sub_package>/interfaces.py)
     "ISchema",
-    "ISchemaRegistry",
     "ISchemaAdapter",
-    "ISchemaStorage",
-    "IAsyncSchemaStorage",
     "HasBuild",
-    "IDataConverter",
     "IDataValidator",
-    "IVisualizationFormatter",
-    "IDocumentationFormatter",
-    "ISchemaVisualizer",
-    "ISchemaDocumentationGenerator",
-    "IStorageManager",
-    "IVersionManager",
-    "IRegisterStorage",
-    "IAsyncRegisterStorage",
-    "ISchemaManager",
     # Исключения
     "DataSchemaError",
     "SchemaNotFoundError",

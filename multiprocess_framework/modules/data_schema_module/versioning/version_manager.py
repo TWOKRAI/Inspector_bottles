@@ -8,7 +8,8 @@
 import time
 from typing import Dict, Any, Optional, List
 
-from ..core.interfaces import IVersionManager, IStorageManager
+from .interfaces import IVersionManager
+from ..storage.interfaces import IStorageManager
 from ..models.base import BaseManagerModel
 from ..registry.schema_registry import SchemaManager
 

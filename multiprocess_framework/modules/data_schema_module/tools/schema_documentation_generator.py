@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from ..registry.schema_registry import SchemaManager
 from ..core.exceptions import SchemaNotFoundError
-from ..core.interfaces import ISchemaDocumentationGenerator, IDocumentationFormatter
+from .interfaces import ISchemaDocumentationGenerator, IDocumentationFormatter
 from .formatters import (
     MarkdownDocumentationFormatter,
     RstDocumentationFormatter,

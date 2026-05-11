@@ -9,7 +9,7 @@ from abc import ABC
 import json
 from datetime import datetime
 
-from ..core.interfaces import IVisualizationFormatter, IDocumentationFormatter
+from .interfaces import IVisualizationFormatter, IDocumentationFormatter
 
 
 # ============================================================================

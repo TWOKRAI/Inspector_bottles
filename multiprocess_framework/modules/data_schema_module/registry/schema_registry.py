@@ -27,7 +27,7 @@ from ..core.exceptions import (
     SchemaRegistrationError,
     SchemaValidationError,
 )
-from ..interfaces import ISchemaManager
+from .interfaces import ISchemaManager
 
 try:
     from ..extensions.metrics import increment_metric, record_timing

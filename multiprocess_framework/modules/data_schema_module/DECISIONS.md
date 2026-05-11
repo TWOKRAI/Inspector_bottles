@@ -41,3 +41,27 @@
 - Решение: Сохранить `extensions/` для опциональных компонентов; `StorageManager` и `ProcessDataContainer` импортировать из `data_schema_module.storage` (реализация в `storage/`), не через удалённые shim-файлы в `extensions/`.
 - Причина: Зависимости от `process_module` и др. остаются изолированными; ядро без лишних side effects при `import data_schema_module`.
 - Отклонённые альтернативы: Реэкспорт StorageManager снова в корень пакета — отклонено (нарушает слойность).
+
+---
+
+## ADR-DS-005: Декомпозиция `interfaces.py` по sub-package'ам
+- Дата: 2026-05-11
+- Статус: принято
+- Контекст: До этой даты все 17 Protocol/ABC контрактов жили в одном корневом `interfaces.py` (594 LOC). Это удобно для импорта (`from data_schema_module import ISchemaRegistry`), но плохо для понимания границ: `IVersionManager` сидит рядом с `ISchema` и `IRegisterStorage`, у каждого слоя нет своего «лица». Также при добавлении нового интерфейса непонятно, куда его класть концептуально — все попадает в один monolith.
+- Решение: Контракты разнесены по sub-package'ам по принципу «контракт живёт там же, где его реализация»:
+  - `core/interfaces.py` — `ISchema`, `ISchemaAdapter`, `HasBuild`, `IDataValidator` (фундамент без внешних зависимостей).
+  - `registry/interfaces.py` — `ISchemaRegistry`, `ISchemaManager` (реестр + legacy).
+  - `serialization/interfaces.py` — `IDataConverter`, `ISchemaStorage`, `IAsyncSchemaStorage` + legacy aliases `IRegisterStorage` / `IAsyncRegisterStorage`.
+  - `storage/interfaces.py` — `IStorageManager` (зависит от `process_module`).
+  - `versioning/interfaces.py` — `IVersionManager` (зависит от `config_module`).
+  - `tools/interfaces.py` — `IVisualizationFormatter`, `IDocumentationFormatter`, `ISchemaVisualizer`, `ISchemaDocumentationGenerator`.
+
+  Корневой `interfaces.py` (86 LOC) превращён в **агрегатор-фасад**: реэкспортирует все 17 контрактов из sub-package'ов. Импорты `from data_schema_module.interfaces import ISchemaRegistry` продолжают работать без изменений в потребляющем коде. Внутренние импорты внутри модуля переписаны на локальные пути (`from .interfaces import ISchemaManager` в `registry/schema_registry.py`, `from ..core.interfaces import HasBuild` в `container/config_converters.py` и т.п.) — это разрешает проблему циклической инициализации при загрузке корневого `interfaces.py`.
+
+  Backward compat: `core/interfaces.py` теперь содержит только 4 core-контракта (не 17 как раньше). Старые потребители `from data_schema_module.core.interfaces import ...` для не-core контрактов сломаются — но в кодовой базе таких импортов нет (проверено grep'ом перед изменением); единственным внутренним потребителем был `core/__init__.py`, обновлён.
+
+- Причина: Каждый слой получил своё «лицо контракта»; добавление нового интерфейса теперь однозначно — кладётся туда, где его реализация. Корневой `interfaces.py` всё ещё работает как единая точка импорта (R-1 «единый канал»), но за ним стоит структурированная декомпозиция. Подготавливает почву для возможного будущего carve-out `tools/` в отдельный top-level модуль (его контракты уже изолированы).
+- Отклонённые альтернативы:
+  - **Оставить монолит** — терпимо, но затрудняет понимание границ и добавление нового интерфейса.
+  - **Полностью удалить корневой `interfaces.py`** — сломает 43 файла-потребителя с импортами `from data_schema_module.interfaces import ...`. Стоимость миграции не окупается выигрышем.
+  - **Использовать `__getattr__` (PEP 562) в корневом `__init__.py`** — lazy-loading через `__getattr__` сокращает import-time, но добавляет неявность; для interfaces (легковесные Protocol/ABC) overhead отсутствует.
