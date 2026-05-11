@@ -34,8 +34,8 @@ from typing import Any
 
 import yaml
 
-from .exceptions import StorageCorrupted
-from .models import Role, User
+from ..exceptions import StorageCorrupted
+from ..models import Role, User
 
 
 class YamlUserStorage:

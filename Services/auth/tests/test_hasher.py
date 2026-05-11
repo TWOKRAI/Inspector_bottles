@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from Services.auth.hasher import BcryptHasher
+from Services.auth import BcryptHasher
 
 
 ROUNDS = 4

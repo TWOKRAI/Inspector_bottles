@@ -12,8 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from Services.auth.lockout_tracker import LockoutTracker
-from Services.auth.policies import LockoutPolicy
+from Services.auth import LockoutPolicy, LockoutTracker
 
 
 @pytest.fixture
@@ -125,7 +124,7 @@ def test_auto_reset_after_inactivity(tracker: LockoutTracker) -> None:
     # Эмулируем прошедшее время: подменяем time.time в трекере
     future_time = time.time() + 10  # 10s > reset_after_sec=5
 
-    with patch("Services.auth.lockout_tracker.time") as mock_time:
+    with patch("Services.auth.security.lockout.time") as mock_time:
         mock_time.time.return_value = future_time
         locked, wait = tracker.is_locked("alice")
 
@@ -139,7 +138,7 @@ def test_auto_reset_clears_on_is_locked(tracker: LockoutTracker) -> None:
 
     future = time.time() + 100
 
-    with patch("Services.auth.lockout_tracker.time") as mock_time:
+    with patch("Services.auth.security.lockout.time") as mock_time:
         mock_time.time.return_value = future
         locked, _ = tracker.is_locked("alice")
 

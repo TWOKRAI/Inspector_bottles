@@ -13,9 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from Services.auth.exceptions import StorageCorrupted
-from Services.auth.models import Role, User
-from Services.auth.storage_users import YamlUserStorage
+from Services.auth import Role, StorageCorrupted, User, YamlUserStorage
 
 
 # =============================================================================
@@ -195,7 +193,7 @@ def test_atomic_write_original_preserved_on_error(tmp_path: Path) -> None:
     original_content = yaml_path.read_text(encoding="utf-8")
 
     # Пытаемся сохранить новые данные, но os.replace падает
-    with patch("Services.auth.storage_users.os.replace", side_effect=OSError("disk full")):
+    with patch("Services.auth.storage.yaml_users.os.replace", side_effect=OSError("disk full")):
         with pytest.raises(OSError):
             storage.save({"bob": _make_user("bob", "operator")})
 
@@ -214,7 +212,7 @@ def test_atomic_write_no_tmp_files_left_on_error(tmp_path: Path) -> None:
     yaml_path = tmp_path / "users.yaml"
     storage = YamlUserStorage(yaml_path)
 
-    with patch("Services.auth.storage_users.os.replace", side_effect=OSError("disk full")):
+    with patch("Services.auth.storage.yaml_users.os.replace", side_effect=OSError("disk full")):
         with pytest.raises(OSError):
             storage.save({"alice": _make_user("alice")})
 

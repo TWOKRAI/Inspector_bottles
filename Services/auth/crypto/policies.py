@@ -15,7 +15,7 @@ from typing import Annotated
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 
-from .exceptions import WeakPassword
+from ..exceptions import WeakPassword
 
 
 class PasswordPolicy(SchemaBase):

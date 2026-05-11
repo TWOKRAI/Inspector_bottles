@@ -111,3 +111,39 @@ bcrypt с rounds=12 в production, rounds=4 в тестах.
 - `bootstrap.py` реализуется в Группе B (следующий PR-этап).
 - `LockoutTracker` — in-memory, restart сбрасывает счётчики (намеренно: простота,
   нет SQLite-зависимости для lockout).
+
+---
+
+## Auth-005: Sub-package декомпозиция по доменам (crypto/storage/security), фасадный импорт
+
+**Статус:** Принято (Refactor 1, PR1-ветка).
+
+**Контекст:**
+Плоская структура `Services/auth/` с 8+ файлами в корне становится трудно
+навигируемой. Аналогичная проблема решена в `data_schema_module` через
+декомпозицию на sub-packages (ADR-DS-005, ADR-DS-006).
+
+**Решение:**
+Разбить `Services/auth/` на три доменных sub-package:
+- `crypto/`   — `hasher.py` + `policies.py` (хеширование и политики безопасности)
+- `storage/`  — `yaml_users.py` (переименование `storage_users.py`)
+- `security/` — `lockout.py` (переименование `lockout_tracker.py`) + `permissions.py`
+               (переименование `permissions_registry.py`)
+
+Фасад `Services/auth/__init__.py` — единственный канал публичного API.
+Внутренние пути sub-package (`Services.auth.crypto.*`, `Services.auth.storage.*`,
+`Services.auth.security.*`) — приватные, не использовать в коде вне `Services/auth/`.
+
+**Паттерн идентичен:**
+- `data_schema_module` (ADR-DS-005: декомпозиция interfaces.py по sub-packages)
+- `data_schema_module` (ADR-DS-006: фасадный импорт через `__init__.py`)
+
+**Альтернативы отклонены:**
+- Оставить плоскую структуру — нарастающий cognitive load при добавлении
+  `manager.py`, `bootstrap.py` и будущих компонентов PR2–PR4.
+
+**Последствия:**
+- Тесты `Services/auth/tests/` импортируют только через фасад: `from Services.auth import ...`.
+- Внешние потребители модуля не ломаются — API фасада не изменился.
+- `models.py`, `exceptions.py`, `interfaces.py` остаются в корне
+  (слишком маленькие для отдельного sub-package).

@@ -24,7 +24,7 @@ from multiprocess_framework.modules.data_schema_module import (
     register_schema,
 )
 
-from .policies import LockoutPolicy, PasswordPolicy
+from .crypto.policies import LockoutPolicy, PasswordPolicy
 
 
 # =============================================================================

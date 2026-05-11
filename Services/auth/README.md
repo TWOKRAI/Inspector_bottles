@@ -144,16 +144,22 @@ Services/auth
 
 ```
 Services/auth/
-├── __init__.py            # Фасадный экспорт публичного API
+├── __init__.py            # Фасадный экспорт публичного API (единственный канал)
 ├── interfaces.py          # IAuthManager, IUserStorage, IPasswordHasher (Protocol)
 ├── exceptions.py          # AUTH-001..012
 ├── models.py              # User, Role, AuthConfig (SchemaBase + @register_schema)
-├── policies.py            # PasswordPolicy, LockoutPolicy (SchemaBase)
-├── hasher.py              # BcryptHasher
-├── lockout_tracker.py     # In-memory LockoutTracker (thread-safe)
-├── storage_users.py       # YamlUserStorage (atomic write)
-├── permissions_registry.py# PermissionsRegistry (thread-safe)
-├── DECISIONS.md           # Auth-001..004
+├── crypto/
+│   ├── __init__.py        # BcryptHasher, PasswordPolicy, LockoutPolicy
+│   ├── hasher.py          # BcryptHasher
+│   └── policies.py        # PasswordPolicy, LockoutPolicy (SchemaBase)
+├── storage/
+│   ├── __init__.py        # YamlUserStorage
+│   └── yaml_users.py      # YamlUserStorage (atomic write)
+├── security/
+│   ├── __init__.py        # LockoutTracker, PermissionsRegistry, PermissionDescriptor
+│   ├── lockout.py         # In-memory LockoutTracker (thread-safe)
+│   └── permissions.py     # PermissionsRegistry (thread-safe)
+├── DECISIONS.md           # Auth-001..005
 ├── README.md              # (этот файл)
 ├── STATUS.md
 └── tests/
@@ -163,6 +169,17 @@ Services/auth/
     ├── test_lockout.py     # 15 тестов
     └── test_storage_users.py # 21 тест
 ```
+
+## Public API
+
+Импортируйте **ТОЛЬКО** через фасад:
+
+```python
+from Services.auth import BcryptHasher, PasswordPolicy, ...
+```
+
+Внутренние пути (`Services.auth.crypto.*`, `Services.auth.storage.*`,
+`Services.auth.security.*`) — приватные и могут меняться между версиями.
 
 ## Примечания
 

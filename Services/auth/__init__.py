@@ -2,12 +2,9 @@
 """
 Services/auth — модуль аутентификации и RBAC.
 
-Фасадный экспорт публичного API.
+Фасадный экспорт публичного API (единственный канал публичного API).
 
-На данном этапе (Группа A, PR1) экспортируются только инфраструктурные
-компоненты без AuthManager (Группа B).
-
-Импортируйте через этот модуль:
+Импортируйте ТОЛЬКО через этот модуль:
     from Services.auth import (
         AuthError, InvalidCredentials, WeakPassword,
         User, Role, AuthConfig,
@@ -18,6 +15,8 @@ Services/auth — модуль аутентификации и RBAC.
         PermissionsRegistry, PermissionDescriptor,
         IAuthManager, IUserStorage, IPasswordHasher,
     )
+
+Внутренние пути sub-package (crypto/, storage/, security/) — приватные.
 """
 from __future__ import annotations
 
@@ -38,23 +37,17 @@ from .exceptions import (
     WeakPassword,
 )
 
-# --- Политики ---
-from .policies import LockoutPolicy, PasswordPolicy
-
 # --- Модели ---
 from .models import AuthConfig, Role, User
 
-# --- Hasher ---
-from .hasher import BcryptHasher
-
-# --- Lockout ---
-from .lockout_tracker import LockoutTracker
+# --- Crypto: hasher + политики ---
+from .crypto import BcryptHasher, LockoutPolicy, PasswordPolicy
 
 # --- Storage ---
-from .storage_users import YamlUserStorage
+from .storage import YamlUserStorage
 
-# --- Permissions ---
-from .permissions_registry import PermissionDescriptor, PermissionsRegistry
+# --- Security: lockout + permissions ---
+from .security import LockoutTracker, PermissionDescriptor, PermissionsRegistry
 
 # --- Interfaces (Protocol) ---
 from .interfaces import IAuthManager, IPasswordHasher, IUserStorage
@@ -74,20 +67,18 @@ __all__ = [
     "SessionExpired",
     "LastAdminError",
     "AccountLocked",
-    # Политики
-    "PasswordPolicy",
-    "LockoutPolicy",
     # Модели
     "User",
     "Role",
     "AuthConfig",
-    # Hasher
+    # Crypto
     "BcryptHasher",
-    # Lockout
-    "LockoutTracker",
+    "PasswordPolicy",
+    "LockoutPolicy",
     # Storage
     "YamlUserStorage",
-    # Permissions
+    # Security
+    "LockoutTracker",
     "PermissionsRegistry",
     "PermissionDescriptor",
     # Interfaces

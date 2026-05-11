@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from Services.auth.exceptions import WeakPassword
-from Services.auth.policies import LockoutPolicy, PasswordPolicy
+from Services.auth import LockoutPolicy, PasswordPolicy, WeakPassword
 
 
 @pytest.fixture

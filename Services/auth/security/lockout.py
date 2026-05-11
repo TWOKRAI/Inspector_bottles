@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .policies import LockoutPolicy
+from ..crypto.policies import LockoutPolicy
 
 
 @dataclass
