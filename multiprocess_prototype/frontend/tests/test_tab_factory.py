@@ -4,8 +4,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QTabWidget, QWidget
 
+from multiprocess_framework.modules.frontend_module.managers.access_context import (
+    AccessContext,
+)
 from multiprocess_prototype.frontend.tab_factory import (
     TAB_ORDER,
     LazyTabWidget,
@@ -19,10 +23,31 @@ from multiprocess_prototype.frontend.widgets.tabs.placeholder import Placeholder
 # ---------------------------------------------------------------------------
 
 
-def _make_ctx() -> MagicMock:
-    """Создать mock AppContext."""
+def _make_ctx(auth_state: object | None = None) -> MagicMock:
+    """Создать mock AppContext.
+
+    По умолчанию `auth_state()` возвращает None — фабрика работает в legacy-режиме
+    без фильтрации по permissions (все табы видны). Для тестов фильтрации
+    передавай stub AuthState с атрибутом `access_context` и сигналом
+    `access_context_changed`.
+    """
     ctx = MagicMock()
+    ctx.auth_state.return_value = auth_state
     return ctx
+
+
+class _StubAuthState(QObject):
+    """Минимальный AuthState для тестов: только сигнал и access_context."""
+
+    access_context_changed = Signal(AccessContext)
+
+    def __init__(self, ctx: AccessContext | None = None) -> None:
+        super().__init__()
+        self.access_context: AccessContext = ctx or AccessContext()
+
+    def set_context(self, ctx: AccessContext) -> None:
+        self.access_context = ctx
+        self.access_context_changed.emit(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -270,3 +295,96 @@ class TestTabFactoryCreateTab:
             assert result is not None, f"create_tab({tab_info['id']!r}) вернул None"
             qtbot.addWidget(result)
             assert isinstance(result, QWidget)
+
+
+# ---------------------------------------------------------------------------
+# Тесты фильтрации по permissions
+# ---------------------------------------------------------------------------
+
+
+def _visible_tab_ids(tab_widget: QTabWidget) -> list[str]:
+    """Список id видимых табов в порядке TAB_ORDER."""
+    bar = tab_widget.tabBar()
+    visible: list[str] = []
+    for i, tab_info in enumerate(TAB_ORDER):
+        if bar.isTabVisible(i):
+            visible.append(tab_info["id"])
+    return visible
+
+
+class TestTabFactoryPermissions:
+    """Фильтрация по `view_permission` из TAB_ORDER через QTabBar.setTabVisible."""
+
+    def test_legacy_no_auth_state_shows_all(self, qtbot):
+        """Без AuthState (legacy) все табы остаются видимыми."""
+        tab_widget = QTabWidget()
+        qtbot.addWidget(tab_widget)
+
+        factory = TabFactory(_make_ctx(auth_state=None))
+        factory.create_tabs(tab_widget)
+
+        assert _visible_tab_ids(tab_widget) == [t["id"] for t in TAB_ORDER]
+
+    def test_empty_permissions_hides_all_tabs(self, qtbot):
+        """Свежий AccessContext без permissions скрывает все табы с view_permission."""
+        tab_widget = QTabWidget()
+        qtbot.addWidget(tab_widget)
+
+        stub = _StubAuthState()  # default AccessContext() — permissions=frozenset()
+        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory.create_tabs(tab_widget)
+
+        # Все 7 табов имеют view_permission → ни один не виден
+        assert _visible_tab_ids(tab_widget) == []
+
+    def test_partial_permissions_shows_subset(self, qtbot):
+        """Permissions содержат подмножество view → видны только разрешённые табы."""
+        tab_widget = QTabWidget()
+        qtbot.addWidget(tab_widget)
+
+        ctx = AccessContext(
+            permissions=frozenset({"tabs.recipes.view", "tabs.pipeline.view"}),
+            role_name="viewer",
+        )
+        stub = _StubAuthState(ctx)
+        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory.create_tabs(tab_widget)
+
+        assert _visible_tab_ids(tab_widget) == ["recipes", "pipeline"]
+
+    def test_wildcard_permission_shows_all(self, qtbot):
+        """Wildcard `*` в permissions делает все табы видимыми (роль dev)."""
+        tab_widget = QTabWidget()
+        qtbot.addWidget(tab_widget)
+
+        ctx = AccessContext(permissions=frozenset({"*"}), role_name="dev")
+        stub = _StubAuthState(ctx)
+        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory.create_tabs(tab_widget)
+
+        assert _visible_tab_ids(tab_widget) == [t["id"] for t in TAB_ORDER]
+
+    def test_access_context_changed_reapplies_filter(self, qtbot):
+        """Сигнал access_context_changed → пере-применение фильтра."""
+        tab_widget = QTabWidget()
+        qtbot.addWidget(tab_widget)
+
+        stub = _StubAuthState()  # старт без permissions
+        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory.create_tabs(tab_widget)
+        assert _visible_tab_ids(tab_widget) == []
+
+        # Логин: admin получает recipes + settings
+        new_ctx = AccessContext(
+            permissions=frozenset(
+                {"tabs.recipes.view", "tabs.settings.view"}
+            ),
+            role_name="admin",
+        )
+        stub.set_context(new_ctx)
+
+        assert _visible_tab_ids(tab_widget) == ["settings", "recipes"]
+
+        # Logout: возвращаемся к пустому контексту
+        stub.set_context(AccessContext())
+        assert _visible_tab_ids(tab_widget) == []

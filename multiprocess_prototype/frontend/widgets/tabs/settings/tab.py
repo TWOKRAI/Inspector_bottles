@@ -392,6 +392,14 @@ class SettingsTab(QWidget):
         btn_layout.addStretch()
         columns.addLayout(btn_layout)
 
+        # PR3: edit-кнопки доступны только при tabs.settings.edit.
+        from multiprocess_prototype.frontend.widgets.access import gate_edit_widgets
+        gate_edit_widgets(
+            [reset_btn, save_btn],
+            "tabs.settings.edit",
+            self._ctx.auth_state(),
+        )
+
         return container
 
     # ------------------------------------------------------------------

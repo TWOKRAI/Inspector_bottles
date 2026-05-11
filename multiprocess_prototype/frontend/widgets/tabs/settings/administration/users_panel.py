@@ -55,9 +55,11 @@ class UsersPanel(QWidget):
         super().__init__(parent)
 
         self._auth_manager = ctx.auth_manager()
+        self._auth_state = ctx.auth_state()
         self._users: list[dict] = []
 
         self._setup_ui()
+        self._wire_permissions()
         self._load_users()
 
     # ------------------------------------------------------------------
@@ -146,6 +148,52 @@ class UsersPanel(QWidget):
         root.addLayout(content_layout, stretch=1)
 
     # ------------------------------------------------------------------
+    # Permissions
+    # ------------------------------------------------------------------
+
+    _BUTTON_PERMISSIONS = (
+        # (attr_name, permission)
+        ("_btn_add",         "users.create"),
+        ("_btn_delete",      "users.delete"),
+        ("_btn_change_role", "users.edit"),
+        ("_btn_reset_pwd",   "users.reset_password"),
+    )
+
+    def _wire_permissions(self) -> None:
+        """Привязать CRUD-кнопки к users.* permissions с учётом transient-блокировки.
+
+        Кнопка enabled только если выдан соответствующий permission. Transient
+        блокировка (`_set_buttons_enabled(False)` во время операций) приоритетна
+        над permission. Подписка на `AuthState.access_context_changed` реагирует
+        на login/logout/смену роли.
+        """
+        if self._auth_state is None:
+            return
+        self._auth_state.access_context_changed.connect(
+            lambda _ctx: self._apply_permissions()
+        )
+        self._apply_permissions()
+
+    def _apply_permissions(self) -> None:
+        """Установить enabled-состояние кнопок по текущим permissions.
+
+        Сторонняя transient блокировка не учитывается — после её снятия
+        вызывается этот же метод (см. `_set_buttons_enabled`).
+        """
+        if self._auth_state is None:
+            return
+        ctx = self._auth_state.access_context
+        for attr, perm in self._BUTTON_PERMISSIONS:
+            btn = getattr(self, attr)
+            allowed = ctx.has_permission(perm)
+            btn.setEnabled(allowed)
+            btn.setProperty("readOnly", not allowed)
+            style = btn.style()
+            if style is not None:
+                style.unpolish(btn)
+                style.polish(btn)
+
+    # ------------------------------------------------------------------
     # Загрузка данных
     # ------------------------------------------------------------------
 
@@ -208,11 +256,20 @@ class UsersPanel(QWidget):
         return self._users[row].get("username")
 
     def _set_buttons_enabled(self, enabled: bool) -> None:
-        """Включить/отключить все кнопки действий."""
-        self._btn_add.setEnabled(enabled)
-        self._btn_delete.setEnabled(enabled)
-        self._btn_change_role.setEnabled(enabled)
-        self._btn_reset_pwd.setEnabled(enabled)
+        """Transient блокировка кнопок во время операций.
+
+        При `False` отключает все кнопки. При `True` восстанавливает состояние
+        из текущих permissions (без AuthState — включает все).
+        """
+        if not enabled:
+            for attr, _ in self._BUTTON_PERMISSIONS:
+                getattr(self, attr).setEnabled(False)
+            return
+        if self._auth_state is None:
+            for attr, _ in self._BUTTON_PERMISSIONS:
+                getattr(self, attr).setEnabled(True)
+            return
+        self._apply_permissions()
 
     def _open_confirm_dialog(self, action_text: str) -> bool:
         """Открыть ConfirmWithPasswordDialog и вернуть True если подтверждено."""

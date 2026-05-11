@@ -147,10 +147,27 @@ class PipelineTab(QWidget):
             self._palette.load_plugins(plugins)
 
     # ------------------------------------------------------------------ #
+    #  Permissions                                                         #
+    # ------------------------------------------------------------------ #
+
+    def _can_edit(self) -> bool:
+        """Имеет ли текущий пользователь право на mutation в pipeline."""
+        auth_state = self._ctx.auth_state()
+        if auth_state is None:
+            return True
+        return auth_state.access_context.has_permission("tabs.pipeline.edit")
+
+    # ------------------------------------------------------------------ #
     #  Обработчики                                                         #
     # ------------------------------------------------------------------ #
 
+    _MUTATING_ACTIONS = frozenset(
+        {"delete", "auto_layout", "undo", "redo"}
+    )
+
     def _on_toolbar_action(self, action_id: str) -> None:
+        if action_id in self._MUTATING_ACTIONS and not self._can_edit():
+            return
         if action_id == "zoom_in":
             self._view.zoom_in()
         elif action_id == "zoom_out":
@@ -186,12 +203,16 @@ class PipelineTab(QWidget):
 
     def _on_plugin_dropped(self, plugin_name: str, scene_pos: "QPointF") -> None:
         """D&D из палитры → создать процесс на canvas."""
+        if not self._can_edit():
+            return
         self._presenter.add_process_from_plugin(
             plugin_name, scene_pos.x(), scene_pos.y()
         )
 
     def _on_wire_created(self, source_endpoint: str, target_endpoint: str) -> None:
         """Wire creation через GraphView."""
+        if not self._can_edit():
+            return
         self._presenter.add_wire(source_endpoint, target_endpoint)
 
     def _on_selection_changed(self) -> None:

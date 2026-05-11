@@ -43,11 +43,12 @@ from .exceptions import (
 )
 from .interfaces import IPasswordHasher, IUserStorage
 from .models import AuthConfig, Role, User
+from .predefined_roles import PREDEFINED_ROLES as _PREDEFINED_ROLES_SPEC
 from .security import LockoutTracker, PermissionsRegistry
 from .storage import YamlUserStorage
 
 # Predefined роли — запрещено удалять
-_PREDEFINED_ROLES = frozenset({"dev", "admin", "operator", "viewer"})
+_PREDEFINED_ROLES = frozenset(_PREDEFINED_ROLES_SPEC.keys())
 
 # Длина генерируемого пароля при reset_password
 _GENERATED_PASSWORD_LENGTH = 16
@@ -136,10 +137,63 @@ class AuthManager(BaseManager, ObservableMixin):
     # =========================================================================
 
     def initialize(self) -> bool:
-        """Инициализация: проверяем доступность хранилища."""
+        """Инициализация: проверяем доступность хранилища и выравниваем predefined роли.
+
+        Auto-merge: если в хранилище у predefined роли (admin/operator/viewer/dev)
+        отсутствуют permissions, перечисленные в эталонном `PREDEFINED_ROLES`
+        (`Services.auth.predefined_roles`), они добавляются и хранилище
+        перезаписывается. Custom-роли не затрагиваются. Существующие permissions
+        у predefined ролей не удаляются — миграция аддитивная.
+        """
+        self._migrate_predefined_roles_permissions()
         self.is_initialized = True
         self._log_info("AuthManager initialized")
         return True
+
+    def _migrate_predefined_roles_permissions(self) -> None:
+        """Добавить недостающие permissions в predefined-роли (idempotent)."""
+        # До-bootstrap состояние — файл хранилища не создан; миграция отложена
+        # до первого вызова bootstrap. Это предотвращает «теневое» создание
+        # users.yaml только с predefined-ролями (без пользователей).
+        if not self._storage.exists():
+            return
+
+        try:
+            roles = self._storage.load_roles()
+        except Exception as exc:
+            # Любые ошибки чтения пробрасываем выше через лог — фоновую миграцию
+            # не падаем, чтобы не блокировать lifecycle BaseManager.
+            self._log_warning(
+                f"auth.migrate.predefined_roles.skip: reason={type(exc).__name__}"
+            )
+            return
+
+        changed = False
+        for name, spec in _PREDEFINED_ROLES_SPEC.items():
+            current = roles.get(name)
+            if current is None:
+                # Predefined-роль удалена — восстанавливаем целиком.
+                roles[name] = spec
+                changed = True
+                self._log_info(
+                    f"auth.migrate.predefined_roles.restored: name={name!r}"
+                )
+                continue
+            expected = set(spec.permissions)
+            existing = set(current.permissions)
+            missing = expected - existing
+            if not missing:
+                continue
+            merged_perms = sorted(existing | expected)
+            roles[name] = current.model_copy(update={"permissions": merged_perms})
+            changed = True
+            self._log_info(
+                f"auth.migrate.predefined_roles.merged: "
+                f"name={name!r}, added={sorted(missing)}"
+            )
+
+        if changed:
+            self._storage.save_roles(roles)
 
     def shutdown(self) -> bool:
         """Завершение: очищаем сессию."""
@@ -147,6 +201,11 @@ class AuthManager(BaseManager, ObservableMixin):
         self.is_initialized = False
         self._log_info("AuthManager shutdown")
         return True
+
+    @property
+    def permissions(self) -> PermissionsRegistry:
+        """Каталог зарегистрированных permissions (read+write)."""
+        return self._permissions
 
     # =========================================================================
     # Auth lifecycle

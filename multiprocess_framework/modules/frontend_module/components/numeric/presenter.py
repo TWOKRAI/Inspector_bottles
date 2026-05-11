@@ -27,6 +27,9 @@ from multiprocess_framework.modules.frontend_module.components.base.traits impor
     SyncTrait,
 )
 from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
+from multiprocess_framework.modules.frontend_module.managers.access_context import (
+    AccessContext,
+)
 
 
 class NumericPresenter:
@@ -52,7 +55,13 @@ class NumericPresenter:
         self._schema = SchemaTrait(binding, adapter, config_override)
         self._sync = SyncTrait(binding, adapter)
         self._debounce = DebounceTrait(ms=100)
-        self._access = AccessTrait(self._schema.effective_access_level)
+        view_perm = view_config.required_view_permission if view_config else None
+        edit_perm = view_config.required_edit_permission if view_config else None
+        self._access = AccessTrait(
+            self._schema.effective_access_level,
+            required_view_permission=view_perm,
+            required_edit_permission=edit_perm,
+        )
         self._access.update(current_access_level)
         self._transform = ValueTransformer(self._schema.meta)
         self._view: Optional[INumericView] = None
@@ -206,5 +215,15 @@ class NumericPresenter:
 
     def set_access_level(self, level: int) -> None:
         self._access.update(level)
+        if self._view is not None:
+            self._view.set_enabled(self._access.can_modify())
+
+    def set_access_context(self, ctx: AccessContext) -> None:
+        """Применить новый AccessContext (имя+permissions) к контролу.
+
+        Используется при login/logout/смене роли — пропагируется из
+        AuthState.access_context_changed через RegisterView/ParamsForm.
+        """
+        self._access.update(ctx)
         if self._view is not None:
             self._view.set_enabled(self._access.can_modify())

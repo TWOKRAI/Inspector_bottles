@@ -74,8 +74,21 @@ class DisplaysTab(QWidget):
     #  Обработчики                                                         #
     # ------------------------------------------------------------------ #
 
+    # ------------------------------------------------------------------ #
+    #  Permissions (PR3)                                                   #
+    # ------------------------------------------------------------------ #
+
+    def _can_edit(self) -> bool:
+        """Имеет ли текущий пользователь право мутаций в displays."""
+        auth_state = self._ctx.auth_state()
+        if auth_state is None:
+            return True
+        return auth_state.access_context.has_permission("tabs.displays.edit")
+
     def _on_preset_selected(self, index: int) -> None:
         """Применить пресет раскладки."""
+        if not self._can_edit():
+            return
         preset_names = list(DISPLAY_PRESETS.keys())
         if 0 <= index < len(preset_names):
             preset_name = preset_names[index]
@@ -83,6 +96,8 @@ class DisplaysTab(QWidget):
             self._sync_table()
 
     def _on_toolbar_action(self, action_id: str) -> None:
+        if not self._can_edit():
+            return
         if action_id == "add_slot":
             self._presenter.add_slot()
             self._sync_table()

@@ -1,4 +1,4 @@
-"""TabFactory — фабрика табов с ленивой инициализацией и заглушками.
+"""TabFactory — фабрика табов с ленивой инициализацией, фильтрацией по permissions и заглушками.
 
 Использование:
     factory = TabFactory(ctx, custom_factories={"settings": my_settings_factory})
@@ -6,6 +6,14 @@
 
 custom_factories: dict[tab_id -> Callable[[AppContext], QWidget]]
     Если id отсутствует — создаётся PlaceholderTab.
+
+Фильтрация по permissions:
+    После создания всех табов фабрика читает `ctx.auth_state().access_context`
+    и скрывает табы, у которых `view_permission` не выдан текущему пользователю
+    (через `QTabBar.setTabVisible`). Подписывается на `access_context_changed`
+    и пере-применяет видимость при login/logout/смене роли.
+
+    Если в AppContext нет `auth_state` — все табы видимы (legacy-режим).
 """
 from __future__ import annotations
 
@@ -19,21 +27,30 @@ from .widgets.tabs.placeholder import PlaceholderTab
 
 if TYPE_CHECKING:
     from .app_context import AppContext
+    from multiprocess_framework.modules.frontend_module.managers.access_context import (
+        AccessContext,
+    )
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Порядок и метаданные всех табов приложения
 # ---------------------------------------------------------------------------
+#
+# Поля:
+#   id, title, description — отображение.
+#   view_permission — имя permission (`tabs.<id>.view`). Если у текущего
+#     `AccessContext` его нет — таб скрыт через QTabBar.setTabVisible.
+#     None означает «доступен всем» (например, для гостевых табов до login).
 
 TAB_ORDER: list[dict] = [
-    {"id": "settings",  "title": "Settings",  "description": "Администрирование, конфиг системы"},
-    {"id": "recipes",   "title": "Recipes",   "description": "Пресеты/рецепты обработки"},
-    {"id": "processes", "title": "Processes", "description": "Управление процессами"},
-    {"id": "services",  "title": "Services",  "description": "Камеры SDK, БД, робот, нейронки"},
-    {"id": "plugins",   "title": "Plugins",   "description": "Обработка изображений, мосты"},
-    {"id": "pipeline",  "title": "Pipeline",  "description": "Визуальный конструктор цепочек"},
-    {"id": "displays",  "title": "Displays",  "description": "Управление экранами вывода"},
+    {"id": "settings",  "title": "Settings",  "description": "Администрирование, конфиг системы", "view_permission": "tabs.settings.view"},
+    {"id": "recipes",   "title": "Recipes",   "description": "Пресеты/рецепты обработки",         "view_permission": "tabs.recipes.view"},
+    {"id": "processes", "title": "Processes", "description": "Управление процессами",             "view_permission": "tabs.processes.view"},
+    {"id": "services",  "title": "Services",  "description": "Камеры SDK, БД, робот, нейронки",   "view_permission": "tabs.services.view"},
+    {"id": "plugins",   "title": "Plugins",   "description": "Обработка изображений, мосты",      "view_permission": "tabs.plugins.view"},
+    {"id": "pipeline",  "title": "Pipeline",  "description": "Визуальный конструктор цепочек",    "view_permission": "tabs.pipeline.view"},
+    {"id": "displays",  "title": "Displays",  "description": "Управление экранами вывода",        "view_permission": "tabs.displays.view"},
 ]
 
 
@@ -91,10 +108,13 @@ class LazyTabWidget(QWidget):
 
 
 class TabFactory:
-    """Фабрика табов с поддержкой custom factories и ленивой инициализации.
+    """Фабрика табов с поддержкой custom factories, ленивой инициализации и permissions.
 
     Args:
-        ctx: AppContext — DI-контейнер, передаётся в custom factory
+        ctx: AppContext — DI-контейнер, передаётся в custom factory.
+            Если `ctx.auth_state()` не None — фабрика подписывается на
+            `access_context_changed` и применяет видимость табов по
+            `view_permission` каждой записи `TAB_ORDER`.
         custom_factories: опциональный dict[tab_id -> factory(ctx) -> QWidget]
             Если передан factory для tab_id, таб создаётся через LazyTabWidget.
             Иначе используется PlaceholderTab.
@@ -107,13 +127,23 @@ class TabFactory:
     ) -> None:
         self._ctx = ctx
         self._custom_factories: dict[str, Callable] = custom_factories or {}
+        # Сохраняем целевой QTabWidget для re-apply при смене access_context
+        self._tab_widget: QTabWidget | None = None
+        # Соответствие tab_id → индекс в QTabWidget (порядок TAB_ORDER)
+        self._tab_index: dict[str, int] = {}
 
     def create_tabs(self, tab_widget: QTabWidget) -> None:
         """Создать все табы согласно TAB_ORDER и добавить в QTabWidget.
 
         Табы с custom_factories — LazyTabWidget (создаются при первом показе).
         Остальные — PlaceholderTab (создаются немедленно, они лёгкие).
+
+        После создания применяется фильтрация по permissions и регистрируется
+        подписка на смену AccessContext.
         """
+        self._tab_widget = tab_widget
+        self._tab_index = {}
+
         for tab_info in TAB_ORDER:
             tab_id = tab_info["id"]
             title = tab_info["title"]
@@ -132,7 +162,12 @@ class TabFactory:
                     description=tab_info.get("description", ""),
                 )
 
-            tab_widget.addTab(widget, title)
+            index = tab_widget.addTab(widget, title)
+            self._tab_index[tab_id] = index
+
+        # Применяем permissions и подписываемся на изменения AccessContext
+        self._apply_permissions()
+        self._wire_auth_state()
 
     def create_tab(self, tab_id: str) -> QWidget | None:
         """Создать один таб по id.
@@ -154,6 +189,46 @@ class TabFactory:
                 return self._make_placeholder(tab_info)
 
         return self._make_placeholder(tab_info)
+
+    # ------------------------------------------------------------------
+    # Permissions
+    # ------------------------------------------------------------------
+
+    def _wire_auth_state(self) -> None:
+        """Подписаться на смену AccessContext в AuthState."""
+        auth_state = self._ctx.auth_state() if hasattr(self._ctx, "auth_state") else None
+        if auth_state is None:
+            return
+        # Реагируем на login/logout/смену роли — реалогиниваем видимость
+        auth_state.access_context_changed.connect(self._on_access_context_changed)
+
+    def _on_access_context_changed(self, _ctx: "AccessContext") -> None:
+        """Сигнал из AuthState — обновить видимость табов."""
+        self._apply_permissions()
+
+    def _apply_permissions(self) -> None:
+        """Скрыть/показать табы по `view_permission` текущего AccessContext.
+
+        Если в AppContext нет `auth_state` — все табы остаются видимыми
+        (legacy-режим, для тестов без RBAC).
+        """
+        if self._tab_widget is None:
+            return
+
+        auth_state = self._ctx.auth_state() if hasattr(self._ctx, "auth_state") else None
+        if auth_state is None:
+            return
+
+        ctx = auth_state.access_context
+        bar = self._tab_widget.tabBar()
+        for tab_info in TAB_ORDER:
+            tab_id = tab_info["id"]
+            index = self._tab_index.get(tab_id)
+            if index is None:
+                continue
+            view_perm = tab_info.get("view_permission")
+            visible = view_perm is None or ctx.has_permission(view_perm)
+            bar.setTabVisible(index, visible)
 
     @staticmethod
     def _make_placeholder(tab_info: dict) -> PlaceholderTab:

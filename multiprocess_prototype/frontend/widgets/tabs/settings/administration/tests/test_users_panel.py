@@ -64,9 +64,10 @@ def mock_auth_manager():
 
 @pytest.fixture
 def mock_ctx(mock_auth_manager):
-    """Мок AppContext: auth_manager() возвращает mock_auth_manager."""
+    """Мок AppContext: auth_manager() возвращает mock_auth_manager, auth_state() — None."""
     ctx = MagicMock()
     ctx.auth_manager.return_value = mock_auth_manager
+    ctx.auth_state.return_value = None
     return ctx
 
 
@@ -467,3 +468,100 @@ class TestUsersPanelLastAdminError:
 
         # list_users по-прежнему возвращает [_USER_ALICE] — пользователь не был удалён
         assert panel._table.rowCount() == 1
+
+
+# ---------------------------------------------------------------------------
+# Permissions (PR3)
+# ---------------------------------------------------------------------------
+
+
+class _StubAuthState:
+    """Минимальный AuthState для тестов permissions."""
+
+    def __init__(self, permissions: set[str]) -> None:
+        from PySide6.QtCore import QObject, Signal
+        from multiprocess_framework.modules.frontend_module.managers.access_context import (
+            AccessContext,
+        )
+
+        # Создаём QObject динамически, чтобы Signal работал
+        class _Stub(QObject):
+            access_context_changed = Signal(AccessContext)
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.access_context = AccessContext(permissions=frozenset(permissions))
+
+            def set_context(self, ctx: AccessContext) -> None:
+                self.access_context = ctx
+                self.access_context_changed.emit(ctx)
+
+        self._impl = _Stub()
+
+    def __getattr__(self, name):
+        return getattr(self._impl, name)
+
+
+class TestUsersPanelPermissions:
+    """CRUD-кнопки enabled только при наличии соответствующих users.* permissions."""
+
+    def _ctx_with_state(self, mock_auth_manager, permissions: set[str]):
+        ctx = MagicMock()
+        ctx.auth_manager.return_value = mock_auth_manager
+        ctx.auth_state.return_value = _StubAuthState(permissions)._impl
+        return ctx
+
+    def test_no_permissions_all_buttons_disabled(self, qtbot, mock_auth_manager):
+        ctx = self._ctx_with_state(mock_auth_manager, permissions=set())
+        panel = UsersPanel(ctx)
+        qtbot.addWidget(panel)
+
+        assert panel._btn_add.isEnabled() is False
+        assert panel._btn_delete.isEnabled() is False
+        assert panel._btn_change_role.isEnabled() is False
+        assert panel._btn_reset_pwd.isEnabled() is False
+
+    def test_admin_all_buttons_enabled(self, qtbot, mock_auth_manager):
+        admin_perms = {
+            "users.create",
+            "users.delete",
+            "users.edit",
+            "users.reset_password",
+        }
+        ctx = self._ctx_with_state(mock_auth_manager, permissions=admin_perms)
+        panel = UsersPanel(ctx)
+        qtbot.addWidget(panel)
+
+        assert panel._btn_add.isEnabled() is True
+        assert panel._btn_delete.isEnabled() is True
+        assert panel._btn_change_role.isEnabled() is True
+        assert panel._btn_reset_pwd.isEnabled() is True
+
+    def test_partial_permission_grants_subset(self, qtbot, mock_auth_manager):
+        ctx = self._ctx_with_state(
+            mock_auth_manager, permissions={"users.create"}
+        )
+        panel = UsersPanel(ctx)
+        qtbot.addWidget(panel)
+
+        assert panel._btn_add.isEnabled() is True
+        assert panel._btn_delete.isEnabled() is False
+        assert panel._btn_change_role.isEnabled() is False
+        assert panel._btn_reset_pwd.isEnabled() is False
+
+    def test_transient_lock_overrides_permission(self, qtbot, mock_auth_manager):
+        """_set_buttons_enabled(False) отключает кнопки даже при наличии прав."""
+        ctx = self._ctx_with_state(
+            mock_auth_manager,
+            permissions={"users.create", "users.delete", "users.edit", "users.reset_password"},
+        )
+        panel = UsersPanel(ctx)
+        qtbot.addWidget(panel)
+        assert panel._btn_add.isEnabled() is True
+
+        panel._set_buttons_enabled(False)
+        assert panel._btn_add.isEnabled() is False
+
+        # После возвращения True — permission-driven восстановление
+        panel._set_buttons_enabled(True)
+        assert panel._btn_add.isEnabled() is True

@@ -26,69 +26,9 @@ from pathlib import Path
 
 from .crypto import BcryptHasher, PasswordPolicy
 from .exceptions import WeakPassword
-from .models import AuthConfig, Role, User
+from .models import AuthConfig, User
+from .predefined_roles import PREDEFINED_ROLES as _PREDEFINED_ROLES
 from .storage import YamlUserStorage
-
-# Predefined роли — создаются при bootstrap
-_PREDEFINED_ROLES: dict[str, Role] = {
-    "dev": Role(
-        name="dev",
-        level=10,
-        permissions=["*"],
-        hidden_in_ui=True,
-        bypass_readonly=True,
-        show_hidden=True,
-    ),
-    "admin": Role(
-        name="admin",
-        level=9,
-        permissions=[
-            "tabs.recipes.view",
-            "tabs.recipes.edit",
-            "tabs.settings.view",
-            "tabs.settings.edit",
-            "tabs.pipeline.view",
-            "tabs.pipeline.edit",
-            "tabs.users.view",
-            "tabs.users.edit",
-            "users.view",
-            "users.create",
-            "users.edit",
-            "users.delete",
-            "users.reset_password",
-            "roles.view",
-        ],
-        hidden_in_ui=False,
-        bypass_readonly=False,
-        show_hidden=False,
-    ),
-    "operator": Role(
-        name="operator",
-        level=5,
-        permissions=[
-            "tabs.recipes.view",
-            "tabs.recipes.edit",
-            "tabs.pipeline.view",
-            "tabs.pipeline.edit",
-            "tabs.settings.view",
-        ],
-        hidden_in_ui=False,
-        bypass_readonly=False,
-        show_hidden=False,
-    ),
-    "viewer": Role(
-        name="viewer",
-        level=1,
-        permissions=[
-            "tabs.recipes.view",
-            "tabs.pipeline.view",
-            "tabs.settings.view",
-        ],
-        hidden_in_ui=False,
-        bypass_readonly=False,
-        show_hidden=False,
-    ),
-}
 
 
 def _create_user(
