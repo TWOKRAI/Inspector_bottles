@@ -101,6 +101,13 @@ class TestAccessContextPermissions:
         ctx = AccessContext()
         assert ctx.has_permission("any.perm") is False
 
+    def test_has_permission_wildcard_grants_all(self):
+        """Wildcard `*` в permissions означает «все права» (роль dev)."""
+        ctx = AccessContext(permissions=frozenset({"*"}))
+        assert ctx.has_permission("users.view") is True
+        assert ctx.has_permission("anything.at.all") is True
+        assert ctx.has_permission("") is True
+
     def test_permissions_immutable_frozenset(self):
         ctx = AccessContext(permissions=frozenset({"a", "b"}))
         # frozenset не имеет add

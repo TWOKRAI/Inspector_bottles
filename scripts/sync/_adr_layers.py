@@ -33,6 +33,7 @@ MODULE_LAYERS: list[tuple[str, str]] = [
     ("console_module", "UI / Console"),
     ("state_store_module", "Resources & Config"),
     ("chain_module", "Command & Work"),
+    ("actions_module", "Command & Work"),
 ]
 
 # Модули, у которых есть DECISIONS.md, но нет локального ADR-кода

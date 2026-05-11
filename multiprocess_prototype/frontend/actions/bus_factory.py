@@ -22,6 +22,7 @@ from .handlers import FieldSetHandler, NodeMoveHandler, RecipeApplyHandler, Topo
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
+    from multiprocess_prototype.frontend.state.auth_state import AuthState
 
 
 def create_action_bus(
@@ -29,6 +30,7 @@ def create_action_bus(
     topology_holder: "TopologyHolder",
     *,
     topology_bridge: "TopologyBridge | None" = None,
+    auth_state: "AuthState | None" = None,
     max_history: int = 50,
 ) -> ActionBus:
     """Создать ActionBus v2 с handlers для field_set и recipe_apply.
@@ -37,6 +39,7 @@ def create_action_bus(
         rm: RegistersManager (совместим с IRegistersManagerGui).
         topology_holder: TopologyHolder для recipe_apply handler.
         topology_bridge: TopologyBridge для IPC-интеграции (Phase 12, опционально).
+        auth_state: AuthState для PreAuthGuard (PR2, опционально).
         max_history: максимальный размер undo-стека (по умолчанию 50).
 
     Returns:
@@ -59,4 +62,12 @@ def create_action_bus(
     node_move_handler = NodeMoveHandler()
     bus.register_handler(NODE_MOVE, node_move_handler)
     bus.node_move_handler = node_move_handler  # для post-init конфигурации
+
+    # PR2 auth-rbac: PreAuthGuard — блокировка мутаций до авторизации
+    if auth_state is not None:
+        from .middleware.pre_auth_guard import PreAuthGuard
+
+        guard = PreAuthGuard(auth_state)
+        bus.set_pre_execute_hook(guard.hook, on_blocked=guard.show_auth_required)
+
     return bus

@@ -93,6 +93,12 @@ class ActionBus:
         # Опциональный writer для персистентного логирования действий
         self._log_writer: IActionLogWriter | None = None
 
+        # Pre-execute хук: вызывается перед handler.apply() в execute().
+        # hook(action) -> bool: True — выполнять, False — заблокировать.
+        # Undo/redo хук НЕ проходят — блокируется только новая мутация.
+        self._pre_execute_hook: Callable[[Action], bool] | None = None
+        self._on_blocked_callback: Callable[[Action], None] | None = None
+
     # ------------------------------------------------------------------
     # Регистрация обработчиков
     # ------------------------------------------------------------------
@@ -117,6 +123,29 @@ class ActionBus:
         self._log_writer = writer
 
     # ------------------------------------------------------------------
+    # Pre-execute hook (AD-1, PR2 auth-rbac)
+    # ------------------------------------------------------------------
+
+    def set_pre_execute_hook(
+        self,
+        hook: Callable[[Action], bool],
+        on_blocked: Callable[[Action], None] | None = None,
+    ) -> None:
+        """Установить pre-execute хук.
+
+        hook(action) -> bool: True — выполнять, False — заблокировать.
+        on_blocked(action): вызывается при блокировке (например, показ диалога).
+        Один хук (last-write wins). Если уже установлен — заменяется.
+        """
+        self._pre_execute_hook = hook
+        self._on_blocked_callback = on_blocked
+
+    def clear_pre_execute_hook(self) -> None:
+        """Сбросить pre-execute хук."""
+        self._pre_execute_hook = None
+        self._on_blocked_callback = None
+
+    # ------------------------------------------------------------------
     # Основные операции
     # ------------------------------------------------------------------
 
@@ -129,7 +158,17 @@ class ActionBus:
         forward_patch от нового).
 
         COMMAND (undoable=False): выполняется, но НЕ добавляется в стек.
+
+        Pre-execute hook: если задан и вернул False — action не выполняется,
+        undo_stack не изменяется, on_blocked вызывается. Undo/redo хук не проходят.
         """
+        # Pre-execute hook (AD-1, PR2 auth-rbac)
+        if self._pre_execute_hook is not None:
+            if not self._pre_execute_hook(action):
+                if self._on_blocked_callback is not None:
+                    self._on_blocked_callback(action)
+                return
+
         handler = self._handlers.get(action.action_type)
         if handler is None:
             logger.warning(

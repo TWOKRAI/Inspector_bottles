@@ -123,11 +123,69 @@ def run_gui(process: "GuiProcess") -> None:
 
     process._bridge.set_state_callback(_state_multiplexer)
 
+    # 3e. Auth: инициализация AuthManager + AuthState (PR2 auth-rbac)
+    import os
+    from Services.auth import AuthManager, AuthConfig, YamlUserStorage
+    from multiprocess_prototype.frontend.state.auth_state import AuthState
+
+    _users_path = os.environ.get(
+        "INSPECTOR_AUTH_USERS_PATH",
+        str(Path.home() / ".inspector_bottles" / "auth" / "users.yaml"),
+    )
+    _auth_config = AuthConfig(users_path=_users_path)
+    _storage = YamlUserStorage(_users_path)
+
+    if not _storage.exists():
+        # Bootstrap не запускался — показать блокирующий диалог и выйти
+        from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
+
+        _dlg = StartupBlockingDialog(
+            "Хранилище пользователей не найдено.\n\n"
+            "Запустите перед запуском приложения:\n"
+            "    python -m Services.auth.bootstrap"
+        )
+        _dlg.exec()
+        sys.exit(1)
+
+    _auth_manager = AuthManager(_auth_config)
+    try:
+        _auth_manager.initialize()
+    except Exception as exc:  # включая StorageCorrupted
+        process._log_error(f"auth.init.failed: {exc}", module="startup")
+        from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
+        _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
+        _dlg.exec()
+        sys.exit(1)
+    ctx.extras["auth_manager"] = _auth_manager
+
+    _auth_state = AuthState()
+    ctx.extras["auth_state"] = _auth_state
+
+    # 3c-bis. Dev-mode автологин (временно, для разработки).
+    # Если INSPECTOR_DEV_PASSWORD задан и есть пользователь dev — логинимся
+    # автоматически при старте. Кнопка «Выйти» в LoginButton работает
+    # как обычно; повторный вход — через LoginDialog.
+    _dev_password = os.environ.get("INSPECTOR_DEV_PASSWORD", "").strip()
+    if _dev_password:
+        try:
+            from multiprocess_framework.modules.frontend_module.managers.access_context import (
+                AccessContext,
+            )
+
+            _result = _auth_manager.login("dev", _dev_password)
+            _auth_state.set_user(_result, AccessContext.from_dict(_result))
+            process._log_info("auth.auto_login: dev", module="startup")
+        except Exception as exc:
+            process._log_error(f"auth.auto_login.failed: {exc}", module="startup")
+
     # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
     from .actions.bus_factory import create_action_bus
 
     action_bus = create_action_bus(
-        registers_manager, topology_holder, topology_bridge=topology_bridge,
+        registers_manager,
+        topology_holder,
+        topology_bridge=topology_bridge,
+        auth_state=_auth_state,
     )
     ctx.extras["action_bus"] = action_bus
 
@@ -140,6 +198,12 @@ def run_gui(process: "GuiProcess") -> None:
 
     # 4a. Привязать ActionBus shortcuts (Ctrl+Z / Ctrl+Y)
     window.set_action_bus(action_bus)
+
+    # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
+    if ctx.auth_state() is not None and ctx.auth_manager() is not None:
+        from .widgets.chrome.login_button import LoginButton
+        _login_btn = LoginButton(ctx.auth_state(), ctx.auth_manager())
+        window.header.set_login_button(_login_btn)
 
     # 4a2. Phase 12: StatusBar live bindings
     window.connect_bindings(bindings)

@@ -1,6 +1,13 @@
 """AppHeaderWidget — верхняя панель главного окна (бренд + статус)."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel
+
+if TYPE_CHECKING:
+    from multiprocess_prototype.frontend.widgets.chrome.login_button import LoginButton
 
 
 class AppHeaderWidget(QWidget):
@@ -35,3 +42,11 @@ class AppHeaderWidget(QWidget):
     def update_status(self, text: str) -> None:
         """Обновить текст статуса в правой части header."""
         self._status_label.setText(text)
+
+    def set_login_button(self, button: "LoginButton") -> None:
+        """Вставить LoginButton справа от _status_label.
+
+        Итоговый порядок элементов в layout:
+            [BrandLabel] [stretch] [StatusLabel] [LoginButton]
+        """
+        self.layout().addWidget(button)
