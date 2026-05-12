@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Валидатор commit-сообщений Inspector_bottles.
+"""Commit message validator for Inspector_bottles.
 
-Проверяет:
-1. Subject в формате Conventional Commits: `<type>(<scope>): <subject>`
-2. Subject ≤ 72 символа.
-3. Между subject и body — пустая строка.
-4. Обязательные trailers: `Why:` и `Layer:` (с допустимыми значениями).
-5. Опциональные trailers (если есть) — корректный формат: `Risk:`, `Reversible:`, `Tested:`, `Refs:`, `Rejected:`.
+Checks:
+1. Subject in Conventional Commits format: `<type>(<scope>): <subject>`
+2. Subject <= 72 chars.
+3. Blank line between subject and body.
+4. Required trailers: `Why:` and `Layer:` (with allowed values).
+5. Optional trailers (if present) — valid format: `Risk:`, `Reversible:`, `Tested:`, `Refs:`, `Rejected:`.
 
-Запуск:
+Usage:
     python scripts/validate_commit/validate_commit.py <path-to-commit-msg-file>
     git log -1 --format=%B | python scripts/validate_commit/validate_commit.py -
 
-Используется как git commit-msg hook (см. scripts/validate_commit/install_hook.sh).
-Exit 0 — OK, exit 1 — ошибка.
+Used as git commit-msg hook (see scripts/validate_commit/install_hook.sh).
+Exit 0 — OK, exit 1 — validation failed.
 
-Игнорируются: merge-коммиты (Merge ...), revert-коммиты, fixup!/squash!, пустые
-сообщения. Это сделано осознанно — git/rebase должны работать без трения.
+Skipped: merge commits (Merge ..., merge: ...), reverts, fixup!/squash!/amend!.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# ────────────────────────── Конфигурация ──────────────────────────
+# ────────────────────────── Config ──────────────────────────
 
 ALLOWED_TYPES = {
     "feat", "fix", "refactor", "docs", "test",
@@ -52,11 +51,11 @@ KNOWN_TRAILERS = REQUIRED_TRAILERS | {
     "Co-Authored-By", "Signed-off-by", "Reviewed-by",
 }
 
-SKIP_PREFIXES = ("Merge ", "Revert ", "fixup!", "squash!", "amend!")
+SKIP_PREFIXES = ("Merge ", "merge: ", "Revert ", "fixup!", "squash!", "amend!")
 SUBJECT_MAX_LEN = 72
 
 
-# ────────────────────────── Структуры ──────────────────────────
+# ────────────────────────── Structures ──────────────────────────
 
 @dataclass
 class ValidationResult:
@@ -68,19 +67,18 @@ class ValidationResult:
         return not self.errors
 
 
-# ────────────────────────── Парсинг ──────────────────────────
+# ────────────────────────── Parsing ──────────────────────────
 
 def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
-    """Вернуть (subject, body_lines, trailers).
+    """Return (subject, body_lines, trailers).
 
-    Логика: разбиваем на параграфы (по пустым строкам). Идём с конца — пока
-    последний параграф состоит ИСКЛЮЧИТЕЛЬНО из trailer-строк, считаем его
-    trailer-блоком. Это позволяет иметь несколько trailer-параграфов
-    (например, business-trailers + отдельный Co-Authored-By внизу).
+    Split into paragraphs by blank lines. Walk from the end — while the last
+    paragraph consists entirely of trailer lines, treat it as a trailer block.
+    This allows multiple trailer paragraphs (e.g., business trailers +
+    separate Co-Authored-By at the bottom).
 
-    trailers — dict[key -> list[values]] (один ключ может встречаться многократно).
+    trailers — dict[key -> list[values]] (one key can appear multiple times).
     """
-    # Убираем git-комментарии (строки `#...`) и хвостовые пустые.
     lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
     while lines and not lines[-1].strip():
         lines.pop()
@@ -90,11 +88,9 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
 
     subject = lines[0]
     rest = lines[1:]
-    # Убираем ведущую пустую строку (между subject и body)
     if rest and not rest[0].strip():
         rest = rest[1:]
 
-    # Разбиваем на параграфы по пустым строкам.
     paragraphs: list[list[str]] = []
     current: list[str] = []
     for ln in rest:
@@ -107,7 +103,6 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
     if current:
         paragraphs.append(current)
 
-    # С конца: пока последний параграф полностью trailer-only — это trailer-блок.
     trailers: dict[str, list[str]] = {}
     while paragraphs:
         last = paragraphs[-1]
@@ -121,7 +116,6 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
         else:
             break
 
-    # Остатки склеиваем обратно через пустую строку для body
     body: list[str] = []
     for i, p in enumerate(paragraphs):
         if i > 0:
@@ -131,84 +125,83 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
     return subject, body, trailers
 
 
-# ────────────────────────── Валидация ──────────────────────────
+# ────────────────────────── Validation ──────────────────────────
 
 def validate(text: str) -> ValidationResult:
     result = ValidationResult()
     text = text.strip()
 
     if not text:
-        result.errors.append("Пустое commit-сообщение")
+        result.errors.append("Empty commit message")
         return result
 
     first_line = text.splitlines()[0]
     if any(first_line.startswith(p) for p in SKIP_PREFIXES):
-        return result  # merge/revert/fixup — не валидируем
+        return result  # merge/revert/fixup — skip validation
 
     subject, body, trailers = parse_message(text)
 
-    # 1. Subject формат
+    # 1. Subject format
     if not subject:
-        result.errors.append("Пустой subject (первая строка)")
+        result.errors.append("Empty subject (first line)")
         return result
 
     if len(subject) > SUBJECT_MAX_LEN:
         result.warnings.append(
-            f"Subject длиннее {SUBJECT_MAX_LEN} символов ({len(subject)}). "
-            f"Сократи: «{subject[:60]}…»"
+            f"Subject exceeds {SUBJECT_MAX_LEN} chars ({len(subject)}). "
+            f"Shorten: '{subject[:60]}...'"
         )
 
     m = SUBJECT_RE.match(subject)
     if not m:
         result.errors.append(
-            f"Subject не в Conventional Commits формате.\n"
-            f"  Получено: «{subject}»\n"
-            f"  Ожидается: <type>(<scope>): <description>\n"
-            f"  Пример: feat(auth): добавить wildcard в has_permission"
+            f"Subject not in Conventional Commits format.\n"
+            f"  Got: '{subject}'\n"
+            f"  Expected: <type>(<scope>): <description>\n"
+            f"  Example: feat(auth): add wildcard to has_permission"
         )
         return result
 
     t = m.group("type")
     if t not in ALLOWED_TYPES:
         result.errors.append(
-            f"Неизвестный type «{t}». Разрешено: {sorted(ALLOWED_TYPES)}"
+            f"Unknown type '{t}'. Allowed: {sorted(ALLOWED_TYPES)}"
         )
 
-    # 2. Пустая строка между subject и body (если body есть)
+    # 2. Blank line between subject and body
     full_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
     if len(full_lines) >= 2 and full_lines[1].strip():
         result.errors.append(
-            "Между subject и body должна быть пустая строка"
+            "Missing blank line between subject and body"
         )
 
-    # 3. Обязательные trailers
+    # 3. Required trailers
     missing = REQUIRED_TRAILERS - set(trailers.keys())
     if missing:
         result.errors.append(
-            f"Отсутствуют обязательные trailers: {sorted(missing)}.\n"
-            f"  Добавь в конец сообщения (после пустой строки):\n"
-            f"    Why: одна строка про мотивацию\n"
+            f"Missing required trailers: {sorted(missing)}.\n"
+            f"  Add at end of message (after blank line):\n"
+            f"    Why: one line about motivation\n"
             f"    Layer: framework | services | plugins | prototype | docs | scripts | tests"
         )
 
-    # 4. Валидация значений trailer'ов
+    # 4. Trailer value validation
     if "Layer" in trailers:
         for val in trailers["Layer"]:
             layers = {x.strip() for x in val.split(",") if x.strip()}
             unknown = layers - ALLOWED_LAYERS
             if unknown:
                 result.errors.append(
-                    f"Layer: неизвестные значения {sorted(unknown)}. "
-                    f"Разрешено: {sorted(ALLOWED_LAYERS)}"
+                    f"Layer: unknown values {sorted(unknown)}. "
+                    f"Allowed: {sorted(ALLOWED_LAYERS)}"
                 )
 
     if "Risk" in trailers:
         for val in trailers["Risk"]:
-            # Формат: "<level> — пояснение" или просто "<level>"
             level = val.split("—")[0].split("-")[0].strip().lower()
             if level not in ALLOWED_RISK:
                 result.warnings.append(
-                    f"Risk: «{val}». Ожидается начало с low/medium/high"
+                    f"Risk: '{val}'. Expected to start with low/medium/high"
                 )
 
     if "Reversible" in trailers:
@@ -216,22 +209,22 @@ def validate(text: str) -> ValidationResult:
             level = val.split("—")[0].strip().lower()
             if level not in ALLOWED_REVERSIBLE:
                 result.warnings.append(
-                    f"Reversible: «{val}». Ожидается: yes | no | migration-needed"
+                    f"Reversible: '{val}'. Expected: yes | no | migration-needed"
                 )
 
-    # 5. Неизвестные trailers — warning (не блокируем, расширяемо)
+    # 5. Unknown trailers — warning (don't block, extensible)
     for key in trailers:
         if key not in KNOWN_TRAILERS:
             result.warnings.append(
-                f"Неизвестный trailer «{key}:». "
-                f"Известные: {sorted(KNOWN_TRAILERS)}"
+                f"Unknown trailer '{key}:'. "
+                f"Known: {sorted(KNOWN_TRAILERS)}"
             )
 
     if "Why" in trailers:
         for val in trailers["Why"]:
             if len(val) < 5:
                 result.warnings.append(
-                    f"Why: слишком кратко («{val}»). Опиши мотивацию хотя бы одной фразой"
+                    f"Why: too brief ('{val}'). Describe motivation in at least one phrase"
                 )
 
     return result
@@ -253,17 +246,17 @@ def main(argv: list[str]) -> int:
     result = validate(text)
 
     if result.warnings:
-        sys.stderr.write("⚠️  Warnings:\n")
+        sys.stderr.write("WARNING:\n")
         for w in result.warnings:
-            sys.stderr.write(f"  • {w}\n")
+            sys.stderr.write(f"  - {w}\n")
 
     if result.errors:
-        sys.stderr.write("\n❌ Commit-сообщение не валидно:\n")
+        sys.stderr.write("\nERROR: Commit message is invalid:\n")
         for e in result.errors:
-            sys.stderr.write(f"  • {e}\n")
+            sys.stderr.write(f"  - {e}\n")
         sys.stderr.write(
-            "\nШаблон: .gitmessage  •  Гайд: docs/claude/COMMIT_GUIDE.md\n"
-            "Bypass (только для merge/rebase): git commit --no-verify\n"
+            "\nTemplate: .gitmessage  |  Guide: docs/claude/COMMIT_GUIDE.md\n"
+            "Bypass (merge/rebase only): git commit --no-verify\n"
         )
         return 1
 

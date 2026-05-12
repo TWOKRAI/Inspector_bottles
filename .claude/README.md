@@ -22,6 +22,7 @@
 | [`hooks/`](hooks/) | Хуки на события (validate-safe, autoformat, check-imports) |
 | [`skills/`](skills/) | Skills для агентов (`kb-discover/`, `kb-lint/`) |
 | [`mcp/`](mcp/) | **MCP-инфраструктура** — template, launcher, bootstrap |
+| [`memory/`](memory/) | **Git-tracked memory** (project + feedback) — синхронизируется между машинами |
 | [`platforms/`](platforms/) | Platform-specific overrides (macOS / Windows) |
 
 ---
@@ -59,10 +60,14 @@ python .claude/mcp/bootstrap.py     # Windows
 | `spec-writer` | Sonnet | Живое ТЗ (`docs/direction/`) с точки зрения пользователя |
 | `_template` | — | Шаблон для `/hire` (в корне `agents/`) |
 
-### Workflow разработки
+### Workflow разработки (Plan-Driven)
 
 ```
-/plan → /implement → /test → /review → /docs → /ship
+/plan → создаёт план (plans/<slug>.md) + ветку (feat/<slug>) + коммит плана
+/implement → реализация Task X.Y + Refs: plans/<slug>.md в коммите
+/test → /review → /docs → /ship (проверяет Refs, предлагает закрыть план)
+/plan-status → прогресс по плану текущей ветки
+
 Полный автомат: /pipeline
 Нанять нового специалиста: /hire <роль>
 ```
@@ -91,6 +96,7 @@ python .claude/mcp/bootstrap.py     # Windows
 | `/debug` | `debug.md` | Debugger → диагностика |
 | `/docs` | `docs.md` | Docs Writer → документация |
 | `/ship` | `ship.md` | Финальная проверка перед merge |
+| `/plan-status` | `plan-status.md` | Прогресс по плану текущей ветки |
 
 ### Спецификации
 
@@ -132,6 +138,21 @@ python .claude/mcp/bootstrap.py     # Windows
 | `session-end-daily-log.sh` | (отключён) | Был для KnowledgeOS, оставлен как пример |
 
 `hooks/tests/test_hooks.sh` — smoke-тесты для хуков.
+
+---
+
+## Memory (dual-write)
+
+Проектная память хранится в двух местах:
+
+| Место | Путь | Git | Содержимое |
+|-------|------|-----|------------|
+| Локальная | `~/.claude/projects/<hash>/memory/` | Нет | Всё (project, feedback, user, reference) |
+| Git-tracked | **`docs/claude/memory/`** | **Да** | project + feedback (синхронизация между машинами) |
+
+**Правило:** при записи memory → писать в **оба** места. Личное (user type) — только локально.
+
+> `.claude/` — универсальная конфигурация (портируется между проектами). Memory здесь **не хранить**.
 
 ---
 

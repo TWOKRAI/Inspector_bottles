@@ -83,7 +83,7 @@ When arriving on escalation:
 
 Why: мотивация (для архитектурных изменений — обязательно с обоснованием)
 Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
-Refs: docs/plans/.../*.md, ADR-NNN, PR#NN
+Refs: plans/<slug>.md  (ОБЯЗАТЕЛЬНО если задача из плана; + ADR-NNN, PR#NN по необходимости)
 Risk: low|medium|high — короткое почему  (для архитектурных всегда заполняй)
 Reversible: yes | migration-needed | no  (для архитектурных всегда заполняй)
 Tested: scope/N passed

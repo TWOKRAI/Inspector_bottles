@@ -47,7 +47,7 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
 
 Why: мотивация одной-двумя строками (не реализация)
 Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
-Refs: docs/plans/.../*.md, ADR-XXX, PR#NN  (если есть связь — заполняй)
+Refs: plans/<slug>.md  (ОБЯЗАТЕЛЬНО если задача из плана; + ADR-XXX, PR#NN по необходимости)
 Risk: low|medium|high — короткое почему  (если non-trivial)
 Reversible: yes | migration-needed | no  (если non-trivial)
 Tested: scope/N passed, e.g. auth/120  (всегда при изменении кода)
@@ -67,7 +67,7 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `build`, `ci`
 - `multiprocess_prototype/` → `prototype`
 - 3+ слоя одновременно → `mixed`
 
-`Refs:` — обязательно если задача связана с планом (`docs/plans/...`) или ADR.
+`Refs:` — **ОБЯЗАТЕЛЬНО** если задача из плана. Путь: `plans/<slug>.md` или `plans/<slug>/phase-N.md`. Дополнительно: ADR-XXX, PR#NN.
 
 НЕ использовать `--no-verify` для обхода валидации — это для merge/rebase.
 

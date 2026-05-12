@@ -72,7 +72,7 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 
 Why: одна-две строки про мотивацию (не реализацию)
 Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
-Refs: docs/plans/.../*.md, ADR-XXX, PR#NN  (опц., если есть связь)
+Refs: plans/<slug>.md, ADR-XXX, PR#NN  (ОБЯЗАТЕЛЬНО если задача из плана; опц. для hotfix)
 Risk: low|medium|high — короткое почему  (опц.)
 Reversible: yes | migration-needed | no  (опц.)
 Tested: scope/N passed, например auth/120  (опц., при изменении кода)
@@ -82,6 +82,32 @@ Co-Authored-By: ...
 ```
 
 **Обязательны:** `Why:` и `Layer:`. Без них hook отклонит коммит. Полный гайд — [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md). Whitelist'ы значений в [`scripts/validate_commit/validate_commit.py`](scripts/validate_commit/validate_commit.py).
+
+## Plan-Driven Development
+
+Новые планы создаются через `/plan` с единой конвенцией:
+- **Slug:** kebab-case, `<домен>-<суть>`, max 40 символов. Хранение: `plans/<slug>.md` (дефолт) или `plans/<slug>/plan.md` (multi-phase)
+- **Ветка:** `<type>/<slug>` — автоматически при `/plan`. Стандарт: `feat/`, не `feature/`
+- **Refs:** коммит из плана **обязан** содержать `Refs: plans/<slug>.md` (enforce на уровне агентов)
+- **Коммиты плана:** создание/закрытие — отдельный `docs(plans):` коммит. Статусы задач — допустимо в коммите кода
+- **Статус:** `/plan-status` — прогресс по текущей ветке
+
+Подробности — в [`plans/` конвенциях](.claude/commands/plan.md) и промптах агентов.
+
+## Memory (dual-write)
+
+Проектная память хранится в **двух местах** — локальном (Claude Code) и git-tracked (между машинами):
+
+| Место | Путь | Git | Что хранить |
+|-------|------|-----|-------------|
+| **Локальная** | `~/.claude/projects/<hash>/memory/` | Нет | Всё: project, feedback, user, reference |
+| **Git-tracked** | `docs/claude/memory/` | **Да** | project + feedback (без личных user-записей) |
+
+**Правило dual-write:** при создании/обновлении memory — писать в **оба** места. MEMORY.md индекс — тоже в обоих.
+
+- `docs/claude/memory/` — проектная (project, feedback), синхронизируется через git
+- `~/.claude/.../memory/` — + личное (user, reference), остаётся локально
+- `.claude/` — универсальная конфигурация, портируется между проектами. Memory здесь **не хранить**
 
 ## MCP: qex (семантический поиск)
 
@@ -132,5 +158,6 @@ Co-Authored-By: ...
 | `/test-ratio` | LOC тестов ÷ LOC кода на модуль ([`scripts/test_ratio/`](scripts/test_ratio/README.md)) |
 | `/todo-inventory` | Инвентаризация TODO/FIXME/HACK с `git blame` ([`scripts/todo_inventory/`](scripts/todo_inventory/README.md)) |
 | `/clean-cache` | Чистка Python-кэшей (`__pycache__`, `.pytest_cache`, `*.pyc`, `.coverage`) — dry-run по умолчанию, `--apply` для удаления ([`scripts/clean_cache/`](scripts/clean_cache/README.md)) |
+| `/plan-status` | Прогресс по плану текущей ветки (Task-статусы, фазы, процент) |
 
 Подробный гайд: [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md).

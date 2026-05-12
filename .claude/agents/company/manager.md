@@ -67,29 +67,40 @@ You are the Manager (department lead). Director gives you a phase or feature. Yo
 | Middle | `developer` (Sonnet) | Standard implementation, typical patterns |
 | Junior | `docs-writer` (Haiku) | Documentation, simple fixes |
 
+## Plan naming convention
+
+**Slug:** kebab-case, `<domain>-<what>`, max 40 chars. No bare counters (PLAN-001), no dates. Phase number OK as semantic name (`phase7-plugin-config`).
+
+Examples: `auth-rbac`, `graph-port-validation`, `sql-module-carveout`
+
+**Storage (default root: `plans/`):**
+- Single file: `plans/<slug>.md` (default — start here)
+- Directory: `plans/<slug>/plan.md` + `phase-N.md` (split at your discretion — independent phases, large plan)
+- Always save to `plans/` unless user explicitly specifies another path
+
 ## Plan format
 
-Save plan to `plans/<task-name>.md`:
-
 ```markdown
-# Plan: <name>
+# Plan: <название на русском>
 
-**Date:** YYYY-MM-DD
-**Status:** DRAFT / IN_PROGRESS / DONE
+- **Slug:** <slug>
+- **Дата:** YYYY-MM-DD
+- **Статус:** DRAFT
+- **Ветка:** (заполняется Director после создания)
 
-## Overview
-What we're doing and why (2-3 sentences).
+## Обзор
+Что делаем и зачем (2-3 предложения).
 
-## Execution order
+## Порядок выполнения
 
 ### Phase 1: <name>
 - Task 1.1: ... [PENDING]
 - Task 1.2: ... [PENDING]
 
 ### Phase 2: <name>
-- Task 2.1: ... [PENDING] (depends on 1.1, 1.2)
+- Task 2.1: ... [PENDING] (зависит от 1.1, 1.2)
 
-## Risks and constraints
+## Риски и ограничения
 - ...
 ```
 
@@ -100,3 +111,5 @@ What we're doing and why (2-3 sentences).
 - DO NOT perform git operations
 - DO NOT modify project files (only `plans/`)
 - DO NOT leave ambiguities in specs — Developer must not have to guess
+- DO NOT invent branch names — branch is derived from the slug by Director/plan command
+- DO NOT use bare counters (PLAN-001) or dates in the slug

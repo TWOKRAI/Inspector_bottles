@@ -1,0 +1,23 @@
+- [Qt widget editing patterns](feedback_widget_qt_patterns.md) — setFlags recursion, blockSignals, EditTriggers (critical)
+- [Dict at Boundary for GUI](feedback_dict_at_boundary_gui.md) — widgets work with dict only, never live SchemaBase
+- [Register routing hang](feedback_register_routing_hang.md) — FieldRouting without IPC channel = GUI freeze
+- [SourceTopology two-layer architecture](project_source_topology.md) — Layer 1 (sources) + Layer 2 (processing), shared region keys
+- [Processes tab state](project_processes_tab.md) — Phase 1-3 done, pending: pause, workers/threads tree, process→camera binding
+- [Workers architecture](project_workers_architecture.md) — Real threads via WorkerManager, GUI CRUD except protected main worker
+- [Worker cycle timing](project_worker_cycle_timing.md) — Monitor cycle duration/Hz + editable target_interval_ms with smart sleep
+- [GenericProcess vision](project_generic_process_vision.md) — DONE: ProcessModule natively supports plugins (ADR-PM-007/008), GenericProcess deprecated
+- [macOS SHM skipped tests](project_macos_shm.md) — T2.1 deferred: 15 skipped MemoryManager tests on macOS, user works Win+Mac
+- [Plugin system Phase 6](project_plugin_system_phase6.md) — Phase 6 done: plugin UI in ProcessesTab (catalog, chain editor, config panel, blueprint I/O)
+- [SystemTopology Phase 1](project_system_topology_phase1.md) — Phase 1 done (7f21b30): schemas, editor, sections, bridge, 71 tests. Phase 2 = tab migration
+- [Config-driven architecture](project_config_driven_arch.md) — Phases 0-2 done (a213498): plugins catalog, blueprint launch, PluginManager. Phase 3 = GUI editor
+- [MVP pattern preference](feedback_mvp_pattern.md) — always use full MVP (presenter + view Protocol) for new GUI tabs
+- [Constructor Phase 5](project_constructor_phase5.md) — ShmRouteNode + PluginManagerTab done, 146 tests total Phase 2-5
+- [Constructor Phase 6](project_constructor_phase6.md) — DisplayTargetNode + WireMetricsBadge + ShmDashboard + display combo, 172 tests
+- [No SHM hacks in plugins](feedback_no_shm_hacks.md) — plugins MUST NOT read SHM directly, use framework middleware
+- [Phase 5 Data Pipeline](project_phase5_data_pipeline.md) — GenericProcess refactor: 3 workers + InspectorManager + process()
+- [Phase 5 Progress](project_phase5_progress.md) — Tasks 5.1-5.3 done (45 tests), next: 5.4-5.7 plugin migration on single branch
+- [Services vs Plugins](project_services_vs_plugins.md) — Services = large SDK/backend, Plugins = small processing/bridges
+- [Tab order preference](feedback_tab_order.md) — Settings first → Recipes → functional tabs (not Settings last)
+- [Constructor modularity](feedback_constructor_modularity.md) — everything must be modular constructor: pluggable, testable, composable blocks
+- [Component Design System](project_component_scoped_styles.md) — React-style design system, DEFERRED until custom components replace raw Qt widgets
+- [Plan-Driven Development](project_plan_driven_dev.md) — slug naming, Refs trailer, plan→branch→commits traceability

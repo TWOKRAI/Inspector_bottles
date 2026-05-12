@@ -4,11 +4,11 @@ description: CI-friendly проверка правил архитектуры (s
 
 Запусти CLI-валидатор `sentrux check` — он подходит для CI и pre-commit, выходит с кодом 0 (всё ок) или 1 (есть нарушения).
 
-```bash
-sentrux check /Users/twokrai/Project_code/Inspector_bottles
-```
+Определи абсолютный путь к корню проекта и запусти:
 
-(Замени путь на абсолютный путь к корню текущего проекта.)
+```bash
+sentrux check "$(git rev-parse --show-toplevel)"
+```
 
 Покажи пользователю:
 - Итоговый exit code и `Quality: NNNN`.
