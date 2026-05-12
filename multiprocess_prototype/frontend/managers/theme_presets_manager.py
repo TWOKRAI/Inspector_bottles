@@ -1,0 +1,98 @@
+"""ThemePresetsManager — хранилище пользовательских пресетов переменных тем.
+
+Пресеты хранятся в YAML-файле (по умолчанию data/theme_presets.yaml).
+Каждый пресет — плоский dict[str, str] с именованными переменными.
+
+API:
+    mgr = ThemePresetsManager()
+    mgr.list_presets()                # ["default", "high-contrast"]
+    mgr.get_preset("default")         # {"bg_deep": "#1a1f28", ...}
+    mgr.save_preset("my", data)       # сохранить / перезаписать
+    mgr.delete_preset("my")           # удалить
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import yaml
+
+_logger = logging.getLogger(__name__)
+
+# Путь по умолчанию: multiprocess_prototype/data/theme_presets.yaml
+_DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_PRESETS_FILE = "theme_presets.yaml"
+
+
+class ThemePresetsManager:
+    """Менеджер пресетов переменных тем (YAML-backed)."""
+
+    def __init__(self, data_dir: Path | None = None) -> None:
+        self._data_dir = data_dir or _DEFAULT_DATA_DIR
+        self._file = self._data_dir / _PRESETS_FILE
+        self._cache: dict[str, dict[str, str]] | None = None
+
+    def _load(self) -> dict[str, dict[str, str]]:
+        """Загрузить пресеты из YAML-файла (с кэшированием)."""
+        if self._cache is not None:
+            return self._cache
+
+        if not self._file.is_file():
+            self._cache = {}
+            return self._cache
+
+        try:
+            with open(self._file, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                self._cache = {
+                    str(k): {str(kk): str(vv) for kk, vv in v.items()}
+                    for k, v in data.items()
+                    if isinstance(v, dict)
+                }
+            else:
+                self._cache = {}
+        except Exception as exc:
+            _logger.error("[ThemePresetsManager] ошибка чтения %s: %s", self._file, exc)
+            self._cache = {}
+
+        return self._cache
+
+    def _save(self) -> None:
+        """Записать кэш обратно в YAML."""
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(self._file, "w", encoding="utf-8") as f:
+                yaml.dump(
+                    self._cache,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+        except Exception as exc:
+            _logger.error("[ThemePresetsManager] ошибка записи %s: %s", self._file, exc)
+
+    def list_presets(self) -> list[str]:
+        """Список имён всех пресетов, отсортированный."""
+        return sorted(self._load().keys())
+
+    def get_preset(self, name: str) -> dict[str, str] | None:
+        """Получить переменные пресета по имени. None если не найден."""
+        return self._load().get(name)
+
+    def save_preset(self, name: str, data: dict[str, str]) -> None:
+        """Сохранить (или перезаписать) пресет."""
+        presets = self._load()
+        presets[name] = dict(data)
+        self._save()
+
+    def delete_preset(self, name: str) -> bool:
+        """Удалить пресет. Вернёт True если существовал и удалён."""
+        presets = self._load()
+        if name not in presets:
+            return False
+        del presets[name]
+        self._save()
+        return True

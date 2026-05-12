@@ -12,6 +12,7 @@ from .crud_table import CrudTable
 from .sectioned_form import SectionedForm
 from .side_nav_layout import SideNavLayout
 from .standard_tab_layout import StandardTabLayout
+from .diff_scroll_tab_layout import DiffScrollTabLayout
 
 __all__ = [
     "StatusIndicator",
@@ -24,4 +25,5 @@ __all__ = [
     "CrudTable",
     "SectionedForm",
     "StandardTabLayout",
+    "DiffScrollTabLayout",
 ]

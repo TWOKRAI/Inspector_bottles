@@ -281,9 +281,18 @@ def run_gui(process: "GuiProcess") -> None:
     # 5. Создать TabFactory и заполнить табы (Phase 10: все 7 табов)
     from .widgets.tabs import register_all_tabs
     tab_factory = TabFactory(ctx, custom_factories=register_all_tabs())
+    ctx.extras["tab_factory"] = tab_factory
     tab_factory.create_tabs(window.tab_widget)
 
-    # 5a. PR3: подключить tree-propagator AccessContext — любой виджет
+    # 5a. Подключить dirty-индикатор Settings → StatusBar
+    from .widgets.tabs.settings.tab import SettingsTab
+    for i in range(window.tab_widget.count()):
+        w = window.tab_widget.widget(i)
+        if isinstance(w, SettingsTab):
+            w.dirty_changed.connect(window.set_dirty_indicator)
+            break
+
+    # 5b. PR3: подключить tree-propagator AccessContext — любой виджет
     # с `_trait`/`_apply_access`/`presenter.set_access_context` под
     # MainWindow автоматически реагирует на login/logout/смену роли.
     from .widgets.access import propagate_access_context_to_tree
@@ -366,8 +375,14 @@ def _setup_timers(
     safety_timer.timeout.connect(_check_stop)
     safety_timer.start()
 
-    # При выходе из Qt — сигнализируем процессу
-    app.aboutToQuit.connect(lambda: setattr(process, '_stop_requested', True))
+    # При выходе из Qt — сигнализируем процессу (кроме перезапуска UI)
+    app.aboutToQuit.connect(
+        lambda: (
+            setattr(process, '_stop_requested', True)
+            if not getattr(process, '_restart_ui', False)
+            else None
+        )
+    )
 
     # Сохранить ссылки на таймеры чтобы GC не убил их
     window._fps_timer = fps_timer

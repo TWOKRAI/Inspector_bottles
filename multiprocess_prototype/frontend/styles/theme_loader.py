@@ -24,8 +24,14 @@ _STYLES_DIR = Path(__file__).resolve().parent
 
 
 def create_theme_manager() -> ThemeManager:
-    """Создать ThemeManager с путём к v2 styles/."""
-    return ThemeManager(_STYLES_DIR)
+    """Создать ThemeManager с путём к v2 styles/ и провайдером дефолтных переменных.
+
+    default_variables_provider = get_default_variables из registers/theme/schemas
+    — без него read_default_variables() возвращает {} (фильтрует по пустому defaults).
+    """
+    from multiprocess_prototype.registers.theme.schemas import get_default_variables
+
+    return ThemeManager(_STYLES_DIR, default_variables_provider=get_default_variables)
 
 
 def _load_variables(theme_name: str) -> dict[str, str]:

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
@@ -127,12 +128,56 @@ class GuiProcess(ProcessModule):
                 _backoff = min(_backoff * 2, _MAX_BACKOFF)
 
     def run(self) -> None:
-        """Запустить базовый ProcessModule (воркеры), затем Qt event loop."""
+        """Запустить базовый ProcessModule (воркеры), затем Qt event loop.
+
+        Поддерживает перезапуск UI без перезапуска процесса:
+        если _restart_ui == True после выхода из Qt loop,
+        QApplication пересоздаётся и run_gui() вызывается заново.
+        При рестарте Python-модули frontend перезагружаются — подхватываются
+        новые файлы без перезапуска всего приложения.
+        """
         super().run()
-        # Qt event loop блокирует main thread до закрытия приложения
-        gui_app.run_gui(self)
+        self._restart_ui = False
+        while True:
+            gui_app.run_gui(self)
+            if not self._restart_ui:
+                break
+            self._restart_ui = False
+            self._stop_requested = False
+            self._reload_frontend_modules()
+            self._log_info("GuiProcess: перезапуск UI по запросу", module="gui")
         # После возврата из Qt — сигнализируем об остановке
         self._stop_requested = True
+
+    def _reload_frontend_modules(self) -> None:
+        """Перезагрузить Python-модули frontend для подхвата новых файлов.
+
+        Удаляем из sys.modules все модули multiprocess_prototype.frontend.*
+        (кроме process и bridge — они живут между рестартами).
+        При следующем import Python загрузит актуальные .py-файлы.
+        """
+        import importlib
+
+        keep_prefixes = (
+            "multiprocess_prototype.frontend.process",
+            "multiprocess_prototype.frontend.bridge",
+        )
+        to_remove = [
+            name for name in sys.modules
+            if name.startswith("multiprocess_prototype.frontend")
+            and not any(name.startswith(p) for p in keep_prefixes)
+        ]
+        for name in to_remove:
+            del sys.modules[name]
+
+        # Перезагружаем сам app-модуль чтобы подхватить новые импорты
+        importlib.invalidate_caches()
+        import multiprocess_prototype.frontend.app as _app_mod
+        importlib.reload(_app_mod)
+
+        # Обновляем ссылку на уровне модуля
+        global gui_app
+        gui_app = _app_mod
 
     def shutdown(self) -> bool:
         """Graceful shutdown: сначала останавливаем воркеры, затем базовый shutdown."""
