@@ -71,7 +71,7 @@ class RolesPanel(QWidget):
         if self._auth_manager is None:
             placeholder = QLabel("AuthManager не инициализирован")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            placeholder.setStyleSheet("color: gray; font-size: 13px;")
+            placeholder.setObjectName("PlaceholderLabel")
             main_layout.addWidget(placeholder)
             return
 
@@ -80,13 +80,13 @@ class RolesPanel(QWidget):
         header_layout.setSpacing(8)
 
         title_label = QLabel("Роли")
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title_label.setObjectName("SectionTitle")
 
         header_layout.addWidget(title_label)
 
         if not self._can_edit:
             readonly_label = QLabel("(только чтение)")
-            readonly_label.setStyleSheet("color: gray; font-size: 12px;")
+            readonly_label.setProperty("role", "readonly-hint")
             header_layout.addWidget(readonly_label)
 
         header_layout.addStretch()

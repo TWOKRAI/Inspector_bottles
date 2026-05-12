@@ -93,7 +93,7 @@ class ProcessesTab(QWidget):
 
         # Заголовок
         header = QLabel("Процессы")
-        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header.setObjectName("TabHeader")
         layout.addWidget(header)
 
         # 3-колоночный layout

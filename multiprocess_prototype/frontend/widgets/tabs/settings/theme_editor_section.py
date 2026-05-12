@@ -402,7 +402,7 @@ class ThemeEditorSection(QWidget):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Plain)
-        line.setStyleSheet("color: #1a1f25;")
+        line.setObjectName("ThemeDivider")
         line.setFixedHeight(2)
         container_layout.addWidget(line)
         return container

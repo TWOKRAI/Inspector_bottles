@@ -46,8 +46,8 @@ class GraphView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
-        # Фон
-        self.setStyleSheet("background-color: #1e1e1e;")
+        # Фон (objectName для QSS-правила QGraphicsView#PipelineGraphView)
+        self.setObjectName("PipelineGraphView")
 
         self._current_zoom = 1.0
 

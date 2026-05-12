@@ -56,7 +56,7 @@ class TopologyEditorWidget(QWidget):
 
         # Строка статуса (имя файла)
         self._status_label = QLabel("Новая топология")
-        self._status_label.setStyleSheet("color: grey; font-size: 11px;")
+        self._status_label.setObjectName("StatusHint")
         root.addWidget(self._status_label)
 
         # Основной сплиттер

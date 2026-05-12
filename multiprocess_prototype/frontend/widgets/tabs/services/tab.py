@@ -153,7 +153,7 @@ class ServicesTab(QWidget):
         layout = QVBoxLayout(widget)
         label = QLabel(text)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: gray; font-size: 14px; font-style: italic;")
+        label.setProperty("role", "placeholder-italic")
         layout.addWidget(label)
         return widget
 
