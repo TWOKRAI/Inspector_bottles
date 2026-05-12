@@ -33,7 +33,7 @@
 QWidget {
     color: @text_0;
     font-family: "@font_family", "Segoe UI", sans-serif;
-    font-size: 13px;
+    font-size: @font_md;
     selection-background-color: @accent;
     selection-color: #ffffff;
 }
@@ -52,10 +52,10 @@ QToolTip {
     color: @text_0;
     background-color: @bg_deep;
     border: 1px solid @accent;
-    border-radius: 4px;
+    border-radius: @radius_sm;
     padding: 6px 10px;
     font-family: "@font_family_mono", monospace;
-    font-size: 11px;
+    font-size: @font_sm;
 }
 
 /* ===================== ШАПКА (AppHeaderWidget) ===================== */
@@ -73,14 +73,14 @@ QWidget#AppHeader {
 QLabel#BrandLabel {
     color: #003087;
     font-family: "Square721 BdEx BT";
-    font-size: 28px;
+    font-size: @font_brand;
     font-weight: 900;
     padding-left: 8px;
 }
 
 QLabel#BrandSub {
     color: @text_2;
-    font-size: 9px;
+    font-size: @font_xs;
 }
 
 /* разделитель в шапке (objectName="HeaderDiv") */
@@ -98,10 +98,10 @@ QFrame[role="status-pill"] {
         stop:0 rgba(255, 255, 255, 0.08), stop:1 rgba(0, 0, 0, 0.15));
     border: 1px solid rgba(0, 0, 0, 0.35);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 14px;
+    border-radius: @radius_14;
     padding: 4px 14px;
     color: @text_0;
-    font-size: 12px;
+    font-size: @font_base;
 }
 
 /* ===================== ИНФО-ТИКЕР / СТРОКА СООБЩЕНИЙ ===================== */
@@ -112,11 +112,11 @@ QFrame#InfoTicker {
     border: 1px solid rgba(0, 0, 0, 0.65);
     border-top: 1px solid rgba(0, 0, 0, 0.65);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
+    border-radius: @radius_10;
     padding: 6px 18px;
     color: @text_1;
     font-family: "@font_family_mono", monospace;
-    font-size: 12px;
+    font-size: @font_base;
 }
 
 /* ===================== КНОПКИ (.btn) ===================== */
@@ -125,7 +125,7 @@ QPushButton {
         stop:0 #6a7284, stop:0.5 #4b5261, stop:1 #3a4150);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 10px;
+    border-radius: @radius_10;
     color: @text_0;
     font-weight: 600;
     padding: 8px 20px;
@@ -215,7 +215,7 @@ QGroupBox {
         stop:0 @surf_1, stop:0.48 #454c5a, stop:1 #383e4a);
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 12px;
+    border-radius: @radius_lg;
     margin-top: 16px;
     padding: 18px 16px 14px 16px;
     font-weight: 600;
@@ -231,9 +231,9 @@ QGroupBox::title {
         stop:0 @surf_1, stop:1 #454c5a);
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-top: 1px solid rgba(255, 255, 255, 0.20);
-    border-radius: 4px;
+    border-radius: @radius_sm;
     color: @text_0;
-    font-size: 11px;
+    font-size: @font_sm;
     font-weight: 600;
 }
 
@@ -243,7 +243,7 @@ QTabWidget::pane {
         stop:0 #3b414d, stop:1 #333844);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0 0 10px 10px;
+    border-radius: 0 0 @radius_10 @radius_10;
     top: -1px;
 }
 
@@ -272,8 +272,8 @@ QTabBar::tab {
     border: 1px solid rgba(0, 0, 0, 0.4);
     border-top: 1px solid rgba(255, 255, 255, 0.14);
     border-bottom: none;
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
+    border-top-left-radius: @radius_lg;
+    border-top-right-radius: @radius_lg;
     padding: 10px 24px;
     margin-right: 4px;
     font-weight: 500;
@@ -303,7 +303,7 @@ QComboBox {
         stop:0 #2e333d, stop:1 #1e222a);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
+    border-radius: @radius_md;
     padding: 6px 28px 6px 12px;
     min-height: 24px;
     color: @text_0;
@@ -341,7 +341,7 @@ QLineEdit, QPlainTextEdit, QTextEdit {
         stop:0 #1c2028, stop:1 #262b34);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
+    border-radius: @radius_md;
     padding: 6px 12px;
     color: @text_0;
     font-family: "@font_family_mono", monospace;
@@ -361,7 +361,7 @@ QSpinBox, QDoubleSpinBox {
         stop:0 #1c2028, stop:1 #262b34);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
+    border-radius: @radius_md;
     padding: 4px 22px 4px 8px;
     color: @text_0;
     font-family: "@font_family_mono", monospace;
@@ -410,7 +410,7 @@ QCheckBox {
 }
 QCheckBox::indicator {
     width: 16px; height: 16px;
-    border-radius: 3px;
+    border-radius: @radius_xs;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #1c2028, stop:1 #262b34);
     border: 1px solid rgba(0, 0, 0, 0.55);
@@ -440,7 +440,7 @@ QRadioButton {
 }
 QRadioButton::indicator {
     width: 16px; height: 16px;
-    border-radius: 8px;
+    border-radius: @radius_md;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #1c2028, stop:1 #262b34);
     border: 1px solid rgba(0, 0, 0, 0.55);
@@ -459,12 +459,12 @@ QSlider::groove:horizontal {
         stop:0 #1b1f27, stop:1 #2a3040);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 4px;
+    border-radius: @radius_sm;
 }
 QSlider::sub-page:horizontal {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 @accent_lo, stop:1 @accent_hi);
-    border-radius: 4px;
+    border-radius: @radius_sm;
     margin: 1px;
 }
 QSlider::add-page:horizontal {
@@ -474,7 +474,7 @@ QSlider::handle:horizontal {
     width: 24px;
     height: 24px;
     margin: -9px 0;
-    border-radius: 12px;
+    border-radius: @radius_lg;
     background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
         stop:0 #ffffff, stop:0.3 #d7e0ee, stop:1 #7a8aa5);
     border: 1px solid rgba(0, 0, 0, 0.55);
@@ -493,19 +493,19 @@ QSlider::groove:vertical {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #1b1f27, stop:1 #2a3040);
     border: 1px solid rgba(0, 0, 0, 0.5);
-    border-radius: 4px;
+    border-radius: @radius_sm;
 }
 QSlider::sub-page:vertical {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 @accent_hi, stop:1 @accent_lo);
-    border-radius: 4px;
+    border-radius: @radius_sm;
     margin: 1px;
 }
 QSlider::handle:vertical {
     width: 24px;
     height: 24px;
     margin: 0 -9px;
-    border-radius: 12px;
+    border-radius: @radius_lg;
     background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
         stop:0 #ffffff, stop:0.3 #d7e0ee, stop:1 #7a8aa5);
     border: 1px solid rgba(0, 0, 0, 0.55);
@@ -516,18 +516,18 @@ QProgressBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #1b1f27, stop:1 #2a3040);
     border: 1px solid rgba(0, 0, 0, 0.5);
-    border-radius: 6px;
+    border-radius: @radius_6;
     text-align: center;
     color: @text_0;
     min-height: 18px;
     max-height: 22px;
     font-family: "@font_family_mono", monospace;
-    font-size: 11px;
+    font-size: @font_sm;
 }
 QProgressBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 @accent_lo, stop:1 @accent_hi);
-    border-radius: 5px;
+    border-radius: @radius_5;
     margin: 1px;
 }
 
@@ -540,13 +540,13 @@ QScrollBar:vertical {
         stop:0 #1b1f27, stop:1 #2a3040);
     width: 50px;
     border: 1px solid rgba(0, 0, 0, 0.45);
-    border-radius: 21px;
+    border-radius: @radius_pill;
     margin: 4px;
 }
 QScrollBar::handle:vertical {
     background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
         stop:0 #3d4e74, stop:1 #9ab0d5);
-    border-radius: 15px;
+    border-radius: @radius_pill_sm;
     min-height: 60px;
     margin: 4px;
 }
@@ -566,13 +566,13 @@ QScrollBar:horizontal {
         stop:0 #1b1f27, stop:1 #2a3040);
     height: 42px;
     border: 1px solid rgba(0, 0, 0, 0.45);
-    border-radius: 21px;
+    border-radius: @radius_pill;
     margin: 4px;
 }
 QScrollBar::handle:horizontal {
     background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
         stop:0 #3d4e74, stop:1 #9ab0d5);
-    border-radius: 15px;
+    border-radius: @radius_pill_sm;
     min-width: 60px;
     margin: 4px;
 }
@@ -597,7 +597,7 @@ QMenuBar {
 QMenuBar::item {
     background: transparent;
     padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: @radius_sm;
 }
 QMenuBar::item:selected {
     background: rgba(43, 127, 255, 0.25);
@@ -611,7 +611,7 @@ QMenu {
 }
 QMenu::item {
     padding: 6px 24px;
-    border-radius: 4px;
+    border-radius: @radius_sm;
 }
 QMenu::item:selected {
     background: @accent;
@@ -641,7 +641,7 @@ QTableView, QListView, QTreeView {
     alternate-background-color: #232833;
     color: @text_0;
     border: 1px solid rgba(0, 0, 0, 0.55);
-    border-radius: 6px;
+    border-radius: @radius_6;
     gridline-color: rgba(255, 255, 255, 0.06);
     selection-background-color: @accent;
     selection-color: #ffffff;
@@ -667,7 +667,7 @@ QHeaderView::section {
     border-bottom: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     font-weight: 600;
-    font-size: 11px;
+    font-size: @font_sm;
 }
 
 /* ===================== SPLITTER ===================== */
@@ -683,7 +683,7 @@ QFrame#ImageSlot, QWidget#ImageSlot {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #14171d, stop:1 #0a0c10);
     border: 1px solid rgba(0, 0, 0, 0.55);
-    border-radius: 12px;
+    border-radius: @radius_lg;
 }
 
 QFrame#ImageSlot[role="accent-edges"],
@@ -700,7 +700,7 @@ QFrame[role="ds-card"], QWidget[role="ds-card"] {
         stop:0 #4c5464, stop:1 #383e4a);
     border: 1px solid rgba(0, 0, 0, 0.4);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 16px;
+    border-radius: @radius_xl;
 }
 
 /* ===================== Note-блок (info/подсказка) ===================== */
@@ -708,7 +708,7 @@ QFrame[role="note"], QLabel[role="note"] {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(43, 127, 255, 0.15), stop:1 rgba(43, 127, 255, 0.05));
     border: 1px solid rgba(43, 127, 255, 0.35);
-    border-radius: 10px;
+    border-radius: @radius_10;
     padding: 10px 14px;
     color: #c0d4ff;
 }
@@ -716,22 +716,22 @@ QFrame[role="note"], QLabel[role="note"] {
 /* ===================== ОБЩИЕ КЛАССЫ-ОБЪЕКТНЫЕ ИМЕНА ===================== */
 QLabel#Mono {
     font-family: "@font_family_mono", monospace;
-    font-size: 12px;
+    font-size: @font_base;
     color: @text_1;
 }
 QLabel#Caption {
-    font-size: 11px;
+    font-size: @font_sm;
     color: @text_1;
     font-weight: 500;
 }
 QLabel#MetricValue {
     font-family: "@font_family_mono", monospace;
-    font-size: 17px;
+    font-size: @font_xl;
     color: @accent_hi;
     font-weight: 500;
 }
 QLabel#MetricKey {
-    font-size: 10px;
+    font-size: @font_2xs;
     color: @text_2;
 }
 
@@ -743,42 +743,42 @@ QLabel[role="ch-b"] { color: #6aa8ff; font-family: "@font_family_mono", monospac
 QLabel[role="ch-value"] {
     color: @accent_hi;
     font-family: "@font_family_mono", monospace;
-    font-size: 13px;
+    font-size: @font_md;
     font-weight: 500;
 }
 
 /* ===================== INLINE → QSS: централизованные виджетные стили ===================== */
 
 /* --- Навигационные списки --- */
-QListWidget#NavList { font-size: 15px; }
+QListWidget#NavList { font-size: @font_lg; }
 QListWidget#NavList::item { padding: 10px 12px; }
 
-QListWidget#RecipeSlotList { font-size: 15px; }
+QListWidget#RecipeSlotList { font-size: @font_lg; }
 QListWidget#RecipeSlotList::item { padding: 10px 12px; }
 QListWidget#RecipeSlotList::item:selected { background-color: #d5e8fb; color: #000; font-weight: bold; }
 
 /* --- Chrome --- */
 QLabel#InfoTickerLabel { color: @text_1; padding: 0 4px; background: transparent; }
 QLabel#StatusIndicator { color: @text_2; }
-QWidget#WatchdogOverlay { background-color: rgba(255, 200, 0, 180); border-radius: 8px; }
-QLabel#WatchdogOverlayLabel { font-size: 20px; font-weight: bold; color: #333333; background: transparent; }
-QLabel#RecDot { background-color: red; border-radius: 6px; }
+QWidget#WatchdogOverlay { background-color: rgba(255, 200, 0, 180); border-radius: @radius_md; }
+QLabel#WatchdogOverlayLabel { font-size: @font_xxl_sm; font-weight: bold; color: #333333; background: transparent; }
+QLabel#RecDot { background-color: red; border-radius: @radius_6; }
 
 /* --- Общие утилитарные стили --- */
 QLabel#MutedLabel { color: @text_2; }
-QLabel#HintLabel { font-size: 10px; color: @text_2; }
-QLabel#HintLabelLg { font-size: 11px; color: @text_2; }
-QLabel#PlaceholderLabel { color: @text_2; font-size: 13px; }
-QLabel#SectionTitle { font-weight: bold; font-size: 14px; }
-QLabel#PanelTitle { font-weight: bold; font-size: 12px; }
-QLabel#PanelTitleLg { font-weight: bold; font-size: 13px; }
-QLabel#WarningBar { background-color: #FFF3CD; color: #856404; border: 1px solid #FFE69C; border-radius: 3px; padding: 4px; }
+QLabel#HintLabel { font-size: @font_2xs; color: @text_2; }
+QLabel#HintLabelLg { font-size: @font_sm; color: @text_2; }
+QLabel#PlaceholderLabel { color: @text_2; font-size: @font_md; }
+QLabel#SectionTitle { font-weight: bold; font-size: @font_lg_sm; }
+QLabel#PanelTitle { font-weight: bold; font-size: @font_base; }
+QLabel#PanelTitleLg { font-weight: bold; font-size: @font_md; }
+QLabel#WarningBar { background-color: #FFF3CD; color: #856404; border: 1px solid #FFE69C; border-radius: @radius_xs; padding: 4px; }
 
 /* --- DiffScrollTabLayout --- */
 QGroupBox#DiffScrollNavGroup {
     margin-top: 10px;
     padding: 6px 4px 4px 4px;
-    border-radius: 8px;
+    border-radius: @radius_md;
 }
 QGroupBox#DiffScrollNavGroup::title {
     left: 10px;
@@ -791,7 +791,7 @@ QLabel#CameraStatus { font-weight: bold; color: @text_2; }
 
 /* --- Пагинация (стрелки ← →) --- */
 QPushButton#PaginationArrow {
-    font-size: 22px;
+    font-size: @font_xxl;
     padding: 4px 4px;
     min-width: 50px;
     max-width: 50px;
@@ -799,15 +799,15 @@ QPushButton#PaginationArrow {
 
 /* --- Tab headers (общий objectName для всех заголовков вкладок) --- */
 QLabel#TabHeader {
-    font-size: 16px;
+    font-size: @font_xl_sm;
     font-weight: bold;
 }
 
 /* --- Panel headers (admin panels: audit, sessions, users) --- */
-QLabel#PanelHeader { font-weight: bold; font-size: 15px; }
+QLabel#PanelHeader { font-weight: bold; font-size: @font_lg; }
 
 /* --- Large tab header (services tab) --- */
-QLabel#TabHeaderLg { font-weight: bold; font-size: 17px; }
+QLabel#TabHeaderLg { font-weight: bold; font-size: @font_xl; }
 
 /* --- Confirm dialog action label --- */
 QLabel#ConfirmActionLabel { font-weight: bold; }
@@ -821,7 +821,7 @@ QLabel#DirtyLabel {
 /* --- Topology hints --- */
 QLabel#StatusHint {
     color: @text_3;
-    font-size: 11px;
+    font-size: @font_sm;
 }
 
 /* --- Pipeline graph view background --- */
@@ -837,20 +837,20 @@ QFrame#ThemeDivider {
 /* --- Readonly hint (roles panel, etc.) --- */
 QLabel[role="readonly-hint"] {
     color: @text_3;
-    font-size: 12px;
+    font-size: @font_base;
 }
 
 /* --- Placeholder italic (services tab, etc.) --- */
 QLabel[role="placeholder-italic"] {
     color: @text_3;
-    font-size: 14px;
+    font-size: @font_lg_sm;
     font-style: italic;
 }
 
 /* --- Permissions hint (admin dashboard) --- */
 QLabel#PermissionsHint {
     color: @silver;
-    font-size: 11px;
+    font-size: @font_sm;
 }
 
 /* --- DiffScroll transparent ScrollArea --- */
@@ -863,7 +863,7 @@ QScrollArea#DiffScrollRight {
 /* --- EntityCard --- */
 QFrame#EntityCard {
     border: 1px solid @surf_1;
-    border-radius: 4px;
+    border-radius: @radius_sm;
     padding: 8px;
     margin: 2px;
 }
@@ -879,7 +879,7 @@ QLabel#DisplaySlotLabel,
 QLabel#CameraViewLabel {
     background-color: #1a1a2e;
     color: @text_2;
-    font-size: 16px;
+    font-size: @font_xl_sm;
 }
 
 /* --- ViewModeToggle (iOS-switch) --- */
@@ -889,7 +889,7 @@ QCheckBox#ViewModeSwitch {
 QCheckBox#ViewModeSwitch::indicator {
     width: 56px;
     height: 30px;
-    border-radius: 15px;
+    border-radius: @radius_pill_sm;
     border: 1px solid rgba(0, 0, 0, 0.4);
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 @bg_hi, stop:1 @surf_0);
@@ -930,7 +930,7 @@ QLabel#PasswordErrorLabel {
     color: @danger;
 }
 QLabel#PasswordErrorLabel {
-    font-size: 11px;
+    font-size: @font_sm;
 }
 
 /* --- Validation error border (dynamic property hasError="true") --- */
@@ -964,14 +964,14 @@ QLabel#InspectorPlaceholder {
     padding: 20px;
 }
 QLabel#InspectorTitle {
-    font-size: 14px;
+    font-size: @font_lg_sm;
     font-weight: bold;
     color: @text_0;
 }
 QLabel#InspectorCategoryBadge {
-    font-size: 11px;
+    font-size: @font_sm;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: @radius_xs;
 }
 QFrame#InspectorDivider {
     color: @surf_1;
