@@ -45,27 +45,17 @@ Slash-команды у `sync/` нет — это инфраструктурны
 
 ---
 
-## 4. Инфраструктура MCP
+## 4. Архив (`_archive/`)
 
-| Файл | Назначение |
-|------|------------|
-| [`qex-launcher.py`](qex-launcher.py) | Symlink на [`.claude/mcp/qex-launcher.py`](../.claude/mcp/qex-launcher.py). Лаунчер MCP-сервера qex (Ollama + Tantivy). Сам файл не редактировать — менять исходник в `.claude/mcp/`. |
-
----
-
-## 5. Депрекейты и эксперименты (не использовать, сохранены ради истории)
-
-Эти файлы оставлены как есть (по решению владельца проекта), но в актуальном пайплайне **не задействованы**. Не запускать без явной необходимости.
+Устаревшие и экспериментальные скрипты перенесены в [`_archive/`](_archive/). Не использовать без явной необходимости.
 
 | Файл | Статус | Почему устарел |
 |------|--------|----------------|
-| [`reorganize_decisions.py`](reorganize_decisions.py) | **DEPRECATED** | Одноразовая ранняя пересборка `DECISIONS.md`. Заменён на [`scripts/sync/`](sync/) (см. правило 8 в [`CLAUDE.md`](../CLAUDE.md)). |
-| [`check-qex-env.sh`](check-qex-env.sh) | **OUTDATED** | Поднимает Qdrant в Docker и тянет модель `nomic-embed-text-v2-moe`. Текущая архитектура qex: brute-force dense vectors в `~/.qex/`, без Qdrant/Docker; модель — `qwen3-embedding:4b` (Win) / `8b` (macOS). Холодный старт окружения теперь через [`/cold-start`](../.claude/commands/cold-start.md). |
-| [`_test_bundle_queue.py`](_test_bundle_queue.py) | **EXPERIMENT** | Разовая разведка паттерна `multiprocessing.Queue` через mid_process на Windows spawn. Не часть тест-сьюта (не лежит в `tests/`, pytest не подбирает). |
-| [`_test_queue_isolation.py`](_test_queue_isolation.py) | **EXPERIMENT** | То же — изоляция Queue между 3 уровнями subprocess. |
-| [`_test_queue_nested.py`](_test_queue_nested.py) | **EXPERIMENT** | То же — Queue, созданная в mid_process, переданная двум воркерам. |
-
-Префикс `_test_*` намеренно: pytest по умолчанию ловит `test_*`, эти файлы не попадают в коллекцию.
+| `reorganize_decisions.py` | **DEPRECATED** | Заменён на [`scripts/sync/`](sync/) |
+| `check-qex-env.sh` | **OUTDATED** | Заменён на `/cold-start` (qex без Docker) |
+| `_test_bundle_queue.py` | **EXPERIMENT** | Разведка `multiprocessing.Queue` на Windows |
+| `_test_queue_isolation.py` | **EXPERIMENT** | Изоляция Queue между subprocess |
+| `_test_queue_nested.py` | **EXPERIMENT** | Queue в mid_process → воркеры |
 
 ---
 
@@ -97,4 +87,4 @@ Slash-команды у `sync/` нет — это инфраструктурны
 | `/todo-inventory` | [`todo_inventory/todo_inventory.py`](todo_inventory/todo_inventory.py) |
 | `/clean-cache` | [`clean_cache/clean_cache.py`](clean_cache/clean_cache.py) |
 
-Полный список slash-команд проекта — в корневом [`CLAUDE.md`](../CLAUDE.md#проектные-команды).
+Полный список slash-команд проекта — в [`.claude/README.md`](../.claude/README.md#команды-commands).

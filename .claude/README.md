@@ -1,192 +1,166 @@
 # .claude/ — Конфигурация Claude Code
 
-Папка с агентами, командами, режимами, хуками и MCP-инфраструктурой для проекта **Inspector_bottles**.
-Проектный контекст (стек, пути, правила) — в корневом [`CLAUDE.md`](../CLAUDE.md).
+Самодостаточная система управления проектом **Inspector_bottles**.
+Проектный контекст (архитектура, стек, правила) — в корневом [`CLAUDE.md`](../CLAUDE.md).
 
-> **Кросс-платформа.** Все скрипты работают и на **macOS**, и на **Windows**: `bootstrap.py` и `qex-launcher.py` сами определяют ОС, hooks написаны через bash (на Windows — Git Bash).
-
----
-
-## Файлы и папки
-
-| Файл / Папка | Назначение |
-|--------------|-----------|
-| [`CLAUDE.md`](CLAUDE.md) | Project extensions: режимы (modes), language policy |
-| [`../CLAUDE.md`](../CLAUDE.md) | **Главный** — проектный контекст (single source of truth) |
-| [`CLAUDE-SETUP.md`](CLAUDE-SETUP.md) | Как перенести `.claude/` в новый проект |
-| [`settings.json`](settings.json) | Tools allowlist + хуки + statusLine |
-| `settings.local.json` | Локальный override (gitignored) |
-| [`agents/`](agents/) | Sub-агенты (`company/`, `_template.md`) |
-| [`commands/`](commands/) | Slash-команды (см. ниже) |
-| [`modes/`](modes/) | Режимы работы (`dev.md`, `spec.md`) |
-| [`hooks/`](hooks/) | Хуки на события (validate-safe, autoformat, check-imports) |
-| [`skills/`](skills/) | Skills для агентов (`kb-discover/`, `kb-lint/`) |
-| [`mcp/`](mcp/) | **MCP-инфраструктура** — template, launcher, bootstrap |
-| [`memory/`](memory/) | **Git-tracked memory** (project + feedback) — синхронизируется между машинами |
-| [`platforms/`](platforms/) | Platform-specific overrides (macOS / Windows) |
+> **Кросс-платформа.** Windows + macOS: `bootstrap.py` и `qex-launcher.py` определяют ОС автоматически, hooks работают через Git Bash.
 
 ---
 
-## MCP-серверы
+## Структура
 
-Подробнее в [`mcp/README.md`](mcp/README.md).
-
-| Сервер | Уровень | Назначение |
-|--------|---------|------------|
-| **qex** | проектный (`.mcp.json`) | Семантический поиск по коду (Ollama + BM25) |
-| **sentrux** | проектный (`.mcp.json`) | Архитектурный health-gate (DSM, метрики, gaps) |
-| **Context7** | user-level (`~/.claude.json`) | Актуальная документация библиотек |
-
-**Установка в новом проекте:**
-```bash
-python3 .claude/mcp/bootstrap.py    # macOS / Linux
-python .claude/mcp/bootstrap.py     # Windows
+```
+.claude/
+├── CLAUDE.md              # Режимы + language policy
+├── settings.json          # Permissions, hooks, statusLine
+├── settings.local.json    # Локальный override (gitignored)
+├── agents/company/        # 9 агентов (manager, developer, reviewer...)
+├── commands/              # 35 slash-команд по категориям
+│   ├── dev/               #   цикл разработки (8)
+│   ├── quality/           #   метрики и анализ качества (14)
+│   ├── analysis/          #   инспекция кода (3)
+│   ├── spec/              #   спецификации (2)
+│   ├── infra/             #   инфраструктура (5)
+│   └── team/              #   команда и документация (4)
+├── modes/                 # dev.md, spec.md
+├── hooks/                 # PreToolUse / PostToolUse скрипты
+├── skills/                # kb-discover/, kb-lint/
+├── mcp/                   # MCP-инфраструктура (qex, sentrux)
+├── memory/                # Git-tracked project memory
+└── platforms/             # settings.local шаблоны (macOS/Windows)
 ```
 
 ---
 
-## Агенты IT-Команды (`agents/company/`)
+## Команды (`commands/`)
+
+### `dev/` — Цикл разработки
+
+| Команда | Действие |
+|---------|----------|
+| `/plan` | Manager → декомпозиция → ТЗ (Task X.Y) |
+| `/plan-status` | Прогресс по плану текущей ветки |
+| `/implement` | Developer → реализация задачи |
+| `/test` | Tester → тесты по acceptance criteria |
+| `/review` | Reviewer → код-ревью |
+| `/debug` | Debugger → диагностика |
+| `/ship` | Финальная проверка перед merge |
+| `/pipeline` | Полный цикл: plan → implement → test → review → ship |
+
+### `quality/` — Метрики и качество
+
+| Команда | Действие |
+|---------|----------|
+| `/sentrux-health` | Снимок здоровья (scan + metrics) |
+| `/sentrux-dsm` | Dependency Structure Matrix |
+| `/sentrux-gaps` | Модули без тестов |
+| `/sentrux-baseline` | Зафиксировать quality baseline |
+| `/sentrux-diff` | Дельта с baseline |
+| `/sentrux-check` | CI-friendly проверка правил (exit 0/1) |
+| `/sentrux-rules` | Проверка `.sentrux/rules.toml` |
+| `/sentrux-evolution` | Тренды метрик во времени |
+| `/qex-status` | Статус qex-индекса |
+| `/qex-reindex` | Инкрементальная переиндексация |
+| `/qex-rebuild` | Полная переиндексация с нуля |
+| `/code-stats` | Подсчёт LOC (stdlib) |
+| `/code-stats-tokei` | Подсчёт LOC (tokei) |
+| `/test-ratio` | Отношение тестов к коду |
+
+### `analysis/` — Инспекция кода
+
+| Команда | Действие |
+|---------|----------|
+| `/channel-map` | AST-карта IPC: FieldRouting + send_message |
+| `/message-contracts` | Дамп SchemaBase/Message/BaseModel классов |
+| `/todo-inventory` | TODO/FIXME/HACK с git blame |
+
+### `spec/` — Спецификации
+
+| Команда | Действие |
+|---------|----------|
+| `/spec` | Создать/обновить живое ТЗ |
+| `/spec-sync` | Синхронизировать ТЗ с кодом |
+
+### `infra/` — Инфраструктура
+
+| Команда | Действие |
+|---------|----------|
+| `/validate` | `python scripts/validate.py` |
+| `/fw-test` | `python scripts/run_framework_tests.py` |
+| `/cold-start` | Ollama + venv init |
+| `/run-proto` | Запуск прототипа |
+| `/clean-cache` | Чистка Python-кэшей |
+
+### `team/` — Команда
+
+| Команда | Действие |
+|---------|----------|
+| `/team` | Показать состав |
+| `/hire` | Создать нового агента |
+| `/handoff` | Cross-machine context transfer |
+| `/docs` | Docs Writer → документация |
+
+---
+
+## Агенты (`agents/company/`)
 
 | Агент | Модель | Роль |
 |-------|--------|------|
-| `manager` | Opus | Декомпозиция задачи → ТЗ с уровнями сложности (Task X.Y) |
-| `teamlead` | Opus | Старший разработчик — Senior+ задачи, экспресс-ревью |
-| `developer` | Sonnet | Реализация кода по ТЗ, smoke-тесты, коммиты |
-| `reviewer` | Opus | Финальный код-ревью (архитектура + безопасность) |
+| `manager` | Opus | Декомпозиция → ТЗ (Task X.Y) |
+| `teamlead` | Opus | Senior+ задачи, экспресс-ревью |
+| `developer` | Sonnet | Реализация кода, smoke-тесты |
+| `reviewer` | Opus | Код-ревью (архитектура + безопасность) |
 | `tester` | Sonnet | Тесты по acceptance criteria |
-| `debugger` | Sonnet | Диагностика падающих тестов, регрессий, непонятных ошибок |
-| `docs-writer` | Haiku | Простая документация — docstrings, README, STATUS.md |
-| `tech-writer` | Sonnet | Сложная документация — DECISIONS.md (ADR), ARCHITECTURE.md, RFC |
-| `spec-writer` | Sonnet | Живое ТЗ (`docs/direction/`) с точки зрения пользователя |
-| `_template` | — | Шаблон для `/hire` (в корне `agents/`) |
+| `debugger` | Sonnet | Диагностика падений |
+| `docs-writer` | Haiku | README, STATUS, docstrings |
+| `tech-writer` | Sonnet | ADR, ARCHITECTURE, RFC |
+| `spec-writer` | Sonnet | Живое ТЗ (`docs/direction/`) |
 
-### Workflow разработки (Plan-Driven)
-
-```
-/plan → создаёт план (plans/<slug>.md) + ветку (feat/<slug>) + коммит плана
-/implement → реализация Task X.Y + Refs: plans/<slug>.md в коммите
-/test → /review → /docs → /ship (проверяет Refs, предлагает закрыть план)
-/plan-status → прогресс по плану текущей ветки
-
-Полный автомат: /pipeline
-Нанять нового специалиста: /hire <роль>
-```
-
-### Пороги сложности
-
-| Объём | Исполнитель |
-|-------|-------------|
-| 1-3 файла, <80 строк | Director (main) |
-| 4-9 файлов | Developer → TeamLead (экспресс-ревью) |
-| 10+ файлов, архитектура | Manager → Developer → Reviewer |
-
----
-
-## Slash-команды (`commands/`)
-
-### Workflow разработки
-
-| Команда | Файл | Действие |
-|---------|------|----------|
-| `/pipeline` | `pipeline.md` | Полный цикл разработки |
-| `/plan` | `plan.md` | Manager → декомпозиция → ТЗ |
-| `/implement` | `implement.md` | Developer → реализация Task X.Y |
-| `/test` | `test.md` | Tester → тесты |
-| `/review` | `review.md` | Reviewer → код-ревью |
-| `/debug` | `debug.md` | Debugger → диагностика |
-| `/docs` | `docs.md` | Docs Writer → документация |
-| `/ship` | `ship.md` | Финальная проверка перед merge |
-| `/plan-status` | `plan-status.md` | Прогресс по плану текущей ветки |
-
-### Спецификации
-
-| Команда | Файл | Действие |
-|---------|------|----------|
-| `/spec` | `spec.md` | Создать/обновить живое ТЗ |
-| `/spec-sync` | `spec-sync.md` | Синхронизировать ТЗ с кодом |
-
-### Проектные
-
-| Команда | Файл | Действие |
-|---------|------|----------|
-| `/validate` | `validate.md` | `python scripts/validate.py` |
-| `/fw-test` | `fw-test.md` | `python scripts/run_framework_tests.py` |
-| `/qex-status` | `qex-status.md` | Статус qex-индекса |
-| `/qex-reindex` | `qex-reindex.md` | Переиндексация qex |
-| `/run-proto` | `run-proto.md` | Запуск прототипа PySide6 |
-| `/cold-start` | `cold-start.md` | Холодный старт: Ollama + venv |
-
-### Инфраструктура
-
-| Команда | Файл | Действие |
-|---------|------|----------|
-| `/team` | `team.md` | Показать состав команды |
-| `/hire` | `hire.md` | Создать нового агента |
-| `/handoff` | `handoff.md` | Документ для cross-machine handoff |
+**Пороги:** 1-3 файла → Director | 4-9 → Developer | 10+ → Manager → Developer → Reviewer
 
 ---
 
 ## Хуки (`hooks/`)
 
-Все хуки **кросс-платформенные** (работают через Git Bash на Windows).
+| Скрипт | Событие | Действие |
+|--------|---------|----------|
+| `validate-safe-command.sh` | PreToolUse (Bash) | Блокирует опасные команды |
+| `autoformat-python.sh` | PostToolUse (Edit/Write) | ruff format + check |
+| `check-imports.sh` | PostToolUse (Edit/Write) | py_compile (синтаксис) |
 
-| Скрипт | Тип | Действие |
-|--------|-----|----------|
-| `validate-safe-command.sh` | PreToolUse (Bash) | Блокирует опасные команды (`rm -rf /`, `dd if=/dev/zero` и т.п.) |
-| `autoformat-python.sh` | PostToolUse (Edit/Write) | `ruff format` + `ruff check --fix` (поддержка `venv/Scripts/ruff.exe` на Windows) |
-| `check-imports.sh` | PostToolUse (Edit/Write) | `python -m py_compile` (проверка синтаксиса) |
-| `session-end-daily-log.sh` | (отключён) | Был для KnowledgeOS, оставлен как пример |
+---
 
-`hooks/tests/test_hooks.sh` — smoke-тесты для хуков.
+## MCP-серверы
+
+Подробнее: [`mcp/README.md`](mcp/README.md).
+
+| Сервер | Назначение |
+|--------|------------|
+| **qex** | Семантический поиск по коду (Ollama + BM25) |
+| **sentrux** | Архитектурный health-gate (DSM, метрики) |
+| **Context7** | Документация библиотек (user-level) |
+
+Установка: `python .claude/mcp/bootstrap.py`
 
 ---
 
 ## Memory (dual-write)
 
-Проектная память хранится в двух местах:
+| Место | Git | Содержимое |
+|-------|-----|------------|
+| `~/.claude/projects/<hash>/memory/` | Нет | Всё (project, feedback, user, reference) |
+| `docs/claude/memory/` | **Да** | project + feedback (между машинами) |
 
-| Место | Путь | Git | Содержимое |
-|-------|------|-----|------------|
-| Локальная | `~/.claude/projects/<hash>/memory/` | Нет | Всё (project, feedback, user, reference) |
-| Git-tracked | **`docs/claude/memory/`** | **Да** | project + feedback (синхронизация между машинами) |
-
-**Правило:** при записи memory → писать в **оба** места. Личное (user type) — только локально.
-
-> `.claude/` — универсальная конфигурация (портируется между проектами). Memory здесь **не хранить**.
+Правило: при записи → писать в **оба** места. Личное (user) — только локально.
 
 ---
 
-## Двух-машинный workflow (Windows днём + macOS вечером)
+## Двух-машинный workflow
 
-| Что | Как синхронизируется |
-|-----|----------------------|
-| `.claude/` целиком | через git (всё в репозитории) |
-| `.mcp.json` | через git (после `bootstrap.py`) |
-| `qex-launcher.py` | сам определяет ОС → подбирает модель Ollama (`8b` macOS / `4b` Windows) |
-| MCP биндинги | sentrux ставится на каждой машине (brew/exe), Context7 — OAuth раз на машину |
-| Hooks | работают через Git Bash на Windows (нужен Git for Windows) |
-| `settings.local.json` | gitignored — на каждой машине свой (см. `platforms/`) |
-| qex-индекс (`~/.qex/`) | у каждой машины свой, после `git pull` запусти `/qex-reindex` |
-
-При переезде:
-
+После `git pull` на новой машине:
 ```bash
-# 1. На Windows-машине (днём)
-git pull
-python .claude/mcp/bootstrap.py     # проверит зависимости
-# /qex-reindex (если кодовая база заметно изменилась)
-
-# 2. На macOS-машине (вечером)
-git pull
-python3 .claude/mcp/bootstrap.py
-# /qex-reindex
+python .claude/mcp/bootstrap.py   # проверит зависимости
+# /qex-reindex                    # если код изменился
 ```
 
----
-
-## Добавить нового специалиста
-
-1. Запусти `/hire <роль>` — создаст агента по `agents/_template.md`
-2. Заполни: `name`, `description`, `model`, `tools`, workflow
-3. Обнови таблицы в `.claude/README.md`
-4. При необходимости добавь slash-команду в `commands/`
+`settings.local.json` — gitignored, шаблоны в `platforms/`.

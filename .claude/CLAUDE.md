@@ -8,10 +8,9 @@ Project context, vault zones, rules, stack → see root `CLAUDE.md` (single sour
 | Mode | File | When |
 |------|------|------|
 | **Dev** | `.claude/modes/dev.md` | Code, tests, review, refactoring, migration, CI, deploy, bugs |
-| **Knowledge** | `.claude/modes/knowledge.md` | Transcription, curation, synthesis, search, Q&A, translation |
 | **Spec** | `.claude/modes/spec.md` | Living product specs in `docs/direction/` |
 
-Mixed task (dev + knowledge) → read both. Unclear → ask the user.
+Unclear which mode → ask the user.
 
 ## Language policy (STRICT)
 
@@ -35,5 +34,7 @@ Mixed task (dev + knowledge) → read both. Unclear → ask the user.
 Full list in the corresponding mode file. Key commands:
 
 - **Dev:** `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/team`
-- **Knowledge:** `/transcribe`, `/curate`, `/synthesize`, `/search`, `/research`, `/library`, `/translate`, `/digest`, `/compress`
 - **Spec:** `/spec`, `/spec-sync`
+- **Quality:** `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`
+- **Analysis:** `/channel-map`, `/message-contracts`, `/todo-inventory`
+- **Infra:** `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`

@@ -92,7 +92,7 @@ Co-Authored-By: ...
 - **Коммиты плана:** создание/закрытие — отдельный `docs(plans):` коммит. Статусы задач — допустимо в коммите кода
 - **Статус:** `/plan-status` — прогресс по текущей ветке
 
-Подробности — в [`plans/` конвенциях](.claude/commands/plan.md) и промптах агентов.
+Подробности — в [`plans/` конвенциях](.claude/commands/dev/plan.md) и промптах агентов.
 
 ## Memory (dual-write)
 
@@ -133,31 +133,17 @@ Co-Authored-By: ...
 
 **qex и sentrux ортогональны:** qex отвечает «*где*», sentrux — «*насколько здорово*». Не дублируют.
 
-## Проектные команды
+## Slash-команды
 
-| Команда | Действие |
-|---------|----------|
-| `/validate` | `python scripts/validate.py` |
-| `/fw-test` | `python scripts/run_framework_tests.py` |
-| `/qex-status` | Статус qex-индекса |
-| `/qex-reindex` | Переиндексация кодовой базы |
-| `/run-proto` | Запуск прототипа |
-| `/cold-start` | Холодный старт: Ollama + venv |
-| `/sentrux-health` | Снимок quality_signal + 5 метрик + bottleneck |
-| `/sentrux-dsm` | DSM: связи между модулями, поиск циклов |
-| `/sentrux-gaps` | Модули без тестов (приоритет по связности) |
-| `/sentrux-baseline` | Зафиксировать baseline качества перед рефакторингом |
-| `/sentrux-diff` | Сравнить с baseline: дельта качества (pass/fail) |
-| `/sentrux-rules` | Проверить `.sentrux/rules.toml` (MCP, интерактивно) |
-| `/sentrux-check` | `sentrux check` (CLI, exit 0/1, для CI) |
-| `/sentrux-evolution` | Тренды метрик во времени |
-| `/code-stats` | Подсчёт файлов / строк / символов по TOML-конфигу ([`scripts/code_stats/`](scripts/code_stats/README.md)) |
-| `/code-stats-tokei` | Точный LOC через tokei (общий TOML с `/code-stats`) — [`scripts/code_stats/code_stats_tokei.py`](scripts/code_stats/code_stats_tokei.py) |
-| `/channel-map` | AST-карта IPC: `FieldRouting` декларации + `send_message` адресаты ([`scripts/channel_map/`](scripts/channel_map/README.md)) |
-| `/message-contracts` | AST-дамп `SchemaBase` / `Message` / `BaseModel` классов с полями ([`scripts/message_contracts/`](scripts/message_contracts/README.md)) |
-| `/test-ratio` | LOC тестов ÷ LOC кода на модуль ([`scripts/test_ratio/`](scripts/test_ratio/README.md)) |
-| `/todo-inventory` | Инвентаризация TODO/FIXME/HACK с `git blame` ([`scripts/todo_inventory/`](scripts/todo_inventory/README.md)) |
-| `/clean-cache` | Чистка Python-кэшей (`__pycache__`, `.pytest_cache`, `*.pyc`, `.coverage`) — dry-run по умолчанию, `--apply` для удаления ([`scripts/clean_cache/`](scripts/clean_cache/README.md)) |
-| `/plan-status` | Прогресс по плану текущей ветки (Task-статусы, фазы, процент) |
+35 команд в 6 категориях. Полный список с описаниями: [`.claude/README.md`](.claude/README.md#команды-commands).
 
-Подробный гайд: [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md).
+| Категория | Ключевые команды |
+|-----------|------------------|
+| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline` |
+| **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio` |
+| **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory` |
+| **spec/** | `/spec`, `/spec-sync` |
+| **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache` |
+| **team/** | `/team`, `/hire`, `/handoff`, `/docs` |
+
+Гайд по sentrux: [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).

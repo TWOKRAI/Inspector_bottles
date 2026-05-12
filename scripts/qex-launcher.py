@@ -1,1 +1,0 @@
-../.claude/mcp/qex-launcher.py
