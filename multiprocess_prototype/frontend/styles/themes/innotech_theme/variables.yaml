@@ -66,3 +66,98 @@ radius_14: "14px"
 radius_pill_sm: "15px"
 radius_xl: "16px"
 radius_pill: "21px"
+
+# --- Кнопки (default) ---
+btn_grad_top: "#6a7284"
+btn_grad_mid: "#4b5261"
+btn_grad_bot: "#3a4150"
+btn_hover_top: "#788092"
+btn_hover_mid: "#566075"
+btn_hover_bot: "#434a5a"
+
+# --- Кнопки (primary / accent) ---
+btn_primary_top: "#5ea3ff"
+btn_primary_hover_top: "#7ab3ff"
+btn_primary_hover_mid: "#3d8cff"
+btn_primary_hover_bot: "#2870e0"
+btn_primary_pressed_mid: "#1a51ad"
+btn_primary_pressed_bot: "#133a82"
+
+# --- Кнопки (danger) ---
+btn_danger_top: "#b84050"
+btn_danger_mid: "#8a2d3d"
+btn_danger_bot: "#5f1f28"
+btn_danger_hover_top: "#c8505f"
+btn_danger_hover_mid: "#9a3548"
+btn_danger_hover_bot: "#6e2530"
+
+# --- Поля ввода ---
+input_bg_top: "#1c2028"
+input_bg_bot: "#262b34"
+input_combo_top: "#2e333d"
+input_combo_bot: "#1e222a"
+input_disabled_bg: "#2a2f39"
+input_alt_row: "#232833"
+
+# --- Вкладки ---
+tab_bg_top: "#4a5161"
+tab_bg_bot: "#363c49"
+tab_hover_top: "#5a6272"
+tab_hover_bot: "#434a58"
+tab_selected_top: "#6a7284"
+tab_selected_bot: "#4f5768"
+tab_pane_top: "#3b414d"
+tab_pane_bot: "#333844"
+
+# --- Скроллбар ---
+scroll_groove_top: "#1b1f27"
+scroll_groove_bot: "#2a3040"
+scroll_handle_a: "#3d4e74"
+scroll_handle_b: "#9ab0d5"
+scroll_handle_hover_a: "#4a5b85"
+scroll_handle_hover_b: "#abbfe0"
+
+# --- Слайдер ---
+slider_knob_hi: "#d7e0ee"
+slider_knob_lo: "#7a8aa5"
+slider_knob_hover_hi: "#e0e8f4"
+slider_knob_hover_lo: "#8a9ab5"
+slider_knob_pressed_top: "#e8eef8"
+slider_knob_pressed_hi: "#c0cce0"
+slider_knob_pressed_lo: "#6a7a95"
+
+# --- Градиенты фона ---
+grad_main_mid: "#3e4552"
+grad_main_bot: "#2a303b"
+grad_header_mid: "#454c5a"
+grad_header_bot: "#353b47"
+grad_ticker_mid: "#252b37"
+grad_ticker_bot: "#1e242e"
+grad_groupbox_bot: "#383e4a"
+grad_card_top: "#4c5464"
+
+# --- Слоты / карточки ---
+slot_bg_top: "#14171d"
+slot_bg_bot: "#0a0c10"
+display_slot_bg: "#1a1a2e"
+slot_occupied_bg: "#2d5a2d"
+slot_selected_bg: "#1a5276"
+
+# --- Бренд / каналы ---
+brand_color: "#003087"
+accent_light: "#c0d4ff"
+ch_red: "#ff7894"
+ch_green: "#6ae0a8"
+ch_blue: "#6aa8ff"
+
+# --- Предупреждения ---
+warning_bar_bg: "#FFF3CD"
+warning_bar_text: "#856404"
+warning_bar_border: "#FFE69C"
+error_banner_border: "#dc2626"
+warning_banner_border: "#eab308"
+watchdog_text: "#333333"
+
+# --- Другое ---
+pipeline_graph_bg: "#1e1e1e"
+recipe_selected_bg: "#d5e8fb"

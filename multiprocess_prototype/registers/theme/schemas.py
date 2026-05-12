@@ -41,25 +41,39 @@ THEME_VAR_TREE: dict[str, dict[str, list[str]]] = {
         "Акцент (стекло)": [],  # TODO: Task 1.3
     },
     "Компоненты": {
-        "Кнопки": [],  # TODO: Task 1.2
-        "Кнопки Accent": [],  # TODO: Task 1.2
-        "Кнопки Danger": [],  # TODO: Task 1.2
-        "Поля ввода": [],  # TODO: Task 1.2
-        "Скроллбар": [],  # TODO: Task 1.2
-        "Слайдер": [],  # TODO: Task 1.2
-        "Карточки": [],  # TODO: Task 1.2
+        "Кнопки": ["btn_grad_top", "btn_grad_mid", "btn_grad_bot",
+                    "btn_hover_top", "btn_hover_mid", "btn_hover_bot"],
+        "Кнопки Accent": ["btn_primary_top", "btn_primary_hover_top",
+                           "btn_primary_hover_mid", "btn_primary_hover_bot",
+                           "btn_primary_pressed_mid", "btn_primary_pressed_bot"],
+        "Кнопки Danger": ["btn_danger_top", "btn_danger_mid", "btn_danger_bot",
+                           "btn_danger_hover_top", "btn_danger_hover_mid", "btn_danger_hover_bot"],
+        "Поля ввода": ["input_bg_top", "input_bg_bot", "input_combo_top", "input_combo_bot",
+                       "input_disabled_bg", "input_alt_row"],
+        "Скроллбар": ["scroll_groove_top", "scroll_groove_bot",
+                      "scroll_handle_a", "scroll_handle_b",
+                      "scroll_handle_hover_a", "scroll_handle_hover_b"],
+        "Слайдер": ["slider_knob_hi", "slider_knob_lo",
+                    "slider_knob_hover_hi", "slider_knob_hover_lo",
+                    "slider_knob_pressed_top", "slider_knob_pressed_hi", "slider_knob_pressed_lo"],
+        "Карточки": ["slot_bg_top", "slot_bg_bot", "display_slot_bg",
+                     "slot_occupied_bg", "slot_selected_bg",
+                     "recipe_selected_bg"],
     },
     "Окно": {
-        "Шапка": [],  # TODO: Task 1.2
-        "Фон окна": [],  # TODO: Task 1.2
-        "Вкладки": [],  # TODO: Task 1.2
-        "GroupBox / Card": [],  # TODO: Task 1.2
+        "Шапка": ["brand_color", "grad_header_mid", "grad_header_bot"],
+        "Фон окна": ["grad_main_mid", "grad_main_bot",
+                     "grad_ticker_mid", "grad_ticker_bot"],
+        "Вкладки": ["tab_bg_top", "tab_bg_bot", "tab_hover_top", "tab_hover_bot",
+                    "tab_selected_top", "tab_selected_bot", "tab_pane_top", "tab_pane_bot"],
+        "GroupBox / Card": ["grad_groupbox_bot", "grad_card_top", "accent_light"],
     },
     "Специальное": {
-        "Каналы RGB": [],  # TODO: Task 1.2
-        "Оповещения": [],  # TODO: Task 1.2
-        "Pipeline": [],  # TODO: Task 1.2
-        "Watchdog": [],  # TODO: Task 1.2
+        "Каналы RGB": ["ch_red", "ch_green", "ch_blue"],
+        "Оповещения": ["warning_bar_bg", "warning_bar_text", "warning_bar_border",
+                       "error_banner_border", "warning_banner_border"],
+        "Pipeline": ["pipeline_graph_bg"],
+        "Watchdog": ["watchdog_text"],
     },
 }
 
@@ -124,6 +138,89 @@ THEME_VAR_DESCRIPTIONS: dict[str, str] = {
     "radius_pill_sm": "Малая таблетка (15px) — теги, chip-элементы",
     "radius_xl": "Большое скругление (16px) — боковые панели",
     "radius_pill": "Полная таблетка (21px) — переключатели, toggle",
+    # --- Кнопки (default) ---
+    "btn_grad_top": "Кнопка (default) — верх градиента",
+    "btn_grad_mid": "Кнопка (default) — середина градиента",
+    "btn_grad_bot": "Кнопка (default) — низ градиента",
+    "btn_hover_top": "Кнопка (default) hover — верх градиента",
+    "btn_hover_mid": "Кнопка (default) hover — середина градиента",
+    "btn_hover_bot": "Кнопка (default) hover — низ градиента",
+    # --- Кнопки (primary) ---
+    "btn_primary_top": "Кнопка Accent — верх градиента",
+    "btn_primary_hover_top": "Кнопка Accent hover — верх градиента",
+    "btn_primary_hover_mid": "Кнопка Accent hover — середина градиента",
+    "btn_primary_hover_bot": "Кнопка Accent hover — низ градиента",
+    "btn_primary_pressed_mid": "Кнопка Accent нажата — середина градиента",
+    "btn_primary_pressed_bot": "Кнопка Accent нажата — низ градиента",
+    # --- Кнопки (danger) ---
+    "btn_danger_top": "Кнопка Danger — верх градиента",
+    "btn_danger_mid": "Кнопка Danger — середина градиента",
+    "btn_danger_bot": "Кнопка Danger — низ градиента",
+    "btn_danger_hover_top": "Кнопка Danger hover — верх градиента",
+    "btn_danger_hover_mid": "Кнопка Danger hover — середина градиента",
+    "btn_danger_hover_bot": "Кнопка Danger hover — низ градиента",
+    # --- Поля ввода ---
+    "input_bg_top": "Поле ввода — верх фона",
+    "input_bg_bot": "Поле ввода — низ фона",
+    "input_combo_top": "Комбобокс — верх фона",
+    "input_combo_bot": "Комбобокс — низ фона",
+    "input_disabled_bg": "Поле ввода — фон в отключённом состоянии",
+    "input_alt_row": "Таблица/список — чередующийся фон строки",
+    # --- Вкладки ---
+    "tab_bg_top": "Вкладка — верх фона",
+    "tab_bg_bot": "Вкладка — низ фона",
+    "tab_hover_top": "Вкладка hover — верх фона",
+    "tab_hover_bot": "Вкладка hover — низ фона",
+    "tab_selected_top": "Вкладка выбранная — верх фона",
+    "tab_selected_bot": "Вкладка выбранная — низ фона",
+    "tab_pane_top": "Панель вкладок — верх фона",
+    "tab_pane_bot": "Панель вкладок — низ фона",
+    # --- Скроллбар ---
+    "scroll_groove_top": "Скроллбар — желоб (верх)",
+    "scroll_groove_bot": "Скроллбар — желоб (низ)",
+    "scroll_handle_a": "Скроллбар — ручка (начало градиента)",
+    "scroll_handle_b": "Скроллбар — ручка (конец градиента)",
+    "scroll_handle_hover_a": "Скроллбар — ручка hover (начало градиента)",
+    "scroll_handle_hover_b": "Скроллбар — ручка hover (конец градиента)",
+    # --- Слайдер ---
+    "slider_knob_hi": "Слайдер — ручка (светлый конец градиента)",
+    "slider_knob_lo": "Слайдер — ручка (тёмный конец градиента)",
+    "slider_knob_hover_hi": "Слайдер — ручка hover (светлый конец)",
+    "slider_knob_hover_lo": "Слайдер — ручка hover (тёмный конец)",
+    "slider_knob_pressed_top": "Слайдер — ручка нажата (верх)",
+    "slider_knob_pressed_hi": "Слайдер — ручка нажата (светлый тон)",
+    "slider_knob_pressed_lo": "Слайдер — ручка нажата (тёмный тон)",
+    # --- Градиенты фона ---
+    "grad_main_mid": "Основной фон окна — середина градиента",
+    "grad_main_bot": "Основной фон окна — низ градиента",
+    "grad_header_mid": "Шапка — середина градиента",
+    "grad_header_bot": "Шапка — низ градиента",
+    "grad_ticker_mid": "Тикер/нижняя панель — середина градиента",
+    "grad_ticker_bot": "Тикер/нижняя панель — низ градиента",
+    "grad_groupbox_bot": "GroupBox — низ градиента",
+    "grad_card_top": "Карточка — верх градиента",
+    # --- Слоты / карточки ---
+    "slot_bg_top": "Слот — верх фона",
+    "slot_bg_bot": "Слот — низ фона",
+    "display_slot_bg": "Display-слот — фон",
+    "slot_occupied_bg": "Слот занят — фон",
+    "slot_selected_bg": "Слот выбран — фон",
+    # --- Бренд / каналы ---
+    "brand_color": "Брендовый цвет (синий корпоратив)",
+    "accent_light": "Акцент светлый (GroupBox/Card)",
+    "ch_red": "Канал R — цвет отображения",
+    "ch_green": "Канал G — цвет отображения",
+    "ch_blue": "Канал B — цвет отображения",
+    # --- Предупреждения ---
+    "warning_bar_bg": "Предупреждение — фон полосы",
+    "warning_bar_text": "Предупреждение — цвет текста",
+    "warning_bar_border": "Предупреждение — цвет рамки",
+    "error_banner_border": "Баннер ошибки — цвет рамки",
+    "warning_banner_border": "Баннер предупреждения — цвет рамки",
+    "watchdog_text": "Watchdog — цвет текста",
+    # --- Другое ---
+    "pipeline_graph_bg": "Pipeline граф — фон рабочей области",
+    "recipe_selected_bg": "Рецепт выбранный — фон строки",
 }
 
 
@@ -293,6 +390,243 @@ class ThemeVariables(SchemaBase):
     radius_pill: Annotated[
         str, FieldMeta("Радиус pill", info="Полная таблетка (21px) — переключатели, toggle")
     ] = "21px"
+
+    # --- Кнопки (default) ---
+    btn_grad_top: Annotated[
+        str, FieldMeta("Кнопка верх", info="Кнопка (default) — верх градиента")
+    ] = "#6a7284"
+    btn_grad_mid: Annotated[
+        str, FieldMeta("Кнопка середина", info="Кнопка (default) — середина градиента")
+    ] = "#4b5261"
+    btn_grad_bot: Annotated[
+        str, FieldMeta("Кнопка низ", info="Кнопка (default) — низ градиента")
+    ] = "#3a4150"
+    btn_hover_top: Annotated[
+        str, FieldMeta("Кнопка hover верх", info="Кнопка (default) hover — верх градиента")
+    ] = "#788092"
+    btn_hover_mid: Annotated[
+        str, FieldMeta("Кнопка hover середина", info="Кнопка (default) hover — середина градиента")
+    ] = "#566075"
+    btn_hover_bot: Annotated[
+        str, FieldMeta("Кнопка hover низ", info="Кнопка (default) hover — низ градиента")
+    ] = "#434a5a"
+
+    # --- Кнопки (primary / accent) ---
+    btn_primary_top: Annotated[
+        str, FieldMeta("Кнопка Accent верх", info="Кнопка Accent — верх градиента")
+    ] = "#5ea3ff"
+    btn_primary_hover_top: Annotated[
+        str, FieldMeta("Кнопка Accent hover верх", info="Кнопка Accent hover — верх градиента")
+    ] = "#7ab3ff"
+    btn_primary_hover_mid: Annotated[
+        str, FieldMeta("Кнопка Accent hover середина", info="Кнопка Accent hover — середина градиента")
+    ] = "#3d8cff"
+    btn_primary_hover_bot: Annotated[
+        str, FieldMeta("Кнопка Accent hover низ", info="Кнопка Accent hover — низ градиента")
+    ] = "#2870e0"
+    btn_primary_pressed_mid: Annotated[
+        str, FieldMeta("Кнопка Accent нажата середина", info="Кнопка Accent нажата — середина градиента")
+    ] = "#1a51ad"
+    btn_primary_pressed_bot: Annotated[
+        str, FieldMeta("Кнопка Accent нажата низ", info="Кнопка Accent нажата — низ градиента")
+    ] = "#133a82"
+
+    # --- Кнопки (danger) ---
+    btn_danger_top: Annotated[
+        str, FieldMeta("Кнопка Danger верх", info="Кнопка Danger — верх градиента")
+    ] = "#b84050"
+    btn_danger_mid: Annotated[
+        str, FieldMeta("Кнопка Danger середина", info="Кнопка Danger — середина градиента")
+    ] = "#8a2d3d"
+    btn_danger_bot: Annotated[
+        str, FieldMeta("Кнопка Danger низ", info="Кнопка Danger — низ градиента")
+    ] = "#5f1f28"
+    btn_danger_hover_top: Annotated[
+        str, FieldMeta("Кнопка Danger hover верх", info="Кнопка Danger hover — верх градиента")
+    ] = "#c8505f"
+    btn_danger_hover_mid: Annotated[
+        str, FieldMeta("Кнопка Danger hover середина", info="Кнопка Danger hover — середина градиента")
+    ] = "#9a3548"
+    btn_danger_hover_bot: Annotated[
+        str, FieldMeta("Кнопка Danger hover низ", info="Кнопка Danger hover — низ градиента")
+    ] = "#6e2530"
+
+    # --- Поля ввода ---
+    input_bg_top: Annotated[
+        str, FieldMeta("Ввод фон верх", info="Поле ввода — верх фона")
+    ] = "#1c2028"
+    input_bg_bot: Annotated[
+        str, FieldMeta("Ввод фон низ", info="Поле ввода — низ фона")
+    ] = "#262b34"
+    input_combo_top: Annotated[
+        str, FieldMeta("Комбобокс верх", info="Комбобокс — верх фона")
+    ] = "#2e333d"
+    input_combo_bot: Annotated[
+        str, FieldMeta("Комбобокс низ", info="Комбобокс — низ фона")
+    ] = "#1e222a"
+    input_disabled_bg: Annotated[
+        str, FieldMeta("Ввод отключён фон", info="Поле ввода — фон в отключённом состоянии")
+    ] = "#2a2f39"
+    input_alt_row: Annotated[
+        str, FieldMeta("Чередующийся ряд", info="Таблица/список — чередующийся фон строки")
+    ] = "#232833"
+
+    # --- Вкладки ---
+    tab_bg_top: Annotated[
+        str, FieldMeta("Вкладка фон верх", info="Вкладка — верх фона")
+    ] = "#4a5161"
+    tab_bg_bot: Annotated[
+        str, FieldMeta("Вкладка фон низ", info="Вкладка — низ фона")
+    ] = "#363c49"
+    tab_hover_top: Annotated[
+        str, FieldMeta("Вкладка hover верх", info="Вкладка hover — верх фона")
+    ] = "#5a6272"
+    tab_hover_bot: Annotated[
+        str, FieldMeta("Вкладка hover низ", info="Вкладка hover — низ фона")
+    ] = "#434a58"
+    tab_selected_top: Annotated[
+        str, FieldMeta("Вкладка выбрана верх", info="Вкладка выбранная — верх фона")
+    ] = "#6a7284"
+    tab_selected_bot: Annotated[
+        str, FieldMeta("Вкладка выбрана низ", info="Вкладка выбранная — низ фона")
+    ] = "#4f5768"
+    tab_pane_top: Annotated[
+        str, FieldMeta("Панель вкладок верх", info="Панель вкладок — верх фона")
+    ] = "#3b414d"
+    tab_pane_bot: Annotated[
+        str, FieldMeta("Панель вкладок низ", info="Панель вкладок — низ фона")
+    ] = "#333844"
+
+    # --- Скроллбар ---
+    scroll_groove_top: Annotated[
+        str, FieldMeta("Скроллбар желоб верх", info="Скроллбар — желоб (верх)")
+    ] = "#1b1f27"
+    scroll_groove_bot: Annotated[
+        str, FieldMeta("Скроллбар желоб низ", info="Скроллбар — желоб (низ)")
+    ] = "#2a3040"
+    scroll_handle_a: Annotated[
+        str, FieldMeta("Скроллбар ручка A", info="Скроллбар — ручка (начало градиента)")
+    ] = "#3d4e74"
+    scroll_handle_b: Annotated[
+        str, FieldMeta("Скроллбар ручка B", info="Скроллбар — ручка (конец градиента)")
+    ] = "#9ab0d5"
+    scroll_handle_hover_a: Annotated[
+        str, FieldMeta("Скроллбар ручка hover A", info="Скроллбар — ручка hover (начало градиента)")
+    ] = "#4a5b85"
+    scroll_handle_hover_b: Annotated[
+        str, FieldMeta("Скроллбар ручка hover B", info="Скроллбар — ручка hover (конец градиента)")
+    ] = "#abbfe0"
+
+    # --- Слайдер ---
+    slider_knob_hi: Annotated[
+        str, FieldMeta("Слайдер ручка hi", info="Слайдер — ручка (светлый конец градиента)")
+    ] = "#d7e0ee"
+    slider_knob_lo: Annotated[
+        str, FieldMeta("Слайдер ручка lo", info="Слайдер — ручка (тёмный конец градиента)")
+    ] = "#7a8aa5"
+    slider_knob_hover_hi: Annotated[
+        str, FieldMeta("Слайдер ручка hover hi", info="Слайдер — ручка hover (светлый конец)")
+    ] = "#e0e8f4"
+    slider_knob_hover_lo: Annotated[
+        str, FieldMeta("Слайдер ручка hover lo", info="Слайдер — ручка hover (тёмный конец)")
+    ] = "#8a9ab5"
+    slider_knob_pressed_top: Annotated[
+        str, FieldMeta("Слайдер ручка нажата верх", info="Слайдер — ручка нажата (верх)")
+    ] = "#e8eef8"
+    slider_knob_pressed_hi: Annotated[
+        str, FieldMeta("Слайдер ручка нажата hi", info="Слайдер — ручка нажата (светлый тон)")
+    ] = "#c0cce0"
+    slider_knob_pressed_lo: Annotated[
+        str, FieldMeta("Слайдер ручка нажата lo", info="Слайдер — ручка нажата (тёмный тон)")
+    ] = "#6a7a95"
+
+    # --- Градиенты фона ---
+    grad_main_mid: Annotated[
+        str, FieldMeta("Фон окна середина", info="Основной фон окна — середина градиента")
+    ] = "#3e4552"
+    grad_main_bot: Annotated[
+        str, FieldMeta("Фон окна низ", info="Основной фон окна — низ градиента")
+    ] = "#2a303b"
+    grad_header_mid: Annotated[
+        str, FieldMeta("Шапка середина", info="Шапка — середина градиента")
+    ] = "#454c5a"
+    grad_header_bot: Annotated[
+        str, FieldMeta("Шапка низ", info="Шапка — низ градиента")
+    ] = "#353b47"
+    grad_ticker_mid: Annotated[
+        str, FieldMeta("Тикер середина", info="Тикер/нижняя панель — середина градиента")
+    ] = "#252b37"
+    grad_ticker_bot: Annotated[
+        str, FieldMeta("Тикер низ", info="Тикер/нижняя панель — низ градиента")
+    ] = "#1e242e"
+    grad_groupbox_bot: Annotated[
+        str, FieldMeta("GroupBox низ", info="GroupBox — низ градиента")
+    ] = "#383e4a"
+    grad_card_top: Annotated[
+        str, FieldMeta("Карточка верх", info="Карточка — верх градиента")
+    ] = "#4c5464"
+
+    # --- Слоты / карточки ---
+    slot_bg_top: Annotated[
+        str, FieldMeta("Слот фон верх", info="Слот — верх фона")
+    ] = "#14171d"
+    slot_bg_bot: Annotated[
+        str, FieldMeta("Слот фон низ", info="Слот — низ фона")
+    ] = "#0a0c10"
+    display_slot_bg: Annotated[
+        str, FieldMeta("Display-слот фон", info="Display-слот — фон")
+    ] = "#1a1a2e"
+    slot_occupied_bg: Annotated[
+        str, FieldMeta("Слот занят фон", info="Слот занят — фон")
+    ] = "#2d5a2d"
+    slot_selected_bg: Annotated[
+        str, FieldMeta("Слот выбран фон", info="Слот выбран — фон")
+    ] = "#1a5276"
+
+    # --- Бренд / каналы ---
+    brand_color: Annotated[
+        str, FieldMeta("Брендовый цвет", info="Брендовый цвет (синий корпоратив)")
+    ] = "#003087"
+    accent_light: Annotated[
+        str, FieldMeta("Акцент светлый", info="Акцент светлый (GroupBox/Card)")
+    ] = "#c0d4ff"
+    ch_red: Annotated[
+        str, FieldMeta("Канал R", info="Канал R — цвет отображения")
+    ] = "#ff7894"
+    ch_green: Annotated[
+        str, FieldMeta("Канал G", info="Канал G — цвет отображения")
+    ] = "#6ae0a8"
+    ch_blue: Annotated[
+        str, FieldMeta("Канал B", info="Канал B — цвет отображения")
+    ] = "#6aa8ff"
+
+    # --- Предупреждения ---
+    warning_bar_bg: Annotated[
+        str, FieldMeta("Предупреждение фон", info="Предупреждение — фон полосы")
+    ] = "#FFF3CD"
+    warning_bar_text: Annotated[
+        str, FieldMeta("Предупреждение текст", info="Предупреждение — цвет текста")
+    ] = "#856404"
+    warning_bar_border: Annotated[
+        str, FieldMeta("Предупреждение рамка", info="Предупреждение — цвет рамки")
+    ] = "#FFE69C"
+    error_banner_border: Annotated[
+        str, FieldMeta("Баннер ошибки рамка", info="Баннер ошибки — цвет рамки")
+    ] = "#dc2626"
+    warning_banner_border: Annotated[
+        str, FieldMeta("Баннер предупреждения рамка", info="Баннер предупреждения — цвет рамки")
+    ] = "#eab308"
+    watchdog_text: Annotated[
+        str, FieldMeta("Watchdog текст", info="Watchdog — цвет текста")
+    ] = "#333333"
+
+    # --- Другое ---
+    pipeline_graph_bg: Annotated[
+        str, FieldMeta("Pipeline граф фон", info="Pipeline граф — фон рабочей области")
+    ] = "#1e1e1e"
+    recipe_selected_bg: Annotated[
+        str, FieldMeta("Рецепт выбран фон", info="Рецепт выбранный — фон строки")
+    ] = "#d5e8fb"
 
 
 def get_default_variables() -> dict[str, str]:
