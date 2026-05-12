@@ -1,47 +1,42 @@
-"""SettingsTab — таб Settings с боковой навигацией.
+"""SettingsTab — таб Settings на основе DiffScrollTabLayout.
 
-Загружает config/system.yaml, авто-генерирует форму через RegisterView
-(фабрика форм из T2), показывает группы Cards/Table, валидирует и
-сохраняет обратно в YAML. Выбор Cards/Table запоминается в UiPrefsStore.
+Layout (дифференциальный скролл):
 
-Боковая навигация (SideNavLayout) с 5 секциями:
-- Администрация (заглушка)
-- Настройки системы (RegisterView + кнопки сохранения)
-- Настройка интерфейса (заглушка)
-- Оформление (заглушка)
-- История (заглушка)
+    ┌──────────────┬──────────────┬────────────────────┬───┐
+    │  [scroll]    │ ┌──────────┐ │  [scroll]          │ █ │
+    │  Actions     │ │Настройки │ │  Content            │ █ │
+    │  (120px)     │ └──────────┘ │  (QStackedWidget)  │   │
+    │  Toggle      │  [scroll]    │                    │   │
+    │  Сбросить    │  ▾ Админ     │                    │   │
+    │  Сохранить   │    Users...  │                    │   │
+    │              │  Настр.сист. │                    │   │
+    ├──────────────┤  Интерфейс   │                    │   │
+    │ [static]     │  Оформление  │                    │   │
+    │  [◀]  [▶]   │  История     │                    │   │
+    └──────────────┴──────────────┴────────────────────┴───┘
 
-Layout:
-    QVBoxLayout
-      +-- QHBoxLayout (header)
-      |     +-- QLabel "Настройки"
-      |     +-- stretch
-      +-- SideNavLayout (stretch=1)
-            nav (200px):              stack:
-            ┌──────────────┐          ┌──────────────────────────┐
-            │Администрация │          │ placeholder / content    │
-            │Наст. системы │←default  │                          │
-            │Наст. интерф. │          │                          │
-            │Оформление    │          │                          │
-            │История       │          │                          │
-            └──────────────┘          └──────────────────────────┘
+Один мастер-скроллбар. Каждая колонка останавливается на своей высоте.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import pydantic
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -50,13 +45,16 @@ from multiprocess_prototype.frontend.forms import RegisterView, ViewMode
 from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewModeToggle
 from multiprocess_prototype.frontend.prefs.store import UiPrefsStore
-from multiprocess_prototype.frontend.widgets.primitives import SideNavLayout
+from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
+    DiffScrollTabLayout,
+)
 
 from .yaml_io import SETTINGS_PATH, load_settings, save_settings, schema_to_field_infos
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
 
+logger = logging.getLogger(__name__)
 
 # Русские названия секций для group-box (RegisterView)
 _SECTION_TITLES: dict[str, str] = {
@@ -67,86 +65,57 @@ _SECTION_TITLES: dict[str, str] = {
     "storage": "Хранение",
 }
 
-# Секции боковой навигации (key, title)
-_NAV_SECTIONS: list[tuple[str, str]] = [
-    ("administration", "Администрация"),
-    ("system_settings", "Настройки системы"),
-    ("interface_settings", "Настройка интерфейса"),
-    ("appearance", "Оформление"),
-    ("history", "История"),
-]
-_DEFAULT_SECTION = "system_settings"
+# Ширины колонок
+_ACTION_WIDTH = 120
+_NAV_WIDTH = 230
+_NAV_ITEM_HEIGHT = 36
 
 
 class SettingsTab(QWidget):
-    """Пилотный таб Settings v2 — загрузка/редактирование/сохранение system.yaml.
-
-    Использует RegisterView для авто-генерации формы по Pydantic-схеме SystemConfig.
-    Два режима отображения: Cards / Table, выбор запоминается в UiPrefsStore.
+    """Таб Settings — DiffScrollTabLayout с дифференциальным скроллом.
 
     Сигналы:
-        settings_saved(dict): эмитится при успешном сохранении (передаёт dict_form)
+        settings_saved(dict): эмитится при успешном сохранении system.yaml
+        dirty_changed(bool): эмитится при смене dirty-флага (для statusBar)
     """
 
     settings_saved = Signal(dict)
+    dirty_changed = Signal(bool)
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._ctx = ctx
 
-        # ----------------------------------------------------------------
-        # Шаг 1: Загрузить конфиг и предпочтения
-        # ----------------------------------------------------------------
+        # Загрузить конфиг и предпочтения
         self._cfg = load_settings()
         self._prefs = UiPrefsStore()
         self._dirty = False
 
-        # ----------------------------------------------------------------
-        # Шаг 2-3: Получить field_infos и начальный режим
-        # ----------------------------------------------------------------
+        # Подготовить RegisterView для секции «Настройки системы»
         field_infos = schema_to_field_infos(self._cfg)
-
         try:
             initial_mode = ViewMode(self._prefs.get("settings.view_mode", "cards"))
         except ValueError:
-            # Мусор в YAML — откатываемся к Cards
             initial_mode = ViewMode.CARDS
 
-        # ----------------------------------------------------------------
-        # Шаг 4: Создать RegisterView (со встроенным ViewModeToggle — Вариант A)
-        # ----------------------------------------------------------------
         self._view = RegisterView(
             field_infos,
             initial_mode=initial_mode,
             category_titles=_SECTION_TITLES,
         )
-
-        # ----------------------------------------------------------------
-        # Шаг 5: Установить начальные значения из cfg через setter'ы
-        # ----------------------------------------------------------------
         self._init_editor_values(field_infos)
 
-        # ----------------------------------------------------------------
-        # Шаг 6: Подключить сигналы изменения полей
-        # ----------------------------------------------------------------
         for key, editor in self._view.editors().items():
             editor.change_signal.connect(self._on_field_changed)
-
-        # ----------------------------------------------------------------
-        # Шаг 6b: Подключить field_changed → ActionBus (Phase 11)
-        # ----------------------------------------------------------------
-        self._ctx = ctx
         self._view.field_changed.connect(self._on_field_changed_action_bus)
-
-        # ----------------------------------------------------------------
-        # Шаг 7: Подключить mode_changed → сохранение в prefs
-        # ----------------------------------------------------------------
         self._view.mode_changed.connect(
             lambda mode_str: self._prefs.set("settings.view_mode", mode_str)
         )
 
-        # ----------------------------------------------------------------
-        # Шаг 8: Построить layout
-        # ----------------------------------------------------------------
+        # Маппинг ключ → индекс в content stack
+        self._page_index: dict[str, int] = {}
+
+        # Построить UI
         self._setup_ui()
 
     # ------------------------------------------------------------------
@@ -163,11 +132,7 @@ class SettingsTab(QWidget):
     # ------------------------------------------------------------------
 
     def reload(self) -> None:
-        """Перечитать system.yaml и сбросить все изменения.
-
-        Возвращает все поля к on-disk значениям.
-        Сбрасывает dirty-флаг и убирает индикатор и красные рамки.
-        """
+        """Перечитать system.yaml и сбросить все изменения."""
         self._cfg = load_settings()
         field_infos = schema_to_field_infos(self._cfg)
         self._sync_editors_to_cfg(field_infos)
@@ -175,13 +140,7 @@ class SettingsTab(QWidget):
         self._set_dirty(False)
 
     def save(self) -> bool:
-        """Собрать значения из виджетов, валидировать и сохранить в YAML.
-
-        Returns:
-            True — сохранено успешно.
-            False — ошибка валидации (Pydantic), YAML не меняется.
-        """
-        # Собрать dict_form: {section: {field: value}}
+        """Собрать значения из виджетов, валидировать и сохранить в YAML."""
         dict_form: dict[str, Any] = {}
         for key, editor in self._view.editors().items():
             parts = key.split(".", 1)
@@ -192,7 +151,6 @@ class SettingsTab(QWidget):
                 dict_form[section] = {}
             dict_form[section][field_name] = editor.getter()
 
-        # Валидация через Pydantic
         try:
             from multiprocess_prototype.config.schemas import SystemConfig
             validated = SystemConfig.model_validate(dict_form)
@@ -200,7 +158,6 @@ class SettingsTab(QWidget):
             self._show_validation_errors(exc)
             return False
 
-        # Сохранить
         self._clear_validation_errors()
         save_settings(validated)
         self._cfg = validated
@@ -209,212 +166,274 @@ class SettingsTab(QWidget):
         return True
 
     def is_dirty(self) -> bool:
-        """True если есть несохранённые изменения."""
         return self._dirty
 
     def field_editors(self) -> dict[str, FieldEditor]:
-        """Словарь editors (ключи вида 'section.field')."""
         return self._view.editors()
 
     def view_mode(self) -> ViewMode:
-        """Текущий режим отображения (Cards/Table)."""
         return self._view.mode()
 
     # ------------------------------------------------------------------
-    # Внутренние
+    # UI Build
     # ------------------------------------------------------------------
 
-    def _init_editor_values(self, field_infos: list) -> None:
-        """Установить начальные значения в editors из _cfg."""
-        self._sync_editors_to_cfg(field_infos)
-
-    def _sync_editors_to_cfg(self, field_infos: list) -> None:
-        """Протолкнуть значения из _cfg в editors через setter."""
-        editors = self._view.editors()
-        for fi in field_infos:
-            section_name = fi.plugin_name   # plugin_name = section_name (см. yaml_io)
-            field_name = fi.field_name
-            key = f"{section_name}.{field_name}"
-
-            section_obj = getattr(self._cfg, section_name, None)
-            if section_obj is None:
-                continue
-
-            value = getattr(section_obj, field_name, None)
-            if value is None:
-                continue
-
-            editor = editors.get(key)
-            if editor is None:
-                continue
-
-            try:
-                editor.setter(value)
-            except Exception:
-                # Setter не смог принять значение — пропускаем
-                pass
-
-    def _on_field_changed(self) -> None:
-        """Обработчик: поле изменилось → помечаем dirty."""
-        self._set_dirty(True)
-
-    def _on_field_changed_action_bus(
-        self, register_name: str, field_name: str, old_value: object, new_value: object,
-    ) -> None:
-        """Изменение параметра настроек → ActionBus.record(field_set).
-
-        Используем record() (не execute()): секции system/camera/display — это
-        конфиг system.yaml, а не plugin-регистры. handler.apply() не нужен,
-        виджет уже содержит новое значение.
-        """
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-        action = V2ActionBuilder.field_set_timed(
-            register_name, field_name, new_value, old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.record(action)
-
-    def _set_dirty(self, dirty: bool) -> None:
-        """Установить dirty-флаг и обновить индикатор."""
-        self._dirty = dirty
-        self._dirty_label.setVisible(dirty)
-
-    def _show_validation_errors(self, exc: pydantic.ValidationError) -> None:
-        """Показать inline-ошибки под невалидными полями (красная рамка)."""
-        editors = self._view.editors()
-        for error in exc.errors():
-            loc = error.get("loc", ())
-            if len(loc) >= 2:
-                # loc = ('system', 'stop_timeout', ...)
-                key = f"{loc[0]}.{loc[1]}"
-                editor = editors.get(key)
-                if editor is not None:
-                    editor.widget.setStyleSheet("border: 1px solid red;")
-                    editor.widget.setToolTip(f"Ошибка: {error['msg']}")
-
-    def _clear_validation_errors(self) -> None:
-        """Убрать красные рамки со всех виджетов."""
-        for editor in self._view.editors().values():
-            editor.widget.setStyleSheet("")
-            editor.widget.setToolTip("")
-
     def _setup_ui(self) -> None:
-        """Построить layout таба с боковой навигацией."""
+        """Построить UI на основе DiffScrollTabLayout."""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        # Header: заголовок "Настройки"
-        header_layout = QHBoxLayout()
-        title_label = QLabel("Настройки")
-        font = title_label.font()
-        font.setPointSize(font.pointSize() + 4)
-        font.setBold(True)
-        title_label.setFont(font)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        main_layout.addLayout(header_layout)
+        # === DiffScrollTabLayout ===
+        self._diff_layout = DiffScrollTabLayout(
+            title="Настройки",
+            action_width=_ACTION_WIDTH,
+            nav_width=_NAV_WIDTH,
+        )
 
-        # Боковая навигация с секциями
-        self._side_nav = SideNavLayout()
+        # --- Левая колонка: action widget ---
+        action_widget = QWidget()
+        action_layout = QVBoxLayout(action_widget)
+        action_layout.setContentsMargins(4, 4, 4, 4)
+        action_layout.setSpacing(6)
 
-        # Виджеты секций
-        section_widgets: dict[str, QWidget] = {
-            "administration": self._build_administration_section(),
-            "system_settings": self._build_system_section(),
-            "history": self._build_history_section(),
-        }
-
-        for key, title in _NAV_SECTIONS:
-            widget = section_widgets.get(key) or self._build_placeholder(title)
-            self._side_nav.add_section(key, title, widget)
-
-        self._side_nav.set_current(_DEFAULT_SECTION)
-        main_layout.addWidget(self._side_nav, stretch=1)
-
-    def _build_administration_section(self) -> QWidget:
-        """Секция «Администрация» — реактивно зависит от прав текущего пользователя."""
-        from .administration.section import AdministrationSection
-        return AdministrationSection(self._ctx)
-
-    def _build_system_section(self) -> QWidget:
-        """Секция «Настройки системы» — RegisterView + вертикальные кнопки справа."""
-        container = QWidget()
-        columns = QHBoxLayout(container)
-        columns.setContentsMargins(0, 0, 0, 0)
-        columns.setSpacing(8)
-
-        # Скрыть встроенный toggle внутри RegisterView
+        # Тумблер Cards/Table
         self._view._toggle.hide()
-
-        # Левая часть: RegisterView + индикатор dirty
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(4)
-
-        left_layout.addWidget(self._view, stretch=1)
-
-        # Индикатор несохранённых изменений
-        self._dirty_label = QLabel("Изменения не сохранены")
-        self._dirty_label.setStyleSheet("color: orange; font-weight: bold;")
-        self._dirty_label.setVisible(False)
-        left_layout.addWidget(self._dirty_label)
-
-        columns.addWidget(left, stretch=1)
-
-        # Правая часть: тумблер Cards/Table + вертикальные кнопки
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(8)
-
-        # Тумблер Cards/Table (первый элемент)
         self._external_toggle = ViewModeToggle(initial_mode=self._view.mode())
         self._external_toggle.mode_changed.connect(
             lambda mode_str: self._view.set_mode(ViewMode(mode_str))
         )
-        btn_layout.addWidget(self._external_toggle)
+        action_layout.addWidget(self._external_toggle)
 
-        reset_btn = QPushButton("Сбросить")
-        reset_btn.setFixedWidth(100)
-        reset_btn.setToolTip("Сбросить изменения и загрузить данные с диска")
-        reset_btn.clicked.connect(self.reload)
-        btn_layout.addWidget(reset_btn)
+        # Кнопки Save/Reset
+        self._btn_reset = QPushButton("Сбросить")
+        self._btn_reset.setToolTip("Сбросить изменения и загрузить данные с диска")
+        self._btn_reset.clicked.connect(self.reload)
+        action_layout.addWidget(self._btn_reset)
 
-        save_btn = QPushButton("Сохранить")
-        save_btn.setFixedWidth(100)
-        save_btn.setToolTip("Сохранить изменения в config/system.yaml")
-        save_btn.clicked.connect(self.save)
-        btn_layout.addWidget(save_btn)
+        self._btn_save = QPushButton("Сохранить")
+        self._btn_save.setToolTip("Сохранить изменения в config/system.yaml")
+        self._btn_save.clicked.connect(self.save)
+        action_layout.addWidget(self._btn_save)
 
-        btn_layout.addStretch()
-        columns.addLayout(btn_layout)
+        action_layout.addStretch(1)
 
-        # PR3: edit-кнопки доступны только при tabs.settings.edit.
+        self._diff_layout.set_action_widget(action_widget)
+
+        # PR3: edit-кнопки — permission gate
         from multiprocess_prototype.frontend.widgets.access import gate_edit_widgets
         _auth = self._ctx.auth
         gate_edit_widgets(
-            [reset_btn, save_btn],
+            [self._btn_reset, self._btn_save],
             "tabs.settings.edit",
             _auth.state if _auth is not None else None,
         )
 
-        return container
+        # --- Средняя колонка: tree nav ---
+        self._tree_nav = QTreeWidget()
+        self._tree_nav.setObjectName("SettingsTreeNav")
+        self._tree_nav.setHeaderHidden(True)
+        self._tree_nav.setRootIsDecorated(True)
+        self._tree_nav.setIndentation(16)
+        # Отключаем встроенный скролл QTreeWidget
+        self._tree_nav.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+        self._tree_nav.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+        self._tree_nav.currentItemChanged.connect(self._on_tree_item_changed)
+        self._diff_layout.set_nav_widget(self._tree_nav)
+
+        # --- Правая колонка: content stack ---
+        self._content_stack = QStackedWidget()
+        self._diff_layout.set_content_widget(self._content_stack)
+
+        # --- Undo/Redo (статичная зона) ---
+        bus = self._ctx.action_bus()
+        self._diff_layout.enable_undo_redo(bus)
+        # Сохраняем ссылки для _refresh_undo_redo_state
+        self._btn_undo = self._diff_layout.undo_button
+        self._btn_redo = self._diff_layout.redo_button
+
+        main_layout.addWidget(self._diff_layout, stretch=1)
+
+        # === Заполнить дерево и стек контента ===
+        self._populate_tree_and_stack()
+
+        # Спрятать скроллбар у внутреннего QScrollArea в RegisterView —
+        # скроллом управляет мастер-скроллбар DiffScrollTabLayout
+        cards_scroll = self._view._cards_widget
+        if hasattr(cards_scroll, "setVerticalScrollBarPolicy"):
+            cards_scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+            )
+
+        # === Подписка ActionBus ===
+        if bus is not None:
+            bus.add_change_callback(self._refresh_history)
+            bus.add_change_callback(self._on_bus_undo_redo_sync)
+            bus.add_change_callback(self._refresh_undo_redo_state)
 
     # ------------------------------------------------------------------
-    # Секция «История» — таблица действий + кнопки Undo/Redo/Сбросить
+    # Дерево навигации + стек контента
     # ------------------------------------------------------------------
 
-    def _build_history_section(self) -> QWidget:
-        """Секция «История» — таблица действий ActionBus + управление."""
+    def _populate_tree_and_stack(self) -> None:
+        """Заполнить QTreeWidget и QStackedWidget."""
+        auth = self._ctx.auth
+        auth_state = auth.state if auth is not None else None
+
+        # --- Администрация (разворачиваемый узел) ---
+        admin_root = QTreeWidgetItem(self._tree_nav, ["Администрация"])
+        admin_root.setData(0, Qt.ItemDataRole.UserRole, "admin_dashboard")
+        admin_root.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
+        admin_root.setExpanded(True)
+
+        # AdminDashboard
+        from .administration.dashboard import AdminDashboard
+        dashboard = AdminDashboard(auth_state)
+        dashboard.navigate_to.connect(self._navigate_to_admin_section)
+        self._add_page("admin_dashboard", dashboard)
+
+        # Подразделы администрации
+        admin_children = [
+            ("users", "Пользователи"),
+            ("roles", "Роли"),
+            ("sessions", "Сессии"),
+            ("audit_log", "Audit log"),
+        ]
+        for key, title in admin_children:
+            child = QTreeWidgetItem(admin_root, [title])
+            child.setData(0, Qt.ItemDataRole.UserRole, key)
+            child.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
+
+        # Лениво создаём панели при первом переходе
+        self._lazy_admin_panels: dict[str, QWidget | None] = {
+            "users": None,
+            "roles": None,
+            "sessions": None,
+            "audit_log": None,
+        }
+
+        # --- Настройки системы ---
+        self._add_tree_item("system_settings", "Настройки системы")
+        self._add_page("system_settings", self._view)
+
+        # --- Настройка интерфейса ---
+        self._add_tree_item("interface_settings", "Настройка интерфейса")
+        from .interface_section import InterfaceSection
+        self._add_page("interface_settings", InterfaceSection(self._ctx))
+
+        # --- Оформление ---
+        self._add_tree_item("appearance", "Оформление")
+        self._add_page("appearance", self._build_appearance_widget())
+
+        # --- История ---
+        self._add_tree_item("history", "История")
+        self._add_page("history", self._build_history_widget())
+
+        # Выбрать начальную секцию
+        self._select_tree_key("system_settings")
+
+    def _add_tree_item(self, key: str, title: str) -> QTreeWidgetItem:
+        """Добавить top-level элемент в дерево."""
+        item = QTreeWidgetItem(self._tree_nav, [title])
+        item.setData(0, Qt.ItemDataRole.UserRole, key)
+        item.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
+        return item
+
+    def _add_page(self, key: str, widget: QWidget) -> int:
+        """Добавить виджет в content stack и запомнить индекс."""
+        idx = self._content_stack.addWidget(widget)
+        self._page_index[key] = idx
+        return idx
+
+    def _select_tree_key(self, key: str) -> None:
+        """Выбрать элемент дерева по ключу."""
+        iterator = self._tree_nav.invisibleRootItem()
+        item = self._find_tree_item(iterator, key)
+        if item is not None:
+            self._tree_nav.setCurrentItem(item)
+
+    def _find_tree_item(self, parent: QTreeWidgetItem, key: str) -> QTreeWidgetItem | None:
+        """Рекурсивный поиск элемента дерева по ключу в UserRole."""
+        for i in range(parent.childCount()):
+            child = parent.child(i)
+            if child.data(0, Qt.ItemDataRole.UserRole) == key:
+                return child
+            found = self._find_tree_item(child, key)
+            if found is not None:
+                return found
+        return None
+
+    def _on_tree_item_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
+        """Смена текущего элемента дерева → переключить контент."""
+        if current is None:
+            return
+        key = current.data(0, Qt.ItemDataRole.UserRole)
+        if not key:
+            return
+
+        # Ленивое создание панелей администрации
+        if key in self._lazy_admin_panels and key not in self._page_index:
+            widget = self._create_admin_panel(key)
+            if widget is not None:
+                self._add_page(key, widget)
+                self._lazy_admin_panels[key] = widget
+
+        idx = self._page_index.get(key)
+        if idx is not None:
+            self._content_stack.setCurrentIndex(idx)
+
+        # Показать/скрыть кнопки, специфичные для секции
+        is_system = (key == "system_settings")
+        self._btn_reset.setVisible(is_system)
+        self._btn_save.setVisible(is_system)
+        self._external_toggle.setVisible(is_system)
+
+    def _navigate_to_admin_section(self, key: str) -> None:
+        """Навигация из AdminDashboard → выбор дочернего узла в дереве."""
+        self._select_tree_key(key)
+
+    def _create_admin_panel(self, key: str) -> QWidget | None:
+        """Создать панель администрации по ключу (ленивая инициализация)."""
+        auth = self._ctx.auth
+        bus = self._ctx.action_bus()
+
+        if key == "users":
+            from .administration.users_panel import UsersPanel
+            return UsersPanel(auth)
+        elif key == "roles":
+            from .administration.roles_panel import RolesPanel
+            return RolesPanel(auth, bus)
+        elif key == "sessions":
+            from .administration.sessions_panel import SessionsPanel
+            return SessionsPanel(auth)
+        elif key == "audit_log":
+            from .administration.audit_log_panel import AuditLogPanel
+            return AuditLogPanel(auth)
+        return None
+
+    # ------------------------------------------------------------------
+    # Builders для секций-контентов
+    # ------------------------------------------------------------------
+
+    def _build_appearance_widget(self) -> QWidget:
+        """Виджет секции «Оформление» — редактор темы с пресетами."""
+        from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
+        from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
+        from .theme_editor_section import ThemeEditorSection
+
+        return ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
+
+    def _build_history_widget(self) -> QWidget:
+        """Виджет секции «История» — таблица действий ActionBus."""
         container = QWidget()
-        columns = QHBoxLayout(container)
-        columns.setContentsMargins(0, 0, 0, 0)
-        columns.setSpacing(8)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        # Левая часть: таблица действий
         _HISTORY_COLUMNS = ["Время", "Вкладка", "Параметр", "Значение"]
         self._history_table = QTableWidget(0, len(_HISTORY_COLUMNS))
         self._history_table.setHorizontalHeaderLabels(_HISTORY_COLUMNS)
@@ -433,101 +452,133 @@ class SettingsTab(QWidget):
             h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
             h.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
-        columns.addWidget(self._history_table, stretch=1)
+        layout.addWidget(self._history_table)
 
-        # Правая часть: кнопки управления
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(8)
-
-        self._btn_undo = QPushButton("← Назад")
-        self._btn_undo.setFixedWidth(100)
-        self._btn_undo.setToolTip("Отменить последнее действие (Ctrl+Z)")
-        self._btn_undo.setEnabled(False)
-        self._btn_undo.clicked.connect(self._on_history_undo)
-        btn_layout.addWidget(self._btn_undo)
-
-        self._btn_redo = QPushButton("Вперёд →")
-        self._btn_redo.setFixedWidth(100)
-        self._btn_redo.setToolTip("Повторить отменённое действие (Ctrl+Y)")
-        self._btn_redo.setEnabled(False)
-        self._btn_redo.clicked.connect(self._on_history_redo)
-        btn_layout.addWidget(self._btn_redo)
-
-        self._btn_clear_history = QPushButton("Сбросить")
-        self._btn_clear_history.setFixedWidth(100)
+        # Кнопка «Сбросить историю» внизу
+        btn_row = QHBoxLayout()
+        self._btn_clear_history = QPushButton("Очистить историю")
         self._btn_clear_history.setToolTip("Очистить всю историю действий")
         self._btn_clear_history.setEnabled(False)
         self._btn_clear_history.clicked.connect(self._on_history_clear)
-        btn_layout.addWidget(self._btn_clear_history)
-
-        btn_layout.addStretch()
-        columns.addLayout(btn_layout)
-
-        # Подписаться на изменения ActionBus
-        bus = self._ctx.action_bus()
-        if bus is not None:
-            bus.add_change_callback(self._refresh_history)
-            bus.add_change_callback(self._on_bus_undo_redo_sync)
+        btn_row.addWidget(self._btn_clear_history)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
 
         return container
 
-    def _refresh_history(self) -> None:
-        """Обновить таблицу истории из ActionBus."""
+    # ------------------------------------------------------------------
+    # Editors / Field sync
+    # ------------------------------------------------------------------
+
+    def _init_editor_values(self, field_infos: list) -> None:
+        self._sync_editors_to_cfg(field_infos)
+
+    def _sync_editors_to_cfg(self, field_infos: list) -> None:
+        editors = self._view.editors()
+        for fi in field_infos:
+            section_name = fi.plugin_name
+            field_name = fi.field_name
+            key = f"{section_name}.{field_name}"
+            section_obj = getattr(self._cfg, section_name, None)
+            if section_obj is None:
+                continue
+            value = getattr(section_obj, field_name, None)
+            if value is None:
+                continue
+            editor = editors.get(key)
+            if editor is None:
+                continue
+            try:
+                editor.setter(value)
+            except Exception:
+                pass
+
+    def _on_field_changed(self) -> None:
+        self._set_dirty(True)
+
+    def _on_field_changed_action_bus(
+        self, register_name: str, field_name: str, old_value: object, new_value: object,
+    ) -> None:
         bus = self._ctx.action_bus()
         if bus is None:
             return
+        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+        action = V2ActionBuilder.field_set_timed(
+            register_name, field_name, new_value, old_value,
+            description=f"{register_name}.{field_name} = {new_value}",
+        )
+        bus.record(action)
 
+    def _set_dirty(self, dirty: bool) -> None:
+        self._dirty = dirty
+        self.dirty_changed.emit(dirty)
+
+    def _show_validation_errors(self, exc: pydantic.ValidationError) -> None:
+        editors = self._view.editors()
+        for error in exc.errors():
+            loc = error.get("loc", ())
+            if len(loc) >= 2:
+                key = f"{loc[0]}.{loc[1]}"
+                editor = editors.get(key)
+                if editor is not None:
+                    editor.widget.setStyleSheet("border: 1px solid red;")
+                    editor.widget.setToolTip(f"Ошибка: {error['msg']}")
+
+    def _clear_validation_errors(self) -> None:
+        for editor in self._view.editors().values():
+            editor.widget.setStyleSheet("")
+            editor.widget.setToolTip("")
+
+    # ------------------------------------------------------------------
+    # History + Undo/Redo
+    # ------------------------------------------------------------------
+
+    def _refresh_history(self) -> None:
+        bus = self._ctx.action_bus()
+        if bus is None:
+            return
         actions = bus.history(n=50)
-
         self._history_table.setRowCount(len(actions))
         for row, action in enumerate(actions):
-            # Время
             ts = datetime.fromtimestamp(action.timestamp).strftime("%H:%M:%S")
             self._history_table.setItem(row, 0, QTableWidgetItem(ts))
-
-            # Вкладка (register_name = plugin_name / section)
             tab_name = action.register_name or action.action_type
             self._history_table.setItem(row, 1, QTableWidgetItem(tab_name))
-
-            # Параметр
             param = action.field_name or action.description
             self._history_table.setItem(row, 2, QTableWidgetItem(param))
-
-            # Значение
             value = action.forward_patch.get("value", "")
             if action.action_type == "recipe_apply":
                 value = action.forward_patch.get("recipe_name", "recipe")
             self._history_table.setItem(row, 3, QTableWidgetItem(str(value)))
-
-        # Прокрутить к последней строке
         if actions:
             self._history_table.scrollToBottom()
-
-        # Обновить состояние кнопок
-        self._btn_undo.setEnabled(bus.can_undo())
-        self._btn_redo.setEnabled(bus.can_redo())
         self._btn_clear_history.setEnabled(bus.can_undo() or bus.can_redo())
 
+    def _refresh_undo_redo_state(self) -> None:
+        bus = self._ctx.action_bus()
+        if bus is None:
+            return
+        if self._btn_undo is not None:
+            self._btn_undo.setEnabled(bus.can_undo())
+        if self._btn_redo is not None:
+            self._btn_redo.setEnabled(bus.can_redo())
+
     def _on_history_undo(self) -> None:
-        """Кнопка «Назад» — отменить последнее действие."""
         bus = self._ctx.action_bus()
         if bus is not None:
             bus.undo()
 
     def _on_history_redo(self) -> None:
-        """Кнопка «Вперёд» — повторить отменённое действие."""
         bus = self._ctx.action_bus()
         if bus is not None:
             bus.redo()
 
     def _on_history_clear(self) -> None:
-        """Кнопка «Сбросить» — очистить всю историю."""
         bus = self._ctx.action_bus()
         if bus is not None:
             bus.clear()
 
     def _on_bus_undo_redo_sync(self) -> None:
-        """Синхронизация виджетов при undo/redo (callback от ActionBus)."""
         bus = self._ctx.action_bus()
         if bus is None:
             return
@@ -548,14 +599,3 @@ class SettingsTab(QWidget):
         key = f"{register_name}.{action.field_name}"
         if key in self._view.editors():
             self._view.set_editor_value(key, value)
-
-    @staticmethod
-    def _build_placeholder(title: str) -> QWidget:
-        """Заглушка для секции, которая ещё не реализована."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        label = QLabel(f"Раздел «{title}» в разработке")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: gray; font-size: 14px;")
-        layout.addWidget(label)
-        return widget

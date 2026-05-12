@@ -774,6 +774,17 @@ QLabel#PanelTitle { font-weight: bold; font-size: 12px; }
 QLabel#PanelTitleLg { font-weight: bold; font-size: 13px; }
 QLabel#WarningBar { background-color: #FFF3CD; color: #856404; border: 1px solid #FFE69C; border-radius: 3px; padding: 4px; }
 
+/* --- DiffScrollTabLayout --- */
+QGroupBox#DiffScrollNavGroup {
+    margin-top: 10px;
+    padding: 6px 4px 4px 4px;
+    border-radius: 8px;
+}
+QGroupBox#DiffScrollNavGroup::title {
+    left: 10px;
+    top: -1px;
+}
+
 /* --- Источники --- */
 QLabel#DisplayImageLabel { background-color: black; }
 QLabel#CameraStatus { font-weight: bold; color: @text_2; }
