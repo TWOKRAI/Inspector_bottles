@@ -1,22 +1,31 @@
-"""ThemeEditorSection — редактор переменных темы оформления (v2).
+"""ThemeEditorSection — редактор переменных темы оформления (v3).
 
 Макет:
   Правая часть (контент):
     +-- Темы ───────────────────────────────────+
-    │ QTableWidget: Название | Тип              │
-    +-- Переменные темы ────────────────────────+
-    │ QTreeWidget (группы → переменные)         │
-    +───────────────────────────────────────────+
+    | QTableWidget: Название | Тип | Родительская|
+    +------------------+------------------------+
+    | Поиск...         |                        |
+    +------------------+ Таблица параметров     |
+    |                  |                        |
+    | > Глобальное     | Имя | Значение | Описан.|
+    |   Палитра        |                        |
+    |   ...            |                        |
+    | > Компоненты     |                        |
+    |   Кнопки       <-|                        |
+    |   ...            |                        |
+    +------------------+------------------------+
 
   Левая часть (action-колонка, через action_buttons()):
-    [Применить тему]   ← primary
+    [Применить тему]   <- primary
+    [Сохранить]
     [Обновить]
-    ───────────────
+    ---------------
     [Добавить]
     [Копировать]
     [Переименовать]
     [Удалить]
-    ───────────────
+    ---------------
     [По умолчанию]
     [Отменить]
 """
@@ -27,7 +36,7 @@ import re
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QPalette
 from PySide6.QtWidgets import (
     QColorDialog,
     QFrame,
@@ -35,18 +44,19 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from multiprocess_prototype.frontend.widgets.primitives import TreeNavWidget
 from multiprocess_prototype.registers.theme.schemas import (
     THEME_VAR_DESCRIPTIONS,
-    THEME_VAR_GROUPS,
+    THEME_VAR_TREE,
     ThemeVariables,
     get_default_variables,
 )
@@ -59,8 +69,16 @@ if TYPE_CHECKING:
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
+def _build_flat_nav_tree(tree: dict[str, dict[str, list[str]]]) -> dict[str, list[str]]:
+    """Конвертировать THEME_VAR_TREE в формат TreeNavWidget: {категория: [подкатегория, ...]}."""
+    result: dict[str, list[str]] = {}
+    for category, subcats in tree.items():
+        result[category] = list(subcats.keys())
+    return result
+
+
 class ThemeEditorSection(QWidget):
-    """Секция «Оформление»: таблица тем + дерево переменных + action-кнопки."""
+    """Секция 'Оформление': таблица тем + TreeNavWidget + QTableWidget переменных + action-кнопки."""
 
     def __init__(
         self,
@@ -74,12 +92,21 @@ class ThemeEditorSection(QWidget):
 
         # Текущие значения переменных (редактируемые в UI)
         self._current_vars: dict[str, str] = {}
-        # Снэпшот при загрузке/сохранении — для кнопки «Отменить»
+        # Снэпшот при загрузке/сохранении — для кнопки 'Отменить'
         self._last_saved_vars: dict[str, str] = {}
 
         # Выбранная в таблице тема
         self._selected_theme: str = ""
         self._selected_is_default: bool = False
+
+        # Текущая выбранная категория/подкатегория для навигации
+        self._current_category: str = ""
+        self._current_subcategory: str = ""
+
+        # Строка с inline color editor (-1 = не показан)
+        self._color_editor_row: int = -1
+        # Единственный экземпляр QColorDialog (переиспользуется)
+        self._color_dialog: QColorDialog | None = None
 
         self._init_buttons()
         self._init_ui()
@@ -151,7 +178,7 @@ class ThemeEditorSection(QWidget):
         ]
 
     # ------------------------------------------------------------------
-    # Инициализация UI (таблица тем + дерево переменных)
+    # Инициализация UI
     # ------------------------------------------------------------------
 
     def _init_ui(self) -> None:
@@ -193,33 +220,59 @@ class ThemeEditorSection(QWidget):
         themes_layout.addWidget(self._themes_table)
         layout.addWidget(themes_group)
 
-        # === Секция 2: Дерево переменных ===
+        # === Секция 2: Навигация + таблица переменных ===
         vars_group = QGroupBox("Переменные темы")
-        vars_layout = QVBoxLayout(vars_group)
-        vars_layout.setContentsMargins(4, 4, 4, 4)
+        vars_outer_layout = QVBoxLayout(vars_group)
+        vars_outer_layout.setContentsMargins(4, 4, 4, 4)
+        vars_outer_layout.setSpacing(4)
 
-        self._tree = QTreeWidget()
-        self._tree.setColumnCount(3)
-        self._tree.setHeaderLabels(["Параметр", "Значение", "Описание"])
-        self._tree.setAlternatingRowColors(True)
-        self._tree.setRootIsDecorated(True)
+        # Строка поиска
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Поиск переменных...")
+        self._search_input.setClearButtonEnabled(True)
+        self._search_input.textChanged.connect(self._on_search_changed)
+        vars_outer_layout.addWidget(self._search_input)
+
+        # Горизонтальный layout: TreeNavWidget слева + QTableWidget справа
+        nav_and_table_layout = QHBoxLayout()
+        nav_and_table_layout.setSpacing(8)
+
+        # Навигация (слева)
+        self._nav = TreeNavWidget(nav_width=200)
+        nav_tree = _build_flat_nav_tree(THEME_VAR_TREE)
+        self._nav.set_tree(nav_tree)
+        self._nav.leaf_selected.connect(self._on_subcategory_selected)
+        self._nav.category_selected.connect(self._on_category_selected)
+        nav_and_table_layout.addWidget(self._nav)
+
+        # Таблица переменных (справа)
+        self._vars_table = QTableWidget(0, 3)
+        self._vars_table.setHorizontalHeaderLabels(["Имя", "Значение", "Описание"])
+        self._vars_table.setAlternatingRowColors(True)
+        # Запрет редактирования по умолчанию; двойной клик — только для не-hex
+        self._vars_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._vars_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._vars_table.verticalHeader().setVisible(False)
         # Без внутреннего вертикального скролла — мастер-скролл DiffScrollTabLayout
-        self._tree.setVerticalScrollBarPolicy(
+        self._vars_table.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
 
-        header = self._tree.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.resizeSection(1, 120)
+        vh = self._vars_table.horizontalHeader()
+        vh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        vh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        vh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        vh.resizeSection(0, 180)
+        vh.resizeSection(1, 160)
 
-        vars_layout.addWidget(self._tree)
+        nav_and_table_layout.addWidget(self._vars_table, stretch=1)
+        vars_outer_layout.addLayout(nav_and_table_layout)
         layout.addWidget(vars_group)
 
-        # Сигналы дерева
-        self._tree.itemChanged.connect(self._on_item_changed)
-        self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # Сигналы таблицы переменных
+        self._vars_table.cellClicked.connect(self._on_cell_clicked)
+        self._vars_table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self._vars_table.cellChanged.connect(self._on_cell_changed)
 
         # Сигнал таблицы тем
         self._themes_table.currentCellChanged.connect(self._on_theme_selected)
@@ -242,9 +295,9 @@ class ThemeEditorSection(QWidget):
             name_item = QTableWidgetItem(name)
             kind_item = QTableWidgetItem(kind)
             parent = self._presets_manager.get_parent(name)
-            parent_item = QTableWidgetItem(parent if parent else "—")
+            parent_item = QTableWidgetItem(parent if parent else "\u2014")
 
-            # default-темы — серый текст в колонках «Тип» и «Родительская»
+            # default-темы — серый текст в колонках 'Тип' и 'Родительская'
             if kind == "default":
                 gray = QBrush(QColor("#888888"))
                 kind_item.setForeground(gray)
@@ -288,7 +341,7 @@ class ThemeEditorSection(QWidget):
     # ------------------------------------------------------------------
 
     def _load_theme(self, name: str) -> None:
-        """Загрузить переменные темы по имени и перестроить дерево."""
+        """Загрузить переменные темы по имени и перестроить таблицу."""
         variables: ThemeVariables = self._presets_manager.get_variables(name)
         # Собрать в плоский dict
         self._current_vars = {
@@ -301,88 +354,274 @@ class ThemeEditorSection(QWidget):
             if k not in self._current_vars:
                 self._current_vars[k] = v
 
-        # Снэпшот — для «Отменить»
+        # Снэпшот — для 'Отменить'
         self._last_saved_vars = dict(self._current_vars)
 
-        self._rebuild_tree()
+        self._rebuild_vars_table()
 
     # ------------------------------------------------------------------
-    # Дерево переменных
+    # Таблица переменных
     # ------------------------------------------------------------------
 
-    def _rebuild_tree(self) -> None:
-        """Перестроить QTreeWidget из текущих переменных."""
-        self._tree.blockSignals(True)
-        self._tree.clear()
+    def _get_vars_for_subcategory(self, category: str, subcategory: str) -> list[str]:
+        """Получить список имён переменных для подкатегории."""
+        return THEME_VAR_TREE.get(category, {}).get(subcategory, [])
 
-        for group_name, var_names in THEME_VAR_GROUPS.items():
-            group_item = QTreeWidgetItem(self._tree, [group_name, "", ""])
-            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            group_item.setExpanded(True)
+    def _get_vars_for_category(self, category: str) -> list[str]:
+        """Получить ВСЕ переменные из всех подкатегорий данной категории."""
+        result: list[str] = []
+        for var_list in THEME_VAR_TREE.get(category, {}).values():
+            result.extend(var_list)
+        return result
 
-            for var_name in var_names:
-                value = self._current_vars.get(var_name, "")
-                description = THEME_VAR_DESCRIPTIONS.get(var_name, "")
+    def _rebuild_vars_table(self) -> None:
+        """Перестроить QTableWidget из текущих переменных для выбранной навигации."""
+        # Закрыть inline color editor перед перестроением
+        self._close_color_editor()
 
-                child = QTreeWidgetItem(group_item, [var_name, value, description])
-                child.setFlags(
+        # Определить список переменных для отображения
+        if self._current_subcategory:
+            var_names = self._get_vars_for_subcategory(
+                self._current_category, self._current_subcategory
+            )
+        elif self._current_category:
+            var_names = self._get_vars_for_category(self._current_category)
+        else:
+            # Ничего не выбрано — показать всё из первой категории
+            first_cat = next(iter(THEME_VAR_TREE), "")
+            if first_cat:
+                var_names = self._get_vars_for_category(first_cat)
+                self._current_category = first_cat
+            else:
+                var_names = []
+
+        self._populate_vars_table(var_names)
+
+    def _populate_vars_table(self, var_names: list[str]) -> None:
+        """Заполнить таблицу переменных указанным списком имён."""
+        self._vars_table.blockSignals(True)
+        self._vars_table.setRowCount(0)
+        self._vars_table.setRowCount(len(var_names))
+
+        for row, var_name in enumerate(var_names):
+            value = self._current_vars.get(var_name, "")
+            description = THEME_VAR_DESCRIPTIONS.get(var_name, "")
+
+            # Колонка 0: Имя (не редактируемая)
+            name_item = QTableWidgetItem(var_name)
+            name_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self._vars_table.setItem(row, 0, name_item)
+
+            # Колонка 1: Значение
+            value_item = QTableWidgetItem(value)
+            if _HEX_RE.match(value):
+                # hex-цвета — не редактируемые напрямую, клик откроет color editor
+                value_item.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                )
+            else:
+                # px/rgba/шрифты — редактируемые по двойному клику
+                value_item.setFlags(
                     Qt.ItemFlag.ItemIsEnabled
                     | Qt.ItemFlag.ItemIsSelectable
                     | Qt.ItemFlag.ItemIsEditable
                 )
-                self._apply_color_hint(child, value)
+            self._vars_table.setItem(row, 1, value_item)
 
-        self._tree.blockSignals(False)
+            # Колонка 2: Описание (не редактируемая)
+            desc_item = QTableWidgetItem(description)
+            desc_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self._vars_table.setItem(row, 2, desc_item)
 
-        # Обновить фиксированную высоту дерева
-        self._update_tree_height()
+            # Превью цвета — виджет в колонке 1 (поверх текста нет — рядом)
+            self._set_color_preview(row, value)
 
-    def _update_tree_height(self) -> None:
-        """Пересчитать и установить фиксированную высоту дерева.
+        self._vars_table.blockSignals(False)
+        self._update_vars_table_height()
+
+    def _set_color_preview(self, row: int, value: str) -> None:
+        """Установить превью цвета в ячейке 'Значение' для hex-значений через QPalette."""
+        if _HEX_RE.match(value):
+            color = QColor(value)
+            # Цветной квадратик через QLabel + QPalette
+            preview = QLabel()
+            preview.setFixedSize(20, 20)
+            palette = preview.palette()
+            palette.setColor(QPalette.ColorRole.Window, color)
+            preview.setPalette(palette)
+            preview.setAutoFillBackground(True)
+            # Контейнер с горизонтальным layout для квадратика + текст
+            container = QWidget()
+            container_layout = QHBoxLayout(container)
+            container_layout.setContentsMargins(4, 2, 4, 2)
+            container_layout.setSpacing(6)
+            container_layout.addWidget(preview)
+            # Текст со значением
+            label = QLabel(value)
+            container_layout.addWidget(label)
+            container_layout.addStretch()
+            self._vars_table.setCellWidget(row, 1, container)
+        else:
+            # Для не-hex — убрать виджет, если был
+            self._vars_table.removeCellWidget(row, 1)
+
+    def _update_vars_table_height(self) -> None:
+        """Пересчитать и установить фиксированную высоту таблицы переменных.
 
         Без внутреннего скролла высота должна вмещать все строки —
         мастер-скролл DiffScrollTabLayout прокрутит всё.
         """
-        self._tree.expandAll()
-        total_h = self._tree.header().height() + 4  # +4 margin
-        root = self._tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            group = root.child(i)
-            total_h += self._tree.rowHeight(
-                self._tree.indexFromItem(group)
-            )
-            for j in range(group.childCount()):
-                total_h += self._tree.rowHeight(
-                    self._tree.indexFromItem(group.child(j))
-                )
-        self._tree.setFixedHeight(total_h)
+        header_h = self._vars_table.horizontalHeader().height()
+        row_count = self._vars_table.rowCount()
+        if row_count == 0:
+            self._vars_table.setFixedHeight(header_h + 40)
+            return
+        total_h = header_h + 4  # +4 margin
+        for r in range(row_count):
+            total_h += self._vars_table.rowHeight(r)
+        self._vars_table.setFixedHeight(total_h)
 
-    def _apply_color_hint(self, item: QTreeWidgetItem, value: str) -> None:
-        """Установить фоновый цвет ячейки «Значение» если это hex-цвет (#rrggbb)."""
-        if _HEX_RE.match(value):
-            color = QColor(value)
-            item.setBackground(1, QBrush(color))
-            luminance = (
-                0.299 * color.red()
-                + 0.587 * color.green()
-                + 0.114 * color.blue()
-            )
-            text_color = QColor("#000000") if luminance > 128 else QColor("#ffffff")
-            item.setForeground(1, QBrush(text_color))
-        else:
-            item.setData(1, Qt.ItemDataRole.BackgroundRole, None)
-            item.setData(1, Qt.ItemDataRole.ForegroundRole, None)
-
-    def _collect_vars_from_tree(self) -> dict[str, str]:
-        """Собрать текущие значения переменных из дерева."""
+    def _collect_vars_from_table(self) -> dict[str, str]:
+        """Собрать текущие значения переменных из таблицы."""
         result: dict[str, str] = {}
-        root = self._tree.invisibleRootItem()
-        for gi in range(root.childCount()):
-            group_item = root.child(gi)
-            for ci in range(group_item.childCount()):
-                child = group_item.child(ci)
-                result[child.text(0)] = child.text(1).strip()
+        for row in range(self._vars_table.rowCount()):
+            name_item = self._vars_table.item(row, 0)
+            if name_item is None:
+                continue
+            var_name = name_item.text()
+            # Проверить: если есть cellWidget (color preview), значение берём из _current_vars
+            widget = self._vars_table.cellWidget(row, 1)
+            if widget is not None:
+                # Значение из _current_vars (уже обновлено color editor'ом)
+                result[var_name] = self._current_vars.get(var_name, "")
+            else:
+                value_item = self._vars_table.item(row, 1)
+                if value_item is not None:
+                    result[var_name] = value_item.text().strip()
         return result
+
+    # ------------------------------------------------------------------
+    # Inline color editor (expandable row)
+    # ------------------------------------------------------------------
+
+    def _get_or_create_color_dialog(self) -> QColorDialog:
+        """Получить или создать единственный экземпляр QColorDialog."""
+        if self._color_dialog is None:
+            self._color_dialog = QColorDialog(self)
+            self._color_dialog.setOption(
+                QColorDialog.ColorDialogOption.NoButtons, True
+            )
+            self._color_dialog.setOption(
+                QColorDialog.ColorDialogOption.ShowAlphaChannel, False
+            )
+            self._color_dialog.currentColorChanged.connect(self._on_color_live_changed)
+        return self._color_dialog
+
+    def _open_color_editor(self, row: int) -> None:
+        """Вставить строку под row с QColorDialog (expandable inline editor)."""
+        # Закрыть предыдущий, если был
+        self._close_color_editor()
+
+        # Получить имя переменной и текущий цвет
+        name_item = self._vars_table.item(row, 0)
+        if name_item is None:
+            return
+        var_name = name_item.text()
+        current_value = self._current_vars.get(var_name, "#000000")
+        if not _HEX_RE.match(current_value):
+            return
+
+        # Запомнить строку, к которой привязан editor
+        self._color_editor_target_row = row
+        self._color_editor_var_name = var_name
+
+        # Вставить новую строку под целевой
+        editor_row = row + 1
+        self._vars_table.blockSignals(True)
+        self._vars_table.insertRow(editor_row)
+        self._color_editor_row = editor_row
+
+        # Настроить QColorDialog
+        dialog = self._get_or_create_color_dialog()
+        dialog.setCurrentColor(QColor(current_value))
+
+        # Установить QColorDialog как cellWidget, заняв все 3 колонки через span
+        self._vars_table.setSpan(editor_row, 0, 1, 3)
+        self._vars_table.setCellWidget(editor_row, 0, dialog)
+        # Высота строки под диалог
+        self._vars_table.setRowHeight(editor_row, dialog.sizeHint().height())
+        self._vars_table.blockSignals(False)
+
+        self._update_vars_table_height()
+
+    def _close_color_editor(self) -> None:
+        """Закрыть inline color editor (убрать вставленную строку)."""
+        if self._color_editor_row < 0:
+            return
+
+        row = self._color_editor_row
+        self._color_editor_row = -1
+
+        self._vars_table.blockSignals(True)
+        # ОБЯЗАТЕЛЬНО removeCellWidget перед removeRow — иначе Qt удалит QColorDialog!
+        self._vars_table.removeCellWidget(row, 0)
+        self._vars_table.setSpan(row, 0, 1, 1)  # Сбросить span
+        self._vars_table.removeRow(row)
+        self._vars_table.blockSignals(False)
+
+        self._update_vars_table_height()
+
+    def _on_color_live_changed(self, color: QColor) -> None:
+        """Live-обновление значения при изменении цвета в QColorDialog."""
+        if self._color_editor_row < 0:
+            return
+
+        hex_color = color.name()  # #rrggbb
+        var_name = getattr(self, "_color_editor_var_name", "")
+        if not var_name:
+            return
+
+        # Обновить _current_vars
+        self._current_vars[var_name] = hex_color
+
+        # Обновить превью в строке-цели
+        target_row = getattr(self, "_color_editor_target_row", -1)
+        if target_row >= 0:
+            self._set_color_preview(target_row, hex_color)
+
+    # ------------------------------------------------------------------
+    # Обработчики навигации
+    # ------------------------------------------------------------------
+
+    def _on_subcategory_selected(self, category: str, subcategory: str) -> None:
+        """Клик по подкатегории в TreeNavWidget — показать её переменные."""
+        # Собрать текущие значения перед переключением
+        self._flush_table_to_vars()
+
+        self._current_category = category
+        self._current_subcategory = subcategory
+        self._rebuild_vars_table()
+
+    def _on_category_selected(self, category: str) -> None:
+        """Клик по категории в TreeNavWidget — показать ВСЕ переменные подкатегорий."""
+        # Собрать текущие значения перед переключением
+        self._flush_table_to_vars()
+
+        self._current_category = category
+        self._current_subcategory = ""
+        self._rebuild_vars_table()
+
+    def _on_search_changed(self, text: str) -> None:
+        """Фильтрация TreeNavWidget по тексту поиска."""
+        if text.strip():
+            self._nav.filter(text.strip())
+        else:
+            self._nav.clear_filter()
+
+    def _flush_table_to_vars(self) -> None:
+        """Собрать текущие значения из таблицы в self._current_vars."""
+        current = self._collect_vars_from_table()
+        self._current_vars.update(current)
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
@@ -426,7 +665,7 @@ class ThemeEditorSection(QWidget):
         _prev_row: int,
         _prev_col: int,
     ) -> None:
-        """Клик по строке таблицы тем → загрузить переменные."""
+        """Клик по строке таблицы тем -> загрузить переменные."""
         if current_row < 0:
             return
 
@@ -443,52 +682,91 @@ class ThemeEditorSection(QWidget):
         self._load_theme(self._selected_theme)
 
     # ------------------------------------------------------------------
-    # Обработчики событий дерева переменных
+    # Обработчики событий таблицы переменных
     # ------------------------------------------------------------------
 
-    def _on_item_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        """Двойной клик на ячейку «Значение» — открыть палитру для hex-цветов."""
-        if column != 1 or item.childCount() > 0:
+    def _on_cell_clicked(self, row: int, column: int) -> None:
+        """Клик на ячейку таблицы переменных — для hex открыть color editor."""
+        # Игнорировать клик на строке color editor
+        if row == self._color_editor_row:
             return
-        current_value = item.text(1).strip()
-        if not _HEX_RE.match(current_value):
-            return
-        chosen = QColorDialog.getColor(
-            QColor(current_value),
-            self,
-            "Выберите цвет",
-            QColorDialog.ColorDialogOption.ShowAlphaChannel,
-        )
-        if chosen.isValid():
-            hex_color = chosen.name()
-            self._tree.blockSignals(True)
-            item.setText(1, hex_color)
-            self._current_vars[item.text(0)] = hex_color
-            self._apply_color_hint(item, hex_color)
-            self._tree.blockSignals(False)
 
-    def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        """Редактирование ячейки в дереве → обновить _current_vars."""
+        # Корректировать row, если color editor вставлен выше
+        actual_row = row
+        if self._color_editor_row >= 0 and row > self._color_editor_row:
+            actual_row = row - 1
+
+        # Клик на колонку 'Значение' (1) для hex
+        if column == 1:
+            name_item = self._vars_table.item(row, 0)
+            if name_item is None:
+                return
+            var_name = name_item.text()
+            value = self._current_vars.get(var_name, "")
+            if _HEX_RE.match(value):
+                # Если color editor уже открыт для этой строки — закрыть
+                if (
+                    self._color_editor_row >= 0
+                    and getattr(self, "_color_editor_target_row", -1) == row
+                ):
+                    self._close_color_editor()
+                else:
+                    self._open_color_editor(row)
+                return
+
+    def _on_cell_double_clicked(self, row: int, column: int) -> None:
+        """Двойной клик на ячейку 'Значение' — inline edit для px/rgba/шрифтов."""
+        # Игнорировать строку color editor
+        if row == self._color_editor_row:
+            return
+
         if column != 1:
             return
-        var_name = item.text(0)
-        var_value = item.text(1).strip()
+
+        name_item = self._vars_table.item(row, 0)
+        if name_item is None:
+            return
+
+        var_name = name_item.text()
+        value = self._current_vars.get(var_name, "")
+
+        # Hex-цвета обрабатываются через color editor (по клику), не по двойному клику
+        if _HEX_RE.match(value):
+            return
+
+        # Для не-hex включить редактирование ячейки
+        value_item = self._vars_table.item(row, 1)
+        if value_item is not None:
+            self._vars_table.editItem(value_item)
+
+    def _on_cell_changed(self, row: int, column: int) -> None:
+        """Редактирование ячейки в таблице -> обновить _current_vars."""
+        if column != 1:
+            return
+        # Игнорировать строку color editor
+        if row == self._color_editor_row:
+            return
+
+        name_item = self._vars_table.item(row, 0)
+        value_item = self._vars_table.item(row, 1)
+        if name_item is None or value_item is None:
+            return
+
+        var_name = name_item.text()
+        var_value = value_item.text().strip()
         self._current_vars[var_name] = var_value
-        self._tree.blockSignals(True)
-        self._apply_color_hint(item, var_value)
-        self._tree.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Обработчики кнопок action-колонки
     # ------------------------------------------------------------------
 
     def _on_apply(self) -> None:
-        """Применить тему с текущими переменными из дерева."""
+        """Применить тему с текущими переменными из таблицы."""
         # Взять первую default-тему как QSS-базу
         defaults = self._presets_manager.list_defaults()
         base_theme = defaults[0] if defaults else self._theme_manager.current_theme
 
-        current = self._collect_vars_from_tree()
+        current = self._collect_vars_from_table()
         self._current_vars.update(current)
         self._theme_manager.apply_theme_with_variables(base_theme, self._current_vars)
 
@@ -496,7 +774,7 @@ class ThemeEditorSection(QWidget):
         """Сохранить текущие переменные в выбранную custom-тему."""
         if not self._selected_theme or self._selected_is_default:
             return
-        current = self._collect_vars_from_tree()
+        current = self._collect_vars_from_table()
         self._current_vars.update(current)
         variables = ThemeVariables.model_validate(self._current_vars)
         parent = self._presets_manager.get_parent(self._selected_theme)
@@ -531,8 +809,8 @@ class ThemeEditorSection(QWidget):
                 self._presets_manager.get_parent(self._selected_theme)
                 or self._selected_theme
             )
-        # Создать на основе текущих переменных из дерева
-        current = self._collect_vars_from_tree()
+        # Создать на основе текущих переменных из таблицы
+        current = self._collect_vars_from_table()
         self._current_vars.update(current)
         variables = ThemeVariables.model_validate(self._current_vars)
         self._presets_manager.save_custom(name, variables, parent=parent)
@@ -592,4 +870,4 @@ class ThemeEditorSection(QWidget):
     def _on_revert(self) -> None:
         """Откатить переменные к последнему сохранённому состоянию."""
         self._current_vars = dict(self._last_saved_vars)
-        self._rebuild_tree()
+        self._rebuild_vars_table()

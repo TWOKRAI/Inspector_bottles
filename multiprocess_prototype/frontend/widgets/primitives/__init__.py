@@ -13,6 +13,7 @@ from .sectioned_form import SectionedForm
 from .side_nav_layout import SideNavLayout
 from .standard_tab_layout import StandardTabLayout
 from .diff_scroll_tab_layout import DiffScrollTabLayout
+from .tree_nav_widget import TreeNavWidget
 
 __all__ = [
     "StatusIndicator",
@@ -26,4 +27,5 @@ __all__ = [
     "SectionedForm",
     "StandardTabLayout",
     "DiffScrollTabLayout",
+    "TreeNavWidget",
 ]

@@ -195,3 +195,187 @@ class TestResolveQss:
         ]
         for key in expected_keys:
             assert key in variables, f"Ключ '{key}' отсутствует в variables.yaml"
+
+
+class TestSchemaYamlSync:
+    """Тесты синхронизации ThemeVariables (schema) ↔ variables.yaml."""
+
+    def _load_yaml_variables(self) -> dict[str, str]:
+        """Загрузить переменные из variables.yaml."""
+        yaml_path = _STYLES_DIR / "themes" / _THEME_NAME / "variables.yaml"
+        with open(yaml_path, encoding="utf-8") as f:
+            loaded = yaml.safe_load(f)
+        return {k: str(v) for k, v in loaded.items()}
+
+    def test_all_schema_fields_in_yaml(self) -> None:
+        """Все поля ThemeVariables.model_fields присутствуют в variables.yaml.
+
+        Проверяет синхронизацию: если добавили поле в схему, оно должно быть
+        и в yaml-файле темы, иначе подстановка не произойдёт.
+        """
+        from multiprocess_prototype.registers.theme.schemas import ThemeVariables
+
+        yaml_vars = self._load_yaml_variables()
+        schema_fields = set(ThemeVariables.model_fields.keys())
+        yaml_keys = set(yaml_vars.keys())
+
+        missing_in_yaml = schema_fields - yaml_keys
+        assert not missing_in_yaml, (
+            f"Поля схемы отсутствуют в variables.yaml: {sorted(missing_in_yaml)}"
+        )
+
+    def test_all_yaml_keys_in_schema(self) -> None:
+        """Все ключи variables.yaml присутствуют в ThemeVariables.model_fields.
+
+        Обратная проверка: если убрали поле из схемы, его не должно быть в yaml
+        (устаревшие ключи засоряют файл).
+        """
+        from multiprocess_prototype.registers.theme.schemas import ThemeVariables
+
+        yaml_vars = self._load_yaml_variables()
+        schema_fields = set(ThemeVariables.model_fields.keys())
+        yaml_keys = set(yaml_vars.keys())
+
+        extra_in_yaml = yaml_keys - schema_fields
+        assert not extra_in_yaml, (
+            f"Ключи yaml отсутствуют в схеме ThemeVariables: {sorted(extra_in_yaml)}"
+        )
+
+
+class TestQssTemplate:
+    """Тесты QSS-шаблона main.qss (до подстановки переменных)."""
+
+    def _read_template(self) -> str:
+        """Прочитать raw-шаблон main.qss без подстановки переменных."""
+        qss_path = _STYLES_DIR / "themes" / _THEME_NAME / "main.qss"
+        return qss_path.read_text(encoding="utf-8")
+
+    def _non_comment_lines(self, qss: str) -> list[str]:
+        """Вернуть строки шаблона, которые не являются QSS-комментариями.
+
+        Убирает строки внутри /* ... */ блоков.
+        Простая (строчная) фильтрация: строка является комментарием,
+        если она находится между /* и */ (многострочный блок).
+        """
+        lines = []
+        inside_comment = False
+        for line in qss.splitlines():
+            stripped = line.strip()
+            if inside_comment:
+                if "*/" in stripped:
+                    inside_comment = False
+                # Строки внутри блочного комментария пропускаем
+                continue
+            if stripped.startswith("/*"):
+                if "*/" not in stripped:
+                    # Открывающая строка многострочного комментария
+                    inside_comment = True
+                # Строки-комментарии (однострочные и открывающие) пропускаем
+                continue
+            lines.append(line)
+        return lines
+
+    def test_no_hardcoded_hex_in_template_qss(self) -> None:
+        """Шаблон main.qss не содержит хардкодных hex-цветов (кроме #fff/#000).
+
+        Допустимые литералы: #ffffff, #fff, #000, #000000.
+        Все остальные hex-цвета должны быть заменены на @-переменные.
+        """
+        import re
+
+        # Допустимые hex: белый и чёрный во всех вариантах
+        ALLOWED_HEX = {
+            "#ffffff", "#fff", "#000", "#000000",
+        }
+
+        qss = self._read_template()
+        non_comment = "\n".join(self._non_comment_lines(qss))
+
+        # Ищем все hex-литералы в не-комментарных строках
+        found = re.findall(r"#[0-9a-fA-F]{3,8}\b", non_comment)
+        forbidden = [h for h in found if h.lower() not in ALLOWED_HEX]
+
+        assert not forbidden, (
+            f"Хардкодные hex-цвета в main.qss (должны быть заменены на @-переменные): "
+            f"{sorted(set(forbidden))}"
+        )
+
+    def test_no_literal_rgba_in_template_qss(self) -> None:
+        """Шаблон main.qss не содержит литеральных rgba() вне комментариев.
+
+        Все rgba()-значения должны быть вынесены в переменные variables.yaml.
+
+        Известные исключения (xfail → known):
+            строка ~900: border: 1px solid rgba(0, 0, 0, 0.3) — QCheckBox#ViewModeSwitch.
+            Помечено как xfail до выноса в переменную (например shadow_30).
+        """
+        import re
+
+        # Известные допустимые rgba-исключения (до выноса в переменные)
+        KNOWN_EXCEPTIONS = {
+            "rgba(0, 0, 0, 0.3)",  # QCheckBox#ViewModeSwitch::indicator:checked
+        }
+
+        qss = self._read_template()
+        non_comment_lines = self._non_comment_lines(qss)
+
+        violations = []
+        for line in non_comment_lines:
+            for match in re.finditer(r"rgba\([^)]+\)", line):
+                value = match.group(0)
+                if value not in KNOWN_EXCEPTIONS:
+                    violations.append(f"  {line.strip()!r}")
+
+        assert not violations, (
+            "Литеральные rgba() в main.qss (должны быть заменены на @-переменные):\n"
+            + "\n".join(violations)
+        )
+
+
+class TestScaleTokenValues:
+    """Тесты валидности значений size/scale токенов из variables.yaml."""
+
+    def _load_yaml_variables(self) -> dict[str, str]:
+        """Загрузить переменные из variables.yaml."""
+        yaml_path = _STYLES_DIR / "themes" / _THEME_NAME / "variables.yaml"
+        with open(yaml_path, encoding="utf-8") as f:
+            loaded = yaml.safe_load(f)
+        return {k: str(v) for k, v in loaded.items()}
+
+    def test_scale_tokens_are_valid_css_values(self) -> None:
+        """Все font_*, radius_*, shadow_*, glow_* содержат корректные CSS-значения.
+
+        - font_* (кроме font_family*): формат «Npx»
+        - radius_*: формат «Npx»
+        - shadow_* и glow_*: содержат «rgba(»
+        """
+        import re
+
+        variables = self._load_yaml_variables()
+        px_pattern = re.compile(r"^\d+px$")
+        errors = []
+
+        for key, value in variables.items():
+            # font_family и font_family_mono — строки шрифтов, не px
+            if key.startswith("font_") and not key.startswith("font_family"):
+                if not px_pattern.match(value):
+                    errors.append(
+                        f"font-токен '{key}' = {value!r}: ожидается формат 'Npx'"
+                    )
+
+            elif key.startswith("radius_"):
+                if not px_pattern.match(value):
+                    errors.append(
+                        f"radius-токен '{key}' = {value!r}: ожидается формат 'Npx'"
+                    )
+
+            elif key.startswith("shadow_") or key.startswith("glow_"):
+                if "rgba(" not in value:
+                    errors.append(
+                        f"shadow/glow-токен '{key}' = {value!r}: ожидается rgba()"
+                    )
+
+        assert not errors, (
+            "Некорректные значения scale-токенов в variables.yaml:\n"
+            + "\n".join(f"  {e}" for e in errors)
+        )
