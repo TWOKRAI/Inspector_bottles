@@ -5,6 +5,10 @@
     apply_default_theme(app)      — применить innotech_theme к QApplication
     available_themes()            — список доступных тем
     create_theme_manager()        — фабрика ThemeManager (для расширенного использования)
+
+Стратегия загрузки:
+    - Если тема содержит components/ → manifest-сборка (base.qss + STYLE_MANIFEST)
+    - Иначе → fallback на read_theme() (алфавитный порядок .qss файлов)
 """
 from __future__ import annotations
 
@@ -50,25 +54,43 @@ def _load_variables(theme_name: str) -> dict[str, str]:
     return {k: str(v) for k, v in loaded.items()}
 
 
+def _has_components(theme_name: str) -> bool:
+    """Проверить наличие components/ в папке темы."""
+    return (_STYLES_DIR / "themes" / theme_name / "components").is_dir()
+
+
+def _get_manifest() -> list[str] | None:
+    """Загрузить STYLE_MANIFEST; None если модуль недоступен."""
+    try:
+        from multiprocess_prototype.frontend.styles.style_manifest import STYLE_MANIFEST
+        return STYLE_MANIFEST
+    except ImportError:
+        return None
+
+
 def load_theme(theme_name: str = "innotech_theme") -> str:
     """Загрузить QSS тему, подставив переменные из variables.yaml.
 
-    Шаги:
-      1. Читает variables.yaml из папки темы
-      2. Читает main.qss (или склеенные .qss-файлы для модульных тем)
-      3. Заменяет @variable_name на значения из yaml
-      4. Возвращает готовый QSS
+    Стратегия:
+      - Если тема содержит components/ и manifest доступен →
+        manifest-сборка (base.qss + компонентные файлы в порядке каскада)
+      - Иначе → fallback на read_theme() (все .qss по алфавиту)
 
     Raises:
         FileNotFoundError: если тема не найдена.
     """
     tm = create_theme_manager()
-    template = tm.read_theme(theme_name)
+    manifest = _get_manifest()
+
+    if manifest is not None and _has_components(theme_name):
+        template = tm.read_theme_by_manifest(theme_name, manifest)
+    else:
+        template = tm.read_theme(theme_name)
+
     if template is None:
         raise FileNotFoundError(f"Тема '{theme_name}' не найдена в {_STYLES_DIR / 'themes'}")
 
     variables = _load_variables(theme_name)
-    # Подставляем @variable_name → значение; неизвестные плейсхолдеры остаются
     resolved = re.sub(
         r"@(\w+)",
         lambda m: variables.get(m.group(1), m.group(0)),
@@ -88,10 +110,25 @@ def _register_theme_fonts(theme_name: str) -> None:
 
 
 def apply_default_theme(app: "QApplication") -> None:
-    """Применить дефолтную тему innotech_theme к QApplication."""
-    _register_theme_fonts("innotech_theme")
-    qss = load_theme("innotech_theme")
-    app.setStyleSheet(qss)
+    """Применить дефолтную тему innotech_theme к QApplication.
+
+    Использует manifest-сборку если components/ доступна,
+    иначе fallback через load_theme().
+    """
+    theme_name = "innotech_theme"
+    _register_theme_fonts(theme_name)
+
+    manifest = _get_manifest()
+    if manifest is not None and _has_components(theme_name):
+        tm = create_theme_manager()
+        variables = _load_variables(theme_name)
+        if not tm.apply_theme_by_manifest(theme_name, manifest, variables):
+            # fallback если manifest-сборка не удалась
+            qss = load_theme(theme_name)
+            app.setStyleSheet(qss)
+    else:
+        qss = load_theme(theme_name)
+        app.setStyleSheet(qss)
 
 
 def available_themes() -> list[str]:

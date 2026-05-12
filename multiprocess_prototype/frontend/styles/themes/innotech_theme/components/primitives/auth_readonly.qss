@@ -1,0 +1,23 @@
+/* === auth_readonly.qss — Auth RBAC readOnly state === */
+
+/* ===== Auth RBAC: readOnly state (PR2/PR3) ===== */
+/* Виджеты с property readOnly="true" — приглушённый вид (можно видеть, нельзя менять).
+   Qt QSS не поддерживает opacity, поэтому используем цветовое затенение и
+   контрастный фон у кнопок. */
+*[readOnly="true"] {
+    color: @text_3;
+}
+*[readOnly="true"] QLabel {
+    color: @text_3;
+}
+QPushButton[readOnly="true"] {
+    color: @text_3;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
+    border-color: @shadow_xl;
+}
+QPushButton[readOnly="true"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
+    border-color: @shadow_xl;
+}

@@ -1,0 +1,29 @@
+/* === groupbox.qss — QGroupBox === */
+
+/* ===================== GROUPBOX ===================== */
+QGroupBox {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @surf_1, stop:0.48 @grad_header_mid, stop:1 @grad_groupbox_bot);
+    border: 1px solid @shadow_2xl;
+    border-top: 1px solid @glow_2xl;
+    border-radius: @radius_lg;
+    margin-top: 16px;
+    padding: 18px 16px 14px 16px;
+    font-weight: 600;
+    color: @text_0;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 14px;
+    top: -2px;
+    padding: 3px 12px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @surf_1, stop:1 @grad_header_mid);
+    border: 1px solid @shadow_2xl;
+    border-top: 1px solid @glow_3xl;
+    border-radius: @radius_sm;
+    color: @text_0;
+    font-size: @font_sm;
+    font-weight: 600;
+}

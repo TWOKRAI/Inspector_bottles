@@ -1,0 +1,20 @@
+/* === chrome_misc.qss — InfoTickerLabel, StatusIndicator, WatchdogOverlay, RecDot, DirtyLabel, StatusHint === */
+
+/* --- Chrome --- */
+QLabel#InfoTickerLabel { color: @text_1; padding: 0 4px; background: transparent; }
+QLabel#StatusIndicator { color: @text_2; }
+QWidget#WatchdogOverlay { background-color: @watchdog_overlay_bg; border-radius: @radius_md; }
+QLabel#WatchdogOverlayLabel { font-size: @font_xxl_sm; font-weight: bold; color: @watchdog_text; background: transparent; }
+QLabel#RecDot { background-color: red; border-radius: @radius_6; }
+
+/* --- Dirty indicator (statusbar) --- */
+QLabel#DirtyLabel {
+    color: @warn;
+    font-weight: bold;
+}
+
+/* --- Topology hints --- */
+QLabel#StatusHint {
+    color: @text_3;
+    font-size: @font_sm;
+}

@@ -1,0 +1,37 @@
+/* === menu.qss — QMenuBar, QMenu === */
+
+/* ===================== MENU / MENUBAR ===================== */
+QMenuBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:1 @grad_header_bot);
+    color: @text_0;
+    border-bottom: 1px solid @shadow_3xl;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 6px 12px;
+    border-radius: @radius_sm;
+}
+QMenuBar::item:selected {
+    background: @accent_glass_md;
+    color: #ffffff;
+}
+QMenu {
+    background: @bg_mid;
+    color: @text_0;
+    border: 1px solid @shadow_5xl;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 6px 24px;
+    border-radius: @radius_sm;
+}
+QMenu::item:selected {
+    background: @accent;
+    color: #ffffff;
+}
+QMenu::separator {
+    height: 1px;
+    background: @glow_sm;
+    margin: 4px 8px;
+}

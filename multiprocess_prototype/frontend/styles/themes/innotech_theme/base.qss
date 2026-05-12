@@ -1,0 +1,61 @@
+/* =============================================================
+   INNOTECH · Silver Industrial Theme · v3.1 (PySide6-safe)
+   Глобальная QSS-тема для PySide6 / PyQt5.
+
+   Подключение:
+       from pathlib import Path
+       qss = (Path(__file__).parent / "styles" / "innotech_theme.qss").read_text(encoding="utf-8")
+       app.setStyleSheet(qss)
+
+   ВАЖНО — ограничения Qt QSS (НЕ как в HTML/CSS):
+     - text-transform НЕ поддерживается. Используй str.upper() в коде
+       или QFont.setCapitalization(QFont.AllUppercase).
+     - letter-spacing НЕ поддерживается. Используй
+       QFont.setLetterSpacing(QFont.AbsoluteSpacing, px).
+     - Псевдо-стрелки через border-трюк (width:0; border-left/right/top)
+       НЕ работают. Стрелки QComboBox/QSpinBox оставляем дефолтные Qt
+       либо назначаем image: url(...) на реальный SVG/PNG.
+     - Для корректного фона у кастомных QWidget включай атрибут
+       Qt.WA_StyledBackground (иначе background не применяется).
+
+   Палитра (см. THEME_SPEC.md):
+     bg-deep   #1a1f28   bg-mid   #2d3440   bg-hi    #4a5362   bg-hi2  #5c6573
+     surf-0    #3a414e   surf-1   #5a6370   surf-2   #6e7886   surf-deep #252a33
+     silver-hi #c8ccd4   silver   #9ea6b2   silver-lo #6a7280
+     text-0    #f2f5fa   text-1   #c0c7d2   text-2   #8a93a1   text-3  #5e6674
+     accent    #2b7fff   accent-hi #4a95ff  accent-lo #1f5fcc  accent-deep #153f8a
+     danger    #e54863   success  #2ecc8f   warn     #f0a23a
+   ============================================================= */
+
+/* === base.qss — глобальные правила темы === */
+
+/* ===================== БАЗА ===================== */
+/* НЕ ставим background: transparent для QWidget — каскадирует на
+   все дочерние виджеты и ломает фон. Прозрачность задаём точечно. */
+QWidget {
+    color: @text_0;
+    font-family: "@font_family", "Segoe UI", sans-serif;
+    font-size: @font_md;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+}
+
+QLabel {
+    background: transparent;
+}
+
+QMainWindow,
+QDialog {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:0.45 @grad_main_mid, stop:1 @grad_main_bot);
+}
+
+QToolTip {
+    color: @text_0;
+    background-color: @bg_deep;
+    border: 1px solid @accent;
+    border-radius: @radius_sm;
+    padding: 6px 10px;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_sm;
+}

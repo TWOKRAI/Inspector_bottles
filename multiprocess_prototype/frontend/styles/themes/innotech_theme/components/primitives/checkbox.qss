@@ -1,0 +1,31 @@
+/* === checkbox.qss — QCheckBox === */
+
+/* ===================== CHECKBOX ===================== */
+QCheckBox {
+    spacing: 10px;
+    color: @text_0;
+    background: transparent;
+}
+QCheckBox::indicator {
+    width: 16px; height: 16px;
+    border-radius: @radius_xs;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    border: 1px solid @shadow_4xl;
+    border-bottom: 1px solid @glow_md;
+}
+QCheckBox::indicator:hover { border: 1px solid @accent; }
+/* image: url(:/icons/check.svg) требует зарегистрированный qrc-ресурс.
+   Без него галка НЕ отрисуется. Чтобы избежать «пустого» индикатора,
+   используем сплошной акцентный фон + двойную рамку как индикацию.
+   Когда добавишь иконку галки — раскомментируй image:. */
+QCheckBox::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent_lo);
+    border: 2px solid @accent_light;
+    /* image: url(:/icons/check.svg); */
+}
+QCheckBox::indicator:disabled {
+    background: @input_disabled_bg;
+    border-color: @surf_0;
+}

@@ -1,0 +1,76 @@
+/* === typography.qss — текстовые стили, метки, заголовки === */
+
+/* ===================== ОБЩИЕ КЛАССЫ-ОБЪЕКТНЫЕ ИМЕНА ===================== */
+QLabel#Mono {
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_base;
+    color: @text_1;
+}
+QLabel#Caption {
+    font-size: @font_sm;
+    color: @text_1;
+    font-weight: 500;
+}
+QLabel#MetricValue {
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_xl;
+    color: @accent_hi;
+    font-weight: 500;
+}
+QLabel#MetricKey {
+    font-size: @font_2xs;
+    color: @text_2;
+}
+
+/* Метки каналов R/G/B для слайдеров */
+QLabel[role="ch-r"] { color: @ch_red; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-g"] { color: @ch_green; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-b"] { color: @ch_blue; font-family: "@font_family_mono", monospace; font-weight: 600; }
+
+QLabel[role="ch-value"] {
+    color: @accent_hi;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_md;
+    font-weight: 500;
+}
+
+/* --- Общие утилитарные стили --- */
+QLabel#MutedLabel { color: @text_2; }
+QLabel#HintLabel { font-size: @font_2xs; color: @text_2; }
+QLabel#HintLabelLg { font-size: @font_sm; color: @text_2; }
+QLabel#PlaceholderLabel { color: @text_2; font-size: @font_md; }
+QLabel#SectionTitle { font-weight: bold; font-size: @font_lg_sm; }
+QLabel#PanelTitle { font-weight: bold; font-size: @font_base; }
+QLabel#PanelTitleLg { font-weight: bold; font-size: @font_md; }
+QLabel#WarningBar { background-color: @warning_bar_bg; color: @warning_bar_text; border: 1px solid @warning_bar_border; border-radius: @radius_xs; padding: 4px; }
+
+/* --- Tab headers (общий objectName для всех заголовков вкладок) --- */
+QLabel#TabHeader {
+    font-size: @font_xl_sm;
+    font-weight: bold;
+}
+
+/* --- Panel headers (admin panels: audit, sessions, users) --- */
+QLabel#PanelHeader { font-weight: bold; font-size: @font_lg; }
+
+/* --- Large tab header (services tab) --- */
+QLabel#TabHeaderLg { font-weight: bold; font-size: @font_xl; }
+
+/* --- Readonly hint (roles panel, etc.) --- */
+QLabel[role="readonly-hint"] {
+    color: @text_3;
+    font-size: @font_base;
+}
+
+/* --- Placeholder italic (services tab, etc.) --- */
+QLabel[role="placeholder-italic"] {
+    color: @text_3;
+    font-size: @font_lg_sm;
+    font-style: italic;
+}
+
+/* --- Permissions hint (admin dashboard) --- */
+QLabel#PermissionsHint {
+    color: @silver;
+    font-size: @font_sm;
+}

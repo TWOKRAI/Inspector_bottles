@@ -1,0 +1,60 @@
+/* === slider.qss — QSlider (horizontal и vertical) === */
+
+/* ===================== SLIDER ===================== */
+QSlider::groove:horizontal {
+    height: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    border: 1px solid @shadow_3xl;
+    border-bottom: 1px solid @glow_sm;
+    border-radius: @radius_sm;
+}
+QSlider::sub-page:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @accent_lo, stop:1 @accent_hi);
+    border-radius: @radius_sm;
+    margin: 1px;
+}
+QSlider::add-page:horizontal {
+    background: transparent;
+}
+QSlider::handle:horizontal {
+    width: 24px;
+    height: 24px;
+    margin: -9px 0;
+    border-radius: @radius_lg;
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 #ffffff, stop:0.3 @slider_knob_hi, stop:1 @slider_knob_lo);
+    border: 1px solid @shadow_4xl;
+}
+QSlider::handle:horizontal:hover {
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 #ffffff, stop:0.3 @slider_knob_hover_hi, stop:1 @slider_knob_hover_lo);
+}
+QSlider::handle:horizontal:pressed {
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 @slider_knob_pressed_top, stop:0.3 @slider_knob_pressed_hi, stop:1 @slider_knob_pressed_lo);
+}
+
+QSlider::groove:vertical {
+    width: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    border: 1px solid @shadow_3xl;
+    border-radius: @radius_sm;
+}
+QSlider::sub-page:vertical {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent_lo);
+    border-radius: @radius_sm;
+    margin: 1px;
+}
+QSlider::handle:vertical {
+    width: 24px;
+    height: 24px;
+    margin: 0 -9px;
+    border-radius: @radius_lg;
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 #ffffff, stop:0.3 @slider_knob_hi, stop:1 @slider_knob_lo);
+    border: 1px solid @shadow_4xl;
+}

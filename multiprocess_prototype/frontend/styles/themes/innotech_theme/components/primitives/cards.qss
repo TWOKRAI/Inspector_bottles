@@ -1,0 +1,24 @@
+/* === cards.qss — ds-card + EntityCard === */
+
+/* ===================== ds-card / панель дизайн-системы ===================== */
+QFrame[role="ds-card"], QWidget[role="ds-card"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @grad_card_top, stop:1 @grad_groupbox_bot);
+    border: 1px solid @shadow_xl;
+    border-top: 1px solid @glow_2xl;
+    border-radius: @radius_xl;
+}
+
+/* --- EntityCard --- */
+QFrame#EntityCard {
+    border: 1px solid @surf_1;
+    border-radius: @radius_sm;
+    padding: 8px;
+    margin: 2px;
+}
+QLabel#EntityCardTitle {
+    font-weight: bold;
+}
+QLabel#EntityCardKey {
+    color: @text_2;
+}
