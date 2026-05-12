@@ -1,9 +1,10 @@
 """MainWindow — главное окно: AppHeader + ImagePanel-placeholder + TabWidget + StatusBar."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QPoint, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QMouseEvent, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -188,6 +189,11 @@ class MainWindow(QMainWindow):
         self._tab_widget.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
         # StatusBar
+        self._dirty_label = QLabel("")
+        self._dirty_label.setStyleSheet("color: orange; font-weight: bold;")
+        self._dirty_label.setVisible(False)
+        self.statusBar().addWidget(self._dirty_label)
+
         self._fps_label = QLabel("FPS: —")
         self._latency_label = QLabel("Latency: —")
         self._frames_label = QLabel("Frames: —")
@@ -200,6 +206,33 @@ class MainWindow(QMainWindow):
 
         # ActionBus (Phase 11) — устанавливается через set_action_bus()
         self._action_bus = None
+
+        # Восстановить позицию и размер окна из прошлой сессии
+        self._settings = QSettings("INNOTECH", "Inspector")
+        self._restore_geometry()
+
+    # -- Сохранение/восстановление геометрии окна --
+
+    def _restore_geometry(self) -> None:
+        """Восстановить позицию и размер из QSettings."""
+        geometry = self._settings.value("mainwindow/geometry")
+        if isinstance(geometry, QByteArray) and not geometry.isEmpty():
+            self.restoreGeometry(geometry)
+            # Проверка: окно может оказаться за пределами экранов
+            if QApplication.instance() is not None:
+                screen = QApplication.screenAt(self.pos())
+                if screen is None:
+                    # Экран не найден — центрируем на primary
+                    self.resize(self.size())
+
+    def _save_geometry(self) -> None:
+        """Сохранить позицию и размер в QSettings."""
+        self._settings.setValue("mainwindow/geometry", self.saveGeometry())
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Сохранить геометрию при закрытии окна."""
+        self._save_geometry()
+        super().closeEvent(event)
 
     # -- Properties --
 
@@ -457,6 +490,11 @@ class MainWindow(QMainWindow):
     def add_tab(self, widget: QWidget, title: str) -> int:
         """Добавить таб. Возвращает индекс вкладки."""
         return self._tab_widget.addTab(widget, title)
+
+    def set_dirty_indicator(self, dirty: bool) -> None:
+        """Показать/скрыть индикатор несохранённых изменений в StatusBar."""
+        self._dirty_label.setVisible(dirty)
+        self._dirty_label.setText("Изменения не сохранены" if dirty else "")
 
     def update_status(self, fps: float, latency_ms: float = 0.0) -> None:
         """Обновить StatusBar и header: fps и latency."""
