@@ -45,7 +45,7 @@ QLabel {
 QMainWindow,
 QDialog {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_hi2, stop:0.45 #3e4552, stop:1 #2a303b);
+        stop:0 @bg_hi2, stop:0.45 @grad_main_mid, stop:1 @grad_main_bot);
 }
 
 QToolTip {
@@ -63,7 +63,7 @@ QToolTip {
    Для срабатывания фона у кастомного QWidget нужен Qt.WA_StyledBackground. */
 QWidget#AppHeader {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_hi2, stop:0.55 #454c5a, stop:1 #353b47);
+        stop:0 @bg_hi2, stop:0.55 @grad_header_mid, stop:1 @grad_header_bot);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-bottom: 4px solid @accent;
     min-height: 60px;
@@ -71,7 +71,7 @@ QWidget#AppHeader {
 }
 
 QLabel#BrandLabel {
-    color: #003087;
+    color: @brand_color;
     font-family: "Square721 BdEx BT";
     font-size: @font_brand;
     font-weight: 900;
@@ -108,7 +108,7 @@ QFrame[role="status-pill"] {
 QLabel#InfoTicker,
 QFrame#InfoTicker {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_deep, stop:0.55 #252b37, stop:1 #1e242e);
+        stop:0 @bg_deep, stop:0.55 @grad_ticker_mid, stop:1 @grad_ticker_bot);
     border: 1px solid rgba(0, 0, 0, 0.65);
     border-top: 1px solid rgba(0, 0, 0, 0.65);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -122,7 +122,7 @@ QFrame#InfoTicker {
 /* ===================== КНОПКИ (.btn) ===================== */
 QPushButton {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #6a7284, stop:0.5 #4b5261, stop:1 #3a4150);
+        stop:0 @btn_grad_top, stop:0.5 @btn_grad_mid, stop:1 @btn_grad_bot);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: @radius_10;
@@ -133,18 +133,18 @@ QPushButton {
 }
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #788092, stop:0.5 #566075, stop:1 #434a5a);
+        stop:0 @btn_hover_top, stop:0.5 @btn_hover_mid, stop:1 @btn_hover_bot);
     color: #ffffff;
 }
 QPushButton:pressed {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #3a4150, stop:0.5 #4b5261, stop:1 #6a7284);
+        stop:0 @btn_grad_bot, stop:0.5 @btn_grad_mid, stop:1 @btn_grad_top);
     border-top: 1px solid rgba(0, 0, 0, 0.25);
 }
 QPushButton:disabled {
     color: @text_3;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_hi, stop:1 #353b47);
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
     border-color: rgba(0, 0, 0, 0.4);
 }
 QPushButton:focus {
@@ -156,17 +156,17 @@ QPushButton:focus {
 QPushButton[role="primary"] {
     color: #ffffff;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #5ea3ff, stop:0.5 @accent, stop:1 @accent_lo);
+        stop:0 @btn_primary_top, stop:0.5 @accent, stop:1 @accent_lo);
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-top: 1px solid rgba(255, 255, 255, 0.22);
 }
 QPushButton[role="primary"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #7ab3ff, stop:0.5 #3d8cff, stop:1 #2870e0);
+        stop:0 @btn_primary_hover_top, stop:0.5 @btn_primary_hover_mid, stop:1 @btn_primary_hover_bot);
 }
 QPushButton[role="primary"]:pressed {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @accent_lo, stop:0.5 #1a51ad, stop:1 #133a82);
+        stop:0 @accent_lo, stop:0.5 @btn_primary_pressed_mid, stop:1 @btn_primary_pressed_bot);
     border-top: 1px solid rgba(0, 0, 0, 0.35);
 }
 
@@ -174,17 +174,17 @@ QPushButton[role="primary"]:pressed {
 QPushButton[role="danger"] {
     color: #ffffff;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #b84050, stop:0.5 #8a2d3d, stop:1 #5f1f28);
+        stop:0 @btn_danger_top, stop:0.5 @btn_danger_mid, stop:1 @btn_danger_bot);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 QPushButton[role="danger"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #c8505f, stop:0.5 #9a3548, stop:1 #6e2530);
+        stop:0 @btn_danger_hover_top, stop:0.5 @btn_danger_hover_mid, stop:1 @btn_danger_hover_bot);
 }
 QPushButton[role="danger"]:pressed {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #5f1f28, stop:0.5 #8a2d3d, stop:1 #b84050);
+        stop:0 @btn_danger_bot, stop:0.5 @btn_danger_mid, stop:1 @btn_danger_top);
 }
 
 /* ghost — почти прозрачная для второстепенных действий */
@@ -203,7 +203,7 @@ QPushButton[role="ghost"]:hover {
 /* checkable / toggle */
 QPushButton:checked {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #5ea3ff, stop:0.5 @accent, stop:1 @accent_lo);
+        stop:0 @btn_primary_top, stop:0.5 @accent, stop:1 @accent_lo);
     color: #ffffff;
     border: 1px solid @accent_lo;
     border-top: 1px solid rgba(255, 255, 255, 0.22);
@@ -212,7 +212,7 @@ QPushButton:checked {
 /* ===================== GROUPBOX ===================== */
 QGroupBox {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @surf_1, stop:0.48 #454c5a, stop:1 #383e4a);
+        stop:0 @surf_1, stop:0.48 @grad_header_mid, stop:1 @grad_groupbox_bot);
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: @radius_lg;
@@ -228,7 +228,7 @@ QGroupBox::title {
     top: -2px;
     padding: 3px 12px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @surf_1, stop:1 #454c5a);
+        stop:0 @surf_1, stop:1 @grad_header_mid);
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-top: 1px solid rgba(255, 255, 255, 0.20);
     border-radius: @radius_sm;
@@ -240,7 +240,7 @@ QGroupBox::title {
 /* ===================== TABS ===================== */
 QTabWidget::pane {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #3b414d, stop:1 #333844);
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0 0 @radius_10 @radius_10;
@@ -251,12 +251,12 @@ QTabWidget::pane {
    получают тёмный градиент вместо системного белого фона. */
 QAbstractScrollArea {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #3b414d, stop:1 #333844);
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
     border: none;
 }
 QAbstractScrollArea > QWidget > QWidget {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #3b414d, stop:1 #333844);
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
 }
 QTabBar {
     background: transparent;
@@ -267,7 +267,7 @@ QTabBar {
 }
 QTabBar::tab {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a5161, stop:1 #363c49);
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
     color: @text_1;
     border: 1px solid rgba(0, 0, 0, 0.4);
     border-top: 1px solid rgba(255, 255, 255, 0.14);
@@ -281,12 +281,12 @@ QTabBar::tab {
 }
 QTabBar::tab:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #5a6272, stop:1 #434a58);
+        stop:0 @tab_hover_top, stop:1 @tab_hover_bot);
     color: @text_0;
 }
 QTabBar::tab:selected {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #6a7284, stop:1 #4f5768);
+        stop:0 @tab_selected_top, stop:1 @tab_selected_bot);
     color: @text_0;
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(255, 255, 255, 0.22);
@@ -300,7 +300,7 @@ QTabBar::tab:!selected {
 /* ===================== COMBOBOX ===================== */
 QComboBox {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #2e333d, stop:1 #1e222a);
+        stop:0 @input_combo_top, stop:1 @input_combo_bot);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: @radius_md;
@@ -326,7 +326,7 @@ QComboBox::down-arrow {
     height: 10px;
 }
 QComboBox QAbstractItemView {
-    background: #1e222a;
+    background: @input_combo_bot;
     color: @text_0;
     border: 1px solid rgba(0, 0, 0, 0.6);
     selection-background-color: @accent;
@@ -338,7 +338,7 @@ QComboBox QAbstractItemView {
 /* ===================== LINE EDIT ===================== */
 QLineEdit, QPlainTextEdit, QTextEdit {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1c2028, stop:1 #262b34);
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: @radius_md;
@@ -352,13 +352,13 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {
 }
 QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled {
     color: @text_3;
-    background: #2a2f39;
+    background: @input_disabled_bg;
 }
 
 /* ===================== SPIN BOX ===================== */
 QSpinBox, QDoubleSpinBox {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1c2028, stop:1 #262b34);
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: @radius_md;
@@ -373,7 +373,7 @@ QSpinBox::up-button, QDoubleSpinBox::up-button {
     subcontrol-position: top right;
     width: 18px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a5161, stop:1 #363c49);
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
     border: none;
     border-left: 1px solid rgba(0, 0, 0, 0.5);
     border-top-right-radius: 7px;
@@ -383,7 +383,7 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {
     subcontrol-position: bottom right;
     width: 18px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a5161, stop:1 #363c49);
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
     border: none;
     border-left: 1px solid rgba(0, 0, 0, 0.5);
     border-top: 1px solid rgba(0, 0, 0, 0.5);
@@ -392,7 +392,7 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #5a6272, stop:1 #434a58);
+        stop:0 @tab_hover_top, stop:1 @tab_hover_bot);
 }
 /* Стандартные стрелки Qt — кастомизация через border-трюк не работает.
    Для кастомной иконки — image: url(:/icons/spin-up.svg) и т.п. */
@@ -412,7 +412,7 @@ QCheckBox::indicator {
     width: 16px; height: 16px;
     border-radius: @radius_xs;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1c2028, stop:1 #262b34);
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
@@ -424,11 +424,11 @@ QCheckBox::indicator:hover { border: 1px solid @accent; }
 QCheckBox::indicator:checked {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 @accent_hi, stop:1 @accent_lo);
-    border: 2px solid #c0d4ff;
+    border: 2px solid @accent_light;
     /* image: url(:/icons/check.svg); */
 }
 QCheckBox::indicator:disabled {
-    background: #2a2f39;
+    background: @input_disabled_bg;
     border-color: @surf_0;
 }
 
@@ -442,7 +442,7 @@ QRadioButton::indicator {
     width: 16px; height: 16px;
     border-radius: @radius_md;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1c2028, stop:1 #262b34);
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
     border: 1px solid rgba(0, 0, 0, 0.55);
 }
 QRadioButton::indicator:hover { border: 1px solid @accent; }
@@ -456,7 +456,7 @@ QRadioButton::indicator:checked {
 QSlider::groove:horizontal {
     height: 8px;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1b1f27, stop:1 #2a3040);
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: @radius_sm;
@@ -476,22 +476,22 @@ QSlider::handle:horizontal {
     margin: -9px 0;
     border-radius: @radius_lg;
     background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
-        stop:0 #ffffff, stop:0.3 #d7e0ee, stop:1 #7a8aa5);
+        stop:0 #ffffff, stop:0.3 @slider_knob_hi, stop:1 @slider_knob_lo);
     border: 1px solid rgba(0, 0, 0, 0.55);
 }
 QSlider::handle:horizontal:hover {
     background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
-        stop:0 #ffffff, stop:0.3 #e0e8f4, stop:1 #8a9ab5);
+        stop:0 #ffffff, stop:0.3 @slider_knob_hover_hi, stop:1 @slider_knob_hover_lo);
 }
 QSlider::handle:horizontal:pressed {
     background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
-        stop:0 #e8eef8, stop:0.3 #c0cce0, stop:1 #6a7a95);
+        stop:0 @slider_knob_pressed_top, stop:0.3 @slider_knob_pressed_hi, stop:1 @slider_knob_pressed_lo);
 }
 
 QSlider::groove:vertical {
     width: 8px;
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #1b1f27, stop:1 #2a3040);
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-radius: @radius_sm;
 }
@@ -507,14 +507,14 @@ QSlider::handle:vertical {
     margin: 0 -9px;
     border-radius: @radius_lg;
     background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
-        stop:0 #ffffff, stop:0.3 #d7e0ee, stop:1 #7a8aa5);
+        stop:0 #ffffff, stop:0.3 @slider_knob_hi, stop:1 @slider_knob_lo);
     border: 1px solid rgba(0, 0, 0, 0.55);
 }
 
 /* ===================== PROGRESS BAR ===================== */
 QProgressBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1b1f27, stop:1 #2a3040);
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
     border: 1px solid rgba(0, 0, 0, 0.5);
     border-radius: @radius_6;
     text-align: center;
@@ -537,7 +537,7 @@ QProgressBar::chunk {
  */
 QScrollBar:vertical {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1b1f27, stop:1 #2a3040);
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
     width: 50px;
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: @radius_pill;
@@ -545,14 +545,14 @@ QScrollBar:vertical {
 }
 QScrollBar::handle:vertical {
     background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
-        stop:0 #3d4e74, stop:1 #9ab0d5);
+        stop:0 @scroll_handle_a, stop:1 @scroll_handle_b);
     border-radius: @radius_pill_sm;
     min-height: 60px;
     margin: 4px;
 }
 QScrollBar::handle:vertical:hover {
     background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
-        stop:0 #4a5b85, stop:1 #abbfe0);
+        stop:0 @scroll_handle_hover_a, stop:1 @scroll_handle_hover_b);
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
@@ -563,7 +563,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
 
 QScrollBar:horizontal {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #1b1f27, stop:1 #2a3040);
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
     height: 42px;
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: @radius_pill;
@@ -571,14 +571,14 @@ QScrollBar:horizontal {
 }
 QScrollBar::handle:horizontal {
     background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
-        stop:0 #3d4e74, stop:1 #9ab0d5);
+        stop:0 @scroll_handle_a, stop:1 @scroll_handle_b);
     border-radius: @radius_pill_sm;
     min-width: 60px;
     margin: 4px;
 }
 QScrollBar::handle:horizontal:hover {
     background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
-        stop:0 #4a5b85, stop:1 #abbfe0);
+        stop:0 @scroll_handle_hover_a, stop:1 @scroll_handle_hover_b);
 }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0;
@@ -590,7 +590,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: t
 /* ===================== MENU / MENUBAR ===================== */
 QMenuBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_hi2, stop:1 #353b47);
+        stop:0 @bg_hi2, stop:1 @grad_header_bot);
     color: @text_0;
     border-bottom: 1px solid rgba(0, 0, 0, 0.5);
 }
@@ -626,7 +626,7 @@ QMenu::separator {
 /* ===================== STATUS BAR ===================== */
 QStatusBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #353b47, stop:1 #2a303b);
+        stop:0 @grad_header_bot, stop:1 @grad_main_bot);
     color: @text_1;
     border-top: 1px solid rgba(0, 0, 0, 0.55);
 }
@@ -637,8 +637,8 @@ QStatusBar::item {
 /* ===================== TABLE / LIST / TREE ===================== */
 QTableView, QListView, QTreeView {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #1c2028, stop:1 #262b34);
-    alternate-background-color: #232833;
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    alternate-background-color: @input_alt_row;
     color: @text_0;
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-radius: @radius_6;
@@ -659,7 +659,7 @@ QHeaderView {
 }
 QHeaderView::section {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @surf_1, stop:1 #383e4a);
+        stop:0 @surf_1, stop:1 @grad_groupbox_bot);
     color: @text_0;
     padding: 6px 10px;
     border: none;
@@ -681,7 +681,7 @@ QSplitter::handle:hover { background: @accent; }
 /* ===================== FRAME / IMAGE SLOT ===================== */
 QFrame#ImageSlot, QWidget#ImageSlot {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #14171d, stop:1 #0a0c10);
+        stop:0 @slot_bg_top, stop:1 @slot_bg_bot);
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-radius: @radius_lg;
 }
@@ -697,7 +697,7 @@ QWidget#ImageSlot[role="accent-edges"] {
 /* ===================== ds-card / панель дизайн-системы ===================== */
 QFrame[role="ds-card"], QWidget[role="ds-card"] {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4c5464, stop:1 #383e4a);
+        stop:0 @grad_card_top, stop:1 @grad_groupbox_bot);
     border: 1px solid rgba(0, 0, 0, 0.4);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: @radius_xl;
@@ -710,7 +710,7 @@ QFrame[role="note"], QLabel[role="note"] {
     border: 1px solid rgba(43, 127, 255, 0.35);
     border-radius: @radius_10;
     padding: 10px 14px;
-    color: #c0d4ff;
+    color: @accent_light;
 }
 
 /* ===================== ОБЩИЕ КЛАССЫ-ОБЪЕКТНЫЕ ИМЕНА ===================== */
@@ -736,9 +736,9 @@ QLabel#MetricKey {
 }
 
 /* Метки каналов R/G/B для слайдеров */
-QLabel[role="ch-r"] { color: #ff7894; font-family: "@font_family_mono", monospace; font-weight: 600; }
-QLabel[role="ch-g"] { color: #6ae0a8; font-family: "@font_family_mono", monospace; font-weight: 600; }
-QLabel[role="ch-b"] { color: #6aa8ff; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-r"] { color: @ch_red; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-g"] { color: @ch_green; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-b"] { color: @ch_blue; font-family: "@font_family_mono", monospace; font-weight: 600; }
 
 QLabel[role="ch-value"] {
     color: @accent_hi;
@@ -755,13 +755,13 @@ QListWidget#NavList::item { padding: 10px 12px; }
 
 QListWidget#RecipeSlotList { font-size: @font_lg; }
 QListWidget#RecipeSlotList::item { padding: 10px 12px; }
-QListWidget#RecipeSlotList::item:selected { background-color: #d5e8fb; color: #000; font-weight: bold; }
+QListWidget#RecipeSlotList::item:selected { background-color: @recipe_selected_bg; color: #000; font-weight: bold; }
 
 /* --- Chrome --- */
 QLabel#InfoTickerLabel { color: @text_1; padding: 0 4px; background: transparent; }
 QLabel#StatusIndicator { color: @text_2; }
 QWidget#WatchdogOverlay { background-color: rgba(255, 200, 0, 180); border-radius: @radius_md; }
-QLabel#WatchdogOverlayLabel { font-size: @font_xxl_sm; font-weight: bold; color: #333333; background: transparent; }
+QLabel#WatchdogOverlayLabel { font-size: @font_xxl_sm; font-weight: bold; color: @watchdog_text; background: transparent; }
 QLabel#RecDot { background-color: red; border-radius: @radius_6; }
 
 /* --- Общие утилитарные стили --- */
@@ -772,7 +772,7 @@ QLabel#PlaceholderLabel { color: @text_2; font-size: @font_md; }
 QLabel#SectionTitle { font-weight: bold; font-size: @font_lg_sm; }
 QLabel#PanelTitle { font-weight: bold; font-size: @font_base; }
 QLabel#PanelTitleLg { font-weight: bold; font-size: @font_md; }
-QLabel#WarningBar { background-color: #FFF3CD; color: #856404; border: 1px solid #FFE69C; border-radius: @radius_xs; padding: 4px; }
+QLabel#WarningBar { background-color: @warning_bar_bg; color: @warning_bar_text; border: 1px solid @warning_bar_border; border-radius: @radius_xs; padding: 4px; }
 
 /* --- DiffScrollTabLayout --- */
 QGroupBox#DiffScrollNavGroup {
@@ -826,7 +826,7 @@ QLabel#StatusHint {
 
 /* --- Pipeline graph view background --- */
 QWidget#PipelineGraphView {
-    background-color: #1e1e1e;
+    background-color: @pipeline_graph_bg;
 }
 
 /* --- Theme divider line --- */
@@ -877,7 +877,7 @@ QLabel#EntityCardKey {
 /* --- Display slot / Camera view label --- */
 QLabel#DisplaySlotLabel,
 QLabel#CameraViewLabel {
-    background-color: #1a1a2e;
+    background-color: @display_slot_bg;
     color: @text_2;
     font-size: @font_xl_sm;
 }
@@ -906,12 +906,12 @@ QCheckBox#ViewModeSwitch::indicator:hover {
 /* --- Error banner rows (dynamic property level="error"|"warning") --- */
 QWidget#ErrorBannerRow[level="error"] {
     background: rgba(220, 38, 38, 0.15);
-    border-left: 3px solid #dc2626;
+    border-left: 3px solid @error_banner_border;
     padding: 4px 8px;
 }
 QWidget#ErrorBannerRow[level="warning"] {
     background: rgba(234, 179, 8, 0.15);
-    border-left: 3px solid #eab308;
+    border-left: 3px solid @warning_banner_border;
     padding: 4px 8px;
 }
 
@@ -947,12 +947,12 @@ QPushButton#SlotButton[slotState="empty"] {
     border: 1px solid @surf_1;
 }
 QPushButton#SlotButton[slotState="occupied"] {
-    background: #2d5a2d;
+    background: @slot_occupied_bg;
     color: @text_1;
     border: 1px solid @success;
 }
 QPushButton#SlotButton[slotState="selected"] {
-    background: #1a5276;
+    background: @slot_selected_bg;
     color: @text_0;
     border: 2px solid @accent;
 }
@@ -995,11 +995,11 @@ QLabel[role="plugin-name"] {
 QPushButton[readOnly="true"] {
     color: @text_3;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_hi, stop:1 #353b47);
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
     border-color: rgba(0, 0, 0, 0.4);
 }
 QPushButton[readOnly="true"]:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 @bg_hi, stop:1 #353b47);
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
     border-color: rgba(0, 0, 0, 0.4);
 }
