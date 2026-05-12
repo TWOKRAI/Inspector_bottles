@@ -1,0 +1,12 @@
+/* === statusbar.qss — QStatusBar === */
+
+/* ===================== STATUS BAR ===================== */
+QStatusBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @grad_header_bot, stop:1 @grad_main_bot);
+    color: @text_1;
+    border-top: 1px solid @shadow_4xl;
+}
+QStatusBar::item {
+    border: none;
+}

@@ -1,0 +1,26 @@
+/* === inspector.qss — InspectorPlaceholder, InspectorTitle, InspectorCategoryBadge, InspectorDivider, plugin-name === */
+
+/* --- Inspector panel --- */
+QLabel#InspectorPlaceholder {
+    color: @text_3;
+    font-style: italic;
+    padding: 20px;
+}
+QLabel#InspectorTitle {
+    font-size: @font_lg_sm;
+    font-weight: bold;
+    color: @text_0;
+}
+QLabel#InspectorCategoryBadge {
+    font-size: @font_sm;
+    padding: 2px 6px;
+    border-radius: @radius_xs;
+}
+QFrame#InspectorDivider {
+    color: @surf_1;
+}
+QLabel[role="plugin-name"] {
+    font-weight: bold;
+    color: @text_1;
+    margin-top: 4px;
+}

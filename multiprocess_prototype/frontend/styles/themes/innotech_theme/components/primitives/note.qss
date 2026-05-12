@@ -1,0 +1,11 @@
+/* === note.qss — Note-блок (info/подсказка) === */
+
+/* ===================== Note-блок (info/подсказка) ===================== */
+QFrame[role="note"], QLabel[role="note"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_glass_sm, stop:1 @accent_glass_xs);
+    border: 1px solid @accent_glass_lg;
+    border-radius: @radius_10;
+    padding: 10px 14px;
+    color: @accent_light;
+}

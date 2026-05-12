@@ -109,6 +109,80 @@ class ThemeManager:
 
         return None
 
+    def read_theme_by_manifest(self, name: str, manifest: list[str]) -> str | None:
+        """Прочитать QSS темы по манифесту: base.qss + файлы из manifest.
+
+        В отличие от read_theme() (алфавитный порядок), здесь порядок
+        определяется manifest — это критично для каскада QSS.
+
+        Args:
+            name: имя темы (поддиректория themes/)
+            manifest: список относительных путей QSS-файлов
+                      (напр. ["components/primitives/buttons.qss", ...])
+
+        Returns:
+            Собранный QSS-шаблон или None если ничего не прочитано.
+        """
+        theme_dir = self._themes_dir / name
+        parts: list[str] = []
+
+        # 1) base.qss — глобальные правила темы
+        base_path = theme_dir / "base.qss"
+        if base_path.is_file():
+            try:
+                parts.append(base_path.read_text(encoding="utf-8"))
+            except OSError as exc:
+                _logger.warning("[ThemeManager] не удалось прочитать %s: %s", base_path, exc)
+        else:
+            _logger.warning("[ThemeManager] base.qss не найден в теме '%s'", name)
+
+        # 2) Файлы из manifest в указанном порядке
+        for rel_path in manifest:
+            file_path = theme_dir / rel_path
+            if file_path.is_file():
+                try:
+                    parts.append(file_path.read_text(encoding="utf-8"))
+                except OSError as exc:
+                    _logger.warning(
+                        "[ThemeManager] не удалось прочитать %s: %s", file_path, exc
+                    )
+            else:
+                _logger.warning(
+                    "[ThemeManager] файл из manifest не найден: %s", file_path
+                )
+
+        if not parts:
+            return None
+        return "\n\n".join(parts)
+
+    def apply_theme_by_manifest(
+        self, name: str, manifest: list[str], variables: dict[str, str]
+    ) -> bool:
+        """Применить тему по манифесту к QApplication.
+
+        Args:
+            name: имя темы
+            manifest: список относительных путей QSS-файлов
+            variables: переменные для подстановки
+
+        Returns:
+            True если тема применена, False при ошибке.
+        """
+        template = self.read_theme_by_manifest(name, manifest)
+        if template is None:
+            _logger.warning("[ThemeManager] тема '%s' по manifest не собрана", name)
+            return False
+
+        app = QApplication.instance()
+        if app is None:
+            _logger.error("[ThemeManager] QApplication не создан")
+            return False
+
+        qss = self.resolve_qss(template, variables)
+        app.setStyleSheet(qss)
+        self._current_theme = name
+        return True
+
     def theme_parts(self, name: str) -> list[str]:
         """Список файлов-частей модульной темы (для UI: показать структуру)."""
         theme_dir = self._themes_dir / name

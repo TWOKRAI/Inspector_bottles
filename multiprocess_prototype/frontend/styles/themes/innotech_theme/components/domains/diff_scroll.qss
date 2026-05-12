@@ -1,0 +1,19 @@
+/* === diff_scroll.qss — DiffScrollNavGroup, DiffScrollLeft, DiffScrollRight === */
+
+/* --- DiffScrollTabLayout --- */
+QGroupBox#DiffScrollNavGroup {
+    margin-top: 10px;
+    padding: 6px 4px 4px 4px;
+    border-radius: @radius_md;
+}
+QGroupBox#DiffScrollNavGroup::title {
+    left: 10px;
+    top: -1px;
+}
+
+/* --- DiffScroll transparent ScrollArea --- */
+QScrollArea#DiffScrollLeft,
+QScrollArea#DiffScrollRight {
+    background: transparent;
+    border: none;
+}

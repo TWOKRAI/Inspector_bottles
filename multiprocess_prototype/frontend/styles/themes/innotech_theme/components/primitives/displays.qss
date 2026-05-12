@@ -1,0 +1,13 @@
+/* === displays.qss — DisplaySlotLabel, CameraViewLabel, DisplayImageLabel, CameraStatus === */
+
+/* --- Источники --- */
+QLabel#DisplayImageLabel { background-color: black; }
+QLabel#CameraStatus { font-weight: bold; color: @text_2; }
+
+/* --- Display slot / Camera view label --- */
+QLabel#DisplaySlotLabel,
+QLabel#CameraViewLabel {
+    background-color: @display_slot_bg;
+    color: @text_2;
+    font-size: @font_xl_sm;
+}

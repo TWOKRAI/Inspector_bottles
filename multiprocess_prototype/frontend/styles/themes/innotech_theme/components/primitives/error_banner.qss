@@ -1,0 +1,13 @@
+/* === error_banner.qss — Error banner rows === */
+
+/* --- Error banner rows (dynamic property level="error"|"warning") --- */
+QWidget#ErrorBannerRow[level="error"] {
+    background: @danger_glass;
+    border-left: 3px solid @error_banner_border;
+    padding: 4px 8px;
+}
+QWidget#ErrorBannerRow[level="warning"] {
+    background: @warn_glass;
+    border-left: 3px solid @warning_banner_border;
+    padding: 4px 8px;
+}
