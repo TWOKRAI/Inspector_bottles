@@ -36,23 +36,29 @@ THEME_VAR_TREE: dict[str, dict[str, list[str]]] = {
         "Скругления": ["radius_xs", "radius_sm", "radius_5", "radius_6",
                          "radius_md", "radius_10", "radius_lg", "radius_14",
                          "radius_pill_sm", "radius_xl", "radius_pill"],
-        "Тени": [],  # TODO: Task 1.3
-        "Подсветки": [],  # TODO: Task 1.3
-        "Акцент (стекло)": [],  # TODO: Task 1.3
+        "Тени": ["shadow_xs", "shadow_sm", "shadow_md", "shadow_lg", "shadow_xl",
+                  "shadow_2xl", "shadow_3xl", "shadow_4xl", "shadow_5xl", "shadow_6xl"],
+        "Подсветки": ["glow_xs", "glow_sm", "glow_md", "glow_lg",
+                       "glow_xl", "glow_2xl", "glow_3xl", "glow_4xl"],
+        "Акцент (стекло)": ["accent_glass_xs", "accent_glass_sm", "accent_glass_md",
+                              "accent_glass_lg", "accent_glass_xl", "accent_glass_2xl"],
     },
     "Компоненты": {
         "Кнопки": ["btn_grad_top", "btn_grad_mid", "btn_grad_bot",
-                    "btn_hover_top", "btn_hover_mid", "btn_hover_bot"],
+                    "btn_hover_top", "btn_hover_mid", "btn_hover_bot",
+                    "btn_min_height", "btn_padding"],
         "Кнопки Accent": ["btn_primary_top", "btn_primary_hover_top",
                            "btn_primary_hover_mid", "btn_primary_hover_bot",
                            "btn_primary_pressed_mid", "btn_primary_pressed_bot"],
         "Кнопки Danger": ["btn_danger_top", "btn_danger_mid", "btn_danger_bot",
                            "btn_danger_hover_top", "btn_danger_hover_mid", "btn_danger_hover_bot"],
         "Поля ввода": ["input_bg_top", "input_bg_bot", "input_combo_top", "input_combo_bot",
-                       "input_disabled_bg", "input_alt_row"],
+                       "input_disabled_bg", "input_alt_row",
+                       "input_min_height", "input_padding"],
         "Скроллбар": ["scroll_groove_top", "scroll_groove_bot",
                       "scroll_handle_a", "scroll_handle_b",
-                      "scroll_handle_hover_a", "scroll_handle_hover_b"],
+                      "scroll_handle_hover_a", "scroll_handle_hover_b",
+                      "scrollbar_width", "scrollbar_h_height"],
         "Слайдер": ["slider_knob_hi", "slider_knob_lo",
                     "slider_knob_hover_hi", "slider_knob_hover_lo",
                     "slider_knob_pressed_top", "slider_knob_pressed_hi", "slider_knob_pressed_lo"],
@@ -61,7 +67,7 @@ THEME_VAR_TREE: dict[str, dict[str, list[str]]] = {
                      "recipe_selected_bg"],
     },
     "Окно": {
-        "Шапка": ["brand_color", "grad_header_mid", "grad_header_bot"],
+        "Шапка": ["brand_color", "grad_header_mid", "grad_header_bot", "header_height"],
         "Фон окна": ["grad_main_mid", "grad_main_bot",
                      "grad_ticker_mid", "grad_ticker_bot"],
         "Вкладки": ["tab_bg_top", "tab_bg_bot", "tab_hover_top", "tab_hover_bot",
@@ -71,9 +77,10 @@ THEME_VAR_TREE: dict[str, dict[str, list[str]]] = {
     "Специальное": {
         "Каналы RGB": ["ch_red", "ch_green", "ch_blue"],
         "Оповещения": ["warning_bar_bg", "warning_bar_text", "warning_bar_border",
-                       "error_banner_border", "warning_banner_border"],
+                       "error_banner_border", "warning_banner_border",
+                       "danger_glass", "warn_glass"],
         "Pipeline": ["pipeline_graph_bg"],
-        "Watchdog": ["watchdog_text"],
+        "Watchdog": ["watchdog_text", "watchdog_overlay_bg"],
     },
 }
 
@@ -221,6 +228,45 @@ THEME_VAR_DESCRIPTIONS: dict[str, str] = {
     # --- Другое ---
     "pipeline_graph_bg": "Pipeline граф — фон рабочей области",
     "recipe_selected_bg": "Рецепт выбранный — фон строки",
+    # --- Тени (чёрные rgba) ---
+    "shadow_xs": "Тень xs — rgba(0,0,0, 10%)",
+    "shadow_sm": "Тень sm — rgba(0,0,0, 15%)",
+    "shadow_md": "Тень md — rgba(0,0,0, 25%)",
+    "shadow_lg": "Тень lg — rgba(0,0,0, 35%)",
+    "shadow_xl": "Тень xl — rgba(0,0,0, 40%)",
+    "shadow_2xl": "Тень 2xl — rgba(0,0,0, 45%)",
+    "shadow_3xl": "Тень 3xl — rgba(0,0,0, 50%)",
+    "shadow_4xl": "Тень 4xl — rgba(0,0,0, 55%)",
+    "shadow_5xl": "Тень 5xl — rgba(0,0,0, 60%)",
+    "shadow_6xl": "Тень 6xl — rgba(0,0,0, 65%)",
+    # --- Подсветки (белые rgba) ---
+    "glow_xs": "Подсветка xs — rgba(255,255,255, 6%)",
+    "glow_sm": "Подсветка sm — rgba(255,255,255, 8%)",
+    "glow_md": "Подсветка md — rgba(255,255,255, 10%)",
+    "glow_lg": "Подсветка lg — rgba(255,255,255, 12%)",
+    "glow_xl": "Подсветка xl — rgba(255,255,255, 14%)",
+    "glow_2xl": "Подсветка 2xl — rgba(255,255,255, 18%)",
+    "glow_3xl": "Подсветка 3xl — rgba(255,255,255, 20%)",
+    "glow_4xl": "Подсветка 4xl — rgba(255,255,255, 22%)",
+    # --- Акцент (стекло rgba) ---
+    "accent_glass_xs": "Акцент стекло xs — rgba(#2b7fff, 5%)",
+    "accent_glass_sm": "Акцент стекло sm — rgba(#2b7fff, 15%)",
+    "accent_glass_md": "Акцент стекло md — rgba(#2b7fff, 25%)",
+    "accent_glass_lg": "Акцент стекло lg — rgba(#2b7fff, 35%)",
+    "accent_glass_xl": "Акцент стекло xl — rgba(#2b7fff, 55%)",
+    "accent_glass_2xl": "Акцент стекло 2xl — rgba(#2b7fff, 75%)",
+    # --- Семантика (стекло rgba) ---
+    "danger_glass": "Опасность стекло — rgba(danger, 15%)",
+    "warn_glass": "Предупреждение стекло — rgba(warn, 15%)",
+    "watchdog_overlay_bg": "Watchdog оверлей — полупрозрачный жёлтый фон",
+    # --- Размеры компонентов ---
+    "header_height": "Шапка — высота (60px)",
+    "btn_min_height": "Кнопка — минимальная высота (22px)",
+    "btn_padding": "Кнопка — внутренние отступы (8px 20px)",
+    "input_min_height": "Поле ввода — минимальная высота (24px)",
+    "input_padding": "Поле ввода — внутренние отступы (6px 12px)",
+    "scrollbar_width": "Скроллбар вертикальный — ширина (50px)",
+    "scrollbar_h_height": "Скроллбар горизонтальный — высота (42px)",
 }
 
 
@@ -627,6 +673,118 @@ class ThemeVariables(SchemaBase):
     recipe_selected_bg: Annotated[
         str, FieldMeta("Рецепт выбран фон", info="Рецепт выбранный — фон строки")
     ] = "#d5e8fb"
+
+    # --- Тени (чёрные rgba) ---
+    shadow_xs: Annotated[
+        str, FieldMeta("Тень xs", info="Тень xs — rgba(0,0,0, 10%)")
+    ] = "rgba(0, 0, 0, 0.10)"
+    shadow_sm: Annotated[
+        str, FieldMeta("Тень sm", info="Тень sm — rgba(0,0,0, 15%)")
+    ] = "rgba(0, 0, 0, 0.15)"
+    shadow_md: Annotated[
+        str, FieldMeta("Тень md", info="Тень md — rgba(0,0,0, 25%)")
+    ] = "rgba(0, 0, 0, 0.25)"
+    shadow_lg: Annotated[
+        str, FieldMeta("Тень lg", info="Тень lg — rgba(0,0,0, 35%)")
+    ] = "rgba(0, 0, 0, 0.35)"
+    shadow_xl: Annotated[
+        str, FieldMeta("Тень xl", info="Тень xl — rgba(0,0,0, 40%)")
+    ] = "rgba(0, 0, 0, 0.40)"
+    shadow_2xl: Annotated[
+        str, FieldMeta("Тень 2xl", info="Тень 2xl — rgba(0,0,0, 45%)")
+    ] = "rgba(0, 0, 0, 0.45)"
+    shadow_3xl: Annotated[
+        str, FieldMeta("Тень 3xl", info="Тень 3xl — rgba(0,0,0, 50%)")
+    ] = "rgba(0, 0, 0, 0.50)"
+    shadow_4xl: Annotated[
+        str, FieldMeta("Тень 4xl", info="Тень 4xl — rgba(0,0,0, 55%)")
+    ] = "rgba(0, 0, 0, 0.55)"
+    shadow_5xl: Annotated[
+        str, FieldMeta("Тень 5xl", info="Тень 5xl — rgba(0,0,0, 60%)")
+    ] = "rgba(0, 0, 0, 0.60)"
+    shadow_6xl: Annotated[
+        str, FieldMeta("Тень 6xl", info="Тень 6xl — rgba(0,0,0, 65%)")
+    ] = "rgba(0, 0, 0, 0.65)"
+
+    # --- Подсветки (белые rgba) ---
+    glow_xs: Annotated[
+        str, FieldMeta("Подсветка xs", info="Подсветка xs — rgba(255,255,255, 6%)")
+    ] = "rgba(255, 255, 255, 0.06)"
+    glow_sm: Annotated[
+        str, FieldMeta("Подсветка sm", info="Подсветка sm — rgba(255,255,255, 8%)")
+    ] = "rgba(255, 255, 255, 0.08)"
+    glow_md: Annotated[
+        str, FieldMeta("Подсветка md", info="Подсветка md — rgba(255,255,255, 10%)")
+    ] = "rgba(255, 255, 255, 0.10)"
+    glow_lg: Annotated[
+        str, FieldMeta("Подсветка lg", info="Подсветка lg — rgba(255,255,255, 12%)")
+    ] = "rgba(255, 255, 255, 0.12)"
+    glow_xl: Annotated[
+        str, FieldMeta("Подсветка xl", info="Подсветка xl — rgba(255,255,255, 14%)")
+    ] = "rgba(255, 255, 255, 0.14)"
+    glow_2xl: Annotated[
+        str, FieldMeta("Подсветка 2xl", info="Подсветка 2xl — rgba(255,255,255, 18%)")
+    ] = "rgba(255, 255, 255, 0.18)"
+    glow_3xl: Annotated[
+        str, FieldMeta("Подсветка 3xl", info="Подсветка 3xl — rgba(255,255,255, 20%)")
+    ] = "rgba(255, 255, 255, 0.20)"
+    glow_4xl: Annotated[
+        str, FieldMeta("Подсветка 4xl", info="Подсветка 4xl — rgba(255,255,255, 22%)")
+    ] = "rgba(255, 255, 255, 0.22)"
+
+    # --- Акцент (стекло rgba) ---
+    accent_glass_xs: Annotated[
+        str, FieldMeta("Акцент стекло xs", info="Акцент стекло xs — rgba(#2b7fff, 5%)")
+    ] = "rgba(43, 127, 255, 0.05)"
+    accent_glass_sm: Annotated[
+        str, FieldMeta("Акцент стекло sm", info="Акцент стекло sm — rgba(#2b7fff, 15%)")
+    ] = "rgba(43, 127, 255, 0.15)"
+    accent_glass_md: Annotated[
+        str, FieldMeta("Акцент стекло md", info="Акцент стекло md — rgba(#2b7fff, 25%)")
+    ] = "rgba(43, 127, 255, 0.25)"
+    accent_glass_lg: Annotated[
+        str, FieldMeta("Акцент стекло lg", info="Акцент стекло lg — rgba(#2b7fff, 35%)")
+    ] = "rgba(43, 127, 255, 0.35)"
+    accent_glass_xl: Annotated[
+        str, FieldMeta("Акцент стекло xl", info="Акцент стекло xl — rgba(#2b7fff, 55%)")
+    ] = "rgba(43, 127, 255, 0.55)"
+    accent_glass_2xl: Annotated[
+        str, FieldMeta("Акцент стекло 2xl", info="Акцент стекло 2xl — rgba(#2b7fff, 75%)")
+    ] = "rgba(43, 127, 255, 0.75)"
+
+    # --- Семантика (стекло rgba) ---
+    danger_glass: Annotated[
+        str, FieldMeta("Опасность стекло", info="Опасность стекло — rgba(danger, 15%)")
+    ] = "rgba(220, 38, 38, 0.15)"
+    warn_glass: Annotated[
+        str, FieldMeta("Предупреждение стекло", info="Предупреждение стекло — rgba(warn, 15%)")
+    ] = "rgba(234, 179, 8, 0.15)"
+    watchdog_overlay_bg: Annotated[
+        str, FieldMeta("Watchdog оверлей фон", info="Watchdog оверлей — полупрозрачный жёлтый фон")
+    ] = "rgba(255, 200, 0, 180)"
+
+    # --- Размеры компонентов ---
+    header_height: Annotated[
+        str, FieldMeta("Высота шапки", info="Шапка — высота (60px)")
+    ] = "60px"
+    btn_min_height: Annotated[
+        str, FieldMeta("Кнопка мин. высота", info="Кнопка — минимальная высота (22px)")
+    ] = "22px"
+    btn_padding: Annotated[
+        str, FieldMeta("Кнопка отступы", info="Кнопка — внутренние отступы (8px 20px)")
+    ] = "8px 20px"
+    input_min_height: Annotated[
+        str, FieldMeta("Поле ввода мин. высота", info="Поле ввода — минимальная высота (24px)")
+    ] = "24px"
+    input_padding: Annotated[
+        str, FieldMeta("Поле ввода отступы", info="Поле ввода — внутренние отступы (6px 12px)")
+    ] = "6px 12px"
+    scrollbar_width: Annotated[
+        str, FieldMeta("Скроллбар ширина", info="Скроллбар вертикальный — ширина (50px)")
+    ] = "50px"
+    scrollbar_h_height: Annotated[
+        str, FieldMeta("Скроллбар горизонтальный высота", info="Скроллбар горизонтальный — высота (42px)")
+    ] = "42px"
 
 
 def get_default_variables() -> dict[str, str]:

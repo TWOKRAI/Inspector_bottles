@@ -161,3 +161,47 @@ watchdog_text: "#333333"
 # --- Другое ---
 pipeline_graph_bg: "#1e1e1e"
 recipe_selected_bg: "#d5e8fb"
+
+# --- Тени (чёрные rgba) ---
+shadow_xs: "rgba(0, 0, 0, 0.10)"
+shadow_sm: "rgba(0, 0, 0, 0.15)"
+shadow_md: "rgba(0, 0, 0, 0.25)"
+shadow_lg: "rgba(0, 0, 0, 0.35)"
+shadow_xl: "rgba(0, 0, 0, 0.40)"
+shadow_2xl: "rgba(0, 0, 0, 0.45)"
+shadow_3xl: "rgba(0, 0, 0, 0.50)"
+shadow_4xl: "rgba(0, 0, 0, 0.55)"
+shadow_5xl: "rgba(0, 0, 0, 0.60)"
+shadow_6xl: "rgba(0, 0, 0, 0.65)"
+
+# --- Подсветки (белые rgba) ---
+glow_xs: "rgba(255, 255, 255, 0.06)"
+glow_sm: "rgba(255, 255, 255, 0.08)"
+glow_md: "rgba(255, 255, 255, 0.10)"
+glow_lg: "rgba(255, 255, 255, 0.12)"
+glow_xl: "rgba(255, 255, 255, 0.14)"
+glow_2xl: "rgba(255, 255, 255, 0.18)"
+glow_3xl: "rgba(255, 255, 255, 0.20)"
+glow_4xl: "rgba(255, 255, 255, 0.22)"
+
+# --- Акцент (стекло rgba) ---
+accent_glass_xs: "rgba(43, 127, 255, 0.05)"
+accent_glass_sm: "rgba(43, 127, 255, 0.15)"
+accent_glass_md: "rgba(43, 127, 255, 0.25)"
+accent_glass_lg: "rgba(43, 127, 255, 0.35)"
+accent_glass_xl: "rgba(43, 127, 255, 0.55)"
+accent_glass_2xl: "rgba(43, 127, 255, 0.75)"
+
+# --- Семантика (стекло rgba) ---
+danger_glass: "rgba(220, 38, 38, 0.15)"
+warn_glass: "rgba(234, 179, 8, 0.15)"
+watchdog_overlay_bg: "rgba(255, 200, 0, 180)"
+
+# --- Размеры компонентов ---
+header_height: "60px"
+btn_min_height: "22px"
+btn_padding: "8px 20px"
+input_min_height: "24px"
+input_padding: "6px 12px"
+scrollbar_width: "50px"
+scrollbar_h_height: "42px"
