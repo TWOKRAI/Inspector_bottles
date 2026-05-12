@@ -1,5 +1,6 @@
 ---
 description: Полный цикл разработки одной командой — plan → implement → test → review → ship (с failure-recovery через debugger)
+disable-model-invocation: true
 ---
 
 Автоматический полный цикл. Director управляет каждым этапом. Явные петли failure-recovery через `debugger` и эскалация в `teamlead`.

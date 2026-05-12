@@ -14,7 +14,7 @@
 ├── CLAUDE.md              # Режимы + language policy
 ├── settings.json          # Permissions, hooks, statusLine
 ├── settings.local.json    # Локальный override (gitignored)
-├── agents/company/        # 9 агентов (manager, developer, reviewer...)
+├── agents/company/        # 10 агентов (manager, developer, reviewer, investigator...)
 ├── commands/              # 35 slash-команд по категориям
 │   ├── dev/               #   цикл разработки (8)
 │   ├── quality/           #   метрики и анализ качества (14)
@@ -23,7 +23,7 @@
 │   ├── infra/             #   инфраструктура (5)
 │   └── team/              #   команда и документация (4)
 ├── modes/                 # dev.md, spec.md
-├── hooks/                 # PreToolUse / PostToolUse скрипты
+├── hooks/                 # SessionStart / PreToolUse / PostToolUse / PostCompact
 ├── skills/                # kb-discover/, kb-lint/
 ├── mcp/                   # MCP-инфраструктура (qex, sentrux)
 ├── memory/                # Git-tracked project memory
@@ -112,6 +112,7 @@
 | `reviewer` | Opus | Код-ревью (архитектура + безопасность) |
 | `tester` | Sonnet | Тесты по acceptance criteria |
 | `debugger` | Sonnet | Диагностика падений |
+| `investigator` | Opus | Глубокое расследование архитектурных проблем (read-only) |
 | `docs-writer` | Haiku | README, STATUS, docstrings |
 | `tech-writer` | Sonnet | ADR, ARCHITECTURE, RFC |
 | `spec-writer` | Sonnet | Живое ТЗ (`docs/direction/`) |
@@ -124,9 +125,12 @@
 
 | Скрипт | Событие | Действие |
 |--------|---------|----------|
+| `session-health-check.sh` | SessionStart | Проверка Ollama (qex доступность) |
 | `validate-safe-command.sh` | PreToolUse (Bash) | Блокирует опасные команды |
 | `autoformat-python.sh` | PostToolUse (Edit/Write) | ruff format + check |
 | `check-imports.sh` | PostToolUse (Edit/Write) | py_compile (синтаксис) |
+| `filter-test-output.sh` | PostToolUse (Bash) | Фильтрация pytest — только ошибки |
+| `restore-context.sh` | PostCompact | Восстановление критических правил после сжатия контекста |
 
 ---
 

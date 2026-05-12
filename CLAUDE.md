@@ -33,6 +33,7 @@
 | Нарратив «конструктор» | `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` |
 | Настройка qex | `docs/claude/qex/README.md` (quick-start), `docs/claude/qex/SETUP_GUIDE.md` (полный) |
 | Гайд по sentrux | [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md) (метрики, slash-команды, сценарии) |
+| Path-scoped правила | [`.rules/`](.rules/) — загружаются при работе с соответствующими файлами |
 
 ## История версий и архив
 
