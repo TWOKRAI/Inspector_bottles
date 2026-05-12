@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import Qt
 
 if TYPE_CHECKING:
     from Services.auth.interfaces import IAuthManager
@@ -81,7 +82,7 @@ class UserForm(QDialog):
 
         # Метка ошибки пароля (скрыта по умолчанию)
         self._password_error_label = QLabel("")
-        self._password_error_label.setStyleSheet("color: #d32f2f; font-size: 11px;")
+        self._password_error_label.setObjectName("PasswordErrorLabel")
         self._password_error_label.setVisible(False)
         self._password_error_label.setWordWrap(True)
         form.addRow("", self._password_error_label)
@@ -110,6 +111,16 @@ class UserForm(QDialog):
         main_layout.addWidget(buttons)
 
     # ------------------------------------------------------------------
+    # Вспомогательные методы
+    # ------------------------------------------------------------------
+
+    def _set_error(self, widget: QWidget, has_error: bool) -> None:
+        """Переключить стиль ошибки валидации через QSS property."""
+        widget.setProperty("hasError", has_error)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    # ------------------------------------------------------------------
     # Публичный API
     # ------------------------------------------------------------------
 
@@ -120,7 +131,7 @@ class UserForm(QDialog):
         """
         self._password_error_label.setText(message)
         self._password_error_label.setVisible(True)
-        self._password_edit.setStyleSheet("border: 1px solid #d32f2f;")
+        self._set_error(self._password_edit, True)
         self._password_edit.setFocus()
 
     # ------------------------------------------------------------------
@@ -137,21 +148,21 @@ class UserForm(QDialog):
 
         username = self._username_edit.text().strip()
         if not username:
-            self._username_edit.setStyleSheet("border: 1px solid #d32f2f;")
+            self._set_error(self._username_edit, True)
             valid = False
         else:
-            self._username_edit.setStyleSheet("")
+            self._set_error(self._username_edit, False)
 
         password = self._password_edit.text()
         if not password:
-            self._password_edit.setStyleSheet("border: 1px solid #d32f2f;")
+            self._set_error(self._password_edit, True)
             self._password_error_label.setText("Пароль не может быть пустым")
             self._password_error_label.setVisible(True)
             valid = False
         else:
             # Не сбрасываем стиль сразу — он может быть установлен show_password_error
             if not self._password_error_label.isVisible():
-                self._password_edit.setStyleSheet("")
+                self._set_error(self._password_edit, False)
 
         return valid
 
@@ -159,7 +170,7 @@ class UserForm(QDialog):
         """Собрать result_data и закрыть диалог с accept()."""
         # Сбросить предыдущую ошибку пароля перед новой валидацией
         self._password_error_label.setVisible(False)
-        self._password_edit.setStyleSheet("")
+        self._set_error(self._password_edit, False)
 
         if not self._validate():
             return

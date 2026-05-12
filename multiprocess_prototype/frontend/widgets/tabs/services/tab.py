@@ -73,10 +73,7 @@ class ServicesTab(QWidget):
         # Header
         header_layout = QHBoxLayout()
         title_label = QLabel("Сервисы")
-        font = title_label.font()
-        font.setPointSize(font.pointSize() + 4)
-        font.setBold(True)
-        title_label.setFont(font)
+        title_label.setObjectName("TabHeaderLg")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         main_layout.addLayout(header_layout)

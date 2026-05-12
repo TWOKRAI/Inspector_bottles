@@ -558,12 +558,16 @@ class SettingsTab(QWidget):
                 key = f"{loc[0]}.{loc[1]}"
                 editor = editors.get(key)
                 if editor is not None:
-                    editor.widget.setStyleSheet("border: 1px solid red;")
+                    editor.widget.setProperty("hasError", True)
+                    editor.widget.style().unpolish(editor.widget)
+                    editor.widget.style().polish(editor.widget)
                     editor.widget.setToolTip(f"Ошибка: {error['msg']}")
 
     def _clear_validation_errors(self) -> None:
         for editor in self._view.editors().values():
-            editor.widget.setStyleSheet("")
+            editor.widget.setProperty("hasError", False)
+            editor.widget.style().unpolish(editor.widget)
+            editor.widget.style().polish(editor.widget)
             editor.widget.setToolTip("")
 
     # ------------------------------------------------------------------
