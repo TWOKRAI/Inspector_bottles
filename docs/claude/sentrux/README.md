@@ -28,15 +28,59 @@
 
 ## Установка
 
-| ОС | Команда |
-|----|---------|
-| **macOS** | `brew install sentrux/tap/sentrux` |
-| **Linux** | `curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh \| sh` |
-| **Windows** | Скачать `sentrux-windows-x86_64.exe` из [latest release](https://github.com/sentrux/sentrux/releases/latest), положить в PATH как `sentrux.exe` |
+### macOS
 
-В этом проекте установка автоматизирована — запусти `python .claude/mcp/bootstrap.py` (или просто открой проект в Claude Code, бутстрап стартует сам).
+```bash
+brew install sentrux/tap/sentrux
+```
 
-Проверка: `sentrux --version`. MCP-биндинг прописан в `.mcp.json` (бинарь запускается через `sentrux mcp`).
+Grammars скачаются при первом запуске автоматически.
+
+### Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
+```
+
+### Windows
+
+**Вариант 1 — curl (рекомендуется, если есть Rust toolchain):**
+
+```powershell
+# Скачать бинарь в ~/.cargo/bin/ (уже в PATH если Rust установлен)
+curl -L -o "%USERPROFILE%\.cargo\bin\sentrux.exe" ^
+  https://github.com/sentrux/sentrux/releases/latest/download/sentrux-windows-x86_64.exe
+
+# Проверить
+sentrux --version
+```
+
+Grammars (51 языковой парсер) скачаются при первом запуске автоматически (~30 MB).
+
+**Вариант 2 — ручная установка:**
+
+1. Скачать `sentrux-windows-x86_64.exe` из [latest release](https://github.com/sentrux/sentrux/releases/latest)
+2. Переименовать в `sentrux.exe`
+3. Положить в любую директорию из PATH (например `%USERPROFILE%\.cargo\bin\` или `%USERPROFILE%\bin\`)
+
+**Вариант 3 — bootstrap (автоматическая проверка):**
+
+```bash
+python .claude/mcp/bootstrap.py
+```
+
+Bootstrap проверит наличие sentrux и подскажет команду установки для текущей ОС.
+
+### Проверка установки
+
+```bash
+sentrux --version          # должно показать "sentrux X.Y.Z"
+sentrux check              # должно показать "Quality: NNNN" и список правил
+```
+
+### MCP-подключение
+
+MCP-биндинг прописан в `.mcp.json` (бинарь запускается через `sentrux mcp`). После установки перезапусти Claude Code и проверь: `/mcp` → sentrux должен быть зелёным.
 
 ---
 
@@ -179,17 +223,18 @@ Slash-команды выше — обёртки над этими MCP-tool'ам
 
 ## CLI (без MCP)
 
-Полезно для CI / pre-commit / скриптов:
+Полезно для CI / pre-commit / скриптов. Работает одинаково на macOS, Linux, Windows:
 
 ```bash
 sentrux                        # GUI с live-treemap (если есть дисплей)
-sentrux check .                # валидация rules.toml, exit 0/1
-sentrux gate --save .          # сохранить baseline
-sentrux gate .                 # сравнить с baseline (CI-режим)
+sentrux check                  # валидация rules.toml, exit 0/1
+sentrux gate --save            # сохранить baseline
+sentrux gate                   # сравнить с baseline (CI-режим)
 sentrux mcp                    # запустить MCP-сервер (это и делает .mcp.json)
 sentrux plugin list            # языковые плагины
-sentrux plugin add-standard    # все 52 встроенных языка
 ```
+
+> **Примечание:** в v0.5.7+ путь к проекту определяется автоматически (текущая директория). Аргумент `.` не нужен.
 
 ---
 
@@ -198,11 +243,18 @@ sentrux plugin add-standard    # все 52 встроенных языка
 **`/mcp` показывает sentrux как failed**
 
 ```bash
+# macOS / Linux
 which sentrux                  # бинарь должен быть в PATH
 sentrux mcp --help             # должно быть "Start the MCP server"
+
+# Windows (Git Bash)
+where sentrux                  # или: which sentrux
+sentrux mcp --help
 ```
 
-Если бинарь есть, но MCP всё равно падает — перезапусти Claude Code (в VS Code: `Cmd+Shift+P → Developer: Reload Window`).
+Если бинарь есть, но MCP всё равно падает — перезапусти Claude Code:
+- VS Code: `Ctrl+Shift+P` (Windows) / `Cmd+Shift+P` (macOS) → `Developer: Reload Window`
+- CLI: перезапустить терминал
 
 **`scan` слишком долгий**
 
