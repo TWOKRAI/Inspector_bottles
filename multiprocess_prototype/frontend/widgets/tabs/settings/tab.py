@@ -4,18 +4,21 @@ Layout (дифференциальный скролл):
 
     ┌──────────────┬──────────────┬────────────────────┬───┐
     │  [scroll]    │ ┌──────────┐ │  [scroll]          │ █ │
-    │  Actions     │ │Настройки │ │  Content            │ █ │
+    │  Actions     │ │Настройки │ │  Content           │ █ │
     │  (120px)     │ └──────────┘ │  (QStackedWidget)  │   │
-    │  Toggle      │  [scroll]    │                    │   │
-    │  Сбросить    │  ▾ Админ     │                    │   │
-    │  Сохранить   │    Users...  │                    │   │
-    │              │  Настр.сист. │                    │   │
-    ├──────────────┤  Интерфейс   │                    │   │
-    │ [static]     │  Оформление  │                    │   │
-    │  [◀]  [▶]   │  История     │                    │   │
+    │  QStacked    │  [scroll]    │                    │   │
+    │  Widget      │  ▾ Админ     │                    │   │
+    │  (кнопки     │    Users...  │                    │   │
+    │  меняются    │  Настр.сист. │                    │   │
+    │  по секции)  │  Интерфейс   │                    │   │
+    ├──────────────┤  Оформление  │                    │   │
+    │ [static]     │  История     │                    │   │
+    │  [◀]  [▶]   │              │                    │   │
     └──────────────┴──────────────┴────────────────────┴───┘
 
-Один мастер-скроллбар. Каждая колонка останавливается на своей высоте.
+Action-колонка содержит QStackedWidget: каждая секция регистрирует
+свою «страницу» кнопок через _register_action_page(). При переключении
+секции в дереве навигации action_stack переключается автоматически.
 """
 
 from __future__ import annotations
@@ -66,7 +69,7 @@ _SECTION_TITLES: dict[str, str] = {
 }
 
 # Ширины колонок
-_ACTION_WIDTH = 120
+_ACTION_WIDTH = 160
 _NAV_WIDTH = 230
 _NAV_ITEM_HEIGHT = 36
 
@@ -191,32 +194,37 @@ class SettingsTab(QWidget):
             nav_width=_NAV_WIDTH,
         )
 
-        # --- Левая колонка: action widget ---
+        # --- Левая колонка: action widget (QStackedWidget для кнопок секций) ---
         action_widget = QWidget()
         action_layout = QVBoxLayout(action_widget)
         action_layout.setContentsMargins(4, 4, 4, 4)
-        action_layout.setSpacing(6)
+        action_layout.setSpacing(0)
 
-        # Тумблер Cards/Table
+        self._action_stack = QStackedWidget()
+        action_layout.addWidget(self._action_stack, 1)
+
+        # Маппинг ключ секции → индекс страницы в action_stack
+        self._action_page_index: dict[str, int] = {}
+
+        # Пустая страница (для секций без кнопок)
+        self._action_page_index["_empty"] = self._action_stack.addWidget(QWidget())
+
+        # Страница «Настройки системы»: тумблер + сбросить + сохранить
         self._view._toggle.hide()
         self._external_toggle = ViewModeToggle(initial_mode=self._view.mode())
         self._external_toggle.mode_changed.connect(
             lambda mode_str: self._view.set_mode(ViewMode(mode_str))
         )
-        action_layout.addWidget(self._external_toggle)
-
-        # Кнопки Save/Reset
         self._btn_reset = QPushButton("Сбросить")
         self._btn_reset.setToolTip("Сбросить изменения и загрузить данные с диска")
         self._btn_reset.clicked.connect(self.reload)
-        action_layout.addWidget(self._btn_reset)
-
         self._btn_save = QPushButton("Сохранить")
         self._btn_save.setToolTip("Сохранить изменения в config/system.yaml")
         self._btn_save.clicked.connect(self.save)
-        action_layout.addWidget(self._btn_save)
-
-        action_layout.addStretch(1)
+        self._register_action_page(
+            "system_settings",
+            [self._external_toggle, self._btn_reset, self._btn_save],
+        )
 
         self._diff_layout.set_action_widget(action_widget)
 
@@ -386,46 +394,75 @@ class SettingsTab(QWidget):
         if idx is not None:
             self._content_stack.setCurrentIndex(idx)
 
-        # Показать/скрыть кнопки, специфичные для секции
-        is_system = (key == "system_settings")
-        self._btn_reset.setVisible(is_system)
-        self._btn_save.setVisible(is_system)
-        self._external_toggle.setVisible(is_system)
+        # Переключить кнопки в action-колонке
+        self._switch_action_buttons(key)
 
     def _navigate_to_admin_section(self, key: str) -> None:
         """Навигация из AdminDashboard → выбор дочернего узла в дереве."""
         self._select_tree_key(key)
 
     def _create_admin_panel(self, key: str) -> QWidget | None:
-        """Создать панель администрации по ключу (ленивая инициализация)."""
+        """Создать панель администрации по ключу (ленивая инициализация).
+
+        Панель создаётся, её action_buttons() регистрируются в action-колонке.
+        """
         auth = self._ctx.auth
         bus = self._ctx.action_bus()
 
+        panel: QWidget | None = None
         if key == "users":
             from .administration.users_panel import UsersPanel
-            return UsersPanel(auth)
+            panel = UsersPanel(auth)
         elif key == "roles":
             from .administration.roles_panel import RolesPanel
-            return RolesPanel(auth, bus)
+            panel = RolesPanel(auth, bus)
         elif key == "sessions":
             from .administration.sessions_panel import SessionsPanel
-            return SessionsPanel(auth)
+            panel = SessionsPanel(auth)
         elif key == "audit_log":
             from .administration.audit_log_panel import AuditLogPanel
-            return AuditLogPanel(auth)
-        return None
+            panel = AuditLogPanel(auth)
+
+        # Зарегистрировать кнопки панели в action-колонке
+        if panel is not None and hasattr(panel, "action_buttons"):
+            self._register_action_page(key, panel.action_buttons())
+
+        return panel
+
+    # ------------------------------------------------------------------
+    # Action-колонка (левая): переключение кнопок по секциям
+    # ------------------------------------------------------------------
+
+    def _register_action_page(self, key: str, widgets: list[QWidget]) -> None:
+        """Создать страницу в action_stack с виджетами и запомнить индекс."""
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(12)
+        for w in widgets:
+            page_layout.addWidget(w)
+        page_layout.addStretch(1)
+        self._action_page_index[key] = self._action_stack.addWidget(page)
+
+    def _switch_action_buttons(self, key: str) -> None:
+        """Переключить action_stack на страницу текущей секции."""
+        idx = self._action_page_index.get(key, self._action_page_index["_empty"])
+        self._action_stack.setCurrentIndex(idx)
 
     # ------------------------------------------------------------------
     # Builders для секций-контентов
     # ------------------------------------------------------------------
 
     def _build_appearance_widget(self) -> QWidget:
-        """Виджет секции «Оформление» — редактор темы с пресетами."""
+        """Виджет секции «Оформление» — редактор темы с таблицей тем и деревом переменных."""
         from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
         from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
         from .theme_editor_section import ThemeEditorSection
 
-        return ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
+        section = ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
+        # Зарегистрировать кнопки секции в action-колонке
+        self._register_action_page("appearance", section.action_buttons())
+        return section
 
     def _build_history_widget(self) -> QWidget:
         """Виджет секции «История» — таблица действий ActionBus."""
