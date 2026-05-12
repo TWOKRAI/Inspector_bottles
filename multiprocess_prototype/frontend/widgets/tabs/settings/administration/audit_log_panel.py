@@ -84,10 +84,7 @@ class AuditLogPanel(QWidget):
 
         # Заголовок
         header_label = QLabel("Audit log")
-        font = header_label.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 2)
-        header_label.setFont(font)
+        header_label.setObjectName("PanelHeader")
         root.addWidget(header_label)
 
         # Панель фильтров
@@ -165,7 +162,6 @@ class AuditLogPanel(QWidget):
 
         self._btn_prev = QPushButton("←")
         self._btn_prev.setObjectName("PaginationArrow")
-        self._btn_prev.setFixedWidth(50)
         self._btn_prev.setToolTip("Предыдущая страница")
         self._btn_prev.clicked.connect(self._on_prev_page)
         pagination_layout.addWidget(self._btn_prev)
@@ -175,7 +171,6 @@ class AuditLogPanel(QWidget):
 
         self._btn_next = QPushButton("→")
         self._btn_next.setObjectName("PaginationArrow")
-        self._btn_next.setFixedWidth(50)
         self._btn_next.setToolTip("Следующая страница")
         self._btn_next.clicked.connect(self._on_next_page)
         pagination_layout.addWidget(self._btn_next)

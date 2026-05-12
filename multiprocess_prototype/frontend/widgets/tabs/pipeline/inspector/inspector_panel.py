@@ -63,8 +63,8 @@ class NodeInspectorPanel(QWidget):
 
         # Placeholder
         self._placeholder = QLabel("Выберите узел")
+        self._placeholder.setObjectName("InspectorPlaceholder")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setStyleSheet("color: #888; font-style: italic; padding: 20px;")
         layout.addWidget(self._placeholder)
 
         # Content container (скрыт когда нет выбора)
@@ -75,18 +75,18 @@ class NodeInspectorPanel(QWidget):
 
         # Заголовок: имя процесса
         self._title = QLabel()
-        self._title.setStyleSheet("font-size: 14px; font-weight: bold; color: #fff;")
+        self._title.setObjectName("InspectorTitle")
         content_layout.addWidget(self._title)
 
         # Badge: категория
         self._category_badge = QLabel()
-        self._category_badge.setStyleSheet("font-size: 11px; padding: 2px 6px; border-radius: 3px;")
+        self._category_badge.setObjectName("InspectorCategoryBadge")
         content_layout.addWidget(self._category_badge)
 
         # Разделитель
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("color: #555;")
+        line.setObjectName("InspectorDivider")
         content_layout.addWidget(line)
 
         # Scroll area для параметров
@@ -135,7 +135,6 @@ class NodeInspectorPanel(QWidget):
             color = CATEGORY_COLORS.get(category, "#9e9e9e")
             self._category_badge.setText(category)
             self._category_badge.setStyleSheet(
-                f"font-size: 11px; padding: 2px 6px; border-radius: 3px; "
                 f"background-color: {color}; color: #fff;"
             )
 
@@ -147,7 +146,7 @@ class NodeInspectorPanel(QWidget):
                 for p in plugins:
                     pname = p.get("plugin_name", "") if isinstance(p, dict) else str(p)
                     label = QLabel(pname)
-                    label.setStyleSheet("font-weight: bold; color: #ccc; margin-top: 4px;")
+                    label.setProperty("role", "plugin-name")
                     self._params_layout.addRow(label)
 
             # Попытаться получить FieldInfo из RegistersManager

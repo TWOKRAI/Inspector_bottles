@@ -29,7 +29,7 @@ class PlaceholderTab(QWidget):
         # Метка с названием, описанием и ссылкой на будущую фазу
         label = QLabel(f"{title}\n\n{description}\n\n(Phase 10+)")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: #888; font-size: 14px;")
+        label.setObjectName("PlaceholderLabel")
         layout.addWidget(label)
 
     @property

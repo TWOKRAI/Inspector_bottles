@@ -22,12 +22,12 @@ class PluginInfoCard(QWidget):
 
         # Заголовок
         name_label = QLabel(info.get("name", ""))
-        name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        name_label.setObjectName("TabHeader")
         layout.addWidget(name_label)
 
         # Категория
         cat_label = QLabel(f"Категория: {info.get('category', '—')}")
-        cat_label.setStyleSheet("color: #aaa;")
+        cat_label.setObjectName("MutedLabel")
         layout.addWidget(cat_label)
 
         # Описание

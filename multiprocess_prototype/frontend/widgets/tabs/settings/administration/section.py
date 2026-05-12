@@ -153,6 +153,6 @@ class AdministrationSection(QWidget):
         layout = QVBoxLayout(widget)
         label = QLabel("Недостаточно прав для просмотра раздела «Администрация»")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: gray; font-size: 14px;")
+        label.setObjectName("PlaceholderLabel")
         layout.addWidget(label)
         return widget

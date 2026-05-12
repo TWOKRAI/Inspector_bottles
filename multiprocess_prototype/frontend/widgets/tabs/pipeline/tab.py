@@ -53,7 +53,7 @@ class PipelineTab(QWidget):
 
         # Заголовок
         header = QLabel("Pipeline")
-        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header.setObjectName("TabHeader")
         layout.addWidget(header)
 
         # Тулбар: расширенный

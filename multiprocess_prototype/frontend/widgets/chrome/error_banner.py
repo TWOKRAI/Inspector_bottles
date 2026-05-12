@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -13,18 +14,6 @@ from PySide6.QtWidgets import (
 
 # Максимальное количество одновременно отображаемых сообщений
 _MAX_MESSAGES = 3
-
-# QSS-стили для строк разного уровня
-_STYLE_ERROR = (
-    "background: rgba(220, 38, 38, 0.15);"
-    " border-left: 3px solid #dc2626;"
-    " padding: 4px 8px;"
-)
-_STYLE_WARNING = (
-    "background: rgba(234, 179, 8, 0.15);"
-    " border-left: 3px solid #eab308;"
-    " padding: 4px 8px;"
-)
 
 # Иконки для каждого уровня
 _ICON_ERROR = "❌"
@@ -112,13 +101,14 @@ class ErrorBannerWidget(QWidget):
         if len(self._rows) >= _MAX_MESSAGES:
             self._remove_row(0)
 
-        # Выбираем стиль и иконку по уровню
-        style = _STYLE_ERROR if level == "error" else _STYLE_WARNING
+        # Выбираем иконку по уровню
         icon_text = _ICON_ERROR if level == "error" else _ICON_WARNING
 
-        # Создаём контейнер строки
+        # Создаём контейнер строки; стиль задаётся через QSS property "level"
         row_widget = QWidget(self)
-        row_widget.setStyleSheet(style)
+        row_widget.setObjectName("ErrorBannerRow")
+        row_widget.setProperty("level", level)
+        row_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)

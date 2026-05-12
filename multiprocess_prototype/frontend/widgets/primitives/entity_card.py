@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -48,11 +47,6 @@ class EntityCard(QFrame):
 
     action_clicked = Signal(str, str)  # (entity_id, action_id)
 
-    _CARD_STYLE: ClassVar[str] = (
-        "EntityCard { border: 1px solid #555; border-radius: 4px; "
-        "padding: 8px; margin: 2px; }"
-    )
-
     def __init__(
         self,
         entity_id: str,
@@ -63,13 +57,12 @@ class EntityCard(QFrame):
         super().__init__(parent)
         self.setObjectName("EntityCard")
         self._entity_id = entity_id
-        self.setStyleSheet(self._CARD_STYLE)
         self.setFrameShape(QFrame.Shape.StyledPanel)
 
         # --- виджеты ---
         self._indicator = StatusIndicator(size=12)
         self._title_label = QLabel(title)
-        self._title_label.setStyleSheet("font-weight: bold;")
+        self._title_label.setObjectName("EntityCardTitle")
 
         # Метрики: key → QLabel(value)
         self._metrics_layout = QFormLayout()
@@ -135,7 +128,7 @@ class EntityCard(QFrame):
                 val_label = QLabel(value)
                 self._metric_labels[key] = val_label
                 key_label = QLabel(f"{key}:")
-                key_label.setStyleSheet("color: #aaa;")
+                key_label.setObjectName("EntityCardKey")
                 self._metrics_layout.addRow(key_label, val_label)
 
     def set_action_enabled(self, action_id: str, enabled: bool) -> None:

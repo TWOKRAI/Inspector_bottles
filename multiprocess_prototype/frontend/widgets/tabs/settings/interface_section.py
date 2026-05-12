@@ -50,7 +50,7 @@ class InterfaceSection(QWidget):
             "без перезапуска приложения и без потери IPC-соединений."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #9ea6b2; font-size: 12px;")
+        desc.setObjectName("HintLabelLg")
         group_layout.addWidget(desc)
 
         # Кнопка «Обновить UI»

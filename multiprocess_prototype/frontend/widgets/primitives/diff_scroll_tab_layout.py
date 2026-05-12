@@ -173,8 +173,7 @@ class DiffScrollTabLayout(QWidget):
         sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         sa.setFrameShape(QFrame.Shape.NoFrame)
-        # Прозрачный фон — не перекрываем тему
-        sa.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        # Прозрачный фон задаётся в main.qss через objectName (DiffScrollLeft/Right/...)
         return sa
 
     def _install_wheel_redirect(self, viewport: QWidget) -> None:

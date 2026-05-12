@@ -52,7 +52,7 @@ class PluginsTab(QWidget):
 
         # Заголовок
         header = QLabel("Плагины")
-        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header.setObjectName("TabHeader")
         layout.addWidget(header)
 
         # Master-detail
@@ -70,7 +70,7 @@ class PluginsTab(QWidget):
 
         # Создать placeholder для пустого detail
         placeholder = QLabel("Выберите плагин из списка слева")
-        placeholder.setStyleSheet("color: #888; font-size: 14px;")
+        placeholder.setObjectName("PlaceholderLabel")
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._master_detail.set_detail_widget("__placeholder__", placeholder)
 

@@ -19,30 +19,6 @@ class ViewMode(StrEnum):
     TABLE = "table"
 
 
-# QSS для switch-стиля (iOS-подобный тоггл)
-_SWITCH_QSS = """
-QCheckBox {
-    spacing: 0px;
-}
-QCheckBox::indicator {
-    width: 56px;
-    height: 30px;
-    border-radius: 15px;
-    border: 1px solid rgba(0, 0, 0, 0.4);
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a5362, stop:1 #3a414e);
-}
-QCheckBox::indicator:checked {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a95ff, stop:1 #2b7fff);
-    border: 1px solid rgba(0, 0, 0, 0.3);
-}
-QCheckBox::indicator:hover {
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-"""
-
-
 class ViewModeToggle(QWidget):
     """Переключатель Cards / Table — switch-тумблер без текста.
 
@@ -71,7 +47,7 @@ class ViewModeToggle(QWidget):
         self._checkbox.setText("")
         self._checkbox.setToolTip("Cards / Table")
         self._checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._checkbox.setStyleSheet(_SWITCH_QSS)
+        self._checkbox.setObjectName("ViewModeSwitch")
         self._checkbox.setChecked(self._mode == ViewMode.TABLE)
 
         layout.addWidget(self._checkbox, alignment=Qt.AlignmentFlag.AlignCenter)

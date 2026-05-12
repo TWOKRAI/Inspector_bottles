@@ -77,7 +77,7 @@ class AdminDashboard(QWidget):
         session_layout.setSpacing(6)
 
         self._lbl_user = QLabel()
-        self._lbl_user.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self._lbl_user.setObjectName("SectionTitle")
         session_layout.addWidget(self._lbl_user)
 
         self._lbl_role = QLabel()
@@ -88,7 +88,7 @@ class AdminDashboard(QWidget):
 
         self._lbl_permissions = QLabel()
         self._lbl_permissions.setWordWrap(True)
-        self._lbl_permissions.setStyleSheet("color: #9ea6b2; font-size: 11px;")
+        self._lbl_permissions.setObjectName("PermissionsHint")
         session_layout.addWidget(self._lbl_permissions)
 
         layout.addWidget(self._session_group)

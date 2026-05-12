@@ -74,10 +74,9 @@ class LoginDialog(QDialog):
 
         _outer_layout.addLayout(_form_layout)
 
-        # Метка ошибки — красный текст, скрыта по умолчанию
+        # Метка ошибки — скрыта по умолчанию; цвет задаётся через QSS #LoginErrorLabel
         self._error_label = QLabel("")
         self._error_label.setObjectName("LoginErrorLabel")
-        self._error_label.setStyleSheet("color: #d32f2f;")
         self._error_label.setWordWrap(True)
         self._error_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._error_label.setVisible(False)

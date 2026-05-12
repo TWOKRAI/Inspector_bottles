@@ -1,7 +1,7 @@
 # Plan: Рефакторинг inline setStyleSheet() -> централизованный QSS
 
 **Дата:** 2026-05-12
-**Статус:** DRAFT
+**Статус:** DONE
 
 ## Обзор
 
@@ -77,27 +77,27 @@
 
 ### Фаза 1: QSS-расширение (1 файл, ~120 строк QSS)
 
-- Task 1.1: Добавить все новые правила в main.qss [PENDING]
+- Task 1.1: Добавить все новые правила в main.qss [DONE]
 
 ### Фаза 2: Статические стили (A1-A22, B1-B6) — ~20 файлов
 
-- Task 2.1: Tab headers + placeholders (A2-A9, A14, A17) [PENDING]
-- Task 2.2: Admin dashboard + roles + section (A12-A16) [PENDING]
-- Task 2.3: Остальные статические (A1, A10, A11, A18-A22) [PENDING]
-- Task 2.4: Компонентные стили (B1-B6) [PENDING]
+- Task 2.1: Tab headers + placeholders (A2-A9, A14, A17) [DONE]
+- Task 2.2: Admin dashboard + roles + section (A12-A16) [DONE]
+- Task 2.3: Остальные статические (A1, A10, A11, A18-A22) [DONE]
+- Task 2.4: Компонентные стили (B1-B6) [DONE]
 
 ### Фаза 3: Динамические стили (C1-C14) — ~8 файлов
 
-- Task 3.1: Validation errors — property hasError (C6, C7) [PENDING]
-- Task 3.2: Error labels — objectName (C3, C4, C5) [PENDING]
-- Task 3.3: Error banner — property level (C1) [PENDING]
-- Task 3.4: Validation panel — property validation (C2) [PENDING]
-- Task 3.5: Slot selector — property slotState (C8) [PENDING]
-- Task 3.6: Inspector panel — static + dynamic category (C9-C14) [PENDING]
+- Task 3.1: Validation errors — property hasError (C6, C7) [DONE]
+- Task 3.2: Error labels — objectName (C3, C4, C5) [DONE]
+- Task 3.3: Error banner — property level (C1) [DONE]
+- Task 3.4: Validation panel — property validation (C2) [DONE]
+- Task 3.5: Slot selector — property slotState (C8) [DONE]
+- Task 3.6: Inspector panel — static + dynamic category (C9-C14) [DONE]
 
 ### Фаза 4: Верификация
 
-- Task 4.1: Grep-проверка + визуальный осмотр [PENDING]
+- Task 4.1: Grep-проверка + визуальный осмотр [DONE]
 
 ---
 

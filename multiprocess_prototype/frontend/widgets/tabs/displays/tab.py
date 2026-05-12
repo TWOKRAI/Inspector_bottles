@@ -43,7 +43,7 @@ class DisplaysTab(QWidget):
 
         # Заголовок
         header = QLabel("Дисплеи")
-        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header.setObjectName("TabHeader")
         layout.addWidget(header)
 
         # Пресеты (SlotSelector)

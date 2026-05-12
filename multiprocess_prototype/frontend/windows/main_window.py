@@ -190,7 +190,7 @@ class MainWindow(QMainWindow):
 
         # StatusBar
         self._dirty_label = QLabel("")
-        self._dirty_label.setStyleSheet("color: orange; font-weight: bold;")
+        self._dirty_label.setObjectName("DirtyLabel")
         self._dirty_label.setVisible(False)
         self.statusBar().addWidget(self._dirty_label)
 

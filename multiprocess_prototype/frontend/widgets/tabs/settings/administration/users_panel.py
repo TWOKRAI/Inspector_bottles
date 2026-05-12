@@ -75,10 +75,7 @@ class UsersPanel(QWidget):
         # Заголовок
         header_layout = QHBoxLayout()
         header_label = QLabel("Пользователи")
-        font = header_label.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 2)
-        header_label.setFont(font)
+        header_label.setObjectName("PanelHeader")
         header_layout.addWidget(header_label)
         header_layout.addStretch()
         root.addLayout(header_layout)

@@ -56,15 +56,11 @@ class ConfirmWithPasswordDialog(QDialog):
         _layout.setSpacing(12)
         _layout.setContentsMargins(20, 20, 20, 20)
 
-        # Текст описания действия — жирный
+        # Текст описания действия — стиль через QSS #ConfirmActionLabel
         _action_label = QLabel(action_text)
         _action_label.setObjectName("ConfirmActionLabel")
         _action_label.setWordWrap(True)
         _action_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        # Жирный шрифт для акцента на описании действия
-        _font = _action_label.font()
-        _font.setBold(True)
-        _action_label.setFont(_font)
         _layout.addWidget(_action_label)
 
         # Метка поля пароля
@@ -77,10 +73,9 @@ class ConfirmWithPasswordDialog(QDialog):
         self._password_edit.setObjectName("ConfirmPasswordEdit")
         _layout.addWidget(self._password_edit)
 
-        # Метка ошибки — скрыта по умолчанию
+        # Метка ошибки — скрыта по умолчанию; цвет задаётся через QSS #ConfirmErrorLabel
         self._error_label = QLabel("Неверный пароль")
         self._error_label.setObjectName("ConfirmErrorLabel")
-        self._error_label.setStyleSheet("color: #d32f2f;")
         self._error_label.setVisible(False)
         _layout.addWidget(self._error_label)
 

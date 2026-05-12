@@ -68,7 +68,7 @@ class RecipesTab(QWidget):
         layout.setSpacing(8)
 
         header = QLabel("Рецепты")
-        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header.setObjectName("TabHeader")
         layout.addWidget(header)
 
         # Основной шаблон вкладки.
