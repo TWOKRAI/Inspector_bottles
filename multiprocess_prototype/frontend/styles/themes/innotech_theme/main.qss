@@ -27,6 +27,13 @@
      danger    #e54863   success  #2ecc8f   warn     #f0a23a
    ============================================================= */
 
+/* !!!! DEPRECATED !!!!
+   Этот файл — fallback для обратной совместимости.
+   Актуальные стили: base.qss + components/primitives/ + components/domains/
+   Сборка: style_manifest.py → STYLE_MANIFEST → assemble_qss_by_manifest()
+   Не редактировать — изменения вносить в компонентные файлы.
+*/
+
 /* ===================== БАЗА ===================== */
 /* НЕ ставим background: transparent для QWidget — каскадирует на
    все дочерние виджеты и ломает фон. Прозрачность задаём точечно. */

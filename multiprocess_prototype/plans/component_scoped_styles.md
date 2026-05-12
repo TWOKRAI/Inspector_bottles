@@ -1,7 +1,7 @@
 # Plan: Component Styles -- единый roadmap
 
 **Дата:** 2026-05-12
-**Статус:** DRAFT
+**Статус:** STAGE A DONE
 
 ## Обзор
 
@@ -66,18 +66,18 @@ prototype/styles/
 ### Порядок выполнения
 
 #### Фаза A1: Разбиение main.qss на файлы
-- Task A.1: base.qss [PENDING]
-- Task A.2: QSS primitives (framework-виджеты) [PENDING]
-- Task A.3: QSS domains (прикладные виджеты прототипа) [PENDING]
+- Task A.1: base.qss [DONE] ✓ 9aadd50
+- Task A.2: QSS primitives (framework-виджеты) [DONE] ✓ 9aadd50 (28 файлов)
+- Task A.3: QSS domains (прикладные виджеты прототипа) [DONE] ✓ 9aadd50 (8 файлов)
 
 #### Фаза A2: Манифест + theme_loader
-- Task A.4: style_manifest.py [PENDING] (зависит от A.2, A.3)
-- Task A.5: ThemeManager.read_theme_by_manifest() [PENDING]
-- Task A.6: theme_loader.py -- переход на manifest loading [PENDING] (зависит от A.4, A.5)
+- Task A.4: style_manifest.py [DONE] ✓ cf8546f (28 primitives + 7 domains)
+- Task A.5: ThemeManager.read_theme_by_manifest() [DONE] ✓ 9aadd50 (8 тестов)
+- Task A.6: theme_loader.py -- переход на manifest loading [DONE] ✓ cf8546f (fallback для тем без components/)
 
 #### Фаза A3: Регрессия и финализация
-- Task A.7: Регрессионный тест идентичности QSS [PENDING] (зависит от A.1-A.6)
-- Task A.8: Deprecation main.qss + документация [PENDING] (зависит от A.7)
+- Task A.7: Регрессионный тест идентичности QSS [DONE] ✓ 82828a0 (7 тестов)
+- Task A.8: Deprecation main.qss + документация [DONE]
 
 ---
 
