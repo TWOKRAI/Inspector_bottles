@@ -21,9 +21,7 @@ class CameraView(QWidget):
         self._label = QLabel("Нет сигнала")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setMinimumSize(320, 240)
-        self._label.setStyleSheet(
-            "background-color: #1a1a2e; color: #aaa; font-size: 16px;"
-        )
+        self._label.setObjectName("CameraViewLabel")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
