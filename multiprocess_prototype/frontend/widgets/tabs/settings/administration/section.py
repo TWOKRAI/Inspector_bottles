@@ -116,11 +116,15 @@ class AdministrationSection(QWidget):
 
         if has_users:
             from .users_panel import UsersPanel
-            nav.add_section("users", "Пользователи", UsersPanel(auth))
+            panel = UsersPanel(auth)
+            nav.add_section("users", "Пользователи", panel)
+            nav.set_actions("users", panel.action_buttons())
 
         if has_roles:
             from .roles_panel import RolesPanel
-            nav.add_section("roles", "Роли", RolesPanel(auth, bus))
+            panel = RolesPanel(auth, bus)
+            nav.add_section("roles", "Роли", panel)
+            nav.set_actions("roles", panel.action_buttons())
 
         # PR4 Group C: read-only панели аудита
         has_sessions = has_users
@@ -128,11 +132,15 @@ class AdministrationSection(QWidget):
 
         if has_sessions:
             from .sessions_panel import SessionsPanel
-            nav.add_section("sessions", "Сессии", SessionsPanel(auth))
+            panel = SessionsPanel(auth)
+            nav.add_section("sessions", "Сессии", panel)
+            nav.set_actions("sessions", panel.action_buttons())
 
         if has_audit:
             from .audit_log_panel import AuditLogPanel
-            nav.add_section("audit_log", "Audit log", AuditLogPanel(auth))
+            panel = AuditLogPanel(auth)
+            nav.add_section("audit_log", "Audit log", panel)
+            nav.set_actions("audit_log", panel.action_buttons())
 
         nav.set_current("users" if has_users else "roles")
 

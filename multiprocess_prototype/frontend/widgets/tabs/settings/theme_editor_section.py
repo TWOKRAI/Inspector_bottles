@@ -95,6 +95,9 @@ class ThemeEditorSection(QWidget):
         self._btn_apply.setProperty("role", "primary")
         self._btn_apply.setToolTip("Применить текущую тему с редактированными переменными")
 
+        self._btn_save = QPushButton("Сохранить")
+        self._btn_save.setToolTip("Сохранить текущие переменные в выбранную custom-тему")
+
         self._btn_refresh = QPushButton("Обновить")
         self._btn_refresh.setToolTip("Перечитать список тем и переменные с диска")
 
@@ -118,6 +121,7 @@ class ThemeEditorSection(QWidget):
 
         # Сигналы
         self._btn_apply.clicked.connect(self._on_apply)
+        self._btn_save.clicked.connect(self._on_save)
         self._btn_refresh.clicked.connect(self._on_refresh)
         self._btn_add.clicked.connect(self._on_add)
         self._btn_copy.clicked.connect(self._on_copy)
@@ -134,6 +138,7 @@ class ThemeEditorSection(QWidget):
         """Кнопки для action-колонки SettingsTab."""
         return [
             self._btn_apply,
+            self._btn_save,
             self._btn_refresh,
             self._make_separator(),
             self._btn_add,
@@ -160,8 +165,10 @@ class ThemeEditorSection(QWidget):
         themes_layout = QVBoxLayout(themes_group)
         themes_layout.setContentsMargins(4, 4, 4, 4)
 
-        self._themes_table = QTableWidget(0, 2)
-        self._themes_table.setHorizontalHeaderLabels(["Название", "Тип"])
+        self._themes_table = QTableWidget(0, 3)
+        self._themes_table.setHorizontalHeaderLabels(
+            ["Название", "Тип", "Родительская"]
+        )
         # Запрет редактирования
         self._themes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         # Выделять строку целиком
@@ -171,10 +178,17 @@ class ThemeEditorSection(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self._themes_table.verticalHeader().setVisible(False)
-        # Колонки: «Название» растягивается, «Тип» — по содержимому
+        # Пропорции колонок: Название(2) : Тип(1) : Родительская(2)
         h = self._themes_table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        h.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        h.setStretchLastSection(False)
+        # Минимальные размеры задают пропорцию 2:1:2
+        h.setMinimumSectionSize(40)
+        self._themes_table.setColumnWidth(0, 200)
+        self._themes_table.setColumnWidth(1, 100)
+        self._themes_table.setColumnWidth(2, 200)
 
         themes_layout.addWidget(self._themes_table)
         layout.addWidget(themes_group)
@@ -220,18 +234,25 @@ class ThemeEditorSection(QWidget):
         self._themes_table.setRowCount(0)
 
         themes = self._presets_manager.list_all()
-        self._themes_table.setRowCount(len(themes))
+        # +3 пустых строки внизу таблицы для визуального запаса
+        _EMPTY_ROWS = 3
+        self._themes_table.setRowCount(len(themes) + _EMPTY_ROWS)
 
         for row, (name, kind) in enumerate(themes):
             name_item = QTableWidgetItem(name)
             kind_item = QTableWidgetItem(kind)
+            parent = self._presets_manager.get_parent(name)
+            parent_item = QTableWidgetItem(parent if parent else "—")
 
-            # default-темы — серый текст в колонке «Тип»
+            # default-темы — серый текст в колонках «Тип» и «Родительская»
             if kind == "default":
-                kind_item.setForeground(QBrush(QColor("#888888")))
+                gray = QBrush(QColor("#888888"))
+                kind_item.setForeground(gray)
+                parent_item.setForeground(gray)
 
             self._themes_table.setItem(row, 0, name_item)
             self._themes_table.setItem(row, 1, kind_item)
+            self._themes_table.setItem(row, 2, parent_item)
 
         self._themes_table.blockSignals(False)
 
@@ -368,17 +389,29 @@ class ThemeEditorSection(QWidget):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_separator() -> QFrame:
-        """Создать горизонтальный разделитель для action-колонки."""
+    def _make_separator() -> QWidget:
+        """Создать горизонтальный разделитель для action-колонки.
+
+        Тёмно-серая линия, короче на 20px (отступы по 10px с каждой стороны).
+        """
+        container = QWidget()
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(10, 4, 10, 4)
+        container_layout.setSpacing(0)
+
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        return line
+        line.setFrameShadow(QFrame.Shadow.Plain)
+        line.setStyleSheet("color: #1a1f25;")
+        line.setFixedHeight(2)
+        container_layout.addWidget(line)
+        return container
 
     def _update_crud_buttons_state(self) -> None:
-        """Обновить enabled/disabled кнопок «Переименовать» и «Удалить»."""
-        # Для default-тем эти операции недоступны
+        """Обновить enabled/disabled кнопок, зависящих от типа темы."""
+        # Для default-тем сохранение, переименование и удаление недоступны
         can_modify = not self._selected_is_default and bool(self._selected_theme)
+        self._btn_save.setEnabled(can_modify)
         self._btn_rename.setEnabled(can_modify)
         self._btn_delete.setEnabled(can_modify)
 
@@ -457,8 +490,20 @@ class ThemeEditorSection(QWidget):
 
         current = self._collect_vars_from_tree()
         self._current_vars.update(current)
-        self._last_saved_vars = dict(self._current_vars)
         self._theme_manager.apply_theme_with_variables(base_theme, self._current_vars)
+
+    def _on_save(self) -> None:
+        """Сохранить текущие переменные в выбранную custom-тему."""
+        if not self._selected_theme or self._selected_is_default:
+            return
+        current = self._collect_vars_from_tree()
+        self._current_vars.update(current)
+        variables = ThemeVariables.model_validate(self._current_vars)
+        parent = self._presets_manager.get_parent(self._selected_theme)
+        self._presets_manager.save_custom(
+            self._selected_theme, variables, parent=parent,
+        )
+        self._last_saved_vars = dict(self._current_vars)
 
     def _on_refresh(self) -> None:
         """Перечитать список тем и переменные с диска."""
@@ -469,7 +514,7 @@ class ThemeEditorSection(QWidget):
             self._select_table_row_by_name(prev_selected)
 
     def _on_add(self) -> None:
-        """Создать новую пустую custom-тему."""
+        """Создать новую custom-тему на базе текущей выбранной."""
         name, ok = QInputDialog.getText(
             self,
             "Новая тема",
@@ -478,7 +523,19 @@ class ThemeEditorSection(QWidget):
         if not ok or not name.strip():
             return
         name = name.strip()
-        self._presets_manager.save_custom(name, ThemeVariables())
+        # Родительская тема — выбранная default или parent выбранной custom
+        if self._selected_is_default:
+            parent = self._selected_theme
+        else:
+            parent = (
+                self._presets_manager.get_parent(self._selected_theme)
+                or self._selected_theme
+            )
+        # Создать на основе текущих переменных из дерева
+        current = self._collect_vars_from_tree()
+        self._current_vars.update(current)
+        variables = ThemeVariables.model_validate(self._current_vars)
+        self._presets_manager.save_custom(name, variables, parent=parent)
         self._refresh_table()
         self._select_table_row_by_name(name)
 

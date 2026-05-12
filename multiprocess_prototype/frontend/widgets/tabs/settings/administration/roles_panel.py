@@ -92,7 +92,7 @@ class RolesPanel(QWidget):
         header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
-        # --- Основная область: список + матрица + кнопки ---
+        # --- Основная область: список + матрица ---
         content_layout = QHBoxLayout()
         content_layout.setSpacing(8)
 
@@ -113,39 +113,23 @@ class RolesPanel(QWidget):
         if self._can_edit and self._bus is not None:
             self._matrix.permissions_changed.connect(self._on_permissions_changed)
 
-        # Панель кнопок управления (фиксированная ширина ~140px)
-        buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(4)
+        content_layout.addWidget(self._roles_list)
+        content_layout.addWidget(self._matrix, stretch=1)
 
+        main_layout.addLayout(content_layout, stretch=1)
+
+        # Кнопки создаются здесь, но размещаются в action panel секции
         self._btn_create = QPushButton("Создать роль")
         self._btn_create.setEnabled(self._can_create)
         self._btn_create.setToolTip(
             "" if self._can_create else "Недостаточно прав (roles.create)"
         )
-        self._btn_create.setFixedWidth(140)
-
-        # Кнопки «Изменить права» нет: editable-матрица с кнопкой «Сохранить»
-        # внутри PermissionMatrix полностью заменяет её функциональность.
 
         self._btn_delete = QPushButton("Удалить роль")
         self._btn_delete.setEnabled(self._can_delete)
         self._btn_delete.setToolTip(
             "" if self._can_delete else "Недостаточно прав (roles.delete)"
         )
-        self._btn_delete.setFixedWidth(140)
-
-        for btn in (self._btn_create, self._btn_delete):
-            buttons_layout.addWidget(btn)
-
-        buttons_layout.addStretch()
-
-        content_layout.addWidget(self._roles_list)
-        content_layout.addWidget(self._matrix, stretch=1)
-        content_layout.addLayout(buttons_layout)
-
-        main_layout.addLayout(content_layout, stretch=1)
-
-        # Подключение сигналов кнопок
         self._btn_delete.clicked.connect(self._on_delete_clicked)
 
         # --- Инициализация данных ---
@@ -154,6 +138,10 @@ class RolesPanel(QWidget):
 
         # Сигнал выбора роли
         self._roles_list.currentTextChanged.connect(self._on_role_selected)
+
+    def action_buttons(self) -> list[QPushButton]:
+        """Кнопки действий для размещения в action panel секции."""
+        return [self._btn_create, self._btn_delete]
 
     # ------------------------------------------------------------------
     # Методы работы с данными

@@ -70,7 +70,7 @@ class SessionsPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        # Заголовок + кнопка обновления
+        # Заголовок
         header_layout = QHBoxLayout()
         header_label = QLabel("Сессии")
         font = header_label.font()
@@ -79,13 +79,6 @@ class SessionsPanel(QWidget):
         header_label.setFont(font)
         header_layout.addWidget(header_label)
         header_layout.addStretch()
-
-        self._btn_refresh = QPushButton("Обновить")
-        self._btn_refresh.setFixedWidth(100)
-        self._btn_refresh.setToolTip("Перезагрузить список сессий")
-        self._btn_refresh.clicked.connect(self._load)
-        header_layout.addWidget(self._btn_refresh)
-
         root.addLayout(header_layout)
 
         # Таблица
@@ -108,6 +101,15 @@ class SessionsPanel(QWidget):
                 h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
         root.addWidget(self._table, stretch=1)
+
+        # Кнопка создаётся здесь, но размещается в action panel секции
+        self._btn_refresh = QPushButton("Обновить")
+        self._btn_refresh.setToolTip("Перезагрузить список сессий")
+        self._btn_refresh.clicked.connect(self._load)
+
+    def action_buttons(self) -> list[QPushButton]:
+        """Кнопки действий для размещения в action panel секции."""
+        return [self._btn_refresh]
 
     # ------------------------------------------------------------------
     # Загрузка данных

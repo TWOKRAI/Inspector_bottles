@@ -538,7 +538,7 @@ QProgressBar::chunk {
 QScrollBar:vertical {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #1b1f27, stop:1 #2a3040);
-    width: 42px;
+    width: 50px;
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: 21px;
     margin: 4px;
@@ -788,6 +788,12 @@ QGroupBox#DiffScrollNavGroup::title {
 /* --- Источники --- */
 QLabel#DisplayImageLabel { background-color: black; }
 QLabel#CameraStatus { font-weight: bold; color: @text_2; }
+
+/* --- Пагинация (стрелки ← →) --- */
+QPushButton#PaginationArrow {
+    font-size: 22px;
+    padding: 4px 4px;
+}
 
 /* ===== Auth RBAC: readOnly state (PR2/PR3) ===== */
 /* Виджеты с property readOnly="true" — приглушённый вид (можно видеть, нельзя менять).

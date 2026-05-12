@@ -91,7 +91,7 @@ class DiffScrollTabLayout(QWidget):
     def _build_ui(self, title: str) -> None:
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(4)
+        root.setSpacing(12)
 
         # === Левая колонка: scroll(actions) + static(undo/redo) ===
         left_col = QVBoxLayout()
@@ -144,7 +144,7 @@ class DiffScrollTabLayout(QWidget):
         self._content_scroll = self._make_scroll_area("DiffScrollContent")
         root.addWidget(self._content_scroll, 1)
 
-        # === Мастер-скроллбар ===
+        # === Мастер-скроллбар (ширина управляется темой в main.qss) ===
         self._master_sb = QScrollBar(Qt.Orientation.Vertical)
         self._master_sb.setObjectName("DiffScrollMaster")
         self._master_sb.valueChanged.connect(self._on_master_changed)

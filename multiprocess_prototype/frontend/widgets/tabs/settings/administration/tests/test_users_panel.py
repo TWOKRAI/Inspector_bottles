@@ -64,10 +64,10 @@ def mock_auth_manager():
 
 @pytest.fixture
 def mock_ctx(mock_auth_manager):
-    """Мок AppContext: auth_manager() возвращает mock_auth_manager, auth_state() — None."""
+    """Мок AuthContext: manager = mock_auth_manager, state = None."""
     ctx = MagicMock()
-    ctx.auth_manager.return_value = mock_auth_manager
-    ctx.auth_state.return_value = None
+    ctx.manager = mock_auth_manager
+    ctx.state = None
     return ctx
 
 
@@ -507,8 +507,8 @@ class TestUsersPanelPermissions:
 
     def _ctx_with_state(self, mock_auth_manager, permissions: set[str]):
         ctx = MagicMock()
-        ctx.auth_manager.return_value = mock_auth_manager
-        ctx.auth_state.return_value = _StubAuthState(permissions)._impl
+        ctx.manager = mock_auth_manager
+        ctx.state = _StubAuthState(permissions)._impl
         return ctx
 
     def test_no_permissions_all_buttons_disabled(self, qtbot, mock_auth_manager):

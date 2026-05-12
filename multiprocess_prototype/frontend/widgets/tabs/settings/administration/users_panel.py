@@ -83,10 +83,6 @@ class UsersPanel(QWidget):
         header_layout.addStretch()
         root.addLayout(header_layout)
 
-        # Основная область: таблица + кнопки
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(8)
-
         # Таблица пользователей
         column_keys = [col[0] for col in self._TABLE_COLUMNS]
         column_titles = [col[1] for col in self._TABLE_COLUMNS]
@@ -103,49 +99,35 @@ class UsersPanel(QWidget):
         h = self._table.horizontalHeader()
         for i, width in enumerate(column_widths):
             if i == len(column_widths) - 1:
-                # Последняя колонка — растянуть
                 h.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
             else:
                 self._table.setColumnWidth(i, width)
                 h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
-        # Хранить ключ-имена колонок для _fill_table
         self._column_keys = column_keys
 
-        content_layout.addWidget(self._table, stretch=1)
+        root.addWidget(self._table, stretch=1)
 
-        # Кнопки справа
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(6)
-
+        # Кнопки создаются здесь, но размещаются в action panel секции
         self._btn_add = QPushButton("Добавить")
-        self._btn_add.setFixedWidth(120)
         self._btn_add.setToolTip("Создать нового пользователя")
         self._btn_add.clicked.connect(self._on_add_clicked)
-        btn_layout.addWidget(self._btn_add)
 
         self._btn_delete = QPushButton("Удалить")
-        self._btn_delete.setFixedWidth(120)
         self._btn_delete.setToolTip("Удалить выбранного пользователя")
         self._btn_delete.clicked.connect(self._on_delete_clicked)
-        btn_layout.addWidget(self._btn_delete)
 
         self._btn_change_role = QPushButton("Сменить роль")
-        self._btn_change_role.setFixedWidth(120)
         self._btn_change_role.setToolTip("Изменить роль выбранного пользователя")
         self._btn_change_role.clicked.connect(self._on_change_role_clicked)
-        btn_layout.addWidget(self._btn_change_role)
 
         self._btn_reset_pwd = QPushButton("Сбросить пароль")
-        self._btn_reset_pwd.setFixedWidth(120)
         self._btn_reset_pwd.setToolTip("Сгенерировать новый пароль для выбранного пользователя")
         self._btn_reset_pwd.clicked.connect(self._on_reset_password_clicked)
-        btn_layout.addWidget(self._btn_reset_pwd)
 
-        btn_layout.addStretch()
-
-        content_layout.addLayout(btn_layout)
-        root.addLayout(content_layout, stretch=1)
+    def action_buttons(self) -> list[QPushButton]:
+        """Кнопки действий для размещения в action panel секции."""
+        return [self._btn_add, self._btn_delete, self._btn_change_role, self._btn_reset_pwd]
 
     # ------------------------------------------------------------------
     # Permissions

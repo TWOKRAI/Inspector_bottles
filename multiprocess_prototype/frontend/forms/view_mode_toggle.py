@@ -25,9 +25,9 @@ QCheckBox {
     spacing: 0px;
 }
 QCheckBox::indicator {
-    width: 40px;
-    height: 22px;
-    border-radius: 11px;
+    width: 56px;
+    height: 30px;
+    border-radius: 15px;
     border: 1px solid rgba(0, 0, 0, 0.4);
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #4a5362, stop:1 #3a414e);
@@ -74,7 +74,7 @@ class ViewModeToggle(QWidget):
         self._checkbox.setStyleSheet(_SWITCH_QSS)
         self._checkbox.setChecked(self._mode == ViewMode.TABLE)
 
-        layout.addWidget(self._checkbox)
+        layout.addWidget(self._checkbox, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._checkbox.toggled.connect(self._on_toggled)
 

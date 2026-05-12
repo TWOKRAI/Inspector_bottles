@@ -71,11 +71,11 @@ def mock_auth_manager():
 
 @pytest.fixture
 def mock_ctx(mock_storage, mock_auth_manager):
-    """Мок AppContext: audit_storage(), auth_manager(), auth_state() — None."""
+    """Мок AuthContext: audit = mock_storage, manager = mock_auth_manager."""
     ctx = MagicMock()
-    ctx.audit_storage.return_value = mock_storage
-    ctx.auth_manager.return_value = mock_auth_manager
-    ctx.auth_state.return_value = None
+    ctx.audit = mock_storage
+    ctx.manager = mock_auth_manager
+    ctx.state = None
     return ctx
 
 
@@ -341,9 +341,9 @@ class TestAuditLogPanelUserIdFilter:
         ]
 
         ctx = MagicMock()
-        ctx.audit_storage.return_value = mock_storage
-        ctx.auth_manager.return_value = mock_auth_manager
-        ctx.auth_state.return_value = None
+        ctx.audit = mock_storage
+        ctx.manager = mock_auth_manager
+        ctx.state = None
 
         panel = AuditLogPanel(ctx)
         qtbot.addWidget(panel)
@@ -368,9 +368,9 @@ class TestAuditLogPanelUserIdFilter:
         ]
 
         ctx = MagicMock()
-        ctx.audit_storage.return_value = mock_storage
-        ctx.auth_manager.return_value = mock_auth_manager
-        ctx.auth_state.return_value = None
+        ctx.audit = mock_storage
+        ctx.manager = mock_auth_manager
+        ctx.state = None
 
         panel = AuditLogPanel(ctx)
         qtbot.addWidget(panel)

@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -50,9 +52,9 @@ class AuditLogPanel(QWidget):
     """
 
     _TABLE_COLUMNS = [
-        ("ts",          "Время",         150),
-        ("username",    "Пользователь",  130),
-        ("action_type", "Тип действия",  140),
+        ("ts",          "Время",         300),
+        ("username",    "Пользователь",  110),
+        ("action_type", "Тип действия",  120),
         ("resource",    "Ресурс",        150),
     ]
     _PAGE_SIZE = 100
@@ -92,38 +94,28 @@ class AuditLogPanel(QWidget):
         filter_layout = QHBoxLayout()
         filter_layout.setSpacing(8)
 
-        # Фильтр по пользователю
         filter_layout.addWidget(QLabel("Пользователь:"))
         self._combo_user = QComboBox()
         self._combo_user.setMinimumWidth(120)
         filter_layout.addWidget(self._combo_user)
 
-        # Фильтр «С»
         filter_layout.addWidget(QLabel("С:"))
         self._date_from = QDateEdit()
         self._date_from.setCalendarPopup(True)
         self._date_from.setDate(QDate.currentDate())
         filter_layout.addWidget(self._date_from)
 
-        # Фильтр «По»
         filter_layout.addWidget(QLabel("По:"))
         self._date_to = QDateEdit()
         self._date_to.setCalendarPopup(True)
         self._date_to.setDate(QDate.currentDate())
         filter_layout.addWidget(self._date_to)
 
-        # Фильтр по ресурсу
         filter_layout.addWidget(QLabel("Ресурс:"))
         self._edit_resource = QLineEdit()
         self._edit_resource.setPlaceholderText("точное совпадение")
         self._edit_resource.setMinimumWidth(120)
         filter_layout.addWidget(self._edit_resource)
-
-        # Кнопка применить
-        self._btn_apply = QPushButton("Применить")
-        self._btn_apply.setFixedWidth(90)
-        self._btn_apply.clicked.connect(lambda: self._load(offset=0))
-        filter_layout.addWidget(self._btn_apply)
 
         filter_layout.addStretch()
         root.addLayout(filter_layout)
@@ -150,12 +142,30 @@ class AuditLogPanel(QWidget):
 
         root.addWidget(self._table, stretch=1)
 
+        # Кнопки создаются здесь, но размещаются в action panel секции
+        self._btn_apply = QPushButton("Применить")
+        self._btn_apply.setToolTip("Применить фильтры")
+        self._btn_apply.clicked.connect(lambda: self._load(offset=0))
+
+        self._btn_reset_filter = QPushButton("Сбросить фильтр")
+        self._btn_reset_filter.setToolTip("Сбросить все фильтры к значениям по умолчанию")
+        self._btn_reset_filter.clicked.connect(self._on_reset_filter)
+
+        self._btn_save_file = QPushButton("Сохранить в файл")
+        self._btn_save_file.setToolTip("Экспортировать текущую страницу аудит-лога в CSV")
+        self._btn_save_file.clicked.connect(self._on_save_to_file)
+
+        self._btn_clear_all = QPushButton("Очистить всё")
+        self._btn_clear_all.setToolTip("Очистить весь аудит-лог (необратимо)")
+        self._btn_clear_all.clicked.connect(self._on_clear_all)
+
         # Пагинация
         pagination_layout = QHBoxLayout()
         pagination_layout.addStretch()
 
         self._btn_prev = QPushButton("←")
-        self._btn_prev.setFixedWidth(40)
+        self._btn_prev.setObjectName("PaginationArrow")
+        self._btn_prev.setFixedWidth(50)
         self._btn_prev.setToolTip("Предыдущая страница")
         self._btn_prev.clicked.connect(self._on_prev_page)
         pagination_layout.addWidget(self._btn_prev)
@@ -164,13 +174,86 @@ class AuditLogPanel(QWidget):
         pagination_layout.addWidget(self._lbl_page)
 
         self._btn_next = QPushButton("→")
-        self._btn_next.setFixedWidth(40)
+        self._btn_next.setObjectName("PaginationArrow")
+        self._btn_next.setFixedWidth(50)
         self._btn_next.setToolTip("Следующая страница")
         self._btn_next.clicked.connect(self._on_next_page)
         pagination_layout.addWidget(self._btn_next)
 
         pagination_layout.addStretch()
         root.addLayout(pagination_layout)
+
+    def action_buttons(self) -> list[QPushButton]:
+        """Кнопки действий для размещения в action panel секции."""
+        return [self._btn_apply, self._btn_reset_filter, self._btn_save_file, self._btn_clear_all]
+
+    # ------------------------------------------------------------------
+    # Действия кнопок
+    # ------------------------------------------------------------------
+
+    def _on_reset_filter(self) -> None:
+        """Сбросить все фильтры к значениям по умолчанию и перезагрузить."""
+        self._combo_user.setCurrentIndex(0)  # «Все»
+        self._date_from.setDate(QDate.currentDate())
+        self._date_to.setDate(QDate.currentDate())
+        self._edit_resource.clear()
+        self._load(offset=0)
+
+    def _on_save_to_file(self) -> None:
+        """Экспортировать текущую страницу аудит-лога в CSV-файл."""
+        if not self._entries:
+            QMessageBox.information(self, "Экспорт", "Нет записей для экспорта.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить аудит-лог",
+            "audit_log.csv",
+            "CSV (*.csv);;Все файлы (*)",
+        )
+        if not path:
+            return
+
+        try:
+            import csv
+
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerow(["Время", "Пользователь", "Тип действия", "Ресурс", "Комментарий"])
+                for entry in self._entries:
+                    writer.writerow([
+                        _format_dt(entry.ts),
+                        entry.username,
+                        entry.action_type,
+                        entry.resource or "",
+                        entry.comment or "",
+                    ])
+            QMessageBox.information(self, "Экспорт", f"Сохранено {len(self._entries)} записей.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка экспорта", str(exc))
+
+    def _on_clear_all(self) -> None:
+        """Очистить весь аудит-лог после подтверждения."""
+        if self._storage is None:
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            "Подтверждение очистки",
+            "Очистить весь аудит-лог?\n\nЭто действие необратимо.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self._storage.clear_audit()
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка очистки", str(exc))
+            return
+
+        self._load(offset=0)
 
     # ------------------------------------------------------------------
     # Фильтры

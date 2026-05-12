@@ -53,10 +53,9 @@ def mock_storage():
 
 @pytest.fixture
 def mock_ctx(mock_storage):
-    """Мок AppContext: audit_storage() возвращает mock_storage, auth_state() — None."""
+    """Мок AuthContext: audit = mock_storage, state — auto MagicMock."""
     ctx = MagicMock()
-    ctx.audit_storage.return_value = mock_storage
-    ctx.auth_state.return_value = None
+    ctx.audit = mock_storage
     return ctx
 
 
@@ -113,7 +112,7 @@ class TestSessionsPanelLoadSessions:
 
         auth_state = MagicMock()
         auth_state.access_context = access_ctx
-        mock_ctx.auth_state.return_value = auth_state
+        mock_ctx.state = auth_state
 
         panel = SessionsPanel(mock_ctx)
         qtbot.addWidget(panel)
@@ -130,7 +129,7 @@ class TestSessionsPanelLoadSessions:
 
         auth_state = MagicMock()
         auth_state.access_context = access_ctx
-        mock_ctx.auth_state.return_value = auth_state
+        mock_ctx.state = auth_state
 
         panel = SessionsPanel(mock_ctx)
         qtbot.addWidget(panel)

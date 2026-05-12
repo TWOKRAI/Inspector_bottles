@@ -176,20 +176,52 @@ class ThemePresetsManager:
     # CRUD (только custom)
     # ------------------------------------------------------------------
 
-    def save_custom(self, name: str, variables: ThemeVariables) -> None:
+    def get_parent(self, name: str) -> str:
+        """Получить имя родительской темы для custom-темы.
+
+        Родительская тема хранится в поле ``_parent`` YAML-файла.
+        Для default-тем возвращает пустую строку (они сами являются корнями).
+
+        Args:
+            name: имя темы.
+
+        Returns:
+            Имя родительской темы или пустая строка.
+        """
+        if self.is_default(name):
+            return ""
+        custom_path = self._custom_dir / f"{name}.yaml"
+        if not custom_path.is_file():
+            return ""
+        try:
+            with open(custom_path, encoding="utf-8") as f:
+                raw = yaml.safe_load(f)
+            if isinstance(raw, dict):
+                return str(raw.get("_parent", ""))
+        except Exception:
+            pass
+        return ""
+
+    def save_custom(
+        self, name: str, variables: ThemeVariables, parent: str = "",
+    ) -> None:
         """Сохранить (или перезаписать) custom-тему.
 
         Создаёт директорию data/custom_themes/ если не существует.
         Сериализует через variables.model_dump() → yaml.dump().
+        Дополнительно сохраняет поле ``_parent`` — имя родительской темы.
 
         Args:
             name:      имя темы (будет именем файла без расширения).
             variables: объект ThemeVariables с переменными.
+            parent:    имя родительской темы (опционально).
         """
         self._custom_dir.mkdir(parents=True, exist_ok=True)
         target = self._custom_dir / f"{name}.yaml"
 
         data = variables.model_dump()
+        if parent:
+            data["_parent"] = parent
         try:
             with open(target, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -232,14 +264,20 @@ class ThemePresetsManager:
         """Копировать тему (default или custom) в новый custom-файл.
 
         Загружает переменные из src_name (через get_variables) и сохраняет
-        как новую custom-тему с именем dst_name.
+        как новую custom-тему с именем dst_name. Родительская тема наследуется:
+        для default-источника parent = src_name, для custom — его parent.
 
         Args:
             src_name: имя исходной темы (default или custom).
             dst_name: имя новой custom-темы.
         """
         variables = self.get_variables(src_name)
-        self.save_custom(dst_name, variables)
+        # Определить parent: default → сама; custom → её parent
+        if self.is_default(src_name):
+            parent = src_name
+        else:
+            parent = self.get_parent(src_name) or src_name
+        self.save_custom(dst_name, variables, parent=parent)
         _logger.debug(
             "[ThemePresetsManager] тема '%s' скопирована в custom '%s'",
             src_name,
@@ -267,9 +305,10 @@ class ThemePresetsManager:
             )
             return False
 
-        # Загружаем, сохраняем под новым именем, удаляем старый файл
+        # Загружаем, сохраняем под новым именем (с parent), удаляем старый файл
         variables = self._load_yaml(old_path, old_name)
-        self.save_custom(new_name, variables)
+        parent = self.get_parent(old_name)
+        self.save_custom(new_name, variables, parent=parent)
         self.delete_custom(old_name)
         _logger.debug(
             "[ThemePresetsManager] custom-тема переименована: '%s' → '%s'",
