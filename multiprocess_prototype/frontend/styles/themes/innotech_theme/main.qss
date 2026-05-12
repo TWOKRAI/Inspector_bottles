@@ -66,8 +66,8 @@ QWidget#AppHeader {
         stop:0 @bg_hi2, stop:0.55 @grad_header_mid, stop:1 @grad_header_bot);
     border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-bottom: 4px solid @accent;
-    min-height: 60px;
-    max-height: 60px;
+    min-height: @header_height;
+    max-height: @header_height;
 }
 
 QLabel#BrandLabel {
@@ -128,8 +128,8 @@ QPushButton {
     border-radius: @radius_10;
     color: @text_0;
     font-weight: 600;
-    padding: 8px 20px;
-    min-height: 22px;
+    padding: @btn_padding;
+    min-height: @btn_min_height;
 }
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -305,7 +305,7 @@ QComboBox {
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: @radius_md;
     padding: 6px 28px 6px 12px;
-    min-height: 24px;
+    min-height: @input_min_height;
     color: @text_0;
 }
 QComboBox:hover { border: 1px solid rgba(43, 127, 255, 0.55); }
@@ -342,7 +342,7 @@ QLineEdit, QPlainTextEdit, QTextEdit {
     border: 1px solid rgba(0, 0, 0, 0.55);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: @radius_md;
-    padding: 6px 12px;
+    padding: @input_padding;
     color: @text_0;
     font-family: "@font_family_mono", monospace;
     selection-background-color: @accent;
@@ -538,7 +538,7 @@ QProgressBar::chunk {
 QScrollBar:vertical {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
-    width: 50px;
+    width: @scrollbar_width;
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: @radius_pill;
     margin: 4px;
@@ -564,7 +564,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
 QScrollBar:horizontal {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
-    height: 42px;
+    height: @scrollbar_h_height;
     border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: @radius_pill;
     margin: 4px;
