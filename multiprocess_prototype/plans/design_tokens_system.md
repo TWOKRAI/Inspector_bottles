@@ -88,6 +88,8 @@
 
 ### Уровень 1: Scale tokens (T-shirt размеры)
 
+> **SUPERSEDED:** Финальная версия шкалы — в секции "Уточнение Task 1.1" ниже (12 font-size + 11 border-radius). Эта секция — раннее приближение, оставлена для истории.
+
 ```python
 # font-size шкала
 font_xs: str = "9px"     # brand sub
@@ -360,13 +362,13 @@ THEME_VAR_TREE: dict[str, dict[str, list[str]]] = {
 Дополнительно создаётся helper-функция для совместимости:
 
 ```python
-def flatten_theme_var_tree() -> dict[str, list[str]]:
-    """THEME_VAR_TREE -> плоский dict (подкатегория -> vars) для обратной совместимости."""
-    flat: dict[str, list[str]] = {}
-    for _cat, subcats in THEME_VAR_TREE.items():
-        for subcat_name, var_names in subcats.items():
-            flat[subcat_name] = var_names
-    return flat
+def flatten_theme_var_tree(tree: dict[str, dict[str, list[str]]]) -> dict[str, list[str]]:
+    """Конвертировать 2-уровневый THEME_VAR_TREE в плоский THEME_VAR_GROUPS для обратной совместимости."""
+    result = {}
+    for category, subcats in tree.items():
+        for subcat_name, var_list in subcats.items():
+            result[subcat_name] = var_list
+    return result
 ```
 
 ---
@@ -759,15 +761,19 @@ def flatten_theme_var_tree() -> dict[str, list[str]]:
    ```
    Поведение:
    - Клик на hex-строку (row N) →
-     1. Закрыть предыдущий editor: если `_editor_row` не None → `removeRow(_editor_row)`, пересчитать индексы
+     1. Закрыть предыдущий editor: если `_editor_row` не None →
+        `self._table.removeCellWidget(_editor_row, 0)` (забрать ownership ДО удаления строки)
+        → `self._table.removeRow(_editor_row)` → пересчитать индексы
      2. `insertRow(N + 1)` → `setSpan(N + 1, 0, 1, column_count)` → `setCellWidget(N + 1, 0, _color_editor)`
-     3. `_color_editor.setCurrentColor(QColor(value))`
-     4. `_editor_row = N + 1`
-   - Signal `currentColorChanged` → обновить значение и превью в строке N live
-   - Клик на другую hex-строку → editor переезжает под неё (remove + insert)
-   - Клик на px/rgba строку → editor закрывается (remove row)
+     3. `self._table.setRowHeight(N + 1, self._color_editor.sizeHint().height())`
+     4. `_color_editor.setCurrentColor(QColor(value))`
+     5. `_editor_row = N + 1`, `_data_row_for_editor = N`
+   - Signal `currentColorChanged` → обновить значение и превью в строке `_data_row_for_editor` live
+   - Клик на другую hex-строку → editor переезжает (removeCellWidget + removeRow + insertRow)
+   - Клик на px/rgba строку → editor закрывается (removeCellWidget + removeRow)
    - Пресеты палитры: `setCustomColor(i, QColor(var))` — все hex из текущей темы
-   - **Важно:** при removeRow учитывать смещение индексов — строки ниже editor сдвигаются на -1
+   - **КРИТИЧНО:** перед removeRow ОБЯЗАТЕЛЬНО вызвать `removeCellWidget()` — иначе Qt уничтожит QColorDialog через deleteLater
+   - Для маппинга индексов использовать helper `_real_data_row(visible_row) -> int` который учитывает смещение от editor-строки
 
 8. **Редактирование не-hex значений:**
    - Установить `self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)` глобально
@@ -775,14 +781,14 @@ def flatten_theme_var_tree() -> dict[str, list[str]]:
    - В `_on_cell_double_clicked`: если значение НЕ hex → `self._table.editItem(item)` для inline-редактирования px/rgba
    - Для hex-значений — НЕ открывать editItem (color editor в expandable row уже активен)
 
-10. **Поиск (QLineEdit):** signal `textChanged` ->
+9. **Поиск (QLineEdit):** signal `textChanged` ->
     - Вызвать `self._tree_nav.filter(text)` для фильтрации навигации
     - Если таблица заполнена — фильтровать строки таблицы по имени/описанию
     - Если текст пустой — сбросить фильтр
-11. **_collect_vars_from_tree() -> _collect_vars_from_table():** переписать — теперь собирать из QTableWidget (текущий набор) + из self._current_vars (остальные, которые не в таблице). Логика: пройти все строки таблицы, обновить self._current_vars[var_name] = value из кол. 1. Вернуть self._current_vars.
-12. **Убрать зависимость от _update_tree_height():** QTableWidget + TreeNavWidget имеют свои скроллы. Виджет больше не нуждается в фиксации высоты дерева.
-13. **Сохранить весь остальной код БЕЗ ИЗМЕНЕНИЙ:** _refresh_table, _load_theme, action_buttons, обработчики кнопок (_on_apply, _on_save, _on_add, _on_copy, _on_rename, _on_delete, _on_reset_defaults, _on_revert).
-14. **Важно: перед переключением подкатегории** — собирать текущие значения из таблицы в self._current_vars, чтобы не терять несохранённые правки.
+10. **Переименовать _collect_vars_from_tree() → _collect_vars_from_table()** и обновить все 3 вызова: в `_on_apply`, `_on_save`, `_on_add`. Новая логика: пройти все строки таблицы, обновить self._current_vars[var_name] = value из кол. 1. Вернуть self._current_vars.
+11. **Убрать зависимость от _update_tree_height():** QTableWidget + TreeNavWidget имеют свои скроллы. Виджет больше не нуждается в фиксации высоты дерева.
+12. **Сохранить логику остальных обработчиков БЕЗ ИЗМЕНЕНИЙ** (кроме переименования вызовов _collect_vars_from_tree → _collect_vars_from_table в _on_apply, _on_save, _on_add): _refresh_table, _load_theme, action_buttons, _on_copy, _on_rename, _on_delete, _on_reset_defaults, _on_revert.
+13. **Важно: перед переключением подкатегории** — собирать текущие значения из таблицы в self._current_vars, чтобы не терять несохранённые правки.
 
 **Acceptance criteria:**
 - [ ] UI отображает TreeNavWidget с 4 категориями и ~25 подкатегориями
