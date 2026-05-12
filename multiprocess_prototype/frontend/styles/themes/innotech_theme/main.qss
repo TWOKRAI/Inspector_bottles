@@ -916,10 +916,10 @@ QWidget#ErrorBannerRow[level="warning"] {
 }
 
 /* --- Validation panel output (dynamic property validation="ok"|"error"|"") --- */
-QPlainTextEdit#ValidationOutput[validation="ok"] {
+QTextEdit#ValidationOutput[validation="ok"] {
     color: @success;
 }
-QPlainTextEdit#ValidationOutput[validation="error"] {
+QTextEdit#ValidationOutput[validation="error"] {
     color: @danger;
 }
 

@@ -50,15 +50,18 @@ def test_show_error_makes_visible(banner: ErrorBannerWidget) -> None:
 # ---------------------------------------------------------------------------
 
 def test_show_warning(banner: ErrorBannerWidget) -> None:
-    """show_warning → баннер видим, строка со стилем предупреждения."""
+    """show_warning → баннер видим, строка имеет property level='warning'.
+
+    После рефакторинга inline → QSS стили задаются через setProperty("level", "warning"),
+    поэтому styleSheet() пуст — проверяем property напрямую.
+    """
     banner.show_warning("Низкое освещение")
 
     assert banner.isVisible()
     assert len(banner._rows) == 1
 
-    # Проверяем стиль строки содержит жёлтый цвет
-    row_style = banner._rows[0].styleSheet()
-    assert "#eab308" in row_style
+    # Стиль задаётся через QSS property, а не через setStyleSheet
+    assert banner._rows[0].property("level") == "warning"
 
 
 # ---------------------------------------------------------------------------
@@ -136,17 +139,19 @@ def test_clear(banner: ErrorBannerWidget) -> None:
 # ---------------------------------------------------------------------------
 
 def test_mixed_errors_warnings(banner: ErrorBannerWidget) -> None:
-    """show_error + show_warning → обе строки присутствуют с разными стилями."""
+    """show_error + show_warning → обе строки присутствуют с разными property level.
+
+    После рефакторинга inline → QSS цвета (#dc2626, #eab308) заданы в main.qss
+    через QSS-селекторы QWidget#ErrorBannerRow[level="error"] и [level="warning"].
+    Проверяем property "level", а не styleSheet().
+    """
     banner.show_error("Ошибка: нет сигнала")
     banner.show_warning("Предупреждение: низкий FPS")
 
     assert len(banner._rows) == 2
     assert banner.isVisible()
 
-    error_style = banner._rows[0].styleSheet()
-    warning_style = banner._rows[1].styleSheet()
-
-    # Ошибка — красный цвет
-    assert "#dc2626" in error_style
-    # Предупреждение — жёлтый цвет
-    assert "#eab308" in warning_style
+    # Ошибка — property level="error"
+    assert banner._rows[0].property("level") == "error"
+    # Предупреждение — property level="warning"
+    assert banner._rows[1].property("level") == "warning"

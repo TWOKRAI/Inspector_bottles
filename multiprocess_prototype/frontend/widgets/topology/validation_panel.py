@@ -34,6 +34,7 @@ class ValidationPanel(QWidget):
 
         # Область вывода результатов
         self._output = QTextEdit()
+        self._output.setObjectName("ValidationOutput")
         self._output.setReadOnly(True)
         self._output.setPlaceholderText("Нажмите 'Validate' для проверки blueprint...")
         layout.addWidget(self._output)
@@ -47,6 +48,16 @@ class ValidationPanel(QWidget):
         layout.addLayout(btn_layout)
 
     # ------------------------------------------------------------------ #
+    #  Вспомогательные методы                                              #
+    # ------------------------------------------------------------------ #
+
+    def _set_validation_state(self, state: str) -> None:
+        """Переключить стиль вывода валидации через QSS property."""
+        self._output.setProperty("validation", state)
+        self._output.style().unpolish(self._output)
+        self._output.style().polish(self._output)
+
+    # ------------------------------------------------------------------ #
     #  Публичный API                                                       #
     # ------------------------------------------------------------------ #
 
@@ -57,15 +68,15 @@ class ValidationPanel(QWidget):
         Иначе — красный список ошибок.
         """
         if not errors:
-            self._output.setStyleSheet("color: green;")
+            self._set_validation_state("ok")
             self._output.setPlainText("OK — ошибок не найдено")
         else:
-            self._output.setStyleSheet("color: red;")
+            self._set_validation_state("error")
             text = f"Найдено ошибок: {len(errors)}\n\n"
             text += "\n".join(f"• {err}" for err in errors)
             self._output.setPlainText(text)
 
     def clear(self) -> None:
         """Сбросить содержимое панели."""
-        self._output.setStyleSheet("")
+        self._set_validation_state("")
         self._output.clear()

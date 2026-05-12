@@ -10,20 +10,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 
-# Стили кнопок по состоянию
-_STYLES: dict[str, str] = {
-    "empty": (
-        "background: #3a3a3a; color: #888; border: 1px solid #555;"
-    ),
-    "occupied": (
-        "background: #2d5a2d; color: #ccc; border: 1px solid #4caf50;"
-    ),
-    "selected": (
-        "background: #1a5276; color: #fff; border: 2px solid #2196f3;"
-    ),
-}
-
-
 class SlotSelector(QWidget):
     """Селектор слотов — ряд пронумерованных кнопок.
 
@@ -48,7 +34,8 @@ class SlotSelector(QWidget):
         for i in range(count):
             btn = QPushButton(str(i))
             btn.setMinimumSize(40, 30)
-            btn.setStyleSheet(_STYLES["empty"])
+            btn.setObjectName("SlotButton")
+            btn.setProperty("slotState", "empty")
 
             # Захватить индекс через default-аргумент
             btn.clicked.connect(lambda _checked=False, idx=i: self._on_click(idx))
@@ -70,8 +57,10 @@ class SlotSelector(QWidget):
         if index < 0 or index >= self._count:
             return
         self._states[index] = state
-        style = _STYLES.get(state, _STYLES["empty"])
-        self._buttons[index].setStyleSheet(style)
+        btn = self._buttons[index]
+        btn.setProperty("slotState", state)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
 
     def select(self, index: int) -> None:
         """Выделить слот: снять выделение с предыдущего, установить на новый.
