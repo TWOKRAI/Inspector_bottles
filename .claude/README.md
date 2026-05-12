@@ -24,7 +24,7 @@
 │   └── team/              #   команда и документация (4)
 ├── modes/                 # dev.md, spec.md
 ├── hooks/                 # SessionStart / PreToolUse / PostToolUse / PostCompact
-├── skills/                # kb-discover/, kb-lint/
+├── skills/                # (расширяемо, kb-* удалены)
 ├── mcp/                   # MCP-инфраструктура (qex, sentrux)
 ├── memory/                # Git-tracked project memory
 └── platforms/             # settings.local шаблоны (macOS/Windows)
@@ -111,8 +111,8 @@
 | `developer` | Sonnet | Реализация кода, smoke-тесты |
 | `reviewer` | Opus | Код-ревью (архитектура + безопасность) |
 | `tester` | Sonnet | Тесты по acceptance criteria |
-| `debugger` | Sonnet | Диагностика падений |
-| `investigator` | Opus | Глубокое расследование архитектурных проблем (read-only) |
+| `debugger` | Sonnet | Тесты/runtime-ошибки: воспроизвести → найти → **пофиксить** (1-5 строк) |
+| `investigator` | Opus | Cross-module архитектурные проблемы: **read-only** диагностика + отчёт |
 | `docs-writer` | Haiku | README, STATUS, docstrings |
 | `tech-writer` | Sonnet | ADR, ARCHITECTURE, RFC |
 | `spec-writer` | Sonnet | Живое ТЗ (`docs/direction/`) |
