@@ -715,7 +715,7 @@ def flatten_theme_var_tree() -> dict[str, list[str]]:
                  +-- QLineEdit (поиск) с setPlaceholderText("Поиск переменной...")
                  +-- QHBoxLayout
                        +-- TreeNavWidget (слева, фиксир. ширина 200px)
-                       +-- QTableWidget (справа, stretch)
+                       +-- QTableWidget (справа, stretch, color editor = expandable row внутри таблицы)
    ```
 3. **TreeNavWidget настройка:** вызвать `set_tree()` с ключами из THEME_VAR_TREE: `{"Глобальное": ["Палитра", "Текст", ...], "Компоненты": ["Кнопки", ...], ...}`.
 4. **Signal leaf_selected -> заполнить таблицу:** при выборе подкатегории:
@@ -736,28 +736,66 @@ def flatten_theme_var_tree() -> dict[str, list[str]]:
    ```
    НЕ использовать setStyleSheet для preview — это создаёт приоритетный конфликт с глобальным QSS и не масштабируется (50 строк = 50 inline стилей).
    Для не-hex значений (px, rgba) — показать текст значения в ячейке без превью.
-7. **Редактирование значений:**
+7. **Inline color editor (expandable row в таблице):**
+   При клике на hex-строку — под ней вставляется строка-виджет с QColorDialog:
+   ```
+   ┌──────────────┬────────┬──────────────┐
+   │ btn_grad_top │ ■ #6a72│ Верх град.   │
+   ├──────────────┴────────┴──────────────┤
+   │ [QColorDialog NoButtons, span=all]   │  ← expandable row
+   │  цветовой квадрат + RGB слайдеры     │
+   │  hex-ввод + пресеты палитры          │
+   ├──────────────┬────────┬──────────────┤
+   │ btn_grad_mid │ ■ #4b52│ Середина     │
+   └──────────────┴────────┴──────────────┘
+   ```
+   Реализация:
+   ```python
+   # Один экземпляр QColorDialog (переиспользуется)
+   self._color_editor = QColorDialog(self)
+   self._color_editor.setOption(QColorDialog.ColorDialogOption.NoButtons)
+   self._color_editor.setOption(QColorDialog.ColorDialogOption.ShowAlphaChannel)
+   self._editor_row: int | None = None  # индекс вставленной строки
+   ```
+   Поведение:
+   - Клик на hex-строку (row N) →
+     1. Закрыть предыдущий editor: если `_editor_row` не None → `removeRow(_editor_row)`, пересчитать индексы
+     2. `insertRow(N + 1)` → `setSpan(N + 1, 0, 1, column_count)` → `setCellWidget(N + 1, 0, _color_editor)`
+     3. `_color_editor.setCurrentColor(QColor(value))`
+     4. `_editor_row = N + 1`
+   - Signal `currentColorChanged` → обновить значение и превью в строке N live
+   - Клик на другую hex-строку → editor переезжает под неё (remove + insert)
+   - Клик на px/rgba строку → editor закрывается (remove row)
+   - Пресеты палитры: `setCustomColor(i, QColor(var))` — все hex из текущей темы
+   - **Важно:** при removeRow учитывать смещение индексов — строки ниже editor сдвигаются на -1
+
+8. **Редактирование не-hex значений:**
    - Установить `self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)` глобально
    - Подключить `self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)`
-   - В `_on_cell_double_clicked`: если значение hex-цвет → открыть QColorDialog; иначе → `self._table.editItem(item)` для inline-редактирования
-   - Это предотвращает race condition между inline-edit и QColorDialog при двойном клике на hex-ячейку
-8. **Поиск (QLineEdit):** signal `textChanged` ->
-   - Вызвать `self._tree_nav.filter(text)` для фильтрации навигации
-   - Если таблица заполнена — фильтровать строки таблицы по имени/описанию
-   - Если текст пустой — сбросить фильтр
-9. **_collect_vars_from_tree() -> _collect_vars_from_table():** переписать — теперь собирать из QTableWidget (текущий набор) + из self._current_vars (остальные, которые не в таблице). Логика: пройти все строки таблицы, обновить self._current_vars[var_name] = value из кол. 1. Вернуть self._current_vars.
-10. **Убрать зависимость от _update_tree_height():** QTableWidget + TreeNavWidget имеют свои скроллы. Виджет больше не нуждается в фиксации высоты дерева.
-11. **Сохранить весь остальной код БЕЗ ИЗМЕНЕНИЙ:** _refresh_table, _load_theme, action_buttons, обработчики кнопок (_on_apply, _on_save, _on_add, _on_copy, _on_rename, _on_delete, _on_reset_defaults, _on_revert).
-12. **Важно: перед переключением подкатегории** — собирать текущие значения из таблицы в self._current_vars, чтобы не терять несохранённые правки.
+   - В `_on_cell_double_clicked`: если значение НЕ hex → `self._table.editItem(item)` для inline-редактирования px/rgba
+   - Для hex-значений — НЕ открывать editItem (color editor в expandable row уже активен)
+
+10. **Поиск (QLineEdit):** signal `textChanged` ->
+    - Вызвать `self._tree_nav.filter(text)` для фильтрации навигации
+    - Если таблица заполнена — фильтровать строки таблицы по имени/описанию
+    - Если текст пустой — сбросить фильтр
+11. **_collect_vars_from_tree() -> _collect_vars_from_table():** переписать — теперь собирать из QTableWidget (текущий набор) + из self._current_vars (остальные, которые не в таблице). Логика: пройти все строки таблицы, обновить self._current_vars[var_name] = value из кол. 1. Вернуть self._current_vars.
+12. **Убрать зависимость от _update_tree_height():** QTableWidget + TreeNavWidget имеют свои скроллы. Виджет больше не нуждается в фиксации высоты дерева.
+13. **Сохранить весь остальной код БЕЗ ИЗМЕНЕНИЙ:** _refresh_table, _load_theme, action_buttons, обработчики кнопок (_on_apply, _on_save, _on_add, _on_copy, _on_rename, _on_delete, _on_reset_defaults, _on_revert).
+14. **Важно: перед переключением подкатегории** — собирать текущие значения из таблицы в self._current_vars, чтобы не терять несохранённые правки.
 
 **Acceptance criteria:**
 - [ ] UI отображает TreeNavWidget с 4 категориями и ~25 подкатегориями
-- [ ] Клик на подкатегорию "Кнопки" -> таблица показывает 8 переменных (btn_grad_top...btn_padding)
-- [ ] Клик на категорию "Компоненты" -> таблица показывает ВСЕ переменные всех подкатегорий (~50)
-- [ ] Поиск "btn" -> TreeNavWidget фильтрует, таблица фильтрует
-- [ ] Двойной клик на hex-значение в таблице -> QColorDialog
-- [ ] Двойной клик на px-значение -> inline edit
-- [ ] Превью колонка показывает цветной квадратик для hex
+- [ ] Клик на подкатегорию "Кнопки" → таблица показывает переменные этой подкатегории
+- [ ] Клик на категорию "Компоненты" → таблица показывает ВСЕ переменные всех вложенных подкатегорий
+- [ ] Поиск "btn" → TreeNavWidget и таблица фильтруются
+- [ ] Клик на hex-строку → под ней раскрывается expandable row с QColorDialog (NoButtons)
+- [ ] Изменение цвета в color editor → значение и превью в строке выше обновляются live
+- [ ] Клик на другую hex-строку → editor переезжает под неё
+- [ ] Клик на px/rgba строку → expandable row закрывается
+- [ ] Двойной клик на px/rgba → inline edit
+- [ ] Превью колонка: цветной квадратик (QPalette) для hex, текст для остальных
+- [ ] Пресеты палитры в color editor заполнены цветами текущей темы
 - [ ] _on_apply / _on_save / _on_revert работают корректно (собирают все ~140 переменных)
 - [ ] Кнопки action-колонки работают как раньше
 
