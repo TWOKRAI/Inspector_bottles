@@ -793,6 +793,193 @@ QLabel#CameraStatus { font-weight: bold; color: @text_2; }
 QPushButton#PaginationArrow {
     font-size: 22px;
     padding: 4px 4px;
+    min-width: 50px;
+    max-width: 50px;
+}
+
+/* --- Tab headers (общий objectName для всех заголовков вкладок) --- */
+QLabel#TabHeader {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* --- Panel headers (admin panels: audit, sessions, users) --- */
+QLabel#PanelHeader { font-weight: bold; font-size: 15px; }
+
+/* --- Large tab header (services tab) --- */
+QLabel#TabHeaderLg { font-weight: bold; font-size: 17px; }
+
+/* --- Confirm dialog action label --- */
+QLabel#ConfirmActionLabel { font-weight: bold; }
+
+/* --- Dirty indicator (statusbar) --- */
+QLabel#DirtyLabel {
+    color: @warn;
+    font-weight: bold;
+}
+
+/* --- Topology hints --- */
+QLabel#StatusHint {
+    color: @text_3;
+    font-size: 11px;
+}
+
+/* --- Pipeline graph view background --- */
+QWidget#PipelineGraphView {
+    background-color: #1e1e1e;
+}
+
+/* --- Theme divider line --- */
+QFrame#ThemeDivider {
+    color: @bg_deep;
+}
+
+/* --- Readonly hint (roles panel, etc.) --- */
+QLabel[role="readonly-hint"] {
+    color: @text_3;
+    font-size: 12px;
+}
+
+/* --- Placeholder italic (services tab, etc.) --- */
+QLabel[role="placeholder-italic"] {
+    color: @text_3;
+    font-size: 14px;
+    font-style: italic;
+}
+
+/* --- Permissions hint (admin dashboard) --- */
+QLabel#PermissionsHint {
+    color: @silver;
+    font-size: 11px;
+}
+
+/* --- DiffScroll transparent ScrollArea --- */
+QScrollArea#DiffScrollLeft,
+QScrollArea#DiffScrollRight {
+    background: transparent;
+    border: none;
+}
+
+/* --- EntityCard --- */
+QFrame#EntityCard {
+    border: 1px solid @surf_1;
+    border-radius: 4px;
+    padding: 8px;
+    margin: 2px;
+}
+QLabel#EntityCardTitle {
+    font-weight: bold;
+}
+QLabel#EntityCardKey {
+    color: @text_2;
+}
+
+/* --- Display slot / Camera view label --- */
+QLabel#DisplaySlotLabel,
+QLabel#CameraViewLabel {
+    background-color: #1a1a2e;
+    color: @text_2;
+    font-size: 16px;
+}
+
+/* --- ViewModeToggle (iOS-switch) --- */
+QCheckBox#ViewModeSwitch {
+    spacing: 0px;
+}
+QCheckBox#ViewModeSwitch::indicator {
+    width: 56px;
+    height: 30px;
+    border-radius: 15px;
+    border: 1px solid rgba(0, 0, 0, 0.4);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @surf_0);
+}
+QCheckBox#ViewModeSwitch::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent);
+    border: 1px solid rgba(0, 0, 0, 0.3);
+}
+QCheckBox#ViewModeSwitch::indicator:hover {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* --- Error banner rows (dynamic property level="error"|"warning") --- */
+QWidget#ErrorBannerRow[level="error"] {
+    background: rgba(220, 38, 38, 0.15);
+    border-left: 3px solid #dc2626;
+    padding: 4px 8px;
+}
+QWidget#ErrorBannerRow[level="warning"] {
+    background: rgba(234, 179, 8, 0.15);
+    border-left: 3px solid #eab308;
+    padding: 4px 8px;
+}
+
+/* --- Validation panel output (dynamic property validation="ok"|"error"|"") --- */
+QPlainTextEdit#ValidationOutput[validation="ok"] {
+    color: @success;
+}
+QPlainTextEdit#ValidationOutput[validation="error"] {
+    color: @danger;
+}
+
+/* --- Error labels (login, confirm, user_form) --- */
+QLabel#LoginErrorLabel,
+QLabel#ConfirmErrorLabel,
+QLabel#PasswordErrorLabel {
+    color: @danger;
+}
+QLabel#PasswordErrorLabel {
+    font-size: 11px;
+}
+
+/* --- Validation error border (dynamic property hasError="true") --- */
+QLineEdit[hasError="true"],
+QPlainTextEdit[hasError="true"],
+QTextEdit[hasError="true"] {
+    border: 1px solid @danger;
+}
+
+/* --- Slot selector states (dynamic property slotState) --- */
+QPushButton#SlotButton[slotState="empty"] {
+    background: @surf_0;
+    color: @text_3;
+    border: 1px solid @surf_1;
+}
+QPushButton#SlotButton[slotState="occupied"] {
+    background: #2d5a2d;
+    color: @text_1;
+    border: 1px solid @success;
+}
+QPushButton#SlotButton[slotState="selected"] {
+    background: #1a5276;
+    color: @text_0;
+    border: 2px solid @accent;
+}
+
+/* --- Inspector panel --- */
+QLabel#InspectorPlaceholder {
+    color: @text_3;
+    font-style: italic;
+    padding: 20px;
+}
+QLabel#InspectorTitle {
+    font-size: 14px;
+    font-weight: bold;
+    color: @text_0;
+}
+QLabel#InspectorCategoryBadge {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+QFrame#InspectorDivider {
+    color: @surf_1;
+}
+QLabel[role="plugin-name"] {
+    font-weight: bold;
+    color: @text_1;
+    margin-top: 4px;
 }
 
 /* ===== Auth RBAC: readOnly state (PR2/PR3) ===== */
