@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QGroupBox,
@@ -33,11 +32,6 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
 
 _logger = logging.getLogger(__name__)
-
-# Ключ секции для навигации
-key = "interface_settings"
-# Заголовок секции для nav-дерева
-title = "Настройка интерфейса"
 
 
 class InterfaceSection(QWidget):

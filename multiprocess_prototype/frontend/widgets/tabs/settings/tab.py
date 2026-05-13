@@ -44,6 +44,7 @@ from ._nav_tree import (
     build_nav_tree,
     select_tree_key as _select_tree_key,
 )
+from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionProtocol
 from .presenter import SettingsPresenter
 
 if TYPE_CHECKING:
@@ -53,15 +54,6 @@ if TYPE_CHECKING:
     from .system import SystemSection
 
 logger = logging.getLogger(__name__)
-
-# Русские названия секций для group-box (RegisterView) — оставлены для обратной совместимости
-_SECTION_TITLES: dict[str, str] = {
-    "system": "Система",
-    "camera": "Камера",
-    "processing": "Обработка",
-    "display": "Дисплей",
-    "storage": "Хранение",
-}
 
 # Ширины колонок
 _ACTION_WIDTH = 160
@@ -133,6 +125,7 @@ class SettingsTab(QWidget):
         if self._system_section is not None:
             return self._system_section.view_mode()
         from multiprocess_prototype.frontend.forms import ViewMode
+
         return ViewMode.CARDS
 
     # ------------------------------------------------------------------
@@ -191,6 +184,7 @@ class SettingsTab(QWidget):
     def add_admin_dashboard_page(self, admin_children: list[tuple[str, str]]) -> None:
         """Создать AdminDashboard и зарегистрировать в content stack."""
         from .administration.dashboard import AdminDashboard
+
         auth = self._ctx.auth
         auth_state = auth.state if auth is not None else None
         dashboard = AdminDashboard(auth_state)
@@ -200,10 +194,15 @@ class SettingsTab(QWidget):
     def add_system_settings_page(self) -> None:
         """Создать SystemSection и зарегистрировать как страницу «Настройки системы»."""
         from .system import SystemSection
+
         section = SystemSection(self._ctx)
         # Подключить колбэки для проброса сигналов на SettingsTab
-        section.presenter.on_settings_saved = lambda data: self.settings_saved.emit(data)
-        section.presenter.on_dirty_changed = lambda dirty: self.dirty_changed.emit(dirty)
+        section.presenter.on_settings_saved = lambda data: self.settings_saved.emit(
+            data
+        )
+        section.presenter.on_dirty_changed = lambda dirty: self.dirty_changed.emit(
+            dirty
+        )
         # Зарегистрировать кнопки секции в action-колонке
         self.register_action_page("system_settings", section.action_buttons())
         # Зарегистрировать content-страницу
@@ -222,15 +221,21 @@ class SettingsTab(QWidget):
     def add_interface_settings_page(self) -> None:
         """Создать InterfaceSection и зарегистрировать в content stack."""
         from .interface import InterfaceSection
+
         section = InterfaceSection(self._ctx)
         self.add_content_page("interface_settings", section)
         self._presenter.register_section(section)
 
     def add_appearance_page(self) -> None:
         """Создать AppearanceSection и зарегистрировать в content stack."""
-        from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
-        from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
+        from multiprocess_prototype.frontend.styles.theme_loader import (
+            create_theme_manager,
+        )
+        from multiprocess_prototype.frontend.managers.theme_presets_manager import (
+            ThemePresetsManager,
+        )
         from .appearance import AppearanceSection
+
         section = AppearanceSection(
             theme_manager=create_theme_manager(),
             presets_manager=ThemePresetsManager(),
@@ -238,10 +243,12 @@ class SettingsTab(QWidget):
         # Зарегистрировать кнопки секции в action-колонке
         self.register_action_page("appearance", section.action_buttons())
         self.add_content_page("appearance", section)
+        self._presenter.register_section(section)
 
     def add_history_page(self) -> None:
         """Создать HistorySection и зарегистрировать в content stack."""
         from .history import HistorySection
+
         section = HistorySection(self._ctx)
         # Кнопки секции регистрируются в action-колонке
         self.register_action_page("history", section.action_buttons())
@@ -265,15 +272,19 @@ class SettingsTab(QWidget):
         panel: QWidget | None = None
         if key == "users":
             from .administration.users_panel import UsersPanel
+
             panel = UsersPanel(auth)
         elif key == "roles":
             from .administration.roles_panel import RolesPanel
+
             panel = RolesPanel(auth, bus)
         elif key == "sessions":
             from .administration.sessions_panel import SessionsPanel
+
             panel = SessionsPanel(auth)
         elif key == "audit_log":
             from .administration.audit_log_panel import AuditLogPanel
+
             panel = AuditLogPanel(auth)
 
         if panel is None:
@@ -281,9 +292,8 @@ class SettingsTab(QWidget):
             return
 
         # Зарегистрировать кнопки панели в action-колонке
-        # TODO(Phase 5): заменить hasattr на isinstance(panel, SectionProtocol)
         action_idx = self._presenter.get_action_index("_empty")
-        if hasattr(panel, "action_buttons"):
+        if isinstance(panel, SectionProtocol):
             action_idx = self.register_action_page(key, panel.action_buttons())
 
         content_idx = self._content_stack.addWidget(panel)
@@ -409,4 +419,3 @@ class SettingsTab(QWidget):
         sa.setWidgetResizable(False)
         sa.setWidgetResizable(True)
         self._diff_layout._update_master_range()
-

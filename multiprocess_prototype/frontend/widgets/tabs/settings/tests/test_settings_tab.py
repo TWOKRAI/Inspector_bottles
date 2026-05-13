@@ -21,6 +21,7 @@ from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
 # Фикстуры
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_ctx() -> AppContext:
     """Создать тестовый AppContext с моками."""
     process = MagicMock()
@@ -73,10 +74,14 @@ class TestSettingsTab:
         """Все 5 групп (system/camera/processing/display/storage) присутствуют."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -103,10 +108,14 @@ class TestSettingsTab:
 
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", path)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -121,10 +130,14 @@ class TestSettingsTab:
         """Изменение значения редактора → is_dirty() returns True."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -138,6 +151,7 @@ class TestSettingsTab:
         # Меняем значение через setter — это само по себе не эмитит сигнал.
         # Напрямую устанавливаем значение через виджет — это эмитит change_signal.
         from PySide6.QtWidgets import QSpinBox
+
         if isinstance(fps_editor.widget, QSpinBox):
             # setValue эмитит valueChanged
             fps_editor.widget.setValue(fps_editor.widget.value() + 1)
@@ -153,10 +167,14 @@ class TestSettingsTab:
         """Изменение → save() → YAML обновлён на диске."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -179,12 +197,16 @@ class TestSettingsTab:
         """Невалидное значение → save() returns False, YAML не меняется."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
         original_content = settings_yaml.read_text(encoding="utf-8")
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -207,10 +229,14 @@ class TestSettingsTab:
         """Изменение → reload() → editors показывают on-disk значения."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -233,10 +259,14 @@ class TestSettingsTab:
         """settings_saved эмитится при успешном save()."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -249,10 +279,14 @@ class TestSettingsTab:
         """SettingsTab.create(ctx) возвращает экземпляр SettingsTab."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab.create(ctx)
         qtbot.addWidget(tab)
 
@@ -264,11 +298,15 @@ class TestSettingsTab:
         """Переключение режима → ui_prefs.yaml содержит settings.view_mode: table."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
         from multiprocess_prototype.frontend.forms import ViewMode
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -277,6 +315,7 @@ class TestSettingsTab:
 
         # Проверить что prefs сохранены
         from multiprocess_prototype.frontend.prefs.store import UiPrefsStore
+
         prefs = UiPrefsStore(path=prefs_yaml)
         assert prefs.get("settings.view_mode") == "table"
 
@@ -293,11 +332,15 @@ class TestSettingsTab:
 
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_path)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
         from multiprocess_prototype.frontend.forms import ViewMode
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -311,10 +354,14 @@ class TestSettingsTab:
 
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", missing_path)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
-        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import SettingsTab
+        from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
+            SettingsTab,
+        )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 
@@ -329,13 +376,17 @@ class TestSettingsTab:
         """RegisterView создаётся с русскими category_titles."""
         import multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io as yaml_io_mod
         import multiprocess_prototype.frontend.prefs.store as store_mod
+
         monkeypatch.setattr(yaml_io_mod, "SETTINGS_PATH", settings_yaml)
         monkeypatch.setattr(store_mod, "UI_PREFS_PATH", prefs_yaml)
 
         from multiprocess_prototype.frontend.widgets.tabs.settings.tab import (
             SettingsTab,
+        )
+        from multiprocess_prototype.frontend.widgets.tabs.settings.system.section import (
             _SECTION_TITLES,
         )
+
         tab = SettingsTab(ctx)
         qtbot.addWidget(tab)
 

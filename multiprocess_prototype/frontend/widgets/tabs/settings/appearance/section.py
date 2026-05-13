@@ -7,6 +7,7 @@
 
 Компонует ThemesTable + VarsEditor, владеет кнопками action-колонки.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -25,8 +26,12 @@ from .themes_table import ThemesTable
 from .vars_editor import VarsEditor
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.managers.theme_manager import ThemeManager
-    from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
+    from multiprocess_framework.modules.frontend_module.managers.theme_manager import (
+        ThemeManager,
+    )
+    from multiprocess_prototype.frontend.managers.theme_presets_manager import (
+        ThemePresetsManager,
+    )
 
 
 class AppearanceSection(QWidget):
@@ -120,7 +125,10 @@ class AppearanceSection(QWidget):
         self._vars_editor.set_vars(var_names, values, descriptions)
 
     def set_crud_buttons_enabled(
-        self, save: bool, rename: bool, delete: bool,
+        self,
+        save: bool,
+        rename: bool,
+        delete: bool,
     ) -> None:
         """Установить доступность кнопок CRUD."""
         self._btn_save.setEnabled(save)
@@ -128,7 +136,10 @@ class AppearanceSection(QWidget):
         self._btn_delete.setEnabled(delete)
 
     def get_input_text(
-        self, title: str, label: str, default: str = "",
+        self,
+        title: str,
+        label: str,
+        default: str = "",
     ) -> tuple[str, bool]:
         """Показать диалог ввода текста."""
         if default:
@@ -144,10 +155,6 @@ class AppearanceSection(QWidget):
     def close_color_editor(self) -> None:
         """Закрыть inline color editor."""
         self._vars_editor.close_color_editor()
-
-    def collect_table_vars(self) -> dict[str, str]:
-        """Собрать текущие значения переменных из таблицы."""
-        return self._vars_editor.collect_vars()
 
     # ------------------------------------------------------------------
     # Построение UI
@@ -173,10 +180,14 @@ class AppearanceSection(QWidget):
         """Создать все кнопки action-колонки."""
         self._btn_apply = QPushButton("Применить тему")
         self._btn_apply.setProperty("role", "primary")
-        self._btn_apply.setToolTip("Применить текущую тему с редактированными переменными")
+        self._btn_apply.setToolTip(
+            "Применить текущую тему с редактированными переменными"
+        )
 
         self._btn_save = QPushButton("Сохранить")
-        self._btn_save.setToolTip("Сохранить текущие переменные в выбранную custom-тему")
+        self._btn_save.setToolTip(
+            "Сохранить текущие переменные в выбранную custom-тему"
+        )
 
         self._btn_refresh = QPushButton("Обновить")
         self._btn_refresh.setToolTip("Перечитать список тем и переменные с диска")
@@ -197,7 +208,9 @@ class AppearanceSection(QWidget):
         self._btn_defaults.setToolTip("Загрузить дефолтные значения выбранной темы")
 
         self._btn_revert = QPushButton("Отменить")
-        self._btn_revert.setToolTip("Откатить изменения к последнему сохранённому состоянию")
+        self._btn_revert.setToolTip(
+            "Откатить изменения к последнему сохранённому состоянию"
+        )
 
         # Сигналы кнопок -> слоты
         self._btn_apply.clicked.connect(self._on_apply)

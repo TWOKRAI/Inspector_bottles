@@ -4,6 +4,7 @@
 Presenter работает через этот интерфейс, не импортируя Qt-классы напрямую.
 Конкретная реализация -- AppearanceSection (section.py).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -37,13 +38,19 @@ class AppearanceView(TabViewProtocol, Protocol):
         ...
 
     def set_crud_buttons_enabled(
-        self, save: bool, rename: bool, delete: bool,
+        self,
+        save: bool,
+        rename: bool,
+        delete: bool,
     ) -> None:
         """Установить доступность кнопок CRUD для custom-тем."""
         ...
 
     def get_input_text(
-        self, title: str, label: str, default: str = "",
+        self,
+        title: str,
+        label: str,
+        default: str = "",
     ) -> tuple[str, bool]:
         """Показать диалог ввода текста и вернуть (text, ok)."""
         ...
@@ -54,8 +61,4 @@ class AppearanceView(TabViewProtocol, Protocol):
 
     def close_color_editor(self) -> None:
         """Закрыть inline color editor (если открыт)."""
-        ...
-
-    def collect_table_vars(self) -> dict[str, str]:
-        """Собрать текущие значения переменных из таблицы."""
         ...
