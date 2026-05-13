@@ -13,13 +13,9 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QHeaderView,
-    QHBoxLayout,
     QInputDialog,
-    QLabel,
     QMessageBox,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -27,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from Services.auth.exceptions import AuthError, LastAdminError, UserNotFound, WeakPassword
 
+from ._base_panel import BaseAdminPanel
 from .user_form import UserForm
 
 if TYPE_CHECKING:
@@ -36,12 +33,13 @@ if TYPE_CHECKING:
     )
 
 
-class UsersPanel(QWidget):
+class UsersPanel(BaseAdminPanel):
     """Панель управления пользователями.
 
     Колонки таблицы: Логин | Роль | Создан | Последний вход | Входов | Активен
     """
 
+    _HEADER_TITLE = "Управление пользователями"
     _TABLE_COLUMNS = [
         ("username",      "Логин",           160),
         ("role_name",     "Роль",            100),
@@ -72,36 +70,11 @@ class UsersPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        # Заголовок
-        header_layout = QHBoxLayout()
-        header_label = QLabel("Пользователи")
-        header_label.setObjectName("PanelHeader")
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
-        root.addLayout(header_layout)
+        # Стандартный заголовок из BaseAdminPanel
+        self._create_header(root)
 
-        # Таблица пользователей
-        column_keys = [col[0] for col in self._TABLE_COLUMNS]
-        column_titles = [col[1] for col in self._TABLE_COLUMNS]
-        column_widths = [col[2] for col in self._TABLE_COLUMNS]
-
-        self._table = QTableWidget(0, len(self._TABLE_COLUMNS))
-        self._table.setHorizontalHeaderLabels(column_titles)
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setAlternatingRowColors(True)
-
-        h = self._table.horizontalHeader()
-        for i, width in enumerate(column_widths):
-            if i == len(column_widths) - 1:
-                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                self._table.setColumnWidth(i, width)
-                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
-
-        self._column_keys = column_keys
+        # Таблица пользователей из BaseAdminPanel
+        self._table = self._create_table()
 
         root.addWidget(self._table, stretch=1)
 
@@ -191,7 +164,7 @@ class UsersPanel(QWidget):
         """Заполнить таблицу из self._users."""
         self._table.setRowCount(len(self._users))
         for row, user in enumerate(self._users):
-            for col, key in enumerate(self._column_keys):
+            for col, key in enumerate(self.column_keys):
                 value = user.get(key, "")
                 # Форматирование специальных полей
                 if key == "is_active":

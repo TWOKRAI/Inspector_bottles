@@ -3,6 +3,14 @@
 Содержит кнопку «Обновить UI» — перезапускает Qt event loop,
 полностью пересоздавая главное окно, все табы и тему оформления
 без перезапуска самого процесса.
+
+SectionProtocol:
+    key         = "interface_settings"
+    title       = "Настройка интерфейса"
+    widget()    → self
+    action_buttons() → []
+    on_activated()   → None
+    on_deactivated() → None
 """
 
 from __future__ import annotations
@@ -26,9 +34,22 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+# Ключ секции для навигации
+key = "interface_settings"
+# Заголовок секции для nav-дерева
+title = "Настройка интерфейса"
+
 
 class InterfaceSection(QWidget):
-    """Секция «Настройка интерфейса» — управление UI без перезапуска процесса."""
+    """Секция «Настройка интерфейса» — управление UI без перезапуска процесса.
+
+    Реализует SectionProtocol: key, title, widget(), action_buttons(),
+    on_activated(), on_deactivated().
+    """
+
+    # SectionProtocol — идентификаторы секции
+    key: str = "interface_settings"
+    title: str = "Настройка интерфейса"
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -69,6 +90,28 @@ class InterfaceSection(QWidget):
 
         layout.addWidget(group)
         layout.addStretch()
+
+    # ------------------------------------------------------------------
+    # SectionProtocol
+    # ------------------------------------------------------------------
+
+    def widget(self) -> "InterfaceSection":
+        """Вернуть виджет секции (self)."""
+        return self
+
+    def action_buttons(self) -> list:
+        """Кнопки секции для action-колонки (пустой список)."""
+        return []
+
+    def on_activated(self) -> None:
+        """Вызывается при переключении на эту секцию."""
+
+    def on_deactivated(self) -> None:
+        """Вызывается при уходе с этой секции."""
+
+    # ------------------------------------------------------------------
+    # Обработчики
+    # ------------------------------------------------------------------
 
     def _on_rebuild_ui(self) -> None:
         """Перезапустить UI: ставим флаг на процессе и закрываем QApplication."""

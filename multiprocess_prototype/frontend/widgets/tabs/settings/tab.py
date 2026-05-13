@@ -221,8 +221,10 @@ class SettingsTab(QWidget):
 
     def add_interface_settings_page(self) -> None:
         """Создать InterfaceSection и зарегистрировать в content stack."""
-        from .interface_section import InterfaceSection
-        self.add_content_page("interface_settings", InterfaceSection(self._ctx))
+        from .interface import InterfaceSection
+        section = InterfaceSection(self._ctx)
+        self.add_content_page("interface_settings", section)
+        self._presenter.register_section(section)
 
     def add_appearance_page(self) -> None:
         """Создать AppearanceSection и зарегистрировать в content stack."""

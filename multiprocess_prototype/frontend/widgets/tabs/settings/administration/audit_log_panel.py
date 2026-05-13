@@ -20,12 +20,10 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
@@ -38,11 +36,13 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.administration._forma
     format_dt as _format_dt,
 )
 
+from ._base_panel import BaseAdminPanel
+
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.auth_context import AuthContext
 
 
-class AuditLogPanel(QWidget):
+class AuditLogPanel(BaseAdminPanel):
     """Read-only панель аудит-лога.
 
     Колонки: Время | Пользователь | Тип действия | Ресурс
@@ -51,6 +51,7 @@ class AuditLogPanel(QWidget):
     Двойной клик → детальный QDialog с before/after_json.
     """
 
+    _HEADER_TITLE = "Аудит-лог"
     _TABLE_COLUMNS = [
         ("ts",          "Время",         300),
         ("username",    "Пользователь",  110),
@@ -82,10 +83,8 @@ class AuditLogPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        # Заголовок
-        header_label = QLabel("Audit log")
-        header_label.setObjectName("PanelHeader")
-        root.addWidget(header_label)
+        # Стандартный заголовок из BaseAdminPanel
+        self._create_header(root)
 
         # Панель фильтров
         filter_layout = QHBoxLayout()
@@ -117,25 +116,9 @@ class AuditLogPanel(QWidget):
         filter_layout.addStretch()
         root.addLayout(filter_layout)
 
-        # Таблица
-        self._table = QTableWidget(0, len(self._TABLE_COLUMNS))
-        self._table.setHorizontalHeaderLabels(
-            [col[1] for col in self._TABLE_COLUMNS]
-        )
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setAlternatingRowColors(True)
+        # Таблица из BaseAdminPanel
+        self._table = self._create_table()
         self._table.itemDoubleClicked.connect(self._on_row_double_clicked)
-
-        h = self._table.horizontalHeader()
-        for i, (_, _, width) in enumerate(self._TABLE_COLUMNS):
-            if i == len(self._TABLE_COLUMNS) - 1:
-                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                self._table.setColumnWidth(i, width)
-                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
         root.addWidget(self._table, stretch=1)
 
