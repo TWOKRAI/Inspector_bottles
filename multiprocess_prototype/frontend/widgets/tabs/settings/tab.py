@@ -17,22 +17,20 @@ Layout (дифференциальный скролл):
     └──────────────┴──────────────┴────────────────────┴───┘
 
 Action-колонка содержит QStackedWidget: каждая секция регистрирует
-свою «страницу» кнопок через _register_action_page(). При переключении
+свою «страницу» кнопок через register_action_page(). При переключении
 секции в дереве навигации action_stack переключается автоматически.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pydantic
-from datetime import datetime
-
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHeaderView,
-    QLabel,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -43,11 +41,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
-from multiprocess_framework.modules.frontend_module.widgets.tabs import (
-    CurrentPageStack as _CurrentPageStack,
-)
-
 from multiprocess_prototype.frontend.forms import RegisterView, ViewMode
 from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewModeToggle
@@ -56,6 +49,12 @@ from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout i
     DiffScrollTabLayout,
 )
 
+from ._nav_tree import (
+    CurrentPageStack as _CurrentPageStack,
+    build_nav_tree,
+    select_tree_key as _select_tree_key,
+)
+from .presenter import SettingsPresenter
 from .yaml_io import SETTINGS_PATH, load_settings, save_settings, schema_to_field_infos
 
 if TYPE_CHECKING:
@@ -75,11 +74,14 @@ _SECTION_TITLES: dict[str, str] = {
 # Ширины колонок
 _ACTION_WIDTH = 160
 _NAV_WIDTH = 230
-_NAV_ITEM_HEIGHT = 36
 
 
 class SettingsTab(QWidget):
     """Таб Settings — DiffScrollTabLayout с дифференциальным скроллом.
+
+    Тонкая оболочка над SettingsPresenter: создаёт UI, делегирует
+    навигацию и undo/redo presenter'у. Методы RegisterView (save, reload,
+    field sync) остаются здесь до Phase 3.
 
     Сигналы:
         settings_saved(dict): эмитится при успешном сохранении system.yaml
@@ -118,9 +120,6 @@ class SettingsTab(QWidget):
         self._view.mode_changed.connect(
             lambda mode_str: self._prefs.set("settings.view_mode", mode_str)
         )
-
-        # Маппинг ключ → индекс в content stack
-        self._page_index: dict[str, int] = {}
 
         # Построить UI
         self._setup_ui()
@@ -182,6 +181,51 @@ class SettingsTab(QWidget):
         return self._view.mode()
 
     # ------------------------------------------------------------------
+    # SettingsView Protocol — реализация (для presenter)
+    # ------------------------------------------------------------------
+
+    def set_content_index(self, index: int) -> None:
+        """Переключить content stack на указанный индекс."""
+        self._content_stack.setCurrentIndex(index)
+
+    def set_action_index(self, index: int) -> None:
+        """Переключить action stack на указанный индекс."""
+        self._action_stack.setCurrentIndex(index)
+
+    def register_action_page(self, key: str, widgets: list) -> int:
+        """Создать страницу в action stack с виджетами, вернуть индекс."""
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(12)
+        for w in widgets:
+            page_layout.addWidget(w)
+        page_layout.addStretch(1)
+        idx = self._action_stack.addWidget(page)
+        self._presenter.register_action_page(key, idx)
+        return idx
+
+    def add_content_page(self, key: str, widget: object) -> int:
+        """Добавить виджет в content stack, вернуть индекс."""
+        idx = self._content_stack.addWidget(widget)
+        self._presenter.register_content_page(key, idx)
+        return idx
+
+    def select_tree_key(self, key: str) -> None:
+        """Выбрать элемент nav-дерева по ключу."""
+        _select_tree_key(self._tree_nav, key)
+
+    def set_undo_enabled(self, enabled: bool) -> None:
+        """Установить доступность кнопки Undo."""
+        if self._btn_undo is not None:
+            self._btn_undo.setEnabled(enabled)
+
+    def set_redo_enabled(self, enabled: bool) -> None:
+        """Установить доступность кнопки Redo."""
+        if self._btn_redo is not None:
+            self._btn_redo.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
     # UI Build
     # ------------------------------------------------------------------
 
@@ -198,6 +242,9 @@ class SettingsTab(QWidget):
             nav_width=_NAV_WIDTH,
         )
 
+        # --- Создать presenter ---
+        self._presenter = SettingsPresenter(view=self, rm=None, ui=None, ctx=self._ctx)
+
         # --- Левая колонка: action widget (QStackedWidget для кнопок секций) ---
         action_widget = QWidget()
         action_layout = QVBoxLayout(action_widget)
@@ -207,11 +254,9 @@ class SettingsTab(QWidget):
         self._action_stack = QStackedWidget()
         action_layout.addWidget(self._action_stack, 1)
 
-        # Маппинг ключ секции → индекс страницы в action_stack
-        self._action_page_index: dict[str, int] = {}
-
         # Пустая страница (для секций без кнопок)
-        self._action_page_index["_empty"] = self._action_stack.addWidget(QWidget())
+        empty_idx = self._action_stack.addWidget(QWidget())
+        self._presenter.register_action_page("_empty", empty_idx)
 
         # Страница «Настройки системы»: тумблер + сбросить + сохранить
         self._view._toggle.hide()
@@ -225,7 +270,7 @@ class SettingsTab(QWidget):
         self._btn_save = QPushButton("Сохранить")
         self._btn_save.setToolTip("Сохранить изменения в config/system.yaml")
         self._btn_save.clicked.connect(self.save)
-        self._register_action_page(
+        self.register_action_page(
             "system_settings",
             [self._external_toggle, self._btn_reset, self._btn_save],
         )
@@ -267,7 +312,7 @@ class SettingsTab(QWidget):
         # --- Undo/Redo (статичная зона) ---
         bus = self._ctx.action_bus()
         self._diff_layout.enable_undo_redo(bus)
-        # Сохраняем ссылки для _refresh_undo_redo_state
+        # Сохраняем ссылки для presenter.on_bus_change
         self._btn_undo = self._diff_layout.undo_button
         self._btn_redo = self._diff_layout.redo_button
 
@@ -288,7 +333,7 @@ class SettingsTab(QWidget):
         if bus is not None:
             bus.add_change_callback(self._refresh_history)
             bus.add_change_callback(self._on_bus_undo_redo_sync)
-            bus.add_change_callback(self._refresh_undo_redo_state)
+            bus.add_change_callback(self._presenter.on_bus_change)
 
     # ------------------------------------------------------------------
     # Дерево навигации + стек контента
@@ -299,91 +344,56 @@ class SettingsTab(QWidget):
         auth = self._ctx.auth
         auth_state = auth.state if auth is not None else None
 
-        # --- Администрация (разворачиваемый узел) ---
-        admin_root = QTreeWidgetItem(self._tree_nav, ["Администрация"])
-        admin_root.setData(0, Qt.ItemDataRole.UserRole, "admin_dashboard")
-        admin_root.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
-        admin_root.setExpanded(True)
-
-        # AdminDashboard
-        from .administration.dashboard import AdminDashboard
-        dashboard = AdminDashboard(auth_state)
-        dashboard.navigate_to.connect(self._navigate_to_admin_section)
-        self._add_page("admin_dashboard", dashboard)
-
-        # Подразделы администрации
+        # Дочерние узлы «Администрация»
         admin_children = [
             ("users", "Пользователи"),
             ("roles", "Роли"),
             ("sessions", "Сессии"),
             ("audit_log", "Audit log"),
         ]
-        for key, title in admin_children:
-            child = QTreeWidgetItem(admin_root, [title])
-            child.setData(0, Qt.ItemDataRole.UserRole, key)
-            child.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
+        # Top-level секции (кроме admin_dashboard, который создаётся отдельно)
+        top_level_sections = [
+            ("system_settings", "Настройки системы"),
+            ("interface_settings", "Настройка интерфейса"),
+            ("appearance", "Оформление"),
+            ("history", "История"),
+        ]
 
-        # Лениво создаём панели при первом переходе
-        self._lazy_admin_panels: dict[str, QWidget | None] = {
-            "users": None,
-            "roles": None,
-            "sessions": None,
-            "audit_log": None,
-        }
+        # Заполнить дерево через хелпер
+        build_nav_tree(self._tree_nav, top_level_sections, admin_children)
+
+        # Зарегистрировать admin_dashboard в presenter (content index)
+        from .administration.dashboard import AdminDashboard
+        dashboard = AdminDashboard(auth_state)
+        dashboard.navigate_to.connect(self._navigate_to_admin_section)
+        self.add_content_page("admin_dashboard", dashboard)
+
+        # Объявить ленивые admin-панели в presenter
+        for key, _ in admin_children:
+            self._presenter.register_lazy_admin_panel(key)
 
         # --- Настройки системы ---
-        self._add_tree_item("system_settings", "Настройки системы")
-        self._add_page("system_settings", self._view)
+        self.add_content_page("system_settings", self._view)
 
         # --- Настройка интерфейса ---
-        self._add_tree_item("interface_settings", "Настройка интерфейса")
         from .interface_section import InterfaceSection
-        self._add_page("interface_settings", InterfaceSection(self._ctx))
+        self.add_content_page("interface_settings", InterfaceSection(self._ctx))
 
         # --- Оформление ---
-        self._add_tree_item("appearance", "Оформление")
-        self._add_page("appearance", self._build_appearance_widget())
+        self.add_content_page("appearance", self._build_appearance_widget())
 
         # --- История ---
-        self._add_tree_item("history", "История")
-        self._add_page("history", self._build_history_widget())
+        self.add_content_page("history", self._build_history_widget())
 
         # Выбрать начальную секцию
-        self._select_tree_key("system_settings")
+        self._presenter.navigate_to("system_settings")
 
-    def _add_tree_item(self, key: str, title: str) -> QTreeWidgetItem:
-        """Добавить top-level элемент в дерево."""
-        item = QTreeWidgetItem(self._tree_nav, [title])
-        item.setData(0, Qt.ItemDataRole.UserRole, key)
-        item.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
-        return item
-
-    def _add_page(self, key: str, widget: QWidget) -> int:
-        """Добавить виджет в content stack и запомнить индекс."""
-        idx = self._content_stack.addWidget(widget)
-        self._page_index[key] = idx
-        return idx
-
-    def _select_tree_key(self, key: str) -> None:
-        """Выбрать элемент дерева по ключу."""
-        iterator = self._tree_nav.invisibleRootItem()
-        item = self._find_tree_item(iterator, key)
-        if item is not None:
-            self._tree_nav.setCurrentItem(item)
-
-    def _find_tree_item(self, parent: QTreeWidgetItem, key: str) -> QTreeWidgetItem | None:
-        """Рекурсивный поиск элемента дерева по ключу в UserRole."""
-        for i in range(parent.childCount()):
-            child = parent.child(i)
-            if child.data(0, Qt.ItemDataRole.UserRole) == key:
-                return child
-            found = self._find_tree_item(child, key)
-            if found is not None:
-                return found
-        return None
-
-    def _on_tree_item_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
-        """Смена текущего элемента дерева → переключить контент."""
+    def _on_tree_item_changed(
+        self,
+        current: QTreeWidgetItem | None,
+        _previous: QTreeWidgetItem | None,
+    ) -> None:
+        """Смена текущего элемента дерева → делегировать presenter'у."""
         if current is None:
             return
         key = current.data(0, Qt.ItemDataRole.UserRole)
@@ -391,22 +401,19 @@ class SettingsTab(QWidget):
             return
 
         # Ленивое создание панелей администрации
-        if key in self._lazy_admin_panels and key not in self._page_index:
+        if self._presenter.is_lazy_admin_panel(key):
             widget = self._create_admin_panel(key)
             if widget is not None:
-                self._add_page(key, widget)
-                self._lazy_admin_panels[key] = widget
+                content_idx = self._content_stack.addWidget(widget)
+                action_idx = self._presenter._action_page_index.get(key, 0)
+                self._presenter.notify_admin_panel_created(key, widget, action_idx, content_idx)
 
-        idx = self._page_index.get(key)
-        if idx is not None:
-            self._content_stack.setCurrentIndex(idx)
-
-        # Переключить кнопки в action-колонке
-        self._switch_action_buttons(key)
+        # Делегировать навигацию presenter'у
+        self._presenter.on_tree_item_changed(key)
 
     def _navigate_to_admin_section(self, key: str) -> None:
         """Навигация из AdminDashboard → выбор дочернего узла в дереве."""
-        self._select_tree_key(key)
+        self._presenter.navigate_to(key)
 
     def _create_admin_panel(self, key: str) -> QWidget | None:
         """Создать панель администрации по ключу (ленивая инициализация).
@@ -433,29 +440,9 @@ class SettingsTab(QWidget):
         # Зарегистрировать кнопки панели в action-колонке
         # TODO(Phase 5): заменить hasattr на isinstance(panel, SectionProtocol)
         if panel is not None and hasattr(panel, "action_buttons"):
-            self._register_action_page(key, panel.action_buttons())
+            self.register_action_page(key, panel.action_buttons())
 
         return panel
-
-    # ------------------------------------------------------------------
-    # Action-колонка (левая): переключение кнопок по секциям
-    # ------------------------------------------------------------------
-
-    def _register_action_page(self, key: str, widgets: list[QWidget]) -> None:
-        """Создать страницу в action_stack с виджетами и запомнить индекс."""
-        page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(12)
-        for w in widgets:
-            page_layout.addWidget(w)
-        page_layout.addStretch(1)
-        self._action_page_index[key] = self._action_stack.addWidget(page)
-
-    def _switch_action_buttons(self, key: str) -> None:
-        """Переключить action_stack на страницу текущей секции."""
-        idx = self._action_page_index.get(key, self._action_page_index["_empty"])
-        self._action_stack.setCurrentIndex(idx)
 
     def _on_content_page_changed(self, _index: int) -> None:
         """При смене страницы — принудительно пересчитать scroll area.
@@ -481,7 +468,7 @@ class SettingsTab(QWidget):
 
         section = ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
         # Зарегистрировать кнопки секции в action-колонке
-        self._register_action_page("appearance", section.action_buttons())
+        self.register_action_page("appearance", section.action_buttons())
         return section
 
     def _build_history_widget(self) -> QWidget:
@@ -505,16 +492,12 @@ class SettingsTab(QWidget):
         h = self._history_table.horizontalHeader()
         if h:
             h.setStretchLastSection(False)
-
             h.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
             h.resizeSection(0, 140)   # Время — пошире
-
             h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
             h.resizeSection(1, 150)   # Вкладка — пошире
-
             h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-
-            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)    
+            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
             h.resizeSection(3, 120)   # Значение — поуже
 
         layout.addWidget(self._history_table)
@@ -530,7 +513,7 @@ class SettingsTab(QWidget):
         self._btn_clear_history.setEnabled(False)
         self._btn_clear_history.clicked.connect(self._on_history_clear)
 
-        self._register_action_page(
+        self.register_action_page(
             "history",
             [self._btn_save_history, self._btn_clear_history],
         )
@@ -538,7 +521,7 @@ class SettingsTab(QWidget):
         return container
 
     # ------------------------------------------------------------------
-    # Editors / Field sync
+    # Editors / Field sync (остаются здесь до Phase 3)
     # ------------------------------------------------------------------
 
     def _init_editor_values(self, field_infos: list) -> None:
@@ -568,7 +551,11 @@ class SettingsTab(QWidget):
         self._set_dirty(True)
 
     def _on_field_changed_action_bus(
-        self, register_name: str, field_name: str, old_value: object, new_value: object,
+        self,
+        register_name: str,
+        field_name: str,
+        old_value: object,
+        new_value: object,
     ) -> None:
         bus = self._ctx.action_bus()
         if bus is None:
@@ -630,15 +617,6 @@ class SettingsTab(QWidget):
         has_history = len(actions) > 0
         self._btn_clear_history.setEnabled(bus.can_undo() or bus.can_redo())
         self._btn_save_history.setEnabled(has_history)
-
-    def _refresh_undo_redo_state(self) -> None:
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        if self._btn_undo is not None:
-            self._btn_undo.setEnabled(bus.can_undo())
-        if self._btn_redo is not None:
-            self._btn_redo.setEnabled(bus.can_redo())
 
     def _on_history_undo(self) -> None:
         bus = self._ctx.action_bus()
