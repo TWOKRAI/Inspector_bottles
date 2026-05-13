@@ -80,7 +80,7 @@ class SettingsTab(QWidget):
     """Таб Settings — DiffScrollTabLayout с дифференциальным скроллом.
 
     Тонкая оболочка над SettingsPresenter: создаёт UI, делегирует
-    навигацию и undo/redo presenter'у. Методы RegisterView (save, reload,
+    навигацию presenter'у. Методы RegisterView (save, reload,
     field sync) остаются здесь до Phase 3.
 
     Сигналы:
@@ -107,17 +107,19 @@ class SettingsTab(QWidget):
         except ValueError:
             initial_mode = ViewMode.CARDS
 
-        self._view = RegisterView(
+        self._register_view = RegisterView(
             field_infos,
             initial_mode=initial_mode,
             category_titles=_SECTION_TITLES,
         )
+        # Для обратной совместимости: self._view используется в тестах
+        self._view = self._register_view
         self._init_editor_values(field_infos)
 
-        for key, editor in self._view.editors().items():
+        for key, editor in self._register_view.editors().items():
             editor.change_signal.connect(self._on_field_changed)
-        self._view.field_changed.connect(self._on_field_changed_action_bus)
-        self._view.mode_changed.connect(
+        self._register_view.field_changed.connect(self._on_field_changed_action_bus)
+        self._register_view.mode_changed.connect(
             lambda mode_str: self._prefs.set("settings.view_mode", mode_str)
         )
 
@@ -148,7 +150,7 @@ class SettingsTab(QWidget):
     def save(self) -> bool:
         """Собрать значения из виджетов, валидировать и сохранить в YAML."""
         dict_form: dict[str, Any] = {}
-        for key, editor in self._view.editors().items():
+        for key, editor in self._register_view.editors().items():
             parts = key.split(".", 1)
             if len(parts) != 2:
                 continue
@@ -175,10 +177,10 @@ class SettingsTab(QWidget):
         return self._dirty
 
     def field_editors(self) -> dict[str, FieldEditor]:
-        return self._view.editors()
+        return self._register_view.editors()
 
     def view_mode(self) -> ViewMode:
-        return self._view.mode()
+        return self._register_view.mode()
 
     # ------------------------------------------------------------------
     # SettingsView Protocol — реализация (для presenter)
@@ -225,6 +227,83 @@ class SettingsTab(QWidget):
         if self._btn_redo is not None:
             self._btn_redo.setEnabled(enabled)
 
+    def build_nav_tree(
+        self,
+        sections: list[tuple[str, str]],
+        admin_children: list[tuple[str, str]],
+    ) -> None:
+        """Заполнить QTreeWidget секциями навигации."""
+        build_nav_tree(self._tree_nav, sections, admin_children)
+
+    def add_admin_dashboard_page(self, admin_children: list[tuple[str, str]]) -> None:
+        """Создать AdminDashboard и зарегистрировать в content stack."""
+        from .administration.dashboard import AdminDashboard
+        auth = self._ctx.auth
+        auth_state = auth.state if auth is not None else None
+        dashboard = AdminDashboard(auth_state)
+        dashboard.navigate_to.connect(self._navigate_to_admin_section)
+        self.add_content_page("admin_dashboard", dashboard)
+
+    def add_system_settings_page(self) -> None:
+        """Зарегистрировать RegisterView как страницу «Настройки системы»."""
+        self.add_content_page("system_settings", self._register_view)
+
+    def add_interface_settings_page(self) -> None:
+        """Создать InterfaceSection и зарегистрировать в content stack."""
+        from .interface_section import InterfaceSection
+        self.add_content_page("interface_settings", InterfaceSection(self._ctx))
+
+    def add_appearance_page(self) -> None:
+        """Создать ThemeEditorSection и зарегистрировать в content stack."""
+        from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
+        from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
+        from .theme_editor_section import ThemeEditorSection
+        section = ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
+        # Зарегистрировать кнопки секции в action-колонке
+        self.register_action_page("appearance", section.action_buttons())
+        self.add_content_page("appearance", section)
+
+    def add_history_page(self) -> None:
+        """Создать виджет «История» и зарегистрировать в content stack."""
+        container = self._build_history_widget()
+        self.add_content_page("history", container)
+
+    def create_admin_panel(self, key: str) -> None:
+        """Создать admin-панель и уведомить presenter (ленивая инициализация).
+
+        Presenter вызывает этот метод, когда панель ещё не была создана.
+        View создаёт Qt-виджет и вызывает notify_admin_panel_created().
+        """
+        auth = self._ctx.auth
+        bus = self._ctx.action_bus()
+
+        panel: QWidget | None = None
+        if key == "users":
+            from .administration.users_panel import UsersPanel
+            panel = UsersPanel(auth)
+        elif key == "roles":
+            from .administration.roles_panel import RolesPanel
+            panel = RolesPanel(auth, bus)
+        elif key == "sessions":
+            from .administration.sessions_panel import SessionsPanel
+            panel = SessionsPanel(auth)
+        elif key == "audit_log":
+            from .administration.audit_log_panel import AuditLogPanel
+            panel = AuditLogPanel(auth)
+
+        if panel is None:
+            logger.warning("Неизвестный ключ admin-панели: %s", key)
+            return
+
+        # Зарегистрировать кнопки панели в action-колонке
+        # TODO(Phase 5): заменить hasattr на isinstance(panel, SectionProtocol)
+        action_idx = self._presenter.get_action_index("_empty")
+        if hasattr(panel, "action_buttons"):
+            action_idx = self.register_action_page(key, panel.action_buttons())
+
+        content_idx = self._content_stack.addWidget(panel)
+        self._presenter.notify_admin_panel_created(key, panel, action_idx, content_idx)
+
     # ------------------------------------------------------------------
     # UI Build
     # ------------------------------------------------------------------
@@ -259,10 +338,10 @@ class SettingsTab(QWidget):
         self._presenter.register_action_page("_empty", empty_idx)
 
         # Страница «Настройки системы»: тумблер + сбросить + сохранить
-        self._view._toggle.hide()
-        self._external_toggle = ViewModeToggle(initial_mode=self._view.mode())
+        self._register_view._toggle.hide()
+        self._external_toggle = ViewModeToggle(initial_mode=self._register_view.mode())
         self._external_toggle.mode_changed.connect(
-            lambda mode_str: self._view.set_mode(ViewMode(mode_str))
+            lambda mode_str: self._register_view.set_mode(ViewMode(mode_str))
         )
         self._btn_reset = QPushButton("Сбросить")
         self._btn_reset.setToolTip("Сбросить изменения и загрузить данные с диска")
@@ -318,12 +397,12 @@ class SettingsTab(QWidget):
 
         main_layout.addWidget(self._diff_layout, stretch=1)
 
-        # === Заполнить дерево и стек контента ===
-        self._populate_tree_and_stack()
+        # === Presenter координирует заполнение дерева и стека контента ===
+        self._presenter.populate()
 
         # Спрятать скроллбар у внутреннего QScrollArea в RegisterView —
         # скроллом управляет мастер-скроллбар DiffScrollTabLayout
-        cards_scroll = self._view._cards_widget
+        cards_scroll = self._register_view._cards_widget
         if hasattr(cards_scroll, "setVerticalScrollBarPolicy"):
             cards_scroll.setVerticalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
@@ -336,57 +415,8 @@ class SettingsTab(QWidget):
             bus.add_change_callback(self._presenter.on_bus_change)
 
     # ------------------------------------------------------------------
-    # Дерево навигации + стек контента
+    # Обработчики навигации
     # ------------------------------------------------------------------
-
-    def _populate_tree_and_stack(self) -> None:
-        """Заполнить QTreeWidget и QStackedWidget."""
-        auth = self._ctx.auth
-        auth_state = auth.state if auth is not None else None
-
-        # Дочерние узлы «Администрация»
-        admin_children = [
-            ("users", "Пользователи"),
-            ("roles", "Роли"),
-            ("sessions", "Сессии"),
-            ("audit_log", "Audit log"),
-        ]
-        # Top-level секции (кроме admin_dashboard, который создаётся отдельно)
-        top_level_sections = [
-            ("system_settings", "Настройки системы"),
-            ("interface_settings", "Настройка интерфейса"),
-            ("appearance", "Оформление"),
-            ("history", "История"),
-        ]
-
-        # Заполнить дерево через хелпер
-        build_nav_tree(self._tree_nav, top_level_sections, admin_children)
-
-        # Зарегистрировать admin_dashboard в presenter (content index)
-        from .administration.dashboard import AdminDashboard
-        dashboard = AdminDashboard(auth_state)
-        dashboard.navigate_to.connect(self._navigate_to_admin_section)
-        self.add_content_page("admin_dashboard", dashboard)
-
-        # Объявить ленивые admin-панели в presenter
-        for key, _ in admin_children:
-            self._presenter.register_lazy_admin_panel(key)
-
-        # --- Настройки системы ---
-        self.add_content_page("system_settings", self._view)
-
-        # --- Настройка интерфейса ---
-        from .interface_section import InterfaceSection
-        self.add_content_page("interface_settings", InterfaceSection(self._ctx))
-
-        # --- Оформление ---
-        self.add_content_page("appearance", self._build_appearance_widget())
-
-        # --- История ---
-        self.add_content_page("history", self._build_history_widget())
-
-        # Выбрать начальную секцию
-        self._presenter.navigate_to("system_settings")
 
     def _on_tree_item_changed(
         self,
@@ -399,50 +429,12 @@ class SettingsTab(QWidget):
         key = current.data(0, Qt.ItemDataRole.UserRole)
         if not key:
             return
-
-        # Ленивое создание панелей администрации
-        if self._presenter.is_lazy_admin_panel(key):
-            widget = self._create_admin_panel(key)
-            if widget is not None:
-                content_idx = self._content_stack.addWidget(widget)
-                action_idx = self._presenter._action_page_index.get(key, 0)
-                self._presenter.notify_admin_panel_created(key, widget, action_idx, content_idx)
-
-        # Делегировать навигацию presenter'у
+        # Вся логика (в т.ч. ленивое создание панелей) — в presenter
         self._presenter.on_tree_item_changed(key)
 
     def _navigate_to_admin_section(self, key: str) -> None:
         """Навигация из AdminDashboard → выбор дочернего узла в дереве."""
         self._presenter.navigate_to(key)
-
-    def _create_admin_panel(self, key: str) -> QWidget | None:
-        """Создать панель администрации по ключу (ленивая инициализация).
-
-        Панель создаётся, её action_buttons() регистрируются в action-колонке.
-        """
-        auth = self._ctx.auth
-        bus = self._ctx.action_bus()
-
-        panel: QWidget | None = None
-        if key == "users":
-            from .administration.users_panel import UsersPanel
-            panel = UsersPanel(auth)
-        elif key == "roles":
-            from .administration.roles_panel import RolesPanel
-            panel = RolesPanel(auth, bus)
-        elif key == "sessions":
-            from .administration.sessions_panel import SessionsPanel
-            panel = SessionsPanel(auth)
-        elif key == "audit_log":
-            from .administration.audit_log_panel import AuditLogPanel
-            panel = AuditLogPanel(auth)
-
-        # Зарегистрировать кнопки панели в action-колонке
-        # TODO(Phase 5): заменить hasattr на isinstance(panel, SectionProtocol)
-        if panel is not None and hasattr(panel, "action_buttons"):
-            self.register_action_page(key, panel.action_buttons())
-
-        return panel
 
     def _on_content_page_changed(self, _index: int) -> None:
         """При смене страницы — принудительно пересчитать scroll area.
@@ -457,19 +449,8 @@ class SettingsTab(QWidget):
         self._diff_layout._update_master_range()
 
     # ------------------------------------------------------------------
-    # Builders для секций-контентов
+    # Builder виджета «История» (вызывается из add_history_page)
     # ------------------------------------------------------------------
-
-    def _build_appearance_widget(self) -> QWidget:
-        """Виджет секции «Оформление» — редактор темы с таблицей тем и деревом переменных."""
-        from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
-        from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
-        from .theme_editor_section import ThemeEditorSection
-
-        section = ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
-        # Зарегистрировать кнопки секции в action-колонке
-        self.register_action_page("appearance", section.action_buttons())
-        return section
 
     def _build_history_widget(self) -> QWidget:
         """Виджет секции «История» — таблица действий ActionBus."""
@@ -528,7 +509,7 @@ class SettingsTab(QWidget):
         self._sync_editors_to_cfg(field_infos)
 
     def _sync_editors_to_cfg(self, field_infos: list) -> None:
-        editors = self._view.editors()
+        editors = self._register_view.editors()
         for fi in field_infos:
             section_name = fi.plugin_name
             field_name = fi.field_name
@@ -572,7 +553,7 @@ class SettingsTab(QWidget):
         self.dirty_changed.emit(dirty)
 
     def _show_validation_errors(self, exc: pydantic.ValidationError) -> None:
-        editors = self._view.editors()
+        editors = self._register_view.editors()
         for error in exc.errors():
             loc = error.get("loc", ())
             if len(loc) >= 2:
@@ -585,7 +566,7 @@ class SettingsTab(QWidget):
                     editor.widget.setToolTip(f"Ошибка: {error['msg']}")
 
     def _clear_validation_errors(self) -> None:
-        for editor in self._view.editors().values():
+        for editor in self._register_view.editors().values():
             editor.widget.setProperty("hasError", False)
             editor.widget.style().unpolish(editor.widget)
             editor.widget.style().polish(editor.widget)
@@ -618,16 +599,6 @@ class SettingsTab(QWidget):
         self._btn_clear_history.setEnabled(bus.can_undo() or bus.can_redo())
         self._btn_save_history.setEnabled(has_history)
 
-    def _on_history_undo(self) -> None:
-        bus = self._ctx.action_bus()
-        if bus is not None:
-            bus.undo()
-
-    def _on_history_redo(self) -> None:
-        bus = self._ctx.action_bus()
-        if bus is not None:
-            bus.redo()
-
     def _on_history_clear(self) -> None:
         bus = self._ctx.action_bus()
         if bus is not None:
@@ -644,7 +615,7 @@ class SettingsTab(QWidget):
         if not actions:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self._view.root_widget(),
+            self._register_view.root_widget(),
             "Сохранить историю",
             "history.csv",
             "CSV (*.csv);;Все файлы (*)",
@@ -686,5 +657,5 @@ class SettingsTab(QWidget):
             else action.forward_patch.get("value")
         )
         key = f"{register_name}.{action.field_name}"
-        if key in self._view.editors():
-            self._view.set_editor_value(key, value)
+        if key in self._register_view.editors():
+            self._register_view.set_editor_value(key, value)

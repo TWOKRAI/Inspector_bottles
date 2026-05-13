@@ -10,16 +10,11 @@ Re-export CurrentPageStack из framework для удобства импорта
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 # Re-export для удобства: импортировать CurrentPageStack можно отсюда
 from multiprocess_framework.modules.frontend_module.widgets.tabs import CurrentPageStack
-
-if TYPE_CHECKING:
-    pass
 
 # Высота строки в дереве навигации (px)
 _NAV_ITEM_HEIGHT = 36

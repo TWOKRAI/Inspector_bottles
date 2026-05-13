@@ -21,15 +21,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Конфигурация навигации (presenter — единственный владелец)
+# ---------------------------------------------------------------------------
+
+# Дочерние узлы «Администрация»
+_ADMIN_CHILDREN: list[tuple[str, str]] = [
+    ("users", "Пользователи"),
+    ("roles", "Роли"),
+    ("sessions", "Сессии"),
+    ("audit_log", "Audit log"),
+]
+
+# Top-level секции (кроме admin_dashboard, который строится отдельно)
+_TOP_SECTIONS: list[tuple[str, str]] = [
+    ("system_settings", "Настройки системы"),
+    ("interface_settings", "Настройка интерфейса"),
+    ("appearance", "Оформление"),
+    ("history", "История"),
+]
+
 
 class SettingsPresenter(TabPresenterBase[SettingsView, None]):
     """Презентер Settings таба.
 
     Отвечает за:
+    - конфигурацию и порядок секций навигации (единственный владелец)
     - навигацию по секциям (tree item → content stack + action stack)
+    - ленивое создание панелей администрации (координирует через view)
     - реестр секций (SectionProtocol)
     - undo/redo state (через view)
-    - ленивое создание панелей администрации
 
     НЕ импортирует Qt. Работает исключительно через SettingsView Protocol.
     """
@@ -61,6 +82,44 @@ class SettingsPresenter(TabPresenterBase[SettingsView, None]):
         self._lazy_admin_panels: dict[str, object | None] = {}
 
     # ------------------------------------------------------------------
+    # Конфигурация навигации (публичные аксессоры для view)
+    # ------------------------------------------------------------------
+
+    def admin_children(self) -> list[tuple[str, str]]:
+        """Вернуть список (ключ, название) дочерних узлов «Администрация»."""
+        return list(_ADMIN_CHILDREN)
+
+    def top_sections(self) -> list[tuple[str, str]]:
+        """Вернуть список (ключ, название) top-level секций."""
+        return list(_TOP_SECTIONS)
+
+    # ------------------------------------------------------------------
+    # Populate — координирует построение навигации через view
+    # ------------------------------------------------------------------
+
+    def populate(self) -> None:
+        """Заполнить навигацию и content stack, вызывая методы view.
+
+        Presenter знает ЧТО создать (порядок ключей), view знает КАК (Qt-виджеты).
+        """
+        # Заполнить QTreeWidget через view
+        self._view.build_nav_tree(_TOP_SECTIONS, _ADMIN_CHILDREN)
+
+        # Объявить ленивые admin-панели
+        for key, _ in _ADMIN_CHILDREN:
+            self.register_lazy_admin_panel(key)
+
+        # Добавить страницы контента в строгом порядке через view
+        self._view.add_admin_dashboard_page(_ADMIN_CHILDREN)
+        self._view.add_system_settings_page()
+        self._view.add_interface_settings_page()
+        self._view.add_appearance_page()
+        self._view.add_history_page()
+
+        # Выбрать начальную секцию
+        self.navigate_to("system_settings")
+
+    # ------------------------------------------------------------------
     # Реестр секций
     # ------------------------------------------------------------------
 
@@ -87,6 +146,15 @@ class SettingsPresenter(TabPresenterBase[SettingsView, None]):
         """Является ли ключ ленивой панелью (ещё не созданной)."""
         return key in self._lazy_admin_panels and key not in self._page_index
 
+    def ensure_admin_panel(self, key: str) -> None:
+        """Если панель ещё не создана — попросить view создать и зарегистрировать её.
+
+        View создаёт Qt-виджет и вызывает notify_admin_panel_created()
+        для обратной регистрации индексов.
+        """
+        if self.is_lazy_admin_panel(key):
+            self._view.create_admin_panel(key)
+
     # ------------------------------------------------------------------
     # Регистрация страниц (вызывается из tab.py при построении UI)
     # ------------------------------------------------------------------
@@ -107,8 +175,7 @@ class SettingsPresenter(TabPresenterBase[SettingsView, None]):
         """Обработать смену активного элемента дерева навигации.
 
         Логика:
-        1. Если это ленивая admin-панель — сигнализировать tab о необходимости создания
-           (tab создаёт виджет и уведомляет presenter через notify_admin_panel_created)
+        1. Если это ленивая admin-панель — попросить view создать (ленивая инициализация)
         2. Переключить content stack
         3. Переключить action stack
         4. Вызвать on_activated / on_deactivated для SectionProtocol-секций
@@ -124,6 +191,9 @@ class SettingsPresenter(TabPresenterBase[SettingsView, None]):
                 logger.exception("Ошибка on_deactivated для секции %s", self._current_key)
 
         self._current_key = key
+
+        # Ленивое создание admin-панелей (presenter координирует через view)
+        self.ensure_admin_panel(key)
 
         # Переключить content stack
         idx = self._page_index.get(key)
@@ -154,6 +224,11 @@ class SettingsPresenter(TabPresenterBase[SettingsView, None]):
         idx = self._action_page_index.get(key, empty_idx)
         self._view.set_action_index(idx)
 
+    def get_action_index(self, key: str) -> int:
+        """Получить индекс action-страницы по ключу (публичный аксессор)."""
+        empty_idx = self._action_page_index.get("_empty", 0)
+        return self._action_page_index.get(key, empty_idx)
+
     # ------------------------------------------------------------------
     # Undo/Redo
     # ------------------------------------------------------------------
@@ -171,15 +246,10 @@ class SettingsPresenter(TabPresenterBase[SettingsView, None]):
         self._view.set_redo_enabled(bus.can_redo())
 
     # ------------------------------------------------------------------
-    # Вспомогательные геттеры (для tab.py при необходимости)
+    # Вспомогательные геттеры
     # ------------------------------------------------------------------
 
     @property
     def current_key(self) -> str | None:
         """Текущий активный ключ секции."""
         return self._current_key
-
-    @property
-    def page_index(self) -> dict[str, int]:
-        """Маппинг ключ → индекс в content stack (read-only view)."""
-        return dict(self._page_index)
