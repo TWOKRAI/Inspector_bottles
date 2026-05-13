@@ -66,7 +66,11 @@ class QueueHandle:
         if self._queue is None:
             return None
         try:
-            return self._queue.get(timeout=timeout) if timeout > 0 else self._queue.get_nowait()
+            return (
+                self._queue.get(timeout=timeout)
+                if timeout > 0
+                else self._queue.get_nowait()
+            )
         except Exception:
             return None
 
@@ -212,7 +216,7 @@ class ProcessHandle:
             event_name=event_name,
         )
 
-    def memory(self, memory_name: str) -> "MemoryHandle":
+    def memory(self, memory_name: str) -> "MemoryHandle":  # noqa: F821
         """Получить handle к блоку SharedMemory процесса."""
         from .memory_handle import MemoryHandle
 

@@ -28,13 +28,12 @@ CONFIG_PATH = HERE / "config" / "system.yaml"
 DEFAULT_BLUEPRINT = HERE / "topology" / "region_pipeline.yaml"
 
 
-def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
+def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:  # noqa: F821
     """Merge defaults из system.yaml в plugin-конфиги topology.
 
     Для каждого плагина: defaults[category] | plugin_inline_config.
     Inline-значения имеют приоритет (override).
     """
-    from multiprocess_prototype.config.schemas import SystemConfig
 
     for process in bp_dict.get("processes", []):
         for plugin in process.get("plugins", []):
@@ -48,7 +47,7 @@ def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
     return bp_dict
 
 
-def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
+def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":  # noqa: F821
     """Сборка системы из system.yaml + topology YAML/JSON.
 
     Args:

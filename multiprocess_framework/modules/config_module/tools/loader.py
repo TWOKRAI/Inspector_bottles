@@ -17,6 +17,7 @@ File I/O делегируется ``DataConverter`` (ADR-CFG-002: нет file I/
     )
     print(cfg.get("db.host"))
 """
+
 from __future__ import annotations
 
 import os
@@ -71,7 +72,9 @@ class ConfigLoader:
                 raise FileNotFoundError(f"Config file not found: {file_path}")
             return self
 
-        from multiprocess_framework.modules.data_schema_module.serialization.converter import DataConverter
+        from multiprocess_framework.modules.data_schema_module.serialization.converter import (
+            DataConverter,
+        )
 
         data = DataConverter.load_from_file(file_path)
         if isinstance(data, dict):
@@ -116,7 +119,7 @@ class ConfigLoader:
         self._schema = schema_class
         return self
 
-    def build(self) -> "Config":
+    def build(self) -> "Config":  # noqa: F821
         """Объединить все слои и вернуть Config объект."""
         from multiprocess_framework.modules.config_module.core.config import Config
 

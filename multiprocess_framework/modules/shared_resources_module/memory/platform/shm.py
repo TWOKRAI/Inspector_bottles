@@ -51,7 +51,7 @@ def cleanup_stale_shm(name: str) -> None:
         pass
 
 
-def cleanup_known_shm_at_startup(processes_config: "Dict[str, Any]") -> None:
+def cleanup_known_shm_at_startup(processes_config: "Dict[str, Any]") -> None:  # noqa: F821
     """
     Очистить известные SharedMemory блоки перед стартом приложения.
 
@@ -74,7 +74,8 @@ def cleanup_known_shm_at_startup(processes_config: "Dict[str, Any]") -> None:
         names_raw = mem.get("names")
         if names_raw is None:
             names_raw = {
-                k: v for k, v in mem.items()
+                k: v
+                for k, v in mem.items()
                 if k != "coll" and isinstance(v, (tuple, list))
             }
         names = list(names_raw.keys()) if isinstance(names_raw, dict) else []
@@ -119,6 +120,7 @@ def open_shm_block(name: str) -> Optional[ShmType]:
         SharedMemory или None при ошибке
     """
     import time
+
     for attempt in range(3):
         try:
             return shared_memory.SharedMemory(name=name, create=False)
@@ -154,9 +156,7 @@ def close_shm(shm: Optional[ShmType], unlink: bool = False) -> None:
             raise
 
 
-def create_shm_blocks(
-    base_name: str, size: int, coll: int
-) -> Optional[List[ShmType]]:
+def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[ShmType]]:
     """
     Создать coll блоков SharedMemory с именами {base_name}_0, {base_name}_1, ...
 
@@ -177,5 +177,7 @@ def create_shm_blocks(
     except Exception as e:
         for created in shm_list:
             close_shm(created, unlink=True)
-        _logger.error("[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e)
+        _logger.error(
+            "[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e
+        )
         return None

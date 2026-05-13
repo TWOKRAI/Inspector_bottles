@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar
 from .interfaces import IProcessServices
 
 if TYPE_CHECKING:
-    from ..io import ProcessIO
+    pass
 
 
 def for_each(func):
@@ -35,6 +35,7 @@ def for_each(func):
       list[dict] -> 1:N (fan-out)
       None       -> фильтрация (item отбрасывается)
     """
+
     @functools.wraps(func)
     def wrapper(self, items: list[dict]) -> list[dict]:
         result = []
@@ -47,15 +48,17 @@ def for_each(func):
             else:
                 result.append(out)
         return result
+
     return wrapper
 
 
 class PluginState(str, Enum):
     """Состояние плагина (от GStreamer element states)."""
-    IDLE = "idle"        # Зарегистрирован, не инициализирован
-    READY = "ready"      # configure() выполнен, ресурсы выделены
+
+    IDLE = "idle"  # Зарегистрирован, не инициализирован
+    READY = "ready"  # configure() выполнен, ресурсы выделены
     RUNNING = "running"  # start() выполнен, данные текут
-    PAUSED = "paused"    # Приостановлен, ресурсы удерживаются
+    PAUSED = "paused"  # Приостановлен, ресурсы удерживаются
     STOPPED = "stopped"  # shutdown() выполнен, ресурсы освобождены
 
 
@@ -181,7 +184,7 @@ class ProcessModulePlugin(ABC):
     category: str = ""  # "source" | "processing" | "output"
 
     # Контракт портов — переопределяется в подклассах
-    inputs: list = []   # list[Port]
+    inputs: list = []  # list[Port]
     outputs: list = []  # list[Port]
 
     # Команды — {command_name: method_name}
@@ -195,7 +198,7 @@ class ProcessModulePlugin(ABC):
 
     def __init__(self) -> None:
         self.state: PluginState = PluginState.IDLE
-        self.metrics: PluginMetrics | None = None
+        self.metrics: PluginMetrics | None = None  # noqa: F821
 
     # --- Data pipeline контракт (Phase 5) ---
 
@@ -227,7 +230,9 @@ class ProcessModulePlugin(ABC):
         """
         return None
 
-    def _init_register(self, ctx: PluginContext, register_cls: type | None = None) -> Any:
+    def _init_register(
+        self, ctx: PluginContext, register_cls: type | None = None
+    ) -> Any:
         """Инициализировать register: managed (GUI) → локальный fallback → YAML overrides.
 
         Порядок:
@@ -301,9 +306,7 @@ class ProcessModulePlugin(ABC):
 
         Default: raise NotImplementedError.
         """
-        raise NotImplementedError(
-            f"Plugin '{self.name}' does not implement produce()"
-        )
+        raise NotImplementedError(f"Plugin '{self.name}' does not implement produce()")
 
     @abstractmethod
     def configure(self, ctx: PluginContext) -> None:
@@ -354,11 +357,14 @@ class ProcessModulePlugin(ABC):
     def _do_configure(self, ctx: PluginContext) -> None:
         """IDLE → READY: configure + авторегистрация команд + метрики."""
         if self.state != PluginState.IDLE:
-            ctx.log_error(f"Plugin '{self.name}': configure() в состоянии {self.state}, ожидается IDLE")
+            ctx.log_error(
+                f"Plugin '{self.name}': configure() в состоянии {self.state}, ожидается IDLE"
+            )
             return
 
         # Инициализация метрик
         from .metrics import PluginMetrics
+
         self.metrics = PluginMetrics(self.name)
 
         with self.metrics.measure("configure"):
@@ -370,7 +376,9 @@ class ProcessModulePlugin(ABC):
     def _do_start(self, ctx: PluginContext) -> None:
         """READY → RUNNING."""
         if self.state != PluginState.READY:
-            ctx.log_error(f"Plugin '{self.name}': start() в состоянии {self.state}, ожидается READY")
+            ctx.log_error(
+                f"Plugin '{self.name}': start() в состоянии {self.state}, ожидается READY"
+            )
             return
 
         if self.metrics:
