@@ -24,12 +24,10 @@ Action-колонка содержит QStackedWidget: каждая секция
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import pydantic
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QPushButton,
     QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -37,10 +35,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from multiprocess_prototype.frontend.forms import RegisterView, ViewMode
-from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
-from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewModeToggle
-from multiprocess_prototype.frontend.prefs.store import UiPrefsStore
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
@@ -51,14 +45,16 @@ from ._nav_tree import (
     select_tree_key as _select_tree_key,
 )
 from .presenter import SettingsPresenter
-from .yaml_io import SETTINGS_PATH, load_settings, save_settings, schema_to_field_infos
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
+    from multiprocess_prototype.frontend.forms import ViewMode
+    from .system import SystemSection
 
 logger = logging.getLogger(__name__)
 
-# Русские названия секций для group-box (RegisterView)
+# Русские названия секций для group-box (RegisterView) — оставлены для обратной совместимости
 _SECTION_TITLES: dict[str, str] = {
     "system": "Система",
     "camera": "Камера",
@@ -76,8 +72,7 @@ class SettingsTab(QWidget):
     """Таб Settings — DiffScrollTabLayout с дифференциальным скроллом.
 
     Тонкая оболочка над SettingsPresenter: создаёт UI, делегирует
-    навигацию presenter'у. Методы RegisterView (save, reload,
-    field sync) остаются здесь до Phase 3.
+    навигацию presenter'у. Логика системных настроек вынесена в SystemSection.
 
     Сигналы:
         settings_saved(dict): эмитится при успешном сохранении system.yaml
@@ -91,33 +86,8 @@ class SettingsTab(QWidget):
         super().__init__(parent)
         self._ctx = ctx
 
-        # Загрузить конфиг и предпочтения
-        self._cfg = load_settings()
-        self._prefs = UiPrefsStore()
-        self._dirty = False
-
-        # Подготовить RegisterView для секции «Настройки системы»
-        field_infos = schema_to_field_infos(self._cfg)
-        try:
-            initial_mode = ViewMode(self._prefs.get("settings.view_mode", "cards"))
-        except ValueError:
-            initial_mode = ViewMode.CARDS
-
-        self._register_view = RegisterView(
-            field_infos,
-            initial_mode=initial_mode,
-            category_titles=_SECTION_TITLES,
-        )
-        # Для обратной совместимости: self._view используется в тестах
-        self._view = self._register_view
-        self._init_editor_values(field_infos)
-
-        for key, editor in self._register_view.editors().items():
-            editor.change_signal.connect(self._on_field_changed)
-        self._register_view.field_changed.connect(self._on_field_changed_action_bus)
-        self._register_view.mode_changed.connect(
-            lambda mode_str: self._prefs.set("settings.view_mode", mode_str)
-        )
+        # SystemSection создаётся в add_system_settings_page()
+        self._system_section: "SystemSection | None" = None
 
         # Построить UI
         self._setup_ui()
@@ -132,51 +102,38 @@ class SettingsTab(QWidget):
         return cls(ctx)
 
     # ------------------------------------------------------------------
-    # Публичный API
+    # Публичный API — делегация SystemSection
     # ------------------------------------------------------------------
 
     def reload(self) -> None:
         """Перечитать system.yaml и сбросить все изменения."""
-        self._cfg = load_settings()
-        field_infos = schema_to_field_infos(self._cfg)
-        self._sync_editors_to_cfg(field_infos)
-        self._clear_validation_errors()
-        self._set_dirty(False)
+        if self._system_section is not None:
+            self._system_section.presenter.reload()
 
     def save(self) -> bool:
         """Собрать значения из виджетов, валидировать и сохранить в YAML."""
-        dict_form: dict[str, Any] = {}
-        for key, editor in self._register_view.editors().items():
-            parts = key.split(".", 1)
-            if len(parts) != 2:
-                continue
-            section, field_name = parts
-            if section not in dict_form:
-                dict_form[section] = {}
-            dict_form[section][field_name] = editor.getter()
-
-        try:
-            from multiprocess_prototype.config.schemas import SystemConfig
-            validated = SystemConfig.model_validate(dict_form)
-        except pydantic.ValidationError as exc:
-            self._show_validation_errors(exc)
-            return False
-
-        self._clear_validation_errors()
-        save_settings(validated)
-        self._cfg = validated
-        self.settings_saved.emit(dict_form)
-        self._set_dirty(False)
-        return True
+        if self._system_section is not None:
+            return self._system_section.presenter.save()
+        return False
 
     def is_dirty(self) -> bool:
-        return self._dirty
+        """Вернуть текущий dirty-флаг системных настроек."""
+        if self._system_section is not None:
+            return self._system_section.presenter.is_dirty()
+        return False
 
-    def field_editors(self) -> dict[str, FieldEditor]:
-        return self._register_view.editors()
+    def field_editors(self) -> "dict[str, FieldEditor]":
+        """Вернуть словарь редакторов системных настроек."""
+        if self._system_section is not None:
+            return self._system_section.field_editors()
+        return {}
 
-    def view_mode(self) -> ViewMode:
-        return self._register_view.mode()
+    def view_mode(self) -> "ViewMode":
+        """Вернуть текущий режим отображения."""
+        if self._system_section is not None:
+            return self._system_section.view_mode()
+        from multiprocess_prototype.frontend.forms import ViewMode
+        return ViewMode.CARDS
 
     # ------------------------------------------------------------------
     # SettingsView Protocol — реализация (для presenter)
@@ -241,8 +198,26 @@ class SettingsTab(QWidget):
         self.add_content_page("admin_dashboard", dashboard)
 
     def add_system_settings_page(self) -> None:
-        """Зарегистрировать RegisterView как страницу «Настройки системы»."""
-        self.add_content_page("system_settings", self._register_view)
+        """Создать SystemSection и зарегистрировать как страницу «Настройки системы»."""
+        from .system import SystemSection
+        section = SystemSection(self._ctx)
+        # Подключить колбэки для проброса сигналов на SettingsTab
+        section.presenter.on_settings_saved = lambda data: self.settings_saved.emit(data)
+        section.presenter.on_dirty_changed = lambda dirty: self.dirty_changed.emit(dirty)
+        # Зарегистрировать кнопки секции в action-колонке
+        self.register_action_page("system_settings", section.action_buttons())
+        # Зарегистрировать content-страницу
+        self.add_content_page("system_settings", section)
+        # Подписать presenter секции на undo/redo ActionBus
+        bus = self._ctx.action_bus()
+        if bus is not None:
+            bus.add_change_callback(section.presenter.on_bus_undo_redo_sync)
+        # Зарегистрировать секцию в presenter'е
+        self._presenter.register_section(section)
+        # Сохранить ссылку для делегации публичных методов
+        self._system_section = section
+        # Для обратной совместимости с тестами: _view указывает на register_view секции
+        self._view = section.register_view
 
     def add_interface_settings_page(self) -> None:
         """Создать InterfaceSection и зарегистрировать в content stack."""
@@ -342,33 +317,10 @@ class SettingsTab(QWidget):
         empty_idx = self._action_stack.addWidget(QWidget())
         self._presenter.register_action_page("_empty", empty_idx)
 
-        # Страница «Настройки системы»: тумблер + сбросить + сохранить
-        self._register_view._toggle.hide()
-        self._external_toggle = ViewModeToggle(initial_mode=self._register_view.mode())
-        self._external_toggle.mode_changed.connect(
-            lambda mode_str: self._register_view.set_mode(ViewMode(mode_str))
-        )
-        self._btn_reset = QPushButton("Сбросить")
-        self._btn_reset.setToolTip("Сбросить изменения и загрузить данные с диска")
-        self._btn_reset.clicked.connect(self.reload)
-        self._btn_save = QPushButton("Сохранить")
-        self._btn_save.setToolTip("Сохранить изменения в config/system.yaml")
-        self._btn_save.clicked.connect(self.save)
-        self.register_action_page(
-            "system_settings",
-            [self._external_toggle, self._btn_reset, self._btn_save],
-        )
+        # Кнопки system_settings регистрируются в add_system_settings_page()
+        # через SystemSection.action_buttons() — см. ниже в populate()
 
         self._diff_layout.set_action_widget(action_widget)
-
-        # PR3: edit-кнопки — permission gate
-        from multiprocess_prototype.frontend.widgets.access import gate_edit_widgets
-        _auth = self._ctx.auth
-        gate_edit_widgets(
-            [self._btn_reset, self._btn_save],
-            "tabs.settings.edit",
-            _auth.state if _auth is not None else None,
-        )
 
         # --- Средняя колонка: tree nav ---
         self._tree_nav = QTreeWidget()
@@ -403,19 +355,20 @@ class SettingsTab(QWidget):
         main_layout.addWidget(self._diff_layout, stretch=1)
 
         # === Presenter координирует заполнение дерева и стека контента ===
+        # populate() вызывает add_system_settings_page() → создаётся SystemSection
         self._presenter.populate()
 
-        # Спрятать скроллбар у внутреннего QScrollArea в RegisterView —
+        # Спрятать скроллбар у внутреннего QScrollArea в SystemSection.RegisterView —
         # скроллом управляет мастер-скроллбар DiffScrollTabLayout
-        cards_scroll = self._register_view._cards_widget
-        if hasattr(cards_scroll, "setVerticalScrollBarPolicy"):
-            cards_scroll.setVerticalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-            )
+        if self._system_section is not None:
+            cards_scroll = self._system_section.register_view._cards_widget
+            if hasattr(cards_scroll, "setVerticalScrollBarPolicy"):
+                cards_scroll.setVerticalScrollBarPolicy(
+                    Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+                )
 
         # === Подписка ActionBus ===
         if bus is not None:
-            bus.add_change_callback(self._on_bus_undo_redo_sync)
             bus.add_change_callback(self._presenter.on_bus_change)
 
     # ------------------------------------------------------------------
@@ -452,99 +405,3 @@ class SettingsTab(QWidget):
         sa.setWidgetResizable(True)
         self._diff_layout._update_master_range()
 
-    # ------------------------------------------------------------------
-    # Editors / Field sync (остаются здесь до Phase 3)
-    # ------------------------------------------------------------------
-
-    def _init_editor_values(self, field_infos: list) -> None:
-        self._sync_editors_to_cfg(field_infos)
-
-    def _sync_editors_to_cfg(self, field_infos: list) -> None:
-        editors = self._register_view.editors()
-        for fi in field_infos:
-            section_name = fi.plugin_name
-            field_name = fi.field_name
-            key = f"{section_name}.{field_name}"
-            section_obj = getattr(self._cfg, section_name, None)
-            if section_obj is None:
-                continue
-            value = getattr(section_obj, field_name, None)
-            if value is None:
-                continue
-            editor = editors.get(key)
-            if editor is None:
-                continue
-            try:
-                editor.setter(value)
-            except Exception:
-                pass
-
-    def _on_field_changed(self) -> None:
-        self._set_dirty(True)
-
-    def _on_field_changed_action_bus(
-        self,
-        register_name: str,
-        field_name: str,
-        old_value: object,
-        new_value: object,
-    ) -> None:
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-        action = V2ActionBuilder.field_set_timed(
-            register_name, field_name, new_value, old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.record(action)
-
-    def _set_dirty(self, dirty: bool) -> None:
-        self._dirty = dirty
-        self.dirty_changed.emit(dirty)
-
-    def _show_validation_errors(self, exc: pydantic.ValidationError) -> None:
-        editors = self._register_view.editors()
-        for error in exc.errors():
-            loc = error.get("loc", ())
-            if len(loc) >= 2:
-                key = f"{loc[0]}.{loc[1]}"
-                editor = editors.get(key)
-                if editor is not None:
-                    editor.widget.setProperty("hasError", True)
-                    editor.widget.style().unpolish(editor.widget)
-                    editor.widget.style().polish(editor.widget)
-                    editor.widget.setToolTip(f"Ошибка: {error['msg']}")
-
-    def _clear_validation_errors(self) -> None:
-        for editor in self._register_view.editors().values():
-            editor.widget.setProperty("hasError", False)
-            editor.widget.style().unpolish(editor.widget)
-            editor.widget.style().polish(editor.widget)
-            editor.widget.setToolTip("")
-
-    # ------------------------------------------------------------------
-    # Undo/Redo field sync (остаётся здесь — работает с _register_view)
-    # ------------------------------------------------------------------
-
-    def _on_bus_undo_redo_sync(self) -> None:
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        event = bus.last_event
-        if event is None:
-            return
-        event_type, action = event
-        if event_type not in ("undo", "redo"):
-            return
-        if action.action_type != "field_set":
-            return
-        register_name = action.register_name or ""
-        value = (
-            action.backward_patch.get("value")
-            if event_type == "undo"
-            else action.forward_patch.get("value")
-        )
-        key = f"{register_name}.{action.field_name}"
-        if key in self._register_view.editors():
-            self._register_view.set_editor_value(key, value)
