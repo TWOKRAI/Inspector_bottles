@@ -1,7 +1,7 @@
 ---
 Phase: 4
 Название: Разбивка ThemeEditorSection (869 LOC → 6 файлов)
-Статус: PENDING
+Статус: DONE
 Зависит от: Phase 3
 ---
 
@@ -37,8 +37,8 @@ TreeNav + таблица переменных + `var_changed` signal.
 
 ## Acceptance Criteria
 
-- [ ] Ни один файл > 400 LOC
-- [ ] Presenter владеет данными, vars_editor эмитит var_changed
-- [ ] inline_color_editor: API open/close/signal (без crash при повторном открытии)
-- [ ] Все тесты green
-- [ ] theme_editor_section.py удалён
+- [x] Ни один файл > 400 LOC (max 376 — vars_editor.py)
+- [x] Presenter владеет данными, vars_editor эмитит var_changed
+- [x] inline_color_editor: API open/close/signal (без crash при повторном открытии)
+- [x] Все тесты green (22/22 passed)
+- [x] theme_editor_section.py удалён

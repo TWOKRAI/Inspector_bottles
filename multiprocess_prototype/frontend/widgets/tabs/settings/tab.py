@@ -225,11 +225,14 @@ class SettingsTab(QWidget):
         self.add_content_page("interface_settings", InterfaceSection(self._ctx))
 
     def add_appearance_page(self) -> None:
-        """Создать ThemeEditorSection и зарегистрировать в content stack."""
+        """Создать AppearanceSection и зарегистрировать в content stack."""
         from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
         from multiprocess_prototype.frontend.managers.theme_presets_manager import ThemePresetsManager
-        from .theme_editor_section import ThemeEditorSection
-        section = ThemeEditorSection(create_theme_manager(), ThemePresetsManager())
+        from .appearance import AppearanceSection
+        section = AppearanceSection(
+            theme_manager=create_theme_manager(),
+            presets_manager=ThemePresetsManager(),
+        )
         # Зарегистрировать кнопки секции в action-колонке
         self.register_action_page("appearance", section.action_buttons())
         self.add_content_page("appearance", section)
