@@ -6,6 +6,7 @@
 
 Использует IAuthManager через AppContext.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -17,20 +18,21 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
-from Services.auth.exceptions import AuthError, LastAdminError, UserNotFound, WeakPassword
+from Services.auth.exceptions import (
+    AuthError,
+    LastAdminError,
+    UserNotFound,
+    WeakPassword,
+)
 
 from ._base_panel import BaseAdminPanel
 from .user_form import UserForm
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.auth_context import AuthContext
-    from multiprocess_prototype.frontend.widgets.dialogs.confirm_with_password import (
-        ConfirmWithPasswordDialog,
-    )
 
 
 class UsersPanel(BaseAdminPanel):
@@ -41,15 +43,17 @@ class UsersPanel(BaseAdminPanel):
 
     _HEADER_TITLE = "Управление пользователями"
     _TABLE_COLUMNS = [
-        ("username",      "Логин",           160),
-        ("role_name",     "Роль",            100),
-        ("created_at",    "Создан",          120),
-        ("last_login_at", "Последний вход",  120),
-        ("login_count",   "Входов",           60),
-        ("is_active",     "Активен",          70),
+        ("username", "Логин", 160),
+        ("role_name", "Роль", 100),
+        ("created_at", "Создан", 120),
+        ("last_login_at", "Последний вход", 120),
+        ("login_count", "Входов", 60),
+        ("is_active", "Активен", 70),
     ]
 
-    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
+    def __init__(
+        self, auth: "AuthContext | None", parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
 
         self._auth_manager = auth.manager if auth is not None else None
@@ -66,12 +70,7 @@ class UsersPanel(BaseAdminPanel):
 
     def _setup_ui(self) -> None:
         """Построить layout панели."""
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
-
-        # Стандартный заголовок из BaseAdminPanel
-        self._create_header(root)
+        root = self._create_group()
 
         # Таблица пользователей из BaseAdminPanel
         self._table = self._create_table()
@@ -92,12 +91,19 @@ class UsersPanel(BaseAdminPanel):
         self._btn_change_role.clicked.connect(self._on_change_role_clicked)
 
         self._btn_reset_pwd = QPushButton("Сбросить пароль")
-        self._btn_reset_pwd.setToolTip("Сгенерировать новый пароль для выбранного пользователя")
+        self._btn_reset_pwd.setToolTip(
+            "Сгенерировать новый пароль для выбранного пользователя"
+        )
         self._btn_reset_pwd.clicked.connect(self._on_reset_password_clicked)
 
     def action_buttons(self) -> list[QPushButton]:
         """Кнопки действий для размещения в action panel секции."""
-        return [self._btn_add, self._btn_delete, self._btn_change_role, self._btn_reset_pwd]
+        return [
+            self._btn_add,
+            self._btn_delete,
+            self._btn_change_role,
+            self._btn_reset_pwd,
+        ]
 
     # ------------------------------------------------------------------
     # Permissions
@@ -105,10 +111,10 @@ class UsersPanel(BaseAdminPanel):
 
     _BUTTON_PERMISSIONS = (
         # (attr_name, permission)
-        ("_btn_add",         "users.create"),
-        ("_btn_delete",      "users.delete"),
+        ("_btn_add", "users.create"),
+        ("_btn_delete", "users.delete"),
         ("_btn_change_role", "users.edit"),
-        ("_btn_reset_pwd",   "users.reset_password"),
+        ("_btn_reset_pwd", "users.reset_password"),
     )
 
     def _wire_permissions(self) -> None:
@@ -228,6 +234,7 @@ class UsersPanel(BaseAdminPanel):
         from multiprocess_prototype.frontend.widgets.dialogs.confirm_with_password import (
             ConfirmWithPasswordDialog,
         )
+
         dlg = ConfirmWithPasswordDialog(
             self._auth_manager,
             action_text=action_text,
@@ -279,10 +286,12 @@ class UsersPanel(BaseAdminPanel):
 
         username = self._get_selected_username()
         if username is None:
-            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для удаления")
+            QMessageBox.information(
+                self, "Выбор пользователя", "Выберите пользователя для удаления"
+            )
             return
 
-        confirmed = self._open_confirm_dialog(f'Удалить пользователя «{username}»')
+        confirmed = self._open_confirm_dialog(f"Удалить пользователя «{username}»")
         if not confirmed:
             return
 
@@ -306,7 +315,9 @@ class UsersPanel(BaseAdminPanel):
 
         username = self._get_selected_username()
         if username is None:
-            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для смены роли")
+            QMessageBox.information(
+                self, "Выбор пользователя", "Выберите пользователя для смены роли"
+            )
             return
 
         # Получить роли, исключая hidden_in_ui=True
@@ -316,7 +327,9 @@ class UsersPanel(BaseAdminPanel):
             QMessageBox.critical(self, "Ошибка загрузки ролей", str(e))
             return
 
-        visible_roles = [r["name"] for r in all_roles if not r.get("hidden_in_ui", False)]
+        visible_roles = [
+            r["name"] for r in all_roles if not r.get("hidden_in_ui", False)
+        ]
         if not visible_roles:
             QMessageBox.warning(self, "Нет доступных ролей", "Нет ролей для назначения")
             return
@@ -327,7 +340,9 @@ class UsersPanel(BaseAdminPanel):
         if 0 <= row < len(self._users):
             current_role = self._users[row].get("role_name", "")
 
-        current_index = visible_roles.index(current_role) if current_role in visible_roles else 0
+        current_index = (
+            visible_roles.index(current_role) if current_role in visible_roles else 0
+        )
 
         new_role, ok = QInputDialog.getItem(
             self,
@@ -355,17 +370,21 @@ class UsersPanel(BaseAdminPanel):
 
     def _on_reset_password_clicked(self) -> None:
         """ConfirmWithPasswordDialog → auth_manager.reset_password(selected)
-           → QMessageBox с новым паролем + автоматически копируется в clipboard.
+        → QMessageBox с новым паролем + автоматически копируется в clipboard.
         """
         if self._auth_manager is None:
             return
 
         username = self._get_selected_username()
         if username is None:
-            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для сброса пароля")
+            QMessageBox.information(
+                self, "Выбор пользователя", "Выберите пользователя для сброса пароля"
+            )
             return
 
-        confirmed = self._open_confirm_dialog(f'Сбросить пароль пользователя «{username}»')
+        confirmed = self._open_confirm_dialog(
+            f"Сбросить пароль пользователя «{username}»"
+        )
         if not confirmed:
             return
 
