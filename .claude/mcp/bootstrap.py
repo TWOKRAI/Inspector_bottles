@@ -12,6 +12,7 @@
     2. Проверяет ollama + наличие нужной embedding-модели под платформу
     3. Проверяет node/npx + Context7 (user-level)
     4. Копирует mcp.template.json -> ./.mcp.json в корне проекта
+    5. Копирует sentrux/rules.template.toml -> .sentrux/rules.toml (с защитой от перезаписи)
 
 Что НЕ делает:
     - Не индексирует проект в qex (запусти `/qex-reindex` в Claude Code)
@@ -60,6 +61,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 TEMPLATE = SCRIPT_DIR / "mcp.template.json"
 TARGET = PROJECT_ROOT / ".mcp.json"
+RULES_TEMPLATE = SCRIPT_DIR / "sentrux" / "rules.template.toml"
+RULES_TARGET = PROJECT_ROOT / ".sentrux" / "rules.toml"
 
 
 # ── Утилиты ─────────────────────────────────────────────────────────────────
@@ -101,7 +104,7 @@ print(f"Platform: {platform.system()} {platform.machine()}  |  Python: {sys.vers
 
 
 # ── 1. sentrux ──────────────────────────────────────────────────────────────
-step(1, 4, "sentrux (архитектурный анализ)...")
+step(1, 5, "sentrux (архитектурный анализ)...")
 if has_cmd("sentrux"):
     code, out, _ = run_capture(["sentrux", "--version"])
     version = out.strip().split("\n")[0] if out else "?"
@@ -128,7 +131,7 @@ else:
 
 
 # ── 2. ollama (для qex dense search) ────────────────────────────────────────
-step(2, 4, "Ollama (qex embeddings)...")
+step(2, 5, "Ollama (qex embeddings)...")
 if has_cmd("ollama"):
     ok("ollama установлен")
     qex_model = "qwen3-embedding:4b" if IS_WIN else "qwen3-embedding:8b"
@@ -150,7 +153,7 @@ else:
 
 
 # ── 3. node + Context7 (user-level) ─────────────────────────────────────────
-step(3, 4, "Context7 (актуальные доки библиотек)...")
+step(3, 5, "Context7 (актуальные доки библиотек)...")
 if has_cmd("npx"):
     code, out, _ = run_capture(["node", "--version"])
     node_v = out.strip() if code == 0 else "?"
@@ -184,7 +187,7 @@ else:
 
 
 # ── 4. .mcp.json в корне проекта ────────────────────────────────────────────
-step(4, 4, "Конфиг .mcp.json в корне проекта...")
+step(4, 5, "Конфиг .mcp.json в корне проекта...")
 if not TEMPLATE.exists():
     err(f"Template не найден: {TEMPLATE}")
     sys.exit(1)
@@ -213,9 +216,24 @@ else:
     ok(".mcp.json создан из template")
 
 
+# ── 5. .sentrux/rules.toml ──────────────────────────────────────────────────
+step(5, 5, ".sentrux/rules.toml (архитектурные правила)...")
+if not RULES_TEMPLATE.exists():
+    warn(f"Template не найден: {RULES_TEMPLATE}")
+    warn("Пропускаю — создай .sentrux/rules.toml вручную")
+elif RULES_TARGET.exists():
+    ok(".sentrux/rules.toml уже существует (пропускаю)")
+else:
+    RULES_TARGET.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(RULES_TEMPLATE, RULES_TARGET)
+    ok(".sentrux/rules.toml создан из template")
+    warn("Отредактируй слои и границы под свой проект!")
+
+
 # ── Итог ────────────────────────────────────────────────────────────────────
 print(f"\n{C.B}=== Готово ==={C.N}")
 print("Дальше:")
 print("  1. Перезапусти Claude Code, чтобы поднять MCP-серверы")
 print("  2. В Claude Code: /mcp — проверь что qex и sentrux зелёные")
 print("  3. /qex-reindex — индексация кодовой базы (разовая, 1-5 мин)")
+print("  4. Отредактируй .sentrux/rules.toml под свой проект (слои и границы)")

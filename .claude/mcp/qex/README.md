@@ -25,7 +25,7 @@ Docker и Qdrant **не нужны**. Единственная внешняя з
 ### 1. Скопируй шаблон `.ignore` в корень проекта
 
 ```bash
-cp docs/claude/qex/templates/ignore.template .ignore
+cp .claude/mcp/qex/templates/ignore.template .ignore
 ```
 
 Открой `.ignore` и отредактируй whitelist-блок под свой проект — оставь только активные
@@ -92,7 +92,7 @@ ollama serve &
 ## Структура папки
 
 ```
-docs/claude/qex/
+.claude/mcp/qex/
 ├── README.md                       # этот файл
 ├── SETUP_GUIDE.md                  # полный гайд (Windows + macOS, диагностика)
 └── templates/

@@ -9,7 +9,7 @@
 #
 # Установка:
 #   1. Скопируй этот файл в .git/hooks/post-commit проекта:
-#        cp docs/claude/qex/templates/post-commit.hook.sh .git/hooks/post-commit
+#        cp .claude/mcp/qex/templates/post-commit.hook.sh .git/hooks/post-commit
 #   2. Сделай его исполняемым:
 #        chmod +x .git/hooks/post-commit
 #   3. Проверь, что запускается:
