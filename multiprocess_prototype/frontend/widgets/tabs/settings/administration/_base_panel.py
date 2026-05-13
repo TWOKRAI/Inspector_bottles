@@ -3,15 +3,14 @@
 BaseAdminPanel — базовый класс для admin-панелей с таблицей.
 
 Извлекает общий паттерн:
-  - заголовок (QLabel с objectName="PanelHeader")
-  - QTableWidget с конфигурацией из _TABLE_COLUMNS
+  - заголовок (QLabel с objectName="PanelHeader") — _create_header()
+  - QTableWidget с конфигурацией из _TABLE_COLUMNS — _create_table()
   - метод action_buttons() для action-колонки
-  - метод _fill_table() для заполнения данных
 
 Подклассы:
   - определяют _TABLE_COLUMNS: list[tuple[str, str, int]]
   - определяют _HEADER_TITLE: str
-  - переопределяют _fill_table() для заполнения данных
+  - вызывают _create_header() и _create_table() в _setup_ui()
   - создают кнопки и возвращают через action_buttons()
 """
 from __future__ import annotations
@@ -36,8 +35,8 @@ class BaseAdminPanel(QWidget):
         _TABLE_COLUMNS: список (key, title, width) — определение колонок
         _HEADER_TITLE:  заголовок панели (отображается в header)
 
-    Подклассы вызывают _init_table() в своём _setup_ui() после
-    создания root layout, затем добавляют свои элементы.
+    Подклассы вызывают _create_header() и _create_table() в своём
+    _setup_ui(), затем добавляют свои элементы.
     """
 
     _TABLE_COLUMNS: ClassVar[list[tuple[str, str, int]]] = []
@@ -79,7 +78,7 @@ class BaseAdminPanel(QWidget):
 
         return table
 
-    def action_buttons(self) -> list[QPushButton]:
+    def action_buttons(self) -> list[QWidget]:
         """Кнопки действий для action-колонки. Переопределить в подклассе."""
         return []
 

@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 
-from multiprocess_framework.modules.frontend_module.widgets.tabs.current_page_stack import (
+from multiprocess_framework.modules.frontend_module.widgets.tabs import (
     CurrentPageStack as _CurrentPageStack,
 )
 
@@ -431,6 +431,7 @@ class SettingsTab(QWidget):
             panel = AuditLogPanel(auth)
 
         # Зарегистрировать кнопки панели в action-колонке
+        # TODO(Phase 5): заменить hasattr на isinstance(panel, SectionProtocol)
         if panel is not None and hasattr(panel, "action_buttons"):
             self._register_action_page(key, panel.action_buttons())
 
