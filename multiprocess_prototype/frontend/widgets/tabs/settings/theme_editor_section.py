@@ -504,18 +504,13 @@ class ThemeEditorSection(QWidget):
     # Inline color editor (expandable row)
     # ------------------------------------------------------------------
 
-    def _get_or_create_color_dialog(self) -> QColorDialog:
-        """Получить или создать единственный экземпляр QColorDialog."""
-        if self._color_dialog is None:
-            self._color_dialog = QColorDialog(self)
-            self._color_dialog.setOption(
-                QColorDialog.ColorDialogOption.NoButtons, True
-            )
-            self._color_dialog.setOption(
-                QColorDialog.ColorDialogOption.ShowAlphaChannel, False
-            )
-            self._color_dialog.currentColorChanged.connect(self._on_color_live_changed)
-        return self._color_dialog
+    def _create_color_dialog(self) -> QColorDialog:
+        """Создать новый экземпляр QColorDialog (не кэшировать — ownership у таблицы)."""
+        dialog = QColorDialog(self)
+        dialog.setOption(QColorDialog.ColorDialogOption.NoButtons, True)
+        dialog.setOption(QColorDialog.ColorDialogOption.ShowAlphaChannel, False)
+        dialog.currentColorChanged.connect(self._on_color_live_changed)
+        return dialog
 
     def _open_color_editor(self, row: int) -> None:
         """Вставить строку под row с QColorDialog (expandable inline editor)."""
@@ -541,9 +536,10 @@ class ThemeEditorSection(QWidget):
         self._vars_table.insertRow(editor_row)
         self._color_editor_row = editor_row
 
-        # Настроить QColorDialog
-        dialog = self._get_or_create_color_dialog()
-        dialog.setCurrentColor(QColor(current_value))
+        # Создать новый QColorDialog (не кэшируем — setCellWidget передаёт ownership)
+        self._color_dialog = self._create_color_dialog()
+        self._color_dialog.setCurrentColor(QColor(current_value))
+        dialog = self._color_dialog
 
         # Установить QColorDialog как cellWidget, заняв все 3 колонки через span
         self._vars_table.setSpan(editor_row, 0, 1, 3)
@@ -563,8 +559,8 @@ class ThemeEditorSection(QWidget):
         self._color_editor_row = -1
 
         self._vars_table.blockSignals(True)
-        # ОБЯЗАТЕЛЬНО removeCellWidget перед removeRow — иначе Qt удалит QColorDialog!
-        self._vars_table.removeCellWidget(row, 0)
+        # Qt удалит QColorDialog при removeRow — обнуляем ссылку
+        self._color_dialog = None
         self._vars_table.setSpan(row, 0, 1, 1)  # Сбросить span
         self._vars_table.removeRow(row)
         self._vars_table.blockSignals(False)
