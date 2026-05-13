@@ -141,7 +141,12 @@ class RolesPanel(QWidget):
 
     def action_buttons(self) -> list[QPushButton]:
         """Кнопки действий для размещения в action panel секции."""
-        return [self._btn_create, self._btn_delete]
+        return [
+            self._matrix._btn_save,
+            self._matrix._btn_reset,
+            self._btn_create,
+            self._btn_delete,
+        ]
 
     # ------------------------------------------------------------------
     # Методы работы с данными

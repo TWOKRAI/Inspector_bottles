@@ -171,12 +171,12 @@ class MainWindow(QMainWindow):
         corner_layout.setContentsMargins(0, 0, 4, 0)
         corner_layout.setSpacing(2)
 
-        self._toggle_btn = HideToggleButton("Скрыть")
+        self._toggle_btn = HideToggleButton("▲")
         self._toggle_btn.setToolTip(
             "Клик — скрыть/показать вкладки.\n"
             "Удержание + движение вверх/вниз — плавная регулировка высоты."
         )
-        self._toggle_btn.setFixedSize(80, 28)
+        self._toggle_btn.setFixedSize(36, 40)
         self._toggle_btn.clicked.connect(self._toggle_tabs)
         # Drag-сигналы: запоминаем стартовую высоту, во время drag меняем её,
         # на отпускании фиксируем как _tab_preferred_height.
@@ -399,10 +399,10 @@ class MainWindow(QMainWindow):
                 self._apply_tab_height(self._tab_preferred_height)
             else:
                 self._show_tabs_full()
-            self._toggle_btn.setText("Скрыть")
+            self._toggle_btn.setText("▲")
         else:
             self._collapse_to_tab_bar()
-            self._toggle_btn.setText("Показать")
+            self._toggle_btn.setText("▼")
 
     # -- Drag-режим (удержание кнопки «Скрыть») --
 
@@ -435,11 +435,11 @@ class MainWindow(QMainWindow):
         if h <= min_h + 1:
             self._tabs_visible = False
             self._tab_preferred_height = None
-            self._toggle_btn.setText("Показать")
+            self._toggle_btn.setText("▼")
         else:
             self._tabs_visible = True
             self._tab_preferred_height = h
-            self._toggle_btn.setText("Скрыть")
+            self._toggle_btn.setText("▲")
 
     # -- Live bindings (Phase 12) --
 

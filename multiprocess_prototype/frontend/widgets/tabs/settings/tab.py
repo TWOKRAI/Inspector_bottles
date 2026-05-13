@@ -31,10 +31,10 @@ from datetime import datetime
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -43,6 +43,48 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class _CurrentPageStack(QStackedWidget):
+    """QStackedWidget, чей размер определяется только текущей страницей.
+
+    Стандартный QStackedLayout.minimumSize() = max всех дочерних виджетов,
+    даже скрытых. Из-за этого scroll area выделяет место под самую большую
+    страницу, и мастер-скроллбар показывает диапазон даже на маленькой.
+
+    Решение: при смене страницы ставим неактивным виджетам
+    QSizePolicy.Ignored — QStackedLayout пропустит их в расчёте
+    minimumSize. Активной странице возвращаем Preferred.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumSize(QSize(0, 0))
+        self.currentChanged.connect(self._apply_size_policies)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        w = self.currentWidget()
+        if w is not None:
+            return w.sizeHint()
+        return super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        w = self.currentWidget()
+        if w is not None:
+            return w.minimumSizeHint()
+        return super().minimumSizeHint()
+
+    def _apply_size_policies(self, index: int) -> None:
+        """Ignored на неактивных страницах → layout не считает их размер."""
+        for i in range(self.count()):
+            w = self.widget(i)
+            if w is None:
+                continue
+            if i == index:
+                w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+            else:
+                w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.updateGeometry()
 
 from multiprocess_prototype.frontend.forms import RegisterView, ViewMode
 from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
@@ -254,7 +296,10 @@ class SettingsTab(QWidget):
         self._diff_layout.set_nav_widget(self._tree_nav)
 
         # --- Правая колонка: content stack ---
-        self._content_stack = QStackedWidget()
+        # _CurrentPageStack — sizeHint учитывает только текущую страницу,
+        # иначе скролл раздувается из-за больших страниц (напр. История)
+        self._content_stack = _CurrentPageStack()
+        self._content_stack.currentChanged.connect(self._on_content_page_changed)
         self._diff_layout.set_content_widget(self._content_stack)
 
         # --- Undo/Redo (статичная зона) ---
@@ -449,6 +494,18 @@ class SettingsTab(QWidget):
         idx = self._action_page_index.get(key, self._action_page_index["_empty"])
         self._action_stack.setCurrentIndex(idx)
 
+    def _on_content_page_changed(self, _index: int) -> None:
+        """При смене страницы — принудительно пересчитать scroll area.
+
+        _CurrentPageStack уже переключил size policies в _apply_size_policies.
+        Toggle widgetResizable заставляет QScrollArea пересчитать
+        размер виджета и диапазон скроллбара.
+        """
+        sa = self._diff_layout._content_scroll
+        sa.setWidgetResizable(False)
+        sa.setWidgetResizable(True)
+        self._diff_layout._update_master_range()
+
     # ------------------------------------------------------------------
     # Builders для секций-контентов
     # ------------------------------------------------------------------
@@ -484,22 +541,36 @@ class SettingsTab(QWidget):
 
         h = self._history_table.horizontalHeader()
         if h:
-            h.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            h.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            h.setStretchLastSection(False)
+
+            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            h.resizeSection(0, 140)   # Время — пошире
+
+            h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+            h.resizeSection(1, 150)   # Вкладка — пошире
+
             h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+
+            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)    
+            h.resizeSection(3, 120)   # Значение — поуже
 
         layout.addWidget(self._history_table)
 
-        # Кнопка «Сбросить историю» внизу
-        btn_row = QHBoxLayout()
+        # Кнопки — в левую action-колонку (как у других секций)
+        self._btn_save_history = QPushButton("Сохранить в файл")
+        self._btn_save_history.setToolTip("Экспортировать историю в CSV-файл")
+        self._btn_save_history.setEnabled(False)
+        self._btn_save_history.clicked.connect(self._on_history_save)
+
         self._btn_clear_history = QPushButton("Очистить историю")
         self._btn_clear_history.setToolTip("Очистить всю историю действий")
         self._btn_clear_history.setEnabled(False)
         self._btn_clear_history.clicked.connect(self._on_history_clear)
-        btn_row.addWidget(self._btn_clear_history)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
+
+        self._register_action_page(
+            "history",
+            [self._btn_save_history, self._btn_clear_history],
+        )
 
         return container
 
@@ -593,7 +664,9 @@ class SettingsTab(QWidget):
             self._history_table.setItem(row, 3, QTableWidgetItem(str(value)))
         if actions:
             self._history_table.scrollToBottom()
+        has_history = len(actions) > 0
         self._btn_clear_history.setEnabled(bus.can_undo() or bus.can_redo())
+        self._btn_save_history.setEnabled(has_history)
 
     def _refresh_undo_redo_state(self) -> None:
         bus = self._ctx.action_bus()
@@ -618,6 +691,40 @@ class SettingsTab(QWidget):
         bus = self._ctx.action_bus()
         if bus is not None:
             bus.clear()
+
+    def _on_history_save(self) -> None:
+        """Экспорт истории действий в CSV-файл."""
+        from PySide6.QtWidgets import QFileDialog
+
+        bus = self._ctx.action_bus()
+        if bus is None:
+            return
+        actions = bus.history(n=0)  # все записи
+        if not actions:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._view.root_widget(),
+            "Сохранить историю",
+            "history.csv",
+            "CSV (*.csv);;Все файлы (*)",
+        )
+        if not path:
+            return
+        import csv
+
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerow(["Время", "Вкладка", "Параметр", "Значение"])
+            for action in actions:
+                ts = datetime.fromtimestamp(action.timestamp).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                tab = action.register_name or action.action_type
+                param = action.field_name or action.description
+                value = action.forward_patch.get("value", "")
+                if action.action_type == "recipe_apply":
+                    value = action.forward_patch.get("recipe_name", "recipe")
+                writer.writerow([ts, tab, param, str(value)])
 
     def _on_bus_undo_redo_sync(self) -> None:
         bus = self._ctx.action_bus()

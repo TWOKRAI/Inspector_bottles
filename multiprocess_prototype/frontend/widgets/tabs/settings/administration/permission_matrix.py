@@ -100,24 +100,17 @@ class PermissionMatrix(QWidget):
 
         layout.addWidget(self._table)
 
-        # Кнопки «Сохранить» / «Сбросить» — видны только при editable=True
+        # Кнопки «Сохранить» / «Сбросить» — размещаются в action-колонке
+        # родительской панелью (RolesPanel), а не inline
         self._btn_save = QPushButton("Сохранить")
+        self._btn_save.setToolTip("Сохранить изменения прав роли")
         self._btn_reset = QPushButton("Сбросить")
+        self._btn_reset.setToolTip("Сбросить изменения прав к исходному состоянию")
         self._btn_save.setEnabled(False)  # активируется когда есть изменения
 
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(6)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self._btn_reset)
-        buttons_layout.addWidget(self._btn_save)
-
-        self._buttons_widget = QWidget()
-        self._buttons_widget.setLayout(buttons_layout)
-        layout.addWidget(self._buttons_widget)
-
         # Скрываем кнопки если не editable-режим
-        self._buttons_widget.setVisible(editable)
+        self._btn_save.setVisible(editable)
+        self._btn_reset.setVisible(editable)
 
         self._btn_save.clicked.connect(self._on_save_clicked)
         self._btn_reset.clicked.connect(self._on_reset_clicked)
@@ -195,7 +188,8 @@ class PermissionMatrix(QWidget):
             self._table.setCellWidget(row, self._COL_EDIT, container_edit)
 
         # Показать/скрыть кнопки в зависимости от effective_editable
-        self._buttons_widget.setVisible(effective_editable)
+        self._btn_save.setVisible(effective_editable)
+        self._btn_reset.setVisible(effective_editable)
         self._btn_save.setEnabled(False)  # сбрасываем состояние кнопки
 
     def clear(self) -> None:

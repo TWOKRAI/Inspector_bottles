@@ -262,7 +262,7 @@ class TestHiddenRoleReadonly:
 
         # dev имеет только '*' — матрица пустая (нет ресурсов с точками)
         # Проверяем что кнопки скрыты
-        assert not matrix._buttons_widget.isVisible(), (
+        assert not matrix._btn_save.isVisible(), (
             "Кнопки должны быть скрыты для hidden_in_ui роли"
         )
 
@@ -296,7 +296,7 @@ class TestHiddenRoleReadonly:
         qtbot.addWidget(matrix)
         matrix.set_role(hidden_role)
 
-        assert not matrix._buttons_widget.isVisible()
+        assert not matrix._btn_save.isVisible()
 
 
 # =============================================================================
