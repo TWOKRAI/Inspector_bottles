@@ -110,6 +110,16 @@ settings/
     └── test_history_presenter.py    # NEW — pure-Python тесты
 ```
 
+## Правило: Framework vs Prototype — best-of-both
+
+При переносе компонента в framework (или переиспользовании существующего framework-класса):
+1. **Сравнить** реализацию в prototype и framework
+2. Если prototype-версия **лучше** (удобнее API, чище код, больше edge-cases) — взять лучшее из обоих
+3. Результат сохранить **во framework** (единый источник правды)
+4. Prototype переключить на import из framework
+
+Это касается: `_CurrentPageStack`, `TabPresenterBase`, `BaseTab`, и любых виджетов/утилит, которые дублируются.
+
 ## Ключевые архитектурные решения
 
 ### 1. SectionProtocol — единый контракт секции (→ framework)

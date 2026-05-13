@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -45,46 +44,9 @@ from PySide6.QtWidgets import (
 )
 
 
-class _CurrentPageStack(QStackedWidget):
-    """QStackedWidget, чей размер определяется только текущей страницей.
-
-    Стандартный QStackedLayout.minimumSize() = max всех дочерних виджетов,
-    даже скрытых. Из-за этого scroll area выделяет место под самую большую
-    страницу, и мастер-скроллбар показывает диапазон даже на маленькой.
-
-    Решение: при смене страницы ставим неактивным виджетам
-    QSizePolicy.Ignored — QStackedLayout пропустит их в расчёте
-    minimumSize. Активной странице возвращаем Preferred.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setMinimumSize(QSize(0, 0))
-        self.currentChanged.connect(self._apply_size_policies)
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        w = self.currentWidget()
-        if w is not None:
-            return w.sizeHint()
-        return super().sizeHint()
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        w = self.currentWidget()
-        if w is not None:
-            return w.minimumSizeHint()
-        return super().minimumSizeHint()
-
-    def _apply_size_policies(self, index: int) -> None:
-        """Ignored на неактивных страницах → layout не считает их размер."""
-        for i in range(self.count()):
-            w = self.widget(i)
-            if w is None:
-                continue
-            if i == index:
-                w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-            else:
-                w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.updateGeometry()
+from multiprocess_framework.modules.frontend_module.widgets.tabs.current_page_stack import (
+    CurrentPageStack as _CurrentPageStack,
+)
 
 from multiprocess_prototype.frontend.forms import RegisterView, ViewMode
 from multiprocess_prototype.frontend.forms.field_editor import FieldEditor

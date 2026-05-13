@@ -7,6 +7,7 @@
 callbacks_base, placeholder_utils.
 """
 from .binding_context import RegisterBindingContext
+from .current_page_stack import CurrentPageStack
 from .callbacks_base import (
     callback_no_args,
     tab_callbacks_from_dict,
@@ -15,14 +16,17 @@ from .callbacks_base import (
 from .mvp_facade import MvpTabBase
 from .panel_tab_base import PanelTabBase
 from .mvp_pattern import TabPresenterBase, TabViewProtocol
+from .section_protocol import SectionProtocol
 from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
 
 __all__ = [
     "BaseTab",
+    "CurrentPageStack",
     "MvpTabBase",
     "PanelTabBase",
     "RegisterBindingContext",
+    "SectionProtocol",
     "TabPresenterBase",
     "TabViewProtocol",
     "TabWidget",
