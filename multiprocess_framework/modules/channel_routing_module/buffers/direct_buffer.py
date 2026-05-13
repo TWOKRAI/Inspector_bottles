@@ -11,6 +11,7 @@ Thread safety:
     send_fn вызывается в том же потоке что и enqueue() — без блокировок.
     Если send_fn не thread-safe, вызывающий код должен обеспечить синхронизацию.
 """
+
 from typing import Any, Callable, Dict, Optional
 
 from ..interfaces import IBufferStrategy
@@ -29,12 +30,14 @@ class DirectBuffer(IBufferStrategy):
         self._enqueued = 0
         self._errors = 0
 
-    def enqueue(self, channel: str, data: Dict[str, Any], priority: str = "normal") -> None:
+    def enqueue(
+        self, channel: str, data: Dict[str, Any], priority: str = "normal"
+    ) -> None:
         """Немедленно вызывает send_fn. Приоритет игнорируется."""
         try:
             self._send_fn(channel, data)
             self._enqueued += 1
-        except Exception as e:
+        except Exception:
             self._errors += 1
             raise
 

@@ -19,10 +19,11 @@ Thread safety:
     _lock защищает batches и last_flush_time.
     Список каналов для flush_all() берётся атомарно.
 """
+
 import time
 import threading
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Deque, List, Optional
 
 from ..interfaces import IBufferStrategy
@@ -31,9 +32,10 @@ from ..interfaces import IBufferStrategy
 @dataclass
 class BatchConfig:
     """Параметры пакетной буферизации."""
-    max_size:       int   = 100    # Максимальный размер пачки
-    flush_interval: float = 1.0   # Интервал принудительного сброса (сек)
-    priority_flush: bool  = True  # "urgent" priority → немедленный сброс
+
+    max_size: int = 100  # Максимальный размер пачки
+    flush_interval: float = 1.0  # Интервал принудительного сброса (сек)
+    priority_flush: bool = True  # "urgent" priority → немедленный сброс
 
 
 class BatchBuffer(IBufferStrategy):
@@ -64,19 +66,19 @@ class BatchBuffer(IBufferStrategy):
             config:   Параметры батчинга. По умолчанию BatchConfig().
         """
         self._flush_fn = flush_fn
-        self._config   = config or BatchConfig()
+        self._config = config or BatchConfig()
 
-        self._lock            = threading.Lock()
-        self._batches:         Dict[str, Deque[Dict[str, Any]]] = defaultdict(deque)
+        self._lock = threading.Lock()
+        self._batches: Dict[str, Deque[Dict[str, Any]]] = defaultdict(deque)
         self._last_flush_time: Dict[str, float] = {}
 
         self._total_enqueued: int = 0
-        self._total_batches:  int = 0
-        self._total_flushed:  int = 0
-        self._errors:         int = 0
+        self._total_batches: int = 0
+        self._total_flushed: int = 0
+        self._errors: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
-        self._stop_event    = threading.Event()
+        self._stop_event = threading.Event()
 
     # ------------------------------------------------------------------
     # IBufferStrategy — lifecycle
@@ -126,7 +128,7 @@ class BatchBuffer(IBufferStrategy):
             self._batches[channel].append(data)
             self._total_enqueued += 1
             current_size = len(self._batches[channel])
-            elapsed      = time.time() - self._last_flush_time[channel]
+            elapsed = time.time() - self._last_flush_time[channel]
 
             if self._config.priority_flush and priority == "urgent":
                 should_flush = True
@@ -164,13 +166,13 @@ class BatchBuffer(IBufferStrategy):
         with self._lock:
             pending = {ch: len(buf) for ch, buf in self._batches.items()}
         return {
-            "type":           "batch",
+            "type": "batch",
             "total_enqueued": self._total_enqueued,
-            "total_batches":  self._total_batches,
-            "total_flushed":  self._total_flushed,
-            "errors":         self._errors,
-            "pending":        pending,
-            "running":        bool(self._timer_thread and self._timer_thread.is_alive()),
+            "total_batches": self._total_batches,
+            "total_flushed": self._total_flushed,
+            "errors": self._errors,
+            "pending": pending,
+            "running": bool(self._timer_thread and self._timer_thread.is_alive()),
         }
 
     # ------------------------------------------------------------------
@@ -185,12 +187,12 @@ class BatchBuffer(IBufferStrategy):
             batch = list(self._batches[channel])
             self._batches[channel].clear()
             self._last_flush_time[channel] = time.time()
-            self._total_batches  += 1
-            self._total_flushed  += len(batch)
+            self._total_batches += 1
+            self._total_flushed += len(batch)
 
         try:
             self._flush_fn(channel, batch)
-        except Exception as e:
+        except Exception:
             self._errors += 1
 
     def _timer_worker(self) -> None:

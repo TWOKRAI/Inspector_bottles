@@ -5,11 +5,11 @@
 Проверяем, что _record_metric вызывается с правильными значениями при
 каждом исходе login() и при open/close сессий.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import call, patch
 
 import pytest
 
@@ -78,9 +78,11 @@ def _make_config(tmp_path: Path) -> AuthConfig:
 def _seed(users_path: str) -> None:
     """Создать хранилище с пользователем alice и ролью admin."""
     storage = YamlUserStorage(users_path)
-    storage.save_roles({
-        "admin": _make_role("admin", level=9),
-    })
+    storage.save_roles(
+        {
+            "admin": _make_role("admin", level=9),
+        }
+    )
     storage.save({"alice": _make_user("alice", "admin")})
 
 
@@ -122,18 +124,28 @@ class TestLoginAttemptMetrics:
         manager.login("alice", "ValidPass@1")
 
         # Собираем финальные значения метрик
-        attempts_values = [v for n, v in recorded_metrics if n == "auth.login.attempts.per_hour"]
-        ratio_values = [v for n, v in recorded_metrics if n == "auth.login.failed_ratio"]
+        attempts_values = [
+            v for n, v in recorded_metrics if n == "auth.login.attempts.per_hour"
+        ]
+        ratio_values = [
+            v for n, v in recorded_metrics if n == "auth.login.failed_ratio"
+        ]
 
         # Должны быть 3 вызова каждой метрики (по одному на попытку)
-        assert len(attempts_values) == 3, f"ожидали 3 записи attempts, got: {attempts_values}"
+        assert len(attempts_values) == 3, (
+            f"ожидали 3 записи attempts, got: {attempts_values}"
+        )
         assert len(ratio_values) == 3, f"ожидали 3 записи ratio, got: {ratio_values}"
 
         # Финальные значения: после 3 попыток (2 fail + 1 success)
-        assert attempts_values[-1] == 3, f"ожидали attempts=3, got: {attempts_values[-1]}"
+        assert attempts_values[-1] == 3, (
+            f"ожидали attempts=3, got: {attempts_values[-1]}"
+        )
         final_ratio = ratio_values[-1]
         assert isinstance(final_ratio, float)
-        assert abs(final_ratio - 2 / 3) < 1e-6, f"ожидали ratio≈0.667, got: {final_ratio}"
+        assert abs(final_ratio - 2 / 3) < 1e-6, (
+            f"ожидали ratio≈0.667, got: {final_ratio}"
+        )
 
     def test_success_only_ratio_zero(self, tmp_path: Path) -> None:
         """После 1 успешного входа: attempts=1, failed_ratio=0.0."""
@@ -248,8 +260,8 @@ class TestActiveSessionsMetric:
 
         # Открываем 3 сессии
         sid1 = tracker.open_session("uid-001", "alice")
-        sid2 = tracker.open_session("uid-002", "bob")
-        sid3 = tracker.open_session("uid-003", "carol")
+        _sid2 = tracker.open_session("uid-002", "bob")
+        _sid3 = tracker.open_session("uid-003", "carol")
 
         assert active_values == [1, 2, 3], f"after 3 opens: {active_values}"
         assert tracker._active_sessions_count == 3
@@ -271,7 +283,9 @@ class TestActiveSessionsMetric:
         # Повторный close с тем же session_id — счётчик уже 0, не должен стать -1
         tracker.close_session(sid)
 
-        assert all(v >= 0 for v in active_values), f"отрицательный счётчик: {active_values}"
+        assert all(v >= 0 for v in active_values), (
+            f"отрицательный счётчик: {active_values}"
+        )
         assert tracker._active_sessions_count == 0
 
     def test_active_callback_via_auth_manager(self, tmp_path: Path) -> None:
@@ -301,7 +315,9 @@ class TestActiveSessionsMetric:
         manager.login("alice", "ValidPass@1")
 
         session_metrics = [v for n, v in recorded if n == "auth.sessions.active"]
-        assert len(session_metrics) >= 1, "метрика auth.sessions.active должна быть записана"
+        assert len(session_metrics) >= 1, (
+            "метрика auth.sessions.active должна быть записана"
+        )
         assert session_metrics[-1] == 1
 
         # Логаут

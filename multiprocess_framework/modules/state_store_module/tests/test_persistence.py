@@ -11,6 +11,7 @@
     8. load() + merge() → данные восстанавливаются в TreeStore
     9. Неизвестный prefix → не сохраняется, нет ошибок
 """
+
 from __future__ import annotations
 
 import time
@@ -21,7 +22,9 @@ import yaml
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta, MISSING
 from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
-from multiprocess_framework.modules.state_store_module.persistence.persistence_manager import PersistenceManager
+from multiprocess_framework.modules.state_store_module.persistence.persistence_manager import (
+    PersistenceManager,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +47,11 @@ def store() -> TreeStore:
 # Прикладная конфигурация для тестов — пример доменного маппинга,
 # который раньше был зашит в модуле, а теперь передаётся прикладным кодом.
 TEST_FILE_MAPPING = {
-    "cameras":  "state_cameras.yaml",
+    "cameras": "state_cameras.yaml",
     "renderer": "state_renderer.yaml",
-    "robot":    "state_robot.yaml",
+    "robot": "state_robot.yaml",
     "database": "state_database.yaml",
-    "system":   "state_system.yaml",
+    "system": "state_system.yaml",
 }
 
 
@@ -93,7 +96,9 @@ def _fire_after_set(pm: PersistenceManager, path: str, value: object = 42) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_save_after_debounce(pm: PersistenceManager, store: TreeStore, tmp_data_dir: Path) -> None:
+def test_save_after_debounce(
+    pm: PersistenceManager, store: TreeStore, tmp_data_dir: Path
+) -> None:
     """Изменение fps → через debounce → state_cameras.yaml обновлён."""
     store.set("cameras.0.config.fps", 30, source="test")
     _fire_after_set(pm, "cameras.0.config.fps", 30)
@@ -179,9 +184,7 @@ def test_shutdown_saves_dirty(
 # ---------------------------------------------------------------------------
 
 
-def test_load_returns_merged_dict(
-    store: TreeStore, tmp_data_dir: Path
-) -> None:
+def test_load_returns_merged_dict(store: TreeStore, tmp_data_dir: Path) -> None:
     """load() возвращает dict со всеми данными из YAML-файлов."""
     # Записываем данные вручную в YAML
     (tmp_data_dir).mkdir(parents=True, exist_ok=True)
@@ -227,7 +230,9 @@ def test_state_branch_not_saved(
     assert not pm.is_dirty, "state-ветвь не должна быть dirty"
 
     yaml_file = tmp_data_dir / "state_cameras.yaml"
-    assert not yaml_file.exists(), "state_cameras.yaml не должен быть создан для state-ветви"
+    assert not yaml_file.exists(), (
+        "state_cameras.yaml не должен быть создан для state-ветви"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +280,7 @@ def test_yaml_file_format(
     assert yaml_file.exists()
 
     with open(yaml_file, "r", encoding="utf-8") as f:
-        content = f.read()
+        _content = f.read()
         f.seek(0)
         data = yaml.safe_load(f)
 
@@ -293,10 +298,9 @@ def test_yaml_file_format(
 # ---------------------------------------------------------------------------
 
 
-def test_load_and_merge_restores_state(
-    tmp_data_dir: Path
-) -> None:
+def test_load_and_merge_restores_state(tmp_data_dir: Path) -> None:
     """Полный цикл: save → load() → merge() → данные в новом TreeStore."""
+
     def _make_pm(s: TreeStore) -> PersistenceManager:
         return PersistenceManager(
             store=s,

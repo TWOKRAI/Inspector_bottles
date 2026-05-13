@@ -9,6 +9,7 @@ E2E smoke-тест PR4 — Audit Trail + SessionTracker + AuditWriter без Qt.
 
 Все тесты используют sqlite:///:memory: и tmp_path.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,9 +17,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
-import pytest
 
 from Services.auth import (
     AuthConfig,
@@ -31,7 +31,7 @@ from Services.auth import (
     YamlUserStorage,
 )
 from Services.auth.audit_writer import AuditWriter
-from Services.auth.models import AuditEntry, SessionEntry
+from Services.auth.models import AuditEntry
 from Services.auth.session_tracker import SessionTracker
 from Services.auth.storage.audit_storage import SqliteAuditStorage
 
@@ -71,16 +71,18 @@ def _seed_storage(users_path: str) -> None:
     storage = YamlUserStorage(users_path)
     hasher = BcryptHasher(rounds=4)
     storage.save_roles({"admin": Role(name="admin", level=9, permissions=["*"])})
-    storage.save({
-        "alice": User(
-            user_id="uid-alice",
-            username="alice",
-            password_hash=hasher.hash("MySecret@1"),
-            role_name="admin",
-            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-            is_active=True,
-        )
-    })
+    storage.save(
+        {
+            "alice": User(
+                user_id="uid-alice",
+                username="alice",
+                password_hash=hasher.hash("MySecret@1"),
+                role_name="admin",
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                is_active=True,
+            )
+        }
+    )
 
 
 def _make_audit_entry(action_type: str = "field_update") -> AuditEntry:
@@ -182,7 +184,7 @@ class TestAuditWriterFallbackRecovery:
         fallback_path = str(tmp_path / "audit_fallback.jsonl")
 
         # Ломаем storage
-        original_append = sqlite_storage.append_audit
+        _original_append = sqlite_storage.append_audit
         sqlite_storage.append_audit = MagicMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("simulated SQLite failure")
         )

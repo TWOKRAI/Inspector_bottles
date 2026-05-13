@@ -9,9 +9,9 @@
   - Испускание сигнала permissions_changed при нажатии «Сохранить».
   - Восстановление исходного состояния при нажатии «Сбросить».
 """
+
 from __future__ import annotations
 
-import pytest
 from PySide6.QtWidgets import QCheckBox
 
 from multiprocess_prototype.frontend.widgets.tabs.settings.administration.permission_matrix import (
@@ -156,8 +156,8 @@ class TestCoherenceEditSetsView:
         qtbot.addWidget(matrix)
         matrix.set_role(role)
 
-        cb_edit = _get_checkbox(matrix, "tabs.recipes.edit")
-        cb_view = _get_checkbox(matrix, "tabs.recipes.view")
+        _cb_edit = _get_checkbox(matrix, "tabs.recipes.edit")
+        _cb_view = _get_checkbox(matrix, "tabs.recipes.view")
 
         # Оба в матрице: view=True, edit=False
         # (edit добавляется в матрицу только если есть в permissions или если пара полная)
@@ -336,7 +336,9 @@ class TestSaveEmitsSignal:
         assert matrix._btn_save.isEnabled(), "Кнопка Сохранить должна быть активна"
         matrix._btn_save.click()
 
-        assert len(received) == 1, "Сигнал permissions_changed должен быть испущен 1 раз"
+        assert len(received) == 1, (
+            "Сигнал permissions_changed должен быть испущен 1 раз"
+        )
         role_name, old_perms, new_perms = received[0]
 
         assert role_name == "operator"
@@ -369,7 +371,9 @@ class TestSaveEmitsSignal:
 
         cb_edit.setChecked(False)
 
-        assert matrix._btn_save.isEnabled(), "Кнопка Сохранить должна быть активна после изменения"
+        assert matrix._btn_save.isEnabled(), (
+            "Кнопка Сохранить должна быть активна после изменения"
+        )
 
     def test_save_no_signal_if_no_changes(self, qtbot) -> None:
         """«Сохранить» при отсутствии изменений не испускает сигнал."""
@@ -422,7 +426,9 @@ class TestResetDiscardsChanges:
 
         # edit должен восстановиться
         assert cb_edit.isChecked(), "edit должен быть восстановлен после сброса"
-        assert not matrix._btn_save.isEnabled(), "Кнопка Сохранить должна быть disabled после сброса"
+        assert not matrix._btn_save.isEnabled(), (
+            "Кнопка Сохранить должна быть disabled после сброса"
+        )
 
     def test_reset_does_not_emit_signal(self, qtbot) -> None:
         """«Сбросить» не испускает permissions_changed."""
@@ -446,7 +452,9 @@ class TestResetDiscardsChanges:
 
         matrix._btn_reset.click()
 
-        assert len(received) == 0, "permissions_changed не должен испускаться при сбросе"
+        assert len(received) == 0, (
+            "permissions_changed не должен испускаться при сбросе"
+        )
 
     def test_reset_restores_pending_set(self, qtbot) -> None:
         """После сброса _pending_permissions == set(_initial_permissions)."""

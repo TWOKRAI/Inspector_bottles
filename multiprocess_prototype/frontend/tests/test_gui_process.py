@@ -12,6 +12,7 @@ import pytest
 # Вспомогательная функция — минимальный mock shared_resources
 # ============================================================================
 
+
 def _make_mock_shared_resources() -> MagicMock:
     """Создать минимальный mock shared_resources для тестов ProcessModule."""
     sr = MagicMock()
@@ -28,6 +29,7 @@ def _make_mock_shared_resources() -> MagicMock:
 # ============================================================================
 # test_data_receiver_bridge_dispatch
 # ============================================================================
+
 
 class TestDataReceiverBridgeDispatch:
     """Проверяем что DataReceiverBridge emit'ит правильные signals по data_type."""
@@ -127,6 +129,7 @@ class TestDataReceiverBridgeDispatch:
 # test_gui_process_instantiation
 # ============================================================================
 
+
 class TestGuiProcessInstantiation:
     """Проверяем создание GuiProcess и инициализацию bridge."""
 
@@ -179,13 +182,16 @@ class TestGuiProcessInstantiation:
 # test_topology_parses
 # ============================================================================
 
+
 class TestTopologyParses:
     """Проверяем валидность hello_world.yaml."""
 
     def test_topology_parses(self):
         """Загрузить hello_world.yaml и проверить SystemBlueprint.model_validate()."""
         import yaml
-        from multiprocess_framework.modules.process_module.generic.blueprint import SystemBlueprint
+        from multiprocess_framework.modules.process_module.generic.blueprint import (
+            SystemBlueprint,
+        )
 
         topology_path = (
             Path(__file__).parent.parent.parent / "topology" / "hello_world.yaml"
@@ -207,7 +213,9 @@ class TestTopologyParses:
     def test_topology_check_returns_no_errors(self):
         """blueprint.check() не возвращает ошибок для hello_world."""
         import yaml
-        from multiprocess_framework.modules.process_module.generic.blueprint import SystemBlueprint
+        from multiprocess_framework.modules.process_module.generic.blueprint import (
+            SystemBlueprint,
+        )
 
         topology_path = (
             Path(__file__).parent.parent.parent / "topology" / "hello_world.yaml"
@@ -225,12 +233,15 @@ class TestTopologyParses:
 # test_process_class_field
 # ============================================================================
 
+
 class TestProcessClassField:
     """Проверяем поле process_class в ProcessConfig и as_generic_config()."""
 
     def test_process_class_field_exists(self):
         """ProcessConfig имеет поле process_class с дефолтом ''."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import ProcessConfig
+        from multiprocess_framework.modules.process_module.generic.blueprint import (
+            ProcessConfig,
+        )
 
         cfg = ProcessConfig(process_name="test")
         assert hasattr(cfg, "process_class")
@@ -238,7 +249,9 @@ class TestProcessClassField:
 
     def test_process_class_stored(self):
         """ProcessConfig сохраняет переданный process_class."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import ProcessConfig
+        from multiprocess_framework.modules.process_module.generic.blueprint import (
+            ProcessConfig,
+        )
 
         cfg = ProcessConfig(
             process_name="gui",
@@ -248,7 +261,9 @@ class TestProcessClassField:
 
     def test_as_generic_config_passes_process_class(self):
         """as_generic_config() передаёт process_class в GenericProcessConfig."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import ProcessConfig
+        from multiprocess_framework.modules.process_module.generic.blueprint import (
+            ProcessConfig,
+        )
 
         cfg = ProcessConfig(
             process_name="gui",
@@ -257,11 +272,16 @@ class TestProcessClassField:
         )
         generic = cfg.as_generic_config()
 
-        assert generic.process_class == "multiprocess_prototype.frontend.process.GuiProcess"
+        assert (
+            generic.process_class
+            == "multiprocess_prototype.frontend.process.GuiProcess"
+        )
 
     def test_as_generic_config_default_class_when_empty(self):
         """as_generic_config() с пустым process_class сохраняет дефолтный GenericProcess путь."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import ProcessConfig
+        from multiprocess_framework.modules.process_module.generic.blueprint import (
+            ProcessConfig,
+        )
 
         cfg = ProcessConfig(process_name="default_proc", plugins=[])
         generic = cfg.as_generic_config()
@@ -273,6 +293,7 @@ class TestProcessClassField:
 # ============================================================================
 # TestDataReceiverErrorRecovery
 # ============================================================================
+
 
 class TestDataReceiverErrorRecovery:
     """Тесты exponential backoff и error recovery в data_receiver_loop."""
@@ -296,6 +317,7 @@ class TestDataReceiverErrorRecovery:
     def _make_stop_event(self, delay: float = 0.0):
         """Создать stop_event, который сработает через delay секунд."""
         import threading
+
         stop_event = threading.Event()
         if delay > 0:
             threading.Timer(delay, stop_event.set).start()
@@ -310,13 +332,13 @@ class TestDataReceiverErrorRecovery:
         stop_event = threading.Event()
         pause_event = threading.Event()
 
-        call_count = [0]
+        _call_count = [0]
         sleep_calls = []
 
         # Router всегда бросает исключение
         process.router_manager.receive.side_effect = RuntimeError("сетевая ошибка")
 
-        original_sleep = time_module.sleep
+        _original_sleep = time_module.sleep
 
         def fake_sleep(seconds):
             sleep_calls.append(seconds)
@@ -360,7 +382,8 @@ class TestDataReceiverErrorRecovery:
 
         # _log_info должен быть вызван с сообщением о восстановлении
         recovery_calls = [
-            call for call in process._log_info.call_args_list
+            call
+            for call in process._log_info.call_args_list
             if "восстановление" in str(call)
         ]
         assert len(recovery_calls) == 1
@@ -378,10 +401,12 @@ class TestDataReceiverErrorRecovery:
         process.router_manager.receive.side_effect = RuntimeError("постоянная ошибка")
 
         with patch("multiprocess_prototype.frontend.process.time") as mock_time:
+
             def fake_sleep(seconds):
                 error_count[0] += 1
                 if error_count[0] >= 6:
                     stop_event.set()
+
             mock_time.sleep.side_effect = fake_sleep
             process._data_receiver_loop(stop_event, pause_event)
 
@@ -402,10 +427,12 @@ class TestDataReceiverErrorRecovery:
 
         with patch("multiprocess_prototype.frontend.process.time") as mock_time:
             call_cnt = [0]
+
             def fake_sleep(seconds):
                 call_cnt[0] += 1
                 if call_cnt[0] >= 2:
                     stop_event.set()
+
             mock_time.sleep.side_effect = fake_sleep
             process._data_receiver_loop(stop_event, pause_event)
 

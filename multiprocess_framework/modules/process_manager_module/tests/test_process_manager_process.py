@@ -9,8 +9,7 @@
 - Регистрацию встроенных команд
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from multiprocessing import Event
 
 from ...process_module import ProcessModule
@@ -31,7 +30,9 @@ def _make_mock_shared_resources(process_name: str = "ProcessManager"):
 
 class TestProcessManagerProcessInit:
     def test_init_creates_components(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -42,11 +43,23 @@ class TestProcessManagerProcessInit:
             pmp.config_handler = None
 
             # Проверяем что _create_components не падает без shared_resources
-            with patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessRegistry") as mock_reg, \
-                 patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessPriority"), \
-                 patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessStatusMonitor"), \
-                 patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessMonitor"), \
-                 patch("multiprocess_framework.modules.process_manager_module.process.process_manager_process.QueueRegistry") as mock_qr:
+            with (
+                patch(
+                    "multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessRegistry"
+                ) as _mock_reg,
+                patch(
+                    "multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessPriority"
+                ),
+                patch(
+                    "multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessStatusMonitor"
+                ),
+                patch(
+                    "multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessMonitor"
+                ),
+                patch(
+                    "multiprocess_framework.modules.process_manager_module.process.process_manager_process.QueueRegistry"
+                ) as mock_qr,
+            ):
                 mock_qr.return_value.initialize.return_value = None
                 pmp._create_components()
                 assert hasattr(pmp, "_process_registry")
@@ -60,7 +73,9 @@ class TestProcessManagerProcessShutdownOrder:
         """Порядок shutdown: monitor → registry → console → super."""
         call_order = []
 
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -79,7 +94,9 @@ class TestProcessManagerProcessShutdownOrder:
 
             mock_monitor.stop.side_effect = on_monitor_stop
             mock_registry.stop_all.side_effect = on_registry_stop
-            mock_console.close_all = MagicMock(side_effect=lambda: call_order.append("console"))
+            mock_console.close_all = MagicMock(
+                side_effect=lambda: call_order.append("console")
+            )
 
             pmp._process_monitor = mock_monitor
             pmp._process_registry = mock_registry
@@ -95,7 +112,9 @@ class TestProcessManagerProcessShutdownOrder:
         mock_super_shutdown.assert_called_once()
 
     def test_shutdown_without_console_does_not_raise(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -105,14 +124,18 @@ class TestProcessManagerProcessShutdownOrder:
             pmp._process_registry = MagicMock()
             pmp._console_manager = None
 
-            with patch.object(ProcessManagerProcess.__bases__[0], "shutdown", return_value=True):
+            with patch.object(
+                ProcessManagerProcess.__bases__[0], "shutdown", return_value=True
+            ):
                 pmp.shutdown()
 
 
 class TestProcessManagerProcessStopProcess:
     def test_stop_process_graceful_before_terminate(self) -> None:
         """stop_process: join → terminate → kill (graceful cascade)."""
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -138,7 +161,9 @@ class TestProcessManagerProcessStopProcess:
             mock_registry.stop_one.assert_called_once_with("TestProcess", 0.1)
 
     def test_stop_process_unknown_returns_true(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -155,7 +180,9 @@ class TestProcessManagerProcessStopProcess:
 
 class TestProcessManagerProcessGetStatus:
     def test_get_process_status_unknown_returns_empty(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -169,7 +196,9 @@ class TestProcessManagerProcessGetStatus:
             assert result == {}
 
     def test_get_all_processes_status_delegates_to_status(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -185,7 +214,9 @@ class TestProcessManagerProcessGetStatus:
 
 class TestProcessManagerProcessBuiltinCommands:
     def test_cmd_process_list_returns_dict(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -200,7 +231,9 @@ class TestProcessManagerProcessBuiltinCommands:
             assert isinstance(result, dict)
 
     def test_cmd_process_start_requires_name(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -210,7 +243,9 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "error" in result
 
     def test_cmd_process_stop_requires_name(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -220,7 +255,9 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "error" in result
 
     def test_cmd_system_shutdown_sets_stop_event(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -233,7 +270,9 @@ class TestProcessManagerProcessBuiltinCommands:
             assert pmp.stop_event.is_set()
 
     def test_cmd_system_stats_returns_dict(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -252,7 +291,9 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "processes" in result
 
     def test_register_builtin_commands_registers_all(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None
@@ -265,8 +306,7 @@ class TestProcessManagerProcessBuiltinCommands:
             pmp._register_builtin_commands()
 
             registered_names = [
-                call_args[0][0]
-                for call_args in mock_cm.register_command.call_args_list
+                call_args[0][0] for call_args in mock_cm.register_command.call_args_list
             ]
             assert "process.list" in registered_names
             assert "process.start" in registered_names
@@ -277,7 +317,9 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "system.stats" in registered_names
 
     def test_register_builtin_commands_skips_if_no_command_manager(self) -> None:
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        with patch.object(
+            ProcessManagerProcess, "__init__", lambda self, *a, **kw: None
+        ):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
             pmp.name = "ProcessManager"
             pmp.shared_resources = None

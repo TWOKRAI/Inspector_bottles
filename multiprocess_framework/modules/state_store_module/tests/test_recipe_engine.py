@@ -1,4 +1,5 @@
 """Тесты RecipeEngine — snapshot/restore config-ветвей через TreeStore."""
+
 from __future__ import annotations
 
 import yaml
@@ -6,10 +7,8 @@ import pytest
 from pathlib import Path
 
 from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
-from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from multiprocess_framework.modules.state_store_module.recipes.recipe_engine import (
     RecipeEngine,
-    DEFAULT_CONFIG_PATHS,
     _flatten,
     _remap_path,
 )
@@ -18,49 +17,51 @@ from multiprocess_framework.modules.state_store_module.recipes.recipe_engine imp
 @pytest.fixture
 def store() -> TreeStore:
     """TreeStore с типичными config-данными."""
-    return TreeStore({
-        "cameras": {
-            "0": {
-                "config": {
-                    "fps": 30,
-                    "camera_type": "webcam",
-                    "resolution_width": 1920,
-                    "resolution_height": 1080,
+    return TreeStore(
+        {
+            "cameras": {
+                "0": {
+                    "config": {
+                        "fps": 30,
+                        "camera_type": "webcam",
+                        "resolution_width": 1920,
+                        "resolution_height": 1080,
+                    },
+                    "regions": {
+                        "0": {
+                            "name": "main",
+                            "params": {"threshold": 128},
+                        },
+                    },
+                    "state": {"status": "running"},
                 },
-                "regions": {
-                    "0": {
-                        "name": "main",
-                        "params": {"threshold": 128},
+                "1": {
+                    "config": {
+                        "fps": 15,
+                        "camera_type": "ip",
                     },
                 },
-                "state": {"status": "running"},
             },
-            "1": {
+            "renderer": {
                 "config": {
-                    "fps": 15,
-                    "camera_type": "ip",
+                    "draw_bboxes": True,
+                    "show_original": True,
                 },
             },
-        },
-        "renderer": {
-            "config": {
-                "draw_bboxes": True,
-                "show_original": True,
+            "robot": {
+                "config": {
+                    "speed": 100,
+                    "enabled": False,
+                },
             },
-        },
-        "robot": {
-            "config": {
-                "speed": 100,
-                "enabled": False,
+            "database": {
+                "config": {
+                    "host": "localhost",
+                    "port": 5432,
+                },
             },
-        },
-        "database": {
-            "config": {
-                "host": "localhost",
-                "port": 5432,
-            },
-        },
-    })
+        }
+    )
 
 
 @pytest.fixture
@@ -81,12 +82,11 @@ def engine(store: TreeStore, recipes_dir: Path) -> RecipeEngine:
 # save — базовый
 # =====================================================================
 
+
 class TestSave:
     """Тесты сохранения рецептов."""
 
-    def test_save_default_paths(
-        self, engine: RecipeEngine, recipes_dir: Path
-    ) -> None:
+    def test_save_default_paths(self, engine: RecipeEngine, recipes_dir: Path) -> None:
         """save() без paths → snapshot всех DEFAULT_CONFIG_PATHS."""
         engine.save("production")
 
@@ -111,9 +111,7 @@ class TestSave:
         assert data["cameras"]["0"]["config"]["fps"] == 30
         assert data["renderer"]["config"]["draw_bboxes"] is True
 
-    def test_save_partial_paths(
-        self, engine: RecipeEngine, recipes_dir: Path
-    ) -> None:
+    def test_save_partial_paths(self, engine: RecipeEngine, recipes_dir: Path) -> None:
         """save(paths=["cameras.0.regions"]) → частичный snapshot."""
         engine.save("regions_only", paths=["cameras.0.regions"])
 
@@ -154,6 +152,7 @@ class TestSave:
 # =====================================================================
 # load — базовый + Transaction batching
 # =====================================================================
+
 
 class TestLoad:
     """Тесты загрузки рецептов."""
@@ -206,18 +205,17 @@ class TestLoad:
 # remap
 # =====================================================================
 
+
 class TestRemap:
     """Тесты перемаппинга путей при загрузке."""
 
-    def test_remap_camera_paths(
-        self, store: TreeStore, engine: RecipeEngine
-    ) -> None:
+    def test_remap_camera_paths(self, store: TreeStore, engine: RecipeEngine) -> None:
         """remap={"cameras.0": "cameras.1"} → настройки камеры 0 в камеру 1."""
         # Сохраняем только камеру 0
         engine.save("cam0", paths=["cameras.0"])
 
         # Загружаем с ремаппингом в камеру 1
-        deltas = engine.load("cam0", remap={"cameras.0": "cameras.1"})
+        _deltas = engine.load("cam0", remap={"cameras.0": "cameras.1"})
 
         # Камера 1 теперь должна иметь config от камеры 0
         assert store.get("cameras.1.config.fps") == 30
@@ -245,6 +243,7 @@ class TestRemap:
 # list / delete
 # =====================================================================
 
+
 class TestListDelete:
     """Тесты list и delete."""
 
@@ -260,9 +259,7 @@ class TestListDelete:
         names = engine.list()
         assert names == ["alpha", "beta"]
 
-    def test_delete_existing(
-        self, engine: RecipeEngine, recipes_dir: Path
-    ) -> None:
+    def test_delete_existing(self, engine: RecipeEngine, recipes_dir: Path) -> None:
         """delete() удаляет файл и возвращает True."""
         engine.save("to_delete")
         assert (recipes_dir / "to_delete.yaml").exists()
@@ -290,6 +287,7 @@ class TestListDelete:
 # is_dirty
 # =====================================================================
 
+
 class TestIsDirty:
     """Тесты отслеживания изменений после загрузки."""
 
@@ -299,9 +297,7 @@ class TestIsDirty:
         engine.load("prod")
         assert engine.is_dirty() is False
 
-    def test_dirty_after_change(
-        self, store: TreeStore, engine: RecipeEngine
-    ) -> None:
+    def test_dirty_after_change(self, store: TreeStore, engine: RecipeEngine) -> None:
         """Изменение store после load() → is_dirty() = True."""
         engine.save("prod")
         engine.load("prod")
@@ -318,20 +314,17 @@ class TestIsDirty:
 # diff
 # =====================================================================
 
+
 class TestDiff:
     """Тесты отображения различий между рецептом и store."""
 
-    def test_diff_no_changes(
-        self, engine: RecipeEngine
-    ) -> None:
+    def test_diff_no_changes(self, engine: RecipeEngine) -> None:
         """diff() без изменений → пустой список."""
         engine.save("prod")
         diffs = engine.diff("prod")
         assert diffs == []
 
-    def test_diff_shows_changes(
-        self, store: TreeStore, engine: RecipeEngine
-    ) -> None:
+    def test_diff_shows_changes(self, store: TreeStore, engine: RecipeEngine) -> None:
         """diff() показывает изменённые пути."""
         engine.save("prod")
 
@@ -355,6 +348,7 @@ class TestDiff:
 # =====================================================================
 # Вспомогательные функции
 # =====================================================================
+
 
 class TestHelpers:
     """Тесты вспомогательных функций."""

@@ -13,12 +13,15 @@
 - Валидация входных данных
 - Паттерны с ** (globstar)
 """
+
 from __future__ import annotations
 
 import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
-from multiprocess_framework.modules.state_store_module.core.subscription_manager import SubscriptionManager
+from multiprocess_framework.modules.state_store_module.core.subscription_manager import (
+    SubscriptionManager,
+)
 from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
 from multiprocess_framework.modules.state_store_module.selectors.selector import (
     Selector,
@@ -30,6 +33,7 @@ from multiprocess_framework.modules.state_store_module.selectors.selector import
 # ---------------------------------------------------------------------------
 # Фикстуры
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def store() -> TreeStore:
@@ -55,6 +59,7 @@ def registry(store: TreeStore, sub_manager: SubscriptionManager) -> SelectorRegi
 # ---------------------------------------------------------------------------
 # _collect_values_by_pattern — утилита сбора значений
 # ---------------------------------------------------------------------------
+
 
 class TestCollectValuesByPattern:
     """Тесты для _collect_values_by_pattern."""
@@ -104,6 +109,7 @@ class TestCollectValuesByPattern:
 # Selector — базовые свойства и recompute
 # ---------------------------------------------------------------------------
 
+
 class TestSelector:
     """Тесты для класса Selector."""
 
@@ -148,12 +154,8 @@ class TestSelector:
                 "cameras.*.state.status",
             ],
             compute=lambda v: {
-                "fps_count": sum(
-                    1 for k in v if k.endswith("actual_fps")
-                ),
-                "status_count": sum(
-                    1 for k in v if k.endswith("status")
-                ),
+                "fps_count": sum(1 for k in v if k.endswith("actual_fps")),
+                "status_count": sum(1 for k in v if k.endswith("status")),
             },
         )
         result = sel.recompute(store)
@@ -175,6 +177,7 @@ class TestSelector:
 # SelectorRegistry — регистрация, get, list, unregister
 # ---------------------------------------------------------------------------
 
+
 class TestSelectorRegistry:
     """Тесты для SelectorRegistry."""
 
@@ -194,27 +197,25 @@ class TestSelectorRegistry:
         # Через registry.get()
         assert registry.get("avg_fps") == 27.5
 
-    def test_list_selectors(
-        self, store: TreeStore, registry: SelectorRegistry
-    ) -> None:
+    def test_list_selectors(self, store: TreeStore, registry: SelectorRegistry) -> None:
         """list() возвращает имена зарегистрированных selectors."""
         assert registry.list() == []
 
         sel1 = Selector(
-            name="sel_a", dependencies=["cameras.0.state.actual_fps"],
+            name="sel_a",
+            dependencies=["cameras.0.state.actual_fps"],
             compute=lambda v: list(v.values())[0] if v else 0,
         )
         sel2 = Selector(
-            name="sel_b", dependencies=["cameras.1.state.actual_fps"],
+            name="sel_b",
+            dependencies=["cameras.1.state.actual_fps"],
             compute=lambda v: list(v.values())[0] if v else 0,
         )
         registry.register(sel1)
         registry.register(sel2)
         assert sorted(registry.list()) == ["sel_a", "sel_b"]
 
-    def test_unregister(
-        self, store: TreeStore, registry: SelectorRegistry
-    ) -> None:
+    def test_unregister(self, store: TreeStore, registry: SelectorRegistry) -> None:
         """unregister удаляет selector и его значение из дерева."""
         sel = Selector(
             name="avg_fps",
@@ -243,7 +244,8 @@ class TestSelectorRegistry:
     ) -> None:
         """Повторная регистрация selector с тем же именем вызывает ValueError."""
         sel = Selector(
-            name="dup", dependencies=["cameras.0.state.actual_fps"],
+            name="dup",
+            dependencies=["cameras.0.state.actual_fps"],
             compute=lambda v: 0,
         )
         registry.register(sel)
@@ -254,6 +256,7 @@ class TestSelectorRegistry:
 # ---------------------------------------------------------------------------
 # SelectorRegistry — handle_delta и автоматический recompute
 # ---------------------------------------------------------------------------
+
 
 class TestSelectorRegistryRecompute:
     """Тесты для автоматического пересчёта через handle_delta."""
@@ -291,7 +294,8 @@ class TestSelectorRegistryRecompute:
             return 42.0
 
         sel = Selector(
-            name="fixed", dependencies=["cameras.*.state.actual_fps"],
+            name="fixed",
+            dependencies=["cameras.*.state.actual_fps"],
             compute=compute,
         )
         registry.register(sel)
@@ -414,7 +418,10 @@ class TestSelectorRegistryRecompute:
         assert registry.get("camera_count") == 3
 
     def test_subscribe_to_selector_path(
-        self, store: TreeStore, registry: SelectorRegistry, sub_manager: SubscriptionManager
+        self,
+        store: TreeStore,
+        registry: SelectorRegistry,
+        sub_manager: SubscriptionManager,
     ) -> None:
         """Подписка на selectors.{name} работает как на обычный путь."""
         sel = Selector(
@@ -425,7 +432,7 @@ class TestSelectorRegistryRecompute:
         registry.register(sel)
 
         # Подписываемся на selectors.avg_fps
-        received_deltas: list[Delta] = []
+        _received_deltas: list[Delta] = []
         sub_manager.subscribe("selectors.avg_fps", subscriber="gui")
 
         # Изменяем зависимость

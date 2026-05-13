@@ -4,30 +4,33 @@
 
 Task 7.2 — Tests for SQLMeta + enhanced mapper.
 """
+
 import sys
 import os
 
 # Ensure modules root is on sys.path (conftest does this too, but keep explicit for clarity)
-_modules_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..')
+_modules_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 if os.path.abspath(_modules_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_modules_dir))
 
-from typing import Annotated, Optional
+from typing import Annotated, Optional  # noqa: E402
 
-import pytest
-from sqlalchemy import String
+import pytest  # noqa: E402
+from sqlalchemy import String  # noqa: E402
 
-from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta
-from Services.sql.adapters.sql_meta import extract_sql_meta
-from Services.sql.adapters.schema_mapper import SchemaBaseMapper
+from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta  # noqa: E402
+from Services.sql.adapters.sql_meta import extract_sql_meta  # noqa: E402
+from Services.sql.adapters.schema_mapper import SchemaBaseMapper  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Тестовые схемы
 # ---------------------------------------------------------------------------
 
+
 class SimpleSchema(SchemaBase):
     """Без SQLMeta и без FieldMeta — минимальная схема."""
+
     id: Optional[int] = None
     name: str = ""
 
@@ -52,6 +55,7 @@ class FullSchema(SchemaBase):
 # Тесты extract_sql_meta
 # ---------------------------------------------------------------------------
 
+
 class TestExtractSQLMeta:
     def test_extract_sql_meta_with_class(self):
         """FullSchema: table_name из SQLMeta, indexes, unique_together."""
@@ -73,6 +77,7 @@ class TestExtractSQLMeta:
 # ---------------------------------------------------------------------------
 # Тесты SchemaBaseMapper
 # ---------------------------------------------------------------------------
+
 
 class TestSchemaBaseMapper:
     @pytest.fixture(autouse=True)
@@ -113,7 +118,7 @@ class TestSchemaBaseMapper:
         """Поле с default → 'default' присутствует в метаданных колонки."""
         meta = self.mapper.schema_to_table_meta(FullSchema)
         # name имеет default=""
-        name_col = meta["columns"]["name"]
+        _name_col = meta["columns"]["name"]
         # default "" — falsy, поэтому mapper хранит его только если not None and not PydanticUndefined
         # По реализации: пустая строка "" не является None → default не попадает (условие: != None)
         # Проверяем поле readonly_field с непустым дефолтом

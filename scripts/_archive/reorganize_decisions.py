@@ -22,7 +22,6 @@ def split_adrs(text: str) -> tuple[str, list[tuple[int, str]]]:
     body = text[m.start() + 1 :]
     raw_blocks = re.split(r"\n(?=## ADR-\d+:)", body)
     blocks: list[tuple[int, str]] = []
-    seen_028_shared = False
     for raw in raw_blocks:
         raw = raw.strip()
         if not raw:
@@ -116,7 +115,9 @@ def main() -> None:
 
     out = "\n".join(lines).rstrip() + "\n"
     DECISIONS.write_text(out, encoding="utf-8")
-    print(f"OK: {DECISIONS} — ADR: всего {len(blocks)}, принято {len(active)}, устарело {len(obsolete)}")
+    print(
+        f"OK: {DECISIONS} — ADR: всего {len(blocks)}, принято {len(active)}, устарело {len(obsolete)}"
+    )
 
 
 if __name__ == "__main__":

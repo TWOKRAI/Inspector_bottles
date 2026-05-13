@@ -5,7 +5,6 @@
 """
 
 import signal
-import pytest
 from unittest.mock import MagicMock, patch
 
 from ..launcher.spawner import PROCESS_MANAGER_CLASS_PATH, ProcessSpawner
@@ -80,7 +79,9 @@ class TestProcessSpawner:
         """stop() устанавливает stop_event при живом процессе."""
         spawner = ProcessSpawner()
         mock_process = MagicMock()
-        mock_process.is_alive.return_value = True  # процесс жив — stop_event.set() будет вызван
+        mock_process.is_alive.return_value = (
+            True  # процесс жив — stop_event.set() будет вызван
+        )
         spawner._process = mock_process
 
         spawner.stop(timeout=0.1)
@@ -117,9 +118,15 @@ class TestProcessSpawner:
             processes_config={},
             orchestrator_class_path=custom_path,
         )
-        with patch.object(spawner, "_platform") as mock_platform, \
-             patch("multiprocess_framework.modules.process_manager_module.launcher.spawner.Process") as MockProcess, \
-             patch("multiprocess_framework.modules.process_manager_module.launcher.spawner.SharedResourcesManager") as MockSRM:
+        with (
+            patch.object(spawner, "_platform") as _mock_platform,
+            patch(
+                "multiprocess_framework.modules.process_manager_module.launcher.spawner.Process"
+            ) as MockProcess,
+            patch(
+                "multiprocess_framework.modules.process_manager_module.launcher.spawner.SharedResourcesManager"
+            ) as MockSRM,
+        ):
             MockSRM.return_value = MagicMock()
             mock_proc = MagicMock()
             MockProcess.return_value = mock_proc
