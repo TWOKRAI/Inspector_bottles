@@ -2,7 +2,8 @@
 Phase: 4
 Название: Разбивка ThemeEditorSection (869 LOC → 6 файлов)
 Статус: DONE
-Зависит от: Phase 3
+Зависит от: Phase 3 (✅)
+Коммит: cbcf157
 ---
 
 # Phase 4 — Appearance секция (разбивка монолита)

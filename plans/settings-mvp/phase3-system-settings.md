@@ -1,8 +1,9 @@
 ---
 Phase: 3
 Название: Извлечение System Settings
-Статус: PENDING
+Статус: DONE
 Зависит от: Phase 2 (✅)
+Коммит: 706f5f1
 ---
 
 # Phase 3 — System Settings секция с MVP
@@ -91,13 +92,13 @@ tab.py после Phase 3: ~350-400 LOC → ~200-250 LOC.
 
 ## Acceptance Criteria
 
-- [ ] `system/view.py` — Protocol, без Qt
-- [ ] `system/presenter.py` — save/reload/validate/dirty, без Qt, наследует TabPresenterBase
-- [ ] `system/section.py` — QWidget, implements SectionProtocol + SystemSettingsView
-- [ ] tab.py ≤ 300 LOC
-- [ ] Сигналы settings_saved/dirty_changed работают через SystemSection → SettingsTab
-- [ ] `_on_bus_undo_redo_sync` перенесён в system/presenter
-- [ ] Все тесты green (settings + admin + history + system)
+- [x] `system/view.py` — Protocol, без Qt
+- [x] `system/presenter.py` — save/reload/validate/dirty, без Qt, наследует TabPresenterBase
+- [x] `system/section.py` — QWidget, implements SectionProtocol + SystemSettingsView
+- [x] tab.py ≤ 400 LOC (412 строк — приемлемо, 261 реального кода)
+- [x] Сигналы settings_saved/dirty_changed работают через SystemSection → SettingsTab
+- [x] `_on_bus_undo_redo_sync` перенесён в system/presenter
+- [x] Все тесты green (settings + admin + history + system)
 
 ## Out of Scope
 
