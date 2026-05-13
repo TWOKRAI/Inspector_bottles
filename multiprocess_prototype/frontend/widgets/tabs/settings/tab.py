@@ -24,17 +24,13 @@ Action-колонка содержит QStackedWidget: каждая секция
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pydantic
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QHeaderView,
     QPushButton,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -264,9 +260,18 @@ class SettingsTab(QWidget):
         self.add_content_page("appearance", section)
 
     def add_history_page(self) -> None:
-        """Создать виджет «История» и зарегистрировать в content stack."""
-        container = self._build_history_widget()
-        self.add_content_page("history", container)
+        """Создать HistorySection и зарегистрировать в content stack."""
+        from .history import HistorySection
+        section = HistorySection(self._ctx)
+        # Кнопки секции регистрируются в action-колонке
+        self.register_action_page("history", section.action_buttons())
+        self.add_content_page("history", section)
+        # Подписать presenter секции на обновления ActionBus
+        bus = self._ctx.action_bus()
+        if bus is not None:
+            bus.add_change_callback(section.presenter.refresh)
+        # Зарегистрировать секцию в presenter'е для on_activated / on_deactivated
+        self._presenter.register_section(section)
 
     def create_admin_panel(self, key: str) -> None:
         """Создать admin-панель и уведомить presenter (ленивая инициализация).
@@ -410,7 +415,6 @@ class SettingsTab(QWidget):
 
         # === Подписка ActionBus ===
         if bus is not None:
-            bus.add_change_callback(self._refresh_history)
             bus.add_change_callback(self._on_bus_undo_redo_sync)
             bus.add_change_callback(self._presenter.on_bus_change)
 
@@ -447,59 +451,6 @@ class SettingsTab(QWidget):
         sa.setWidgetResizable(False)
         sa.setWidgetResizable(True)
         self._diff_layout._update_master_range()
-
-    # ------------------------------------------------------------------
-    # Builder виджета «История» (вызывается из add_history_page)
-    # ------------------------------------------------------------------
-
-    def _build_history_widget(self) -> QWidget:
-        """Виджет секции «История» — таблица действий ActionBus."""
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        _HISTORY_COLUMNS = ["Время", "Вкладка", "Параметр", "Значение"]
-        self._history_table = QTableWidget(0, len(_HISTORY_COLUMNS))
-        self._history_table.setHorizontalHeaderLabels(_HISTORY_COLUMNS)
-        self._history_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows,
-        )
-        self._history_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers,
-        )
-        self._history_table.verticalHeader().setVisible(False)
-
-        h = self._history_table.horizontalHeader()
-        if h:
-            h.setStretchLastSection(False)
-            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(0, 140)   # Время — пошире
-            h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(1, 150)   # Вкладка — пошире
-            h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(3, 120)   # Значение — поуже
-
-        layout.addWidget(self._history_table)
-
-        # Кнопки — в левую action-колонку (как у других секций)
-        self._btn_save_history = QPushButton("Сохранить в файл")
-        self._btn_save_history.setToolTip("Экспортировать историю в CSV-файл")
-        self._btn_save_history.setEnabled(False)
-        self._btn_save_history.clicked.connect(self._on_history_save)
-
-        self._btn_clear_history = QPushButton("Очистить историю")
-        self._btn_clear_history.setToolTip("Очистить всю историю действий")
-        self._btn_clear_history.setEnabled(False)
-        self._btn_clear_history.clicked.connect(self._on_history_clear)
-
-        self.register_action_page(
-            "history",
-            [self._btn_save_history, self._btn_clear_history],
-        )
-
-        return container
 
     # ------------------------------------------------------------------
     # Editors / Field sync (остаются здесь до Phase 3)
@@ -573,70 +524,8 @@ class SettingsTab(QWidget):
             editor.widget.setToolTip("")
 
     # ------------------------------------------------------------------
-    # History + Undo/Redo
+    # Undo/Redo field sync (остаётся здесь — работает с _register_view)
     # ------------------------------------------------------------------
-
-    def _refresh_history(self) -> None:
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        actions = bus.history(n=50)
-        self._history_table.setRowCount(len(actions))
-        for row, action in enumerate(actions):
-            ts = datetime.fromtimestamp(action.timestamp).strftime("%H:%M:%S")
-            self._history_table.setItem(row, 0, QTableWidgetItem(ts))
-            tab_name = action.register_name or action.action_type
-            self._history_table.setItem(row, 1, QTableWidgetItem(tab_name))
-            param = action.field_name or action.description
-            self._history_table.setItem(row, 2, QTableWidgetItem(param))
-            value = action.forward_patch.get("value", "")
-            if action.action_type == "recipe_apply":
-                value = action.forward_patch.get("recipe_name", "recipe")
-            self._history_table.setItem(row, 3, QTableWidgetItem(str(value)))
-        if actions:
-            self._history_table.scrollToBottom()
-        has_history = len(actions) > 0
-        self._btn_clear_history.setEnabled(bus.can_undo() or bus.can_redo())
-        self._btn_save_history.setEnabled(has_history)
-
-    def _on_history_clear(self) -> None:
-        bus = self._ctx.action_bus()
-        if bus is not None:
-            bus.clear()
-
-    def _on_history_save(self) -> None:
-        """Экспорт истории действий в CSV-файл."""
-        from PySide6.QtWidgets import QFileDialog
-
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        actions = bus.history(n=0)  # все записи
-        if not actions:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self._register_view.root_widget(),
-            "Сохранить историю",
-            "history.csv",
-            "CSV (*.csv);;Все файлы (*)",
-        )
-        if not path:
-            return
-        import csv
-
-        with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerow(["Время", "Вкладка", "Параметр", "Значение"])
-            for action in actions:
-                ts = datetime.fromtimestamp(action.timestamp).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-                tab = action.register_name or action.action_type
-                param = action.field_name or action.description
-                value = action.forward_patch.get("value", "")
-                if action.action_type == "recipe_apply":
-                    value = action.forward_patch.get("recipe_name", "recipe")
-                writer.writerow([ts, tab, param, str(value)])
 
     def _on_bus_undo_redo_sync(self) -> None:
         bus = self._ctx.action_bus()
