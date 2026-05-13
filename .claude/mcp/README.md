@@ -11,6 +11,10 @@
 | `qex-launcher.py` | Запускает `qex` с правильной моделью под платформу (4b Windows / 8b macOS) |
 | `bootstrap.py` | Автонастройка нового проекта — ставит зависимости, копирует template (кросс-платформа: macOS/Linux/Windows) |
 | `README.md` | Этот файл |
+| `qex/`                | Документация qex: quick-start, полный гайд, шаблоны (.ignore, hook, MCP-конфиг) |
+| `sentrux/`            | Документация sentrux: метрики, slash-команды + шаблон `rules.template.toml` |
+| `context7/`           | Документация Context7: установка, платформы, troubleshooting |
+| `PORTABLE.md`         | Пошаговый чеклист переноса MCP-инфраструктуры в новый проект |
 
 ## MCP-серверы
 
@@ -21,6 +25,17 @@
 | **Context7** | user-level (`~/.claude.json`) | Актуальная документация библиотек | работа с PySide6, Pydantic, PyTorch и др. быстро меняющимися либами |
 
 Подробнее о ролях qex vs sentrux — в `CLAUDE.md` (секции «MCP: qex» и «MCP: sentrux»).
+
+## Документация MCP-серверов
+
+| Документ | Что внутри |
+|----------|------------|
+| [qex/README.md](qex/README.md) | Quick-start qex (5 шагов) |
+| [qex/SETUP_GUIDE.md](qex/SETUP_GUIDE.md) | Полный гайд: архитектура, Windows + macOS, диагностика |
+| [sentrux/README.md](sentrux/README.md) | Метрики, slash-команды, сценарии использования |
+| [sentrux/rules.template.toml](sentrux/rules.template.toml) | Шаблон архитектурных правил для нового проекта |
+| [context7/README.md](context7/README.md) | Установка Context7, платформы, troubleshooting |
+| [PORTABLE.md](PORTABLE.md) | Чеклист переноса в новый проект |
 
 ## Установка в новый проект
 
@@ -62,6 +77,9 @@ npx -y ctx7 setup --claude
 2. **ollama** — проверяет наличие, подсказывает `ollama pull qwen3-embedding:{8b|4b}` под платформу
 3. **node/npx** — проверяет, нужен для Context7
 4. **`.mcp.json`** — копирует `mcp.template.json` в корень проекта (с защитой от перезаписи существующего)
+5. **`.sentrux/rules.toml`** — копирует шаблон архитектурных правил (с защитой от перезаписи)
+
+Подробнее о Context7 — в [context7/README.md](context7/README.md).
 
 ## Как qex знает корень проекта
 
@@ -73,7 +91,7 @@ _script_dir = os.path.dirname(os.path.realpath(__file__))    # .claude/mcp
 workspace = os.path.dirname(os.path.dirname(_script_dir))    # корень
 ```
 
-`realpath` нужен потому что `scripts/qex-launcher.py` — симлинк на `.claude/mcp/qex-launcher.py` (для обратной совместимости с историческими ссылками в документации). Без `realpath` workspace бы вычислялся неправильно при запуске через симлинк.
+`realpath` нужен для корректного вычисления корня проекта независимо от способа запуска скрипта.
 
 ## Платформенная разница в qex
 

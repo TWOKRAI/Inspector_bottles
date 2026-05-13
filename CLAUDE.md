@@ -31,8 +31,8 @@
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |
 | Нарратив «конструктор» | `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` |
-| Настройка qex | `docs/claude/qex/README.md` (quick-start), `docs/claude/qex/SETUP_GUIDE.md` (полный) |
-| Гайд по sentrux | [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md) (метрики, slash-команды, сценарии) |
+| Настройка qex | `.claude/mcp/qex/README.md` (quick-start), `.claude/mcp/qex/SETUP_GUIDE.md` (полный) |
+| Гайд по sentrux | [`.claude/mcp/sentrux/README.md`](.claude/mcp/sentrux/README.md) (метрики, slash-команды, сценарии) |
 | Path-scoped правила | [`.rules/`](.rules/) — загружаются при работе с соответствующими файлами |
 
 ## История версий и архив
@@ -147,4 +147,4 @@ Co-Authored-By: ...
 | **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache` |
 | **team/** | `/team`, `/hire`, `/handoff`, `/docs` |
 
-Гайд по sentrux: [`docs/claude/sentrux/README.md`](docs/claude/sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
+Гайд по sentrux: [`.claude/mcp/sentrux/README.md`](.claude/mcp/sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
