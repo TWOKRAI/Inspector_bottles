@@ -187,13 +187,13 @@ Presenter владеет `_current_vars` и `_last_saved_vars`. `vars_editor` э
 - [x] **1.5** Green-bar: все 22 теста `test_settings_tab.py` проходят
 - **Коммит**: `df3c0e7` + `e999b60` (fix по ревью)
 
-### Phase 2: Извлечение History (минимальная связность)
-- [ ] **2.1** Создать `history/view.py` — HistoryView Protocol
-- [ ] **2.2** Создать `history/presenter.py` — bus queries, CSV export, undo/redo state
-- [ ] **2.3** Создать `history/section.py` — таблица + кнопки, implements SectionProtocol
-- [ ] **2.4** Зарегистрировать HistorySection через SettingsPresenter
-- [ ] **2.5** Тесты: `test_history_presenter.py` + green-bar существующих
-- **Коммит**: `refactor(prototype): History секция с MVP`
+### Phase 2: Извлечение History (минимальная связность) ✅
+- [x] **2.1** Создать `history/view.py` — HistoryView Protocol
+- [x] **2.2** Создать `history/presenter.py` — bus queries, CSV export
+- [x] **2.3** Создать `history/section.py` — таблица + кнопки, implements SectionProtocol
+- [x] **2.4** Зарегистрировать HistorySection через SettingsPresenter
+- [x] **2.5** Тесты: `test_history_presenter.py` (11 тестов) + green-bar (100 passed)
+- **Коммит**: `484f451`
 
 ### Phase 3: Извлечение System Settings
 - [ ] **3.1** Создать `system/view.py` — SystemSettingsView Protocol
