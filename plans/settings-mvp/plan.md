@@ -169,23 +169,23 @@ Presenter владеет `_current_vars` и `_last_saved_vars`. `vars_editor` э
 
 ## Фазы реализации
 
-### Phase 0: Framework-контракты + подготовка
-- [ ] **0.1** Создать `frontend_module/widgets/tabs/section_protocol.py` — SectionProtocol
-- [ ] **0.2** Перенести `_CurrentPageStack` → `frontend_module/widgets/tabs/current_page_stack.py`
-- [ ] **0.3** Создать `administration/_base_panel.py` — BaseAdminPanel (в prototype)
-- [ ] **0.4** Прогнать все тесты — green baseline
-- **Коммит**: `refactor(framework): SectionProtocol + CurrentPageStack в frontend_module`
+### Phase 0: Framework-контракты + подготовка ✅
+- [x] **0.1** Создать `frontend_module/widgets/tabs/section_protocol.py` — SectionProtocol
+- [x] **0.2** Перенести `_CurrentPageStack` → `frontend_module/widgets/tabs/current_page_stack.py`
+- [x] **0.3** Создать `administration/_base_panel.py` — BaseAdminPanel (в prototype)
+- [x] **0.4** Прогнать все тесты — green baseline (272 passed)
+- **Коммит**: `b9282c9` + `4d7ce1b` (fix по ревью)
 
-### Phase 1: Top-level SettingsPresenter ПЕРВЫМ (по рекомендации ревьюера)
+### Phase 1: Top-level SettingsPresenter ПЕРВЫМ ✅
 
 > Ревьюер [MAJOR]: «SettingsPresenter нужно делать первым — иначе каждая следующая фаза меняет tab.py как промежуточный шаг, а потом Phase 4 снова перестраивает»
 
-- [ ] **1.1** Создать `settings/view.py` — SettingsView Protocol
-- [ ] **1.2** Создать `settings/presenter.py` — навигация, реестр SectionProtocol, undo/redo координация
-- [ ] **1.3** Извлечь tree helpers → `settings/_nav_tree.py` (re-export CurrentPageStack из framework)
-- [ ] **1.4** Рефакторинг `tab.py` → тонкая оболочка, делегация presenter'у
-- [ ] **1.5** Green-bar: все 10 тестов `test_settings_tab.py` проходят
-- **Коммит**: `refactor(prototype): SettingsPresenter + View Protocol`
+- [x] **1.1** Создать `settings/view.py` — SettingsView Protocol
+- [x] **1.2** Создать `settings/presenter.py` — навигация, реестр SectionProtocol, undo/redo координация
+- [x] **1.3** Извлечь tree helpers → `settings/_nav_tree.py` (re-export CurrentPageStack из framework)
+- [x] **1.4** Рефакторинг `tab.py` → тонкая оболочка, делегация presenter'у
+- [x] **1.5** Green-bar: все 22 теста `test_settings_tab.py` проходят
+- **Коммит**: `df3c0e7`
 
 ### Phase 2: Извлечение History (минимальная связность)
 - [ ] **2.1** Создать `history/view.py` — HistoryView Protocol
