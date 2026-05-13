@@ -185,7 +185,7 @@ Presenter владеет `_current_vars` и `_last_saved_vars`. `vars_editor` э
 - [x] **1.3** Извлечь tree helpers → `settings/_nav_tree.py` (re-export CurrentPageStack из framework)
 - [x] **1.4** Рефакторинг `tab.py` → тонкая оболочка, делегация presenter'у
 - [x] **1.5** Green-bar: все 22 теста `test_settings_tab.py` проходят
-- **Коммит**: `df3c0e7`
+- **Коммит**: `df3c0e7` + `e999b60` (fix по ревью)
 
 ### Phase 2: Извлечение History (минимальная связность)
 - [ ] **2.1** Создать `history/view.py` — HistoryView Protocol
