@@ -15,11 +15,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -32,16 +28,19 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.administration._forma
     format_duration as _format_duration,
 )
 
+from ._base_panel import BaseAdminPanel
+
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.auth_context import AuthContext
 
 
-class SessionsPanel(QWidget):
+class SessionsPanel(BaseAdminPanel):
     """Read-only панель просмотра сессий.
 
     Колонки: Пользователь | Вход | Выход | Длительность | Хост
     """
 
+    _HEADER_TITLE = "Сессии"
     _TABLE_COLUMNS = [
         ("username",  "Пользователь",  140),
         ("login_at",  "Вход",          140),
@@ -70,33 +69,11 @@ class SessionsPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        # Заголовок
-        header_layout = QHBoxLayout()
-        header_label = QLabel("Сессии")
-        header_label.setObjectName("PanelHeader")
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
-        root.addLayout(header_layout)
+        # Стандартный заголовок из BaseAdminPanel
+        self._create_header(root)
 
-        # Таблица
-        self._table = QTableWidget(0, len(self._TABLE_COLUMNS))
-        self._table.setHorizontalHeaderLabels(
-            [col[1] for col in self._TABLE_COLUMNS]
-        )
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setAlternatingRowColors(True)
-
-        h = self._table.horizontalHeader()
-        for i, (_, _, width) in enumerate(self._TABLE_COLUMNS):
-            if i == len(self._TABLE_COLUMNS) - 1:
-                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                self._table.setColumnWidth(i, width)
-                h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
-
+        # Таблица из BaseAdminPanel
+        self._table = self._create_table()
         root.addWidget(self._table, stretch=1)
 
         # Кнопка создаётся здесь, но размещается в action panel секции
