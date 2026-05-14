@@ -1,0 +1,88 @@
+%% Inspector_bottles — C4 Container Level
+%% Основные процессы, IPC и GUI
+
+graph TB
+    subgraph Entry["Точка входа"]
+        RUN["run.py<br/>(composition root)"]
+    end
+
+    subgraph Orchestration["Оркестрация"]
+        SL["SystemLauncher<br/>запуск системы"]
+        PMP["ProcessManagerProcess<br/>менеджер процессов"]
+    end
+
+    subgraph Workers["Рабочие процессы (ProcessModule)"]
+        direction LR
+        W1["Worker 1<br/>(камера/захват)"]
+        W2["Worker 2<br/>(обработка/детекция)"]
+        W3["Worker N<br/>(кастомный)"]
+    end
+
+    subgraph IPC["Межпроцессное взаимодействие"]
+        MSG["Message / MessageAdapter<br/>сериализация dict"]
+        RM["RouterManager<br/>маршрутизация"]
+        SHM["SharedResources<br/>разделяемая память"]
+    end
+
+    subgraph Framework["Фреймворк (модули)"]
+        direction LR
+        CMD["CommandManager<br/>команды"]
+        CFG["ConfigStore<br/>конфигурация"]
+        SS["StateStore<br/>реактивное состояние"]
+        CHAIN["ChainModule<br/>DAG/pipeline"]
+        DS["DataSchema<br/>Pydantic-схемы"]
+        LOG["LoggerManager<br/>логирование"]
+    end
+
+    subgraph GUI["GUI (PySide6)"]
+        FE["frontend_module<br/>виджеты + tabs"]
+        QT["PySide6<br/>Qt event loop"]
+    end
+
+    subgraph External["Внешние сервисы"]
+        direction LR
+        CAM["GigE Camera<br/>(Harvesters)"]
+        DB["SQLite/PostgreSQL"]
+        ML["YOLO/ONNX<br/>(Phase 1.5)"]
+    end
+
+    RUN --> SL
+    SL --> PMP
+    PMP --> W1
+    PMP --> W2
+    PMP --> W3
+
+    W1 <-->|Message dict| RM
+    W2 <-->|Message dict| RM
+    W3 <-->|Message dict| RM
+    RM <--> MSG
+    RM <--> SHM
+
+    W1 --> CMD
+    W1 --> CFG
+    W1 --> SS
+    W2 --> CHAIN
+    W2 --> DS
+
+    FE <-->|IPC| RM
+    FE --> QT
+
+    W1 -.->|GigE Vision| CAM
+    W2 -.->|SQL| DB
+    W2 -.->|inference| ML
+
+    classDef entry fill:#4CAF50,stroke:#333,color:#fff
+    classDef orch fill:#2196F3,stroke:#333,color:#fff
+    classDef worker fill:#FF9800,stroke:#333,color:#fff
+    classDef ipc fill:#9C27B0,stroke:#333,color:#fff
+    classDef fw fill:#607D8B,stroke:#333,color:#fff
+    classDef gui fill:#E91E63,stroke:#333,color:#fff
+    classDef ext fill:#795548,stroke:#333,color:#fff
+
+    class RUN entry
+    class SL,PMP orch
+    class W1,W2,W3 worker
+    class MSG,RM,SHM ipc
+    class CMD,CFG,SS,CHAIN,DS,LOG fw
+    class FE,QT gui
+    class CAM,DB,ML ext
