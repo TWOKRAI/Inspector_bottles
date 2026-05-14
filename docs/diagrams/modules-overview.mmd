@@ -1,0 +1,96 @@
+%% multiprocess_framework — Связи между модулями
+%% Сгенерировано из анализа реальных импортов (from multiprocess_framework.modules.*)
+%% Дата: 2026-05-14
+%%
+%% Чтение: стрелка A → B означает "A импортирует B" (A зависит от B).
+%% Группировка по слоям отражает иерархию зависимостей.
+
+graph TB
+    subgraph L0["Слой 0 — Фундамент (никто не зависит ниже)"]
+        DS["data_schema_module<br/>SchemaBase, Pydantic v2"]
+    end
+
+    subgraph L1["Слой 1 — Базовая инфраструктура"]
+        BM["base_manager<br/>базовый класс менеджера"]
+        MSG["message_module<br/>Message, MessageAdapter"]
+        ERR["error_module<br/>ErrorManager"]
+    end
+
+    subgraph L2["Слой 2 — Хранилища и роутинг"]
+        SHM["shared_resources_module<br/>разделяемая память"]
+        CHR["channel_routing_module<br/>каналы Router"]
+        RM["router_module<br/>RouterManager"]
+        REG["registers_module<br/>регистры приложения"]
+        SS["state_store_module<br/>реактивный StateStore"]
+        CFG["config_module<br/>ConfigStore"]
+    end
+
+    subgraph L3["Слой 3 — Команды и выполнение"]
+        CMD["command_module<br/>CommandManager"]
+        ACT["actions_module<br/>action bus"]
+        DSP["dispatch_module<br/>диспетчер"]
+        WRK["worker_module<br/>WorkerManager"]
+        LOG["logger_module<br/>LoggerManager"]
+        STAT["statistics_module<br/>StatsManager"]
+        CHAIN["chain_module<br/>DAG/Chain engine"]
+        CONS["console_module<br/>консольный вывод"]
+        SQL["sql_module<br/>SQL-адаптер"]
+    end
+
+    subgraph L4["Слой 4 — Процессы"]
+        PM["process_module<br/>ProcessModule"]
+        PMP["process_manager_module<br/>ProcessManagerProcess"]
+    end
+
+    subgraph L5["Слой 5 — GUI"]
+        FE["frontend_module<br/>PySide6 виджеты"]
+    end
+
+    %% Реальные импорты (из grep по from multiprocess_framework.modules.*)
+    BM --> DS
+    MSG -.-> DS
+    ERR --> DS
+
+    SHM --> BM
+    SHM --> DS
+    CHR --> DS
+    RM --> DS
+    REG -.-> DS
+    SS -.-> DS
+    CFG --> BM
+    CFG --> DS
+    CFG --> SHM
+
+    CMD --> DS
+    ACT --> DS
+    DSP --> DS
+    WRK --> DS
+
+    PM --> BM
+    PM --> MSG
+    PM --> REG
+    PM --> RM
+
+    PMP --> DS
+    PMP --> ERR
+    PMP --> PM
+    PMP --> SHM
+
+    FE --> ACT
+    FE --> BM
+    FE --> REG
+
+    %% Стиль
+    classDef foundation fill:#FFD54F,stroke:#333,color:#000
+    classDef infra fill:#4FC3F7,stroke:#333,color:#000
+    classDef storage fill:#81C784,stroke:#333,color:#000
+    classDef execution fill:#FF8A65,stroke:#333,color:#000
+    classDef process fill:#BA68C8,stroke:#333,color:#fff
+    classDef gui fill:#F06292,stroke:#333,color:#fff
+
+    class DS foundation
+    class BM,MSG,ERR infra
+    class SHM,CHR,RM,REG,SS,CFG storage
+    class CMD,ACT,DSP,WRK,LOG,STAT,CHAIN,CONS,SQL execution
+    class PM,PMP process
+    class FE gui

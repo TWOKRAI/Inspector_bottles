@@ -82,5 +82,7 @@ milvus-docker/volumes/
 
 # Сгенерированные диаграммы (регенерируются: make diagrams)
 docs/diagrams/classes/*.puml
+docs/diagrams/classes/per-module/*.puml
 docs/diagrams/deps/*.svg
+docs/diagrams/deps/per-module/*.svg
 # Ручные диаграммы (.mmd, .drawio) НЕ игнорируются — они в git

@@ -62,19 +62,31 @@ gate: check test ## Полный gate: lint + types + security + tests
 # ── Диаграммы ──
 
 .PHONY: diagrams
-diagrams: diagrams-classes diagrams-deps ## Регенерация всех диаграмм
+diagrams: diagrams-classes diagrams-per-module diagrams-deps ## Регенерация всех диаграмм
 
 .PHONY: diagrams-classes
-diagrams-classes: ## UML классов через pyreverse
+diagrams-classes: ## UML классов всего фреймворка (один большой файл)
 	@mkdir -p $(DIAGRAMS_DIR)/classes
 	pyreverse -o puml -p Framework $(FRAMEWORK) -d $(DIAGRAMS_DIR)/classes/ 2>/dev/null || \
-		echo "[SKIP] pyreverse не установлен — pip install pylint"
+		echo "[SKIP] pyreverse не установлен — uv sync --group diagrams"
+
+.PHONY: diagrams-per-module
+diagrams-per-module: ## UML по каждому модулю отдельно (читаемые файлы)
+	@mkdir -p $(DIAGRAMS_DIR)/classes/per-module
+	@for mod in $(FRAMEWORK)/modules/*_module $(FRAMEWORK)/modules/base_manager; do \
+		if [ -d "$$mod" ]; then \
+			name=$$(basename $$mod); \
+			pyreverse -o puml -p "$$name" "$$mod" -d $(DIAGRAMS_DIR)/classes/per-module/ 2>/dev/null && \
+			echo "[OK] $$name"; \
+		fi; \
+	done
 
 .PHONY: diagrams-deps
-diagrams-deps: ## Граф зависимостей через pydeps
+diagrams-deps: ## Граф зависимостей через pydeps (требует Graphviz в PATH)
 	@mkdir -p $(DIAGRAMS_DIR)/deps
-	pydeps $(FRAMEWORK) -o $(DIAGRAMS_DIR)/deps/framework.svg --cluster --max-bacon 2 --no-show 2>/dev/null || \
-		echo "[SKIP] pydeps не установлен — pip install pydeps"
+	pydeps $(FRAMEWORK) -o $(DIAGRAMS_DIR)/deps/framework-overview.svg --cluster --max-bacon 2 --rankdir LR --no-show 2>/dev/null || \
+		echo "[SKIP] pydeps/Graphviz не установлены — uv sync --group diagrams && winget install Graphviz"
+	pydeps $(FRAMEWORK) -o $(DIAGRAMS_DIR)/deps/framework-modules.svg --cluster --max-bacon 2 --max-module-depth 3 --rankdir LR --no-show 2>/dev/null || true
 
 # ── Валидация проекта ──
 
