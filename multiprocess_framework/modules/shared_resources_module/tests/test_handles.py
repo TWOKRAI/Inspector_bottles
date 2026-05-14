@@ -225,7 +225,9 @@ class TestHandlePickleRoundtrip:
         result_q = mp.Queue()
         p = mp.Process(target=_handle_ipc_worker, args=(srm, result_q))
         p.start()
-        p.join(timeout=5)
+        # Под нагрузкой полного прогона старт дочернего процесса на Windows
+        # стабильно укладывается в ~5-10с, изолированно — <1с. Берём 15с с запасом.
+        p.join(timeout=15)
         assert p.exitcode == 0
 
         msg = result_q.get(timeout=1.0)
