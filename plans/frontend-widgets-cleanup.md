@@ -10,6 +10,9 @@
 
 В `multiprocess_prototype/frontend/widgets/` — 7 мёртвых папок (пустые, 0 LOC), создающих путаницу с рабочими (`widgets/pipeline/` vs `widgets/tabs/pipeline/`). Framework components (`checkbox/`, `slider/`, `spinbox/` и т.д.) — зрелые, с кастомной клавиатурой и фичами, но прототип их не использует — вместо этого создаёт сырые Qt-виджеты. Нужно навести порядок снизу вверх.
 
+> **Детальный план Phase 1 + Phase 2:** [`plans/frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md)
+> Включает целевую архитектуру (мост `ActionBusRegistersManager`, FormBuildingContext, dual-flow GUI↔worker через FieldMeta.routing + TopologyBridge + state_store), пилотную стратегию (Phase 2.0 — Checkbox/robot_control), карту интеграций, ревью-замечания.
+
 ## Стратегия: 4 этапа
 
 ```
