@@ -26,6 +26,7 @@
 | Прикладные сервисы (sql, hikvision, …) | `Services/` ← Phase 4 carve-out |
 | Vocabulary плагинов (19 шт., reuse между приложениями) | `Plugins/` ← Phase 5 carve-out (см. ADR-120) |
 | Документация фреймворка | `multiprocess_framework/docs/` (`MODULES_OVERVIEW.md`, `MODULE_CONTRACTS.md`, `DIAGRAMS.md`) |
+| Диаграммы архитектуры | `docs/diagrams/` (Mermaid, PlantUML, SVG — diagrams-as-code) |
 | Конструктор-blueprint фреймворка (20 модулей) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
 | Точка входа v3 | `multiprocess_prototype/run.py` |
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |
@@ -136,15 +137,38 @@ Co-Authored-By: ...
 
 ## Slash-команды
 
-35 команд в 6 категориях. Полный список с описаниями: [`.claude/README.md`](.claude/README.md#команды-commands).
+37 команд в 6 категориях. Полный список с описаниями: [`.claude/README.md`](.claude/README.md#команды-commands).
 
 | Категория | Ключевые команды |
 |-----------|------------------|
 | **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline` |
-| **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio` |
+| **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review` |
 | **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory` |
 | **spec/** | `/spec`, `/spec-sync` |
-| **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache` |
+| **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams` |
 | **team/** | `/team`, `/hire`, `/handoff`, `/docs` |
 
 Гайд по sentrux: [`.claude/mcp/sentrux/README.md`](.claude/mcp/sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
+
+## Makefile
+
+Единая точка входа для всех операций. Основные targets:
+
+| Target | Что делает |
+|--------|-----------|
+| `make check` | ruff + mypy + bandit (быстрая проверка) |
+| `make test` | pytest с coverage |
+| `make gate` | check + test (полный gate) |
+| `make diagrams` | pyreverse + pydeps → `docs/diagrams/` |
+| `make clean` | удалить Python-кэши |
+| `make help` | справка по всем targets |
+
+## Diagrams-as-Code
+
+Визуализация архитектуры хранится в [`docs/diagrams/`](docs/diagrams/):
+- `architecture.mmd` — C4 Container-level (Mermaid, ручная)
+- `classes/` — UML классов (авто: `pyreverse`)
+- `deps/` — граф зависимостей (авто: `pydeps`)
+- `flows/` — sequence-диаграммы (ручные)
+
+Регенерация: `make diagrams` или `/diagrams`. Установка: `uv sync --group diagrams`.

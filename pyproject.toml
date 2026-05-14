@@ -46,9 +46,17 @@ dependencies = [
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.24",
-    "pytest-qt>=4.4",   # qt_api = "pyside6", фикстура qtbot
+    "pytest-qt>=4.4", # qt_api = "pyside6", фикстура qtbot
+    "pytest-cov>=6.0", # coverage-отчёты
     "ipykernel>=6.29",
-    "aiosqlite>=0.20",  # для тестов async SQL-адаптера
+    "aiosqlite>=0.20", # для тестов async SQL-адаптера
+    "mypy>=1.15", # gradual type checking
+    "bandit>=1.9", # security scanning (OWASP basics)
+    "pre-commit>=4.6.0",
+]
+diagrams = [
+    "pylint>=3.3",      # pyreverse для UML-диаграмм классов
+    "pydeps>=3.0",      # граф зависимостей модулей
 ]
 
 [project.optional-dependencies]
@@ -82,6 +90,36 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=multiprocess_prototype_backup"
 qt_api = "pyside6"
+
+# ── mypy ──
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true          # gradual: включаем по мере добавления стабов
+exclude = [
+    "multiprocess_prototype_backup",
+    "tests",
+]
+
+# ── bandit ──
+[tool.bandit]
+exclude_dirs = ["tests", "multiprocess_prototype_backup"]
+skips = ["B101"]  # assert допустим в не-production коде
+
+# ── coverage ──
+[tool.coverage.run]
+source = ["multiprocess_framework"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "multiprocess_prototype_backup/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+# fail_under = 60  # раскомментировать когда покрытие достигнет 60%
 
 [tool.ruff]
 target-version = "py312"

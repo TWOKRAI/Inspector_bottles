@@ -1,9 +1,9 @@
-# pre-commit hooks — Inspector_bottles
-# Установка: pre-commit install
-# Ручной прогон: pre-commit run --all-files
-# Обновление версий: pre-commit autoupdate
-
-exclude: ^multiprocess_prototype_backup/
+# pre-commit-config.yaml — шаблон quality gates
+# Адаптировать: entry в mypy hook (заменить на свой главный пакет)
+#
+# Установка:
+#   uv run pre-commit install
+#   uv run pre-commit install --hook-type pre-push
 
 repos:
   # ── Общие проверки ──
@@ -20,7 +20,7 @@ repos:
         args: [--maxkb=500]
       - id: debug-statements
 
-  # ── Ruff (линтер + форматтер) ──
+  # ── Ruff (lint + format) ──
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.12
     hooks:
@@ -28,7 +28,7 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  # ── mypy (type checking, gradual) ──
+  # ── mypy (gradual, на pre-push) ──
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.15.0
     hooks:
@@ -36,11 +36,10 @@ repos:
         args: [--ignore-missing-imports, --no-error-summary]
         additional_dependencies: [pydantic>=2.13]
         pass_filenames: false
-        # gradual: запускаем только на framework, не блокируем коммит
-        entry: mypy multiprocess_framework
+        entry: mypy PROJECT_NAME                # ← замени на свой пакет
         language: python
         types: [python]
-        stages: [pre-push]  # на push, не на каждый коммит (пока gradual)
+        stages: [pre-push]
 
   # ── bandit (security scanning) ──
   - repo: https://github.com/PyCQA/bandit
@@ -49,4 +48,4 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^(tests/|multiprocess_prototype_backup/)
+        exclude: ^tests/
