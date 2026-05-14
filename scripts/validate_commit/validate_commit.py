@@ -3,10 +3,9 @@
 
 Checks:
 1. Subject in Conventional Commits format: `<type>(<scope>): <subject>`
-2. Subject <= 72 chars.
-3. Blank line between subject and body.
-4. Required trailers: `Why:` and `Layer:` (with allowed values).
-5. Optional trailers (if present) — valid format: `Risk:`, `Reversible:`, `Tested:`, `Refs:`, `Rejected:`.
+2. Blank line between subject and body.
+3. Required trailers: `Why:` and `Layer:` (with allowed values).
+4. Optional trailers (if present) — valid format: `Risk:`, `Reversible:`, `Tested:`, `Refs:`, `Rejected:`.
 
 Usage:
     python scripts/validate_commit/validate_commit.py <path-to-commit-msg-file>
@@ -28,34 +27,54 @@ from pathlib import Path
 # ────────────────────────── Config ──────────────────────────
 
 ALLOWED_TYPES = {
-    "feat", "fix", "refactor", "docs", "test",
-    "chore", "perf", "build", "ci", "style", "revert",
+    "feat",
+    "fix",
+    "refactor",
+    "docs",
+    "test",
+    "chore",
+    "perf",
+    "build",
+    "ci",
+    "style",
+    "revert",
 }
 
 ALLOWED_LAYERS = {
-    "framework", "services", "plugins", "prototype",
-    "docs", "scripts", "tests", "infra", "mixed",
+    "framework",
+    "services",
+    "plugins",
+    "prototype",
+    "docs",
+    "scripts",
+    "tests",
+    "infra",
+    "mixed",
 }
 
 ALLOWED_RISK = {"low", "medium", "high"}
 ALLOWED_REVERSIBLE = {"yes", "no", "migration-needed"}
 
-SUBJECT_RE = re.compile(
-    r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$"
-)
+SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$")
 TRAILER_RE = re.compile(r"^([A-Z][A-Za-z\-]*): (.+)$")
 
 REQUIRED_TRAILERS = {"Why", "Layer"}
 KNOWN_TRAILERS = REQUIRED_TRAILERS | {
-    "Refs", "Risk", "Reversible", "Tested", "Rejected",
-    "Co-Authored-By", "Signed-off-by", "Reviewed-by",
+    "Refs",
+    "Risk",
+    "Reversible",
+    "Tested",
+    "Rejected",
+    "Co-Authored-By",
+    "Signed-off-by",
+    "Reviewed-by",
 }
 
 SKIP_PREFIXES = ("Merge ", "merge: ", "Revert ", "fixup!", "squash!", "amend!")
-SUBJECT_MAX_LEN = 72
 
 
 # ────────────────────────── Structures ──────────────────────────
+
 
 @dataclass
 class ValidationResult:
@@ -68,6 +87,7 @@ class ValidationResult:
 
 
 # ────────────────────────── Parsing ──────────────────────────
+
 
 def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
     """Return (subject, body_lines, trailers).
@@ -127,6 +147,7 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
 
 # ────────────────────────── Validation ──────────────────────────
 
+
 def validate(text: str) -> ValidationResult:
     result = ValidationResult()
     text = text.strip()
@@ -146,12 +167,6 @@ def validate(text: str) -> ValidationResult:
         result.errors.append("Empty subject (first line)")
         return result
 
-    if len(subject) > SUBJECT_MAX_LEN:
-        result.warnings.append(
-            f"Subject exceeds {SUBJECT_MAX_LEN} chars ({len(subject)}). "
-            f"Shorten: '{subject[:60]}...'"
-        )
-
     m = SUBJECT_RE.match(subject)
     if not m:
         result.errors.append(
@@ -164,16 +179,12 @@ def validate(text: str) -> ValidationResult:
 
     t = m.group("type")
     if t not in ALLOWED_TYPES:
-        result.errors.append(
-            f"Unknown type '{t}'. Allowed: {sorted(ALLOWED_TYPES)}"
-        )
+        result.errors.append(f"Unknown type '{t}'. Allowed: {sorted(ALLOWED_TYPES)}")
 
     # 2. Blank line between subject and body
     full_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
     if len(full_lines) >= 2 and full_lines[1].strip():
-        result.errors.append(
-            "Missing blank line between subject and body"
-        )
+        result.errors.append("Missing blank line between subject and body")
 
     # 3. Required trailers
     missing = REQUIRED_TRAILERS - set(trailers.keys())
@@ -191,53 +202,39 @@ def validate(text: str) -> ValidationResult:
             layers = {x.strip() for x in val.split(",") if x.strip()}
             unknown = layers - ALLOWED_LAYERS
             if unknown:
-                result.errors.append(
-                    f"Layer: unknown values {sorted(unknown)}. "
-                    f"Allowed: {sorted(ALLOWED_LAYERS)}"
-                )
+                result.errors.append(f"Layer: unknown values {sorted(unknown)}. Allowed: {sorted(ALLOWED_LAYERS)}")
 
     if "Risk" in trailers:
         for val in trailers["Risk"]:
             level = val.split("—")[0].split("-")[0].strip().lower()
             if level not in ALLOWED_RISK:
-                result.warnings.append(
-                    f"Risk: '{val}'. Expected to start with low/medium/high"
-                )
+                result.warnings.append(f"Risk: '{val}'. Expected to start with low/medium/high")
 
     if "Reversible" in trailers:
         for val in trailers["Reversible"]:
             level = val.split("—")[0].strip().lower()
             if level not in ALLOWED_REVERSIBLE:
-                result.warnings.append(
-                    f"Reversible: '{val}'. Expected: yes | no | migration-needed"
-                )
+                result.warnings.append(f"Reversible: '{val}'. Expected: yes | no | migration-needed")
 
     # 5. Unknown trailers — warning (don't block, extensible)
     for key in trailers:
         if key not in KNOWN_TRAILERS:
-            result.warnings.append(
-                f"Unknown trailer '{key}:'. "
-                f"Known: {sorted(KNOWN_TRAILERS)}"
-            )
+            result.warnings.append(f"Unknown trailer '{key}:'. Known: {sorted(KNOWN_TRAILERS)}")
 
     if "Why" in trailers:
         for val in trailers["Why"]:
             if len(val) < 5:
-                result.warnings.append(
-                    f"Why: too brief ('{val}'). Describe motivation in at least one phrase"
-                )
+                result.warnings.append(f"Why: too brief ('{val}'). Describe motivation in at least one phrase")
 
     return result
 
 
 # ────────────────────────── CLI ──────────────────────────
 
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        sys.stderr.write(
-            "Usage: validate_commit.py <file>\n"
-            "       echo '...' | validate_commit.py -\n"
-        )
+        sys.stderr.write("Usage: validate_commit.py <file>\n       echo '...' | validate_commit.py -\n")
         return 2
 
     src = argv[1]

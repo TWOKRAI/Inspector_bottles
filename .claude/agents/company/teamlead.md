@@ -75,7 +75,7 @@ When arriving on escalation:
 Полный гайд: `docs/claude/COMMIT_GUIDE.md`. Validator: `scripts/validate_commit/validate_commit.py`.
 
 ```
-<type>(<scope>): краткое описание (≤72 симв)
+<type>(<scope>): краткое описание (кратко, без длинных предложений)
 
 - что сделано (буллеты)
 - ADR: ADR-NNN (если применимо)

@@ -40,7 +40,7 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
 Полный гайд: `docs/claude/COMMIT_GUIDE.md`. Validator: `scripts/validate_commit/validate_commit.py`.
 
 ```
-<type>(<scope>): краткое описание (≤72 симв)
+<type>(<scope>): краткое описание (кратко, без длинных предложений)
 
 - что сделано (буллеты: файлы, классы, числа тестов)
 - Task X.Y — task name

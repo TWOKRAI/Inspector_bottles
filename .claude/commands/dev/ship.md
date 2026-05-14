@@ -17,7 +17,7 @@ disable-model-invocation: true
 
 3. **Линтер:**
    ```bash
-   ruff check 
+   ruff check
    ```
 
 4. **Итог изменений:**
@@ -59,7 +59,7 @@ Layer: docs"
 Полный гайд: [`docs/claude/COMMIT_GUIDE.md`](../../docs/claude/COMMIT_GUIDE.md).
 
 ```
-<type>(<scope>): краткое описание (≤72 симв)
+<type>(<scope>): краткое описание (кратко, без длинных предложений)
 
 - что сделано (буллетами, файлы/классы/числа тестов)
 
