@@ -68,6 +68,7 @@ class WorkerAdapter(BaseAdapter):
     ) -> bool:
         """Создать системный воркер (SYSTEM priority + WorkerType.SYSTEM)."""
         from ..types import ThreadPriority
+
         config = ThreadConfig(
             priority=ThreadPriority.SYSTEM,
             worker_type=WorkerType.SYSTEM,
@@ -143,6 +144,6 @@ class WorkerAdapter(BaseAdapter):
         if self.manager and hasattr(self.manager, "get_stats"):
             try:
                 stats["manager"] = self.manager.get_stats()
-            except Exception:
-                pass
+            except Exception as e:
+                self._log("warning", f"manager.get_stats failed: {e}")
         return stats
