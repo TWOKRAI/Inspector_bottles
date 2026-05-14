@@ -5,15 +5,17 @@ LabelConfig — настройки отображения подписи.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
+from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_framework.modules.frontend_module.components.base.config import BaseControlConfig
 
 
-@dataclass
 class LabelConfig(BaseControlConfig):
     """Настройки подписи (позиция, видимость). Текст подставляется в setup()."""
 
-    position: Literal["left", "right", "top", "bottom"] = "left"
-    visible: bool = True
+    position: Annotated[
+        Literal["left", "right", "top", "bottom"],
+        FieldMeta("Позиция метки"),
+    ] = "left"
+    visible: Annotated[bool, FieldMeta("Видимость")] = True

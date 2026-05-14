@@ -16,7 +16,7 @@ from multiprocess_framework.modules.frontend_module.components.base.interfaces i
 from multiprocess_framework.modules.frontend_module.schemas.register_binding import ResolvedMeta
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.components.base.config import LabelOverride
+    from multiprocess_framework.modules.frontend_module.components.base.config import BaseControlConfig
 
 
 class SchemaTrait:
@@ -26,7 +26,7 @@ class SchemaTrait:
         self,
         binding: IFieldBinding,
         adapter: IRegisterPort,
-        config_override: "LabelOverride | None" = None,
+        config_override: "BaseControlConfig | None" = None,
     ) -> None:
         self._binding = binding
         self._adapter = adapter
@@ -36,7 +36,7 @@ class SchemaTrait:
     def _refresh_meta(self) -> None:
         config = dict(getattr(self._binding, "to_config_dict", lambda: {})() or {})
         if self._config_override:
-            config.update(self._config_override.to_merge_dict())
+            config.update(self._config_override.to_override_dict())
         self._meta = self._adapter.resolve_meta(
             self._binding.register_name,
             self._binding.field_name,

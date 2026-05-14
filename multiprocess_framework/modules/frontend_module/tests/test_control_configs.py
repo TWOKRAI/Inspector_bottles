@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты BindingConfig, SliderConfig, CheckboxViewConfig (control_v2)."""
+
 from multiprocess_framework.modules.frontend_module.components import (
     BindingConfig,
     CheckboxViewConfig,
@@ -26,12 +27,12 @@ class TestSliderConfig:
         assert cfg.show_ticks is False
         assert cfg.label_position == "left"
 
-    def test_label_override(self) -> None:
+    def test_to_override_dict(self) -> None:
         cfg = SliderConfig(label="Test", min_val=0, max_val=100)
-        lo = cfg.to_label_override()
-        assert lo.label == "Test"
-        assert lo.min_val == 0
-        assert lo.max_val == 100
+        d = cfg.to_override_dict()
+        assert d["label"] == "Test"
+        assert d["min"] == 0
+        assert d["max"] == 100
 
 
 class TestCheckboxViewConfig:

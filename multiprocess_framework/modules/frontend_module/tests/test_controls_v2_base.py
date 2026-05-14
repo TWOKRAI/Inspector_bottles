@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Unit-тесты базового слоя controls v2 (config, infrastructure, traits)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,6 @@ import pytest
 from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
     BindingConfig,
-    LabelOverride,
     merge_config,
 )
 from multiprocess_framework.modules.frontend_module.components.base.infrastructure.register_adapter import (
@@ -59,9 +59,7 @@ class _FakeRegistersManager:
     def get_field_metadata(self, register_name: str, field_name: str) -> Optional[dict]:
         return self._meta.get((register_name, field_name))
 
-    def set_field_value(
-        self, register_name: str, field_name: str, value: Any
-    ) -> tuple[bool, Optional[str]]:
+    def set_field_value(self, register_name: str, field_name: str, value: Any) -> tuple[bool, Optional[str]]:
         reg = self.get_register(register_name)
         if not reg:
             return False, "no register"
@@ -71,15 +69,11 @@ class _FakeRegistersManager:
             cb(value)
         return True, None
 
-    def subscribe(
-        self, register_name: str, field_name: str, callback: Callable[[Any], None]
-    ) -> None:
+    def subscribe(self, register_name: str, field_name: str, callback: Callable[[Any], None]) -> None:
         key = (register_name, field_name)
         self._subs.setdefault(key, []).append(callback)
 
-    def unsubscribe(
-        self, register_name: str, field_name: str, callback: Callable[[Any], None]
-    ) -> None:
+    def unsubscribe(self, register_name: str, field_name: str, callback: Callable[[Any], None]) -> None:
         key = (register_name, field_name)
         lst = self._subs.get(key)
         if lst and callback in lst:
@@ -91,14 +85,24 @@ class TestMergeConfig:
         d = BaseControlConfig(label="x", enabled=True)
         assert merge_config(d, None) is d
 
-    def test_override_non_none_fields(self) -> None:
+    def test_override_set_fields_only(self) -> None:
+        """Только явно заданные поля override замещают default (exclude_unset)."""
         a = BaseControlConfig(label="a", tooltip="t", enabled=True, access_level=0)
-        b = BaseControlConfig(label="b", tooltip=None, enabled=False, access_level=1)
+        # tooltip НЕ задан → не замещает "t"
+        b = BaseControlConfig(label="b", enabled=False, access_level=1)
         m = merge_config(a, b)
         assert m.label == "b"
-        assert m.tooltip == "t"
+        assert m.tooltip == "t"  # сохранён из default (tooltip unset в override)
         assert m.enabled is False
         assert m.access_level == 1
+
+    def test_explicit_none_overrides(self) -> None:
+        """Явно заданный None замещает значение из default (сброс)."""
+        a = BaseControlConfig(label="a", tooltip="t")
+        b = BaseControlConfig(tooltip=None)  # явный сброс
+        m = merge_config(a, b)
+        assert m.label == "a"  # label не задан в override → сохранён
+        assert m.tooltip is None  # tooltip=None явно → сброшен
 
     def test_type_mismatch_raises(self) -> None:
         with pytest.raises(TypeError):
@@ -120,10 +124,17 @@ class TestBindingConfig:
         }
 
 
-class TestLabelOverride:
-    def test_to_merge_dict_skips_none(self) -> None:
-        assert LabelOverride().to_merge_dict() == {}
-        d = LabelOverride(label="L", min_val=1.0, max_val=9.0).to_merge_dict()
+class TestBaseControlConfigOverride:
+    def test_to_override_dict_skips_none(self) -> None:
+        assert BaseControlConfig().to_override_dict() == {}
+        cfg = BaseControlConfig(label="L")
+        assert cfg.to_override_dict() == {"label": "L"}
+
+    def test_slider_config_override_with_min_max(self) -> None:
+        from multiprocess_framework.modules.frontend_module.components.slider.config import SliderConfig
+
+        cfg = SliderConfig(label="L", min_val=1.0, max_val=9.0)
+        d = cfg.to_override_dict()
         assert d["label"] == "L"
         assert d["min"] == 1.0
         assert d["max"] == 9.0
@@ -212,7 +223,7 @@ class TestSchemaTrait:
         rm = _FakeRegistersManager()
         ad = RegisterAdapter(rm)
         b = BindingConfig("processor", "min_area", access_level=0)
-        st = SchemaTrait(b, ad, config_override=LabelOverride(label="Название"))
+        st = SchemaTrait(b, ad, config_override=BaseControlConfig(label="Название"))
         assert st.label == "Название"
         assert st.effective_access_level >= 0
 

@@ -50,16 +50,15 @@ class CheckboxPresenter:
         Args:
             binding: Привязка к `register_name.field_name` (+ `access_level`, опционально `index`).
             adapter: Доступ к чтению/записи/подписке (обычно `RegisterAdapter`).
-            view_config: UI-переопределения (`label` через `LabelOverride`,
-                непустой `tooltip` — приоритет над описанием регистра).
+            view_config: UI-переопределения (`label`, `tooltip` — приоритет
+                над метаданными регистра).
             current_access_level: Текущий уровень доступа пользователя для `AccessTrait`.
             hooks: Колбэки для внешних менеджеров (лог / ошибки / статистика).
         """
         self._binding = binding
         self._hooks = hooks
         self._view_config = view_config
-        config_override = view_config.to_label_override() if view_config else None
-        self._schema = SchemaTrait(binding, adapter, config_override)
+        self._schema = SchemaTrait(binding, adapter, view_config)
         self._sync = SyncTrait(binding, adapter)
         view_perm = view_config.required_view_permission if view_config else None
         edit_perm = view_config.required_edit_permission if view_config else None

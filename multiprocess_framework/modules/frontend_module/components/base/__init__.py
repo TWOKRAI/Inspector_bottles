@@ -2,6 +2,7 @@
 """
 Базовые компоненты v2 — интерфейсы, конфиги, инфраструктура, traits.
 """
+
 from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlAccessDeniedEvent,
     ControlHooks,
@@ -15,7 +16,6 @@ from multiprocess_framework.modules.frontend_module.components.base.control_hook
 from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
     BindingConfig,
-    LabelOverride,
     merge_config,
 )
 from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import (
@@ -54,7 +54,6 @@ __all__ = [
     "emit_write_rejected",
     "BaseControlConfig",
     "BindingConfig",
-    "LabelOverride",
     "merge_config",
     "TouchKeyboardConfig",
     "coerce_touch_keyboard",
