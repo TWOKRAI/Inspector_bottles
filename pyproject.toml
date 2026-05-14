@@ -46,12 +46,13 @@ dependencies = [
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.24",
-    "pytest-qt>=4.4",   # qt_api = "pyside6", фикстура qtbot
-    "pytest-cov>=6.0",  # coverage-отчёты
+    "pytest-qt>=4.4", # qt_api = "pyside6", фикстура qtbot
+    "pytest-cov>=6.0", # coverage-отчёты
     "ipykernel>=6.29",
-    "aiosqlite>=0.20",  # для тестов async SQL-адаптера
-    "mypy>=1.15",       # gradual type checking
-    "bandit>=1.9",      # security scanning (OWASP basics)
+    "aiosqlite>=0.20", # для тестов async SQL-адаптера
+    "mypy>=1.15", # gradual type checking
+    "bandit>=1.9", # security scanning (OWASP basics)
+    "pre-commit>=4.6.0",
 ]
 diagrams = [
     "pylint>=3.3",      # pyreverse для UML-диаграмм классов

@@ -79,3 +79,8 @@ milvus-docker/volumes/
 # Pytest
 .pytest_cache/
 .coverage
+
+# Сгенерированные диаграммы (регенерируются: make diagrams)
+docs/diagrams/classes/*.puml
+docs/diagrams/deps/*.svg
+# Ручные диаграммы (.mmd, .drawio) НЕ игнорируются — они в git
