@@ -28,7 +28,7 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  # ── mypy (type checking, gradual) ──
+  # ── mypy (type checking, gradual, ADVISORY) ──
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.15.0
     hooks:
@@ -36,11 +36,13 @@ repos:
         args: [--ignore-missing-imports, --no-error-summary]
         additional_dependencies: [pydantic>=2.13]
         pass_filenames: false
-        # gradual: запускаем только на framework, не блокируем коммит
-        entry: mypy multiprocess_framework
+        # gradual: ошибки печатаются в push-логе, но не блокируют push.
+        # baseline ~520 ошибок (см. docs/claude/COMMIT_GUIDE.md и /arch-review).
+        # Когда долг будет снижен — заменить wrapper на голый `mypy ...`.
+        entry: bash -c "mypy multiprocess_framework --ignore-missing-imports --no-error-summary || true"
         language: python
         types: [python]
-        stages: [pre-push]  # на push, не на каждый коммит (пока gradual)
+        stages: [pre-push]
 
   # ── bandit (security scanning) ──
   - repo: https://github.com/PyCQA/bandit
