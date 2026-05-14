@@ -41,15 +41,18 @@ Phase 3: Сравнить widgets прототипа с widgets фреймвор
 
 **Цель:** пройтись по каждому framework component, убедиться что он лучше прототипных аналогов.
 
-| # | Компонент | LOC | Прототипный аналог | Статус |
-|---|---|---|---|---|
-| 1.1 | `checkbox/` | 385 | `QCheckBox` в `forms/factory.py` | ⏳ сравнение |
-| 1.2 | `numeric/` | 229 | `QDoubleSpinBox` в `forms/factory.py` | ⬚ |
-| 1.3 | `slider/` | 312 | `QSlider` напрямую | ⬚ |
-| 1.4 | `spinbox/` | 244 | `QSpinBox` в `forms/factory.py` | ⬚ |
-| 1.5 | `compound/` | 245 | `ColorTripletWidget` (62 LOC) | ⬚ |
-| 1.6 | `label/` | 48 | `QLabel` напрямую | ⬚ |
-| 1.7 | `group/` | 151 | нет аналога | ⬚ |
+**Артефакт:** [`docs/refactors/widgets-component-review.md`](../docs/refactors/widgets-component-review.md) — 8 секций, решения по каждому компоненту.
+
+| # | Компонент | LOC | Прототипный аналог | Решение для Phase 2 | Статус |
+|---|---|---|---|---|---|
+| 1.1 | `checkbox/` | 389 | `QCheckBox` + `QLabel` (`_build_bool`) | `CheckboxControl.create` (+`value_changed` Signal) | [x] |
+| 1.2 | `numeric/` | 395 | `QDoubleSpinBox` (`_build_float`) | `NumericControl.create(view_type="spinbox")` | [x] |
+| 1.3 | `slider/` | 349 | не используется | `SliderControl.create` (`int` ≤1000 range) | [x] |
+| 1.4 | `spinbox/` | 272 | `QSpinBox` (`_build_int`) | `SpinBoxControl.create` (`int` большой range) | [x] |
+| 1.5 | `compound/` | 313 | `ColorTripletWidget` (62 LOC) | `CompoundNumericControl.create`, удалить ColorTripletWidget | [x] |
+| 1.6 | `label/` | 56 | `QLabel` напрямую | оставить сырой `QLabel` для unsupported (без выгоды) | [x] |
+| 1.7 | `group/` | 285 | нет аналога | используется внутри numeric/spinbox/slider (+`value_changed` proxy) | [x] |
+| **1.8** | **`combo/` (новый)** | — | `QComboBox` (`_build_literal`) | **создать в Phase 2** (8-й компонент) | [x] |
 
 ---
 
