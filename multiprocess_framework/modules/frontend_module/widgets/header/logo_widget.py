@@ -6,12 +6,21 @@ LogoWidget — виджет логотипа для шапки.
 Принимает config (LogoConfig | dict) и parent.
 FieldMeta — для консистентности, tooltips, unit, access_level.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Optional, Union
 
 from multiprocess_framework.modules.frontend_module.schema_adapter import FieldMeta, SchemaBase, register_schema
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QImage, QLabel, QPixmap, QSize, QWidget, Qt
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QHBoxLayout,
+    QImage,
+    QLabel,
+    QPixmap,
+    QSize,
+    QWidget,
+    Qt,
+)
 
 
 @register_schema("LogoConfig")

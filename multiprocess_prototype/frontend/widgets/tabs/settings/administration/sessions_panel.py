@@ -8,16 +8,15 @@ Scope фильтра:
 
 Используется как подсекция «Сессии» в AdministrationSection.
 """
+
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QPushButton,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -42,14 +41,16 @@ class SessionsPanel(BaseAdminPanel):
 
     _HEADER_TITLE = "Сессии"
     _TABLE_COLUMNS = [
-        ("username",  "Пользователь",  140),
-        ("login_at",  "Вход",          140),
-        ("logout_at", "Выход",         140),
-        ("duration",  "Длительность",  110),
-        ("host",      "Хост",          120),
+        ("username", "Пользователь", 140),
+        ("login_at", "Вход", 140),
+        ("logout_at", "Выход", 140),
+        ("duration", "Длительность", 110),
+        ("host", "Хост", 120),
     ]
 
-    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
+    def __init__(
+        self, auth: "AuthContext | None", parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
 
         self._storage = auth.audit if auth is not None else None
@@ -65,12 +66,7 @@ class SessionsPanel(BaseAdminPanel):
 
     def _setup_ui(self) -> None:
         """Построить layout панели."""
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
-
-        # Стандартный заголовок из BaseAdminPanel
-        self._create_header(root)
+        root = self._create_group()
 
         # Таблица из BaseAdminPanel
         self._table = self._create_table()

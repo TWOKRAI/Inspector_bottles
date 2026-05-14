@@ -4,9 +4,9 @@
 "skip" и "fail_region", трактуется как fail_camera). Возвращает флаг
 should_break — нужно ли прервать дальнейшее исполнение цепочки.
 """
+
 from __future__ import annotations
 
-from typing import Any
 
 from .context import ChainContext
 from .result import ChainResult, RunnableStep
@@ -38,10 +38,7 @@ def apply_on_error_policy(
     log = context.logger
 
     if step.on_error == "skip":
-        msg = (
-            f"Операция '{op_ref}' (node={nid}) упала: {exc}. "
-            f"on_error=skip — пропускаем."
-        )
+        msg = f"Операция '{op_ref}' (node={nid}) упала: {exc}. on_error=skip — пропускаем."
         if log is not None:
             log.log_warning(msg)
         context.warnings.append(msg)
@@ -49,10 +46,7 @@ def apply_on_error_policy(
         return False
 
     if step.on_error == "fail_region":
-        msg = (
-            f"Операция '{op_ref}' (node={nid}) упала: {exc}. "
-            f"on_error=fail_region — прерываем (region)."
-        )
+        msg = f"Операция '{op_ref}' (node={nid}) упала: {exc}. on_error=fail_region — прерываем (region)."
         if log is not None:
             log.log_error(msg)
         context.errors.append(msg)
@@ -60,10 +54,7 @@ def apply_on_error_policy(
         result.fail_level = "region"
         return True
 
-    msg = (
-        f"Операция '{op_ref}' (node={nid}) упала: {exc}. "
-        f"on_error={step.on_error} — прерываем (camera)."
-    )
+    msg = f"Операция '{op_ref}' (node={nid}) упала: {exc}. on_error={step.on_error} — прерываем (camera)."
     if log is not None:
         log.log_error(msg)
     context.errors.append(msg)

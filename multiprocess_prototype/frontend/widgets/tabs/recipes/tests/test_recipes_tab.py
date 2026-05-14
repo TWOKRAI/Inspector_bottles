@@ -1,11 +1,9 @@
 """Тесты для RecipesTab."""
+
 from __future__ import annotations
-from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 from multiprocess_prototype.frontend.widgets.tabs.recipes.recipe_io import (
-    RecipeInfo,
     delete_recipe,
     load_recipe,
     save_recipe,

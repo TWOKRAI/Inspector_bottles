@@ -8,8 +8,6 @@
 - with_config() создаёт новый контекст с тем же services
 """
 
-import pytest
-
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 
@@ -64,6 +62,7 @@ def test_context_managers_from_services():
 def test_context_router_manager_from_services():
     """ctx.router_manager берётся из services.router_manager."""
     from unittest.mock import MagicMock
+
     mock_router = MagicMock()
     services = MockProcessServices(router_manager=mock_router)
     ctx = PluginContext(services=services, config={})
@@ -73,6 +72,7 @@ def test_context_router_manager_from_services():
 def test_context_memory_manager_from_services():
     """ctx.memory_manager берётся из services.memory_manager."""
     from unittest.mock import MagicMock
+
     mock_mem = MagicMock()
     services = MockProcessServices(memory_manager=mock_mem)
     ctx = PluginContext(services=services, config={})

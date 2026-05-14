@@ -5,13 +5,13 @@ process_module — типы и перечисления.
 ProcessStatus — re-export из base_manager (единый enum, ADR-117).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypedDict
 
 # Единый ProcessStatus из base_manager (ADR-117).
 # Сохранён как re-export для backward compat.
-from ...base_manager.types.process_status import ProcessStatus
+from multiprocess_framework.modules.base_manager.types.process_status import ProcessStatus  # noqa: F401
 
 
 class ProcessPriorityLevel(str, Enum):

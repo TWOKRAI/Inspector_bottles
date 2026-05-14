@@ -4,8 +4,8 @@
 
 Проверяет: регистрацию, удаление, thread-safety, get/all/names/snapshot/clear.
 """
+
 import threading
-import pytest
 from typing import Any, Dict
 
 from ..interfaces import IChannel
@@ -15,6 +15,7 @@ from ..core.channel_registry import ChannelRegistry
 # ---------------------------------------------------------------------------
 # Fixtures / Helpers
 # ---------------------------------------------------------------------------
+
 
 class _MockChannel(IChannel):
     """Минимальный канал для тестов."""
@@ -53,6 +54,7 @@ def _make_registry() -> ChannelRegistry:
 # ---------------------------------------------------------------------------
 # Tests: registration
 # ---------------------------------------------------------------------------
+
 
 class TestRegistration:
     def test_register_valid_channel(self):
@@ -100,6 +102,7 @@ class TestRegistration:
 # ---------------------------------------------------------------------------
 # Tests: access
 # ---------------------------------------------------------------------------
+
 
 class TestAccess:
     def test_get_existing(self):
@@ -154,6 +157,7 @@ class TestAccess:
 # Tests: thread-safety
 # ---------------------------------------------------------------------------
 
+
 class TestThreadSafety:
     def test_concurrent_register(self):
         reg = _make_registry()
@@ -199,7 +203,7 @@ class TestThreadSafety:
                     errors.append(e)
 
         readers = [threading.Thread(target=_reader) for _ in range(3)]
-        writer  = threading.Thread(target=_writer)
+        writer = threading.Thread(target=_writer)
 
         for r in readers:
             r.start()

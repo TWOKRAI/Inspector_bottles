@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Тесты декларативных permissions в BaseControlConfig и presenter.set_access_context."""
+
 from __future__ import annotations
 
-import pytest
 
 from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
@@ -44,9 +44,7 @@ class TestAccessTraitWithContext:
         trait.update(AccessContext())
         assert trait.can_view() is False
         # С permission — виден
-        trait.update(
-            AccessContext(permissions=frozenset({"tabs.recipes.view"}))
-        )
+        trait.update(AccessContext(permissions=frozenset({"tabs.recipes.view"})))
         assert trait.can_view() is True
 
     def test_edit_permission_required_grants_modification(self):
@@ -56,19 +54,11 @@ class TestAccessTraitWithContext:
             required_edit_permission="tabs.recipes.edit",
         )
         # view есть, edit нет — read-only
-        trait.update(
-            AccessContext(permissions=frozenset({"tabs.recipes.view"}))
-        )
+        trait.update(AccessContext(permissions=frozenset({"tabs.recipes.view"})))
         assert trait.can_view() is True
         assert trait.can_modify() is False
         # view + edit — полный доступ
-        trait.update(
-            AccessContext(
-                permissions=frozenset(
-                    {"tabs.recipes.view", "tabs.recipes.edit"}
-                )
-            )
-        )
+        trait.update(AccessContext(permissions=frozenset({"tabs.recipes.view", "tabs.recipes.edit"})))
         assert trait.can_view() is True
         assert trait.can_modify() is True
 
@@ -79,9 +69,7 @@ class TestAccessTraitWithContext:
             required_edit_permission="tabs.recipes.edit",
         )
         # Только edit без view — coherence запрещает modify
-        trait.update(
-            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
-        )
+        trait.update(AccessContext(permissions=frozenset({"tabs.recipes.edit"})))
         assert trait.can_view() is False
         assert trait.can_modify() is False
 
@@ -91,9 +79,7 @@ class TestAccessTraitWithContext:
             required_view_permission="tabs.x.view",
             required_edit_permission="tabs.x.edit",
         )
-        trait.update(
-            AccessContext(permissions=frozenset({"*"}), role_name="dev")
-        )
+        trait.update(AccessContext(permissions=frozenset({"*"}), role_name="dev"))
         assert trait.can_view() is True
         assert trait.can_modify() is True
 

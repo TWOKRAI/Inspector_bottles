@@ -1,7 +1,7 @@
 """Тесты для Pipeline Tab -- сцена, узлы, связи."""
+
 from __future__ import annotations
 from unittest.mock import MagicMock
-import pytest
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData, NodeItem
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.edge_item import EdgeData, EdgeItem
@@ -110,7 +110,6 @@ class TestGraphScene:
         scene.remove_edge(edge)
         assert scene.edge_count() == 0
 
-
     def test_edge_updates_on_node_move(self, qtbot):
         """Edge'ы обновляются при перемещении узла."""
         scene = GraphScene()
@@ -156,7 +155,8 @@ class TestGraphView:
 def _make_mock_ctx(topology=None):
     ctx = MagicMock()
     ctx.config = {
-        "topology": topology or {
+        "topology": topology
+        or {
             "processes": [
                 {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
                 {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},

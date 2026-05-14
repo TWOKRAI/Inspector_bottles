@@ -8,7 +8,6 @@ Helper-функции для инициализации и завершения 
 создают объекты и ВОЗВРАЩАЮТ результат. ProcessModule сам присваивает атрибуты.
 """
 
-import traceback
 from ..types import ProcessStatus
 
 
@@ -70,9 +69,7 @@ class ProcessLifecycle:
         """
         process_data = None
         if self.process.shared_resources:
-            process_data = self.process.shared_resources.get_process_data(
-                self.process.name
-            )
+            process_data = self.process.shared_resources.get_process_data(self.process.name)
 
         if process_data and process_data.queues:
             queues_dict = {}
@@ -96,12 +93,8 @@ class ProcessLifecycle:
             }
 
         if self.process.shared_resources:
-            queue_registry = getattr(
-                self.process.shared_resources, "queue_registry", None
-            )
-            memory_manager = getattr(
-                self.process.shared_resources, "memory_manager", None
-            )
+            queue_registry = getattr(self.process.shared_resources, "queue_registry", None)
+            memory_manager = getattr(self.process.shared_resources, "memory_manager", None)
         else:
             queue_registry = None
             memory_manager = None
@@ -132,8 +125,7 @@ class ProcessLifecycle:
                 )
             if commands:
                 self.process._log_info(
-                    f"Registered {len(commands)} command(s) with router: "
-                    f"{[c.get('key','') for c in commands]}"
+                    f"Registered {len(commands)} command(s) with router: {[c.get('key', '') for c in commands]}"
                 )
         except Exception as e:
             self.process._log_warning(f"Failed to register commands with router: {e}")
@@ -162,9 +154,7 @@ class ProcessLifecycle:
                 self.process.worker_manager.stop_all_workers()
 
             # 3b. Завершаем SharedResourcesManager (unlink SharedMemory на macOS/Linux)
-            if self.process.shared_resources and hasattr(
-                self.process.shared_resources, "shutdown"
-            ):
+            if self.process.shared_resources and hasattr(self.process.shared_resources, "shutdown"):
                 try:
                     self.process.shared_resources.shutdown()
                 except Exception as e:
@@ -184,13 +174,9 @@ class ProcessLifecycle:
             self.process.update_process_state(status=ProcessStatus.STOPPED.value)
 
             self.process.is_initialized = False
-            self.process._log_info(
-                f"Process '{self.process.name}' shut down successfully"
-            )
+            self.process._log_info(f"Process '{self.process.name}' shut down successfully")
             return True
 
         except Exception as e:
-            self.process._log_error(
-                f"Error during shutdown of process '{self.process.name}': {e}"
-            )
+            self.process._log_error(f"Error during shutdown of process '{self.process.name}': {e}")
             return False

@@ -51,7 +51,10 @@ class TestEventManagerEmit:
 
     def test_subscribe_and_unsubscribe(self, em):
         received = []
-        cb = lambda data: received.append(data)
+
+        def cb(data):
+            received.append(data)
+
         em.subscribe(EventType.CONFIG_UPDATED, cb)
         em.emit_event(EventType.CONFIG_UPDATED)
         assert len(received) == 1

@@ -13,9 +13,10 @@ RouterManager передаёт туда свой receive().
     ...
     receiver.stop()
 """
+
 import threading
 import time
-from typing import Any, Callable, List, Optional
+from typing import Callable, List, Optional
 
 
 class AsyncReceiver:
@@ -47,11 +48,11 @@ class AsyncReceiver:
         self._callbacks: List[Callable] = []
 
         self._log_warning = log_warning or (lambda msg: None)
-        self._log_error   = log_error   or (lambda msg: None)
-        self._log_info    = log_info    or (lambda msg: None)
+        self._log_error = log_error or (lambda msg: None)
+        self._log_info = log_info or (lambda msg: None)
 
         self.processed: int = 0
-        self.errors:    int = 0
+        self.errors: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle

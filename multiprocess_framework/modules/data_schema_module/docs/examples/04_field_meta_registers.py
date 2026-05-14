@@ -10,22 +10,23 @@
     - персистентность через FileStorage (IRegisterStorage)
     - конфиги процессов на той же базе (RegisterBase)
 """
+
 import tempfile
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     RegisterBase,
     RegistersContainer,
     FileStorage,
-    discover_registers_from_package,
 )
 
 
 # =============================================================================
 # 1. Определение регистров
 # =============================================================================
+
 
 class AlgorithmRegisters(RegisterBase):
     """Параметры алгоритма детекции."""
@@ -35,8 +36,10 @@ class AlgorithmRegisters(RegisterBase):
         FieldMeta(
             "Порог уверенности",
             info="Минимальный порог для принятия результата.",
-            min=0.0, max=1.0,
-            transfer_k=100.0, round_k=2,
+            min=0.0,
+            max=1.0,
+            transfer_k=100.0,
+            round_k=2,
             routing={"channel": "control_algorithm"},
         ),
     ] = 0.5
@@ -46,7 +49,8 @@ class AlgorithmRegisters(RegisterBase):
         FieldMeta(
             "Итерации",
             info="Число итераций алгоритма.",
-            min=1, max=100,
+            min=1,
+            max=100,
         ),
     ] = 10
 
@@ -78,14 +82,15 @@ class ServerConfig(RegisterBase):
 # 2. Работа с полями
 # =============================================================================
 
+
 def demo_field_access():
     print("\n=== 1. Доступ к полям ===")
 
     r = AlgorithmRegisters()
 
     # Поле — plain float, не объект-обёртка
-    print(f"threshold = {r.threshold}")          # → 0.5
-    print(f"type = {type(r.threshold).__name__}") # → float
+    print(f"threshold = {r.threshold}")  # → 0.5
+    print(f"type = {type(r.threshold).__name__}")  # → float
 
     # model_dump() — плоский dict, без вложений
     print(f"model_dump() = {r.model_dump()}")
@@ -117,11 +122,11 @@ def demo_validation():
 
     # Валидное значение
     ok, err = r.update_field("threshold", 0.8)
-    print(f"0.8 → ok={ok}, err={err}")       # ok=True
+    print(f"0.8 → ok={ok}, err={err}")  # ok=True
 
     # За диапазоном
     ok, err = r.update_field("threshold", 2.0)
-    print(f"2.0 → ok={ok}, err={err}")       # ok=False
+    print(f"2.0 → ok={ok}, err={err}")  # ok=False
 
     # Значение НЕ изменилось
     print(f"После ошибки threshold = {r.threshold}")  # → 0.8
@@ -144,10 +149,12 @@ def demo_routing():
 def demo_container():
     print("\n=== 5. RegistersContainer ===")
 
-    container = RegistersContainer({
-        "algorithm": AlgorithmRegisters,
-        "server": ServerConfig,
-    })
+    container = RegistersContainer(
+        {
+            "algorithm": AlgorithmRegisters,
+            "server": ServerConfig,
+        }
+    )
 
     print(f"Регистры: {container.register_names()}")
     print(f"algorithm.threshold = {container.algorithm.threshold}")
@@ -159,10 +166,12 @@ def demo_container():
     print(f"JSON: {json_str[:120]}...")
 
     # Десериализуем в новый контейнер
-    container2 = RegistersContainer({
-        "algorithm": AlgorithmRegisters,
-        "server": ServerConfig,
-    })
+    container2 = RegistersContainer(
+        {
+            "algorithm": AlgorithmRegisters,
+            "server": ServerConfig,
+        }
+    )
     container2.from_json(json_str)
     print(f"После from_json threshold = {container2.algorithm.threshold}")  # → 0.9
 
@@ -170,10 +179,12 @@ def demo_container():
 def demo_file_storage():
     print("\n=== 6. FileStorage (IRegisterStorage) ===")
 
-    container = RegistersContainer({
-        "algorithm": AlgorithmRegisters,
-        "server": ServerConfig,
-    })
+    container = RegistersContainer(
+        {
+            "algorithm": AlgorithmRegisters,
+            "server": ServerConfig,
+        }
+    )
     container.algorithm.update_field("threshold", 0.75)
     container.server.update_field("port", 9000)
 
@@ -185,22 +196,24 @@ def demo_file_storage():
         print(f"Сохранено: {storage.list_containers()}")
 
         # Загружаем в новый контейнер
-        container2 = RegistersContainer({
-            "algorithm": AlgorithmRegisters,
-            "server": ServerConfig,
-        })
+        container2 = RegistersContainer(
+            {
+                "algorithm": AlgorithmRegisters,
+                "server": ServerConfig,
+            }
+        )
         loaded = container2.load(storage, "my_process")
         print(f"Загружено: {loaded}")
         print(f"threshold после загрузки: {container2.algorithm.threshold}")  # → 0.75
-        print(f"port после загрузки: {container2.server.port}")               # → 9000
+        print(f"port после загрузки: {container2.server.port}")  # → 9000
 
 
 def demo_clamp():
     print("\n=== 7. FieldMeta.clamp() и process_numeric() ===")
 
     meta = AlgorithmRegisters.get_field_meta("threshold")
-    print(f"clamp(1.5) = {meta.clamp(1.5)}")      # → 1.0
-    print(f"clamp(-0.1) = {meta.clamp(-0.1)}")    # → 0.0
+    print(f"clamp(1.5) = {meta.clamp(1.5)}")  # → 1.0
+    print(f"clamp(-0.1) = {meta.clamp(-0.1)}")  # → 0.0
 
     # Округление через round_value
     meta2 = AlgorithmRegisters.get_field_meta("threshold")

@@ -4,9 +4,10 @@ SchemaTrait — работа с ResolvedMeta из data_schema.
 
 Универсальный трейт для доступа к метаданным поля.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from multiprocess_framework.modules.frontend_module.components.base.interfaces import (
     IFieldBinding,

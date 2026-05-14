@@ -7,12 +7,12 @@
 - Объединения данных с дефолтными значениями
 - Извлечения полей из моделей
 """
+
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel
 
 from .reference import (
-    DataReference,
     is_reference as _is_reference,
     convert_reference_to_data as _convert_reference_to_data,
     convert_all_references as _convert_all_references,
@@ -223,6 +223,7 @@ def unflatten_dict(
 # -----------------------------------------------------------------------------
 # Работа со ссылками (DataReference)
 # -----------------------------------------------------------------------------
+
 
 def is_reference(value: Any) -> bool:
     """Проверить, является ли значение ссылкой (DataReference или словарь со _ref)."""

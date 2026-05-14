@@ -1,7 +1,7 @@
 """Тесты dag_utils — универсальные DAG-алгоритмы."""
+
 from __future__ import annotations
 
-import pytest
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.dag_utils import (
     find_connected_edges,

@@ -73,7 +73,7 @@ class CIRunner:
         passed = result.returncode == 0
 
         if passed:
-            print(f"  [OK]")
+            print("  [OK]")
         else:
             print(f"  [FAIL] exit code {result.returncode}")
             if not self.verbose and result.stdout:
@@ -91,7 +91,7 @@ class CIRunner:
     def run_all(self) -> int:
         """Запускает все проверки и возвращает exit code."""
         print(f"\n{'=' * 60}")
-        print(f"  CI QUALITY GATE — Inspector_bottles")
+        print("  CI QUALITY GATE — Inspector_bottles")
         print(f"{'=' * 60}")
 
         # 1. Структурная валидация
@@ -134,7 +134,7 @@ class CIRunner:
 
         # Итог
         print(f"\n{'=' * 60}")
-        print(f"  ИТОГ")
+        print("  ИТОГ")
         print(f"{'=' * 60}")
 
         failed = []
@@ -154,7 +154,7 @@ class CIRunner:
             print(f"  FAILED: {', '.join(failed)}")
             return 1
         else:
-            print(f"  All checks passed!")
+            print("  All checks passed!")
             return 0
 
 

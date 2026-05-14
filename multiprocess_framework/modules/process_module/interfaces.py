@@ -9,7 +9,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-from .types import ProcessStatus, ProcessConfigDict, ProcessStatsDict
+from .types import ProcessStatsDict
 
 
 class IProcessModule(ABC):

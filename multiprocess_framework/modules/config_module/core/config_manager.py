@@ -10,6 +10,7 @@ ConfigManager — менеджер множества конфигураций (
 - StorageManager (удалён — не используется, заменён прямым вызовом config_store)
 - EventManager (удалён — бизнес-логика событий остаётся за вызывающим кодом)
 """
+
 from __future__ import annotations
 
 from threading import RLock
@@ -20,7 +21,9 @@ from multiprocess_framework.modules.config_module.interfaces import IConfigManag
 from multiprocess_framework.modules.config_module.core.config import Config
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.shared_resources_module.core.shared_resources_manager import SharedResourcesManager
+    from multiprocess_framework.modules.shared_resources_module.core.shared_resources_manager import (
+        SharedResourcesManager,
+    )
 
 
 class ConfigManager(BaseManager, ObservableMixin, IConfigManager):

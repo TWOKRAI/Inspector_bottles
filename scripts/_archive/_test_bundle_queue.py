@@ -5,10 +5,9 @@
 - process_2 получает свои очереди из bundle["queues"]
 - Проверяем что сообщение от process_1 доходит до process_2
 """
+
 import multiprocessing as mp
 import time
-import sys
-from queue import Empty
 
 
 def process_1(bundle):
@@ -40,7 +39,7 @@ def process_2(bundle):
         routing_map = bundle["routing_map"]
         q3 = routing_map["process_1"]["worker_in"]
         q3.put({"command": "pong", "n": msg.get("n", 0) + 1})
-        print(f"[P2] sent pong", flush=True)
+        print("[P2] sent pong", flush=True)
     except Exception as e:
         print(f"[P2] TIMEOUT: {e}", flush=True)
 
@@ -51,11 +50,13 @@ def mid_process():
     # Simulates queue_registry
     registered_queues = {
         "process_1": {
-            "system": mp.Queue(100), "data": mp.Queue(100),
+            "system": mp.Queue(100),
+            "data": mp.Queue(100),
             "worker_in": mp.Queue(50),
         },
         "process_2": {
-            "system": mp.Queue(100), "data": mp.Queue(100),
+            "system": mp.Queue(100),
+            "data": mp.Queue(100),
             "worker_in": mp.Queue(50),
         },
     }
@@ -67,14 +68,16 @@ def mid_process():
     routing_map = dict(registered_queues)  # shallow copy
 
     bundle_p1 = {
-        "queues": registered_queues["process_1"],       # process_1's own queues
-        "config": {}, "custom": {},
-        "routing_map": routing_map,                     # ALL queues (including q6)
+        "queues": registered_queues["process_1"],  # process_1's own queues
+        "config": {},
+        "custom": {},
+        "routing_map": routing_map,  # ALL queues (including q6)
     }
     bundle_p2 = {
-        "queues": registered_queues["process_2"],       # process_2's own queues
-        "config": {}, "custom": {},
-        "routing_map": routing_map,                     # ALL queues (including q3)
+        "queues": registered_queues["process_2"],  # process_2's own queues
+        "config": {},
+        "custom": {},
+        "routing_map": routing_map,  # ALL queues (including q3)
     }
 
     pa = mp.Process(target=process_1, args=(bundle_p1,), name="process_1")

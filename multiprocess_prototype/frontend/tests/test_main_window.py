@@ -1,12 +1,13 @@
 """Тесты MainWindow v2 Layout (Task 9.3)."""
-import pytest
-from PySide6.QtWidgets import QLabel, QTabWidget, QWidget
+
+from PySide6.QtWidgets import QTabWidget, QWidget
 
 from multiprocess_prototype.frontend.windows.main_window import MainWindow
 from multiprocess_prototype.frontend.widgets.chrome.app_header import AppHeaderWidget
 
 
 # -- Создание с дефолтным конфигом --
+
 
 def test_default_config(qtbot):
     """MainWindow с дефолтным конфигом: заголовок, min size."""
@@ -20,6 +21,7 @@ def test_default_config(qtbot):
 
 # -- Создание с кастомным конфигом --
 
+
 def test_custom_config(qtbot):
     """MainWindow принимает dict-конфиг и корректно применяет."""
     cfg = {"window": {"title": "Custom Title", "min_width": 800, "min_height": 600}}
@@ -32,6 +34,7 @@ def test_custom_config(qtbot):
 
 
 # -- Layout содержит 3 компонента --
+
 
 def test_layout_has_three_zones(qtbot):
     """Central layout содержит 4 виджета: header, error_banner, placeholder, tab_widget."""
@@ -50,6 +53,7 @@ def test_layout_has_three_zones(qtbot):
 
 # -- Header property --
 
+
 def test_header_property(qtbot):
     """header property возвращает AppHeaderWidget с objectName='AppHeader'."""
     window = MainWindow()
@@ -60,6 +64,7 @@ def test_header_property(qtbot):
 
 
 # -- AppHeaderWidget содержит INNOTECH --
+
 
 def test_header_brand_label(qtbot):
     """AppHeaderWidget содержит BrandLabel с текстом 'INNOTECH'."""
@@ -73,6 +78,7 @@ def test_header_brand_label(qtbot):
 
 # -- Header update_status --
 
+
 def test_header_status_text(qtbot):
     """update_status обновляет StatusLabel."""
     window = MainWindow()
@@ -83,6 +89,7 @@ def test_header_status_text(qtbot):
 
 
 # -- add_tab (обратная совместимость) --
+
 
 def test_add_tab(qtbot):
     """add_tab добавляет вкладку, tab_widget.count() увеличивается."""
@@ -99,6 +106,7 @@ def test_add_tab(qtbot):
 
 # -- tab_widget property --
 
+
 def test_tab_widget_property(qtbot):
     """tab_widget property возвращает QTabWidget."""
     window = MainWindow()
@@ -108,6 +116,7 @@ def test_tab_widget_property(qtbot):
 
 
 # -- update_status (обратная совместимость) --
+
 
 def test_update_status(qtbot):
     """update_status обновляет fps и latency labels в StatusBar и header."""
@@ -124,6 +133,7 @@ def test_update_status(qtbot):
 
 # -- frame count (обратная совместимость) --
 
+
 def test_frame_count(qtbot):
     """increment_frame_count + reset_frame_count работают корректно."""
     window = MainWindow()
@@ -138,6 +148,7 @@ def test_frame_count(qtbot):
 
 
 # -- set_image_panel заменяет placeholder --
+
 
 def test_set_image_panel(qtbot):
     """set_image_panel заменяет placeholder на реальный виджет."""

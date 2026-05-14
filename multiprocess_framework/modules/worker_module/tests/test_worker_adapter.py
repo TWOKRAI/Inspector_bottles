@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты для adapters/worker_adapter.py."""
 
-import threading
-import pytest
-from unittest.mock import MagicMock, patch
-
 from ..adapters.worker_adapter import WorkerAdapter
 from ..core.thread_config import ThreadConfig
 from ..types import WorkerType, ExecutionMode, ThreadPriority
@@ -51,8 +47,7 @@ class _FakeWorkerManager:
     def list_workers(self, worker_type=None):
         if worker_type is None:
             return list(self.created.keys())
-        return [n for n, d in self.created.items()
-                if d["config"].worker_type == worker_type]
+        return [n for n, d in self.created.items() if d["config"].worker_type == worker_type]
 
     def get_stats(self):
         return {"workers_count": len(self.created)}

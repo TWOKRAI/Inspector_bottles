@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..plugins.interfaces import IProcessServices
+    pass
 
 
 class BuiltinCommands:
@@ -162,8 +162,7 @@ class BuiltinCommands:
         self._wire_middlewares[wire_key] = (mw, role)
 
         self._services._log_info(
-            f"wire.configure: middleware подключён — wire_key={wire_key}, "
-            f"role={role}, shm={shm_owner}/{shm_name}",
+            f"wire.configure: middleware подключён — wire_key={wire_key}, role={role}, shm={shm_owner}/{shm_name}",
             module="wire",
         )
         return {"success": True, "wire_key": wire_key, "role": role}

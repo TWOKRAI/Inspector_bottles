@@ -12,11 +12,10 @@
 - Потокобезопасность (10 потоков)
 - Граничные случаи (пустой путь, несуществующие пути, не-dict промежуточный узел)
 """
+
 from __future__ import annotations
 
 import threading
-import time
-from typing import Any
 
 import pytest
 
@@ -229,9 +228,7 @@ def test_delete_subtree(camera_store: TreeStore) -> None:
 
 def test_merge_adds_new_keys(camera_store: TreeStore) -> None:
     """merge() добавляет новые ключи в существующий dict."""
-    deltas = camera_store.merge(
-        "cameras.0", {"state": {"status": "running"}, "extra": "data"}
-    )
+    deltas = camera_store.merge("cameras.0", {"state": {"status": "running"}, "extra": "data"})
     assert len(deltas) > 0
     assert camera_store.get("cameras.0.state.status") == "running"
     assert camera_store.get("cameras.0.extra") == "data"
@@ -399,9 +396,7 @@ def test_thread_safety_concurrent_writes() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=worker, args=(tid,)) for tid in range(num_threads)
-    ]
+    threads = [threading.Thread(target=worker, args=(tid,)) for tid in range(num_threads)]
     for t in threads:
         t.start()
     for t in threads:
@@ -411,7 +406,7 @@ def test_thread_safety_concurrent_writes() -> None:
     # каждый поток записал своё последнее значение
     for tid in range(num_threads):
         val = store.get(f"thread.{tid}.counter", default=None)
-        assert val == iterations - 1, f"Поток {tid}: ожидалось {iterations-1}, получили {val}"
+        assert val == iterations - 1, f"Поток {tid}: ожидалось {iterations - 1}, получили {val}"
 
 
 # ===========================================================================

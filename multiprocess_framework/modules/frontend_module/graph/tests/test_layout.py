@@ -1,10 +1,7 @@
 """FW-тесты для frontend_module.graph.layout."""
-import pytest
 
 from multiprocess_framework.modules.frontend_module.graph.layout import (
     GRID_SIZE,
-    _assign_layers,
-    _group_by_layer,
     _snap_to_grid,
     auto_layout,
 )

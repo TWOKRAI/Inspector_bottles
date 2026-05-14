@@ -1,7 +1,7 @@
 """Тесты для TreeNavWidget — 2-уровневое дерево навигации."""
+
 from __future__ import annotations
 
-import pytest
 
 from multiprocess_prototype.frontend.widgets.primitives import TreeNavWidget
 
@@ -32,7 +32,7 @@ class TestTreeNavWidget:
 
     def test_custom_nav_width(self, qtbot):
         nav = self._make(qtbot, nav_width=300)
-        assert nav.maximumWidth() == 300  # noqa: PLR2004
+        assert nav.maximumWidth() == 300
 
     # ------------------------------------------------------------------
     # set_tree
@@ -43,11 +43,11 @@ class TestTreeNavWidget:
         nav.set_tree(SAMPLE_TREE)
 
         tree = nav._tree
-        assert tree.topLevelItemCount() == 2  # noqa: PLR2004
+        assert tree.topLevelItemCount() == 2
         # Первая категория — 3 ребёнка
         cat0 = tree.topLevelItem(0)
         assert cat0.text(0) == "Компоненты"
-        assert cat0.childCount() == 3  # noqa: PLR2004
+        assert cat0.childCount() == 3
         assert cat0.child(0).text(0) == "Кнопки"
 
     def test_set_tree_empty_dict(self, qtbot):

@@ -1,7 +1,7 @@
 """Тесты TopologyMutationHandler (Task 13.1a)."""
+
 from __future__ import annotations
 
-from typing import Any
 
 import pytest
 

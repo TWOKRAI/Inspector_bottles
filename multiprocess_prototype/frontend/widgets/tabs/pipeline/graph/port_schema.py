@@ -3,9 +3,10 @@
 Используется для передачи информации о портах плагина в NodeItem.
 Не зависит от Qt.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

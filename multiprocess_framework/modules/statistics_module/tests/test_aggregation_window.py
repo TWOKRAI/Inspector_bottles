@@ -2,7 +2,6 @@
 """
 Тесты для AggregationWindow.
 """
-import pytest
 
 from ..core.aggregation_window import AggregationWindow
 from ...channel_routing_module.interfaces import IBufferStrategy

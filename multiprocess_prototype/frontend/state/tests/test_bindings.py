@@ -6,19 +6,21 @@ set_state_callback был вызван при инициализации GuiStat
 
 Сообщения синтезируются вызовом bindings._on_state_msg() напрямую.
 """
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QLabel, QSpinBox
+from PySide6.QtWidgets import QCheckBox, QLabel, QSpinBox
 
-from multiprocess_prototype.frontend.state.bindings import BindingHandle, GuiStateBindings
+from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательный fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def bridge():
@@ -37,6 +39,7 @@ def bindings(bridge):
 # Инициализация
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     """Проверка инициализации GuiStateBindings."""
 
@@ -50,6 +53,7 @@ class TestInit:
 # Базовые property setters
 # ---------------------------------------------------------------------------
 
+
 class TestPropertySetters:
     """Проверка применения setter-ов при получении state_delta."""
 
@@ -59,11 +63,13 @@ class TestPropertySetters:
         qtbot.addWidget(spinbox)
 
         bindings.bind("processes.cam.state.fps", spinbox, "value")
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.state.fps",
-            "value": 42,
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": 42,
+            }
+        )
 
         assert spinbox.value() == 42
 
@@ -73,11 +79,13 @@ class TestPropertySetters:
         qtbot.addWidget(label)
 
         bindings.bind("services.capture.status", label, "text")
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "services.capture.status",
-            "value": "running",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "services.capture.status",
+                "value": "running",
+            }
+        )
 
         assert label.text() == "running"
 
@@ -88,11 +96,13 @@ class TestPropertySetters:
         checkbox.setChecked(False)
 
         bindings.bind("system.flags.enabled", checkbox, "checked")
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "system.flags.enabled",
-            "value": True,
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "system.flags.enabled",
+                "value": True,
+            }
+        )
 
         assert checkbox.isChecked() is True
 
@@ -100,6 +110,7 @@ class TestPropertySetters:
 # ---------------------------------------------------------------------------
 # Glob-паттерны с несколькими подписчиками
 # ---------------------------------------------------------------------------
+
 
 class TestGlobMultipleSubscribers:
     """Проверка, что glob-паттерн срабатывает на нескольких виджетах."""
@@ -114,11 +125,13 @@ class TestGlobMultipleSubscribers:
         bindings.bind("processes.*.state.fps", label1, "text")
         bindings.bind("processes.*.state.fps", label2, "text")
 
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.state.fps",
-            "value": "25.3",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": "25.3",
+            }
+        )
 
         assert label1.text() == "25.3"
         assert label2.text() == "25.3"
@@ -127,6 +140,7 @@ class TestGlobMultipleSubscribers:
 # ---------------------------------------------------------------------------
 # Несовпадающий паттерн
 # ---------------------------------------------------------------------------
+
 
 class TestNoMatch:
     """Несовпадающий путь не должен вызывать setter."""
@@ -137,11 +151,13 @@ class TestNoMatch:
         qtbot.addWidget(label)
 
         bindings.bind("processes.cam.state.fps", label, "text")
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.config.fps",  # другой сегмент 'config' вместо 'state'
-            "value": "updated",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.config.fps",  # другой сегмент 'config' вместо 'state'
+                "value": "updated",
+            }
+        )
 
         assert label.text() == "original"
 
@@ -149,6 +165,7 @@ class TestNoMatch:
 # ---------------------------------------------------------------------------
 # Авто-уборка мёртвых виджетов
 # ---------------------------------------------------------------------------
+
 
 class TestDestroyedWidget:
     """После уничтожения виджета подписка должна быть убрана."""
@@ -168,11 +185,13 @@ class TestDestroyedWidget:
         qtbot.wait(50)
 
         # Отправляем сообщение — не должно быть исключений
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.state.fps",
-            "value": "updated",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": "updated",
+            }
+        )
         # Список должен быть очищен (либо через signal, либо через прунинг в _on_state_msg)
         assert len(bindings._bindings) == 0
 
@@ -180,6 +199,7 @@ class TestDestroyedWidget:
 # ---------------------------------------------------------------------------
 # Formatter
 # ---------------------------------------------------------------------------
+
 
 class TestFormatter:
     """Formatter применяется до setter."""
@@ -195,11 +215,13 @@ class TestFormatter:
             "text",
             formatter=lambda v: f"{v:.1f}",
         )
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.state.fps",
-            "value": 25.3,
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": 25.3,
+            }
+        )
 
         assert label.text() == "25.3"
 
@@ -207,6 +229,7 @@ class TestFormatter:
 # ---------------------------------------------------------------------------
 # Unbind
 # ---------------------------------------------------------------------------
+
 
 class TestUnbind:
     """unbind(handle) удаляет подписку, setter больше не вызывается."""
@@ -219,28 +242,33 @@ class TestUnbind:
         handle = bindings.bind("processes.cam.state.fps", label, "text")
 
         # Убеждаемся, что до unbind — работает
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.state.fps",
-            "value": "updated",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": "updated",
+            }
+        )
         assert label.text() == "updated"
 
         # Снимаем подписку
         bindings.unbind(handle)
 
         # Сообщение после unbind не должно изменить виджет
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "path": "processes.cam.state.fps",
-            "value": "should_not_appear",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": "should_not_appear",
+            }
+        )
         assert label.text() == "updated"
 
 
 # ---------------------------------------------------------------------------
 # Игнорирование некорректных сообщений
 # ---------------------------------------------------------------------------
+
 
 class TestIgnoreInvalidMessages:
     """Сообщения без обязательных полей — тихо игнорируются."""
@@ -251,11 +279,13 @@ class TestIgnoreInvalidMessages:
         qtbot.addWidget(label)
         bindings.bind("processes.cam.state.fps", label, "text")
 
-        bindings._on_state_msg({
-            "data_type": "frame_ready",
-            "path": "processes.cam.state.fps",
-            "value": "updated",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "frame_ready",
+                "path": "processes.cam.state.fps",
+                "value": "updated",
+            }
+        )
 
         assert label.text() == "original"
 
@@ -265,9 +295,11 @@ class TestIgnoreInvalidMessages:
         qtbot.addWidget(label)
         bindings.bind("processes.cam.state.fps", label, "text")
 
-        bindings._on_state_msg({
-            "data_type": "state_delta",
-            "value": "updated",
-        })
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "value": "updated",
+            }
+        )
 
         assert label.text() == "original"

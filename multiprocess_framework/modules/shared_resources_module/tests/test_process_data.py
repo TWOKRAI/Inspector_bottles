@@ -6,9 +6,8 @@ import pickle
 import time
 from multiprocessing import Queue, Event
 
-import pytest
 
-from ..state.process_data import ProcessData, QueuesProxy, EventsProxy, ProcessDataKeys
+from ..state.process_data import ProcessData, QueuesProxy, EventsProxy
 from ..types import ProcessStatus
 
 

@@ -7,12 +7,14 @@ PR4: при наличии прав roles.edit/create/delete кнопки акт
 
 Роли с hidden_in_ui=True (например, dev) не показываются в списке.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -63,11 +65,18 @@ class RolesPanel(QWidget):
             self._can_edit = False
             self._can_delete = False
 
-        main_layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        group = QGroupBox("Роли")
+        main_layout = QVBoxLayout(group)
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(6)
 
-        # Если AuthManager недоступен — показываем заглушку
+        outer.addWidget(group)
+
+        # Если AuthManager недоступен — показываем заглушку внутри group
         if self._auth_manager is None:
             placeholder = QLabel("AuthManager не инициализирован")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -75,22 +84,11 @@ class RolesPanel(QWidget):
             main_layout.addWidget(placeholder)
             return
 
-        # --- Заголовок ---
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(8)
-
-        title_label = QLabel("Роли")
-        title_label.setObjectName("SectionTitle")
-
-        header_layout.addWidget(title_label)
-
+        # Подсказка «только чтение» (если нет прав на редактирование)
         if not self._can_edit:
             readonly_label = QLabel("(только чтение)")
             readonly_label.setProperty("role", "readonly-hint")
-            header_layout.addWidget(readonly_label)
-
-        header_layout.addStretch()
-        main_layout.addLayout(header_layout)
+            main_layout.addWidget(readonly_label)
 
         # --- Основная область: список + матрица ---
         content_layout = QHBoxLayout()

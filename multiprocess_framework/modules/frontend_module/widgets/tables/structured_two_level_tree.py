@@ -8,6 +8,7 @@ StructuredTwoLevelTreeWidget — дерево из двух уровней: гр
 groups: list of (group_id: str, rows: list[dict]) — строки с ключами из columns и
 идентификатором листа в row_key (например region_id).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -27,7 +28,9 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     Signal,
 )
 
-from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import TouchLineEditItemDelegate
+from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import (
+    TouchLineEditItemDelegate,
+)
 
 
 ROLE_KIND = Qt.ItemDataRole.UserRole
@@ -64,9 +67,7 @@ class StructuredTwoLevelTreeWidget(QTreeWidget):
         self.setAnimated(True)
         self.setIndentation(20)
         self.setEditTriggers(
-            QAbstractItemView.DoubleClicked
-            | QAbstractItemView.EditKeyPressed
-            | QAbstractItemView.SelectedClicked
+            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed | QAbstractItemView.SelectedClicked
         )
         self.setAlternatingRowColors(True)
         self.setColumnCount(len(self._columns))
@@ -188,9 +189,17 @@ class StructuredTwoLevelTreeWidget(QTreeWidget):
                             editable = bool(row["_value_editable"])
                         base = leaf.flags()
                         if editable:
-                            leaf.setFlags(base | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                            leaf.setFlags(
+                                base
+                                | Qt.ItemFlag.ItemIsEditable
+                                | Qt.ItemFlag.ItemIsEnabled
+                                | Qt.ItemFlag.ItemIsSelectable
+                            )
                         else:
-                            leaf.setFlags((base | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable) & ~Qt.ItemFlag.ItemIsEditable)
+                            leaf.setFlags(
+                                (base | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                                & ~Qt.ItemFlag.ItemIsEditable
+                            )
 
             self.addTopLevelItem(g_item)
             g_item.setExpanded(True)

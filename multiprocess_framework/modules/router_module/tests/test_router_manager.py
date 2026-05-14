@@ -13,21 +13,22 @@
 - Middleware pipeline (send / receive)
 - Инспекция (get_dispatcher_info, get_stats)
 """
+
 import threading
 import time
 import unittest
 from queue import Queue
 from types import SimpleNamespace
-from typing import Any, Callable, Dict
+from typing import Callable
 
 from ..core.router_manager import RouterManager
 from ..channels.queue_channel import QueueChannel
-from ...dispatch_module import DispatchStrategy
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательные инструменты
 # ---------------------------------------------------------------------------
+
 
 def _make_router(name: str = "test_router") -> RouterManager:
     return RouterManager(manager_name=name)
@@ -43,8 +44,8 @@ def _make_channel(name: str = "test_channel") -> tuple:
 # Тесты жизненного цикла
 # ---------------------------------------------------------------------------
 
-class TestLifecycle(unittest.TestCase):
 
+class TestLifecycle(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
 
@@ -89,8 +90,8 @@ class TestLifecycle(unittest.TestCase):
 # Тесты каналов
 # ---------------------------------------------------------------------------
 
-class TestChannels(unittest.TestCase):
 
+class TestChannels(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.router.initialize()
@@ -136,8 +137,8 @@ class TestChannels(unittest.TestCase):
 # Тесты отправки (send — синхронная)
 # ---------------------------------------------------------------------------
 
-class TestSendSync(unittest.TestCase):
 
+class TestSendSync(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -151,12 +152,14 @@ class TestSendSync(unittest.TestCase):
 
     def test_send_explicit_channel_success(self):
         """Если msg['channel'] задан явно — прямой O(1) lookup, маршрут не нужен."""
-        result = self.router.send({
-            "type": "command",
-            "command": "do_work",
-            "channel": "test_channel",
-            "data": {},
-        })
+        result = self.router.send(
+            {
+                "type": "command",
+                "command": "do_work",
+                "channel": "test_channel",
+                "data": {},
+            }
+        )
         self.assertEqual(result["status"], "success")
         self.assertFalse(self.q.empty())
 
@@ -206,8 +209,8 @@ class TestSendSync(unittest.TestCase):
 # Тесты отправки broadcast
 # ---------------------------------------------------------------------------
 
-class TestBroadcast(unittest.TestCase):
 
+class TestBroadcast(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch1, self.q1 = _make_channel("ch1")
@@ -239,8 +242,8 @@ class TestBroadcast(unittest.TestCase):
 # Тесты получения (receive — sync poll)
 # ---------------------------------------------------------------------------
 
-class TestReceive(unittest.TestCase):
 
+class TestReceive(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -290,7 +293,6 @@ class TestReceive(unittest.TestCase):
 
 
 class TestChannelTypesFilter(unittest.TestCase):
-
     def setUp(self):
         proc = SimpleNamespace(name="proc")
         self.router = RouterManager(manager_name="rt", process=proc)
@@ -321,7 +323,6 @@ class TestChannelTypesFilter(unittest.TestCase):
 
 
 class TestAttachLogger(unittest.TestCase):
-
     def setUp(self):
         self.router = _make_router()
         self.router.initialize()
@@ -344,8 +345,8 @@ class TestAttachLogger(unittest.TestCase):
 # Тесты message_dispatcher — обработчики входящих
 # ---------------------------------------------------------------------------
 
-class TestMessageHandlers(unittest.TestCase):
 
+class TestMessageHandlers(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -394,8 +395,8 @@ class TestMessageHandlers(unittest.TestCase):
 # Тесты send_async
 # ---------------------------------------------------------------------------
 
-class TestSendAsync(unittest.TestCase):
 
+class TestSendAsync(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -447,8 +448,8 @@ class TestSendAsync(unittest.TestCase):
 # Тесты middleware
 # ---------------------------------------------------------------------------
 
-class TestMiddleware(unittest.TestCase):
 
+class TestMiddleware(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -535,8 +536,8 @@ class TestMiddleware(unittest.TestCase):
 # Тесты register_channel_handler (backward compat)
 # ---------------------------------------------------------------------------
 
-class TestChannelHandlerBackwardCompat(unittest.TestCase):
 
+class TestChannelHandlerBackwardCompat(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -578,8 +579,8 @@ class TestChannelHandlerBackwardCompat(unittest.TestCase):
 # Тесты get_dispatcher_info
 # ---------------------------------------------------------------------------
 
-class TestDispatcherInfo(unittest.TestCase):
 
+class TestDispatcherInfo(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.router.initialize()
@@ -613,8 +614,8 @@ class TestDispatcherInfo(unittest.TestCase):
 # Тесты статистики
 # ---------------------------------------------------------------------------
 
-class TestStats(unittest.TestCase):
 
+class TestStats(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -667,8 +668,8 @@ class TestStats(unittest.TestCase):
 # Тесты async listener
 # ---------------------------------------------------------------------------
 
-class TestAsyncListener(unittest.TestCase):
 
+class TestAsyncListener(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -700,7 +701,9 @@ class TestAsyncListener(unittest.TestCase):
         self.assertEqual(len(received), 1)
 
     def test_remove_callback(self):
-        cb = lambda msg: None
+        def cb(msg):
+            pass
+
         self.router.add_message_callback(cb)
         self.router.remove_message_callback(cb)
         stats = self.router.get_stats()["router"]
@@ -710,6 +713,7 @@ class TestAsyncListener(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Тесты thread-safety
 # ---------------------------------------------------------------------------
+
 
 class TestThreadSafety(unittest.TestCase):
     """Параллельная регистрация / удаление каналов и колбэков не должна
@@ -789,10 +793,9 @@ class TestThreadSafety(unittest.TestCase):
                 errors.append(e)
 
         callbacks = [lambda msg, i=i: None for i in range(10)]
-        threads = (
-            [threading.Thread(target=adder, args=(cb,)) for cb in callbacks]
-            + [threading.Thread(target=remover, args=(cb,)) for cb in callbacks]
-        )
+        threads = [threading.Thread(target=adder, args=(cb,)) for cb in callbacks] + [
+            threading.Thread(target=remover, args=(cb,)) for cb in callbacks
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -847,10 +850,9 @@ class TestThreadSafety(unittest.TestCase):
             except Exception as e:
                 errors.append(e)
 
-        threads = (
-            [threading.Thread(target=sync_send, args=(i,)) for i in range(n)]
-            + [threading.Thread(target=async_send, args=(i,)) for i in range(n)]
-        )
+        threads = [threading.Thread(target=sync_send, args=(i,)) for i in range(n)] + [
+            threading.Thread(target=async_send, args=(i,)) for i in range(n)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -865,8 +867,8 @@ class TestThreadSafety(unittest.TestCase):
 # Тесты middleware — исключение в fn не убивает pipeline
 # ---------------------------------------------------------------------------
 
-class TestMiddlewareRobustness(unittest.TestCase):
 
+class TestMiddlewareRobustness(unittest.TestCase):
     def setUp(self):
         self.router = _make_router()
         self.ch, self.q = _make_channel()
@@ -878,6 +880,7 @@ class TestMiddlewareRobustness(unittest.TestCase):
 
     def test_exception_in_send_middleware_does_not_drop_message(self):
         """Если middleware бросает исключение — pipeline продолжается."""
+
         def broken(msg: dict):
             raise RuntimeError("middleware bug")
 
@@ -889,6 +892,7 @@ class TestMiddlewareRobustness(unittest.TestCase):
 
     def test_exception_in_receive_middleware_does_not_drop_message(self):
         """Если receive middleware бросает — сообщение доходит до result."""
+
         def broken(msg: dict):
             raise ValueError("oops")
 

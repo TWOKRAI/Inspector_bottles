@@ -4,14 +4,13 @@
 
 Без Qt-зависимостей: тесты чисто unit-уровня.
 """
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
-import pytest
 
 from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.middleware.audit_middleware import AuditMiddleware
@@ -59,9 +58,7 @@ class _FakeStateStore:
 def test_middleware_logs_action() -> None:
     """Авторизованный пользователь + action → AuditEntry.log() вызывается 1 раз."""
     mock_writer = MagicMock()
-    state_store = _FakeStateStore(
-        current_user={"user_id": "uid-alice", "username": "alice"}
-    )
+    state_store = _FakeStateStore(current_user={"user_id": "uid-alice", "username": "alice"})
 
     middleware = AuditMiddleware(mock_writer, state_store)
     action = _make_action()
@@ -97,9 +94,7 @@ def test_middleware_skips_no_user() -> None:
 def test_middleware_uses_action_resource_when_present() -> None:
     """action.resource задан → entry.resource == action.resource (игнорирует register_name)."""
     mock_writer = MagicMock()
-    state_store = _FakeStateStore(
-        current_user={"user_id": "uid-bob", "username": "bob"}
-    )
+    state_store = _FakeStateStore(current_user={"user_id": "uid-bob", "username": "bob"})
 
     middleware = AuditMiddleware(mock_writer, state_store)
 
@@ -108,8 +103,8 @@ def test_middleware_uses_action_resource_when_present() -> None:
         action_id=str(uuid.uuid4()),
         action_type="role_update",
         register_name="some_register",  # должен быть проигнорирован
-        field_name="some_field",        # должен быть проигнорирован
-        resource="roles.admin",         # именно это должно попасть в entry
+        field_name="some_field",  # должен быть проигнорирован
+        resource="roles.admin",  # именно это должно попасть в entry
         forward_patch={"permissions": ["roles.view"]},
         backward_patch={"permissions": []},
     )
@@ -124,9 +119,7 @@ def test_middleware_uses_action_resource_when_present() -> None:
 def test_middleware_falls_back_to_register_name() -> None:
     """action.resource отсутствует → entry.resource == action.register_name (fallback)."""
     mock_writer = MagicMock()
-    state_store = _FakeStateStore(
-        current_user={"user_id": "uid-carol", "username": "carol"}
-    )
+    state_store = _FakeStateStore(current_user={"user_id": "uid-carol", "username": "carol"})
 
     middleware = AuditMiddleware(mock_writer, state_store)
 

@@ -4,7 +4,7 @@
 Каждая область имеет свою цепочку. Цепочку можно копировать между областями.
 """
 
-from typing import List, Dict, Any, Type
+from typing import List, Dict, Type
 import numpy as np
 
 from .base import BaseProcessor
@@ -32,4 +32,5 @@ def run_chain(image: np.ndarray, chain: List[Dict], registry: Dict[str, Type[Bas
 def copy_chain(source_chain: List[Dict]) -> List[Dict]:
     """Глубокая копия цепочки (для копирования между областями)."""
     import copy
+
     return copy.deepcopy(source_chain)

@@ -1,9 +1,9 @@
 """NodeItem -- узел процесса на QGraphicsScene."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
 
@@ -15,6 +15,7 @@ from .port_schema import PortSchema
 @dataclass
 class NodeData:
     """Абстрактные данные узла (не привязан к SystemBlueprint)."""
+
     node_id: str
     title: str
     subtitle: str = ""  # обычно category
@@ -90,13 +91,19 @@ class NodeItem(QGraphicsRectItem):
         category = self._data.category
 
         input_port = PortItem(
-            "input", f"{node_id}.input", category, parent=self,
+            "input",
+            f"{node_id}.input",
+            category,
+            parent=self,
         )
         input_port.setPos(0, NODE_HEIGHT / 2)  # Левый край, середина
         self._input_ports.append(input_port)
 
         output_port = PortItem(
-            "output", f"{node_id}.output", category, parent=self,
+            "output",
+            f"{node_id}.output",
+            category,
+            parent=self,
         )
         output_port.setPos(NODE_WIDTH, NODE_HEIGHT / 2)  # Правый край, середина
         self._output_ports.append(output_port)

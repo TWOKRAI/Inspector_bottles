@@ -42,7 +42,7 @@ class InfoTickerWidget(QWidget):
         else:
             self._timer.stop()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API naming
+    def resizeEvent(self, event) -> None:
         self._label.setFixedHeight(self.height())
         super().resizeEvent(event)
 

@@ -1,11 +1,11 @@
 """
 Unit-тесты для config_module.tools.loader — ConfigLoader.
 """
+
 import json
 import os
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from multiprocess_framework.modules.config_module.tools.loader import ConfigLoader
 from multiprocess_framework.modules.config_module.core.config import Config
@@ -14,6 +14,7 @@ from multiprocess_framework.modules.config_module.core.config import Config
 # ---------------------------------------------------------------------------
 # build_dict — слои и merge
 # ---------------------------------------------------------------------------
+
 
 def test_empty_loader():
     result = ConfigLoader().build_dict()
@@ -31,22 +32,12 @@ def test_from_dict():
 
 
 def test_defaults_plus_dict():
-    result = (
-        ConfigLoader()
-        .defaults({"a": 1, "b": 2})
-        .from_dict({"b": 3, "c": 4})
-        .build_dict()
-    )
+    result = ConfigLoader().defaults({"a": 1, "b": 2}).from_dict({"b": 3, "c": 4}).build_dict()
     assert result == {"a": 1, "b": 3, "c": 4}
 
 
 def test_multiple_dicts_priority():
-    result = (
-        ConfigLoader()
-        .from_dict({"port": 5432})
-        .from_dict({"port": 3306})
-        .build_dict()
-    )
+    result = ConfigLoader().from_dict({"port": 5432}).from_dict({"port": 3306}).build_dict()
     assert result == {"port": 3306}
 
 
@@ -64,6 +55,7 @@ def test_nested_merge():
 # build — возвращает Config
 # ---------------------------------------------------------------------------
 
+
 def test_build_returns_config():
     cfg = ConfigLoader().from_dict({"key": "value"}).build()
     assert isinstance(cfg, Config)
@@ -71,12 +63,7 @@ def test_build_returns_config():
 
 
 def test_build_with_env_prefix():
-    cfg = (
-        ConfigLoader()
-        .from_dict({"key": "value"})
-        .from_env(prefix="MYAPP")
-        .build()
-    )
+    cfg = ConfigLoader().from_dict({"key": "value"}).from_env(prefix="MYAPP").build()
     assert isinstance(cfg, Config)
     # env_prefix передан в Config — проверяем через _env_prefix
     assert cfg._env_prefix == "MYAPP"
@@ -86,27 +73,20 @@ def test_build_with_env_prefix():
 # from_file
 # ---------------------------------------------------------------------------
 
+
 def test_from_file_json(tmp_path):
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps({"db": {"host": "prod-server"}}))
 
     result = (
-        ConfigLoader()
-        .defaults({"db": {"host": "localhost", "port": 5432}})
-        .from_file(str(config_file))
-        .build_dict()
+        ConfigLoader().defaults({"db": {"host": "localhost", "port": 5432}}).from_file(str(config_file)).build_dict()
     )
     assert result == {"db": {"host": "prod-server", "port": 5432}}
 
 
 def test_from_file_not_found_optional():
     """Несуществующий файл при required=False — пропускается."""
-    result = (
-        ConfigLoader()
-        .defaults({"a": 1})
-        .from_file("/nonexistent/config.yaml", required=False)
-        .build_dict()
-    )
+    result = ConfigLoader().defaults({"a": 1}).from_file("/nonexistent/config.yaml", required=False).build_dict()
     assert result == {"a": 1}
 
 
@@ -120,31 +100,23 @@ def test_from_file_not_found_required():
 # from_env_dict
 # ---------------------------------------------------------------------------
 
+
 def test_from_env_dict():
     with patch.dict(os.environ, {"MYAPP_DB_HOST": "env-host"}):
-        result = (
-            ConfigLoader()
-            .defaults({"db_host": "localhost"})
-            .from_env_dict("MYAPP", ["db_host"])
-            .build_dict()
-        )
+        result = ConfigLoader().defaults({"db_host": "localhost"}).from_env_dict("MYAPP", ["db_host"]).build_dict()
     assert result == {"db_host": "env-host"}
 
 
 def test_from_env_dict_missing_keys():
     """Отсутствующие env-переменные не добавляются."""
-    result = (
-        ConfigLoader()
-        .defaults({"a": 1})
-        .from_env_dict("MYAPP", ["nonexistent_key"])
-        .build_dict()
-    )
+    result = ConfigLoader().defaults({"a": 1}).from_env_dict("MYAPP", ["nonexistent_key"]).build_dict()
     assert result == {"a": 1}
 
 
 # ---------------------------------------------------------------------------
 # validate
 # ---------------------------------------------------------------------------
+
 
 def test_validate_success():
     """Валидация проходит — build_dict возвращает данные."""
@@ -154,12 +126,7 @@ def test_validate_success():
         host: str
         port: int
 
-    result = (
-        ConfigLoader()
-        .from_dict({"host": "localhost", "port": 5432})
-        .validate(TestSchema)
-        .build_dict()
-    )
+    result = ConfigLoader().from_dict({"host": "localhost", "port": 5432}).validate(TestSchema).build_dict()
     assert result == {"host": "localhost", "port": 5432}
 
 
@@ -179,6 +146,7 @@ def test_validate_failure():
 # Chaining / fluent API
 # ---------------------------------------------------------------------------
 
+
 def test_full_pipeline(tmp_path):
     """Полный pipeline: defaults → file → dict → env → validate → build."""
     config_file = tmp_path / "app.json"
@@ -195,5 +163,5 @@ def test_full_pipeline(tmp_path):
 
     assert isinstance(cfg, Config)
     assert cfg.get("db.host") == "localhost"  # из defaults
-    assert cfg.get("db.port") == 3306         # из file (override)
-    assert cfg.get("debug") is True           # из dict (override)
+    assert cfg.get("db.port") == 3306  # из file (override)
+    assert cfg.get("debug") is True  # из dict (override)

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from multiprocess_prototype.registers.theme.schemas import (
@@ -83,9 +82,7 @@ class TestOldCustomThemeLoads:
         # Оригинальные 24 переменных должны совпадать
         for key, expected_value in _ORIGINAL_24_VARS.items():
             actual = getattr(result, key)
-            assert actual == expected_value, (
-                f"Переменная '{key}': ожидалось '{expected_value}', получено '{actual}'"
-            )
+            assert actual == expected_value, f"Переменная '{key}': ожидалось '{expected_value}', получено '{actual}'"
 
         # Новые поля (добавленные при расширении до 152 переменных)
         # должны получить дефолтные значения из ThemeVariables
@@ -99,8 +96,7 @@ class TestOldCustomThemeLoads:
             expected_default = getattr(defaults, field_name)
             actual = getattr(result, field_name)
             assert actual == expected_default, (
-                f"Новое поле '{field_name}': ожидался дефолт '{expected_default}', "
-                f"получено '{actual}'"
+                f"Новое поле '{field_name}': ожидался дефолт '{expected_default}', получено '{actual}'"
             )
 
     def test_old_custom_theme_loads_direct_model_validate(self) -> None:
@@ -149,8 +145,7 @@ class TestFullThemeRoundtrip:
         for field_name, expected_value in original_data.items():
             actual_value = loaded_data[field_name]
             assert actual_value == expected_value, (
-                f"Round-trip: поле '{field_name}': ожидалось '{expected_value}', "
-                f"получено '{actual_value}'"
+                f"Round-trip: поле '{field_name}': ожидалось '{expected_value}', получено '{actual_value}'"
             )
 
     def test_full_theme_roundtrip_field_count(self, tmp_path: Path) -> None:
@@ -164,9 +159,7 @@ class TestFullThemeRoundtrip:
 
         expected_count = len(ThemeVariables.model_fields)
         actual_count = len(loaded_data)
-        assert actual_count == expected_count, (
-            f"Количество полей: ожидалось {expected_count}, получено {actual_count}"
-        )
+        assert actual_count == expected_count, f"Количество полей: ожидалось {expected_count}, получено {actual_count}"
         # Схема должна содержать как минимум 24 оригинальных переменных
         assert expected_count >= 24, f"Схема должна иметь минимум 24 поля, имеет {expected_count}"
 
@@ -198,7 +191,9 @@ class TestUnknownKeysIgnored:
         custom_dir = tmp_path / "custom_themes"
         custom_dir.mkdir(parents=True, exist_ok=True)
         yaml_content = yaml.dump(
-            data_with_extra, default_flow_style=False, allow_unicode=True,
+            data_with_extra,
+            default_flow_style=False,
+            allow_unicode=True,
         )
         (custom_dir / "compat_test.yaml").write_text(yaml_content, encoding="utf-8")
 
@@ -233,40 +228,30 @@ class TestAllOriginalVarsUnchanged:
         defaults = get_default_variables()
 
         for field_name, expected_value in _ORIGINAL_24_VARS.items():
-            assert field_name in defaults, (
-                f"Оригинальная переменная '{field_name}' отсутствует в схеме"
-            )
+            assert field_name in defaults, f"Оригинальная переменная '{field_name}' отсутствует в схеме"
             actual_value = defaults[field_name]
             assert actual_value == expected_value, (
-                f"Дефолт '{field_name}' изменился: "
-                f"ожидалось '{expected_value}', получено '{actual_value}'"
+                f"Дефолт '{field_name}' изменился: ожидалось '{expected_value}', получено '{actual_value}'"
             )
 
     def test_original_vars_present_in_schema(self) -> None:
         """Все 24 оригинальных переменных присутствуют в ThemeVariables.model_fields."""
         all_fields = set(ThemeVariables.model_fields.keys())
         for field_name in _ORIGINAL_24_VARS:
-            assert field_name in all_fields, (
-                f"Оригинальная переменная '{field_name}' пропала из схемы ThemeVariables"
-            )
+            assert field_name in all_fields, f"Оригинальная переменная '{field_name}' пропала из схемы ThemeVariables"
 
     def test_schema_has_more_than_24_fields(self) -> None:
         """Схема расширена и содержит больше 24 полей."""
         total_fields = len(ThemeVariables.model_fields)
-        assert total_fields > 24, (
-            f"Схема должна содержать более 24 полей (расширение), имеет {total_fields}"
-        )
+        assert total_fields > 24, f"Схема должна содержать более 24 полей (расширение), имеет {total_fields}"
 
     def test_get_default_variables_returns_all_fields(self) -> None:
         """get_default_variables() возвращает все поля схемы как dict."""
         defaults = get_default_variables()
         expected_count = len(ThemeVariables.model_fields)
         assert len(defaults) == expected_count, (
-            f"get_default_variables() вернул {len(defaults)} полей, "
-            f"ожидалось {expected_count}"
+            f"get_default_variables() вернул {len(defaults)} полей, ожидалось {expected_count}"
         )
         # Все значения должны быть строками
         for key, value in defaults.items():
-            assert isinstance(value, str), (
-                f"Поле '{key}': ожидалась str, получено {type(value).__name__}"
-            )
+            assert isinstance(value, str), f"Поле '{key}': ожидалась str, получено {type(value).__name__}"

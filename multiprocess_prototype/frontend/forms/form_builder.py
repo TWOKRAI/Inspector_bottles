@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHeaderView,
-    QLabel,
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Cards view
 # ---------------------------------------------------------------------------
+
 
 def build_form_for_register(
     fields: list[FieldInfo],
@@ -193,7 +194,7 @@ def build_table_for_register(
 
             # Колонка 0: Параметр (название)
             name_item = QTableWidgetItem(fi.title)
-            name_item.setFlags(name_item.flags() & ~(name_item.flags() & name_item.flags()))  # noqa
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 0, name_item)
 
             # Колонка 1: Значение (виджет)
@@ -218,6 +219,7 @@ def build_table_for_register(
 # ---------------------------------------------------------------------------
 # Утилиты
 # ---------------------------------------------------------------------------
+
 
 def _editor_key(fi: FieldInfo) -> str:
     """Ключ редактора: plugin_name.field_name или просто field_name."""

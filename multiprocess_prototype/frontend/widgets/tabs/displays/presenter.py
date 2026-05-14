@@ -1,6 +1,7 @@
 """DisplaysPresenter — бизнес-логика таба дисплеев."""
+
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
@@ -51,10 +52,7 @@ class DisplaysPresenter:
     def apply_preset(self, preset_name: str) -> list[dict[str, str]]:
         """Применить пресет — заменить все слоты."""
         slot_ids = DISPLAY_PRESETS.get(preset_name, [])
-        self._slots = [
-            {"slot_id": sid, "source": "", "label": sid}
-            for sid in slot_ids
-        ]
+        self._slots = [{"slot_id": sid, "source": "", "label": sid} for sid in slot_ids]
         return list(self._slots)
 
     def add_slot(self, slot_id: str = "") -> dict[str, str]:

@@ -5,6 +5,7 @@ StatsAdapter — связывает StatsManager с CommandManager.
 Регистрирует команды get_metrics, get_metric, reset_metrics, stats_snapshot,
 flush_stats для доступа к метрикам через CommandManager.
 """
+
 from typing import Any, Optional
 
 from ...base_manager.adapters.base_adapter import BaseAdapter
@@ -64,7 +65,10 @@ class StatsAdapter(BaseAdapter):
             )
 
             self._initialized = True
-            self._log("info", "StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered")
+            self._log(
+                "info",
+                "StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered",
+            )
             return True
 
         except Exception as exc:

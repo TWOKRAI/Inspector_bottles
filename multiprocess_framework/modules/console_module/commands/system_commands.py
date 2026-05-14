@@ -5,6 +5,7 @@ SystemCommandHandler — базовые системные команды God Mo
 Не зависит от registers_module.
 Все методы работают без crash при отсутствии менеджеров.
 """
+
 import os
 from typing import Any, Dict, List, Optional
 
@@ -22,10 +23,10 @@ class SystemCommandHandler:
 
     # Описания встроенных команд этого обработчика
     _BUILTIN_DESCRIPTIONS: Dict[str, str] = {
-        "help":   "Show available commands and descriptions",
+        "help": "Show available commands and descriptions",
         "status": "Show current process state (name, pid, managers)",
-        "ps":     "List child processes (if process_manager available)",
-        "stats":  "Show aggregated metrics (if stats_manager available)",
+        "ps": "List child processes (if process_manager available)",
+        "stats": "Show aggregated metrics (if stats_manager available)",
     }
 
     def __init__(self, process_info: Optional[Any] = None) -> None:
@@ -60,7 +61,8 @@ class SystemCommandHandler:
                 lines.append(f"  {name:<20} {description}")
 
         lines.append("-" * 40)
-        lines.append(f"Total: {len(command_registry) if command_registry else len(self._BUILTIN_DESCRIPTIONS)} command(s)")
+        count = len(command_registry) if command_registry else len(self._BUILTIN_DESCRIPTIONS)
+        lines.append(f"Total: {count} command(s)")
         return "\n".join(lines)
 
     # =========================================================================
@@ -109,8 +111,12 @@ class SystemCommandHandler:
             else:
                 # Попробуем найти менеджеры как атрибуты объекта
                 known_managers = [
-                    "logger_manager", "command_manager", "router_manager",
-                    "stats_manager", "console_manager", "error_manager",
+                    "logger_manager",
+                    "command_manager",
+                    "router_manager",
+                    "stats_manager",
+                    "console_manager",
+                    "error_manager",
                 ]
                 found = [m for m in known_managers if getattr(target, m, None) is not None]
                 if found:
@@ -229,6 +235,7 @@ class SystemCommandHandler:
 # =============================================================================
 # Вспомогательные функции
 # =============================================================================
+
 
 def _get_attr(obj: Any, key: str, default: Any = None) -> Any:
     """Получить значение из dict или атрибута объекта."""

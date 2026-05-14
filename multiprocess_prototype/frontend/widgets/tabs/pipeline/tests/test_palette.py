@@ -1,18 +1,13 @@
 """Тесты для PluginPalette и PipelineDropTarget."""
+
 from __future__ import annotations
 
-import pytest
-from unittest.mock import MagicMock
-
-from PySide6.QtCore import QPointF
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette import (
     PluginPalette,
-    PipelineDropTarget,
 )
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
     CATEGORY_ORDER,
-    MIME_TYPE,
 )
 
 # ---------------------------------------------------------------------------
@@ -49,10 +44,7 @@ class TestPluginPalette:
 
         # 4 категории: source, processing, output, utility
         # Всего листьев: 5 (capture, color_mask, blur, display, logger)
-        total_leaves = sum(
-            palette.tree.topLevelItem(i).childCount()
-            for i in range(palette.tree.topLevelItemCount())
-        )
+        total_leaves = sum(palette.tree.topLevelItem(i).childCount() for i in range(palette.tree.topLevelItemCount()))
         assert total_leaves == len(SAMPLE_PLUGINS)
 
     def test_plugins_grouped_by_category(self, qtbot):
@@ -137,6 +129,7 @@ class TestPluginPalette:
         for i in range(source_item.childCount()):
             child = source_item.child(i)
             from PySide6.QtCore import Qt
+
             name = child.data(0, Qt.ItemDataRole.UserRole)
             if name == "capture":
                 capture_visible = not child.isHidden()

@@ -15,6 +15,7 @@ custom_factories: dict[tab_id -> Callable[[AppContext], QWidget]]
 
     Если в AppContext нет `auth_state` — все табы видимы (legacy-режим).
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,13 +45,48 @@ logger = logging.getLogger(__name__)
 #     None означает «доступен всем» (например, для гостевых табов до login).
 
 TAB_ORDER: list[dict] = [
-    {"id": "settings",  "title": "Settings",  "description": "Администрирование, конфиг системы", "view_permission": "tabs.settings.view"},
-    {"id": "recipes",   "title": "Recipes",   "description": "Пресеты/рецепты обработки",         "view_permission": "tabs.recipes.view"},
-    {"id": "processes", "title": "Processes", "description": "Управление процессами",             "view_permission": "tabs.processes.view"},
-    {"id": "services",  "title": "Services",  "description": "Камеры SDK, БД, робот, нейронки",   "view_permission": "tabs.services.view"},
-    {"id": "plugins",   "title": "Plugins",   "description": "Обработка изображений, мосты",      "view_permission": "tabs.plugins.view"},
-    {"id": "pipeline",  "title": "Pipeline",  "description": "Визуальный конструктор цепочек",    "view_permission": "tabs.pipeline.view"},
-    {"id": "displays",  "title": "Displays",  "description": "Управление экранами вывода",        "view_permission": "tabs.displays.view"},
+    {
+        "id": "settings",
+        "title": "Settings",
+        "description": "Администрирование, конфиг системы",
+        "view_permission": "tabs.settings.view",
+    },
+    {
+        "id": "recipes",
+        "title": "Recipes",
+        "description": "Пресеты/рецепты обработки",
+        "view_permission": "tabs.recipes.view",
+    },
+    {
+        "id": "processes",
+        "title": "Processes",
+        "description": "Управление процессами",
+        "view_permission": "tabs.processes.view",
+    },
+    {
+        "id": "services",
+        "title": "Services",
+        "description": "Камеры SDK, БД, робот, нейронки",
+        "view_permission": "tabs.services.view",
+    },
+    {
+        "id": "plugins",
+        "title": "Plugins",
+        "description": "Обработка изображений, мосты",
+        "view_permission": "tabs.plugins.view",
+    },
+    {
+        "id": "pipeline",
+        "title": "Pipeline",
+        "description": "Визуальный конструктор цепочек",
+        "view_permission": "tabs.pipeline.view",
+    },
+    {
+        "id": "displays",
+        "title": "Displays",
+        "description": "Управление экранами вывода",
+        "view_permission": "tabs.displays.view",
+    },
 ]
 
 
@@ -151,9 +187,7 @@ class TabFactory:
             if tab_id in self._custom_factories:
                 # Ленивая инициализация: factory вызывается только при первом show
                 factory_fn = self._custom_factories[tab_id]
-                widget: QWidget = LazyTabWidget(
-                    lambda fn=factory_fn: fn(self._ctx)
-                )
+                widget: QWidget = LazyTabWidget(lambda fn=factory_fn: fn(self._ctx))
             else:
                 # Заглушка — создаётся сразу (лёгкий виджет)
                 widget = PlaceholderTab(

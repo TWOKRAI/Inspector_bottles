@@ -3,7 +3,6 @@
 import threading
 import time
 
-import pytest
 
 from multiprocess_framework.modules.process_module.generic.inspector_manager import (
     InspectorManager,
@@ -56,13 +55,15 @@ class TestFanIn:
         mgr = InspectorManager(on_ready=results.append)
 
         for i in range(3):
-            mgr.on_item({
-                "frame": f"region_{i}",
-                "camera_id": 0,
-                "seq_id": 5,
-                "total_regions": 3,
-                "region_name": f"r{i}",
-            })
+            mgr.on_item(
+                {
+                    "frame": f"region_{i}",
+                    "camera_id": 0,
+                    "seq_id": 5,
+                    "total_regions": 3,
+                    "region_name": f"r{i}",
+                }
+            )
 
         assert len(results) == 1
         assert len(results[0]) == 3
@@ -74,13 +75,15 @@ class TestFanIn:
         mgr = InspectorManager(on_ready=results.append)
 
         for i in range(2):
-            mgr.on_item({
-                "frame": f"region_{i}",
-                "camera_id": 0,
-                "seq_id": 5,
-                "total_regions": 3,
-                "region_name": f"r{i}",
-            })
+            mgr.on_item(
+                {
+                    "frame": f"region_{i}",
+                    "camera_id": 0,
+                    "seq_id": 5,
+                    "total_regions": 3,
+                    "region_name": f"r{i}",
+                }
+            )
 
         assert len(results) == 0
         assert mgr.pending_count == 1
@@ -92,23 +95,27 @@ class TestFanIn:
 
         # Камера 0: 2 региона
         for i in range(2):
-            mgr.on_item({
-                "frame": f"cam0_r{i}",
-                "camera_id": 0,
-                "seq_id": 5,
-                "total_regions": 2,
-                "region_name": f"r{i}",
-            })
+            mgr.on_item(
+                {
+                    "frame": f"cam0_r{i}",
+                    "camera_id": 0,
+                    "seq_id": 5,
+                    "total_regions": 2,
+                    "region_name": f"r{i}",
+                }
+            )
 
         # Камера 1: 2 региона
         for i in range(2):
-            mgr.on_item({
-                "frame": f"cam1_r{i}",
-                "camera_id": 1,
-                "seq_id": 5,
-                "total_regions": 2,
-                "region_name": f"r{i}",
-            })
+            mgr.on_item(
+                {
+                    "frame": f"cam1_r{i}",
+                    "camera_id": 1,
+                    "seq_id": 5,
+                    "total_regions": 2,
+                    "region_name": f"r{i}",
+                }
+            )
 
         assert len(results) == 2
         # Первая коллекция — камера 0
@@ -122,12 +129,14 @@ class TestFanIn:
         mgr = InspectorManager(on_ready=results.append)
 
         for i in range(2):
-            mgr.on_item({
-                "frame": f"r{i}",
-                "seq_id": 1,
-                "total_regions": 2,
-                "region_name": f"r{i}",
-            })
+            mgr.on_item(
+                {
+                    "frame": f"r{i}",
+                    "seq_id": 1,
+                    "total_regions": 2,
+                    "region_name": f"r{i}",
+                }
+            )
 
         assert len(results) == 1
         assert len(results[0]) == 2
@@ -143,13 +152,15 @@ class TestTimeout:
 
         # Добавляем 2 из 3
         for i in range(2):
-            mgr.on_item({
-                "frame": f"r{i}",
-                "camera_id": 0,
-                "seq_id": 5,
-                "total_regions": 3,
-                "region_name": f"r{i}",
-            })
+            mgr.on_item(
+                {
+                    "frame": f"r{i}",
+                    "camera_id": 0,
+                    "seq_id": 5,
+                    "total_regions": 3,
+                    "region_name": f"r{i}",
+                }
+            )
 
         assert len(results) == 0
 
@@ -166,13 +177,15 @@ class TestTimeout:
         results = []
         mgr = InspectorManager(timeout_sec=1.0, on_ready=results.append)
 
-        mgr.on_item({
-            "frame": "r0",
-            "camera_id": 0,
-            "seq_id": 5,
-            "total_regions": 3,
-            "region_name": "r0",
-        })
+        mgr.on_item(
+            {
+                "frame": "r0",
+                "camera_id": 0,
+                "seq_id": 5,
+                "total_regions": 3,
+                "region_name": "r0",
+            }
+        )
 
         mgr.check_timeouts()
         assert len(results) == 0
@@ -192,20 +205,24 @@ class TestEdgeCases:
         )
 
         # Два item с одинаковым region_name
-        mgr.on_item({
-            "frame": "first",
-            "camera_id": 0,
-            "seq_id": 1,
-            "total_regions": 2,
-            "region_name": "r0",
-        })
-        mgr.on_item({
-            "frame": "duplicate",
-            "camera_id": 0,
-            "seq_id": 1,
-            "total_regions": 2,
-            "region_name": "r0",
-        })
+        mgr.on_item(
+            {
+                "frame": "first",
+                "camera_id": 0,
+                "seq_id": 1,
+                "total_regions": 2,
+                "region_name": "r0",
+            }
+        )
+        mgr.on_item(
+            {
+                "frame": "duplicate",
+                "camera_id": 0,
+                "seq_id": 1,
+                "total_regions": 2,
+                "region_name": "r0",
+            }
+        )
 
         # Warning залогирован
         assert len(warnings) == 1
@@ -235,13 +252,15 @@ class TestThreadSafety:
         def worker(start_seq):
             for seq in range(start_seq, start_seq + num_collections):
                 for r in range(regions_per_collection):
-                    mgr.on_item({
-                        "frame": f"seq{seq}_r{r}",
-                        "camera_id": 0,
-                        "seq_id": seq,
-                        "total_regions": regions_per_collection,
-                        "region_name": f"r{r}",
-                    })
+                    mgr.on_item(
+                        {
+                            "frame": f"seq{seq}_r{r}",
+                            "camera_id": 0,
+                            "seq_id": seq,
+                            "total_regions": regions_per_collection,
+                            "region_name": f"r{r}",
+                        }
+                    )
 
         # Два потока с разными seq_id диапазонами
         t1 = threading.Thread(target=worker, args=(0,))

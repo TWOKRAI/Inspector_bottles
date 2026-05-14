@@ -87,7 +87,7 @@ class Hit:
     tag: str
     text: str
     author: str = ""
-    date: str = ""    # ISO YYYY-MM-DD
+    date: str = ""  # ISO YYYY-MM-DD
     age_days: int = -1
 
 
@@ -205,10 +205,10 @@ def annotate_blame(hits: list[Hit], cwd: Path) -> None:
                     cur_final = -1
                 continue
             if raw.startswith("author "):
-                cur_author = raw[len("author "):].strip()
+                cur_author = raw[len("author ") :].strip()
             elif raw.startswith("author-time "):
                 try:
-                    cur_ts = int(raw[len("author-time "):].strip())
+                    cur_ts = int(raw[len("author-time ") :].strip())
                 except ValueError:
                     cur_ts = 0
 
@@ -315,16 +315,14 @@ def render_csv(hits: list[Hit]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="todo_inventory",
-                                description="Инвентаризация TODO/FIXME с git blame.")
+    p = argparse.ArgumentParser(prog="todo_inventory", description="Инвентаризация TODO/FIXME с git blame.")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
     p.add_argument("--group-by", choices=["tag", "file", "author", "none"], default=None)
     p.add_argument("--sort-by", choices=["age", "tag", "file", "author"], default=None)
     p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--no-blame", action="store_true",
-                   help="Не запускать git blame (быстрее, но без автора/возраста).")
+    p.add_argument("--no-blame", action="store_true", help="Не запускать git blame (быстрее, но без автора/возраста).")
     return p
 
 
@@ -337,12 +335,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     overrides = {}
-    if args.root is not None: overrides["root"] = args.root
-    if args.format is not None: overrides["output_format"] = args.format
-    if args.group_by is not None: overrides["group_by"] = args.group_by
-    if args.sort_by is not None: overrides["sort_by"] = args.sort_by
-    if args.limit is not None: overrides["limit"] = args.limit
-    if args.no_blame: overrides["git_blame"] = False
+    if args.root is not None:
+        overrides["root"] = args.root
+    if args.format is not None:
+        overrides["output_format"] = args.format
+    if args.group_by is not None:
+        overrides["group_by"] = args.group_by
+    if args.sort_by is not None:
+        overrides["sort_by"] = args.sort_by
+    if args.limit is not None:
+        overrides["limit"] = args.limit
+    if args.no_blame:
+        overrides["git_blame"] = False
     if overrides:
         cfg = Config(**{**cfg.__dict__, **overrides})
 

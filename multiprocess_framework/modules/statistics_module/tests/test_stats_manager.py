@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """Тесты StatsManager."""
-import time
-import pytest
 
 from .. import StatsManager, StatsManagerConfig, IStatsManager
 from ...channel_routing_module.interfaces import IChannelRoutingManager
 
 
 class TestStatsManagerCreation:
-
     def test_create_manager(self):
         mgr = StatsManager(manager_name="TestStats", config={})
         assert mgr.manager_name == "TestStats"
@@ -38,7 +35,6 @@ class TestStatsManagerCreation:
 
 
 class TestMetricTypes:
-
     def setup_method(self):
         self.mgr = StatsManager(
             manager_name="TestStats",
@@ -169,10 +165,17 @@ class TestNoCounting:
             def __init__(self, n):
                 self._name = n
                 self.received = []
+
             @property
-            def name(self): return self._name
-            def write(self, data): self.received.append(data); return {"status": "ok"}
-            def close(self): pass
+            def name(self):
+                return self._name
+
+            def write(self, data):
+                self.received.append(data)
+                return {"status": "ok"}
+
+            def close(self):
+                pass
 
         mgr = StatsManager(
             manager_name="TestStats",
@@ -204,7 +207,6 @@ class TestNoCounting:
 
 
 class TestFlushAndChannels:
-
     def test_manual_flush(self):
         """flush() не должен кидать исключений."""
         mgr = StatsManager(

@@ -10,7 +10,6 @@ Unit-тесты для registers_io.
 from typing import Any, Dict
 
 import pytest
-from pydantic import BaseModel
 
 from ..serialization.io import (
     registers_to_dict,

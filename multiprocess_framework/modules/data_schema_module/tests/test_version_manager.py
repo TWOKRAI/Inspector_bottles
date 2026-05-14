@@ -8,14 +8,14 @@ Unit-тесты для VersionManager (versioning/version_manager.py).
 """
 
 import pytest
-from typing import Optional
 from unittest.mock import Mock
 
 from ..registry.schema_registry import SchemaManager
-from ..versioning.version_manager import VersionManager, VersionInfo
+from ..versioning.version_manager import VersionManager
 from ..storage.storage_manager import StorageManager
 from ..models.base import BaseManagerModel
 from ..models.types import ComponentType
+
 # Опциональный импорт ProcessData для тестов
 try:
     from ...process_module.process_data import ProcessData
@@ -30,7 +30,7 @@ except ImportError:
 # Тестовая модель (префикс _ чтобы pytest не собирал как тест)
 class _TestManagerModel(BaseManagerModel):
     """Тестовая модель менеджера."""
-    
+
     test_field: str = "default"
 
 
@@ -48,10 +48,7 @@ def schema_registry():
 def mock_process_data():
     """Создает mock ProcessData."""
     process_data = Mock(spec=ProcessData)
-    process_data.custom = {
-        'component_managers': {},
-        'component_managers_versions': {}
-    }
+    process_data.custom = {"component_managers": {}, "component_managers_versions": {}}
     process_data.update_timestamp = Mock()
     return process_data
 
@@ -77,43 +74,36 @@ def manager_model():
         component_class="TestManager",
         name="test_manager",
         component_type=ComponentType.MANAGER,
-        config={"test_field": "test_value"}
+        config={"test_field": "test_value"},
     )
 
 
 def test_create_version(version_manager, manager_model, mock_process_data):
     """Тест создания версии."""
-    version = version_manager.create_version(
-        manager_model,
-        comment="Test version",
-        tags=["test"]
-    )
-    
+    version = version_manager.create_version(manager_model, comment="Test version", tags=["test"])
+
     assert version == 1
-    assert 'component_managers_versions' in mock_process_data.custom
-    versions_dict = mock_process_data.custom['component_managers_versions']
-    assert 'TestManager' in versions_dict
-    assert 'test_manager' in versions_dict['TestManager']
-    
-    manager_versions = versions_dict['TestManager']['test_manager']
-    assert manager_versions['current_version'] == 1
-    assert '1' in manager_versions['versions']
-    
-    version_info = manager_versions['versions']['1']
-    assert version_info['version'] == 1
-    assert version_info['comment'] == "Test version"
-    assert "test" in version_info['tags']
+    assert "component_managers_versions" in mock_process_data.custom
+    versions_dict = mock_process_data.custom["component_managers_versions"]
+    assert "TestManager" in versions_dict
+    assert "test_manager" in versions_dict["TestManager"]
+
+    manager_versions = versions_dict["TestManager"]["test_manager"]
+    assert manager_versions["current_version"] == 1
+    assert "1" in manager_versions["versions"]
+
+    version_info = manager_versions["versions"]["1"]
+    assert version_info["version"] == 1
+    assert version_info["comment"] == "Test version"
+    assert "test" in version_info["tags"]
 
 
 def test_get_current_version(version_manager, manager_model, mock_process_data):
     """Тест получения текущей версии."""
     # Создаем версию
     version_manager.create_version(manager_model)
-    
-    current = version_manager.get_current_version(
-        "TestManager",
-        "test_manager"
-    )
+
+    current = version_manager.get_current_version("TestManager", "test_manager")
     assert current == 1
 
 
@@ -121,14 +111,10 @@ def test_get_version(version_manager, manager_model, mock_process_data, schema_r
     """Тест получения модели по версии."""
     # Создаем версию
     version_manager.create_version(manager_model)
-    
+
     # Получаем версию
-    retrieved = version_manager.get_version(
-        "TestManager",
-        "test_manager",
-        1
-    )
-    
+    retrieved = version_manager.get_version("TestManager", "test_manager", 1)
+
     assert retrieved is not None
     assert isinstance(retrieved, BaseManagerModel)
     assert retrieved.component_class == "TestManager"
@@ -140,31 +126,22 @@ def test_get_version_history(version_manager, manager_model, mock_process_data):
     # Создаем несколько версий
     version_manager.create_version(manager_model, comment="Version 1")
     version_manager.create_version(manager_model, comment="Version 2")
-    
-    history = version_manager.get_version_history(
-        "TestManager",
-        "test_manager"
-    )
-    
+
+    history = version_manager.get_version_history("TestManager", "test_manager")
+
     assert len(history) == 2
-    assert history[0]['version'] == 2  # Сортировка от новых к старым
-    assert history[1]['version'] == 1
+    assert history[0]["version"] == 2  # Сортировка от новых к старым
+    assert history[1]["version"] == 1
 
 
 def test_rollback(version_manager, manager_model, mock_process_data, mock_storage_manager):
     """Тест отката к предыдущей версии."""
     # Создаем версию
     version_manager.create_version(manager_model, comment="Version 1")
-    
+
     # Откатываемся
-    success = version_manager.rollback(
-        "TestManager",
-        "test_manager",
-        1,
-        create_new_version=True,
-        comment="Rollback"
-    )
-    
+    success = version_manager.rollback("TestManager", "test_manager", 1, create_new_version=True, comment="Rollback")
+
     assert success
     # Проверяем, что была создана новая версия с откатом
     history = version_manager.get_version_history("TestManager", "test_manager")
@@ -178,28 +155,22 @@ def test_compare_versions(version_manager, manager_model, mock_process_data, sch
         component_class="TestManager",
         name="test_manager",
         component_type=ComponentType.MANAGER,
-        config={"test_field": "value1"}
+        config={"test_field": "value1"},
     )
     version_manager.create_version(model1)
-    
+
     # Создаем вторую версию с изменением
     model2 = _TestManagerModel(
         component_class="TestManager",
         name="test_manager",
         component_type=ComponentType.MANAGER,
-        config={"test_field": "value2"}
+        config={"test_field": "value2"},
     )
     version_manager.create_version(model2)
-    
-    # Сравниваем версии
-    diff = version_manager.compare_versions(
-        "TestManager",
-        "test_manager",
-        1,
-        2
-    )
-    
-    assert 'differences' in diff
-    assert diff['version1'] == 1
-    assert diff['version2'] == 2
 
+    # Сравниваем версии
+    diff = version_manager.compare_versions("TestManager", "test_manager", 1, 2)
+
+    assert "differences" in diff
+    assert diff["version1"] == 1
+    assert diff["version2"] == 2

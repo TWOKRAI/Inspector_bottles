@@ -4,6 +4,7 @@
 Интеграционные тесты используют StateStoreManager напрямую.
 GuiStateProxy тестируется без Qt через fallback-режим (signal_emitter=None).
 """
+
 from __future__ import annotations
 
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
@@ -15,6 +16,7 @@ from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy imp
 # ---------------------------------------------------------------------------
 # MockRouter — мок RouterManager для тестов
 # ---------------------------------------------------------------------------
+
 
 class MockRouter:
     """Мок RouterManager для тестов StateProxy."""
@@ -59,6 +61,7 @@ class MockRouter:
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 
+
 def _make_state_changed_msg(deltas: list[Delta]) -> dict:
     """Создать IPC-сообщение state.changed из списка дельт."""
     return {
@@ -81,6 +84,7 @@ def _make_mock_logger(warnings_sink: list[str]):
     `manager.warning(...)` или `manager.log_warning(...)` на переданном logger.
     Достаточно реализовать оба интерфейса.
     """
+
     class _Logger:
         def warning(self, msg, *args, **kwargs):
             warnings_sink.append(msg if not args else msg % args)
@@ -89,12 +93,23 @@ def _make_mock_logger(warnings_sink: list[str]):
             self.warning(msg, *args, **kwargs)
 
         # Остальные уровни — no-op
-        def info(self, *a, **kw): pass
-        def debug(self, *a, **kw): pass
-        def error(self, *a, **kw): pass
-        def log_info(self, *a, **kw): pass
-        def log_debug(self, *a, **kw): pass
-        def log_error(self, *a, **kw): pass
+        def info(self, *a, **kw):
+            pass
+
+        def debug(self, *a, **kw):
+            pass
+
+        def error(self, *a, **kw):
+            pass
+
+        def log_info(self, *a, **kw):
+            pass
+
+        def log_debug(self, *a, **kw):
+            pass
+
+        def log_error(self, *a, **kw):
+            pass
 
     return _Logger()
 
@@ -102,6 +117,7 @@ def _make_mock_logger(warnings_sink: list[str]):
 # ===========================================================================
 # Тесты StateProxy — инициализация
 # ===========================================================================
+
 
 class TestStateProxyInit:
     """Инициализация и базовые свойства StateProxy."""
@@ -127,6 +143,7 @@ class TestStateProxyInit:
 # ===========================================================================
 # Тесты StateProxy — запись (set, merge)
 # ===========================================================================
+
 
 class TestStateProxyWrite:
     """Тесты методов set и merge."""
@@ -191,6 +208,7 @@ class TestStateProxyWrite:
 # ===========================================================================
 # Тесты StateProxy — чтение (get, get_subtree)
 # ===========================================================================
+
 
 class TestStateProxyRead:
     """Тесты методов get и get_subtree."""
@@ -270,6 +288,7 @@ class TestStateProxyRead:
 # Тесты StateProxy — подписки
 # ===========================================================================
 
+
 class TestStateProxySubscribe:
     """Тесты методов subscribe и unsubscribe."""
 
@@ -279,7 +298,9 @@ class TestStateProxySubscribe:
         router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "test-sub-1"})
         proxy = StateProxy("camera_0", router=router)
 
-        callback = lambda deltas: None
+        def callback(deltas):
+            pass
+
         sub_id = proxy.subscribe("cameras.0.config.*", callback)
 
         assert sub_id == "test-sub-1"
@@ -403,6 +424,7 @@ class TestStateProxySubscribe:
 # Тесты StateProxy — обработка входящих
 # ===========================================================================
 
+
 class TestStateProxyOnStateChanged:
     """Тесты on_state_changed: кэш + callbacks."""
 
@@ -497,6 +519,7 @@ class TestStateProxyOnStateChanged:
 # Тесты StateProxy — фильтрация callbacks по pattern подписки
 # ===========================================================================
 
+
 class TestStateProxyCallbackFiltering:
     """Каждый callback получает ТОЛЬКО дельты, чьи path матчат его pattern."""
 
@@ -519,9 +542,7 @@ class TestStateProxyCallbackFiltering:
 
     def test_callback_receives_only_matching_deltas(self):
         """Callback с pattern 'cameras.0.*' не должен получать дельты renderer.*"""
-        proxy, _router, received = self._make_proxy_with_subs(
-            "cameras.0.*", "renderer.*"
-        )
+        proxy, _router, received = self._make_proxy_with_subs("cameras.0.*", "renderer.*")
 
         deltas = [
             _make_delta(path="cameras.0.fps", new=30),
@@ -542,9 +563,7 @@ class TestStateProxyCallbackFiltering:
         proxy, _router, received = self._make_proxy_with_subs("renderer.*")
 
         # Только cameras.* — для renderer.* совпадений нет
-        proxy.on_state_changed(
-            _make_state_changed_msg([_make_delta(path="cameras.0.fps", new=30)])
-        )
+        proxy.on_state_changed(_make_state_changed_msg([_make_delta(path="cameras.0.fps", new=30)]))
 
         assert received["renderer.*"] == []
 
@@ -590,6 +609,7 @@ class TestStateProxyCallbackFiltering:
 # Тесты StateProxy — lifecycle
 # ===========================================================================
 
+
 class TestStateProxyLifecycle:
     """Тесты shutdown."""
 
@@ -630,6 +650,7 @@ class TestStateProxyLifecycle:
 # ===========================================================================
 # Тесты GuiStateProxy
 # ===========================================================================
+
 
 class TestGuiStateProxy:
     """Тесты GuiStateProxy в fallback-режиме (без Qt)."""
@@ -706,6 +727,7 @@ class TestGuiStateProxy:
 # Интеграционные тесты: StateProxy + StateStoreManager
 # ===========================================================================
 
+
 class TestStateProxyIntegration:
     """Интеграционные тесты: proxy <-> manager в одном процессе."""
 
@@ -737,13 +759,15 @@ class TestStateProxyIntegration:
         received: list[list[Delta]] = []
 
         # Подписываемся через менеджер напрямую (симулируем IPC)
-        sub_result = mgr.handle_state_subscribe({
-            "data": {
-                "pattern": "cameras.**",
-                "subscriber": "camera_0",
-                "exclude_sources": [],
-            },
-        })
+        sub_result = mgr.handle_state_subscribe(
+            {
+                "data": {
+                    "pattern": "cameras.**",
+                    "subscriber": "camera_0",
+                    "exclude_sources": [],
+                },
+            }
+        )
         assert sub_result["status"] == "ok"
         sub_id = sub_result["sub_id"]
 
@@ -752,9 +776,11 @@ class TestStateProxyIntegration:
         proxy._sub_ids.append(sub_id)
 
         # Кто-то устанавливает значение
-        mgr.handle_state_set({
-            "data": {"path": "cameras.0.config.fps", "value": 28, "source": "gui"},
-        })
+        mgr.handle_state_set(
+            {
+                "data": {"path": "cameras.0.config.fps", "value": 28, "source": "gui"},
+            }
+        )
 
         # Manager отправил state.changed — находим его и передаём proxy
         state_changed_msg = router.last_sent("state.changed")
@@ -773,18 +799,22 @@ class TestStateProxyIntegration:
         proxy, mgr, router = self._build_pair()
 
         # Подписываем camera_0 через менеджер
-        mgr.handle_state_subscribe({
-            "data": {
-                "pattern": "system.**",
-                "subscriber": "camera_0",
-                "exclude_sources": [],
-            },
-        })
+        mgr.handle_state_subscribe(
+            {
+                "data": {
+                    "pattern": "system.**",
+                    "subscriber": "camera_0",
+                    "exclude_sources": [],
+                },
+            }
+        )
 
         # Изменение состояния
-        mgr.handle_state_set({
-            "data": {"path": "system.status", "value": "running", "source": "manager"},
-        })
+        mgr.handle_state_set(
+            {
+                "data": {"path": "system.status", "value": "running", "source": "manager"},
+            }
+        )
 
         # Находим state.changed и передаём proxy
         msg = router.last_sent("state.changed")

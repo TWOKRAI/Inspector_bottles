@@ -8,6 +8,7 @@
 
 Re-export CurrentPageStack из framework для удобства импорта.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
@@ -22,6 +23,7 @@ _NAV_ITEM_HEIGHT = 36
 __all__ = [
     "CurrentPageStack",
     "build_nav_tree",
+    "collapse_other_branches",
     "find_tree_item",
     "select_tree_key",
 ]
@@ -47,7 +49,7 @@ def build_nav_tree(
     admin_root = QTreeWidgetItem(tree_widget, ["Администрация"])
     admin_root.setData(0, Qt.ItemDataRole.UserRole, "admin_dashboard")
     admin_root.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
-    admin_root.setExpanded(True)
+    admin_root.setExpanded(False)
 
     for key, title in admin_children:
         child = QTreeWidgetItem(admin_root, [title])
@@ -59,6 +61,35 @@ def build_nav_tree(
         item = QTreeWidgetItem(tree_widget, [title])
         item.setData(0, Qt.ItemDataRole.UserRole, key)
         item.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
+
+
+def collapse_other_branches(
+    tree_widget: QTreeWidget,
+    current_item: QTreeWidgetItem,
+) -> None:
+    """Свернуть все ветки кроме той, к которой принадлежит текущий элемент.
+
+    Если выбран top-level узел с детьми — раскрыть его.
+    Если выбран дочерний узел — раскрыть его родителя.
+    Все остальные top-level узлы с детьми — свернуть.
+
+    Args:
+        tree_widget:   QTreeWidget
+        current_item:  текущий выбранный элемент
+    """
+    root = tree_widget.invisibleRootItem()
+
+    # Определить «активный» top-level узел
+    active_top = current_item
+    while active_top.parent() is not None:
+        active_top = active_top.parent()
+
+    for i in range(root.childCount()):
+        top_item = root.child(i)
+        if top_item.childCount() == 0:
+            continue
+        # Раскрыть ветку активного элемента, свернуть остальные
+        top_item.setExpanded(top_item is active_top)
 
 
 def find_tree_item(

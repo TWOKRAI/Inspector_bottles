@@ -21,7 +21,6 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QFont,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -73,7 +72,7 @@ class BrandLabel(QWidget):
         h = fm.height() + _OUTLINE_WIDTH * 2 + _SHADOW_OFFSETS[-1][1] + 4
         self.setFixedSize(w, h)
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -135,7 +134,7 @@ class AppHeaderWidget(QWidget):
         self._buttons_widget.button_clicked.connect(self.action_triggered.emit)
 
         self._mode_stack = QStackedWidget()
-        self._mode_stack.addWidget(info_page)        # 0
+        self._mode_stack.addWidget(info_page)  # 0
         self._mode_stack.addWidget(self._buttons_widget)  # 1
         self._mode_stack.setCurrentIndex(self._mode_toggle.isChecked() and 1 or 0)
 

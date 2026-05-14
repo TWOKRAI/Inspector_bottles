@@ -3,10 +3,9 @@
 
 Проверяем текущую платформу через фабрику.
 """
-import sys
+
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from ..platforms import create_platform_console
 from ..interfaces import IPlatformConsole

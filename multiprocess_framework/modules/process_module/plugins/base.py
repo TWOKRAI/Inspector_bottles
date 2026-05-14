@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar
 from .interfaces import IProcessServices
 
 if TYPE_CHECKING:
-    pass
+    from .metrics import PluginMetrics
 
 
 def for_each(func):
@@ -198,7 +198,7 @@ class ProcessModulePlugin(ABC):
 
     def __init__(self) -> None:
         self.state: PluginState = PluginState.IDLE
-        self.metrics: PluginMetrics | None = None  # noqa: F821
+        self.metrics: PluginMetrics | None = None
 
     # --- Data pipeline контракт (Phase 5) ---
 
@@ -230,9 +230,7 @@ class ProcessModulePlugin(ABC):
         """
         return None
 
-    def _init_register(
-        self, ctx: PluginContext, register_cls: type | None = None
-    ) -> Any:
+    def _init_register(self, ctx: PluginContext, register_cls: type | None = None) -> Any:
         """Инициализировать register: managed (GUI) → локальный fallback → YAML overrides.
 
         Порядок:
@@ -357,9 +355,7 @@ class ProcessModulePlugin(ABC):
     def _do_configure(self, ctx: PluginContext) -> None:
         """IDLE → READY: configure + авторегистрация команд + метрики."""
         if self.state != PluginState.IDLE:
-            ctx.log_error(
-                f"Plugin '{self.name}': configure() в состоянии {self.state}, ожидается IDLE"
-            )
+            ctx.log_error(f"Plugin '{self.name}': configure() в состоянии {self.state}, ожидается IDLE")
             return
 
         # Инициализация метрик
@@ -376,9 +372,7 @@ class ProcessModulePlugin(ABC):
     def _do_start(self, ctx: PluginContext) -> None:
         """READY → RUNNING."""
         if self.state != PluginState.READY:
-            ctx.log_error(
-                f"Plugin '{self.name}': start() в состоянии {self.state}, ожидается READY"
-            )
+            ctx.log_error(f"Plugin '{self.name}': start() в состоянии {self.state}, ожидается READY")
             return
 
         if self.metrics:
@@ -428,10 +422,7 @@ class ProcessModulePlugin(ABC):
         for cmd_name, method_name in self.commands.items():
             method = getattr(self, method_name, None)
             if method is None:
-                ctx.log_error(
-                    f"Plugin '{self.name}': команда '{cmd_name}' → "
-                    f"метод '{method_name}' не найден"
-                )
+                ctx.log_error(f"Plugin '{self.name}': команда '{cmd_name}' → метод '{method_name}' не найден")
                 continue
 
             ctx.command_manager.register_command(cmd_name, method)

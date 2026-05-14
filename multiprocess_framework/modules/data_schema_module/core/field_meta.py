@@ -26,6 +26,7 @@ FieldMeta — дескриптор метаданных поля для Annotate
     r.model_dump()  # → {"dp": 1.4, ...}
     DrawRegisters.get_field_meta("dp").to_dict()  # → {description, min, max, ...}
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Union
@@ -54,7 +55,8 @@ class FieldMeta:
         min / max       — допустимый диапазон для числовых полей
         transfer_k      — шаг UI-слайдера = 1/transfer_k (по умолч. 1.0)
         round_k         — знаков после запятой при round_value()
-        routing         — маршрутизация: channel для Router; опционально process_targets для register_update (FieldRouting)
+        routing         — маршрутизация: channel для Router; опционально process_targets
+                          для register_update (FieldRouting)
         access_level    — минимальный уровень доступа для изменения
         readonly        — запретить изменение через update_field()
         hidden          — скрыть в UI (can_modify() → False при hidden UI)
@@ -188,10 +190,7 @@ class FieldMeta:
         Возвращает (успех, сообщение_об_ошибке | None).
         """
         if not self.can_modify(access_level):
-            return False, (
-                f"Недостаточно прав доступа: требуется уровень {self.access_level}, "
-                f"передан {access_level}"
-            )
+            return False, (f"Недостаточно прав доступа: требуется уровень {self.access_level}, передан {access_level}")
         if isinstance(value, (int, float)):
             if self.min is not None and value < self.min:
                 return False, f"Значение {value} меньше минимального {self.min}"

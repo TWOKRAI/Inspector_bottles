@@ -1,8 +1,9 @@
 """Тесты для StandardTabLayout — единый шаблон вкладок."""
+
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QLabel
 
 from multiprocess_prototype.frontend.widgets.primitives import StandardTabLayout
 

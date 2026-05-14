@@ -9,7 +9,6 @@ Unit-тесты для DataConverter (serialization/converter.py).
 import json
 from pathlib import Path
 
-import pytest
 from pydantic import BaseModel, Field
 from typing import Any, Dict
 
@@ -19,6 +18,7 @@ from ..serialization.converter import DataConverter, FormatType
 # ============================================================================
 # Тестовые модели
 # ============================================================================
+
 
 class SampleModel(BaseModel):
     """Тестовая модель конфигурации."""
@@ -31,6 +31,7 @@ class SampleModel(BaseModel):
 # ============================================================================
 # Тесты DataConverter
 # ============================================================================
+
 
 def test_data_converter_roundtrips(tmp_path: Path):
     """Модель → dict/json/yaml → обратно в модель; универсальный convert(); сохранение/загрузка YAML-файла."""
@@ -89,4 +90,3 @@ def test_data_converter_file_operations(tmp_path: Path):
     DataConverter.save_to_file(model, yaml_file, format_type=FormatType.YAML)
     loaded_yaml = DataConverter.load_from_file(yaml_file, model_class=SampleModel)
     assert loaded_yaml.count == 42
-

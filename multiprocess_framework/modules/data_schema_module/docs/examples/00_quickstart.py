@@ -10,9 +10,10 @@ Quickstart: весь стек data_schema_module за 5 минут.
     5. Конфиги процессов на той же базе (RegisterBase)
     6. Дата-модели (BaseModel, без метаданных)
 """
+
 import tempfile
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -21,7 +22,6 @@ from multiprocess_framework.modules.data_schema_module import (
     RegistersContainer,
     FileStorage,
     # Готовые type aliases
-    Percent,
     Pixels,
     HsvHue,
     HsvChannel,
@@ -38,20 +38,33 @@ from pydantic import BaseModel
 # FieldRouting: один объект вместо повторного {"channel": "control_draw"}
 DRAW = FieldRouting(channel="control_draw")
 
+
 class DrawRegisters(RegisterBase):
     """Параметры детектора кругов HoughCircles."""
 
-    dp: Annotated[float, FieldMeta(
-        "Разрешение аккумулятора",
-        info="Обратное разрешение. Чем меньше — тем точнее.",
-        min=0.1, max=20.0, transfer_k=0.1, round_k=1,
-        routing=DRAW,
-    )] = 1.4
+    dp: Annotated[
+        float,
+        FieldMeta(
+            "Разрешение аккумулятора",
+            info="Обратное разрешение. Чем меньше — тем точнее.",
+            min=0.1,
+            max=20.0,
+            transfer_k=0.1,
+            round_k=1,
+            routing=DRAW,
+        ),
+    ] = 1.4
 
-    minDist: Annotated[float, FieldMeta(
-        "Мин. расстояние между кругами", unit="px", min=0.0, max=1000.0,
-        routing=DRAW,
-    )] = 50.0
+    minDist: Annotated[
+        float,
+        FieldMeta(
+            "Мин. расстояние между кругами",
+            unit="px",
+            min=0.0,
+            max=1000.0,
+            routing=DRAW,
+        ),
+    ] = 50.0
 
     enabled: bool = True
 
@@ -77,6 +90,7 @@ class ProcessingRegisters(RegisterBase):
 # 2. Работа с полями
 # =============================================================================
 
+
 def demo_fields():
     print("\n--- 2. Поля как plain-значения ---")
     r = DrawRegisters()
@@ -96,6 +110,7 @@ def demo_fields():
 # =============================================================================
 # 3. Метаданные
 # =============================================================================
+
 
 def demo_metadata():
     print("\n--- 3. Метаданные ---")
@@ -121,13 +136,16 @@ def demo_metadata():
 # 4. RegistersContainer
 # =============================================================================
 
+
 def demo_container():
     print("\n--- 4. RegistersContainer ---")
 
-    container = RegistersContainer({
-        "draw": DrawRegisters,
-        "processing": ProcessingRegisters,
-    })
+    container = RegistersContainer(
+        {
+            "draw": DrawRegisters,
+            "processing": ProcessingRegisters,
+        }
+    )
 
     # Атрибутный и индексный доступ
     print(f"container.draw.dp = {container.draw.dp}")
@@ -149,13 +167,16 @@ def demo_container():
 # 5. FileStorage
 # =============================================================================
 
+
 def demo_storage():
     print("\n--- 5. FileStorage ---")
 
-    container = RegistersContainer({
-        "draw": DrawRegisters,
-        "processing": ProcessingRegisters,
-    })
+    container = RegistersContainer(
+        {
+            "draw": DrawRegisters,
+            "processing": ProcessingRegisters,
+        }
+    )
     container.draw.update_field("dp", 7.7)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -163,10 +184,12 @@ def demo_storage():
         container.save(storage, "main_process")
         print(f"Сохранено: {storage.list_containers()}")
 
-        container2 = RegistersContainer({
-            "draw": DrawRegisters,
-            "processing": ProcessingRegisters,
-        })
+        container2 = RegistersContainer(
+            {
+                "draw": DrawRegisters,
+                "processing": ProcessingRegisters,
+            }
+        )
         loaded = container2.load(storage, "main_process")
         print(f"Загружено: {loaded}, dp = {container2.draw.dp}")
 
@@ -174,6 +197,7 @@ def demo_storage():
 # =============================================================================
 # 6. RegisterBase как конфиг процесса (не только UI-регистры)
 # =============================================================================
+
 
 def demo_config():
     print("\n--- 6. Конфиг процесса ---")
@@ -193,12 +217,15 @@ def demo_config():
 # 7. Дата-модели (BaseModel, без метаданных)
 # =============================================================================
 
+
 def demo_data_models():
     print("\n--- 7. Дата-модели ---")
 
     class RegionData(BaseModel):
-        x1: int = 0; y1: int = 0
-        x2: int = 100; y2: int = 100
+        x1: int = 0
+        y1: int = 0
+        x2: int = 100
+        y2: int = 100
         enabled: bool = True
 
     class CameraData(BaseModel):

@@ -3,11 +3,11 @@
 Покрывает: TopologyPresenter (CRUD, load/save, валидация)
            TopologyEditorWidget (создание без crash).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
 from multiprocess_prototype.frontend.widgets.topology.editor import TopologyEditorWidget

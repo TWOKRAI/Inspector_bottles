@@ -1,8 +1,8 @@
 """Тесты ActionBus v2 integration (Phase 11) — undo/redo, coalescing, factory."""
+
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,8 +11,6 @@ from multiprocess_prototype.frontend.actions import (
     ActionBus,
     V2ActionBuilder,
     create_action_bus,
-    FIELD_SET,
-    RECIPE_APPLY,
 )
 from multiprocess_prototype.frontend.actions.action_types import FIELD_SET, RECIPE_APPLY
 from multiprocess_prototype.frontend.topology_holder import TopologyHolder
@@ -22,15 +20,14 @@ from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 # FakeRM — stub RegistersManager
 # ---------------------------------------------------------------------------
 
+
 class FakeRM:
     """Минимальный stub для RegistersManager."""
 
     def __init__(self) -> None:
         self._values: dict[tuple[str, str], Any] = {}
 
-    def set_field_value(
-        self, register_name: str, field_name: str, value: Any
-    ) -> tuple[bool, str | None]:
+    def set_field_value(self, register_name: str, field_name: str, value: Any) -> tuple[bool, str | None]:
         self._values[(register_name, field_name)] = value
         return True, None
 
@@ -38,6 +35,7 @@ class FakeRM:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def rm() -> FakeRM:
@@ -60,6 +58,7 @@ def bus(rm: FakeRM, holder: TopologyHolder) -> ActionBus:
 # ---------------------------------------------------------------------------
 # Тесты базовых операций ActionBus
 # ---------------------------------------------------------------------------
+
 
 class TestActionBusBasicOps:
     def test_execute_calls_handler_apply(self, bus: ActionBus, rm: FakeRM) -> None:
@@ -134,6 +133,7 @@ class TestActionBusBasicOps:
 # Тест ограничения размера истории
 # ---------------------------------------------------------------------------
 
+
 class TestActionBusHistory:
     def test_max_history_50(self, rm: FakeRM, holder: TopologyHolder) -> None:
         """Стек undo не превышает 50 элементов при max_history=50."""
@@ -155,6 +155,7 @@ class TestActionBusHistory:
 # ---------------------------------------------------------------------------
 # Тест recipe_apply undo восстанавливает topology
 # ---------------------------------------------------------------------------
+
 
 class TestRecipeApplyUndo:
     def test_recipe_apply_undo_restores_topology(
@@ -198,6 +199,7 @@ class TestRecipeApplyUndo:
 # ---------------------------------------------------------------------------
 # Тест coalescing для field_set
 # ---------------------------------------------------------------------------
+
 
 class TestCoalescing:
     def test_field_set_coalescing(self, bus: ActionBus, rm: FakeRM) -> None:
@@ -259,25 +261,20 @@ class TestCoalescing:
 # Тест фабрики create_action_bus
 # ---------------------------------------------------------------------------
 
+
 class TestBusFactory:
-    def test_bus_factory_creates_with_handlers(
-        self, rm: FakeRM, holder: TopologyHolder
-    ) -> None:
+    def test_bus_factory_creates_with_handlers(self, rm: FakeRM, holder: TopologyHolder) -> None:
         """create_action_bus регистрирует handlers для field_set и recipe_apply."""
         bus = create_action_bus(rm, holder)
         assert FIELD_SET in bus._handlers
         assert RECIPE_APPLY in bus._handlers
 
-    def test_bus_factory_default_max_history_50(
-        self, rm: FakeRM, holder: TopologyHolder
-    ) -> None:
+    def test_bus_factory_default_max_history_50(self, rm: FakeRM, holder: TopologyHolder) -> None:
         """create_action_bus устанавливает max_history=50 по умолчанию."""
         bus = create_action_bus(rm, holder)
         assert bus._max_history == 50
 
-    def test_bus_factory_custom_max_history(
-        self, rm: FakeRM, holder: TopologyHolder
-    ) -> None:
+    def test_bus_factory_custom_max_history(self, rm: FakeRM, holder: TopologyHolder) -> None:
         """create_action_bus принимает кастомный max_history."""
         bus = create_action_bus(rm, holder, max_history=100)
         assert bus._max_history == 100

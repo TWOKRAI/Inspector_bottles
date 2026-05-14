@@ -13,6 +13,7 @@ minimumSize. Активной странице возвращаем Preferred.
 Извлечён из prototype SettingsTab для переиспользования в любом табе
 с дифференциальным скроллом (DiffScrollTabLayout и аналоги).
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QSize
@@ -32,13 +33,13 @@ class CurrentPageStack(QStackedWidget):
         self.setMinimumSize(QSize(0, 0))
         self.currentChanged.connect(self._apply_size_policies)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         w = self.currentWidget()
         if w is not None:
             return w.sizeHint()
         return super().sizeHint()
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         w = self.currentWidget()
         if w is not None:
             return w.minimumSizeHint()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from PySide6.QtWidgets import QTableWidget
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta

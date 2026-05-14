@@ -13,15 +13,16 @@ BaseAdminPanel — базовый класс для admin-панелей с та
   - вызывают _create_header() и _create_table() в _setup_ui()
   - создают кнопки и возвращают через action_buttons()
 """
+
 from __future__ import annotations
 
 from typing import ClassVar
 
 from PySide6.QtWidgets import (
+    QGroupBox,
     QHeaderView,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QTableWidget,
     QVBoxLayout,
     QWidget,
@@ -41,6 +42,26 @@ class BaseAdminPanel(QWidget):
 
     _TABLE_COLUMNS: ClassVar[list[tuple[str, str, int]]] = []
     _HEADER_TITLE: ClassVar[str] = ""
+
+    def _create_group(self) -> QVBoxLayout:
+        """Создать QGroupBox с заголовком _HEADER_TITLE и вернуть его внутренний layout.
+
+        Структура:
+            self → QVBoxLayout (outer, без отступов)
+              └── QGroupBox(_HEADER_TITLE)
+                    └── QVBoxLayout (group_layout, 8px отступы/spacing) ← возвращается
+        """
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        group = QGroupBox(self._HEADER_TITLE)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(8, 8, 8, 8)
+        group_layout.setSpacing(8)
+
+        outer.addWidget(group)
+        return group_layout
 
     def _create_header(self, parent_layout: QVBoxLayout) -> None:
         """Добавить стандартный заголовок панели в layout."""

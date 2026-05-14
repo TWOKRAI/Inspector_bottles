@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """BaseConfigurableWidget — реактивная подписка на AuthState через auth_source."""
+
 from __future__ import annotations
 
-import pytest
 from PySide6.QtCore import QObject, Signal
 
 from multiprocess_framework.modules.frontend_module.components.base.traits.access_trait import (
@@ -57,9 +57,7 @@ class TestBaseWidgetAuthSource:
 
     def test_initial_context_applied(self, qtbot):
         """Сразу после создания текущий AccessContext применён к trait."""
-        stub = _StubAuthSource(
-            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
-        )
+        stub = _StubAuthSource(AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"})))
         w = _WidgetWithTrait("tabs.x.view", "tabs.x.edit", auth_source=stub)
         qtbot.addWidget(w)
         assert w._trait.can_view() is True
@@ -73,17 +71,13 @@ class TestBaseWidgetAuthSource:
         assert w._trait.can_view() is False
 
         # Login → permission получен
-        stub.set_context(
-            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
-        )
+        stub.set_context(AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"})))
         assert w._trait.can_view() is True
         assert w._trait.can_modify() is True
 
     def test_logout_disables_modify(self, qtbot):
         """Logout — trait снова без permissions, can_modify=False."""
-        stub = _StubAuthSource(
-            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
-        )
+        stub = _StubAuthSource(AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"})))
         w = _WidgetWithTrait("tabs.x.view", "tabs.x.edit", auth_source=stub)
         qtbot.addWidget(w)
         assert w._trait.can_modify() is True

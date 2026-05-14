@@ -5,7 +5,6 @@
 """
 
 import time
-import pytest
 from multiprocessing import Process
 
 from ..core.process_status import ProcessStatusMonitor

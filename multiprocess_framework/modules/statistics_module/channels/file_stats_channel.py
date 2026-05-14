@@ -2,9 +2,10 @@
 """
 FileStatsChannel — канал записи метрик в JSON/CSV файл.
 """
+
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ...channel_routing_module.interfaces import IChannel
 

@@ -7,8 +7,6 @@
 - Запись вызовов в mock-объектах
 """
 
-import pytest
-
 from multiprocess_framework.modules.process_module.plugins.interfaces import (
     IPluginCommandManager,
     IPluginWorkerManager,

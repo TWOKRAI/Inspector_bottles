@@ -1,7 +1,7 @@
 """Тесты для register_all_permissions — каталог permissions приложения."""
+
 from __future__ import annotations
 
-import pytest
 
 from multiprocess_prototype.frontend.permissions import register_all_permissions
 from multiprocess_prototype.frontend.tab_factory import TAB_ORDER
@@ -18,12 +18,8 @@ class TestRegisterAllPermissions:
 
         for tab in TAB_ORDER:
             tab_id = tab["id"]
-            assert reg.has(f"tabs.{tab_id}.view"), (
-                f"Не зарегистрирован tabs.{tab_id}.view"
-            )
-            assert reg.has(f"tabs.{tab_id}.edit"), (
-                f"Не зарегистрирован tabs.{tab_id}.edit"
-            )
+            assert reg.has(f"tabs.{tab_id}.view"), f"Не зарегистрирован tabs.{tab_id}.view"
+            assert reg.has(f"tabs.{tab_id}.edit"), f"Не зарегистрирован tabs.{tab_id}.edit"
 
     def test_registers_users_crud(self):
         """Users CRUD permissions присутствуют."""

@@ -6,7 +6,8 @@ Process Module (Refactored) — базовый модуль процессов.
 - interfaces — IProcessModule, ISharedResources, IProcessCommunication
 - types — ProcessStatus, ManagerType, QueueType, ProcessConfigDict, ProcessStatsDict
 - adapters — ProcessAdapter, SchemaAdapter
-- ManagersConfig, managers_from_log_dir, managers_payload_for_proc — сборка proc_dict['managers'] (лениво, ADR-114, ADR-115)
+- ManagersConfig, managers_from_log_dir, managers_payload_for_proc —
+  сборка proc_dict['managers'] (лениво, ADR-114, ADR-115)
 
 ProcessModule и фабрики managers подгружаются лениво (PEP 562), чтобы лёгкий импорт
 ``from process_module import ProcessPriorityLevel`` не тянул ``ManagersConfig`` / ``ProcessModule``.

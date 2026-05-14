@@ -13,6 +13,7 @@
     5. Обратная совместимость: RegisterBase, RegisterMixin
     6. Routing + Container: маршрутизация через контейнер
 """
+
 import json
 import unittest
 from pathlib import Path
@@ -35,19 +36,8 @@ from multiprocess_framework.modules.data_schema_module import (
     # Registry
     SchemaRegistry,
     register_schema,
-    get_default_registry,
-    # Serialization
-    DataConverter,
-    FormatType,
-    registers_to_dict,
-    registers_from_dict,
-    registers_to_json,
-    registers_from_json,
-    registers_to_flat_dict,
-    # Container
     RegistersContainer,
     config_to_dict,
-    build_process_with_workers,
     process,
     FileStorage,
     # Validators
@@ -61,8 +51,10 @@ from multiprocess_framework.modules.data_schema_module import (
 # Тестовые схемы
 # =============================================================================
 
+
 class CameraConfig(SchemaBase):
     """Конфигурация камеры."""
+
     exposure: Annotated[int, FieldMeta("Экспозиция", min=0, max=10000)] = 500
     gain: Annotated[float, FieldMeta("Усиление", min=0.0, max=10.0)] = 1.0
     fps: Annotated[int, FieldMeta("FPS", min=1, max=120)] = 30
@@ -74,6 +66,7 @@ _PROCESSING_CTRL = FieldRouting(channel="processing_ctrl")
 
 class ProcessingConfig(SchemaBase):
     """Конфигурация обработки изображений."""
+
     hue_low: HsvHue = 0
     hue_high: HsvHue = 179
     sat_low: HsvChannel = 0
@@ -84,6 +77,7 @@ class ProcessingConfig(SchemaBase):
 
 class DisplayConfig(SchemaBase):
     """Конфигурация отображения."""
+
     width: Pixels = 1280
     height: Pixels = 720
     zoom: Annotated[float, FieldMeta("Масштаб", min=0.1, max=4.0)] = 1.0
@@ -91,6 +85,7 @@ class DisplayConfig(SchemaBase):
 
 class NetworkConfig(SchemaBase):
     """Сетевая конфигурация."""
+
     port: NetworkPort = 8080
     host: str = "localhost"
     timeout: Annotated[float, FieldMeta("Таймаут", min=0.1, max=60.0)] = 5.0
@@ -100,15 +95,18 @@ class NetworkConfig(SchemaBase):
 # 1. Полный жизненный цикл
 # =============================================================================
 
+
 class TestFullLifecycle(unittest.TestCase):
     """Полный жизненный цикл: Schema → Container → Serialization → Restore."""
 
     def setUp(self):
-        self.container = RegistersContainer({
-            "camera": CameraConfig,
-            "processing": ProcessingConfig,
-            "display": DisplayConfig,
-        })
+        self.container = RegistersContainer(
+            {
+                "camera": CameraConfig,
+                "processing": ProcessingConfig,
+                "display": DisplayConfig,
+            }
+        )
 
     def test_create_container_with_defaults(self):
         self.assertEqual(self.container.camera.exposure, 500)
@@ -129,11 +127,13 @@ class TestFullLifecycle(unittest.TestCase):
         self.assertEqual(snap["processing"]["threshold"], 200)
 
         # Восстановить из снапшота
-        new_container = RegistersContainer({
-            "camera": CameraConfig,
-            "processing": ProcessingConfig,
-            "display": DisplayConfig,
-        })
+        new_container = RegistersContainer(
+            {
+                "camera": CameraConfig,
+                "processing": ProcessingConfig,
+                "display": DisplayConfig,
+            }
+        )
         new_container.model_validate_all(snap)
         self.assertEqual(new_container.camera.exposure, 2000)
         self.assertEqual(new_container.processing.threshold, 200)
@@ -142,11 +142,13 @@ class TestFullLifecycle(unittest.TestCase):
         self.container.camera.update_field("gain", 3.5)
         js = self.container.to_json()
 
-        new_container = RegistersContainer({
-            "camera": CameraConfig,
-            "processing": ProcessingConfig,
-            "display": DisplayConfig,
-        })
+        new_container = RegistersContainer(
+            {
+                "camera": CameraConfig,
+                "processing": ProcessingConfig,
+                "display": DisplayConfig,
+            }
+        )
         new_container.from_json(js)
         self.assertEqual(new_container.camera.gain, 3.5)
 
@@ -167,6 +169,7 @@ class TestFullLifecycle(unittest.TestCase):
 # 2. Registry + Schema
 # =============================================================================
 
+
 class TestRegistryWithSchema(unittest.TestCase):
     """Тесты интеграции Registry со SchemaBase."""
 
@@ -186,19 +189,25 @@ class TestRegistryWithSchema(unittest.TestCase):
         self.assertEqual(instance.fps, 60)
 
     def test_validate_valid_data(self):
-        ok, instance, err = self.registry.validate("Camera", {
-            "exposure": 1000,
-            "gain": 2.0,
-            "fps": 30,
-            "active": True,
-        })
+        ok, instance, err = self.registry.validate(
+            "Camera",
+            {
+                "exposure": 1000,
+                "gain": 2.0,
+                "fps": 30,
+                "active": True,
+            },
+        )
         self.assertTrue(ok)
         self.assertIsNone(err)
 
     def test_validate_invalid_data_constraint_violation(self):
-        ok, instance, err = self.registry.validate("Camera", {
-            "exposure": 99999,  # > max 10000
-        })
+        ok, instance, err = self.registry.validate(
+            "Camera",
+            {
+                "exposure": 99999,  # > max 10000
+            },
+        )
         self.assertFalse(ok)
         self.assertIsNotNone(err)
 
@@ -223,32 +232,39 @@ class TestRegistryWithSchema(unittest.TestCase):
 # 3. Container + FileStorage
 # =============================================================================
 
+
 class TestContainerWithFileStorage(unittest.TestCase):
     """Тесты сохранения и загрузки контейнера через FileStorage."""
 
     def setUp(self):
         import tempfile
+
         self.temp_dir = Path(tempfile.mkdtemp())
         self.storage = FileStorage(str(self.temp_dir))
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_save_and_load_container(self):
-        container = RegistersContainer({
-            "camera": CameraConfig,
-            "network": NetworkConfig,
-        })
+        container = RegistersContainer(
+            {
+                "camera": CameraConfig,
+                "network": NetworkConfig,
+            }
+        )
         container.camera.update_field("exposure", 3000)
         container.network.update_field("port", 9090)
 
         container.save(self.storage, "test_config")
 
-        restored = RegistersContainer({
-            "camera": CameraConfig,
-            "network": NetworkConfig,
-        })
+        restored = RegistersContainer(
+            {
+                "camera": CameraConfig,
+                "network": NetworkConfig,
+            }
+        )
         restored.load(self.storage, "test_config")
 
         self.assertEqual(restored.camera.exposure, 3000)
@@ -276,6 +292,7 @@ class TestContainerWithFileStorage(unittest.TestCase):
 # 4. Dict at Boundary: process()
 # =============================================================================
 
+
 class TestDictAtBoundary(unittest.TestCase):
     """Тесты паттерна Dict at Boundary."""
 
@@ -285,10 +302,13 @@ class TestDictAtBoundary(unittest.TestCase):
             workers: int = 4
 
             def build(self) -> Tuple[str, dict]:
-                return ("main_process", {
-                    "class": "app.MainProcess",
-                    "config": self.model_dump(),
-                })
+                return (
+                    "main_process",
+                    {
+                        "class": "app.MainProcess",
+                        "config": self.model_dump(),
+                    },
+                )
 
         cfg = ProcessCfg(timeout=10.0, workers=8)
         name, d = config_to_dict(cfg)
@@ -319,6 +339,7 @@ class TestDictAtBoundary(unittest.TestCase):
 # 5. Обратная совместимость
 # =============================================================================
 
+
 class TestBackwardCompatibility(unittest.TestCase):
     """Тесты обратной совместимости алиасов."""
 
@@ -345,6 +366,7 @@ class TestBackwardCompatibility(unittest.TestCase):
 
     def test_schema_manager_alias(self):
         from multiprocess_framework.modules.data_schema_module import SchemaManager
+
         self.assertIs(SchemaManager, SchemaRegistry)
 
 
@@ -352,13 +374,16 @@ class TestBackwardCompatibility(unittest.TestCase):
 # 6. Routing + Container
 # =============================================================================
 
+
 class TestRoutingWithContainer(unittest.TestCase):
     """Тесты маршрутизации через контейнер."""
 
     def setUp(self):
-        self.container = RegistersContainer({
-            "processing": ProcessingConfig,
-        })
+        self.container = RegistersContainer(
+            {
+                "processing": ProcessingConfig,
+            }
+        )
 
     def test_get_routing_channels(self):
         channels = self.container.processing.get_routing_channels()
@@ -377,6 +402,7 @@ class TestRoutingWithContainer(unittest.TestCase):
 # =============================================================================
 # 7. DataValidator интеграция
 # =============================================================================
+
 
 class TestDataValidatorIntegration(unittest.TestCase):
     """Тесты DataValidator в связке со схемами."""
@@ -399,21 +425,26 @@ class TestDataValidatorIntegration(unittest.TestCase):
         self.assertEqual(instance.gain, 1.0)  # дефолт
 
     def test_is_valid_with_schema(self):
-        self.assertTrue(DataValidator.is_valid(
-            {"exposure": 500, "gain": 1.0, "fps": 30, "active": True},
-            CameraConfig,
-        ))
+        self.assertTrue(
+            DataValidator.is_valid(
+                {"exposure": 500, "gain": 1.0, "fps": 30, "active": True},
+                CameraConfig,
+            )
+        )
 
     def test_is_not_valid_with_constraint_violation(self):
-        self.assertFalse(DataValidator.is_valid(
-            {"exposure": -100},  # < min
-            CameraConfig,
-        ))
+        self.assertFalse(
+            DataValidator.is_valid(
+                {"exposure": -100},  # < min
+                CameraConfig,
+            )
+        )
 
 
 # =============================================================================
 # 8. merge_with_defaults
 # =============================================================================
+
 
 class TestMergeWithDefaults(unittest.TestCase):
     """Тесты merge_with_defaults."""
@@ -443,6 +474,7 @@ class TestMergeWithDefaults(unittest.TestCase):
 # 9. Полный сценарий: регистрация + контейнер + сериализация
 # =============================================================================
 
+
 class TestFullScenario(unittest.TestCase):
     """Полный сценарий использования модуля."""
 
@@ -466,10 +498,12 @@ class TestFullScenario(unittest.TestCase):
         self.assertTrue(registry.has_schema("Network"))
 
         # 4. Создаём контейнер
-        container = RegistersContainer({
-            "camera": Camera,
-            "network": Network,
-        })
+        container = RegistersContainer(
+            {
+                "camera": Camera,
+                "network": Network,
+            }
+        )
 
         # 5. Изменяем значения
         container.camera.update_field("exposure", 1500)

@@ -34,9 +34,10 @@ ProcessSchemaAdapter — преобразование SchemaBase в конфиг
     from multiprocess_framework.modules.data_schema_module import build_process_with_workers
     launcher.add_process(*build_process_with_workers(ProcessConfig(), WorkerConfig()))
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Tuple, Type
 
 
 class ProcessSchemaAdapter:
@@ -90,6 +91,7 @@ class ProcessSchemaAdapter:
         if hasattr(schema_instance, "build") and callable(schema_instance.build):
             try:
                 from multiprocess_framework.modules.data_schema_module import config_to_dict
+
                 return config_to_dict(schema_instance)
             except Exception:
                 pass
@@ -140,10 +142,7 @@ class ProcessSchemaAdapter:
         process_name, process_dict = self.adapt_instance(process_config, **options)
 
         if worker_configs:
-            workers = [
-                self.adapt_instance(wc, **options)
-                for wc in worker_configs
-            ]
+            workers = [self.adapt_instance(wc, **options) for wc in worker_configs]
             process_dict = dict(process_dict)
             process_dict["workers"] = workers
 

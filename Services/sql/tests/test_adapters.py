@@ -1,18 +1,15 @@
 """Тесты адаптеров."""
+
+import importlib.util
+
 import pytest
 
 from Services.sql.core.adapter_factory import create_sync_adapter, create_async_adapter
 from Services.sql.configs import SQLManagerConfig
 
-try:
-    import pytest_asyncio  # noqa: F401
-    HAS_ASYNCIO = True
-except ImportError:
-    HAS_ASYNCIO = False
+HAS_ASYNCIO = importlib.util.find_spec("pytest_asyncio") is not None
 
-skip_no_asyncio = pytest.mark.skipif(
-    not HAS_ASYNCIO, reason="pytest-asyncio not installed"
-)
+skip_no_asyncio = pytest.mark.skipif(not HAS_ASYNCIO, reason="pytest-asyncio not installed")
 
 
 class TestSyncAdapters:

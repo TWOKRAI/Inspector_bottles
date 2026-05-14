@@ -4,13 +4,13 @@
 
 Сценарии: env var dev-password, слабый пароль, уже инициализировано, интерактивный режим.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from Services.auth.bootstrap import _PREDEFINED_ROLES, main
 from Services.auth.storage import YamlUserStorage
@@ -145,7 +145,7 @@ def test_interactive_creates_admin_user(tmp_path: Path) -> None:
 
     with (
         patch.dict(os.environ, env, clear=True),
-        patch("Services.auth.bootstrap.input", return_value=""),        # default "admin"
+        patch("Services.auth.bootstrap.input", return_value=""),  # default "admin"
         patch("Services.auth.bootstrap.getpass.getpass", return_value="AdminPass@1"),
     ):
         exit_code = main()

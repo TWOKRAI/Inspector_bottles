@@ -38,7 +38,8 @@ def split_adrs(text: str) -> tuple[str, list[tuple[int, str]]]:
             if "- Примечание: номер **ADR-110**" not in raw:
                 raw = raw.replace(
                     "- Дата: 2026-03-16",
-                    "- Дата: 2026-03-16\n- Примечание: номер **ADR-110** присвоен при рефакторинге журнала (раньше ошибочно дублировался **ADR-028**).",
+                    "- Дата: 2026-03-16\n- Примечание: номер **ADR-110** присвоен при рефакторинге"
+                    " журнала (раньше ошибочно дублировался **ADR-028**).",
                     1,
                 )
         blocks.append((num, raw))
@@ -103,9 +104,7 @@ def main() -> None:
     lines.append("")
     lines.append("## Устарело")
     lines.append("")
-    lines.append(
-        "Ниже — решения, явно помеченные как устаревшие; обычно указан преемник (**Суперсед**)."
-    )
+    lines.append("Ниже — решения, явно помеченные как устаревшие; обычно указан преемник (**Суперсед**).")
     lines.append("")
     for num, block in obsolete:
         lines.append(block)
@@ -115,9 +114,7 @@ def main() -> None:
 
     out = "\n".join(lines).rstrip() + "\n"
     DECISIONS.write_text(out, encoding="utf-8")
-    print(
-        f"OK: {DECISIONS} — ADR: всего {len(blocks)}, принято {len(active)}, устарело {len(obsolete)}"
-    )
+    print(f"OK: {DECISIONS} — ADR: всего {len(blocks)}, принято {len(active)}, устарело {len(obsolete)}")
 
 
 if __name__ == "__main__":

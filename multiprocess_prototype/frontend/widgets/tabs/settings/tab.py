@@ -42,9 +42,9 @@ from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout i
 from ._nav_tree import (
     CurrentPageStack as _CurrentPageStack,
     build_nav_tree,
+    collapse_other_branches as _collapse_other_branches,
     select_tree_key as _select_tree_key,
 )
-from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionProtocol
 from .presenter import SettingsPresenter
 
 if TYPE_CHECKING:
@@ -197,12 +197,8 @@ class SettingsTab(QWidget):
 
         section = SystemSection(self._ctx)
         # Подключить колбэки для проброса сигналов на SettingsTab
-        section.presenter.on_settings_saved = lambda data: self.settings_saved.emit(
-            data
-        )
-        section.presenter.on_dirty_changed = lambda dirty: self.dirty_changed.emit(
-            dirty
-        )
+        section.presenter.on_settings_saved = lambda data: self.settings_saved.emit(data)
+        section.presenter.on_dirty_changed = lambda dirty: self.dirty_changed.emit(dirty)
         # Зарегистрировать кнопки секции в action-колонке
         self.register_action_page("system_settings", section.action_buttons())
         # Зарегистрировать content-страницу
@@ -293,7 +289,7 @@ class SettingsTab(QWidget):
 
         # Зарегистрировать кнопки панели в action-колонке
         action_idx = self._presenter.get_action_index("_empty")
-        if isinstance(panel, SectionProtocol):
+        if hasattr(panel, "action_buttons"):
             action_idx = self.register_action_page(key, panel.action_buttons())
 
         content_idx = self._content_stack.addWidget(panel)
@@ -401,6 +397,8 @@ class SettingsTab(QWidget):
         key = current.data(0, Qt.ItemDataRole.UserRole)
         if not key:
             return
+        # Авто-expand/collapse: раскрыть ветку текущего, свернуть остальные
+        _collapse_other_branches(self._tree_nav, current)
         # Вся логика (в т.ч. ленивое создание панелей) — в presenter
         self._presenter.on_tree_item_changed(key)
 

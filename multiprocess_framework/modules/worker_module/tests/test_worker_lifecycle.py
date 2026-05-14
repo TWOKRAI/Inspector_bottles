@@ -3,10 +3,9 @@
 
 import threading
 import time
-import pytest
 
 from ..core.thread_config import ThreadConfig
-from ..types import WorkerStatus, WorkerType, ExecutionMode, ThreadPriority
+from ..types import WorkerStatus, ExecutionMode
 from ..registry.worker_registry import WorkerRegistry
 from ..lifecycle.worker_lifecycle import WorkerLifecycle
 

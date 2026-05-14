@@ -11,10 +11,9 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 # Фиктивный кадр (H=480, W=640, C=3)
 _FAKE_FRAME = np.zeros((480, 640, 3), dtype="uint8")
@@ -69,6 +68,7 @@ def _make_plugin_with_open_camera(state_proxy=None, process_name="test_process")
 # Тест 1: FPS-интервал вызывает merge()
 # ---------------------------------------------------------------------------
 
+
 def test_publish_state_on_fps_interval():
     """produce() вызывает _publish_state() когда прошло >= 1 секунды."""
     state_proxy = MagicMock()
@@ -102,6 +102,7 @@ def test_publish_state_on_fps_interval():
 # Тест 2: _start_capture публикует status=running
 # ---------------------------------------------------------------------------
 
+
 def test_publish_state_on_start_capture():
     """_start_capture() вызывает merge() с status='running'."""
     state_proxy = MagicMock()
@@ -117,6 +118,7 @@ def test_publish_state_on_start_capture():
 # ---------------------------------------------------------------------------
 # Тест 3: _stop_capture публикует status=stopped
 # ---------------------------------------------------------------------------
+
 
 def test_publish_state_on_stop_capture():
     """_stop_capture() вызывает merge() с status='stopped' и fps=0.0."""
@@ -135,6 +137,7 @@ def test_publish_state_on_stop_capture():
 # ---------------------------------------------------------------------------
 # Тест 4: drops инкрементируется при неудачном read()
 # ---------------------------------------------------------------------------
+
 
 def test_drops_counted():
     """Если camera.read() возвращает (False, None) — drops растёт."""
@@ -157,6 +160,7 @@ def test_drops_counted():
 # Тест 5: state_proxy=None — не падает
 # ---------------------------------------------------------------------------
 
+
 def test_none_state_proxy_no_error():
     """При state_proxy=None produce() работает без ошибок."""
     plugin, ctx, mock_cap = _make_plugin_with_open_camera(state_proxy=None)
@@ -175,6 +179,7 @@ def test_none_state_proxy_no_error():
 # ---------------------------------------------------------------------------
 # Тест 6: pause/resume публикует paused=True/False
 # ---------------------------------------------------------------------------
+
 
 def test_pause_resume_publishes():
     """cmd_pause_capture → merge(paused=True), cmd_resume_capture → merge(paused=False)."""

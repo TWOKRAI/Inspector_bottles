@@ -1,10 +1,10 @@
 """
 Тесты для ConsoleRedirector.
 """
+
 import sys
 from unittest.mock import MagicMock
 
-import pytest
 
 from ..redirectors.console_redirector import ConsoleRedirector
 

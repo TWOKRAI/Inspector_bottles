@@ -1,6 +1,6 @@
 """Тесты MainWindow, CameraView и CameraPresenter (Task 4.2)."""
+
 import numpy as np
-import pytest
 from PySide6.QtGui import QPixmap
 
 from multiprocess_prototype.frontend.widgets.camera.view import CameraView

@@ -9,7 +9,7 @@ PR1-Group-C: расширен полями permissions (frozenset[str]) и role_
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,6 @@
 """Тесты для types/types.py."""
 
 import threading
-import pytest
 
 from ..types import WorkerStatus, ThreadPriority, WorkerType, ExecutionMode, WorkerInfo
 

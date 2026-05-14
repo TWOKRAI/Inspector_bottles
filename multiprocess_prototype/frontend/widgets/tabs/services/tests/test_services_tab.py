@@ -1,7 +1,7 @@
 """Тесты для ServicesTab."""
+
 from __future__ import annotations
 from unittest.mock import MagicMock
-import pytest
 from multiprocess_prototype.frontend.widgets.tabs.services.tab import ServicesTab
 from multiprocess_prototype.frontend.widgets.tabs.services.presenter import ServicesPresenter
 
@@ -14,6 +14,7 @@ class _MockEntry:
 
 class _MockFieldInfo:
     """Минимальный mock для FieldInfo."""
+
     def __init__(self, plugin_name, field_name, field_type=int, default=0):
         self.plugin_name = plugin_name
         self.field_name = field_name

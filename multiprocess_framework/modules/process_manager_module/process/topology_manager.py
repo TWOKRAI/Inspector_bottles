@@ -129,10 +129,7 @@ class TopologyManager:
                 "has_changes": diff.get("has_changes", bool(commands)),
                 "diff": diff,
                 "commands_count": len(commands),
-                "commands": [
-                    {"cmd": c.get("cmd", ""), "process_name": c.get("process_name", "")}
-                    for c in commands
-                ],
+                "commands": [{"cmd": c.get("cmd", ""), "process_name": c.get("process_name", "")} for c in commands],
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -163,7 +160,9 @@ class TopologyManager:
                         if mem_names:
                             self._allocate_shm(process_name, mem_names, coll)
                             if self._log is not None:
-                                self._log._log_info(f"SHM allocated for {process_name}: {list(mem_names.keys())} (coll={coll})")
+                                self._log._log_info(
+                                    f"SHM allocated for {process_name}: {list(mem_names.keys())} (coll={coll})"
+                                )
                     except Exception as e:
                         if self._log is not None:
                             self._log._log_warning(f"SHM allocation failed for {process_name}: {e}")

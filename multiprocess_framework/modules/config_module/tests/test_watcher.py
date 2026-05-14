@@ -3,10 +3,10 @@ Unit-тесты для config_module.tools.watcher — ConfigFileWatcher.
 
 Пропускаются если watchdog не установлен.
 """
+
 import json
 import time
 import pytest
-from pathlib import Path
 
 try:
     from multiprocess_framework.modules.config_module.tools.watcher import ConfigFileWatcher
@@ -23,6 +23,7 @@ pytestmark = pytest.mark.skipif(not HAS_WATCHDOG, reason="watchdog not installed
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+
 
 def test_start_stop(tmp_path):
     config_file = tmp_path / "config.json"
@@ -60,6 +61,7 @@ def test_stop_without_start():
 # ---------------------------------------------------------------------------
 # Hot reload
 # ---------------------------------------------------------------------------
+
 
 def test_reload_on_file_change(tmp_path):
     config_file = tmp_path / "config.json"

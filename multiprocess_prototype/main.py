@@ -13,8 +13,15 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
+        SystemLauncher,
+    )
+    from multiprocess_prototype.config.schemas import SystemConfig
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
@@ -28,7 +35,7 @@ CONFIG_PATH = HERE / "config" / "system.yaml"
 DEFAULT_BLUEPRINT = HERE / "topology" / "region_pipeline.yaml"
 
 
-def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:  # noqa: F821
+def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
     """Merge defaults из system.yaml в plugin-конфиги topology.
 
     Для каждого плагина: defaults[category] | plugin_inline_config.
@@ -47,7 +54,7 @@ def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:  # noqa: F
     return bp_dict
 
 
-def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":  # noqa: F821
+def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     """Сборка системы из system.yaml + topology YAML/JSON.
 
     Args:
@@ -97,10 +104,7 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":  # n
 
     initial_state = build_initial_state(bp_dict, sys_config.model_dump())
     throttle_rules = build_throttle_rules()
-    print(
-        f"[bootstrap] initial state: "
-        f"{len(initial_state.get('processes', {}))} процессов"
-    )
+    print(f"[bootstrap] initial state: {len(initial_state.get('processes', {}))} процессов")
 
     topology = SystemBlueprint.model_validate(bp_dict)
     print(f"[bootstrap] topology: {topology.name} - {topology.description}")
@@ -126,9 +130,7 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":  # n
 
     launcher = SystemLauncher(
         stop_timeout=sys_config.system.stop_timeout,
-        orchestrator_class_path=(
-            "multiprocess_prototype.orchestrator.ProcessManagerProcessApp"
-        ),
+        orchestrator_class_path=("multiprocess_prototype.orchestrator.ProcessManagerProcessApp"),
         orchestrator_config={
             "initial_state": initial_state,
             "state_throttle_rules": throttle_rules,

@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
 
 from multiprocess_prototype.frontend.actions.handlers.field_set_handler import FieldSetHandler
 
@@ -63,7 +62,6 @@ class MockBridge:
 
 
 class TestFieldSetHandlerWithBridge:
-
     def test_apply_calls_bridge(self) -> None:
         """apply → rm.set_field_value + bridge.on_field_set."""
         rm = MockRM()
@@ -148,4 +146,4 @@ class TestFieldSetHandlerWithBridge:
 
         assert len(bridge.calls) == 2
         assert bridge.calls[0][2] == 50  # forward
-        assert bridge.calls[1][2] == 0   # backward
+        assert bridge.calls[1][2] == 0  # backward

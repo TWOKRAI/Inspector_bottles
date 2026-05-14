@@ -1,9 +1,9 @@
 """Тесты для TabFactory, LazyTabWidget, PlaceholderTab."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QTabWidget, QWidget
 
@@ -133,8 +133,7 @@ class TestTabFactoryCreateTabs:
         for i in range(tab_widget.count()):
             widget = tab_widget.widget(i)
             assert isinstance(widget, PlaceholderTab), (
-                f"Таб {i} ({tab_widget.tabText(i)}) должен быть PlaceholderTab, "
-                f"но является {type(widget).__name__}"
+                f"Таб {i} ({tab_widget.tabText(i)}) должен быть PlaceholderTab, но является {type(widget).__name__}"
             )
 
     def test_placeholder_tab_ids_match_order(self, qtbot):
@@ -212,6 +211,7 @@ class TestLazyTabWidget:
 
     def test_factory_error_shows_error_label(self, qtbot):
         """При исключении в factory создаётся QLabel с текстом ошибки."""
+
         def bad_factory():
             raise RuntimeError("Тестовая ошибка")
 
@@ -284,6 +284,7 @@ class TestTabFactoryCreateTab:
 
     def test_custom_factory_raises_falls_back_to_placeholder(self, qtbot):
         """Если custom factory выбросила исключение — используется PlaceholderTab."""
+
         def bad_factory(ctx):
             raise ValueError("Намеренная ошибка")
 
@@ -384,9 +385,7 @@ class TestTabFactoryPermissions:
 
         # Логин: admin получает recipes + settings
         new_ctx = AccessContext(
-            permissions=frozenset(
-                {"tabs.recipes.view", "tabs.settings.view"}
-            ),
+            permissions=frozenset({"tabs.recipes.view", "tabs.settings.view"}),
             role_name="admin",
         )
         stub.set_context(new_ctx)

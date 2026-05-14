@@ -15,6 +15,7 @@ ErrorManager — специализированный наследник LoggerM
   RouterManager:   message → channel_dispatcher(key=type) → IMessageChannel
   ErrorManager:    error   → _level_to_channel(key=level) → ILogChannel
 """
+
 import time
 import traceback
 from typing import Optional, Any, Union, Dict
@@ -103,7 +104,8 @@ def _normalize_error_config(
         return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
 
     raise TypeError(
-        f"config must be dict, LoggerManagerConfig, ErrorManagerConfig, or object with build() -> (name, dict), got {type(config)}"
+        f"config must be dict, LoggerManagerConfig, ErrorManagerConfig, or object"
+        f" with build() -> (name, dict), got {type(config)}"
     )
 
 
@@ -205,13 +207,13 @@ class ErrorManager(LoggerManager):
         Теперь level routing РЕАЛЬНО используется (в старом коде маршруты
         были зарегистрированы но route_by_level() никогда не вызывался).
         """
-        self.stats['messages_processed'] += 1
+        self.stats["messages_processed"] += 1
 
         channel_name = self._level_to_channel.get(level.value)
         if channel_name is None:
             # DEBUG / INFO / unknown level → parent scope-based routing
             # Don't double-count messages_processed
-            self.stats['messages_processed'] -= 1
+            self.stats["messages_processed"] -= 1
             return LoggerManager.log(self, scope, level, message, module, **extra)
 
         record_dict = LogRecord(
@@ -225,7 +227,7 @@ class ErrorManager(LoggerManager):
 
         if self._buffer is not None:
             self._buffer.enqueue(channel_name, record_dict)
-            self.stats['messages_batched'] += 1
+            self.stats["messages_batched"] += 1
         else:
             ch = self._channel_registry.get(channel_name)
             if ch is not None:

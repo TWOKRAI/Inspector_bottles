@@ -29,6 +29,8 @@ from multiprocess_framework.modules.config_module.tools.merge import deep_merge
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from multiprocess_framework.modules.config_module.core.config import Config
+
 
 class ConfigLoader:
     """
@@ -119,7 +121,7 @@ class ConfigLoader:
         self._schema = schema_class
         return self
 
-    def build(self) -> "Config":  # noqa: F821
+    def build(self) -> "Config":
         """Объединить все слои и вернуть Config объект."""
         from multiprocess_framework.modules.config_module.core.config import Config
 

@@ -1,9 +1,9 @@
 """Тесты read_theme_by_manifest / apply_theme_by_manifest."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from multiprocess_framework.modules.frontend_module.managers.theme_manager import ThemeManager
 
@@ -24,12 +24,8 @@ class TestReadThemeByManifest:
         # components/primitives/
         comp_dir = theme_dir / "components" / "primitives"
         comp_dir.mkdir(parents=True)
-        (comp_dir / "buttons.qss").write_text(
-            "QPushButton { background: @btn_bg; }", encoding="utf-8"
-        )
-        (comp_dir / "inputs.qss").write_text(
-            "QLineEdit { border: 1px solid @border; }", encoding="utf-8"
-        )
+        (comp_dir / "buttons.qss").write_text("QPushButton { background: @btn_bg; }", encoding="utf-8")
+        (comp_dir / "inputs.qss").write_text("QLineEdit { border: 1px solid @border; }", encoding="utf-8")
 
         return styles_dir
 
@@ -130,9 +126,7 @@ class TestApplyThemeByManifest:
 
         comp_dir = theme_dir / "components"
         comp_dir.mkdir(parents=True)
-        (comp_dir / "buttons.qss").write_text(
-            "QPushButton { background: blue; }", encoding="utf-8"
-        )
+        (comp_dir / "buttons.qss").write_text("QPushButton { background: blue; }", encoding="utf-8")
 
         return styles_dir
 

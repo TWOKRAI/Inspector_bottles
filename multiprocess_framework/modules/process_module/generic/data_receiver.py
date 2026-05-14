@@ -12,7 +12,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from typing import Any, Callable
+from typing import Callable
 
 from .frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
@@ -103,7 +103,7 @@ class DataReceiver:
             if not hasattr(self, "_trace_recv_cnt"):
                 self._trace_recv_cnt = 0
             self._trace_recv_cnt += 1
-            do_trace = (self._trace_recv_cnt % 30 == 1)
+            do_trace = self._trace_recv_cnt % 30 == 1
 
             if do_trace:
                 data = msg.get("data", {})
@@ -158,8 +158,17 @@ class DataReceiver:
             item["frame"] = msg["frame"]
 
         # Стандартные поля из msg-уровня
-        for key in ("camera_id", "seq_id", "total_regions", "region_name",
-                    "frame_id", "timestamp", "owner", "shm_name", "shm_index"):
+        for key in (
+            "camera_id",
+            "seq_id",
+            "total_regions",
+            "region_name",
+            "frame_id",
+            "timestamp",
+            "owner",
+            "shm_name",
+            "shm_index",
+        ):
             if key in msg and key not in item:
                 item[key] = msg[key]
 

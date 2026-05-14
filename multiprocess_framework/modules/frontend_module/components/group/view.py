@@ -4,12 +4,18 @@ GroupView — композиция Label + Value, реализует INumericVie
 
 Класс виджета без фабрики: сборка Label+Slider/SpinBox — в ``labeled_numeric_factory.py``.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Optional
 
 from multiprocess_framework.modules.frontend_module.components.label.view import LabelView
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QHBoxLayout,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.frontend_module.components.slider.view import SliderValueView

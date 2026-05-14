@@ -6,7 +6,6 @@ Dict at Boundary: add_process(name, proc_dict) — только dict.
 
 import logging
 
-import pytest
 
 from ..launcher.system_launcher import SystemLauncher
 
@@ -23,6 +22,7 @@ class TestSystemLauncher:
     def test_log_fallback_without_spawner(self, caplog, monkeypatch) -> None:
         """_log_info/_log_warning без spawner — логируется через stdlib logging."""
         from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
         monkeypatch.setattr(LoggerManager, "_instance", None)
         launcher = SystemLauncher()
         with caplog.at_level(logging.INFO):
@@ -64,9 +64,7 @@ class TestSystemLauncher:
         """add_process возвращает self для цепочки."""
         launcher = SystemLauncher()
 
-        launcher.add_process("p1", {"class": "P1"}).add_process(
-            "p2", {"class": "P2"}
-        )
+        launcher.add_process("p1", {"class": "P1"}).add_process("p2", {"class": "P2"})
 
         assert len(launcher._processes) == 2
         assert launcher._processes[0][0] == "p1"
@@ -123,6 +121,7 @@ class TestSystemLauncher:
     def test_init_with_on_shutdown_callback(self) -> None:
         """Инициализация с on_shutdown callback."""
         from unittest.mock import MagicMock
+
         callback = MagicMock()
         launcher = SystemLauncher(on_shutdown=callback)
         assert launcher._on_shutdown is callback
@@ -130,8 +129,10 @@ class TestSystemLauncher:
     def test_create_spawner_passes_timeout(self) -> None:
         """_create_spawner передаёт stop_timeout в ProcessSpawner."""
         from unittest.mock import patch, MagicMock
+
         launcher = SystemLauncher(stop_timeout=7.0)
-        with patch("multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner") as mock_spawner_cls:
+        patch_path = "multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner"
+        with patch(patch_path) as mock_spawner_cls:
             mock_spawner_cls.return_value = MagicMock()
             launcher._create_spawner({})
             call_kwargs = mock_spawner_cls.call_args[1]
@@ -140,6 +141,7 @@ class TestSystemLauncher:
     def test_stop_calls_spawner_stop(self) -> None:
         """stop() вызывает spawner.stop()."""
         from unittest.mock import MagicMock
+
         launcher = SystemLauncher()
         mock_spawner = MagicMock()
         launcher._spawner = mock_spawner
@@ -148,7 +150,8 @@ class TestSystemLauncher:
 
     def test_shutdown_is_alias_for_stop(self) -> None:
         """shutdown() вызывает stop()."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
+
         launcher = SystemLauncher()
         with patch.object(launcher, "stop") as mock_stop:
             launcher.shutdown()
@@ -170,9 +173,11 @@ class TestSystemLauncher:
     def test_create_spawner_forwards_orchestrator_class_path(self) -> None:
         """_create_spawner передаёт orchestrator_class_path в ProcessSpawner."""
         from unittest.mock import patch, MagicMock
+
         custom_path = "my_app.MyOrchestrator"
         launcher = SystemLauncher(orchestrator_class_path=custom_path)
-        with patch("multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner") as mock_cls:
+        _spawner_path = "multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner"
+        with patch(_spawner_path) as mock_cls:
             mock_cls.return_value = MagicMock()
             launcher._create_spawner({})
             call_kwargs = mock_cls.call_args[1]
@@ -181,8 +186,10 @@ class TestSystemLauncher:
     def test_create_spawner_omits_orchestrator_when_none(self) -> None:
         """_create_spawner НЕ передаёт orchestrator_class_path если None."""
         from unittest.mock import patch, MagicMock
+
         launcher = SystemLauncher()  # orchestrator_class_path=None
-        with patch("multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner") as mock_cls:
+        _spawner_path = "multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner"
+        with patch(_spawner_path) as mock_cls:
             mock_cls.return_value = MagicMock()
             launcher._create_spawner({})
             call_kwargs = mock_cls.call_args[1]

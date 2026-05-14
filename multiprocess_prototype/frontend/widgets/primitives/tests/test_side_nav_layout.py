@@ -1,7 +1,7 @@
 """Тесты для SideNavLayout — универсальная боковая навигация."""
+
 from __future__ import annotations
 
-import pytest
 from PySide6.QtWidgets import QLabel, QWidget
 
 from multiprocess_prototype.frontend.widgets.primitives import SideNavLayout

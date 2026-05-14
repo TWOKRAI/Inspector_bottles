@@ -6,13 +6,14 @@ WindowManager — управление жизненным циклом окон.
 Приложение регистрирует окна через register().
 Поддерживает IConfig (dot-notation) и Dict для обратной совместимости.
 """
+
 from __future__ import annotations
 
 import warnings
 from typing import Any, Callable, Dict, Optional, Union
 
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QCursor, QObject, Qt, QWidget, Signal
-from multiprocess_framework.modules.frontend_module.core.window_registry import WindowEntry, WindowRegistry
+from multiprocess_framework.modules.frontend_module.core.window_registry import WindowRegistry
 from multiprocess_framework.modules.frontend_module.managers.access_context import AccessContext
 
 
@@ -41,17 +42,18 @@ class WindowManager(QObject):
     Управление окнами приложения.
     Сигналы: window_shown, window_hidden, update_access_context.
     """
+
     window_shown = Signal(str)
     window_hidden = Signal(str)
     # PR1-Group-C: новый сигнал для RBAC — передаёт AccessContext всем подписчикам
     update_access_context = Signal(object)
 
     def __init__(
-            self,
-            config: Union[Dict[str, Any], Any],
-            registers_manager: Any,
-            data_manager: Optional[Any] = None,
-            parent=None,
+        self,
+        config: Union[Dict[str, Any], Any],
+        registers_manager: Any,
+        data_manager: Optional[Any] = None,
+        parent=None,
     ):
         super().__init__(parent)
         self._config = config  # IConfig или Dict

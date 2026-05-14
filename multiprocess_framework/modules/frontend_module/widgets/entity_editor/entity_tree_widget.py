@@ -17,6 +17,7 @@
 - Дочерний: □, обычный шрифт
 - Значение «—» если None/отсутствует
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,7 +28,6 @@ from PySide6.QtGui import QColor, QFont, QStandardItem
 
 from .base_editor_tree import BaseEditorTreeView
 from .entity_tree_config import (
-    EntityLevel,
     EntityTreeConfig,
     ParamDef,
 )
@@ -35,10 +35,10 @@ from .entity_tree_config import (
 logger = logging.getLogger(__name__)
 
 # Универсальные роли для EntityTreeWidget
-ROLE_TYPE = Qt.ItemDataRole.UserRole + 1      # "parent"|"child"|"param_group"|"parent_param"|"child_param"
-ROLE_PARENT = Qt.ItemDataRole.UserRole + 2    # ключ родительского элемента
-ROLE_CHILD = Qt.ItemDataRole.UserRole + 3     # ключ дочернего элемента
-ROLE_PARAM = Qt.ItemDataRole.UserRole + 4     # ключ параметра
+ROLE_TYPE = Qt.ItemDataRole.UserRole + 1  # "parent"|"child"|"param_group"|"parent_param"|"child_param"
+ROLE_PARENT = Qt.ItemDataRole.UserRole + 2  # ключ родительского элемента
+ROLE_CHILD = Qt.ItemDataRole.UserRole + 3  # ключ дочернего элемента
+ROLE_PARAM = Qt.ItemDataRole.UserRole + 4  # ключ параметра
 
 # Цвета
 _COLOR_GRAY = QColor(140, 140, 140)
@@ -120,9 +120,7 @@ class EntityTreeWidget(BaseEditorTreeView):
         index = self._tree.selectionModel().currentIndex()
         if not index.isValid():
             return None
-        item = self._model.itemFromIndex(
-            self._model.index(index.row(), 0, index.parent())
-        )
+        item = self._model.itemFromIndex(self._model.index(index.row(), 0, index.parent()))
         if item is None:
             return None
         return (
@@ -182,13 +180,14 @@ class EntityTreeWidget(BaseEditorTreeView):
             parent_item = parent_row[0]
 
             # Группа параметров родителя
-            params_group = self._make_group_item(
-                "Параметры", "parent_param_group", parent_key
-            )
+            params_group = self._make_group_item("Параметры", "parent_param_group", parent_key)
             parent_item.appendRow(self._make_full_row(params_group))
             self._build_param_rows(
-                params_group, parent_key, parent_data,
-                self._config.parent_level.params, "parent_param",
+                params_group,
+                parent_key,
+                parent_data,
+                self._config.parent_level.params,
+                "parent_param",
             )
 
             # Дочерние элементы
@@ -201,13 +200,14 @@ class EntityTreeWidget(BaseEditorTreeView):
                 child_item = child_row[0]
 
                 # Группа параметров дочернего
-                child_params_group = self._make_group_item(
-                    "Параметры", "child_param_group", parent_key, child_key
-                )
+                child_params_group = self._make_group_item("Параметры", "child_param_group", parent_key, child_key)
                 child_item.appendRow(self._make_full_row(child_params_group))
                 self._build_param_rows(
-                    child_params_group, parent_key, child_data,
-                    self._config.child_level.params, "child_param",
+                    child_params_group,
+                    parent_key,
+                    child_data,
+                    self._config.child_level.params,
+                    "child_param",
                     child_key=child_key,
                 )
 
@@ -215,9 +215,7 @@ class EntityTreeWidget(BaseEditorTreeView):
     # Построители строк
     # ------------------------------------------------------------------
 
-    def _build_parent_row(
-        self, key: str, data: dict
-    ) -> list[QStandardItem]:
+    def _build_parent_row(self, key: str, data: dict) -> list[QStandardItem]:
         """Создать строку-заголовок родительского элемента.
 
         Args:
@@ -259,9 +257,7 @@ class EntityTreeWidget(BaseEditorTreeView):
 
         return self._pad_row([name_item, val_item, comment_item, summary_item])
 
-    def _build_child_row(
-        self, parent_key: str, child_key: str, data: dict
-    ) -> list[QStandardItem]:
+    def _build_child_row(self, parent_key: str, child_key: str, data: dict) -> list[QStandardItem]:
         """Создать строку-заголовок дочернего элемента.
 
         Args:
@@ -330,9 +326,7 @@ class EntityTreeWidget(BaseEditorTreeView):
             raw_value = data.get(param_def.key)
             display_value = self._format_param_value(raw_value, param_def)
 
-            row = self._make_param_row(
-                f"⚙ {param_def.label}", display_value, param_def.comment
-            )
+            row = self._make_param_row(f"⚙ {param_def.label}", display_value, param_def.comment)
 
             # Установить роли
             item = row[0]
@@ -407,9 +401,7 @@ class EntityTreeWidget(BaseEditorTreeView):
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         return item
 
-    def _make_param_row(
-        self, name: str, value: str, desc: str
-    ) -> list[QStandardItem]:
+    def _make_param_row(self, name: str, value: str, desc: str) -> list[QStandardItem]:
         """Создать строку параметра с серым шрифтом.
 
         Args:
@@ -479,11 +471,7 @@ class EntityTreeWidget(BaseEditorTreeView):
         Returns:
             Словарь {child_key: child_data} для данного родителя.
         """
-        return {
-            k: v
-            for k, v in self._children.items()
-            if v.get("parent_ref") == parent_key
-        }
+        return {k: v for k, v in self._children.items() if v.get("parent_ref") == parent_key}
 
     def _sorted_parent_keys(self) -> list[str]:
         """Вернуть ключи родителей, отсортированные по sort_order и имени.
@@ -550,9 +538,7 @@ class EntityTreeWidget(BaseEditorTreeView):
             ):
                 return item
             # Рекурсия в дочерние узлы
-            found = self._find_item_by_roles(
-                role_type, role_parent, role_child, role_param, item
-            )
+            found = self._find_item_by_roles(role_type, role_parent, role_child, role_param, item)
             if found is not None:
                 return found
 
@@ -561,5 +547,8 @@ class EntityTreeWidget(BaseEditorTreeView):
 
 __all__ = [
     "EntityTreeWidget",
-    "ROLE_TYPE", "ROLE_PARENT", "ROLE_CHILD", "ROLE_PARAM",
+    "ROLE_TYPE",
+    "ROLE_PARENT",
+    "ROLE_CHILD",
+    "ROLE_PARAM",
 ]

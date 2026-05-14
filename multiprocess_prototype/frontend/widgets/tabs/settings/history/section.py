@@ -13,14 +13,19 @@
 Кнопки «Сохранить в файл» и «Очистить историю» возвращаются через action_buttons()
 и регистрируются в action-колонке SettingsTab.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QFileDialog,
+    QGroupBox,
     QHeaderView,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -128,9 +133,16 @@ class HistorySection(QWidget):
 
     def _build_ui(self) -> None:
         """Создать таблицу истории и кнопки."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        group = QGroupBox("История")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
+
+        outer.addWidget(group)
 
         # Таблица истории
         self._table = QTableWidget(0, len(_HISTORY_COLUMNS))
@@ -138,17 +150,25 @@ class HistorySection(QWidget):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
+        # Скроллом управляет мастер-скроллбар DiffScrollTabLayout
+        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._table.setSizeAdjustPolicy(
+            QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents,
+        )
+        self._table.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
         h = self._table.horizontalHeader()
         if h:
             h.setStretchLastSection(False)
             h.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(0, 140)   # Время — пошире
+            h.resizeSection(0, 140)  # Время — пошире
             h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(1, 150)   # Вкладка — пошире
+            h.resizeSection(1, 150)  # Вкладка — пошире
             h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
             h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(3, 120)   # Значение — поуже
+            h.resizeSection(3, 120)  # Значение — поуже
 
         layout.addWidget(self._table)
 

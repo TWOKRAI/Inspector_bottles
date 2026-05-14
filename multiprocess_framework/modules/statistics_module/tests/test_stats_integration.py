@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Интеграционные тесты каналов, get_metric с тегами, thread-safety."""
+
 import json
 import threading
 from unittest.mock import MagicMock
 
-import pytest
 
 from .. import StatsManager
 from ..channels.file_stats_channel import FileStatsChannel

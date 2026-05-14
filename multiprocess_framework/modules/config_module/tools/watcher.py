@@ -19,12 +19,12 @@ ConfigFileWatcher — hot-reload конфигов при изменении фа
     # ... при изменении файла Config обновится автоматически
     watcher.stop()
 """
+
 from __future__ import annotations
 
-import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
@@ -106,7 +106,10 @@ class ConfigFileWatcher:
             return
 
         handler = _ConfigReloadHandler(
-            self._path, self._config, self._on_reload, self._debounce,
+            self._path,
+            self._config,
+            self._on_reload,
+            self._debounce,
         )
         self._observer = Observer()
         self._observer.daemon = True

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable
+from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
 from .frame_shm_middleware import FrameShmMiddleware
@@ -62,9 +62,7 @@ class SourceProducer:
             try:
                 items = self._plugin.produce()
             except NotImplementedError:
-                self._log_error(
-                    f"SourceProducer: {self._plugin.name} не реализует produce()"
-                )
+                self._log_error(f"SourceProducer: {self._plugin.name} не реализует produce()")
                 stop_event.set()
                 return
             except Exception as e:

@@ -4,7 +4,7 @@
 handler когда state_proxy задан, и пропускает когда не задан.
 """
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from multiprocess_framework.modules.process_module.core.process_module import (
     ProcessModule,

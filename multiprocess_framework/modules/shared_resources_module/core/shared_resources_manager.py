@@ -10,18 +10,13 @@ register_process(), передаётся напрямую в дочерние п
 ADR-018: register_process() — единая точка регистрации.
 ADR-021: прямой pickle SRM вместо ad-hoc bundle dict.
 """
+
 from __future__ import annotations
 
 from multiprocessing import Event, Queue
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 
 from ...base_manager import BaseManager, ObservableMixin
-
-
-def _noop(*a, **kw):
-    """Pickle-safe noop stub для методов после unpickle (Windows spawn)."""
-    return None
-
 from ..config_store import ConfigStore
 from ..events import EventManager
 from ..queues import QueueRegistry
@@ -33,13 +28,31 @@ from ..handles import ProcessHandle
 from .interfaces import ISharedResourcesManager
 
 
+def _noop(*a, **kw):
+    """Pickle-safe noop stub для методов после unpickle (Windows spawn)."""
+    return None
+
+
 # Атрибуты ObservableMixin, которые нельзя pickle (closures)
-_PICKLE_EXCLUDE = frozenset((
-    "log_debug", "log_info", "log_warning", "log_error", "log_critical",
-    "record_metric", "increment", "record_timing", "gauge",
-    "track_error", "record_error",
-    "_call_manager", "_registry", "_plugin_registry", "_proxy_created",
-))
+_PICKLE_EXCLUDE = frozenset(
+    (
+        "log_debug",
+        "log_info",
+        "log_warning",
+        "log_error",
+        "log_critical",
+        "record_metric",
+        "increment",
+        "record_timing",
+        "gauge",
+        "track_error",
+        "record_error",
+        "_call_manager",
+        "_registry",
+        "_plugin_registry",
+        "_proxy_created",
+    )
+)
 
 
 class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManager):
@@ -165,16 +178,11 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
                 coll = memory_config.get("coll", 2)
                 if memory_names is None:
                     # Плоский формат: {"camera_frame": (h,w,c), "coll": 2}
-                    memory_names = {
-                        k: v for k, v in memory_config.items()
-                        if k != "coll" and isinstance(v, tuple)
-                    }
+                    memory_names = {k: v for k, v in memory_config.items() if k != "coll" and isinstance(v, tuple)}
                 if memory_names:
                     names_normalized = self._normalize_memory_names(memory_names)
                     if names_normalized:
-                        self._memory_manager.create_memory_dict(
-                            name, names_normalized, coll
-                        )
+                        self._memory_manager.create_memory_dict(name, names_normalized, coll)
 
             self._log_info(f"Process '{name}' registered in SRM")
             return True
@@ -182,9 +190,7 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             self._log_error(f"register_process('{name}') failed: {e}")
             return False
 
-    def _normalize_memory_names(
-        self, memory_names: Dict[str, Any]
-    ) -> Dict[str, tuple]:
+    def _normalize_memory_names(self, memory_names: Dict[str, Any]) -> Dict[str, tuple]:
         """
         Нормализовать memory names к (num_images, shape, dtype).
         Короткий формат (h, w, c) → (1, (h,w,c), "uint8").
@@ -261,8 +267,7 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
         """
         if not self._process_state_registry.has_process(name):
             raise KeyError(
-                f"Process '{name}' not registered. "
-                f"Available: {self._process_state_registry.get_process_names()}"
+                f"Process '{name}' not registered. Available: {self._process_state_registry.get_process_names()}"
             )
         return ProcessHandle(name, self)
 
@@ -277,16 +282,11 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
         exclude: Optional[str] = None,
     ) -> int:
         """Разослать сообщение всем процессам. Возвращает количество доставок."""
-        return self._queue_registry.broadcast_message(
-            message, queue_type=queue_type, exclude_process=exclude
-        )
+        return self._queue_registry.broadcast_message(message, queue_type=queue_type, exclude_process=exclude)
 
     def get_all_statuses(self) -> Dict[str, ProcessStatus]:
         """Получить статусы всех процессов."""
-        return {
-            name: pd.status
-            for name, pd in self._process_state_registry.get_all_process_data().items()
-        }
+        return {name: pd.status for name, pd in self._process_state_registry.get_all_process_data().items()}
 
     # =========================================================================
     # Properties — внутренние менеджеры (deprecated, используйте srm.for_process())
@@ -366,15 +366,23 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
 
     def __getattr__(self, name: str) -> Any:
         _PICKLE_SKIP = (
-            "_log_method", "_log_method_internal", "_log",
-            "_record_metric_method", "_track_error_method", "_call_manager",
+            "_log_method",
+            "_log_method_internal",
+            "_log",
+            "_record_metric_method",
+            "_track_error_method",
+            "_call_manager",
         )
         if name in _PICKLE_SKIP or name.startswith(("_log_", "_record_", "_track_")):
             return _noop
         if name.startswith("_") or name in (
-            "_process_state_registry", "_event_manager",
-            "_queue_registry", "_memory_manager", "_config_store",
-            "get_stats", "__dict__",
+            "_process_state_registry",
+            "_event_manager",
+            "_queue_registry",
+            "_memory_manager",
+            "_config_store",
+            "get_stats",
+            "__dict__",
         ):
             raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 

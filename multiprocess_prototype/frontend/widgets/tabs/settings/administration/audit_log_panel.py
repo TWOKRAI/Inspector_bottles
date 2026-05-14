@@ -7,6 +7,7 @@
 
 Используется как подсекция «Audit log» в AdministrationSection.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
@@ -53,14 +54,16 @@ class AuditLogPanel(BaseAdminPanel):
 
     _HEADER_TITLE = "Аудит-лог"
     _TABLE_COLUMNS = [
-        ("ts",          "Время",         300),
-        ("username",    "Пользователь",  110),
-        ("action_type", "Тип действия",  120),
-        ("resource",    "Ресурс",        150),
+        ("ts", "Время", 300),
+        ("username", "Пользователь", 110),
+        ("action_type", "Тип действия", 120),
+        ("resource", "Ресурс", 150),
     ]
     _PAGE_SIZE = 100
 
-    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
+    def __init__(
+        self, auth: "AuthContext | None", parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
 
         self._storage = auth.audit if auth is not None else None
@@ -79,12 +82,7 @@ class AuditLogPanel(BaseAdminPanel):
 
     def _setup_ui(self) -> None:
         """Построить layout панели."""
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
-
-        # Стандартный заголовок из BaseAdminPanel
-        self._create_header(root)
+        root = self._create_group()
 
         # Панель фильтров
         filter_layout = QHBoxLayout()
@@ -128,11 +126,15 @@ class AuditLogPanel(BaseAdminPanel):
         self._btn_apply.clicked.connect(lambda: self._load(offset=0))
 
         self._btn_reset_filter = QPushButton("Сбросить фильтр")
-        self._btn_reset_filter.setToolTip("Сбросить все фильтры к значениям по умолчанию")
+        self._btn_reset_filter.setToolTip(
+            "Сбросить все фильтры к значениям по умолчанию"
+        )
         self._btn_reset_filter.clicked.connect(self._on_reset_filter)
 
         self._btn_save_file = QPushButton("Сохранить в файл")
-        self._btn_save_file.setToolTip("Экспортировать текущую страницу аудит-лога в CSV")
+        self._btn_save_file.setToolTip(
+            "Экспортировать текущую страницу аудит-лога в CSV"
+        )
         self._btn_save_file.clicked.connect(self._on_save_to_file)
 
         self._btn_clear_all = QPushButton("Очистить всё")
@@ -163,7 +165,12 @@ class AuditLogPanel(BaseAdminPanel):
 
     def action_buttons(self) -> list[QPushButton]:
         """Кнопки действий для размещения в action panel секции."""
-        return [self._btn_apply, self._btn_reset_filter, self._btn_save_file, self._btn_clear_all]
+        return [
+            self._btn_apply,
+            self._btn_reset_filter,
+            self._btn_save_file,
+            self._btn_clear_all,
+        ]
 
     # ------------------------------------------------------------------
     # Действия кнопок
@@ -197,16 +204,22 @@ class AuditLogPanel(BaseAdminPanel):
 
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f, delimiter=";")
-                writer.writerow(["Время", "Пользователь", "Тип действия", "Ресурс", "Комментарий"])
+                writer.writerow(
+                    ["Время", "Пользователь", "Тип действия", "Ресурс", "Комментарий"]
+                )
                 for entry in self._entries:
-                    writer.writerow([
-                        _format_dt(entry.ts),
-                        entry.username,
-                        entry.action_type,
-                        entry.resource or "",
-                        entry.comment or "",
-                    ])
-            QMessageBox.information(self, "Экспорт", f"Сохранено {len(self._entries)} записей.")
+                    writer.writerow(
+                        [
+                            _format_dt(entry.ts),
+                            entry.username,
+                            entry.action_type,
+                            entry.resource or "",
+                            entry.comment or "",
+                        ]
+                    )
+            QMessageBox.information(
+                self, "Экспорт", f"Сохранено {len(self._entries)} записей."
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка экспорта", str(exc))
 

@@ -7,9 +7,7 @@ Unit-тесты для DataValidator (core/validators.py).
 - validate_nested (валидация по пути вложенности nested_path).
 """
 
-import pytest
 from pydantic import BaseModel
-from typing import Dict, Any
 
 from ..core.validators import DataValidator
 
@@ -17,6 +15,7 @@ from ..core.validators import DataValidator
 # ============================================================================
 # Тестовые модели
 # ============================================================================
+
 
 class SampleModel(BaseModel):
     """Тестовая модель конфигурации."""
@@ -35,8 +34,10 @@ class NestedModel(BaseModel):
 # Тесты DataValidator
 # ============================================================================
 
+
 def test_data_validator_variants():
-    """Валидные/невалидные данные, is_valid, get_validation_errors, validate_partial, validate_nested (успех и ошибка)."""
+    """Валидные/невалидные данные, is_valid, get_validation_errors,
+    validate_partial, validate_nested (успех и ошибка)."""
     # Базовая валидация
     valid, instance, err = DataValidator.validate(
         {"name": "v", "count": 2},
@@ -82,4 +83,3 @@ def test_data_validator_variants():
         nested_path="container",
     )
     assert not bad_nested and "не является словарем" in nested_err
-

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Tests for DDLBuilder -- DDL generation from schema metadata."""
+
 import pytest
 
-from sqlalchemy import Integer, String, Float, Boolean, DateTime, Date
+from sqlalchemy import Integer, String, Float, Boolean
 
 from Services.sql.core.ddl_builder import DDLBuilder
 
@@ -10,6 +11,7 @@ from Services.sql.core.ddl_builder import DDLBuilder
 # ---------------------------------------------------------------------------
 # Fake mapper: returns pre-built metadata dicts
 # ---------------------------------------------------------------------------
+
 
 class FakeMapper:
     """Mimics SchemaBaseMapper.schema_to_table_meta() for testing."""
@@ -24,6 +26,7 @@ class FakeMapper:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _basic_meta():
     """Minimal table with id, name, score."""
@@ -72,6 +75,7 @@ def _basic_meta():
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestDDLBuilderSQLite:
     """SQLite dialect tests."""

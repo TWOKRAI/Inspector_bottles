@@ -1,5 +1,5 @@
 """Тесты round-trip YAML с позициями нод."""
-import pytest
+
 from unittest.mock import MagicMock
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
@@ -8,7 +8,8 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import Pipe
 def _make_ctx(topology=None):
     ctx = MagicMock()
     ctx.config = {
-        "topology": topology or {
+        "topology": topology
+        or {
             "processes": [
                 {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
                 {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
@@ -74,10 +75,12 @@ class TestYamlPositions:
 
     def test_load_without_metadata(self):
         """Загрузка topology без metadata — нет ошибок."""
-        ctx = _make_ctx(topology={
-            "processes": [{"process_name": "test", "plugins": []}],
-            "wires": [],
-        })
+        ctx = _make_ctx(
+            topology={
+                "processes": [{"process_name": "test", "plugins": []}],
+                "wires": [],
+            }
+        )
         p = PipelinePresenter(ctx)
         nodes, edges = p.load_topology_from_config()
         assert len(nodes) == 1

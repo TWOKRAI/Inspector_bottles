@@ -8,12 +8,11 @@ LoggerManager (Refactored) — наследник ChannelRoutingManager.
   - Батчинг через self._buffer (BatchBuffer из CRM)
   - Публичный API не изменён (info, error, log, flush, get_stats и т.д.)
 """
+
 import logging as _stdlib_logging
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from contextvars import ContextVar
-
-_fallback_logger = _stdlib_logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from multiprocessing import Process
@@ -32,7 +31,9 @@ from .log_types import LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 from .log_paths import resolve_log_file_path
 
-log_context: ContextVar[Dict[str, Any]] = ContextVar('log_context', default={})
+_fallback_logger = _stdlib_logging.getLogger(__name__)
+
+log_context: ContextVar[Dict[str, Any]] = ContextVar("log_context", default={})
 
 
 class LoggerManager(ChannelRoutingManager, ILoggerManager):
@@ -67,9 +68,9 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         if managers is None:
             managers = {}
         if router_manager:
-            managers['router'] = router_manager
+            managers["router"] = router_manager
 
-        observable_config = {'router_routing': enable_router_routing}
+        observable_config = {"router_routing": enable_router_routing}
 
         # --- Normalize config ---
         log_config = self._resolve_log_config(config)
@@ -84,7 +85,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             dispatcher_key_field="level",
             managers=managers,
             observable_config=observable_config,
-            auto_proxy=kwargs.get('auto_proxy', True),
+            auto_proxy=kwargs.get("auto_proxy", True),
         )
 
         self._config_manager = config_manager
@@ -102,11 +103,11 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         self._cache_enabled = True
 
         self.stats = {
-            'messages_processed': 0,
-            'messages_skipped': 0,
-            'messages_batched': 0,
-            'messages_routed': 0,
-            'module_files_created': 0,
+            "messages_processed": 0,
+            "messages_skipped": 0,
+            "messages_batched": 0,
+            "messages_routed": 0,
+            "module_files_created": 0,
         }
 
         self._setup_channels()
@@ -167,26 +168,16 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         if isinstance(config, LoggerManagerConfig):
             return config
         if isinstance(config, dict):
-            return (
-                LoggerManagerConfig.model_validate(config) if config else LoggerManagerConfig()
-            )
+            return LoggerManagerConfig.model_validate(config) if config else LoggerManagerConfig()
         if hasattr(config, "build") and callable(config.build):
             result = config.build()
             if isinstance(result, tuple) and len(result) == 2:
                 _, cfg_dict = result
                 if isinstance(cfg_dict, dict):
-                    return (
-                        LoggerManagerConfig.model_validate(cfg_dict)
-                        if cfg_dict
-                        else LoggerManagerConfig()
-                    )
+                    return LoggerManagerConfig.model_validate(cfg_dict) if cfg_dict else LoggerManagerConfig()
                 return LoggerManagerConfig()
             if isinstance(result, dict):
-                return (
-                    LoggerManagerConfig.model_validate(result)
-                    if result
-                    else LoggerManagerConfig()
-                )
+                return LoggerManagerConfig.model_validate(result) if result else LoggerManagerConfig()
         return LoggerManagerConfig()
 
     def _scope_schema(self, scope: LogScope) -> LoggerScopeSchema:
@@ -213,9 +204,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
         # Автосоздание каналов для модулей из config.modules
         for module_name, module_config in self.config.modules.items():
-            if getattr(module_config, 'enabled', True) and getattr(
-                module_config, 'file_path', None
-            ):
+            if getattr(module_config, "enabled", True) and getattr(module_config, "file_path", None):
                 self._setup_module_channel(module_name, module_config)
 
     def _resolved_file_path(self, file_path: Optional[str], fallback: str) -> str:
@@ -223,6 +212,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         log_dir = self.config.log_directory
         if self.process is not None and hasattr(self.process, "name"):
             from pathlib import Path as _Path
+
             base = _Path(log_dir) if log_dir else _Path("logs")
             log_dir = str(base / self.process.name)
         return resolve_log_file_path(
@@ -255,16 +245,8 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             module_config.file_path,
             f"logs/{module_name}.log",
         )
-        max_size = (
-            module_config.max_size
-            if module_config.max_size is not None
-            else 10 * 1024 * 1024
-        )
-        backup_count = (
-            module_config.backup_count
-            if module_config.backup_count is not None
-            else 5
-        )
+        max_size = module_config.max_size if module_config.max_size is not None else 10 * 1024 * 1024
+        backup_count = module_config.backup_count if module_config.backup_count is not None else 5
         rotate = module_config.rotate
         try:
             ch_name = f"module_{module_name}"
@@ -281,7 +263,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             channel = create_channel(ch_name, channel_config)
             self._module_channels[module_name] = channel
             self._channel_registry.register(channel)
-            self.stats['module_files_created'] += 1
+            self.stats["module_files_created"] += 1
             self.debug(
                 f"Module channel created: {module_name} -> {path}",
                 module="logger_manager",
@@ -347,10 +329,10 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         module: str = "main",
         **extra,
     ):
-        self.stats['messages_processed'] += 1
+        self.stats["messages_processed"] += 1
 
         if not self.should_log(scope, level, module):
-            self.stats['messages_skipped'] += 1
+            self.stats["messages_skipped"] += 1
             return
 
         scope_config = self._scope_schema(scope)
@@ -375,13 +357,13 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             extra=context,
         )
 
-        if self.is_enabled('router_routing') and self._router_manager:
+        if self.is_enabled("router_routing") and self._router_manager:
             self._route_via_router(record)
 
         if self._buffer:
             for ch_name in channels:
                 self._buffer.enqueue(ch_name, record.to_dict())
-            self.stats['messages_batched'] += 1
+            self.stats["messages_batched"] += 1
         else:
             self._write_record_to_channels(record, channels)
 
@@ -417,7 +399,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                 msg.add_metadata("extra", record.extra)
 
             self._router_manager.send(msg)
-            self.stats['messages_routed'] += 1
+            self.stats["messages_routed"] += 1
         except Exception:
             pass
 
@@ -480,9 +462,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
     # =========================================================================
 
     def enable_module_logging(self, module_name: str, file_path: Optional[str] = None):
-        self._setup_module_channel(
-            module_name, LoggerModuleSchema(enabled=True, file_path=file_path)
-        )
+        self._setup_module_channel(module_name, LoggerModuleSchema(enabled=True, file_path=file_path))
 
     def disable_module_logging(self, module_name: str):
         if module_name in self._module_channels:
@@ -500,21 +480,23 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     def get_stats(self) -> Dict[str, Any]:
         base_stats = {
-            'app_name': self.app_name,
-            'messages_processed': self.stats['messages_processed'],
-            'messages_skipped': self.stats['messages_skipped'],
-            'messages_routed': self.stats['messages_routed'],
-            'channels_count': len(self._channel_registry),
-            'module_channels_count': len(self._module_channels),
-            'module_files_created': self.stats['module_files_created'],
-            'batching_enabled': self.config.enable_batching,
+            "app_name": self.app_name,
+            "messages_processed": self.stats["messages_processed"],
+            "messages_skipped": self.stats["messages_skipped"],
+            "messages_routed": self.stats["messages_routed"],
+            "channels_count": len(self._channel_registry),
+            "module_channels_count": len(self._module_channels),
+            "module_files_created": self.stats["module_files_created"],
+            "batching_enabled": self.config.enable_batching,
         }
 
         if self._buffer:
-            base_stats.update({
-                'messages_batched': self.stats['messages_batched'],
-                'batch_stats': self._buffer.stats,
-            })
+            base_stats.update(
+                {
+                    "messages_batched": self.stats["messages_batched"],
+                    "batch_stats": self._buffer.stats,
+                }
+            )
 
         return base_stats
 
@@ -540,6 +522,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 # =========================================================================
 # Глобальные функции
 # =========================================================================
+
 
 def get_logger() -> Optional[LoggerManager]:
     return LoggerManager._instance

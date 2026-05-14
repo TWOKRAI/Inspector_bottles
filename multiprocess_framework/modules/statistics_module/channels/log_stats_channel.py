@@ -4,7 +4,8 @@ LogStatsChannel — канал вывода метрик в LoggerManager.
 
 При write(data) вызывает logger_manager.performance() с агрегированным снапшотом.
 """
-from typing import Any, Dict, Optional
+
+from typing import Any, Dict
 
 from ...channel_routing_module.interfaces import IChannel
 

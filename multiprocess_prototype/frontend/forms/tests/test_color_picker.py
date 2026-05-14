@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from PySide6.QtWidgets import QHBoxLayout, QSpinBox
+from PySide6.QtWidgets import QSpinBox
 
 from multiprocess_prototype.frontend.forms.widgets.color_picker import ColorTripletWidget
 

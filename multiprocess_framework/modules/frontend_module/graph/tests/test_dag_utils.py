@@ -1,5 +1,4 @@
 """FW-тесты для frontend_module.graph.dag_utils."""
-import pytest
 
 from multiprocess_framework.modules.frontend_module.graph.dag_utils import (
     find_connected_edges,

@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """RegistersManager: контейнер, делегирование, подписки, set_field_value."""
+
 from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Dict, List
 
-from multiprocess_framework.modules.data_schema_module import FieldMeta, FieldRouting, RegisterDispatchMeta, SchemaBase
+from multiprocess_framework.modules.data_schema_module import FieldMeta, RegisterDispatchMeta, SchemaBase
 
 from multiprocess_framework.modules.registers_module import RegistersManager
 

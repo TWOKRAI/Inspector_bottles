@@ -25,6 +25,7 @@ Layout:
     layout.set_content_widget(my_content)
     layout.enable_undo_redo(action_bus)
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -35,7 +36,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QScrollArea,
     QScrollBar,
@@ -189,13 +189,13 @@ class DiffScrollTabLayout(QWidget):
         for child in widget.findChildren(QAbstractScrollArea):
             self._install_wheel_redirect(child.viewport())
 
-    def eventFilter(self, obj: object, event: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: object, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Wheel:
             self._forward_wheel(event)  # type: ignore[arg-type]
             return True
         return super().eventFilter(obj, event)
 
-    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+    def wheelEvent(self, event: QWheelEvent) -> None:
         """Wheel в любом месте шаблона → мастер-скроллбар."""
         self._forward_wheel(event)
 
@@ -231,7 +231,7 @@ class DiffScrollTabLayout(QWidget):
         self._master_sb.blockSignals(False)
         self._master_sb.setVisible(max_range > 0)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_master_range()
 

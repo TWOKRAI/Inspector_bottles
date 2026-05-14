@@ -3,10 +3,10 @@
 
 pytest -q multiprocess_framework/modules/console_module/tests/
 """
+
 import os
 from unittest.mock import MagicMock
 
-import pytest
 
 from ..commands.system_commands import SystemCommandHandler, _get_attr, _extract_processes
 
@@ -14,6 +14,7 @@ from ..commands.system_commands import SystemCommandHandler, _get_attr, _extract
 # ---------------------------------------------------------------------------
 # help
 # ---------------------------------------------------------------------------
+
 
 class TestHelp:
     def test_help_shows_builtin_commands(self):
@@ -29,9 +30,9 @@ class TestHelp:
     def test_help_with_registry(self):
         """Все команды из переданного реестра присутствуют в выводе."""
         registry = {
-            "help":   "Show help",
+            "help": "Show help",
             "status": "Show status",
-            "reg":    "Register commands",
+            "reg": "Register commands",
             "custom": "Custom command",
         }
         handler = SystemCommandHandler()
@@ -66,6 +67,7 @@ class TestHelp:
 # ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
+
 
 class TestStatus:
     def test_status_with_process_object(self):
@@ -130,6 +132,7 @@ class TestStatus:
 # ---------------------------------------------------------------------------
 # ps
 # ---------------------------------------------------------------------------
+
 
 class TestPs:
     def test_ps_with_manager_list(self):
@@ -198,13 +201,14 @@ class TestPs:
 # stats
 # ---------------------------------------------------------------------------
 
+
 class TestStats:
     def test_stats_with_metrics(self):
         """Mock stats_manager с get_all_metrics() — метрики присутствуют в выводе."""
         sm = MagicMock()
         sm.get_all_metrics.return_value = {
             "frames_processed": {"type": "counter", "total": 1024},
-            "inference_time":   {"type": "timing",  "avg": 0.032, "count": 512},
+            "inference_time": {"type": "timing", "avg": 0.032, "count": 512},
         }
         handler = SystemCommandHandler()
 
@@ -258,6 +262,7 @@ class TestStats:
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
+
 
 class TestHelpers:
     def test_get_attr_from_dict(self):

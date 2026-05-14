@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты для ProcessConfigHandler — get_config/update_config."""
 
-import pytest
 from unittest.mock import Mock
 
 from ..configs.process_config_handler import ProcessConfigHandler

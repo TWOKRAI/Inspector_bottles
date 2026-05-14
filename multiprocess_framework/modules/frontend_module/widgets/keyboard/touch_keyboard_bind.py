@@ -7,7 +7,9 @@ from typing import Any
 
 from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QLineEdit, QWidget
-from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import install_touch_keyboard_on_line_edit
+from multiprocess_framework.modules.frontend_module.widgets.keyboard.touch_keyboard import (
+    install_touch_keyboard_on_line_edit,
+)
 
 
 def merge_touch_keyboard_dicts(*parts: Any | None) -> Any | None:

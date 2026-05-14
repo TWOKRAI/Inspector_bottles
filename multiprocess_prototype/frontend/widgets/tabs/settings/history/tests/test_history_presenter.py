@@ -10,6 +10,7 @@
   - test_save_skips_when_no_actions   : если история пуста — диалог не показывается
   - test_refresh_empty_bus            : bus=None не бросает исключений
 """
+
 from __future__ import annotations
 
 import csv
@@ -17,7 +18,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from multiprocess_prototype.frontend.widgets.tabs.settings.history.presenter import (
     HistoryPresenter,
@@ -27,6 +27,7 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.history.presenter imp
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
+
 
 def _make_action(
     *,
@@ -90,6 +91,7 @@ def _make_presenter(
 # ---------------------------------------------------------------------------
 # Тесты
 # ---------------------------------------------------------------------------
+
 
 class TestHistoryPresenterRefresh:
     """Тесты метода refresh()."""

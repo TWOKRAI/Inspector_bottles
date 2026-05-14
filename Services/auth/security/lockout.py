@@ -20,12 +20,12 @@ Thread-safe через threading.Lock.
     tracker.record_failure("alice")
     locked, wait_sec = tracker.is_locked("alice")
 """
+
 from __future__ import annotations
 
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ..crypto.policies import LockoutPolicy
 

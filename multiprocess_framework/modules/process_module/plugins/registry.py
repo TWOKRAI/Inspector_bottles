@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .base import ProcessModulePlugin
@@ -173,14 +173,17 @@ class _PluginRegistry:
                 except Exception as exc:
                     logger.debug(
                         "PluginRegistry.discover: %s — %s: %s",
-                        module_path, type(exc).__name__, exc,
+                        module_path,
+                        type(exc).__name__,
+                        exc,
                     )
 
         discovered = len(self._plugins) - count_before
         if discovered > 0:
             logger.info(
                 "PluginRegistry.discover: найдено %d новых плагинов (всего %d)",
-                discovered, len(self._plugins),
+                discovered,
+                len(self._plugins),
             )
         return discovered
 
@@ -241,6 +244,7 @@ def register_plugin(
 
     Аналог: Node-RED RED.nodes.registerType + GStreamer GST_ELEMENT_REGISTER_DEFINE.
     """
+
     def decorator(cls):
         PluginRegistry.register(
             name=name,

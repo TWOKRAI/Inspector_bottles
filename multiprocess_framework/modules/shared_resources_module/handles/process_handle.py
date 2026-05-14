@@ -8,6 +8,8 @@ ProcessHandle — единый chainable доступ к ресурсам про
     handle.status  # → ProcessStatus
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict, Optional, TYPE_CHECKING
 from multiprocessing import Queue, Event
 
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
     from ..core.shared_resources_manager import SharedResourcesManager
     from ..state.process_data import ProcessData
     from ..types import ProcessStatus
+    from .memory_handle import MemoryHandle
 
 
 class QueueHandle:
@@ -43,9 +46,7 @@ class QueueHandle:
     def send(self, message: Any, timeout: float = 0.0) -> bool:
         """Отправить сообщение в очередь."""
         if self._queue_registry is not None:
-            return self._queue_registry.send_to_queue(
-                self._process_name, self._queue_type, message, timeout
-            )
+            return self._queue_registry.send_to_queue(self._process_name, self._queue_type, message, timeout)
         if self._queue is None:
             return False
         try:
@@ -60,17 +61,11 @@ class QueueHandle:
     def receive(self, timeout: float = 0.0) -> Optional[Any]:
         """Получить сообщение из очереди."""
         if self._queue_registry is not None:
-            return self._queue_registry.receive_from_queue(
-                self._process_name, self._queue_type, timeout
-            )
+            return self._queue_registry.receive_from_queue(self._process_name, self._queue_type, timeout)
         if self._queue is None:
             return None
         try:
-            return (
-                self._queue.get(timeout=timeout)
-                if timeout > 0
-                else self._queue.get_nowait()
-            )
+            return self._queue.get(timeout=timeout) if timeout > 0 else self._queue.get_nowait()
         except Exception:
             return None
 
@@ -216,7 +211,7 @@ class ProcessHandle:
             event_name=event_name,
         )
 
-    def memory(self, memory_name: str) -> "MemoryHandle":  # noqa: F821
+    def memory(self, memory_name: str) -> "MemoryHandle":
         """Получить handle к блоку SharedMemory процесса."""
         from .memory_handle import MemoryHandle
 

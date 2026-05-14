@@ -3,25 +3,26 @@
 Проверяют координацию PipelineModel + ActionBus + GraphScene + TopologyHolder.
 Без Qt — все зависимости замоканы.
 """
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
-import pytest
+from unittest.mock import MagicMock
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
-from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.edge_item import EdgeData
 
 
 # ------------------------------------------------------------------ #
 #  Фикстуры                                                           #
 # ------------------------------------------------------------------ #
 
+
 def _make_enhanced_ctx(topology=None):
     """Создать mock AppContext с полным набором extras."""
     ctx = MagicMock()
     ctx.config = {
-        "topology": topology or {
+        "topology": topology
+        or {
             "processes": [
                 {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
                 {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
@@ -43,6 +44,7 @@ def _make_enhanced_ctx(topology=None):
 # ------------------------------------------------------------------ #
 #  Тесты загрузки                                                     #
 # ------------------------------------------------------------------ #
+
 
 class TestLoad:
     def test_load_topology(self):
@@ -71,6 +73,7 @@ class TestLoad:
 # ------------------------------------------------------------------ #
 #  Тесты мутаций                                                      #
 # ------------------------------------------------------------------ #
+
 
 class TestMutations:
     def test_add_process_from_plugin(self):
@@ -108,13 +111,15 @@ class TestMutations:
 
     def test_add_wire(self):
         """add_wire добавляет wire через модель."""
-        ctx = _make_enhanced_ctx(topology={
-            "processes": [
-                {"process_name": "a", "plugins": []},
-                {"process_name": "b", "plugins": []},
-            ],
-            "wires": [],
-        })
+        ctx = _make_enhanced_ctx(
+            topology={
+                "processes": [
+                    {"process_name": "a", "plugins": []},
+                    {"process_name": "b", "plugins": []},
+                ],
+                "wires": [],
+            }
+        )
         p = PipelinePresenter(ctx)
         p.load_topology_from_config()
 
@@ -124,15 +129,17 @@ class TestMutations:
 
     def test_add_wire_cycle_rejected(self):
         """Цикл → add_wire возвращает False."""
-        ctx = _make_enhanced_ctx(topology={
-            "processes": [
-                {"process_name": "a", "plugins": []},
-                {"process_name": "b", "plugins": []},
-            ],
-            "wires": [
-                {"source": "a.out.data", "target": "b.in.data"},
-            ],
-        })
+        ctx = _make_enhanced_ctx(
+            topology={
+                "processes": [
+                    {"process_name": "a", "plugins": []},
+                    {"process_name": "b", "plugins": []},
+                ],
+                "wires": [
+                    {"source": "a.out.data", "target": "b.in.data"},
+                ],
+            }
+        )
         p = PipelinePresenter(ctx)
         p.load_topology_from_config()
 
@@ -144,6 +151,7 @@ class TestMutations:
 # ------------------------------------------------------------------ #
 #  Тесты валидации                                                    #
 # ------------------------------------------------------------------ #
+
 
 class TestValidation:
     def test_validate(self):
@@ -161,6 +169,7 @@ class TestValidation:
 # ------------------------------------------------------------------ #
 #  Тесты auto-layout                                                  #
 # ------------------------------------------------------------------ #
+
 
 class TestAutoLayout:
     def test_auto_layout(self, qtbot):
@@ -180,6 +189,7 @@ class TestAutoLayout:
 # ------------------------------------------------------------------ #
 #  Тесты signal suppression                                           #
 # ------------------------------------------------------------------ #
+
 
 class TestSignalSuppression:
     def test_block_signals(self):
@@ -215,10 +225,12 @@ class TestSignalSuppression:
         p.load_topology_from_config()
 
         with p._block_signals():
-            p._on_topology_changed_external({
-                "processes": [{"process_name": "x", "plugins": []}],
-                "wires": [],
-            })
+            p._on_topology_changed_external(
+                {
+                    "processes": [{"process_name": "x", "plugins": []}],
+                    "wires": [],
+                }
+            )
 
         # Модель не должна обновиться (suppress был активен)
         assert "x" not in p.model.get_process_names()
@@ -227,6 +239,7 @@ class TestSignalSuppression:
 # ------------------------------------------------------------------ #
 #  Тесты ActionBus интеграция                                        #
 # ------------------------------------------------------------------ #
+
 
 class TestActionBus:
     def test_add_process_with_action_bus(self):
@@ -244,6 +257,7 @@ class TestActionBus:
 # ------------------------------------------------------------------ #
 #  Тесты GUI positions                                                #
 # ------------------------------------------------------------------ #
+
 
 class TestGuiPositions:
     def test_gui_positions_stored(self):
@@ -282,6 +296,7 @@ class TestGuiPositions:
 # ------------------------------------------------------------------ #
 #  Тесты scene интеграция                                             #
 # ------------------------------------------------------------------ #
+
 
 class TestSceneIntegration:
     def test_scene_updated_on_add(self):

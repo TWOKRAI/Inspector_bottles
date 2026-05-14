@@ -10,6 +10,8 @@
     - save_to_file / load_from_file (JSON и YAML)
     - Опции: exclude_none, exclude_defaults, include/exclude fields
 """
+
+import importlib.util
 import json
 import unittest
 from pathlib import Path
@@ -23,6 +25,7 @@ from multiprocess_framework.modules.data_schema_module import DataConverter, For
 # =============================================================================
 # Тестовые модели
 # =============================================================================
+
 
 class SimpleModel(BaseModel):
     name: str = "default"
@@ -45,6 +48,7 @@ class ComplexModel(BaseModel):
 # =============================================================================
 # Тесты model_to_dict / dict_to_model
 # =============================================================================
+
 
 class TestModelToDict(unittest.TestCase):
     """Тесты model_to_dict."""
@@ -108,6 +112,7 @@ class TestDictToModel(unittest.TestCase):
 # Тесты model_to_json / json_to_model
 # =============================================================================
 
+
 class TestModelToJson(unittest.TestCase):
     """Тесты model_to_json / json_to_model."""
 
@@ -141,15 +146,12 @@ class TestModelToJson(unittest.TestCase):
 # Тесты model_to_yaml / yaml_to_model
 # =============================================================================
 
+
 class TestModelToYaml(unittest.TestCase):
     """Тесты model_to_yaml / yaml_to_model."""
 
     def setUp(self):
-        try:
-            import yaml
-            self.yaml_available = True
-        except ImportError:
-            self.yaml_available = False
+        self.yaml_available = importlib.util.find_spec("yaml") is not None
 
     def test_model_to_yaml_is_string(self):
         if not self.yaml_available:
@@ -180,6 +182,7 @@ class TestModelToYaml(unittest.TestCase):
 # Тесты универсального convert()
 # =============================================================================
 
+
 class TestConvertUniversal(unittest.TestCase):
     """Тесты универсального метода convert()."""
 
@@ -198,9 +201,7 @@ class TestConvertUniversal(unittest.TestCase):
 
     def test_json_to_model(self):
         js = '{"name": "from_json_conv", "count": 7, "active": false}'
-        result = DataConverter.convert(
-            js, FormatType.JSON, FormatType.MODEL, model_class=SimpleModel
-        )
+        result = DataConverter.convert(js, FormatType.JSON, FormatType.MODEL, model_class=SimpleModel)
         self.assertIsInstance(result, SimpleModel)
         self.assertEqual(result.name, "from_json_conv")
 
@@ -221,15 +222,18 @@ class TestConvertUniversal(unittest.TestCase):
 # Тесты save_to_file / load_from_file
 # =============================================================================
 
+
 class TestFileOperations(unittest.TestCase):
     """Тесты сохранения и загрузки из файла."""
 
     def setUp(self):
         import tempfile
+
         self.temp_dir = Path(tempfile.mkdtemp())
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_save_and_load_json(self):
@@ -240,9 +244,7 @@ class TestFileOperations(unittest.TestCase):
         self.assertEqual(loaded, m)
 
     def test_save_and_load_yaml(self):
-        try:
-            import yaml
-        except ImportError:
+        if not importlib.util.find_spec("yaml"):
             self.skipTest("PyYAML не установлен")
         m = SimpleModel(name="file_yaml", count=20)
         path = self.temp_dir / "test.yaml"

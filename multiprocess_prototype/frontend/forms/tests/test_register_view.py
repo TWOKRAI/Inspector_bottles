@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from PySide6.QtWidgets import QSpinBox, QStackedWidget, QTableWidget
+from PySide6.QtWidgets import QSpinBox, QStackedWidget
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.register_view import RegisterView

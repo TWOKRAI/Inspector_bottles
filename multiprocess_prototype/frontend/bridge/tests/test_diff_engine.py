@@ -5,10 +5,8 @@ Pure Python, без Qt и внешних зависимостей.
 
 from __future__ import annotations
 
-import pytest
 
 from multiprocess_prototype.frontend.bridge.diff_engine import (
-    TopologyDiff,
     compute_diff,
 )
 
@@ -34,7 +32,6 @@ def make_wire(source: str, target: str, **kwargs) -> dict:
 
 
 class TestBasicCases:
-
     def test_empty_diff(self) -> None:
         """Оба topology пустые → has_changes=False."""
         diff = compute_diff({}, {})
@@ -58,7 +55,6 @@ class TestBasicCases:
 
 
 class TestProcessDiff:
-
     def test_process_added(self) -> None:
         """Новый процесс в new → ProcessDiff kind=added."""
         old = {"processes": [make_process("camera_0")]}
@@ -139,7 +135,6 @@ class TestProcessDiff:
 
 
 class TestWireDiff:
-
     def test_wire_added(self) -> None:
         """Новый wire → WireDiff kind=added."""
         old = {"wires": []}
@@ -188,7 +183,6 @@ class TestWireDiff:
 
 
 class TestSummary:
-
     def test_empty_summary(self) -> None:
         """Пустой diff → 'Нет изменений'."""
         diff = compute_diff({}, {})
@@ -233,7 +227,6 @@ class TestSummary:
 
 
 class TestConvenienceProperties:
-
     def test_added_processes_property(self) -> None:
         """added_processes возвращает только added."""
         old = {"processes": []}
@@ -277,7 +270,6 @@ class TestConvenienceProperties:
 
 
 class TestMissingSections:
-
     def test_missing_processes_in_both(self) -> None:
         """Нет 'processes' ни в old ни в new → пустой diff."""
         diff = compute_diff({"wires": []}, {"wires": []})

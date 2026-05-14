@@ -1,9 +1,9 @@
 """Интеграционные тесты PipelineTab -- 3-панельный layout."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.tab import PipelineTab
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette import PluginPalette
@@ -14,7 +14,8 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_view impo
 def _make_full_ctx(topology=None):
     ctx = MagicMock()
     ctx.config = {
-        "topology": topology or {
+        "topology": topology
+        or {
             "processes": [
                 {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
                 {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
@@ -139,6 +140,7 @@ class TestPipelineTabToolbar:
         qtbot.addWidget(tab)
 
         from PySide6.QtWidgets import QMessageBox
+
         monkeypatch.setattr(QMessageBox, "information", lambda *a, **kw: None)
         monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: None)
 
@@ -154,6 +156,7 @@ class TestPipelineTabToolbar:
         shown_info = []
 
         from PySide6.QtWidgets import QMessageBox
+
         monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: shown_info.append("info"))
         monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: shown_info.append("warning"))
 

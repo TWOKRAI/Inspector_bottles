@@ -1,9 +1,9 @@
 """Тесты для DisplaysTab."""
+
 from __future__ import annotations
 from unittest.mock import MagicMock
-import pytest
 from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
-from multiprocess_prototype.frontend.widgets.tabs.displays.presenter import DisplaysPresenter, DISPLAY_PRESETS
+from multiprocess_prototype.frontend.widgets.tabs.displays.presenter import DisplaysPresenter
 
 
 def _make_mock_ctx(processes=None):

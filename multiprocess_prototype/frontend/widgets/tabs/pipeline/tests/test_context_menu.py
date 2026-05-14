@@ -1,5 +1,5 @@
 """Тесты контекстных меню GraphScene."""
-import pytest
+
 from unittest.mock import MagicMock, patch
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
@@ -120,6 +120,7 @@ class TestContextMenuMethods:
     def test_show_background_menu_add_process(self, qtbot):
         """_show_background_menu эмитит add_process_requested при выборе Add Process."""
         from PySide6.QtCore import QPointF
+
         scene = GraphScene()
         received = []
         scene.add_process_requested.connect(lambda x, y: received.append((x, y)))
@@ -142,6 +143,7 @@ class TestContextMenuMethods:
     def test_show_background_menu_cancel(self, qtbot):
         """_show_background_menu не эмитит сигнал при отмене."""
         from PySide6.QtCore import QPointF
+
         scene = GraphScene()
         received = []
         scene.add_process_requested.connect(lambda x, y: received.append((x, y)))

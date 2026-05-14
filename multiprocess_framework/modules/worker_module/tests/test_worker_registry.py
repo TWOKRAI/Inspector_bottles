@@ -2,8 +2,6 @@
 """Тесты для registry/worker_registry.py."""
 
 import threading
-import time
-import pytest
 
 from ..registry.worker_registry import WorkerRegistry
 from ..core.thread_config import ThreadConfig

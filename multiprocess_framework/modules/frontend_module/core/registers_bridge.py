@@ -8,11 +8,10 @@ FrontendRegistersBridge — обёртка над RegistersManager для свя
 router: ProcessModule (напр. GuiProcess прототипа). Имеет send_message(target, msg),
 который делегирует в ProcessCommunication → RouterManager.queue_registry.send_to_queue.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
-from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManager
 
 
 def _build_send_callback(router: Any, process_name: str) -> Callable[[str, str, str, Any, Dict[str, Any]], None]:
@@ -22,6 +21,7 @@ def _build_send_callback(router: Any, process_name: str) -> Callable[[str, str, 
     При изменении поля с connection отправляет сообщение через router.
     Формат: control_{channel} с data_type="register_update".
     """
+
     def _send(channel: str, register_name: str, field_name: str, value: Any, snapshot: Dict[str, Any]) -> None:
         if not router or not hasattr(router, "send_message"):
             return
@@ -122,9 +122,7 @@ class FrontendRegistersBridge:
         value: Any,
         current_access_level: int = 0,
     ) -> Tuple[bool, Optional[str]]:
-        return self._registers.validate_field_value(
-            register_name, field_name, value, current_access_level
-        )
+        return self._registers.validate_field_value(register_name, field_name, value, current_access_level)
 
     def set_field_value(
         self,

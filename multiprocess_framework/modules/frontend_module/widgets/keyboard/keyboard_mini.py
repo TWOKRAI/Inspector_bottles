@@ -2,9 +2,16 @@
 """
 VirtualKeyboardMini — компактная цифровая клавиатура (touch-ввод).
 """
+
 from __future__ import annotations
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QFont, QGridLayout, QPushButton, QVBoxLayout, QWidget, Qt
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QGridLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+    Qt,
+)
 from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
@@ -17,7 +24,9 @@ class VirtualKeyboardMini(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+        self.setWindowFlags(
+            Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint
+        )
         self.setStyleSheet("""
                 QPushButton {
                     background-color: #f0f0f0;
@@ -38,11 +47,11 @@ class VirtualKeyboardMini(QWidget):
         layout = QVBoxLayout(self)
         grid = QGridLayout()
         buttons = [
-            ['7', '8', '9', '/'],
-            ['4', '5', '6', '*'],
-            ['1', '2', '3', '-'],
-            ['0', '.', ',', '+'],
-            ['Backspace', 'Clear', 'Enter', '']
+            ["7", "8", "9", "/"],
+            ["4", "5", "6", "*"],
+            ["1", "2", "3", "-"],
+            ["0", ".", ",", "+"],
+            ["Backspace", "Clear", "Enter", ""],
         ]
         for row, button_row in enumerate(buttons):
             for col, text in enumerate(button_row):
@@ -78,12 +87,12 @@ class VirtualKeyboardMini(QWidget):
     def on_button_clicked(self, text):
         if self.input is None:
             return
-        if text == 'Backspace':
+        if text == "Backspace":
             current = self.input.text()
             self.input.setText(current[:-1])
-        elif text == 'Clear':
-            self.input.setText('')
-        elif text == 'Enter':
+        elif text == "Clear":
+            self.input.setText("")
+        elif text == "Enter":
             self.emit_widget_event("keyboard.mini.enter", None)
             if self.enter:
                 self.enter()

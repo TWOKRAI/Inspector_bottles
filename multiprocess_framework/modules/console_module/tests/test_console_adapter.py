@@ -1,9 +1,9 @@
 """
 Тесты для ConsoleAdapter.
 """
+
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from ..adapters.console_adapter import ConsoleAdapter
 from ..configs.console_config import ConsoleConfig

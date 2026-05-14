@@ -23,7 +23,6 @@ import io
 import json
 import sys
 import tomllib
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -123,10 +122,10 @@ def iter_py_files(cfg: Config):
 
 @dataclass
 class Finding:
-    file: str          # relative POSIX path
+    file: str  # relative POSIX path
     line: int
-    kind: str          # "declaration" | "send" | "subscribe"
-    name: str          # channel / target string ("?" если не литерал)
+    kind: str  # "declaration" | "send" | "subscribe"
+    name: str  # channel / target string ("?" если не литерал)
 
 
 def _str_arg(node: ast.AST | None) -> str | None:
@@ -356,10 +355,7 @@ def render_json(rows: list[GroupRow], findings: list[Finding]) -> str:
             }
             for r in rows
         ],
-        "findings": [
-            {"file": f.file, "line": f.line, "kind": f.kind, "name": f.name}
-            for f in findings
-        ],
+        "findings": [{"file": f.file, "line": f.line, "kind": f.kind, "name": f.name} for f in findings],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -384,8 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
     p.add_argument("--group-by", choices=["file", "module", "role"], default=None)
-    p.add_argument("--sort-by", choices=["total", "declarations", "sends", "subscribes", "name"],
-                   default=None)
+    p.add_argument("--sort-by", choices=["total", "declarations", "sends", "subscribes", "name"], default=None)
     p.add_argument("--limit", type=int, default=None)
     return p
 

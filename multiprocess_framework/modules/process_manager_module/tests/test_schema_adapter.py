@@ -5,7 +5,6 @@
 _extract_dict фильтрацию и _flatten_dict.
 """
 
-import pytest
 from typing import Any, Dict
 
 from ..adapters.schema_adapter import ProcessSchemaAdapter
@@ -15,8 +14,10 @@ from ..adapters.schema_adapter import ProcessSchemaAdapter
 # Вспомогательные схемы для тестов
 # ---------------------------------------------------------------------------
 
+
 class SimpleSchema:
     """Простая схема без build()."""
+
     timeout: float = 5.0
     workers: int = 4
     name: str = "test"
@@ -43,6 +44,7 @@ class SchemaWithModelDump:
 
 class SchemaWithSchemaName:
     """Схема с явным __schema_name__."""
+
     __schema_name__ = "CustomName"
 
     def __init__(self):
@@ -64,6 +66,7 @@ class ProcessConfig:
 # ---------------------------------------------------------------------------
 # Тесты
 # ---------------------------------------------------------------------------
+
 
 class TestProcessSchemaAdapterAdapt:
     """Тесты метода adapt()."""
@@ -173,9 +176,7 @@ class TestProcessSchemaAdapterBuildProcessEntry:
     def test_build_process_entry_multiple_workers(self) -> None:
         adapter = ProcessSchemaAdapter()
         process_schema = SchemaWithBuild()
-        name, config = adapter.build_process_entry(
-            process_schema, WorkerConfig(), WorkerConfig()
-        )
+        name, config = adapter.build_process_entry(process_schema, WorkerConfig(), WorkerConfig())
         assert len(config["workers"]) == 2
 
 

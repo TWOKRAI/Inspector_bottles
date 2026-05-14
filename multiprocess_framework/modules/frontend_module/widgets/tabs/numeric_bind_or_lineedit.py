@@ -11,7 +11,13 @@ from typing import Any, Callable, List, Optional, Protocol, Sequence
 
 from multiprocess_framework.modules.frontend_module.components import BindingConfig, NumericControl, NumericViewConfig
 from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import coerce_touch_keyboard
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .binding_context import RegisterBindingContext
 

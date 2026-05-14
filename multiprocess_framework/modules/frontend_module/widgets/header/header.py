@@ -7,11 +7,12 @@ HeaderWidget — контейнер шапки приложения.
   header.buttons_widget.button_clicked.connect(show_window)
   header.admin_button.clicked.connect(open_admin)
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPixmap, QVBoxLayout, QWidget, Signal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QVBoxLayout, QWidget, Signal
 
 from .admin_button_widget import AdminButtonConfig, AdminButtonWidget
 from .header_buttons_widget import HeaderButtonsWidget

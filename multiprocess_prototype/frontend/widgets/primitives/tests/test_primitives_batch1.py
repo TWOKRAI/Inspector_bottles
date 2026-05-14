@@ -1,8 +1,7 @@
 """Тесты для примитивов batch 1: StatusIndicator, EntityCard, ActionToolbar."""
+
 from __future__ import annotations
 
-import pytest
-from PySide6.QtWidgets import QWidget
 
 from multiprocess_prototype.frontend.widgets.primitives import (
     ActionToolbar,
