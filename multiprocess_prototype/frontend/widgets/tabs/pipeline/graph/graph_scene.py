@@ -1,4 +1,5 @@
 """GraphScene -- QGraphicsScene для DAG pipeline."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Signal
@@ -19,9 +20,9 @@ class GraphScene(QGraphicsScene):
     """
 
     # Сигналы для context menu actions
-    node_delete_requested = Signal(str)      # node_id
-    node_inspect_requested = Signal(str)     # node_id
-    edge_delete_requested = Signal(object)   # EdgeItem
+    node_delete_requested = Signal(str)  # node_id
+    node_inspect_requested = Signal(str)  # node_id
+    edge_delete_requested = Signal(object)  # EdgeItem
     add_process_requested = Signal(float, float)  # scene x, y
 
     def __init__(self, parent=None) -> None:
@@ -81,10 +82,7 @@ class GraphScene(QGraphicsScene):
             return
 
         # Каскадное удаление связей
-        edges_to_remove = [
-            e for e in self._edges
-            if e.source_id == node_id or e.target_id == node_id
-        ]
+        edges_to_remove = [e for e in self._edges if e.source_id == node_id or e.target_id == node_id]
         for edge in edges_to_remove:
             self._edges.remove(edge)
             self.removeItem(edge)
@@ -140,14 +138,16 @@ class GraphScene(QGraphicsScene):
             d = item.data
             # Обновить координаты из текущей позиции
             pos = item.pos()
-            nodes.append(NodeData(
-                node_id=d.node_id,
-                title=d.title,
-                subtitle=d.subtitle,
-                category=d.category,
-                x=pos.x(),
-                y=pos.y(),
-            ))
+            nodes.append(
+                NodeData(
+                    node_id=d.node_id,
+                    title=d.title,
+                    subtitle=d.subtitle,
+                    category=d.category,
+                    x=pos.x(),
+                    y=pos.y(),
+                )
+            )
 
         edges = [e.edge_data for e in self._edges]
         return nodes, edges
@@ -169,14 +169,12 @@ class GraphScene(QGraphicsScene):
 
     def get_all_node_positions(self) -> dict[str, tuple[float, float]]:
         """Вернуть позиции всех нод {node_id: (x, y)}."""
-        return {
-            nid: (item.pos().x(), item.pos().y())
-            for nid, item in self._nodes.items()
-        }
+        return {nid: (item.pos().x(), item.pos().y()) for nid, item in self._nodes.items()}
 
     def port_at(self, scene_pos: tuple[float, float]):
         """Найти PortItem в точке scene_pos."""
         from .port_item import PortItem
+
         x, y = scene_pos
         items = self.items(QPointF(x, y))
         for item in items:
@@ -192,7 +190,6 @@ class GraphScene(QGraphicsScene):
         """Контекстное меню: зависит от того, на чём кликнули."""
         from .node_item import NodeItem
         from .edge_item import EdgeItem
-        from .port_item import PortItem
 
         pos = event.scenePos()
         transform = self.views()[0].transform() if self.views() else QTransform()

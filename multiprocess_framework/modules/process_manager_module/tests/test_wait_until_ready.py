@@ -9,10 +9,8 @@
 
 import threading
 import time
-from multiprocessing import Event
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from ..launcher.system_launcher import SystemLauncher
 
@@ -138,8 +136,7 @@ class TestWaitUntilReady:
         """_create_spawner передаёт system_ready_event в ProcessSpawner."""
         launcher = SystemLauncher()
         with patch(
-            "multiprocess_framework.modules.process_manager_module"
-            ".launcher.system_launcher.ProcessSpawner"
+            "multiprocess_framework.modules.process_manager_module.launcher.system_launcher.ProcessSpawner"
         ) as mock_cls:
             mock_cls.return_value = MagicMock()
             launcher._create_spawner({})

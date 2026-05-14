@@ -7,8 +7,9 @@
     - единицы измерения (unit)
     - использование в SchemaBase (создание, валидация)
 """
+
 import unittest
-from typing import Annotated, get_args
+from typing import get_args
 
 from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Тесты для process_module lifecycle — initialize/shutdown с мок shared_resources."""
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 from ..core.process_module import ProcessModule
 from ..types import ProcessStatus

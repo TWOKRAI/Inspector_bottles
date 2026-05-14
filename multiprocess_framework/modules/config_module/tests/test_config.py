@@ -1,7 +1,7 @@
 """
 Unit-тесты для класса Config.
 """
-import os
+
 import pytest
 
 from multiprocess_framework.modules.config_module.core.config import Config
@@ -10,6 +10,7 @@ from multiprocess_framework.modules.config_module.core.config import Config
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def cfg() -> Config:
@@ -24,6 +25,7 @@ def cfg_with_data() -> Config:
 # ---------------------------------------------------------------------------
 # get / set / has / remove / clear
 # ---------------------------------------------------------------------------
+
 
 def test_get_set(cfg):
     cfg.set("key", "value")
@@ -68,6 +70,7 @@ def test_clear(cfg):
 # update
 # ---------------------------------------------------------------------------
 
+
 def test_update_merges(cfg):
     cfg.set("a", 1)
     cfg.update({"b": 2, "a": 99})
@@ -84,6 +87,7 @@ def test_update_deep_merge(cfg_with_data):
 # ---------------------------------------------------------------------------
 # subscribe / unsubscribe
 # ---------------------------------------------------------------------------
+
 
 def test_subscribe_wildcard(cfg):
     events = []
@@ -114,7 +118,10 @@ def test_subscribe_decorator(cfg):
 
 def test_unsubscribe(cfg):
     events = []
-    cb = lambda k, o, n: events.append(n)
+
+    def cb(k, o, n):
+        events.append(n)
+
     cfg.subscribe(cb)
     cfg.set("a", 1)
     assert cfg.unsubscribe(cb)
@@ -126,8 +133,10 @@ def test_unsubscribe(cfg):
 # section
 # ---------------------------------------------------------------------------
 
+
 def test_section_get_set(cfg):
     from multiprocess_framework.modules.config_module.sections.config_section import ConfigSection
+
     sec = ConfigSection(cfg, "db")
     sec.set("host", "localhost")
     assert sec.get("host") == "localhost"
@@ -137,6 +146,7 @@ def test_section_get_set(cfg):
 # ---------------------------------------------------------------------------
 # dict-syntax
 # ---------------------------------------------------------------------------
+
 
 def test_dict_syntax(cfg):
     cfg["key"] = "value"
@@ -160,6 +170,7 @@ def test_delitem_missing_raises(cfg):
 # env_prefix fallback
 # ---------------------------------------------------------------------------
 
+
 def test_env_fallback(monkeypatch, cfg):
     cfg_env = Config(env_prefix="APP")
     monkeypatch.setenv("APP_DATABASE_HOST", "env_host")
@@ -181,6 +192,7 @@ def test_env_fallback_int(monkeypatch):
 # ---------------------------------------------------------------------------
 # data property
 # ---------------------------------------------------------------------------
+
 
 def test_data_returns_copy(cfg):
     cfg.set("x", 1)

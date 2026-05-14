@@ -3,12 +3,12 @@
 
 pytest -q multiprocess_framework/modules/console_module/tests/
 """
+
 import sys
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from ..configs.console_config import ConsoleConfig
 from ..core.console_manager import ConsoleManager
@@ -17,6 +17,7 @@ from ..core.console_manager import ConsoleManager
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_manager(enabled=False, interactive=False, redirect_stdout=False):
     cfg = ConsoleConfig(
@@ -30,6 +31,7 @@ def _make_manager(enabled=False, interactive=False, redirect_stdout=False):
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestLifecycle:
     def test_initialize_default(self):
@@ -45,8 +47,10 @@ class TestLifecycle:
 
     def test_initialize_enabled(self):
         mgr = _make_manager(enabled=True)
-        with patch.object(mgr._platform, "create", return_value=True) as mock_create, \
-             patch.object(mgr._platform, "show", return_value=True):
+        with (
+            patch.object(mgr._platform, "create", return_value=True) as mock_create,
+            patch.object(mgr._platform, "show", return_value=True),
+        ):
             assert mgr.initialize() is True
             mock_create.assert_called_once()
 
@@ -54,6 +58,7 @@ class TestLifecycle:
 # ---------------------------------------------------------------------------
 # write / show / hide
 # ---------------------------------------------------------------------------
+
 
 class TestWrite:
     def test_write_calls_platform(self):
@@ -89,6 +94,7 @@ class TestWrite:
 # create_console / close_console / list_consoles
 # ---------------------------------------------------------------------------
 
+
 class TestMultipleConsoles:
     def test_create_console_not_supported(self):
         mgr = _make_manager()
@@ -101,7 +107,8 @@ class TestMultipleConsoles:
         mgr = _make_manager()
         mgr.initialize()
         with patch.object(mgr._platform, "supports_multiple_windows", return_value=True):
-            with patch("multiprocess_framework.modules.console_module.core.console_manager.create_platform_console") as mock_factory:
+            patch_path = "multiprocess_framework.modules.console_module.core.console_manager.create_platform_console"
+            with patch(patch_path) as mock_factory:
                 fake_console = MagicMock()
                 fake_console.create.return_value = True
                 mock_factory.return_value = fake_console
@@ -129,6 +136,7 @@ class TestMultipleConsoles:
 # enable_input / disable_input
 # ---------------------------------------------------------------------------
 
+
 class TestInputLoop:
     def test_enable_input_starts_thread(self):
         mgr = _make_manager()
@@ -155,7 +163,6 @@ class TestInputLoop:
         mgr = _make_manager()
         mgr.initialize()
 
-        import threading
         stop_event = threading.Event()
 
         def blocking_read():
@@ -177,6 +184,7 @@ class TestInputLoop:
 # ---------------------------------------------------------------------------
 # setup_redirect
 # ---------------------------------------------------------------------------
+
 
 class TestRedirect:
     def setup_method(self):
@@ -215,6 +223,7 @@ class TestRedirect:
 # ---------------------------------------------------------------------------
 # get_stats / get_debug_info
 # ---------------------------------------------------------------------------
+
 
 class TestStats:
     def test_get_stats_keys(self):

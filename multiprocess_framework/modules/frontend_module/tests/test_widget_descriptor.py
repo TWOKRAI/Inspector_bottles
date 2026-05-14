@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Тесты WidgetDescriptor."""
-import pytest
 
 from multiprocess_framework.modules.frontend_module.schemas.widget_descriptor import (
     WidgetDescriptor,
@@ -10,11 +9,13 @@ from multiprocess_framework.modules.frontend_module.schemas.widget_descriptor im
 
 class TestWidgetDescriptor:
     def test_from_dict(self) -> None:
-        d = widget_descriptor_from_dict({
-            "widget_type": "slider",
-            "register_name": "draw",
-            "field_name": "dp",
-        })
+        d = widget_descriptor_from_dict(
+            {
+                "widget_type": "slider",
+                "register_name": "draw",
+                "field_name": "dp",
+            }
+        )
         assert d.widget_type == "slider"
         assert d.register_name == "draw"
         assert d.field_name == "dp"

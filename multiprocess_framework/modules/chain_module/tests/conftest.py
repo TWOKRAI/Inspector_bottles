@@ -1,13 +1,12 @@
 """Общие фикстуры для тестов chain_module."""
+
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-from multiprocess_framework.modules.chain_module.core.context import ChainContext
 from multiprocess_framework.modules.chain_module.core.result import RunnableStep
 
 

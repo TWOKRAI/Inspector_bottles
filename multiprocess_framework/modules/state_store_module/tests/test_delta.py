@@ -4,16 +4,24 @@
     cd .../multiprocess_prototype
     python -m pytest state_store/tests/test_delta.py -v
 """
+
 from __future__ import annotations
 
 import pytest
 
-from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta, Transaction, _MissingSentinel, StateWriter
+from multiprocess_framework.modules.state_store_module.core.delta import (
+    MISSING,
+    Delta,
+    Transaction,
+    _MissingSentinel,
+    StateWriter,
+)
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательный mock-store, реализующий StateWriter
 # ---------------------------------------------------------------------------
+
 
 class MockStore:
     """Минимальный mock TreeStore для тестирования Transaction.
@@ -54,6 +62,7 @@ class MockStore:
 # Тесты MISSING sentinel
 # ---------------------------------------------------------------------------
 
+
 class TestMissingSentinel:
     def test_singleton(self) -> None:
         """MISSING является singleton — два вызова дают один объект."""
@@ -63,7 +72,7 @@ class TestMissingSentinel:
 
     def test_missing_is_missing(self) -> None:
         """Глобальный MISSING is MISSING → True."""
-        assert MISSING is MISSING  # noqa: PLR0124
+        assert MISSING is MISSING
 
     def test_missing_is_sentinel_instance(self) -> None:
         """MISSING — экземпляр _MissingSentinel."""
@@ -85,6 +94,7 @@ class TestMissingSentinel:
 # ---------------------------------------------------------------------------
 # Тесты Delta — базовые свойства
 # ---------------------------------------------------------------------------
+
 
 class TestDeltaProperties:
     def test_is_create(self) -> None:
@@ -137,6 +147,7 @@ class TestDeltaProperties:
 # Тесты сериализации/десериализации Delta
 # ---------------------------------------------------------------------------
 
+
 class TestDeltaSerialization:
     def test_roundtrip_normal_values(self) -> None:
         """Delta с обычными значениями: to_dict → from_dict → равный объект."""
@@ -186,8 +197,7 @@ class TestDeltaSerialization:
 
     def test_to_dict_missing_marker_string(self) -> None:
         """to_dict заменяет MISSING строкой '__MISSING__'."""
-        d = Delta(path="x", old_value=MISSING, new_value=5, source="gui",
-                  timestamp=1.0, transaction_id="tx")
+        d = Delta(path="x", old_value=MISSING, new_value=5, source="gui", timestamp=1.0, transaction_id="tx")
         data = d.to_dict()
         assert data["old_value"] == "__MISSING__"
         assert data["new_value"] == 5
@@ -224,6 +234,7 @@ class TestDeltaSerialization:
 # ---------------------------------------------------------------------------
 # Тесты Transaction — сбор дельт
 # ---------------------------------------------------------------------------
+
 
 class TestTransactionDeltas:
     def test_transaction_collects_set_deltas(self) -> None:
@@ -281,6 +292,7 @@ class TestTransactionDeltas:
 # ---------------------------------------------------------------------------
 # Тесты Transaction.coalesce()
 # ---------------------------------------------------------------------------
+
 
 class TestTransactionCoalesce:
     def _make_deltas(self, store: MockStore, changes: list[tuple]) -> Transaction:
@@ -376,6 +388,7 @@ class TestTransactionCoalesce:
 # ---------------------------------------------------------------------------
 # Тест StateWriter Protocol
 # ---------------------------------------------------------------------------
+
 
 class TestStateWriterProtocol:
     def test_mock_store_implements_protocol(self) -> None:

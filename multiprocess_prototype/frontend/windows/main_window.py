@@ -1,4 +1,5 @@
 """MainWindow — главное окно: AppHeader + ImagePanel-placeholder + TabWidget + StatusBar."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QPoint, QSettings, Qt, QTimer, Signal
@@ -22,11 +23,11 @@ from .config import MainWindowConfig
 # ВАЖНО: QSS темы (themes/innotech_theme/main.qss) задаёт min/max-height для
 # QWidget#AppHeader — фактическая высота берётся оттуда. Здесь дублируем для
 # виджетов без темы; держим значения синхронно с QSS.
-HEADER_HEIGHT_PX = 60          # высота шапки AppHeader (было 96 в QSS, /1.6)
-TAB_FONT_SCALE = 1.0 / 1.2     # масштаб шрифта виджета вкладок (ужимает табы в 1.2×)
+HEADER_HEIGHT_PX = 60  # высота шапки AppHeader (было 96 в QSS, /1.6)
+TAB_FONT_SCALE = 1.0 / 1.2  # масштаб шрифта виджета вкладок (ужимает табы в 1.2×)
 
 # Поведение кнопки «Скрыть»
-HIDE_LONG_PRESS_MS = 280       # удержание ≥ этого порога → drag-режим вместо клика
+HIDE_LONG_PRESS_MS = 280  # удержание ≥ этого порога → drag-режим вместо клика
 # Минимальная высота вкладок в drag-режиме = высота полосы tabBar (см.
 # `_tab_bar_only_height`). Утянуть ниже нельзя: иначе сама кнопка «Скрыть»
 # (живёт в cornerWidget tabBar'а) исчезнет, и вернуть вкладки будет нечем.
@@ -173,8 +174,7 @@ class MainWindow(QMainWindow):
 
         self._toggle_btn = HideToggleButton("▲")
         self._toggle_btn.setToolTip(
-            "Клик — скрыть/показать вкладки.\n"
-            "Удержание + движение вверх/вниз — плавная регулировка высоты."
+            "Клик — скрыть/показать вкладки.\nУдержание + движение вверх/вниз — плавная регулировка высоты."
         )
         self._toggle_btn.setFixedSize(36, 40)
         self._toggle_btn.clicked.connect(self._toggle_tabs)
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
         """Сохранить позицию и размер в QSettings."""
         self._settings.setValue("mainwindow/geometry", self.saveGeometry())
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event) -> None:
         """Сохранить геометрию при закрытии окна."""
         self._save_geometry()
         super().closeEvent(event)

@@ -1,6 +1,6 @@
 """Тесты ImagePanelWidget, DisplaySlot, ImagePanelPresenter (Task 9.4)."""
+
 import numpy as np
-import pytest
 from PySide6.QtGui import QPixmap
 
 from multiprocess_prototype.frontend.widgets.image_panel import (
@@ -175,10 +175,12 @@ def test_widget_default_config(qtbot):
 
 def test_widget_custom_slots(qtbot):
     """Кастомный конфиг создаёт нужное количество слотов."""
-    panel = ImagePanelWidget(slots=[
-        {"id": "original", "label": "Original"},
-        {"id": "processed", "label": "Processed"},
-    ])
+    panel = ImagePanelWidget(
+        slots=[
+            {"id": "original", "label": "Original"},
+            {"id": "processed", "label": "Processed"},
+        ]
+    )
     qtbot.addWidget(panel)
 
     assert len(panel.slot_ids) == 2
@@ -257,10 +259,12 @@ def test_widget_display_frame_unknown_no_crash(qtbot):
 
 def test_widget_display_frames(qtbot):
     """display_frames() обрабатывает несколько слотов."""
-    panel = ImagePanelWidget(slots=[
-        {"id": "left", "label": "Left"},
-        {"id": "right", "label": "Right"},
-    ])
+    panel = ImagePanelWidget(
+        slots=[
+            {"id": "left", "label": "Left"},
+            {"id": "right", "label": "Right"},
+        ]
+    )
     qtbot.addWidget(panel)
     panel.show()
 
@@ -286,10 +290,12 @@ def test_widget_presenter_property(qtbot):
 
 def test_widget_slot_object_names(qtbot):
     """Все слоты имеют objectName='ImageSlot'."""
-    panel = ImagePanelWidget(slots=[
-        {"id": "a"},
-        {"id": "b"},
-    ])
+    panel = ImagePanelWidget(
+        slots=[
+            {"id": "a"},
+            {"id": "b"},
+        ]
+    )
     qtbot.addWidget(panel)
 
     for slot_id in ("a", "b"):

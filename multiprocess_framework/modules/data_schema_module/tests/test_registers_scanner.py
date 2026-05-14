@@ -15,6 +15,7 @@
     - exclude_files: файлы из исключений
     - Дублирующиеся ключи: предупреждение + последний побеждает
 """
+
 import sys
 import types
 
@@ -27,7 +28,6 @@ if "multiprocess_framework" not in sys.modules:
 import logging
 import textwrap
 from pathlib import Path
-from typing import Annotated
 
 import pytest
 from pydantic import BaseModel
@@ -37,12 +37,12 @@ from multiprocess_framework.modules.data_schema_module.registry.discovery import
     _class_name_to_snake,
 )
 from multiprocess_framework.modules.data_schema_module.core.schema_base import RegisterBase
-from multiprocess_framework.modules.data_schema_module.core.field_meta import FieldMeta
 
 
 # =============================================================================
 # Вспомогательная фикстура: временная директория с .py файлами
 # =============================================================================
+
 
 @pytest.fixture()
 def reg_dir(tmp_path: Path) -> Path:
@@ -96,6 +96,7 @@ def multi_word_dir(tmp_path: Path) -> Path:
 # Тесты _class_name_to_snake
 # =============================================================================
 
+
 class TestClassNameToSnake:
     def test_simple(self) -> None:
         assert _class_name_to_snake("DrawRegisters", "Registers") == "draw"
@@ -117,6 +118,7 @@ class TestClassNameToSnake:
 # =============================================================================
 # Тесты scan_directory
 # =============================================================================
+
 
 class TestScanDirectory:
     def test_finds_registers(self, reg_dir: Path) -> None:
@@ -158,15 +160,11 @@ class TestScanDirectory:
             """),
             encoding="utf-8",
         )
-        result = RegistersScanner.scan_directory(
-            tmp_path, base_class=BaseModel, suffix="Config"
-        )
+        result = RegistersScanner.scan_directory(tmp_path, base_class=BaseModel, suffix="Config")
         assert "system" in result
 
     def test_custom_name_from_class(self, reg_dir: Path) -> None:
-        result = RegistersScanner.scan_directory(
-            reg_dir, name_from_class=lambda cls: cls.__name__.lower()
-        )
+        result = RegistersScanner.scan_directory(reg_dir, name_from_class=lambda cls: cls.__name__.lower())
         assert "alpharegisters" in result
         assert "betaregisters" in result
 
@@ -217,6 +215,7 @@ class TestScanDirectory:
 # Тесты scan_package_path
 # =============================================================================
 
+
 class TestScanPackagePath:
     def test_equivalent_to_scan_directory(self, reg_dir: Path) -> None:
         init_file = reg_dir / "__init__.py"
@@ -237,6 +236,7 @@ class TestScanPackagePath:
 # =============================================================================
 # Тесты list_files
 # =============================================================================
+
 
 class TestListFiles:
     def test_lists_py_files(self, reg_dir: Path) -> None:

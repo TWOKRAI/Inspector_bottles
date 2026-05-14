@@ -7,9 +7,9 @@
 
 Правило: внешние модули импортируют только из interfaces.py.
 """
+
 from __future__ import annotations
 
-from abc import abstractmethod
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Any, Dict, List, Optional, Protocol, Tuple, Type, TypeVar, runtime_checkable
 
@@ -188,9 +188,7 @@ class ISQLManager(Protocol):
     def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> int:
         """Выполнить DML. Возвращает количество затронутых строк."""
 
-    def query(
-        self, sql: str, params: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+    def query(self, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Выполнить SELECT. Возвращает список dict (Dict at Boundary)."""
 
     def uow(self) -> IUnitOfWork:

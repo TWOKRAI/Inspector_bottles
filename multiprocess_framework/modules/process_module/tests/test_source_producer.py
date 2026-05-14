@@ -3,7 +3,6 @@
 import threading
 import time
 
-import pytest
 
 from multiprocess_framework.modules.process_module.generic.source_producer import (
     SourceProducer,
@@ -14,6 +13,7 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 
 
 # --- Тестовые плагины ---
+
 
 class FakeSource(ProcessModulePlugin):
     name = "fake_cam"

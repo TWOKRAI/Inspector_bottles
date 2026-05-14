@@ -5,6 +5,7 @@
 После exec():
     .result_data: dict | None — заполненные поля или None при отмене.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -20,7 +21,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt
 
 if TYPE_CHECKING:
     from Services.auth.interfaces import IAuthManager
@@ -56,9 +56,7 @@ class UserForm(QDialog):
 
         # Загрузить роли заранее (скрыть hidden_in_ui=True)
         all_roles = auth_manager.list_roles()
-        self._visible_roles: list[dict] = [
-            r for r in all_roles if not r.get("hidden_in_ui", False)
-        ]
+        self._visible_roles: list[dict] = [r for r in all_roles if not r.get("hidden_in_ui", False)]
 
         # --- Главный layout ---
         main_layout = QVBoxLayout(self)
@@ -101,9 +99,7 @@ class UserForm(QDialog):
         main_layout.addLayout(form)
 
         # --- Кнопки ---
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Создать")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
         buttons.accepted.connect(self._on_ok_clicked)

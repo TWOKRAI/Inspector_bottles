@@ -5,8 +5,8 @@
 Проверяет: initialize/shutdown, register_channel, route, register_route,
 register_broadcast, buffer integration, get_stats.
 """
+
 import time
-import pytest
 from typing import Any, Dict, List
 
 from ..interfaces import IChannel
@@ -19,6 +19,7 @@ from ..buffers.async_sender_buffer import AsyncSenderBuffer
 # ---------------------------------------------------------------------------
 # Fixtures / Helpers
 # ---------------------------------------------------------------------------
+
 
 class _MockChannel(IChannel):
     def __init__(self, name: str, channel_type: str = "mock") -> None:
@@ -66,6 +67,7 @@ def _manager(**kwargs) -> _ConcreteManager:
 # Tests: lifecycle
 # ---------------------------------------------------------------------------
 
+
 class TestLifecycle:
     def test_initialize_sets_flag(self):
         mgr = _ConcreteManager()
@@ -98,6 +100,7 @@ class TestLifecycle:
 # Tests: channel management
 # ---------------------------------------------------------------------------
 
+
 class TestChannelManagement:
     def test_register_channel(self):
         mgr = _manager()
@@ -126,6 +129,7 @@ class TestChannelManagement:
 # ---------------------------------------------------------------------------
 # Tests: routing (no buffer)
 # ---------------------------------------------------------------------------
+
 
 class TestRouting:
     def test_route_to_channel_by_name(self):
@@ -192,6 +196,7 @@ class TestRouting:
 # Tests: buffer integration
 # ---------------------------------------------------------------------------
 
+
 class TestBufferIntegration:
     def test_direct_buffer_immediate_write(self):
         written = []
@@ -223,9 +228,7 @@ class TestBufferIntegration:
 
     def test_async_sender_buffer(self):
         received = []
-        buf = AsyncSenderBuffer(
-            send_fn=lambda ch, data: received.append((ch, data))
-        )
+        buf = AsyncSenderBuffer(send_fn=lambda ch, data: received.append((ch, data)))
         mgr = _manager(buffer_strategy=buf)
         ch = _MockChannel("ch")
         mgr.register_channel(ch)
@@ -240,6 +243,7 @@ class TestBufferIntegration:
 # ---------------------------------------------------------------------------
 # Tests: stats
 # ---------------------------------------------------------------------------
+
 
 class TestStats:
     def test_stats_includes_channels(self):

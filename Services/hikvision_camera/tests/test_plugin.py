@@ -3,11 +3,11 @@
 Все тесты работают без реального SDK и без запуска multiprocess_framework.
 HikvisionCamera и FrameConverter мокируются через patch.
 """
+
 from __future__ import annotations
 
 import numpy as np
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ def _make_ctx(config: dict | None = None) -> MagicMock:
     ctx.config = config or {}
     ctx.log_info = MagicMock()
     ctx.log_error = MagicMock()
-    ctx.registers = None          # без managed registers → fallback к defaults
+    ctx.registers = None  # без managed registers → fallback к defaults
     return ctx
 
 
@@ -100,9 +100,7 @@ class TestHikvisionCameraConfig:
         from hikvision_camera_module_2.plugin.config import HikvisionCameraConfig
 
         cfg = HikvisionCameraConfig()
-        assert cfg.plugin_class == (
-            "hikvision_camera_module_2.plugin.plugin.HikvisionCameraPlugin"
-        )
+        assert cfg.plugin_class == ("hikvision_camera_module_2.plugin.plugin.HikvisionCameraPlugin")
 
 
 # ===========================================================================
@@ -258,9 +256,7 @@ class TestHikvisionCameraPlugin:
 
         # Mock FrameConverter
         bgr_frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        with patch(
-            "hikvision_camera_module_2.plugin.plugin.FrameConverter"
-        ) as mock_fc:
+        with patch("hikvision_camera_module_2.plugin.plugin.FrameConverter") as mock_fc:
             mock_fc.to_bgr.return_value = bgr_frame
             mock_fc.resize.return_value = bgr_frame
 
@@ -295,9 +291,7 @@ class TestHikvisionCameraPlugin:
         raw_frame = np.zeros((1080, 1920), dtype=np.uint8)
         mock_cam.capture_frame.return_value = (raw_frame, "BayerRG8")
 
-        with patch(
-            "hikvision_camera_module_2.plugin.plugin.FrameConverter"
-        ) as mock_fc:
+        with patch("hikvision_camera_module_2.plugin.plugin.FrameConverter") as mock_fc:
             mock_fc.to_bgr.return_value = None  # конвертер не справился
 
             result = plugin.produce()
@@ -315,9 +309,7 @@ class TestHikvisionCameraPlugin:
         bgr_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         mock_cam.capture_frame.return_value = (raw_frame, "BayerRG8")
 
-        with patch(
-            "hikvision_camera_module_2.plugin.plugin.FrameConverter"
-        ) as mock_fc:
+        with patch("hikvision_camera_module_2.plugin.plugin.FrameConverter") as mock_fc:
             mock_fc.to_bgr.return_value = bgr_frame
             mock_fc.resize.return_value = bgr_frame
 

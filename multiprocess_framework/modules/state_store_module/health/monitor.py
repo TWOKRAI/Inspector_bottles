@@ -6,10 +6,11 @@
 
 Не использует потоки или asyncio — pull-based: явный вызов check().
 """
+
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from ..core.tree_store import TreeStore
@@ -34,6 +35,7 @@ OVERALL_CRITICAL = "critical"
 # WatchedProcess — внутреннее состояние одного отслеживаемого процесса
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WatchedProcess:
     """Внутреннее состояние мониторинга одного процесса.
@@ -54,6 +56,7 @@ class WatchedProcess:
 # ---------------------------------------------------------------------------
 # HealthMonitor
 # ---------------------------------------------------------------------------
+
 
 class HealthMonitor:
     """Watchdog: отслеживает state-обновления от процессов.

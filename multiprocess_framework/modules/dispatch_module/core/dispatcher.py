@@ -12,13 +12,13 @@
 - Если ключ не найден в обработчиках - проверка сценариев
 - По умолчанию используется EXACT_MATCH
 """
+
 from typing import Dict, Any, Callable, Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from multiprocessing import Process
 import time
 
-from .base_dispatcher import BaseDispatcher
 from .scenarios import ScenarioManager
 from ..types.types import DispatchStrategy, HandlerInfo, Scenario
 from ..strategies import (
@@ -26,7 +26,7 @@ from ..strategies import (
     PatternMatchStrategy,
     FallbackMatchStrategy,
     ChainMatchStrategy,
-    BaseStrategy
+    BaseStrategy,
 )
 from ...base_manager import BaseManager, ObservableMixin
 
@@ -34,40 +34,40 @@ from ...base_manager import BaseManager, ObservableMixin
 class Dispatcher(BaseManager, ObservableMixin):
     """
     Универсальный диспетчер для обработки сообщений различного типа.
-    
+
     Наследуется от BaseManager и использует ObservableMixin для:
     - Единообразия со всеми менеджерами системы
     - Автоматического логирования через ObservableMixin
     - Стандартного жизненного цикла (initialize/shutdown)
-    
+
     Поддерживает все стратегии одновременно. Автоматически выбирает стратегию
     на основе сообщения или использует стратегию по умолчанию.
-    
+
     Пример использования:
         dispatcher = Dispatcher("my_dispatcher")
         dispatcher.initialize()  # Инициализация менеджера
-        
+
         # Регистрация обработчика (по умолчанию EXACT_MATCH)
         dispatcher.register_handler("process", lambda data: {"result": data})
-        
+
         # Использование разных стратегий в одном сообщении
         result = dispatcher.dispatch({"command": "process", "data": {...}})
         result = dispatcher.dispatch({"command": "process", "strategy": "fallback", "data": {...}})
-        
+
         # Работа со сценариями
         dispatcher.create_scenario("image_processing", "Обработка изображений")
         dispatcher.add_handler_to_scenario("image_processing", "preprocess", handler1, stage=1)
         result = dispatcher.dispatch({"command": "image_processing", "data": {...}})
-        
+
         dispatcher.shutdown()  # Завершение работы менеджера
-        
+
         # С поддержкой логирования и статистики
         dispatcher = Dispatcher(
             "my_dispatcher",
             managers={'logger': logger_manager, 'statistics': stats_manager}
         )
     """
-    
+
     def __init__(
         self,
         manager_name: str,
@@ -79,7 +79,7 @@ class Dispatcher(BaseManager, ObservableMixin):
     ):
         """
         Инициализация диспетчера.
-        
+
         Args:
             manager_name: Уникальное имя менеджера (для BaseManager)
             process: Ссылка на родительский процесс (опционально, для BaseManager)
@@ -90,16 +90,12 @@ class Dispatcher(BaseManager, ObservableMixin):
         """
         BaseManager.__init__(self, manager_name=manager_name, process=process)
 
-        ObservableMixin.__init__(
-            self,
-            managers=managers,
-            config=config
-        )
+        ObservableMixin.__init__(self, managers=managers, config=config)
 
         self._config_manager = config_manager
-        
+
         self._default_strategy = default_strategy
-        
+
         # Инициализация всех стратегий с DI логгера от ObservableMixin
         _kw = dict(warn_log=self._log_warning, err_log=self._log_error)
         self._strategies: Dict[DispatchStrategy, BaseStrategy] = {
@@ -108,7 +104,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             DispatchStrategy.FALLBACK_MATCH: FallbackMatchStrategy(manager_name, **_kw),
             DispatchStrategy.CHAIN_MATCH: ChainMatchStrategy(manager_name, **_kw),
         }
-        
+
         # Хранилища для каждой стратегии
         self._handlers_storage: Dict[DispatchStrategy, Any] = {
             DispatchStrategy.EXACT_MATCH: {},  # Dict[str, HandlerInfo]
@@ -116,29 +112,29 @@ class Dispatcher(BaseManager, ObservableMixin):
             DispatchStrategy.FALLBACK_MATCH: {},  # Dict[str, List[HandlerInfo]]
             DispatchStrategy.CHAIN_MATCH: None,  # Не используется, сценарии в отдельном хранилище
         }
-        
+
         self._scenario_mgr = ScenarioManager()
 
     @property
     def default_strategy(self) -> DispatchStrategy:
         """Стратегия по умолчанию для регистрации и диспетчеризации без явного поля strategy."""
         return self._default_strategy
-    
+
     @property
     def scenarios(self) -> Dict[str, Scenario]:
         """Словарь сценариев (имя → объект Scenario)."""
         return self._scenario_mgr.scenarios
-    
+
     # ========================================================================
     # РЕАЛИЗАЦИЯ BaseManager - ЖИЗНЕННЫЙ ЦИКЛ
     # ========================================================================
-    
+
     def initialize(self) -> bool:
         """
         Инициализация диспетчера.
-        
+
         Инициализирует все стратегии и готовит диспетчер к работе.
-        
+
         Returns:
             bool: True если инициализация успешна
         """
@@ -151,13 +147,13 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._log_error(f"Failed to initialize Dispatcher: {e}")
             self._track_error("dispatcher.initialization.failed", error=e)
             return False
-    
+
     def shutdown(self) -> bool:
         """
         Завершение работы диспетчера.
-        
+
         Очищает все обработчики, сценарии и освобождает ресурсы.
-        
+
         Returns:
             bool: True если завершение успешно
         """
@@ -168,12 +164,12 @@ class Dispatcher(BaseManager, ObservableMixin):
                     storage.clear()
                 elif isinstance(storage, list):
                     storage.clear()
-            
+
             self._scenario_mgr.clear()
-            
+
             # Очищаем стратегии
             self._strategies.clear()
-            
+
             self.is_initialized = False
             self._log_info(f"Dispatcher '{self.manager_name}' shutdown completed")
             self._record_metric("dispatcher.shutdown.success", tags={"name": self.manager_name})
@@ -182,25 +178,25 @@ class Dispatcher(BaseManager, ObservableMixin):
             self._log_error(f"Error during Dispatcher shutdown: {e}")
             self._track_error("dispatcher.shutdown.failed", error=e)
             return False
-    
+
     # ========================================================================
     # ДИСПЕТЧЕРИЗАЦИЯ
     # ========================================================================
-    
+
     def _get_strategy_from_message(self, message: Dict[str, Any]) -> Optional[DispatchStrategy]:
         """
         Определить стратегию из сообщения.
-        
+
         Args:
             message: Сообщение для обработки
-            
+
         Returns:
             DispatchStrategy если указана в сообщении, None иначе
         """
         strategy_name = message.get("strategy")
         if not strategy_name:
             return None
-        
+
         # Преобразуем строку в enum
         try:
             if isinstance(strategy_name, str):
@@ -210,9 +206,9 @@ class Dispatcher(BaseManager, ObservableMixin):
                         return strategy
         except (AttributeError, ValueError):
             pass
-        
+
         return None
-    
+
     def register_handler(
         self,
         key: str,
@@ -221,11 +217,11 @@ class Dispatcher(BaseManager, ObservableMixin):
         metadata: Dict[str, Any] = None,
         efficiency: int = 0,
         tags: List[str] = None,
-        strategy: Optional[DispatchStrategy] = None
+        strategy: Optional[DispatchStrategy] = None,
     ) -> bool:
         """
         Регистрация обработчика.
-        
+
         Args:
             key: Уникальный ключ обработчика
             handler: Функция-обработчик
@@ -234,23 +230,23 @@ class Dispatcher(BaseManager, ObservableMixin):
             efficiency: Уровень эффективности обработчика (для FALLBACK_MATCH)
             tags: Список тегов для группировки
             strategy: Стратегия для регистрации (если None - регистрируется в default_strategy)
-            
+
         Returns:
             True если регистрация успешна, False в случае ошибки
         """
         self._log_debug(f"Registering handler: {key}", module="dispatcher")
         self._record_metric("dispatcher.handler.registration.attempts", tags={"key": key})
-        
+
         target_strategy = strategy or self._default_strategy
-        
+
         # CHAIN_MATCH не поддерживает прямую регистрацию
         if target_strategy == DispatchStrategy.CHAIN_MATCH:
             self._log_warning(f"Cannot register handler '{key}' directly in CHAIN_MATCH strategy", module="dispatcher")
             return False
-        
+
         strategy_impl = self._strategies[target_strategy]
         storage = self._handlers_storage[target_strategy]
-        
+
         try:
             result = strategy_impl.register_handler(
                 key=key,
@@ -259,28 +255,24 @@ class Dispatcher(BaseManager, ObservableMixin):
                 metadata=metadata,
                 efficiency=efficiency,
                 tags=tags,
-                handlers_storage=storage
+                handlers_storage=storage,
             )
-            
+
             if result:
                 self._log_info(f"Handler '{key}' registered successfully", module="dispatcher")
                 self._record_metric("dispatcher.handler.registration.success", tags={"key": key})
             else:
                 self._log_warning(f"Failed to register handler '{key}'", module="dispatcher")
                 self._record_metric("dispatcher.handler.registration.failed", tags={"key": key})
-            
+
             return result
         except Exception as e:
             self._log_error(f"Error registering handler '{key}': {str(e)}", module="dispatcher")
             self._track_error(e, {"key": key, "strategy": target_strategy.value})
             self._record_metric("dispatcher.handler.registration.errors", tags={"key": key})
             return False
-    
-    def _find_handler_in_strategy(
-        self,
-        key: str,
-        strategy: DispatchStrategy
-    ) -> Optional[HandlerInfo]:
+
+    def _find_handler_in_strategy(self, key: str, strategy: DispatchStrategy) -> Optional[HandlerInfo]:
         """Поиск обработчика в конкретной стратегии."""
         strategy_impl = self._strategies[strategy]
         storage = self._handlers_storage[strategy]
@@ -289,11 +281,11 @@ class Dispatcher(BaseManager, ObservableMixin):
             storage = self._scenario_mgr.scenarios
 
         return strategy_impl.find_handler(key, storage)
-    
+
     def _find_handler(self, key: str) -> Optional[HandlerInfo]:
         """
         Поиск обработчика по всем стратегиям.
-        
+
         Порядок проверки:
         1. EXACT_MATCH (самый быстрый)
         2. FALLBACK_MATCH
@@ -304,52 +296,47 @@ class Dispatcher(BaseManager, ObservableMixin):
         handler = self._find_handler_in_strategy(key, DispatchStrategy.EXACT_MATCH)
         if handler:
             return handler
-        
+
         # 2. FALLBACK_MATCH
         handler = self._find_handler_in_strategy(key, DispatchStrategy.FALLBACK_MATCH)
         if handler:
             return handler
-        
+
         # 3. PATTERN_MATCH
         handler = self._find_handler_in_strategy(key, DispatchStrategy.PATTERN_MATCH)
         if handler:
             return handler
-        
+
         # 4. Проверка сценариев
         if self._scenario_mgr.has_scenario(key):
             # Возвращаем специальный маркер для сценария
             return HandlerInfo(
                 key=key,
                 handler=lambda x: x,  # Заглушка, реальное выполнение в dispatch
-                metadata={"is_scenario": True}
+                metadata={"is_scenario": True},
             )
-        
+
         return None
-    
-    def dispatch(
-        self,
-        message: Dict[str, Any],
-        key_field: str = "command",
-        data_field: str = "data"
-    ) -> Any:
+
+    def dispatch(self, message: Dict[str, Any], key_field: str = "command", data_field: str = "data") -> Any:
         """
         Диспетчеризация с автоматическим выбором стратегии.
-        
+
         Логика выбора:
         1. Если в сообщении есть поле "strategy" - используется указанная стратегия
         2. Если ключ не найден в обработчиках - проверка сценариев
         3. Иначе используется стратегия по умолчанию
-        
+
         Args:
             message: Сообщение для обработки
             key_field: Поле в сообщении, содержащее ключ диспетчеризации
             data_field: Поле в сообщении, содержащее данные для обработки
-            
+
         Returns:
             Результат работы обработчика или словарь с ошибкой
         """
         start_time = time.time()
-        
+
         try:
             key = message.get(key_field)
             if not key:
@@ -357,19 +344,23 @@ class Dispatcher(BaseManager, ObservableMixin):
                 self._log_warning(error_msg, module="dispatcher")
                 self._record_metric("dispatcher.dispatch.errors", tags={"error": "missing_key"})
                 return {"status": "error", "reason": error_msg}
-            
+
             self._log_debug(f"Dispatching message with key '{key}'", module="dispatcher", key=key)
             self._record_metric("dispatcher.dispatch.attempts", tags={"key": key})
-            
+
             # 1. Проверка на явное указание сценария в сообщении
             explicit_scenario = message.get("scenario")
             if explicit_scenario and self._scenario_mgr.has_scenario(explicit_scenario):
                 self._log_debug(f"Executing scenario '{explicit_scenario}'", module="dispatcher")
                 result = self.dispatch_scenario(explicit_scenario, message, data_field)
                 duration = time.time() - start_time
-                self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": explicit_scenario})
+                self._record_timing(
+                    "dispatcher.dispatch.scenario.duration",
+                    duration,
+                    tags={"scenario": explicit_scenario},
+                )
                 return result
-            
+
             # 2. Проверка на сценарий по ключу (если ключ является сценарием)
             if self._scenario_mgr.has_scenario(key):
                 self._log_debug(f"Executing scenario '{key}'", module="dispatcher")
@@ -377,7 +368,7 @@ class Dispatcher(BaseManager, ObservableMixin):
                 duration = time.time() - start_time
                 self._record_timing("dispatcher.dispatch.scenario.duration", duration, tags={"scenario": key})
                 return result
-            
+
             # 3. Определение стратегии из сообщения
             requested_strategy = self._get_strategy_from_message(message)
 
@@ -400,33 +391,33 @@ class Dispatcher(BaseManager, ObservableMixin):
             else:
                 # Авто-детект по всем стратегиям
                 handler_info = self._find_handler(key)
-            
+
             if not handler_info:
                 error_msg = f"No handler for key '{key}'"
                 self._log_warning(error_msg, module="dispatcher", key=key)
                 self._record_metric("dispatcher.dispatch.errors", tags={"error": "handler_not_found", "key": key})
                 return {"status": "error", "reason": error_msg}
-            
+
             # 5. Выполнение обработчика
             handler_data = message if handler_info.expects_full_message else message.get(data_field, {})
             result = handler_info.handler(handler_data)
-            
+
             duration = time.time() - start_time
             self._log_debug(f"Dispatch completed for key '{key}' in {duration:.3f}s", module="dispatcher")
             self._record_timing("dispatcher.dispatch.duration", duration, tags={"key": key})
             self._record_metric("dispatcher.dispatch.success", tags={"key": key})
-            
+
             return result
-            
+
         except Exception as e:
             duration = time.time() - start_time
             error_msg = f"Dispatch failed: {str(e)}"
             self._log_error(error_msg, module="dispatcher", exception=str(e))
-            self._track_error(e, {"key": key if 'key' in locals() else None, "message": str(message)})
+            self._track_error(e, {"key": key if "key" in locals() else None, "message": str(message)})
             self._record_timing("dispatcher.dispatch.error_duration", duration)
             self._record_metric("dispatcher.dispatch.errors", tags={"error": "exception"})
             return {"status": "error", "reason": error_msg}
-    
+
     # Методы для работы со сценариями (делегирование в ScenarioManager)
 
     def create_scenario(
@@ -475,13 +466,9 @@ class Dispatcher(BaseManager, ObservableMixin):
         """Удалить обработчик из сценария."""
         return self._scenario_mgr.remove_handler_from_scenario(scenario_name, handler_key)
 
-    def reorder_handler_in_scenario(
-        self, scenario_name: str, handler_key: str, new_stage: int
-    ) -> bool:
+    def reorder_handler_in_scenario(self, scenario_name: str, handler_key: str, new_stage: int) -> bool:
         """Изменить порядок обработчика в сценарии."""
-        return self._scenario_mgr.reorder_handler_in_scenario(
-            scenario_name, handler_key, new_stage
-        )
+        return self._scenario_mgr.reorder_handler_in_scenario(scenario_name, handler_key, new_stage)
 
     def update_scenario_metadata(self, scenario_name: str, metadata: Dict[str, Any]) -> bool:
         """Обновить метаданные сценария."""
@@ -510,42 +497,40 @@ class Dispatcher(BaseManager, ObservableMixin):
         Returns:
             Словарь с результатами выполнения всех этапов
         """
-        return self._scenario_mgr.dispatch_scenario(
-            scenario_name, message, data_field, stop_on_error
-        )
+        return self._scenario_mgr.dispatch_scenario(scenario_name, message, data_field, stop_on_error)
 
     # Методы для обновления обработчиков (работают с default_strategy)
-    
+
     def update_handler_efficiency(self, key: str, new_efficiency: int) -> bool:
         """Обновление уровня эффективности обработчика."""
         strategy_impl = self._strategies[self._default_strategy]
         storage = self._handlers_storage[self._default_strategy]
         return strategy_impl.update_handler_efficiency(key, new_efficiency, storage)
-    
+
     def update_handler_metadata(self, key: str, new_metadata: Dict[str, Any]) -> bool:
         """Обновление метаданных обработчика."""
         strategy_impl = self._strategies[self._default_strategy]
         storage = self._handlers_storage[self._default_strategy]
         return strategy_impl.update_handler_metadata(key, new_metadata, storage)
-    
+
     def update_handler_tags(self, key: str, new_tags: List[str]) -> bool:
         """Обновление тегов обработчика."""
         strategy_impl = self._strategies[self._default_strategy]
         storage = self._handlers_storage[self._default_strategy]
         return strategy_impl.update_handler_tags(key, new_tags, storage)
-    
+
     def update_handler_function(self, key: str, new_handler: Callable) -> bool:
         """Обновление функции-обработчика."""
         strategy_impl = self._strategies[self._default_strategy]
         storage = self._handlers_storage[self._default_strategy]
         return strategy_impl.update_handler_function(key, new_handler, storage)
-    
+
     def update_expects_full_message(self, key: str, expects_full: bool) -> bool:
         """Обновление флага expects_full_message."""
         strategy_impl = self._strategies[self._default_strategy]
         storage = self._handlers_storage[self._default_strategy]
         return strategy_impl.update_expects_full_message(key, expects_full, storage)
-    
+
     def overwrite_handler(
         self,
         key: str,
@@ -553,7 +538,7 @@ class Dispatcher(BaseManager, ObservableMixin):
         expects_full_message: bool = False,
         metadata: Dict[str, Any] = None,
         efficiency: int = 0,
-        tags: List[str] = None
+        tags: List[str] = None,
     ) -> bool:
         """Принудительная перезапись обработчика."""
         # Удаляем из всех стратегий
@@ -564,7 +549,7 @@ class Dispatcher(BaseManager, ObservableMixin):
                 storage[:] = [h for h in storage if h.key != key]
             elif strategy == DispatchStrategy.FALLBACK_MATCH and key in storage:
                 del storage[key]
-        
+
         # Регистрируем в default_strategy
         return self.register_handler(
             key=key,
@@ -572,48 +557,47 @@ class Dispatcher(BaseManager, ObservableMixin):
             expects_full_message=expects_full_message,
             metadata=metadata,
             efficiency=efficiency,
-            tags=tags
+            tags=tags,
         )
-    
+
     def get_handler_info(self, key: str) -> Optional[Dict]:
         """Получение информации о конкретном обработчике."""
         handler_info = self._find_handler(key)
         if not handler_info:
             return None
-        
+
         return {
             "key": handler_info.key,
             "metadata": handler_info.metadata,
             "efficiency": handler_info.efficiency,
             "tags": list(handler_info.tags),
-            "stage": handler_info.stage
+            "stage": handler_info.stage,
         }
-    
+
     def get_all_handlers(self) -> List[Dict]:
         """Получение информации обо всех обработчиках из всех стратегий."""
         all_handlers = []
-        
+
         for strategy, storage in self._handlers_storage.items():
             if strategy == DispatchStrategy.CHAIN_MATCH:
                 continue  # Сценарии обрабатываются отдельно
-            
+
             strategy_impl = self._strategies[strategy]
             handlers = strategy_impl.get_all_handlers(storage)
             all_handlers.extend(handlers)
-        
+
         return all_handlers
-    
+
     def get_handlers_by_tag(self, tag: str) -> List[Dict]:
         """Получение обработчиков по тегу из всех стратегий."""
         all_handlers = []
-        
+
         for strategy, storage in self._handlers_storage.items():
             if strategy == DispatchStrategy.CHAIN_MATCH:
                 continue
-            
+
             strategy_impl = self._strategies[strategy]
             handlers = strategy_impl.get_handlers_by_tag(tag, storage)
             all_handlers.extend(handlers)
-        
-        return all_handlers
 
+        return all_handlers

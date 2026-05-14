@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from PySide6.QtWidgets import QGroupBox, QScrollArea, QSpinBox
+from PySide6.QtWidgets import QGroupBox, QScrollArea
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.form_builder import build_form_for_register
@@ -51,7 +50,8 @@ class TestBuildFormForRegister:
         ]
         titles = {"system": "Система", "camera": "Камера"}
         form, editors = build_form_for_register(
-            fields, category_titles=titles,
+            fields,
+            category_titles=titles,
         )
         qtbot.addWidget(form)
 
@@ -70,7 +70,8 @@ class TestBuildFormForRegister:
             _fi("b", int, 2, category="camera"),
         ]
         form, editors = build_form_for_register(
-            fields, group_by_category=False,
+            fields,
+            group_by_category=False,
         )
         qtbot.addWidget(form)
 

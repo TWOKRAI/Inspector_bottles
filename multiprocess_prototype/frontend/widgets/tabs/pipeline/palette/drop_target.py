@@ -1,9 +1,10 @@
 """PipelineDropTarget — event filter для приёма D&D плагинов на GraphView."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsView

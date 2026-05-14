@@ -3,7 +3,6 @@
 
 from unittest.mock import Mock
 
-import pytest
 
 from ..io.process_io import ProcessIO
 
@@ -113,12 +112,8 @@ class TestWriteFramesToShm:
             "shm_index": 3,
             "shm_actual_name": "actual_shm_name_007",
         }
-        proc.memory_manager.find_free_index.assert_called_once_with(
-            "camera", "camera_frame"
-        )
-        proc.memory_manager.write_images.assert_called_once_with(
-            "camera", "camera_frame", ["<frame>"], 3
-        )
+        proc.memory_manager.find_free_index.assert_called_once_with("camera", "camera_frame")
+        proc.memory_manager.write_images.assert_called_once_with("camera", "camera_frame", ["<frame>"], 3)
 
     def test_free_index_none_falls_back_to_zero(self):
         proc = make_mock_process()

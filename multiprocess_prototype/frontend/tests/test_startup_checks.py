@@ -1,10 +1,10 @@
 """Тесты StartupChecker — валидация topology при старте."""
+
 import pytest
 from unittest.mock import MagicMock
 
 from multiprocess_prototype.frontend.startup_checks import (
     StartupChecker,
-    StartupReport,
 )
 
 

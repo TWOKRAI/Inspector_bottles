@@ -3,6 +3,7 @@
 
 Проверяет полный цикл: подписка → изменение → матчинг → транзакции → снимки.
 """
+
 from __future__ import annotations
 
 from multiprocess_framework.modules.state_store_module import (
@@ -18,6 +19,7 @@ from multiprocess_framework.modules.state_store_module import (
 # ===========================================================================
 # Полный цикл: подписка → set → match
 # ===========================================================================
+
 
 def test_full_cycle():
     """Основной интеграционный сценарий из плана."""
@@ -180,11 +182,10 @@ def test_import_from_package():
     from multiprocess_framework.modules.state_store_module import (
         Delta,
         MISSING,
-        Subscription,
         SubscriptionManager,
-        Transaction,
         TreeStore,
     )
+
     assert Delta is not None
     assert TreeStore is not None
     assert SubscriptionManager is not None
@@ -205,10 +206,13 @@ def test_merge_and_match():
     store.set("cameras.0.config.type", "none")
     store.set("cameras.0.state.status", "stopped")
 
-    deltas = store.merge("cameras.0", {
-        "config": {"fps": 30, "type": "webcam"},
-        "state": {"status": "running"},
-    })
+    deltas = store.merge(
+        "cameras.0",
+        {
+            "config": {"fps": 30, "type": "webcam"},
+            "state": {"status": "running"},
+        },
+    )
 
     # Должны быть дельты для config.fps и config.type
     config_deltas = [d for d in deltas if "config" in d.path]

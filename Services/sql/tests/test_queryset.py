@@ -3,7 +3,7 @@
 
 Uses mock adapter/mapper to test SQL generation and immutability.
 """
-import pytest
+
 from typing import Any, Dict, List, Optional, Type
 
 from Services.sql.core.queryset import QuerySet
@@ -115,7 +115,6 @@ class TestImmutability:
 
 
 class TestParseLookup:
-
     def test_plain_field(self):
         qs = _make_qs()
         assert qs._parse_lookup("name") == ("name", "eq")
@@ -148,7 +147,6 @@ class TestParseLookup:
 
 
 class TestBuildSelect:
-
     def test_no_filters(self):
         qs = _make_qs(table="products")
         sql, params = qs._build_select()
@@ -186,14 +184,7 @@ class TestBuildSelect:
         assert "OFFSET 20" in sql
 
     def test_chained_complex(self):
-        qs = (
-            _make_qs()
-            .filter(age__gte=18)
-            .exclude(role="admin")
-            .order_by("-score", "name")
-            .limit(5)
-            .offset(10)
-        )
+        qs = _make_qs().filter(age__gte=18).exclude(role="admin").order_by("-score", "name").limit(5).offset(10)
         sql, params = qs._build_select()
         assert "WHERE" in sql
         assert "NOT" in sql
@@ -210,7 +201,6 @@ class TestBuildSelect:
 
 
 class TestOperators:
-
     def test_ne(self):
         qs = _make_qs().filter(status__ne="deleted")
         sql, params = qs._build_select()
@@ -268,7 +258,6 @@ class TestOperators:
 
 
 class TestExclude:
-
     def test_exclude_generates_not(self):
         qs = _make_qs().exclude(role="admin")
         sql, params = qs._build_select()
@@ -282,7 +271,6 @@ class TestExclude:
 
 
 class TestBuildCount:
-
     def test_count_no_filter(self):
         qs = _make_qs(table="items")
         sql, params = qs._build_count()
@@ -297,7 +285,6 @@ class TestBuildCount:
 
 
 class TestBuildDelete:
-
     def test_delete_no_filter(self):
         qs = _make_qs(table="logs")
         sql, params = qs._build_delete()
@@ -311,7 +298,6 @@ class TestBuildDelete:
 
 
 class TestBuildUpdate:
-
     def test_update_with_filter(self):
         qs = _make_qs().filter(active=False)
         sql, params = qs._build_update({"status": "archived"})
@@ -328,7 +314,6 @@ class TestBuildUpdate:
 
 
 class TestTerminalAll:
-
     def test_all_returns_entities(self):
         adapter = FakeAdapter(query_result=[{"name": "Alice"}, {"name": "Bob"}])
         qs = _make_qs(adapter=adapter)
@@ -340,7 +325,6 @@ class TestTerminalAll:
 
 
 class TestTerminalFirst:
-
     def test_first_returns_single(self):
         adapter = FakeAdapter(query_result=[{"name": "Alice"}])
         qs = _make_qs(adapter=adapter)
@@ -357,7 +341,6 @@ class TestTerminalFirst:
 
 
 class TestTerminalCount:
-
     def test_count_returns_int(self):
         adapter = FakeAdapter(query_result=[{"count": 42}])
         qs = _make_qs(adapter=adapter)
@@ -370,7 +353,6 @@ class TestTerminalCount:
 
 
 class TestTerminalValues:
-
     def test_values_returns_raw_dicts(self):
         rows = [{"id": 1, "name": "Alice"}]
         adapter = FakeAdapter(query_result=rows)
@@ -380,7 +362,6 @@ class TestTerminalValues:
 
 
 class TestTerminalDelete:
-
     def test_delete_returns_rowcount(self):
         adapter = FakeAdapter(execute_result=3)
         qs = _make_qs(adapter=adapter).filter(status="old")
@@ -389,7 +370,6 @@ class TestTerminalDelete:
 
 
 class TestTerminalUpdate:
-
     def test_update_returns_rowcount(self):
         adapter = FakeAdapter(execute_result=5)
         qs = _make_qs(adapter=adapter).filter(active=False)

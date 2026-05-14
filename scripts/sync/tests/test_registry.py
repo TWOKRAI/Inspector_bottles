@@ -5,10 +5,10 @@
 - replace_between_markers: MarkerNotFound при отсутствии маркеров.
 - apply_sync(check=True): возвращает 1 при дрифте и печатает diff в stderr.
 """
+
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -75,11 +75,7 @@ def test_check_mode_drift_returns_1(tmp_path, capsys):
     # Создаём временный файл с маркерами и старым контентом
     target = tmp_path / "DECISIONS.md"
     target.write_text(
-        "# Header\n"
-        "<!-- SYNC-TEST:BEGIN -->\n"
-        "old content\n"
-        "<!-- SYNC-TEST:END -->\n"
-        "# Footer\n",
+        "# Header\n<!-- SYNC-TEST:BEGIN -->\nold content\n<!-- SYNC-TEST:END -->\n# Footer\n",
         encoding="utf-8",
     )
 

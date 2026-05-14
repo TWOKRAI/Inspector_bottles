@@ -9,10 +9,9 @@
 """
 
 import logging
-import time
 import pytest
 from multiprocessing import Event
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from ..runner.bundle_builder import _build_shared_resources_from_bundle
 from ..runner.class_loader import _ProcessLogger, _load_process_class
@@ -27,9 +26,11 @@ from ..runner.process_runner import (
 # Тесты _ProcessLogger
 # ---------------------------------------------------------------------------
 
+
 class TestProcessLogger:
     def test_log_without_manager_does_not_raise(self, caplog, monkeypatch) -> None:
         from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+
         monkeypatch.setattr(LoggerManager, "_instance", None)
         log = _ProcessLogger("TestProcess")
         with caplog.at_level(logging.INFO):
@@ -63,11 +64,13 @@ class TestProcessLogger:
 # Тесты _load_process_class
 # ---------------------------------------------------------------------------
 
+
 class TestLoadProcessClass:
     def test_load_valid_class(self) -> None:
         log = _ProcessLogger("test")
         cls = _load_process_class("multiprocessing.Process", log)
         from multiprocessing import Process
+
         assert cls is Process
 
     def test_load_invalid_module(self) -> None:
@@ -89,6 +92,7 @@ class TestLoadProcessClass:
 # ---------------------------------------------------------------------------
 # Тесты _build_shared_resources_from_bundle
 # ---------------------------------------------------------------------------
+
 
 class TestBuildSharedResourcesFromBundle:
     def test_builds_with_empty_bundle(self) -> None:
@@ -140,6 +144,7 @@ class TestBuildSharedResourcesFromBundle:
 # ---------------------------------------------------------------------------
 # Тесты _run_lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestRunLifecycle:
     def test_stops_on_stop_event(self) -> None:
@@ -196,6 +201,7 @@ class TestRunLifecycle:
 # Тесты _update_process_state
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateProcessState:
     def test_update_state_with_none_srm(self) -> None:
         # Не должен падать
@@ -218,6 +224,7 @@ class TestUpdateProcessState:
 # ---------------------------------------------------------------------------
 # Тесты run_process_function
 # ---------------------------------------------------------------------------
+
 
 class TestRunProcessFunction:
     def test_invalid_class_path_returns_early(self, capsys) -> None:

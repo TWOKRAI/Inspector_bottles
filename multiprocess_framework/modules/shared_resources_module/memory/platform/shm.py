@@ -7,10 +7,12 @@ Windows: unlink() — no-op; память освобождается при clos
 POSIX (Linux/macOS): unlink() освобождает сегмент; cleanup_stale_shm: open+close+unlink.
 """
 
+from __future__ import annotations
+
 import os
 import platform
 from multiprocessing import shared_memory
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from ....logger_module.utils import FallbackLogger
 
@@ -51,7 +53,7 @@ def cleanup_stale_shm(name: str) -> None:
         pass
 
 
-def cleanup_known_shm_at_startup(processes_config: "Dict[str, Any]") -> None:  # noqa: F821
+def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
     """
     Очистить известные SharedMemory блоки перед стартом приложения.
 
@@ -73,11 +75,7 @@ def cleanup_known_shm_at_startup(processes_config: "Dict[str, Any]") -> None:  #
         coll = mem.get("coll", 2)
         names_raw = mem.get("names")
         if names_raw is None:
-            names_raw = {
-                k: v
-                for k, v in mem.items()
-                if k != "coll" and isinstance(v, (tuple, list))
-            }
+            names_raw = {k: v for k, v in mem.items() if k != "coll" and isinstance(v, (tuple, list))}
         names = list(names_raw.keys()) if isinstance(names_raw, dict) else []
         for name in names:
             for i in range(coll):
@@ -177,7 +175,5 @@ def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[Shm
     except Exception as e:
         for created in shm_list:
             close_shm(created, unlink=True)
-        _logger.error(
-            "[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e
-        )
+        _logger.error("[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e)
         return None

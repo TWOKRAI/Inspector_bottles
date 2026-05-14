@@ -8,8 +8,6 @@
 - Сравнение статусов из разных импортов работает корректно.
 """
 
-import pytest
-
 
 class TestProcessStatusHasAllLegacyValues:
     """Единый ProcessStatus содержит все значения из всех прежних определений."""
@@ -20,8 +18,15 @@ class TestProcessStatusHasAllLegacyValues:
 
         # process_module определял: 9 значений
         process_module_values = {
-            "initializing", "ready", "running", "stopping", "stopped",
-            "error", "crashed", "unresponsive", "failed",
+            "initializing",
+            "ready",
+            "running",
+            "stopping",
+            "stopped",
+            "error",
+            "crashed",
+            "unresponsive",
+            "failed",
         }
         actual = {s.value for s in ProcessStatus}
         assert process_module_values.issubset(actual), (
@@ -34,13 +39,16 @@ class TestProcessStatusHasAllLegacyValues:
 
         # shared_resources_module определял: 7 значений
         srm_values = {
-            "initializing", "ready", "running", "stopping", "stopped",
-            "error", "crashed",
+            "initializing",
+            "ready",
+            "running",
+            "stopping",
+            "stopped",
+            "error",
+            "crashed",
         }
         actual = {s.value for s in ProcessStatus}
-        assert srm_values.issubset(actual), (
-            f"Отсутствуют значения shared_resources: {srm_values - actual}"
-        )
+        assert srm_values.issubset(actual), f"Отсутствуют значения shared_resources: {srm_values - actual}"
 
     def test_total_count(self):
         """Всего 9 уникальных значений (суперсет)."""
@@ -69,9 +77,7 @@ class TestLegacyImportsStillWork:
         from multiprocess_framework.modules.base_manager.types import ProcessStatus as Canonical
         from multiprocess_framework.modules.process_module.types.types import ProcessStatus as PMS
 
-        assert Canonical is PMS, (
-            "ProcessStatus из process_module должен быть тем же объектом что из base_manager"
-        )
+        assert Canonical is PMS, "ProcessStatus из process_module должен быть тем же объектом что из base_manager"
 
     def test_shared_resources_import_is_same_object(self):
         """from shared_resources_module.types.types import ProcessStatus — тот же объект."""

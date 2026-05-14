@@ -1,6 +1,6 @@
 """Тесты для bridge и controls."""
-import pytest
-from unittest.mock import MagicMock, patch
+
+from unittest.mock import MagicMock
 
 from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
 from multiprocess_prototype.frontend.widgets.controls.process_status import ProcessStatusWidget
@@ -48,11 +48,13 @@ class TestProcessStatusWidget:
         widget = ProcessStatusWidget()
         qtbot.addWidget(widget)
 
-        widget.on_state_updated({
-            "data_type": "status",
-            "sender": "camera_0",
-            "data": {"status": "running", "pid": 1234},
-        })
+        widget.on_state_updated(
+            {
+                "data_type": "status",
+                "sender": "camera_0",
+                "data": {"status": "running", "pid": 1234},
+            }
+        )
 
         assert widget._table.rowCount() == 1
         assert widget._table.item(0, 0).text() == "camera_0"

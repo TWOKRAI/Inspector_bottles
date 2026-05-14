@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from .diff_engine import compute_diff, TopologyDiff
+from .diff_engine import compute_diff
 from .wire_protocol import WireConfig, ShmConfig, validate_wire
 from .system_commands import (
     build_hot_add_process,
@@ -101,13 +101,9 @@ class IBridgeCommandSender(Protocol):
         self, target_process: str, command: str, args: dict[str, Any], *, debounce_ms: int = 0
     ) -> None: ...
 
-    def send_action_command(
-        self, target_process: str, command: str, args: dict[str, Any] | None = None
-    ) -> None: ...
+    def send_action_command(self, target_process: str, command: str, args: dict[str, Any] | None = None) -> None: ...
 
-    def send_command(
-        self, target_process: str, command: str, args: dict[str, Any] | None = None
-    ) -> None: ...
+    def send_command(self, target_process: str, command: str, args: dict[str, Any] | None = None) -> None: ...
 
     def send_system_command(self, command: dict[str, Any]) -> None: ...
 
@@ -190,7 +186,10 @@ class TopologyBridge:
         if not result.ok:
             logger.warning(
                 "TopologyBridge: валидация отклонена — %s.%s = %r: %s",
-                plugin_name, field_name, value, result.error,
+                plugin_name,
+                field_name,
+                value,
+                result.error,
             )
             return False
 
@@ -221,7 +220,9 @@ class TopologyBridge:
         if not result.ok:
             logger.warning(
                 "TopologyBridge: action отклонён — %s.%s: %s",
-                plugin_name, command_name, result.error,
+                plugin_name,
+                command_name,
+                result.error,
             )
             return False
 
@@ -249,7 +250,9 @@ class TopologyBridge:
             if not ok:
                 logger.debug(
                     "TopologyBridge: state_delta не применён — %s.%s = %r",
-                    plugin_name, field_name, value,
+                    plugin_name,
+                    field_name,
+                    value,
                 )
         # Другие path (processes.X.state.fps и т.п.) — не для rm, для bindings
 
@@ -270,9 +273,7 @@ class TopologyBridge:
     def _send_lifecycle(self, command: str, process_name: str) -> bool:
         """Отправить lifecycle-команду после проверки topology."""
         if not self._process_exists(process_name):
-            logger.warning(
-                "TopologyBridge: процесс '%s' не найден в topology", process_name
-            )
+            logger.warning("TopologyBridge: процесс '%s' не найден в topology", process_name)
             return False
 
         self._sender.send_command(process_name, command)
@@ -340,14 +341,10 @@ class TopologyBridge:
             True если команда отправлена, False если процесс уже есть.
         """
         if self._process_exists(process_name):
-            logger.warning(
-                "TopologyBridge.hot_add: процесс '%s' уже существует", process_name
-            )
+            logger.warning("TopologyBridge.hot_add: процесс '%s' уже существует", process_name)
             return False
 
-        cmd = build_hot_add_process(
-            process_name, plugin_name, plugin_config, auto_start=auto_start
-        )
+        cmd = build_hot_add_process(process_name, plugin_name, plugin_config, auto_start=auto_start)
         self._sender.send_system_command(cmd)
         return True
 
@@ -365,9 +362,7 @@ class TopologyBridge:
             True если команда отправлена, False если процесс не найден.
         """
         if not self._process_exists(process_name):
-            logger.warning(
-                "TopologyBridge.hot_remove: процесс '%s' не найден", process_name
-            )
+            logger.warning("TopologyBridge.hot_remove: процесс '%s' не найден", process_name)
             return False
 
         # Каскадное отключение wire'ов процесса
@@ -409,7 +404,8 @@ class TopologyBridge:
         if not valid:
             logger.warning(
                 "TopologyBridge.connect_wire: валидация провалена — %s: %s",
-                wire_key, error,
+                wire_key,
+                error,
             )
             return False
 
@@ -433,9 +429,7 @@ class TopologyBridge:
         """
         wire = self._find_wire(wire_key)
         if wire is None:
-            logger.warning(
-                "TopologyBridge.disconnect_wire: wire '%s' не найден", wire_key
-            )
+            logger.warning("TopologyBridge.disconnect_wire: wire '%s' не найден", wire_key)
             return False
 
         source = wire.get("source", "")
@@ -471,9 +465,7 @@ class TopologyBridge:
             TopologyApplyResult с деталями и ошибками.
         """
         if self._applying:
-            return TopologyApplyResult(
-                errors=["apply_topology_diff уже выполняется (re-entrant guard)"]
-            )
+            return TopologyApplyResult(errors=["apply_topology_diff уже выполняется (re-entrant guard)"])
 
         self._applying = True
         result = TopologyApplyResult()
@@ -492,9 +484,7 @@ class TopologyBridge:
                         wk = f"{wire.get('source', '')}|{wire.get('target', '')}"
                         self.disconnect_wire(wk)
                 except Exception as exc:
-                    result.errors.append(
-                        f"Ошибка отключения wire'ов процесса '{pdiff.process_name}': {exc}"
-                    )
+                    result.errors.append(f"Ошибка отключения wire'ов процесса '{pdiff.process_name}': {exc}")
 
             # 2. Отключить wire'ы из removed_wires
             for wdiff in diff.removed_wires:
@@ -502,9 +492,7 @@ class TopologyBridge:
                     self.disconnect_wire(wdiff.wire_key)
                     result.wires_removed.append(wdiff.wire_key)
                 except Exception as exc:
-                    result.errors.append(
-                        f"Ошибка отключения wire '{wdiff.wire_key}': {exc}"
-                    )
+                    result.errors.append(f"Ошибка отключения wire '{wdiff.wire_key}': {exc}")
 
             # 3. Удалить процессы
             for pdiff in diff.removed_processes:
@@ -514,9 +502,7 @@ class TopologyBridge:
                     self._sender.send_system_command(cmd)
                     result.processes_removed.append(pdiff.process_name)
                 except Exception as exc:
-                    result.errors.append(
-                        f"Ошибка удаления процесса '{pdiff.process_name}': {exc}"
-                    )
+                    result.errors.append(f"Ошибка удаления процесса '{pdiff.process_name}': {exc}")
 
             # 4. Добавить процессы
             for pdiff in diff.added_processes:
@@ -524,15 +510,11 @@ class TopologyBridge:
                     new_cfg = pdiff.new_config or {}
                     plugin_name = new_cfg.get("plugin_name", pdiff.process_name)
                     plugin_config = new_cfg.get("plugin_config")
-                    cmd = build_hot_add_process(
-                        pdiff.process_name, plugin_name, plugin_config
-                    )
+                    cmd = build_hot_add_process(pdiff.process_name, plugin_name, plugin_config)
                     self._sender.send_system_command(cmd)
                     result.processes_added.append(pdiff.process_name)
                 except Exception as exc:
-                    result.errors.append(
-                        f"Ошибка добавления процесса '{pdiff.process_name}': {exc}"
-                    )
+                    result.errors.append(f"Ошибка добавления процесса '{pdiff.process_name}': {exc}")
 
             # 5. Подключить новые wire'ы
             for wdiff in diff.added_wires:
@@ -541,14 +523,10 @@ class TopologyBridge:
                     source = new_cfg.get("source", "")
                     target = new_cfg.get("target", "")
                     transport = new_cfg.get("transport", "router")
-                    self.connect_wire(
-                        wdiff.wire_key, source, target, transport=transport
-                    )
+                    self.connect_wire(wdiff.wire_key, source, target, transport=transport)
                     result.wires_added.append(wdiff.wire_key)
                 except Exception as exc:
-                    result.errors.append(
-                        f"Ошибка подключения wire '{wdiff.wire_key}': {exc}"
-                    )
+                    result.errors.append(f"Ошибка подключения wire '{wdiff.wire_key}': {exc}")
 
             # 6. Обновить конфиги изменённых процессов через on_field_set
             for pdiff in diff.modified_processes:
@@ -561,9 +539,7 @@ class TopologyBridge:
                             self.on_field_set(plugin_name, fld_name, value)
                     result.configs_updated.append(pdiff.process_name)
                 except Exception as exc:
-                    result.errors.append(
-                        f"Ошибка обновления конфига '{pdiff.process_name}': {exc}"
-                    )
+                    result.errors.append(f"Ошибка обновления конфига '{pdiff.process_name}': {exc}")
 
         finally:
             self._applying = False

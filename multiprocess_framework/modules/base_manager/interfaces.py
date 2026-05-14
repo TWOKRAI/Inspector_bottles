@@ -14,11 +14,11 @@
 
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict, Set, List
-from contextlib import contextmanager
 
 # =============================================================================
 # IBaseManager
 # =============================================================================
+
 
 class IBaseManager(ABC):
     """
@@ -90,6 +90,7 @@ class IBaseManager(ABC):
 # IBaseAdapter
 # =============================================================================
 
+
 class IBaseAdapter(ABC):
     """
     Контракт базового адаптера.
@@ -110,6 +111,7 @@ class IBaseAdapter(ABC):
 # =============================================================================
 # IObservableMixin
 # =============================================================================
+
 
 class IObservableMixin(ABC):
     """
@@ -174,7 +176,6 @@ class IObservableMixin(ABC):
     def get_state(self) -> Dict[str, Any]:
         """Полный снимок состояния."""
 
-
     # ---- Встроенные методы наблюдаемости ----
 
     @abstractmethod
@@ -202,22 +203,13 @@ class IObservableMixin(ABC):
         """Логирование уровня CRITICAL."""
 
     @abstractmethod
-    def _record_metric(
-        self, metric_name: str, value: Any = 1,
-        tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def _record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись метрики."""
 
     @abstractmethod
-    def _record_timing(
-        self, metric_name: str, duration: float,
-        tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def _record_timing(self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись времени выполнения."""
 
     @abstractmethod
-    def _track_error(
-        self, error: Exception,
-        context: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
         """Отслеживание ошибки."""

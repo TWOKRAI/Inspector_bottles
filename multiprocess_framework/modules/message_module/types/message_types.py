@@ -6,24 +6,25 @@
 """
 
 from enum import Enum
-from typing import Any
 
 
 class MessageType(Enum):
     """Типы сообщений в системе."""
-    GENERAL = "general"          # Обычное сообщение с произвольным содержимым
-    COMMAND = "command"          # Команда для выполнения действия
-    LOG = "log"                  # Лог-сообщение для централизованного логирования
-    SYSTEM = "system"            # Системное сообщение для управления процессами
-    BROADCAST = "broadcast"      # Широковещательное сообщение для всех процессов
-    DATA = "data"                # Сообщение с большими данными (может использовать shared memory)
-    REQUEST = "request"          # Запрос, ожидающий ответа
-    RESPONSE = "response"        # Ответ на запрос
-    EVENT = "event"              # Событийное сообщение (pub/sub паттерн)
+
+    GENERAL = "general"  # Обычное сообщение с произвольным содержимым
+    COMMAND = "command"  # Команда для выполнения действия
+    LOG = "log"  # Лог-сообщение для централизованного логирования
+    SYSTEM = "system"  # Системное сообщение для управления процессами
+    BROADCAST = "broadcast"  # Широковещательное сообщение для всех процессов
+    DATA = "data"  # Сообщение с большими данными (может использовать shared memory)
+    REQUEST = "request"  # Запрос, ожидающий ответа
+    RESPONSE = "response"  # Ответ на запрос
+    EVENT = "event"  # Событийное сообщение (pub/sub паттерн)
 
 
 class Priority(Enum):
     """Приоритеты сообщений."""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -32,6 +33,7 @@ class Priority(Enum):
 
 class LogLevel(Enum):
     """Уровни логирования."""
+
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"

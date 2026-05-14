@@ -1,17 +1,10 @@
 """Тесты GenericRepository."""
-import sys
-import os
-
-_modules_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..')
-if os.path.abspath(_modules_dir) not in sys.path:
-    sys.path.insert(0, os.path.abspath(_modules_dir))
 
 import pytest
 from typing import Annotated, Optional
 from pydantic import BaseModel
 
 from multiprocess_framework.modules.data_schema_module import SchemaBase, FieldMeta
-from Services.sql import SQLManager, SQLManagerConfig
 
 
 class UserSchema(BaseModel):
@@ -41,9 +34,7 @@ class PersonSchema(SchemaBase):
 
 class TestGenericRepository:
     def test_insert_find_delete(self, sql_manager):
-        sql_manager.execute(
-            "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)"
-        )
+        sql_manager.execute("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
         repo = sql_manager.get_repository(UserSchema, table_name="users")
         user = UserSchema(name="Alice")
         inserted = repo.insert(user)
@@ -107,21 +98,25 @@ class TestReadonlyAndBulkRepository:
 
     def test_find_by_single_field(self, person_repo):
         """find_by(name='Alice') находит нужную запись."""
-        person_repo.insert_many([
-            PersonSchema(name="Alice", age=30),
-            PersonSchema(name="Bob", age=25),
-        ])
+        person_repo.insert_many(
+            [
+                PersonSchema(name="Alice", age=30),
+                PersonSchema(name="Bob", age=25),
+            ]
+        )
         found = person_repo.find_by(name="Alice")
         assert len(found) == 1
         assert found[0].name == "Alice"
 
     def test_find_by_multiple_fields(self, person_repo):
         """find_by(name='Alice', age=25) применяет AND-логику."""
-        person_repo.insert_many([
-            PersonSchema(name="Alice", age=25),
-            PersonSchema(name="Alice", age=30),
-            PersonSchema(name="Bob", age=25),
-        ])
+        person_repo.insert_many(
+            [
+                PersonSchema(name="Alice", age=25),
+                PersonSchema(name="Alice", age=30),
+                PersonSchema(name="Bob", age=25),
+            ]
+        )
         found = person_repo.find_by(name="Alice", age=25)
         assert len(found) == 1
         assert found[0].name == "Alice"
@@ -135,9 +130,11 @@ class TestReadonlyAndBulkRepository:
 
     def test_find_by_no_kwargs(self, person_repo):
         """find_by() без аргументов возвращает все записи."""
-        person_repo.insert_many([
-            PersonSchema(name="Alice", age=30),
-            PersonSchema(name="Bob", age=25),
-        ])
+        person_repo.insert_many(
+            [
+                PersonSchema(name="Alice", age=30),
+                PersonSchema(name="Bob", age=25),
+            ]
+        )
         found = person_repo.find_by()
         assert len(found) == 2

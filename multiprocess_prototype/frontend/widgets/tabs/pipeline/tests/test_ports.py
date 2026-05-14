@@ -1,11 +1,12 @@
 """Тесты для PortItem, TempWireItem и wire creation."""
+
 from __future__ import annotations
 
 import pytest
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.port_item import PortItem
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.temp_wire import TempWireItem
-from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData, NodeItem
+from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene import GraphScene
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_view import GraphView, InteractionMode
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.constants import NODE_WIDTH, NODE_HEIGHT
@@ -14,6 +15,7 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.constants impor
 # ------------------------------------------------------------------ #
 #  PortItem                                                            #
 # ------------------------------------------------------------------ #
+
 
 class TestPortItem:
     def test_port_item_create(self, qtbot):
@@ -54,6 +56,7 @@ class TestPortItem:
 # ------------------------------------------------------------------ #
 #  NodeItem + порты                                                    #
 # ------------------------------------------------------------------ #
+
 
 class TestNodePorts:
     def test_node_has_ports(self, qtbot):
@@ -97,6 +100,7 @@ class TestNodePorts:
 #  TempWireItem                                                        #
 # ------------------------------------------------------------------ #
 
+
 class TestTempWireItem:
     def test_temp_wire_create(self, qtbot):
         """TempWireItem создаётся с начальной позицией."""
@@ -116,6 +120,7 @@ class TestTempWireItem:
 # ------------------------------------------------------------------ #
 #  GraphScene.port_at                                                  #
 # ------------------------------------------------------------------ #
+
 
 class TestScenePortAt:
     def test_scene_port_at(self, qtbot):
@@ -141,6 +146,7 @@ class TestScenePortAt:
 # ------------------------------------------------------------------ #
 #  GraphView — InteractionMode                                         #
 # ------------------------------------------------------------------ #
+
 
 class TestGraphViewInteraction:
     def test_graph_view_has_interaction_mode(self, qtbot):

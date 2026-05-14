@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Optional
 
-import pytest
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -25,6 +24,7 @@ from multiprocess_prototype.registers.field_info import FieldInfo
 # ---------------------------------------------------------------------------
 # Хелперы
 # ---------------------------------------------------------------------------
+
 
 def _fi(
     field_type: type,
@@ -48,6 +48,7 @@ def _fi(
 # ---------------------------------------------------------------------------
 # Тесты
 # ---------------------------------------------------------------------------
+
 
 class TestCardsFieldFactory:
     """Тесты маппинга type → widget."""

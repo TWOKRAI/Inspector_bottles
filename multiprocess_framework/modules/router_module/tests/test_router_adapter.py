@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for RouterAdapter."""
+
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -9,7 +10,6 @@ from ..interfaces import IMessageChannel
 
 
 class TestRouterAdapter(unittest.TestCase):
-
     def test_setup_returns_true_with_manager(self):
         mgr = MagicMock()
         ad = RouterAdapter(mgr)
@@ -75,7 +75,10 @@ class TestRouterAdapter(unittest.TestCase):
         mgr.register_message_handler.return_value = True
         ad = RouterAdapter(mgr)
         ad.setup()
-        fn = lambda m: None
+
+        def fn(m):
+            pass
+
         self.assertTrue(ad.add_message_handler("k", fn))
         mgr.register_message_handler.assert_called_once_with("k", fn)
 

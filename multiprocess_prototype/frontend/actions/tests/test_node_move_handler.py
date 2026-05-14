@@ -1,10 +1,10 @@
 """Тесты NodeMoveHandler и builder-методов V2ActionBuilder (Task 13.1b)."""
+
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 
 from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.handlers.node_move_handler import NodeMoveHandler

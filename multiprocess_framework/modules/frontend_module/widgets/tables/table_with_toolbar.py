@@ -2,17 +2,25 @@
 """
 TableWithToolbar — таблица + панель кнопок (Добавить, Удалить, Вверх, Вниз, Копировать, Вставить).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, Signal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+)
 from multiprocess_framework.modules.frontend_module.widgets.tables.structured_table import StructuredTableWidget
 
 
 class TableWithToolbar(QWidget):
     """Таблица с панелью: Добавить, Удалить, Вверх, Вниз, Копировать, Вставить."""
+
     add_clicked = Signal()
     delete_clicked = Signal()
     move_up_clicked = Signal()

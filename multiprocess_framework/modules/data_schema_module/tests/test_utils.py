@@ -8,7 +8,6 @@ Unit-тесты для утилит (core/helpers.py, core/reference.py).
 
 from typing import Any, Dict
 
-import pytest
 
 from ..core.helpers import (
     get_nested_value,
@@ -26,6 +25,7 @@ from ..core.reference import (
 # ============================================================================
 # Тесты Utils
 # ============================================================================
+
 
 def test_utils_nested_and_merge():
     """Вложенные ключи (dot notation), дефолты при отсутствии, merge_with_defaults, extract_fields с nested=True."""
@@ -58,10 +58,7 @@ def test_utils_nested_and_merge():
 def test_data_reference_and_conversion():
     """DataReference с resolver, to_dict, resolve; convert_all_references в dict и списках."""
     # Хранилище для резолвинга ссылок
-    resolved_store: Dict[str, Any] = {
-        "queue:1": "qobj",
-        "evt:2": {"flag": True}
-    }
+    resolved_store: Dict[str, Any] = {"queue:1": "qobj", "evt:2": {"flag": True}}
 
     def resolver(ref_id: str) -> Any:
         return resolved_store.get(ref_id)
@@ -74,12 +71,7 @@ def test_data_reference_and_conversion():
 
     # Конвертация всех ссылок в структуре данных
     ref_dict = {"_ref": True, "ref_id": "evt:2"}
-    data = {
-        "queue": ref,
-        "evt": ref_dict,
-        "plain": 5,
-        "items": [ref_dict]
-    }
+    data = {"queue": ref, "evt": ref_dict, "plain": 5, "items": [ref_dict]}
     converted = convert_all_references(data, resolver=resolver)
     assert converted["queue"] == "qobj"
     assert converted["evt"] == {"flag": True}
@@ -89,6 +81,7 @@ def test_data_reference_and_conversion():
 
 def test_data_reference_from_dict():
     """Восстановление DataReference из dict с _ref/ref_id и резолвинг через resolver."""
+
     def resolver(ref_id: str) -> Any:
         return f"resolved_{ref_id}"
 
@@ -96,4 +89,3 @@ def test_data_reference_from_dict():
     ref = DataReference.from_dict(ref_dict, resolver=resolver)
     assert ref.ref_id == "test:123"
     assert ref.resolve() == "resolved_test:123"
-

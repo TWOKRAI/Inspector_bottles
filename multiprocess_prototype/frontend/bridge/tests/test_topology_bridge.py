@@ -10,7 +10,7 @@ Pure Python, без Qt. Тестируем:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -108,14 +108,10 @@ class MockSender:
     ) -> None:
         self.field_commands.append((target_process, command, args, debounce_ms))
 
-    def send_action_command(
-        self, target_process: str, command: str, args: dict[str, Any] | None = None
-    ) -> None:
+    def send_action_command(self, target_process: str, command: str, args: dict[str, Any] | None = None) -> None:
         self.action_commands.append((target_process, command, args))
 
-    def send_command(
-        self, target_process: str, command: str, args: dict[str, Any] | None = None
-    ) -> None:
+    def send_command(self, target_process: str, command: str, args: dict[str, Any] | None = None) -> None:
         self.commands.append((target_process, command, args))
 
 
@@ -187,12 +183,14 @@ def rm() -> MockRegistersManager:
 
 @pytest.fixture
 def holder() -> MockTopologyHolder:
-    return MockTopologyHolder({
-        "processes": [
-            {"process_name": "camera_0", "plugins": [{"plugin_name": "capture"}]},
-            {"process_name": "processor_0", "plugins": [{"plugin_name": "color_mask"}]},
-        ]
-    })
+    return MockTopologyHolder(
+        {
+            "processes": [
+                {"process_name": "camera_0", "plugins": [{"plugin_name": "capture"}]},
+                {"process_name": "processor_0", "plugins": [{"plugin_name": "color_mask"}]},
+            ]
+        }
+    )
 
 
 @pytest.fixture
@@ -210,7 +208,6 @@ def bridge(
 
 
 class TestOnFieldSet:
-
     def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """field_set → resolve → validate → send_field_command."""
         ok = bridge.on_field_set("color_mask", "h_min", 50)
@@ -231,9 +228,7 @@ class TestOnFieldSet:
         self, sender: MockSender, catalog: MockCatalog, rm: MockRegistersManager, holder: MockTopologyHolder
     ) -> None:
         """Валидация не прошла → return False, не отправлять."""
-        validator = MockValidator(
-            field_results={"color_mask.h_min": MockValidationResult.fail("bad value")}
-        )
+        validator = MockValidator(field_results={"color_mask.h_min": MockValidationResult.fail("bad value")})
         bridge = TopologyBridge(sender, catalog, validator, rm, holder)
 
         ok = bridge.on_field_set("color_mask", "h_min", -1)
@@ -279,7 +274,6 @@ class TestOnFieldSet:
 
 
 class TestOnActionCommand:
-
     def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """Action → validate → resolve → send."""
         ok = bridge.on_action_command("capture", "start_capture")
@@ -300,9 +294,7 @@ class TestOnActionCommand:
         self, sender: MockSender, catalog: MockCatalog, rm: MockRegistersManager, holder: MockTopologyHolder
     ) -> None:
         """Валидация action не прошла → return False."""
-        validator = MockValidator(
-            action_results={"capture.bad_cmd": MockValidationResult.fail("unknown")}
-        )
+        validator = MockValidator(action_results={"capture.bad_cmd": MockValidationResult.fail("unknown")})
         bridge = TopologyBridge(sender, catalog, validator, rm, holder)
 
         ok = bridge.on_action_command("capture", "bad_cmd")
@@ -324,7 +316,6 @@ class TestOnActionCommand:
 
 
 class TestOnStateDelta:
-
     def test_config_path_updates_rm(self, bridge: TopologyBridge, rm: MockRegistersManager) -> None:
         """state_delta processes.X.config.field → rm.set_value."""
         bridge.on_state_delta("processes.color_mask.config.h_min", 100)
@@ -354,7 +345,6 @@ class TestOnStateDelta:
 
 
 class TestLifecycle:
-
     def test_start_process(self, bridge: TopologyBridge, sender: MockSender) -> None:
         ok = bridge.start_process("camera_0")
         assert ok is True
@@ -383,7 +373,6 @@ class TestLifecycle:
 
 
 class TestTopologyChanged:
-
     def test_clears_slider_cache(self, bridge: TopologyBridge) -> None:
         """on_topology_changed очищает кэш slider-полей."""
         # Заполнить кэш
@@ -403,6 +392,5 @@ class TestTopologyChanged:
 
 
 class TestProperties:
-
     def test_is_connected_default(self, bridge: TopologyBridge) -> None:
         assert bridge.is_connected is True

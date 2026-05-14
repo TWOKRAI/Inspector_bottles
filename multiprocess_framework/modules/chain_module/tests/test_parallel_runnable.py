@@ -5,6 +5,7 @@
 До рефакторинга 2026-05 эта ветка отсутствовала в parallel-исполнителе —
 регрессия фиксируется тестами в этом модуле.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,7 +15,7 @@ import numpy as np
 import pytest
 
 from multiprocess_framework.modules.chain_module.core.parallel import ParallelChainRunnable
-from multiprocess_framework.modules.chain_module.core.result import ChainResult, RunnableStep
+from multiprocess_framework.modules.chain_module.core.result import ChainResult
 from multiprocess_framework.modules.chain_module.thread_pool.pool import ChainThreadPool
 
 from .conftest import (
@@ -30,6 +31,7 @@ from .conftest import (
 @dataclass
 class FakeRemoteResponse:
     """Эрзац WorkerTaskResponse — только нужные поля."""
+
     detections: list[dict] = field(default_factory=list)
 
 
@@ -129,6 +131,7 @@ class TestParallelCrossProcess:
 
     def test_cross_process_failure_with_skip(self, pool, frame):
         """Cross-process падает с on_error=skip → warning, цепочка продолжается."""
+
         class FailingRemoteStep(FakeCrossProcessStep):
             def execute_remote(self, frame, context, input_shm_name, input_shm_index):
                 raise RuntimeError("remote down")
@@ -150,6 +153,7 @@ class TestParallelCrossProcess:
 
     def test_cross_process_failure_with_fail_region(self, pool, frame):
         """Cross-process падает с on_error=fail_region → break, локальные не исполняются."""
+
         class FailingRemoteStep(FakeCrossProcessStep):
             def execute_remote(self, frame, context, input_shm_name, input_shm_index):
                 raise RuntimeError("remote down")

@@ -6,6 +6,7 @@
 - Идемпотентность: после write повторный check → exit 0.
 - Ручная правка между маркерами → check → exit 1.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -13,7 +14,6 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pytest
 
 from scripts.sync.registry import apply_sync
 
@@ -56,9 +56,7 @@ def test_list_shows_three_modules():
         cwd=str(REPO_ROOT),
     )
 
-    assert result.returncode == 0, (
-        f"Ожидался exit code 0, получен {result.returncode}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Ожидался exit code 0, получен {result.returncode}\nstderr: {result.stderr}"
     assert "adr_modules" in result.stdout, "В выводе должно быть 'adr_modules'"
     assert "adr_toc" in result.stdout, "В выводе должно быть 'adr_toc'"
     assert "adr_obsolete" in result.stdout, "В выводе должно быть 'adr_obsolete'"
@@ -101,9 +99,7 @@ def test_only_flag_isolates(tmp_path):
 
     apply_sync([stub_a, stub_b], check=False, only="adr_toc")
 
-    assert stub_a.render_calls == 1, (
-        f"render() модуля 'adr_toc' должен быть вызван 1 раз, вызван {stub_a.render_calls}"
-    )
+    assert stub_a.render_calls == 1, f"render() модуля 'adr_toc' должен быть вызван 1 раз, вызван {stub_a.render_calls}"
     assert stub_b.render_calls == 0, (
         f"render() модуля 'other_module' НЕ должен вызываться, вызван {stub_b.render_calls}"
     )
@@ -136,9 +132,7 @@ def test_check_after_write_exit0(tmp_path):
 
     # Второй прогон — check после write → должен быть 0
     check_code = apply_sync([stub], check=True)
-    assert check_code == 0, (
-        f"Ожидался exit code 0 при check после write (идемпотентность), получен {check_code}"
-    )
+    assert check_code == 0, f"Ожидался exit code 0 при check после write (идемпотентность), получен {check_code}"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +167,4 @@ def test_check_after_manual_edit_exit1(tmp_path, capsys):
 
     # Check должен обнаружить дрифт
     check_code = apply_sync([stub], check=True)
-    assert check_code == 1, (
-        f"Ожидался exit code 1 после ручной правки, получен {check_code}"
-    )
+    assert check_code == 1, f"Ожидался exit code 1 после ручной правки, получен {check_code}"

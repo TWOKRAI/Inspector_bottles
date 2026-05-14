@@ -1,7 +1,7 @@
 """Тесты RegisterView.field_changed signal (Phase 11, требует pytest-qt)."""
+
 from __future__ import annotations
 
-import pytest
 from PySide6.QtWidgets import QSpinBox
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
@@ -12,6 +12,7 @@ from multiprocess_prototype.registers.field_info import FieldInfo
 # ---------------------------------------------------------------------------
 # Вспомогательная функция для создания FieldInfo
 # ---------------------------------------------------------------------------
+
 
 def _make_int_field(
     field_name: str,
@@ -36,6 +37,7 @@ def _make_int_field(
 # ---------------------------------------------------------------------------
 # Тесты field_changed signal
 # ---------------------------------------------------------------------------
+
 
 class TestRegisterViewSignals:
     def test_field_changed_emitted_on_editor_change(self, qtbot) -> None:
@@ -102,9 +104,7 @@ class TestRegisterViewSignals:
         qtbot.addWidget(view)
 
         received_reg_names = []
-        view.field_changed.connect(
-            lambda reg, fld, old, new: received_reg_names.append(reg)
-        )
+        view.field_changed.connect(lambda reg, fld, old, new: received_reg_names.append(reg))
 
         editors = view.editors()
         editor = editors["edge_detector.contrast"]
@@ -119,9 +119,7 @@ class TestRegisterViewSignals:
         qtbot.addWidget(view)
 
         received_field_names = []
-        view.field_changed.connect(
-            lambda reg, fld, old, new: received_field_names.append(fld)
-        )
+        view.field_changed.connect(lambda reg, fld, old, new: received_field_names.append(fld))
 
         editors = view.editors()
         editor = editors["color_mask.saturation"]

@@ -8,7 +8,6 @@ Rejected операции всегда логируются как WARNING, не
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from ..core.delta import Delta
 from ..core import match_pattern, split_pattern

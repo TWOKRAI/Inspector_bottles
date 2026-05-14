@@ -9,7 +9,7 @@ Pure Python логика; QTimer — опциональный (ленивая и
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -18,10 +18,10 @@ class WireStatus(Enum):
     """Жизненный цикл wire."""
 
     NOT_CONFIGURED = "not_configured"
-    PENDING = "pending"   # wire.setup отправлен, ответа нет
-    IDLE = "idle"         # SHM создан, данных пока нет
-    ACTIVE = "active"     # данные передаются
-    BROKEN = "broken"     # ошибка или timeout
+    PENDING = "pending"  # wire.setup отправлен, ответа нет
+    IDLE = "idle"  # SHM создан, данных пока нет
+    ACTIVE = "active"  # данные передаются
+    BROKEN = "broken"  # ошибка или timeout
 
 
 @dataclass
@@ -30,8 +30,8 @@ class WireMetrics:
 
     fps: float = 0.0
     latency_ms: float = 0.0
-    buffer_fill: float = 0.0   # 0.0–1.0
-    last_update: float = 0.0   # UNIX timestamp
+    buffer_fill: float = 0.0  # 0.0–1.0
+    last_update: float = 0.0  # UNIX timestamp
 
 
 class WireStatusMonitor:

@@ -1,11 +1,10 @@
 """Тесты NodeInspectorPanel — включая интеграцию с CardsFieldFactory."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector import NodeInspectorPanel
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
@@ -15,6 +14,7 @@ from PySide6.QtWidgets import QLineEdit
 # ------------------------------------------------------------------ #
 #  Вспомогательные фабрики и фикстуры                                 #
 # ------------------------------------------------------------------ #
+
 
 def _make_ctx_no_rm():
     """AppContext без RegistersManager."""
@@ -41,6 +41,7 @@ def _make_ctx_with_rm(fields: list):
 def _make_field_info(field_name: str, field_type: type = str, default: Any = ""):
     """Создать FieldInfo для теста."""
     from multiprocess_prototype.registers.field_info import FieldInfo
+
     return FieldInfo(
         plugin_name="test_plugin",
         field_name=field_name,
@@ -67,6 +68,7 @@ def _make_presenter_ctx(rm=None, bus=None):
 # ------------------------------------------------------------------ #
 #  Оригинальные тесты (backward compatibility)                        #
 # ------------------------------------------------------------------ #
+
 
 class TestNodeInspectorPanel:
     def test_create(self, qtbot):
@@ -155,6 +157,7 @@ class TestNodeInspectorPanel:
 # ------------------------------------------------------------------ #
 #  Новые тесты: CardsFieldFactory-ветка                               #
 # ------------------------------------------------------------------ #
+
 
 class TestCardsFieldFactoryBranch:
     def test_cards_branch_activated_when_rm_has_fields(self, qtbot):
@@ -307,6 +310,7 @@ class TestCardsFieldFactoryBranch:
 #  Новые тесты: PipelinePresenter + ActionBus integration             #
 # ------------------------------------------------------------------ #
 
+
 class TestPresenterInspectorIntegration:
     def test_set_inspector_connects_field_changed(self, qtbot):
         """set_inspector подключает inspector.field_changed к presenter."""
@@ -365,6 +369,7 @@ class TestPresenterInspectorIntegration:
     def test_field_changed_no_bus_no_rm_logs_warning(self, qtbot, caplog):
         """Если ни ActionBus ни rm — логируется warning."""
         import logging
+
         ctx = _make_presenter_ctx(rm=None, bus=None)
         presenter = PipelinePresenter(ctx)
 
@@ -377,5 +382,4 @@ class TestPresenterInspectorIntegration:
             panel.field_changed.emit("camera", "fps", "60")
 
         # В лог записано предупреждение
-        assert any("warning" in r.levelname.lower() or r.levelno >= logging.WARNING
-                   for r in caplog.records)
+        assert any("warning" in r.levelname.lower() or r.levelno >= logging.WARNING for r in caplog.records)

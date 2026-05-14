@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты normalize_managers_view и согласованности с ProcessConfigHandler."""
 
-import pytest
-
 from ..configs.managers_normalize import normalize_managers_view
 from ..configs.process_config_handler import ProcessConfigHandler
 

@@ -4,19 +4,21 @@
 
 Проверяет: enqueue, flush, stats, thread-safety, priority ordering.
 """
+
 import time
 import threading
 import pytest
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from ..buffers.direct_buffer import DirectBuffer
-from ..buffers.async_sender_buffer import AsyncSenderBuffer, PRIORITY_MAP
+from ..buffers.async_sender_buffer import AsyncSenderBuffer
 from ..buffers.batch_buffer import BatchBuffer, BatchConfig
 
 
 # ---------------------------------------------------------------------------
 # DirectBuffer
 # ---------------------------------------------------------------------------
+
 
 class TestDirectBuffer:
     def test_enqueue_calls_send_fn(self):
@@ -29,7 +31,7 @@ class TestDirectBuffer:
 
     def test_flush_is_noop(self):
         buf = DirectBuffer(send_fn=lambda ch, data: None)
-        buf.flush()          # должно не падать
+        buf.flush()  # должно не падать
         buf.flush("ch1")
 
     def test_stats(self):
@@ -63,9 +65,11 @@ class TestDirectBuffer:
 # AsyncSenderBuffer
 # ---------------------------------------------------------------------------
 
+
 class TestAsyncSenderBuffer:
     def test_enqueue_and_receive(self):
         received = []
+
         def _send(ch, data):
             received.append((ch, data))
 
@@ -88,10 +92,10 @@ class TestAsyncSenderBuffer:
         buf = AsyncSenderBuffer(send_fn=_send, queue_size=100)
         # Fill queue while worker is stopped to preserve ordering
         buf._stop_event.set()
-        buf.enqueue("ch", {"p": "low"},    priority="low")
+        buf.enqueue("ch", {"p": "low"}, priority="low")
         buf.enqueue("ch", {"p": "normal"}, priority="normal")
         buf.enqueue("ch", {"p": "urgent"}, priority="urgent")
-        buf.enqueue("ch", {"p": "high"},   priority="high")
+        buf.enqueue("ch", {"p": "high"}, priority="high")
         buf._stop_event.clear()
         buf.start()
         time.sleep(0.3)
@@ -109,10 +113,10 @@ class TestAsyncSenderBuffer:
             log_warning=warnings.append,
         )
         buf.start()
-        buf.enqueue("ch", {"n": 1})   # worker picks this up immediately
-        time.sleep(0.05)              # wait for worker to dequeue item 1 (now sleeping)
-        buf.enqueue("ch", {"n": 2})   # fills queue (size=1)
-        buf.enqueue("ch", {"n": 3})   # should drop — queue is full
+        buf.enqueue("ch", {"n": 1})  # worker picks this up immediately
+        time.sleep(0.05)  # wait for worker to dequeue item 1 (now sleeping)
+        buf.enqueue("ch", {"n": 2})  # fills queue (size=1)
+        buf.enqueue("ch", {"n": 3})  # should drop — queue is full
         buf.stop()
 
         assert buf.stats["dropped"] >= 1
@@ -148,6 +152,7 @@ class TestAsyncSenderBuffer:
 # ---------------------------------------------------------------------------
 # BatchBuffer
 # ---------------------------------------------------------------------------
+
 
 class TestBatchBuffer:
     def test_enqueue_and_flush(self):

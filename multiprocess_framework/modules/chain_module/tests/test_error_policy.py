@@ -4,11 +4,11 @@
 проверку что ObservableMixin-наследник удовлетворяет узкому IChainLogger
 через runtime_checkable Protocol.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.chain_module.core.context import ChainContext

@@ -66,6 +66,7 @@ dev = [
 NodeGraphQt = { git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git", rev = "7fa60017" }
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = [
     "multiprocess_framework/refactored",
     "multiprocess_framework/modules/state_store_module/tests",
@@ -81,3 +82,19 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=multiprocess_prototype_backup"
 qt_api = "pyside6"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Условные реэкспорты (try/except ImportError + __all__.extend) — F401 ложноположительный
+"multiprocess_framework/modules/frontend_module/widgets/__init__.py" = ["F401"]
+"multiprocess_framework/modules/frontend_module/widgets/chrome/__init__.py" = ["F401"]
+"multiprocess_framework/modules/data_schema_module/factory/__init__.py" = ["F401"]
+"multiprocess_framework/modules/data_schema_module/storage/__init__.py" = ["F401"]
+# Backup — frozen snapshot, не трогаем
+"multiprocess_prototype_backup/**" = ["F401", "F811", "F841", "E"]

@@ -5,12 +5,11 @@
 Bcrypt rounds=4 для скорости тестов.
 Все тесты используют tmp_path для изоляции файловой системы.
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -92,11 +91,13 @@ def _make_role(name: str, level: int = 1) -> Role:
 
 def _seed_storage(storage: YamlUserStorage, config: AuthConfig) -> None:
     """Заполнить хранилище базовыми данными: роль admin + пользователь alice."""
-    storage.save_roles({
-        "admin": _make_role("admin", level=9),
-        "operator": _make_role("operator", level=5),
-        "viewer": _make_role("viewer", level=1),
-    })
+    storage.save_roles(
+        {
+            "admin": _make_role("admin", level=9),
+            "operator": _make_role("operator", level=5),
+            "viewer": _make_role("viewer", level=1),
+        }
+    )
     storage.save({"alice": _make_user("alice", "admin")})
 
 
@@ -123,9 +124,7 @@ def test_shutdown_returns_true(manager: AuthManager) -> None:
 # =============================================================================
 
 
-def test_login_success_returns_access_context(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_login_success_returns_access_context(manager: AuthManager, storage: YamlUserStorage) -> None:
     """login() с верными данными возвращает dict AccessContext."""
     _seed_storage(storage, manager._config)
     ctx = manager.login("alice", "ValidPass@1")
@@ -137,9 +136,7 @@ def test_login_success_returns_access_context(
     assert "password_hash" not in ctx
 
 
-def test_login_updates_last_login_at(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_login_updates_last_login_at(manager: AuthManager, storage: YamlUserStorage) -> None:
     """login() обновляет last_login_at и login_count."""
     _seed_storage(storage, manager._config)
     manager.login("alice", "ValidPass@1")
@@ -149,13 +146,9 @@ def test_login_updates_last_login_at(
     assert users["alice"].login_count == 1
 
 
-def test_login_permissions_sorted(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_login_permissions_sorted(manager: AuthManager, storage: YamlUserStorage) -> None:
     """login() возвращает permissions как sorted list."""
-    storage.save_roles({
-        "admin": Role(name="admin", level=9, permissions=["z.perm", "a.perm", "m.perm"])
-    })
+    storage.save_roles({"admin": Role(name="admin", level=9, permissions=["z.perm", "a.perm", "m.perm"])})
     storage.save({"alice": _make_user("alice", "admin")})
 
     ctx = manager.login("alice", "ValidPass@1")
@@ -167,27 +160,21 @@ def test_login_permissions_sorted(
 # =============================================================================
 
 
-def test_login_wrong_password_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_login_wrong_password_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Неверный пароль → InvalidCredentials."""
     _seed_storage(storage, manager._config)
     with pytest.raises(InvalidCredentials):
         manager.login("alice", "WrongPass@1")
 
 
-def test_login_unknown_user_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_login_unknown_user_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Несуществующий пользователь → InvalidCredentials (защита от user enumeration)."""
     _seed_storage(storage, manager._config)
     with pytest.raises(InvalidCredentials):
         manager.login("nobody", "ValidPass@1")
 
 
-def test_login_inactive_user_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_login_inactive_user_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Деактивированный пользователь → InvalidCredentials."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     inactive_user = _make_user("alice", "admin").model_copy(update={"is_active": False})
@@ -301,9 +288,7 @@ def test_create_user_success(manager: AuthManager, storage: YamlUserStorage) -> 
     assert users["bob"].password_hash != "ValidPass@1"  # хеш, не plain-text
 
 
-def test_create_user_duplicate_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_create_user_duplicate_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Создание пользователя с существующим именем → UserAlreadyExists."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     storage.save({"alice": _make_user("alice", "admin")})
@@ -312,9 +297,7 @@ def test_create_user_duplicate_raises(
         manager.create_user("alice", "NewPass@1", "admin")
 
 
-def test_create_user_unknown_role_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_create_user_unknown_role_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Создание пользователя с несуществующей ролью → RoleNotFound."""
     storage.save_roles({"admin": _make_role("admin", 9)})
 
@@ -322,9 +305,7 @@ def test_create_user_unknown_role_raises(
         manager.create_user("bob", "ValidPass@1", "nonexistent")
 
 
-def test_create_user_weak_password_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_create_user_weak_password_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Создание пользователя со слабым паролем → WeakPassword."""
     from Services.auth import WeakPassword
 
@@ -341,23 +322,25 @@ def test_create_user_weak_password_raises(
 
 def test_delete_user_success(manager: AuthManager, storage: YamlUserStorage) -> None:
     """delete_user() удаляет пользователя."""
-    storage.save_roles({
-        "admin": _make_role("admin", 9),
-        "operator": _make_role("operator", 5),
-    })
-    storage.save({
-        "alice": _make_user("alice", "admin"),
-        "bob": _make_user("bob", "operator"),
-    })
+    storage.save_roles(
+        {
+            "admin": _make_role("admin", 9),
+            "operator": _make_role("operator", 5),
+        }
+    )
+    storage.save(
+        {
+            "alice": _make_user("alice", "admin"),
+            "bob": _make_user("bob", "operator"),
+        }
+    )
 
     manager.delete_user("bob")
     users = storage.load()
     assert "bob" not in users
 
 
-def test_delete_user_not_found_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_delete_user_not_found_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """delete_user() несуществующего → UserNotFound."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     storage.save({"alice": _make_user("alice", "admin")})
@@ -378,10 +361,12 @@ def test_delete_last_admin_raises(manager: AuthManager, storage: YamlUserStorage
 def test_delete_non_last_admin_ok(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Удаление admin при наличии другого admin → OK."""
     storage.save_roles({"admin": _make_role("admin", 9)})
-    storage.save({
-        "alice": _make_user("alice", "admin"),
-        "bob": _make_user("bob", "admin"),
-    })
+    storage.save(
+        {
+            "alice": _make_user("alice", "admin"),
+            "bob": _make_user("bob", "admin"),
+        }
+    )
 
     manager.delete_user("bob")
     users = storage.load()
@@ -394,59 +379,61 @@ def test_delete_non_last_admin_ok(manager: AuthManager, storage: YamlUserStorage
 # =============================================================================
 
 
-def test_update_user_role_success(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_update_user_role_success(manager: AuthManager, storage: YamlUserStorage) -> None:
     """update_user_role() меняет роль пользователя."""
-    storage.save_roles({
-        "admin": _make_role("admin", 9),
-        "operator": _make_role("operator", 5),
-    })
-    storage.save({
-        "alice": _make_user("alice", "admin"),
-        "bob": _make_user("bob", "admin"),
-    })
+    storage.save_roles(
+        {
+            "admin": _make_role("admin", 9),
+            "operator": _make_role("operator", 5),
+        }
+    )
+    storage.save(
+        {
+            "alice": _make_user("alice", "admin"),
+            "bob": _make_user("bob", "admin"),
+        }
+    )
 
     manager.update_user_role("bob", "operator")
     users = storage.load()
     assert users["bob"].role_name == "operator"
 
 
-def test_update_last_admin_role_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_update_last_admin_role_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Снятие роли admin с последнего активного admin → LastAdminError."""
-    storage.save_roles({
-        "admin": _make_role("admin", 9),
-        "operator": _make_role("operator", 5),
-    })
+    storage.save_roles(
+        {
+            "admin": _make_role("admin", 9),
+            "operator": _make_role("operator", 5),
+        }
+    )
     storage.save({"alice": _make_user("alice", "admin")})
 
     with pytest.raises(LastAdminError):
         manager.update_user_role("alice", "operator")
 
 
-def test_update_role_unknown_user_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_update_role_unknown_user_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """update_user_role() несуществующего → UserNotFound."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     with pytest.raises(UserNotFound):
         manager.update_user_role("nobody", "admin")
 
 
-def test_update_role_unknown_role_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_update_role_unknown_role_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """update_user_role() с несуществующей ролью → RoleNotFound."""
-    storage.save_roles({
-        "admin": _make_role("admin", 9),
-        "operator": _make_role("operator", 5),
-    })
-    storage.save({
-        "alice": _make_user("alice", "admin"),
-        "bob": _make_user("bob", "admin"),
-    })
+    storage.save_roles(
+        {
+            "admin": _make_role("admin", 9),
+            "operator": _make_role("operator", 5),
+        }
+    )
+    storage.save(
+        {
+            "alice": _make_user("alice", "admin"),
+            "bob": _make_user("bob", "admin"),
+        }
+    )
 
     with pytest.raises(RoleNotFound):
         manager.update_user_role("bob", "superadmin")
@@ -457,9 +444,7 @@ def test_update_role_unknown_role_raises(
 # =============================================================================
 
 
-def test_reset_password_returns_new_password(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_reset_password_returns_new_password(manager: AuthManager, storage: YamlUserStorage) -> None:
     """reset_password() возвращает новый plain-text пароль."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     storage.save({"alice": _make_user("alice", "admin")})
@@ -469,9 +454,7 @@ def test_reset_password_returns_new_password(
     assert len(new_password) >= 8
 
 
-def test_reset_password_validates_new_password(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_reset_password_validates_new_password(manager: AuthManager, storage: YamlUserStorage) -> None:
     """Новый пароль после reset соответствует PasswordPolicy (через login)."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     storage.save({"alice": _make_user("alice", "admin")})
@@ -482,9 +465,7 @@ def test_reset_password_validates_new_password(
     assert ctx["username"] == "alice"
 
 
-def test_reset_password_changes_hash(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_reset_password_changes_hash(manager: AuthManager, storage: YamlUserStorage) -> None:
     """После reset_password хеш в storage изменился."""
     storage.save_roles({"admin": _make_role("admin", 9)})
     original_user = _make_user("alice", "admin")
@@ -497,9 +478,7 @@ def test_reset_password_changes_hash(
     assert users["alice"].password_hash != old_hash
 
 
-def test_reset_password_not_found_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_reset_password_not_found_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """reset_password() несуществующего → UserNotFound."""
     with pytest.raises(UserNotFound):
         manager.reset_password("nobody")
@@ -510,9 +489,7 @@ def test_reset_password_not_found_raises(
 # =============================================================================
 
 
-def test_list_users_excludes_password_hash(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_list_users_excludes_password_hash(manager: AuthManager, storage: YamlUserStorage) -> None:
     """list_users() не включает password_hash."""
     _seed_storage(storage, manager._config)
     users = manager.list_users()
@@ -523,11 +500,13 @@ def test_list_users_excludes_password_hash(
 def test_list_users_sorted(manager: AuthManager, storage: YamlUserStorage) -> None:
     """list_users() возвращает отсортированный список."""
     storage.save_roles({"admin": _make_role("admin", 9), "operator": _make_role("operator", 5)})
-    storage.save({
-        "charlie": _make_user("charlie", "admin"),
-        "alice": _make_user("alice", "admin"),
-        "bob": _make_user("bob", "operator"),
-    })
+    storage.save(
+        {
+            "charlie": _make_user("charlie", "admin"),
+            "alice": _make_user("alice", "admin"),
+            "bob": _make_user("bob", "operator"),
+        }
+    )
     users = manager.list_users()
     usernames = [u["username"] for u in users]
     assert usernames == sorted(usernames)
@@ -552,26 +531,20 @@ def test_create_role_success(manager: AuthManager, storage: YamlUserStorage) -> 
     assert "qa" in roles
 
 
-def test_create_role_empty_permissions(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_create_role_empty_permissions(manager: AuthManager, storage: YamlUserStorage) -> None:
     """create_role() с пустым списком permissions — OK."""
     result = manager.create_role(name="readonly", permissions=[])
     assert result["permissions"] == []
 
 
-def test_create_role_duplicate_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_create_role_duplicate_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """create_role() с дублирующимся именем → AuthError."""
     manager.create_role(name="qa", permissions=["tabs.view"])
     with pytest.raises(AuthError):
         manager.create_role(name="qa", permissions=["tabs.edit"])
 
 
-def test_delete_role_predefined_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_delete_role_predefined_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """delete_role('admin') → AuthError (predefined role)."""
     storage.save_roles({"admin": _make_role("admin", 9)})
 
@@ -579,25 +552,19 @@ def test_delete_role_predefined_raises(
         manager.delete_role("admin")
 
 
-def test_delete_role_predefined_dev_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_delete_role_predefined_dev_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """delete_role('dev') → AuthError (predefined role)."""
     with pytest.raises(AuthError):
         manager.delete_role("dev")
 
 
-def test_delete_role_not_found_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_delete_role_not_found_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """delete_role() несуществующей → RoleNotFound."""
     with pytest.raises(RoleNotFound):
         manager.delete_role("nonexistent")
 
 
-def test_delete_role_custom_success(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_delete_role_custom_success(manager: AuthManager, storage: YamlUserStorage) -> None:
     """delete_role() кастомной роли → OK."""
     storage.save_roles({"qa": _make_role("qa", 3)})
     manager.delete_role("qa")
@@ -605,9 +572,7 @@ def test_delete_role_custom_success(
     assert "qa" not in roles
 
 
-def test_update_role_permissions_success(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_update_role_permissions_success(manager: AuthManager, storage: YamlUserStorage) -> None:
     """update_role_permissions() обновляет и персистирует permissions."""
     storage.save_roles({"operator": _make_role("operator", 5)})
     manager.update_role_permissions("operator", ["tabs.recipes.view", "tabs.pipeline.edit"])
@@ -617,9 +582,7 @@ def test_update_role_permissions_success(
     assert "tabs.pipeline.edit" in roles["operator"].permissions
 
 
-def test_update_role_permissions_not_found_raises(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_update_role_permissions_not_found_raises(manager: AuthManager, storage: YamlUserStorage) -> None:
     """update_role_permissions() несуществующей → RoleNotFound."""
     with pytest.raises(RoleNotFound):
         manager.update_role_permissions("nonexistent", ["tabs.view"])
@@ -630,18 +593,14 @@ def test_update_role_permissions_not_found_raises(
 # =============================================================================
 
 
-def test_verify_admin_password_correct(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_verify_admin_password_correct(manager: AuthManager, storage: YamlUserStorage) -> None:
     """verify_admin_password() с верным паролем → True."""
     _seed_storage(storage, manager._config)
     manager.login("alice", "ValidPass@1")
     assert manager.verify_admin_password("ValidPass@1") is True
 
 
-def test_verify_admin_password_wrong(
-    manager: AuthManager, storage: YamlUserStorage
-) -> None:
+def test_verify_admin_password_wrong(manager: AuthManager, storage: YamlUserStorage) -> None:
     """verify_admin_password() с неверным паролем → False."""
     _seed_storage(storage, manager._config)
     manager.login("alice", "ValidPass@1")

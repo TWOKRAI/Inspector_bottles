@@ -1,16 +1,9 @@
 """
 Конфигурация pytest для sql_module.
 
-Запуск из каталога refactored/modules:
-    pytest sql_module/tests/ -v
+Запуск из корня проекта:
+    pytest Services/sql/tests/ -v
 """
-import sys
-from pathlib import Path
-
-_modules_dir = Path(__file__).resolve().parent.parent.parent
-if str(_modules_dir) not in sys.path:
-    sys.path.insert(0, str(_modules_dir))
-
 
 import pytest
 from Services.sql import SQLManager, SQLManagerConfig

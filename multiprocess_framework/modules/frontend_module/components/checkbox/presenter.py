@@ -4,6 +4,7 @@ CheckboxPresenter — композиция traits для чекбокса.
 
 Контракт View: `IControlView[bool]` (реализация — `CheckboxView`).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -49,7 +50,8 @@ class CheckboxPresenter:
         Args:
             binding: Привязка к `register_name.field_name` (+ `access_level`, опционально `index`).
             adapter: Доступ к чтению/записи/подписке (обычно `RegisterAdapter`).
-            view_config: UI-переопределения (`label` через `LabelOverride`, непустой `tooltip` — приоритет над описанием регистра).
+            view_config: UI-переопределения (`label` через `LabelOverride`,
+                непустой `tooltip` — приоритет над описанием регистра).
             current_access_level: Текущий уровень доступа пользователя для `AccessTrait`.
             hooks: Колбэки для внешних менеджеров (лог / ошибки / статистика).
         """

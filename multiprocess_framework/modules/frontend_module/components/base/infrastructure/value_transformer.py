@@ -4,9 +4,10 @@
 
 Универсальный «кубик» для любых числовых контролов (слайдер, спинбокс и т.д.).
 """
+
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from multiprocess_framework.modules.frontend_module.schemas.register_binding import ResolvedMeta
 

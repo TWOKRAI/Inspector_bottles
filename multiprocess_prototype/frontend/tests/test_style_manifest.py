@@ -5,12 +5,12 @@
 тематическом разбиении файлов блоки перегруппированы логически, но
 содержат идентичный набор CSS-правил.
 """
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-import pytest
 
 from multiprocess_prototype.frontend.styles.style_manifest import (
     DOMAIN_STYLE_FILES,
@@ -20,12 +20,7 @@ from multiprocess_prototype.frontend.styles.style_manifest import (
 )
 
 # Путь к директории темы относительно этого файла
-_THEME_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "styles"
-    / "themes"
-    / "innotech_theme"
-)
+_THEME_DIR = Path(__file__).resolve().parent.parent / "styles" / "themes" / "innotech_theme"
 
 # Заглушки, которые намеренно не включены в manifest
 _STUB_FILES = {"sources.qss"}
@@ -34,6 +29,7 @@ _STUB_FILES = {"sources.qss"}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def normalize_qss(text: str) -> str:
     """Нормализовать QSS для сравнения без косметических различий.
@@ -116,6 +112,7 @@ def _full_assembled_qss() -> str:
 # Тест 1 — КРИТИЧЕСКИЙ: идентичность CSS-правил (без учёта порядка)
 # ---------------------------------------------------------------------------
 
+
 class TestManifestAssemblyMatchesMain:
     """Сборка по манифесту содержит идентичный набор CSS-правил с main.qss."""
 
@@ -150,6 +147,7 @@ class TestManifestAssemblyMatchesMain:
 # Тест 2 — Все селекторы из main.qss присутствуют в assembled
 # ---------------------------------------------------------------------------
 
+
 class TestAllSelectorsPresent:
     """Ни один CSS-селектор не был потерян при разбиении."""
 
@@ -173,6 +171,7 @@ class TestAllSelectorsPresent:
 # Тест 3 — Нет дублирующихся селекторов между файлами
 # ---------------------------------------------------------------------------
 
+
 class TestNoDuplicateSelectorsAcrossFiles:
     """Один селектор определён только в одном компонентном файле."""
 
@@ -182,10 +181,7 @@ class TestNoDuplicateSelectorsAcrossFiles:
         base.qss исключён — он намеренно может повторять часть main.qss.
         """
         # Собираем только компонентные файлы (primitives + domains)
-        component_files = [
-            (_THEME_DIR / rel_path, rel_path)
-            for rel_path in STYLE_MANIFEST
-        ]
+        component_files = [(_THEME_DIR / rel_path, rel_path) for rel_path in STYLE_MANIFEST]
 
         # Словарь: селектор → список файлов где он встречается
         selector_to_files: dict[str, list[str]] = {}
@@ -198,25 +194,19 @@ class TestNoDuplicateSelectorsAcrossFiles:
             for sel in selectors:
                 selector_to_files.setdefault(sel, []).append(rel_path)
 
-        duplicates = {
-            sel: files
-            for sel, files in selector_to_files.items()
-            if len(files) > 1
-        }
+        duplicates = {sel: files for sel, files in selector_to_files.items() if len(files) > 1}
 
         assert not duplicates, (
             f"Найдены дублирующиеся селекторы в компонентных файлах "
             f"({len(duplicates)} шт.):\n"
-            + "\n".join(
-                f"  {sel!r}: {files}"
-                for sel, files in sorted(duplicates.items())
-            )
+            + "\n".join(f"  {sel!r}: {files}" for sel, files in sorted(duplicates.items()))
         )
 
 
 # ---------------------------------------------------------------------------
 # Тест 4 — Все .qss файлы в components/ присутствуют в STYLE_MANIFEST
 # ---------------------------------------------------------------------------
+
 
 class TestAllComponentFilesInManifest:
     """Все компонентные .qss файлы зарегистрированы в STYLE_MANIFEST."""
@@ -240,15 +230,15 @@ class TestAllComponentFilesInManifest:
                 rel = qss_file.relative_to(_THEME_DIR)
                 missing_from_manifest.append(str(rel))
 
-        assert not missing_from_manifest, (
-            "Следующие .qss файлы не найдены в STYLE_MANIFEST:\n"
-            + "\n".join(missing_from_manifest)
+        assert not missing_from_manifest, "Следующие .qss файлы не найдены в STYLE_MANIFEST:\n" + "\n".join(
+            missing_from_manifest
         )
 
 
 # ---------------------------------------------------------------------------
 # Тест 5 — Порядок групп: primitives идут раньше domains
 # ---------------------------------------------------------------------------
+
 
 class TestManifestOrderMatchesMain:
     """Primitives-файлы в манифесте предшествуют domain-файлам.
@@ -329,6 +319,7 @@ class TestManifestOrderMatchesMain:
 # Тест 6 — Все @переменные из main.qss сохранены
 # ---------------------------------------------------------------------------
 
+
 class TestAllVariablesPreserved:
     """Все CSS-переменные (@var) из main.qss присутствуют в assembled QSS."""
 
@@ -343,12 +334,10 @@ class TestAllVariablesPreserved:
 
         missing = original_vars - assembled_vars
         assert not missing, (
-            f"Следующие @переменные из main.qss отсутствуют в assembled QSS "
-            f"({len(missing)} шт.): {sorted(missing)}"
+            f"Следующие @переменные из main.qss отсутствуют в assembled QSS ({len(missing)} шт.): {sorted(missing)}"
         )
 
         extra = assembled_vars - original_vars
         assert not extra, (
-            f"Следующие @переменные есть в assembled QSS, но отсутствуют в main.qss "
-            f"({len(extra)} шт.): {sorted(extra)}"
+            f"Следующие @переменные есть в assembled QSS, но отсутствуют в main.qss ({len(extra)} шт.): {sorted(extra)}"
         )

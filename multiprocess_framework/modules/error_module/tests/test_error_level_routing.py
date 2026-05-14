@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 
 from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerManagerConfig,
@@ -123,9 +122,7 @@ class TestLevelRouting:
             em.shutdown()
 
     def test_fallback_critical_to_errors_file_when_no_critical_channel(self, tmp_path) -> None:
-        em = ErrorManager(
-            config=_logger_config_for_routing(tmp_path, include_critical=False)
-        )
+        em = ErrorManager(config=_logger_config_for_routing(tmp_path, include_critical=False))
         em.initialize()
         try:
             routes = em.get_stats()["level_routes"]
@@ -135,9 +132,7 @@ class TestLevelRouting:
             em.shutdown()
 
     def test_fallback_warning_to_errors_file_when_no_warnings_channel(self, tmp_path) -> None:
-        em = ErrorManager(
-            config=_logger_config_for_routing(tmp_path, include_warnings=False)
-        )
+        em = ErrorManager(config=_logger_config_for_routing(tmp_path, include_warnings=False))
         em.initialize()
         try:
             routes = em.get_stats()["level_routes"]
@@ -149,9 +144,7 @@ class TestLevelRouting:
 
 class TestLogOverride:
     def test_debug_goes_to_parent_log(self, tmp_path) -> None:
-        em = ErrorManager(
-            config=_logger_config_for_routing(tmp_path, default_level="DEBUG")
-        )
+        em = ErrorManager(config=_logger_config_for_routing(tmp_path, default_level="DEBUG"))
         em.initialize()
         try:
             em.debug("dbg")
@@ -159,9 +152,7 @@ class TestLogOverride:
             em.shutdown()
 
     def test_info_goes_to_parent_log(self, tmp_path) -> None:
-        em = ErrorManager(
-            config=_logger_config_for_routing(tmp_path, default_level="DEBUG")
-        )
+        em = ErrorManager(config=_logger_config_for_routing(tmp_path, default_level="DEBUG"))
         em.initialize()
         try:
             em.info("inf")

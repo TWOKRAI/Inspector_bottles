@@ -12,12 +12,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar
 
-import pytest
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
     SchemaBase,
-    register_schema,
 )
 from multiprocess_framework.modules.process_module.generic.generic_process_config import (
     GenericProcessConfig,
@@ -101,7 +99,10 @@ class TestPluginConfigExtra:
     def test_extra_fields_accepted(self):
         """Extra-поля принимаются без ValidationError."""
         cfg = _TestPluginConfigWithBindings(
-            camera_id=2, width=1920, height=1080, threshold=200,
+            camera_id=2,
+            width=1920,
+            height=1080,
+            threshold=200,
         )
         assert cfg.plugin_name == "test_plugin"
         # Extra-поля доступны через __pydantic_extra__
@@ -153,7 +154,9 @@ class TestFromPluginsMemoryProxy:
     def test_memory_from_register_yaml_overrides(self):
         """YAML overrides (extra-поля) → memory с кастомными значениями."""
         cfg = _TestPluginConfigWithBindings(
-            camera_id=3, width=1920, height=1080,
+            camera_id=3,
+            width=1920,
+            height=1080,
         )
         gpc = GenericProcessConfig.from_plugins("proc2", [cfg])
         mem = gpc.memory

@@ -2,7 +2,6 @@
 """Тесты для process_module/types/types.py."""
 
 import pickle
-import pytest
 
 from ..types import (
     ProcessStatus,
@@ -10,7 +9,6 @@ from ..types import (
     QueueType,
     ProcessConfigDict,
     ProcessStatsDict,
-    ProcessMetadataDict,
 )
 
 

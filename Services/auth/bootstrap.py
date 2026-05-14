@@ -15,6 +15,7 @@ Exit codes:
 Использование:
     python -m Services.auth.bootstrap
 """
+
 from __future__ import annotations
 
 import getpass
@@ -26,7 +27,7 @@ from pathlib import Path
 
 from .crypto import BcryptHasher, PasswordPolicy
 from .exceptions import WeakPassword
-from .models import AuthConfig, User
+from .models import User
 from .predefined_roles import PREDEFINED_ROLES as _PREDEFINED_ROLES
 from .storage import YamlUserStorage
 
@@ -87,7 +88,7 @@ def main() -> int:
             storage.save_roles(_PREDEFINED_ROLES)
             user = _create_user("dev", dev_password, "dev", hasher)
             storage.save({"dev": user})
-            print(f"[OK] Создан пользователь 'dev' с ролью 'dev'")
+            print("[OK] Создан пользователь 'dev' с ролью 'dev'")
             print(f"[OK] Predefined роли: {', '.join(_PREDEFINED_ROLES)}")
             print(f"[OK] Хранилище: {users_path}")
             return 0

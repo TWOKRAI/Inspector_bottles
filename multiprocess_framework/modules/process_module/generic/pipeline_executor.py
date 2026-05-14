@@ -12,7 +12,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from typing import Any, Callable
+from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
 from .frame_shm_middleware import FrameShmMiddleware
@@ -90,7 +90,7 @@ class PipelineExecutor:
             if not hasattr(self, "_trace_exec_cnt"):
                 self._trace_exec_cnt = 0
             self._trace_exec_cnt += 1
-            do_trace = (self._trace_exec_cnt % 30 == 1)
+            do_trace = self._trace_exec_cnt % 30 == 1
 
             if do_trace:
                 self._log_info(
@@ -110,8 +110,7 @@ class PipelineExecutor:
 
             if do_trace:
                 self._log_info(
-                    f"[TRACE] PipelineExecutor: chain → {len(items)} item(s), "
-                    f"sending to {self._chain_targets}"
+                    f"[TRACE] PipelineExecutor: chain → {len(items)} item(s), sending to {self._chain_targets}"
                 )
 
             # Отправить результаты по IPC
@@ -136,9 +135,7 @@ class PipelineExecutor:
                 # Успех — сбросить счётчик fails
                 self._consecutive_fails[plugin.name] = 0
             except Exception as e:
-                self._log_error(
-                    f"PipelineExecutor: {plugin.name}.process() error: {e}"
-                )
+                self._log_error(f"PipelineExecutor: {plugin.name}.process() error: {e}")
                 # Error policy (Q7): pass-through + mark
                 for item in items:
                     item["inspection_status"] = "not_inspected"
@@ -189,9 +186,7 @@ class PipelineExecutor:
             if now - since >= self._auto_reset_sec:
                 self._bypassed[name] = False
                 self._consecutive_fails[name] = 0
-                self._log_info(
-                    f"PipelineExecutor: circuit breaker RESET for '{name}'"
-                )
+                self._log_info(f"PipelineExecutor: circuit breaker RESET for '{name}'")
 
     def is_bypassed(self, plugin_name: str) -> bool:
         """Проверить, обходится ли плагин circuit breaker."""

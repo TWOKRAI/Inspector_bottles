@@ -31,13 +31,14 @@ Singleton. Каждый процесс регистрирует свой Registe
     all_channels = registry.collect_routing_channels()
     summary = registry.summary()
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Type
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +146,7 @@ class ProcessRegistersRegistry:
         with self._registry_lock:
             if process_name in self._processes:
                 raise ValueError(
-                    f"Процесс '{process_name}' уже зарегистрирован. "
-                    "Используйте update_process() для обновления."
+                    f"Процесс '{process_name}' уже зарегистрирован. Используйте update_process() для обновления."
                 )
             self._processes[process_name] = _ProcessEntry(
                 process_name=process_name,
@@ -155,7 +155,8 @@ class ProcessRegistersRegistry:
             )
         logger.info(
             "ProcessRegistersRegistry: зарегистрирован процесс '%s' (%d регистров)",
-            process_name, len(container),
+            process_name,
+            len(container),
         )
 
     def update_process(
@@ -188,9 +189,7 @@ class ProcessRegistersRegistry:
                 entry.container = container
             if meta is not None:
                 entry.meta = meta
-        logger.debug(
-            "ProcessRegistersRegistry: обновлён процесс '%s'", process_name
-        )
+        logger.debug("ProcessRegistersRegistry: обновлён процесс '%s'", process_name)
 
     def unregister_process(self, process_name: str) -> bool:
         """
@@ -265,9 +264,7 @@ class ProcessRegistersRegistry:
             Пустой channel ("") пропускается.
         """
         return {
-            name: entry.meta.routing_channel
-            for name, entry in self._processes.items()
-            if entry.meta.routing_channel
+            name: entry.meta.routing_channel for name, entry in self._processes.items() if entry.meta.routing_channel
         }
 
     def collect_field_routing(self) -> dict[str, dict[str, dict]]:
@@ -325,11 +322,7 @@ class ProcessRegistersRegistry:
                     fields_meta: dict[str, Any] = {}
                     for fn, meta in type(reg).get_all_fields_meta().items():
                         if meta:
-                            fields_meta[fn] = {
-                                k: v
-                                for k, v in meta.to_dict().items()
-                                if v not in (None, "", {}, [])
-                            }
+                            fields_meta[fn] = {k: v for k, v in meta.to_dict().items() if v not in (None, "", {}, [])}
                     reg_info["fields"] = fields_meta
                 else:
                     reg_info["fields"] = list(reg.model_fields.keys())
@@ -385,10 +378,7 @@ class ProcessRegistersRegistry:
 
         Используется для глобального snapshot / сохранения.
         """
-        return {
-            proc_name: entry.container.to_dict()
-            for proc_name, entry in self._processes.items()
-        }
+        return {proc_name: entry.container.to_dict() for proc_name, entry in self._processes.items()}
 
     def to_json(self, indent: int = 2) -> str:
         """Полное состояние реестра в JSON (только данные, без метаданных)."""

@@ -1,7 +1,7 @@
 """Auto-merge predefined-ролей при AuthManager.initialize()."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -102,9 +102,7 @@ class TestAutoMergePredefinedRoles:
         # Хранилище осталось пустым: bootstrap не запускался.
         assert not Path(config.users_path).exists()
 
-    def test_seeded_predefined_with_partial_perms_gets_merged(
-        self, storage: YamlUserStorage, config: AuthConfig
-    ):
+    def test_seeded_predefined_with_partial_perms_gets_merged(self, storage: YamlUserStorage, config: AuthConfig):
         """Seed: admin с partial-permissions → после initialize() добавляются недостающие."""
         # Эмулируем «старое» состояние, как в реальном users.yaml до PR3
         legacy_admin = Role(
@@ -133,9 +131,7 @@ class TestAutoMergePredefinedRoles:
         # Старые permissions сохранились (не удалены).
         assert "tabs.recipes.view" in merged
 
-    def test_seeded_custom_role_untouched(
-        self, storage: YamlUserStorage, config: AuthConfig
-    ):
+    def test_seeded_custom_role_untouched(self, storage: YamlUserStorage, config: AuthConfig):
         """Custom-роли вне списка predefined не затрагиваются миграцией."""
         custom = Role(name="qa_lead", level=4, permissions=["tabs.recipes.view"])
         storage.save_roles({"qa_lead": custom})
@@ -147,9 +143,7 @@ class TestAutoMergePredefinedRoles:
         assert "qa_lead" in loaded
         assert list(loaded["qa_lead"].permissions) == ["tabs.recipes.view"]
 
-    def test_seeded_missing_predefined_role_is_restored(
-        self, storage: YamlUserStorage, config: AuthConfig
-    ):
+    def test_seeded_missing_predefined_role_is_restored(self, storage: YamlUserStorage, config: AuthConfig):
         """Если predefined роль удалена — восстанавливается из spec."""
         # Сохраняем только admin (operator/viewer/dev отсутствуют)
         storage.save_roles({"admin": PREDEFINED_ROLES["admin"]})
@@ -159,9 +153,7 @@ class TestAutoMergePredefinedRoles:
 
         loaded = storage.load_roles()
         assert {"dev", "admin", "operator", "viewer"}.issubset(loaded.keys())
-        assert set(loaded["viewer"].permissions) == set(
-            expected_permissions("viewer")
-        )
+        assert set(loaded["viewer"].permissions) == set(expected_permissions("viewer"))
 
     def test_idempotent(self, storage: YamlUserStorage, config: AuthConfig):
         """Повторный initialize() ничего не меняет (no-op)."""
@@ -176,6 +168,4 @@ class TestAutoMergePredefinedRoles:
         after = storage.load_roles()
 
         # Сериализуемое представление одинаковое
-        assert {n: set(r.permissions) for n, r in before.items()} == {
-            n: set(r.permissions) for n, r in after.items()
-        }
+        assert {n: set(r.permissions) for n, r in before.items()} == {n: set(r.permissions) for n, r in after.items()}

@@ -7,7 +7,7 @@
 
 import threading
 from enum import Enum
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 try:
     from typing import TypedDict
@@ -27,11 +27,12 @@ class WorkerStatus(Enum):
     STOPPING: Промежуточный статус во время завершения (редко виден).
     COMPLETED: Воркер успешно завершился. Финальный статус для TASK-режима.
     """
+
     STOPPED = "stopped"
     RUNNING = "running"
     ERROR = "error"
     STOPPING = "stopping"
-    COMPLETED = "completed"   # для одноразовых задач (ExecutionMode.TASK)
+    COMPLETED = "completed"  # для одноразовых задач (ExecutionMode.TASK)
 
 
 class ThreadPriority(Enum):
@@ -59,11 +60,12 @@ class ThreadPriority(Enum):
         Для низкоприоритетных фоновых задач.
         Очень редко проверяется.
     """
-    SYSTEM = 0        # 0.001s интервал — системные потоки
-    REALTIME = 1      # 0.01s  интервал — реальное время
-    NORMAL = 2        # 0.1s   интервал — обычные
-    BATCH = 3         # 1.0s   интервал — пакетная обработка
-    BACKGROUND = 4    # 5.0s   интервал — фоновые
+
+    SYSTEM = 0  # 0.001s интервал — системные потоки
+    REALTIME = 1  # 0.01s  интервал — реальное время
+    NORMAL = 2  # 0.1s   интервал — обычные
+    BATCH = 3  # 1.0s   интервал — пакетная обработка
+    BACKGROUND = 4  # 5.0s   интервал — фоновые
 
 
 class WorkerType(Enum):
@@ -79,8 +81,9 @@ class WorkerType(Enum):
         Создаются из конфига процесса или программно.
         Обычно средний/низкий приоритет (NORMAL, BATCH, BACKGROUND).
     """
-    SYSTEM = "system"           # Внутренний механизм фреймворка
-    APPLICATION = "application" # Пользовательские задачи
+
+    SYSTEM = "system"  # Внутренний механизм фреймворка
+    APPLICATION = "application"  # Пользовательские задачи
 
 
 class ExecutionMode(Enum):
@@ -110,8 +113,9 @@ class ExecutionMode(Enum):
         LOOP режим идеален для постоянных услуг внутри процесса.
         TASK режим идеален для инициализирующих задач, которые должны выполниться один раз.
     """
-    LOOP = "loop"   # Циклический: run() с бесконечным циклом, слушает stop_event
-    TASK = "task"   # Одноразовый: run() выполняется один раз и завершается
+
+    LOOP = "loop"  # Циклический: run() с бесконечным циклом, слушает stop_event
+    TASK = "task"  # Одноразовый: run() выполняется один раз и завершается
 
 
 class WorkerInfo(TypedDict):
@@ -171,6 +175,7 @@ class WorkerInfo(TypedDict):
     has_been_started: bool
         Был ли воркер когда-либо запущен?
     """
+
     thread: threading.Thread
     stop_event: threading.Event
     pause_event: threading.Event

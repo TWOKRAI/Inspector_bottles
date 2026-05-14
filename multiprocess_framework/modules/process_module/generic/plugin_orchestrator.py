@@ -15,7 +15,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from ..plugins.base import PluginContext, PluginState, ProcessModulePlugin
+from ..plugins.base import PluginContext, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
 
 
@@ -55,7 +55,7 @@ class PluginOrchestrator:
         )
 
         # StateProxy (устанавливается подклассами, например GenericProcessApp)
-        state_proxy = getattr(self._services, '_state_proxy', None)
+        state_proxy = getattr(self._services, "_state_proxy", None)
         if state_proxy is not None:
             base_ctx.state_proxy = state_proxy
 
@@ -66,23 +66,20 @@ class PluginOrchestrator:
             # Short-name resolution: если plugin_class пуст или это короткое имя
             # (без точки) — резолвим через PluginRegistry по plugin_name.
             resolved_class_path = self._resolve_plugin_class(
-                plugin_class_path, plugin_name,
+                plugin_class_path,
+                plugin_name,
             )
             if not resolved_class_path:
                 continue
             try:
                 plugin = self._load_plugin(resolved_class_path, plugin_name)
-                plugin_config = {
-                    k: v for k, v in pdef.items()
-                    if k not in ("plugin_class", "plugin_name")
-                }
+                plugin_config = {k: v for k, v in pdef.items() if k not in ("plugin_class", "plugin_name")}
                 ctx = base_ctx.with_config(plugin_config)
                 plugin.configure_managers(ctx)
                 self._early_plugins.append((plugin, ctx))
             except Exception as e:
                 self._services.log_error(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"configure_managers '{plugin_name}': {e}"
+                    f"PluginOrchestrator[{self._services.name}]: configure_managers '{plugin_name}': {e}"
                 )
 
     def boot(self) -> None:
@@ -92,9 +89,7 @@ class PluginOrchestrator:
         Здесь только configure -> start lifecycle + registers.
         """
         if not self._early_plugins:
-            self._services.log_info(
-                f"PluginOrchestrator[{self._services.name}]: нет плагинов"
-            )
+            self._services.log_info(f"PluginOrchestrator[{self._services.name}]: нет плагинов")
             return
 
         self._plugins = []
@@ -117,29 +112,19 @@ class PluginOrchestrator:
                     f"[{plugin.category}] {plugin.state.value}"
                 )
             except Exception as e:
-                self._services.log_error(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"configure '{plugin.name}': {e}"
-                )
+                self._services.log_error(f"PluginOrchestrator[{self._services.name}]: configure '{plugin.name}': {e}")
 
         # Фаза 2: READY -> RUNNING (start)
         for plugin, ctx in zip(self._plugins, self._contexts):
             try:
                 plugin._do_start(ctx)
                 self._services.log_info(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"'{plugin.name}' {plugin.state.value}"
+                    f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' {plugin.state.value}"
                 )
             except Exception as e:
-                self._services.log_error(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"start '{plugin.name}': {e}"
-                )
+                self._services.log_error(f"PluginOrchestrator[{self._services.name}]: start '{plugin.name}': {e}")
 
-        self._services.log_info(
-            f"PluginOrchestrator[{self._services.name}]: "
-            f"{len(self._plugins)} плагин(ов)"
-        )
+        self._services.log_info(f"PluginOrchestrator[{self._services.name}]: {len(self._plugins)} плагин(ов)")
 
         # Фаза 4: Registers boot — отправить schemas в PM + handler
         if registers_manager is not None:
@@ -151,14 +136,10 @@ class PluginOrchestrator:
             try:
                 plugin._do_shutdown(ctx)
                 self._services.log_info(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"'{plugin.name}' {plugin.state.value}"
+                    f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' {plugin.state.value}"
                 )
             except Exception as e:
-                self._services.log_error(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"shutdown '{plugin.name}': {e}"
-                )
+                self._services.log_error(f"PluginOrchestrator[{self._services.name}]: shutdown '{plugin.name}': {e}")
 
     # --- Properties ---
 
@@ -212,7 +193,8 @@ class PluginOrchestrator:
         return entry.class_path
 
     def _init_registers(
-        self, early: list[tuple[ProcessModulePlugin, PluginContext]],
+        self,
+        early: list[tuple[ProcessModulePlugin, PluginContext]],
     ) -> Any | None:
         """Собрать register schemas от плагинов, создать RegistersManager.
 
@@ -247,8 +229,7 @@ class PluginOrchestrator:
                     )
             except Exception as e:
                 self._services.log_error(
-                    f"PluginOrchestrator[{self._services.name}]: "
-                    f"register_schema '{plugin.name}': {e}"
+                    f"PluginOrchestrator[{self._services.name}]: register_schema '{plugin.name}': {e}"
                 )
 
         if not schemas:
@@ -256,14 +237,12 @@ class PluginOrchestrator:
 
         try:
             from multiprocess_framework.modules.registers_module import RegistersManager
+
             rm = RegistersManager(registers=schemas, logger=self._services)
             self._registers_manager = rm
             return rm
         except Exception as e:
-            self._services.log_error(
-                f"PluginOrchestrator[{self._services.name}]: "
-                f"RegistersManager init: {e}"
-            )
+            self._services.log_error(f"PluginOrchestrator[{self._services.name}]: RegistersManager init: {e}")
             return None
 
     def _boot_registers(self, registers_manager: Any) -> None:
@@ -271,9 +250,7 @@ class PluginOrchestrator:
         # Handler для runtime register_update от GUI/других процессов
         router = getattr(self._services, "router_manager", None)
         if router:
-            router.register_message_handler(
-                "register_update", self._on_register_update
-            )
+            router.register_message_handler("register_update", self._on_register_update)
 
         # Отправить schemas в ProcessManager для broadcast
         try:
@@ -281,13 +258,18 @@ class PluginOrchestrator:
 
             if self._io is not None:
                 # Через ProcessIO (если есть)
-                self._io.send_data("process_manager", "register_schemas", {
-                    "process_name": self._services.name,
-                    "schemas": schemas_payload,
-                })
+                self._io.send_data(
+                    "process_manager",
+                    "register_schemas",
+                    {
+                        "process_name": self._services.name,
+                        "schemas": schemas_payload,
+                    },
+                )
             else:
                 # Напрямую через services
                 from multiprocess_framework.modules.message_module import MessageAdapter
+
                 msg = MessageAdapter.create_message(
                     source=self._services.name,
                     target="process_manager",
@@ -300,14 +282,10 @@ class PluginOrchestrator:
                 self._services.send_message("process_manager", msg)
 
             self._services.log_info(
-                f"PluginOrchestrator[{self._services.name}]: "
-                f"register_schemas -> PM ({len(schemas_payload)} registers)"
+                f"PluginOrchestrator[{self._services.name}]: register_schemas -> PM ({len(schemas_payload)} registers)"
             )
         except Exception as e:
-            self._services.log_error(
-                f"PluginOrchestrator[{self._services.name}]: "
-                f"register_schemas send: {e}"
-            )
+            self._services.log_error(f"PluginOrchestrator[{self._services.name}]: register_schemas send: {e}")
 
     def _on_register_update(self, msg: dict) -> None:
         """Handler: GUI/другой процесс обновляет значение регистра."""
@@ -326,20 +304,24 @@ class PluginOrchestrator:
         success, error = rm.set_field_value(register_name, field_name, value)
         if success:
             self._services.log_info(
-                f"PluginOrchestrator[{self._services.name}]: register_update "
-                f"{register_name}.{field_name} = {value}"
+                f"PluginOrchestrator[{self._services.name}]: register_update {register_name}.{field_name} = {value}"
             )
             # Relay register_changed -> PM для broadcast
             try:
                 if self._io is not None:
-                    self._io.send_data("process_manager", "register_changed", {
-                        "process_name": self._services.name,
-                        "register": register_name,
-                        "field": field_name,
-                        "value": value,
-                    })
+                    self._io.send_data(
+                        "process_manager",
+                        "register_changed",
+                        {
+                            "process_name": self._services.name,
+                            "register": register_name,
+                            "field": field_name,
+                            "value": value,
+                        },
+                    )
                 else:
                     from multiprocess_framework.modules.message_module import MessageAdapter
+
                     relay_msg = MessageAdapter.create_message(
                         source=self._services.name,
                         target="process_manager",

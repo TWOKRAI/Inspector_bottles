@@ -4,6 +4,7 @@
 Простая абстракция над диспетчером, упрощающая работу с командами.
 Наследуется от BaseManager и использует ObservableMixin для единообразия со всеми менеджерами системы.
 """
+
 from typing import Dict, Any, Callable, Optional, List, TYPE_CHECKING
 import time
 
@@ -32,17 +33,17 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         manager_name (str): Имя менеджера (синоним process_name для совместимости)
         process_name (str): Имя процесса для идентификации (для обратной совместимости)
         dispatcher (Dispatcher): Внутренний диспетчер для управления обработчиками команд
-    
+
     Пример использования:
         manager = CommandManager(
             manager_name="my_process",
             managers={'logger': logger_manager, 'statistics': stats_manager}
         )
         manager.initialize()
-        
+
         manager.register_command("greet", greet_handler)
         result = manager.handle_command({"command": "greet", "data": {"name": "Alice"}})
-        
+
         manager.shutdown()
     """
 
@@ -54,7 +55,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         managers: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         config_manager: Optional[Any] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Инициализация командного менеджера.
@@ -91,19 +92,19 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             managers=mgr,
             config=cfg,
         )
-        
+
         # НЕ вызываем initialize() здесь - это делается явно после создания
 
     # ========================================================================
     # РЕАЛИЗАЦИЯ BaseManager - ЖИЗНЕННЫЙ ЦИКЛ
     # ========================================================================
-    
+
     def initialize(self) -> bool:
         """
         Инициализация командного менеджера.
-        
+
         Инициализирует внутренний диспетчер и готовит менеджер к работе.
-        
+
         Returns:
             bool: True если инициализация успешна
         """
@@ -111,7 +112,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             # Инициализация диспетчера
             if not self.dispatcher.initialize():
                 return False
-            
+
             self.is_initialized = True
             self._log_info(f"CommandManager '{self.manager_name}' initialized")
             self._record_metric("command_manager.initialization.success", tags={"name": self.manager_name})
@@ -120,13 +121,13 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._log_error(f"Failed to initialize CommandManager: {e}")
             self._track_error("command_manager.initialization.failed", error=e)
             return False
-    
+
     def shutdown(self) -> bool:
         """
         Завершение работы командного менеджера.
-        
+
         Завершает внутренний диспетчер и освобождает ресурсы.
-        
+
         Returns:
             bool: True если завершение успешно
         """
@@ -134,7 +135,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             # Завершение диспетчера
             if self.dispatcher:
                 self.dispatcher.shutdown()
-            
+
             self.is_initialized = False
             self._log_info(f"CommandManager '{self.manager_name}' shutdown completed")
             self._record_metric("command_manager.shutdown.success", tags={"name": self.manager_name})
@@ -157,7 +158,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         efficiency: int = 0,
         tags: List[str] = None,
         strategy: Optional[DispatchStrategy] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """
         Регистрация новой команды.
@@ -183,7 +184,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         """
         self._log_debug(f"Registering command: {command_name}", module="command_manager")
         self._record_metric("command_manager.command.registration.attempts", tags={"command": command_name})
-        
+
         result = self.dispatcher.register_handler(
             key=command_name,
             handler=handler,
@@ -191,16 +192,16 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             metadata=metadata,
             efficiency=efficiency,
             tags=tags,
-            strategy=strategy
+            strategy=strategy,
         )
-        
+
         if result:
             self._log_info(f"Command '{command_name}' registered successfully", module="command_manager")
             self._record_metric("command_manager.command.registration.success", tags={"command": command_name})
         else:
             self._log_warning(f"Failed to register command '{command_name}'", module="command_manager")
             self._record_metric("command_manager.command.registration.failed", tags={"command": command_name})
-        
+
         return result
 
     def handle_command(self, message: Dict) -> Any:
@@ -223,7 +224,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         """
         start_time = time.time()
         command_name = message.get("command", "unknown")
-        
+
         self._log_debug(f"Handling command: {command_name}", module="command_manager", command=command_name)
         self._record_metric("command_manager.command.execution.attempts", tags={"command": command_name})
 
@@ -234,7 +235,10 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._log_warning(f"Command '{command_name}' failed: {result.get('reason')}", module="command_manager")
             self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
         else:
-            self._log_info(f"Command '{command_name}' executed successfully in {duration:.3f}s", module="command_manager")
+            self._log_info(
+                f"Command '{command_name}' executed successfully in {duration:.3f}s",
+                module="command_manager",
+            )
             self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
 
         self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
@@ -253,79 +257,79 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
                 print(f"Command: {cmd['key']}")
         """
         return self.dispatcher.get_all_handlers()
-    
+
     # ========================================================================
     # ДОПОЛНИТЕЛЬНЫЕ МЕТОДЫ
     # ========================================================================
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """
         Получение статистики командного менеджера.
-        
+
         Returns:
             Dict[str, Any]: Статистика менеджера
         """
         commands = self.get_commands()
         base_stats = super().get_stats()  # Получаем статистику от BaseManager
-        
+
         return {
             **base_stats,
             "process_name": self.process_name,  # Для обратной совместимости
             "total_commands": len(commands),
-            "commands": [cmd.get('key', '') for cmd in commands],
-            "dispatcher_strategy": self.dispatcher.default_strategy.value
+            "commands": [cmd.get("key", "") for cmd in commands],
+            "dispatcher_strategy": self.dispatcher.default_strategy.value,
         }
-    
+
     def get_command_info(self, command_name: str) -> Optional[Dict]:
         """
         Получение информации о конкретной команде.
-        
+
         Args:
             command_name: Название команды
-            
+
         Returns:
             Словарь с информацией о команде или None
         """
         return self.dispatcher.get_handler_info(command_name)
-    
+
     def get_commands_by_tag(self, tag: str) -> List[Dict]:
         """
         Получение команд по тегу.
-        
+
         Args:
             tag: Тег для фильтрации
-            
+
         Returns:
             Список команд с указанным тегом
         """
         return self.dispatcher.get_handlers_by_tag(tag)
-    
+
     def update_command_metadata(self, command_name: str, metadata: Dict[str, Any]) -> bool:
         """
         Обновление метаданных команды.
-        
+
         Args:
             command_name: Название команды
             metadata: Новые метаданные
-            
+
         Returns:
             True если обновлено, False в случае ошибки
         """
         return self.dispatcher.update_handler_metadata(command_name, metadata)
-    
+
     def update_command_tags(self, command_name: str, tags: List[str]) -> bool:
         """
         Обновление тегов команды.
-        
+
         Args:
             command_name: Название команды
             tags: Новые теги
-            
+
         Returns:
             True если обновлено, False в случае ошибки
         """
         return self.dispatcher.update_handler_tags(command_name, tags)
-    
+
     def overwrite_command(
         self,
         command_name: str,
@@ -333,11 +337,11 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         expects_full_message: bool = False,
         metadata: Dict[str, Any] = None,
         efficiency: int = 0,
-        tags: List[str] = None
+        tags: List[str] = None,
     ) -> bool:
         """
         Принудительная перезапись команды.
-        
+
         Args:
             command_name: Название команды
             handler: Новый обработчик
@@ -345,7 +349,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             metadata: Метаданные команды
             efficiency: Уровень эффективности
             tags: Список тегов
-            
+
         Returns:
             True если перезаписано, False в случае ошибки
         """
@@ -355,6 +359,5 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             expects_full_message=expects_full_message,
             metadata=metadata,
             efficiency=efficiency,
-            tags=tags
+            tags=tags,
         )
-

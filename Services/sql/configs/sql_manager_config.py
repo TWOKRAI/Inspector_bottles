@@ -4,7 +4,8 @@ SQLManagerConfig — конфигурационная схема SQLManager.
 
 Следует паттерну SchemaBase + @register_schema (ADR-016).
 """
-from typing import Annotated, Any, Dict, Literal, Optional
+
+from typing import Annotated, Any, Dict, Literal
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase, register_schema
 

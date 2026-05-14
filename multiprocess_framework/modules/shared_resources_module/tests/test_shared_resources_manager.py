@@ -10,10 +10,8 @@
 
 import pickle
 import pytest
-from multiprocessing import Queue, Event
 
 from ..core.shared_resources_manager import SharedResourcesManager
-from ..types import ProcessStatus
 
 
 @pytest.fixture
@@ -140,6 +138,7 @@ class TestPickleRoundtrip:
     def test_queue_ipc_via_process(self, srm):
         """Интеграционный тест: Queue работает между процессами через SRM."""
         import multiprocessing as mp
+
         srm.register_process("p1", BASIC_CONFIG)
         q = srm.get_process_data("p1").get_queue("system")
         q.put("hello_from_parent")
@@ -168,6 +167,7 @@ class TestReinitializeInChild:
         srm2 = pickle.loads(pickle.dumps(s))
         srm2.reinitialize_in_child()
         from ..types import EventType
+
         result = srm2.event_manager.emit_event(EventType.CONFIG_UPDATED)
         assert result is True
 

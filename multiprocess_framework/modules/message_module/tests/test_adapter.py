@@ -10,11 +10,11 @@
 - Валидацию после создания
 - Edge-cases: пустой sender, одиночный target как строка
 """
+
 import pytest
 
 from ..adapters.message_adapter import MessageAdapter
-from ..types.message_types import MessageType, Priority, LogLevel
-from ..types.exceptions import MessageValidationError
+from ..types.message_types import MessageType, LogLevel
 
 
 SENDER = "test_process"
@@ -28,6 +28,7 @@ def adapter():
 # =============================================================================
 # Базовые тесты
 # =============================================================================
+
 
 class TestAdapterInit:
     def test_sender_stored(self, adapter):
@@ -44,6 +45,7 @@ class TestAdapterInit:
 # =============================================================================
 # Метод create()
 # =============================================================================
+
 
 class TestCreate:
     def test_create_general(self, adapter):
@@ -64,6 +66,7 @@ class TestCreate:
 
     def test_create_assigns_timestamp(self, adapter):
         import time
+
         before = time.time()
         msg = adapter.create("general", ["proc_2"])
         after = time.time()
@@ -73,6 +76,7 @@ class TestCreate:
 # =============================================================================
 # command()
 # =============================================================================
+
 
 class TestCommand:
     def test_basic(self, adapter):
@@ -118,6 +122,7 @@ class TestCommand:
 # log()
 # =============================================================================
 
+
 class TestLog:
     def test_basic(self, adapter):
         msg = adapter.log("info", "Process started")
@@ -157,6 +162,7 @@ class TestLog:
 # system()
 # =============================================================================
 
+
 class TestSystem:
     def test_basic(self, adapter):
         msg = adapter.system(targets=["orchestrator"], action="shutdown")
@@ -176,6 +182,7 @@ class TestSystem:
 # =============================================================================
 # broadcast()
 # =============================================================================
+
 
 class TestBroadcast:
     def test_basic(self, adapter):
@@ -197,6 +204,7 @@ class TestBroadcast:
 # data()
 # =============================================================================
 
+
 class TestData:
     def test_basic(self, adapter):
         msg = adapter.data(targets=["proc_2"], data_type="frame", data=b"bytes")
@@ -205,8 +213,7 @@ class TestData:
         assert msg.data == b"bytes"
 
     def test_shared_memory(self, adapter):
-        msg = adapter.data("proc_2", "tensor",
-                           use_shared_memory=True, memory_key="shm_key_1")
+        msg = adapter.data("proc_2", "tensor", use_shared_memory=True, memory_key="shm_key_1")
         assert msg.use_shared_memory is True
         assert msg.memory_key == "shm_key_1"
 
@@ -219,6 +226,7 @@ class TestData:
 # =============================================================================
 # request()
 # =============================================================================
+
 
 class TestRequest:
     def test_basic(self, adapter):
@@ -248,6 +256,7 @@ class TestRequest:
 # =============================================================================
 # response()
 # =============================================================================
+
 
 class TestResponse:
     def test_basic(self, adapter):
@@ -282,6 +291,7 @@ class TestResponse:
 # event()
 # =============================================================================
 
+
 class TestEvent:
     def test_basic(self, adapter):
         msg = adapter.event("frame_ready", event_data={"frame_id": 1})
@@ -306,11 +316,13 @@ class TestEvent:
 # Dict at Boundary
 # =============================================================================
 
+
 class TestDictAtBoundary:
     """Все сообщения должны корректно сериализоваться и десериализоваться."""
 
     def test_roundtrip_command(self, adapter):
         from ..core.message import Message
+
         original = adapter.command("proc_2", "start", args={"timeout": 10})
         raw = original.to_dict()
         restored = Message.from_dict(raw)
@@ -321,6 +333,7 @@ class TestDictAtBoundary:
 
     def test_roundtrip_log(self, adapter):
         from ..core.message import Message
+
         original = adapter.log("warning", "disk low")
         raw = original.to_dict()
         restored = Message.from_dict(raw)
@@ -329,6 +342,7 @@ class TestDictAtBoundary:
 
     def test_roundtrip_response(self, adapter):
         from ..core.message import Message
+
         original = adapter.response("requester", "req_1", result={"ok": True})
         raw = original.to_dict()
         restored = Message.from_dict(raw)
@@ -343,6 +357,7 @@ class TestDictAtBoundary:
 
     def test_to_json_roundtrip(self, adapter):
         from ..core.message import Message
+
         original = adapter.event("test_event", event_data=42)
         json_str = original.to_json()
         restored = Message.from_json(json_str)
@@ -353,6 +368,7 @@ class TestDictAtBoundary:
 # =============================================================================
 # Изоляция sender'ов
 # =============================================================================
+
 
 class TestMultipleAdapters:
     def test_different_senders(self):

@@ -9,17 +9,15 @@ from multiprocessing import Event, Process
 from typing import Any, Callable, Dict, Optional, Union
 
 from ...logger_module.utils import FallbackLogger
-
-_logger = FallbackLogger(__name__)
-
 from ..runner.class_loader import _ProcessLogger
 from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
 from ...shared_resources_module import SharedResourcesManager
 
+_logger = FallbackLogger(__name__)
+
 PROCESS_MANAGER_CLASS_PATH = (
-    "multiprocess_framework.modules.process_manager_module."
-    "process.process_manager_process.ProcessManagerProcess"
+    "multiprocess_framework.modules.process_manager_module.process.process_manager_process.ProcessManagerProcess"
 )
 
 
@@ -121,9 +119,7 @@ class ProcessSpawner:
 
             if self._process.is_alive():
                 if self._logger:
-                    self._logger.warning(
-                        f"ProcessManager did not stop in {effective_timeout}s, terminating..."
-                    )
+                    self._logger.warning(f"ProcessManager did not stop in {effective_timeout}s, terminating...")
                 self._process.terminate()
                 self._process.join(timeout=3.0)
 
@@ -159,9 +155,7 @@ class ProcessSpawner:
             if not children:
                 return
             if self._logger:
-                self._logger.warning(
-                    f"Killing {len(children)} orphan child process(es)..."
-                )
+                self._logger.warning(f"Killing {len(children)} orphan child process(es)...")
             for child in children:
                 try:
                     child.terminate()

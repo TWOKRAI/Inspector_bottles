@@ -8,7 +8,6 @@ Unit-тесты для discovery (registry/discovery.py).
 Используется пакет-фикстура tests.fixtures с TestRegisters и TestData.
 """
 
-import pytest
 from pydantic import BaseModel
 
 from ..registry.discovery import (
@@ -57,7 +56,9 @@ def test_register_package_registers_integrates_with_registry():
             if registry.get_schema(schema_name).__name__ == "TestRegisters":
                 test_schema_name = schema_name
                 break
-        assert test_schema_name is not None, f"TestRegisters не зарегистрирован. Зарегистрированные: {registry.list_schemas()}"
+        assert test_schema_name is not None, (
+            f"TestRegisters не зарегистрирован. Зарегистрированные: {registry.list_schemas()}"
+        )
         assert registry.has_schema(test_schema_name)
         assert registry.get_schema(test_schema_name).__name__ == "TestRegisters"
     finally:

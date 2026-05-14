@@ -11,7 +11,6 @@ import logging
 import time
 from unittest.mock import MagicMock
 
-import pytest
 from multiprocess_framework.modules.state_store_module.core.delta import Delta, MISSING
 from multiprocess_framework.modules.state_store_module.middleware.logging_mw import LoggingMiddleware
 from multiprocess_framework.modules.state_store_module.middleware.metrics import MetricsMiddleware

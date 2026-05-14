@@ -6,7 +6,7 @@ SchemaAdapter — адаптер для интеграции process_module с d
 Не зависит от конкретной реализации data_schema_module — работает через duck typing.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..types import ProcessConfigDict
 
@@ -82,10 +82,7 @@ class SchemaAdapter:
 
         # __dict__
         if hasattr(schema_instance, "__dict__"):
-            return {
-                k: v for k, v in schema_instance.__dict__.items()
-                if not k.startswith("_")
-            }
+            return {k: v for k, v in schema_instance.__dict__.items() if not k.startswith("_")}
 
         # dict
         if isinstance(schema_instance, dict):

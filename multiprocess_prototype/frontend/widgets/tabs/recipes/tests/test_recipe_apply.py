@@ -1,10 +1,10 @@
 """Тесты TopologyHolder и RecipesPresenter.apply_recipe (Phase 11)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,9 +17,11 @@ from multiprocess_prototype.frontend.widgets.tabs.recipes.recipe_io import save_
 # Вспомогательный FakeAppContext
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FakeAppContext:
     """Минимальный контекст приложения для изоляции тестов."""
+
     config: dict = field(default_factory=dict)
     extras: dict = field(default_factory=dict)
 
@@ -30,6 +32,7 @@ class FakeAppContext:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def holder() -> TopologyHolder:
@@ -64,6 +67,7 @@ def presenter_with_holder(ctx_with_holder: FakeAppContext, recipes_dir: Path) ->
 # ---------------------------------------------------------------------------
 # Тесты TopologyHolder
 # ---------------------------------------------------------------------------
+
 
 class TestTopologyHolder:
     def test_topology_holder_get_set(self, holder: TopologyHolder) -> None:
@@ -112,6 +116,7 @@ class TestTopologyHolder:
 # Тесты RecipesPresenter.apply_recipe
 # ---------------------------------------------------------------------------
 
+
 class TestRecipesPresenterApply:
     def test_apply_recipe_updates_topology(
         self,
@@ -150,6 +155,7 @@ class TestRecipesPresenterApply:
         presenter_with_holder.save_to_slot(0, "Snapshot Recipe", "desc")
 
         from multiprocess_prototype.frontend.widgets.tabs.recipes.recipe_io import load_recipe
+
         data = load_recipe(recipes_dir / "recipe_0.yaml")
         assert data["topology"] == actual_topo
 

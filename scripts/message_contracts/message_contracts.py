@@ -203,19 +203,23 @@ def extract_contracts(path: Path, rel: str, cfg: Config) -> list[ClassContract]:
                     fields_list: list[FieldInfo] = []
                     for stmt in node.body:
                         if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
-                            fields_list.append(FieldInfo(
-                                name=stmt.target.id,
-                                type=_type_str(stmt.annotation),
-                                default=_default_str(stmt.value),
-                            ))
-                    contracts.append(ClassContract(
-                        name=node.name,
-                        file=rel,
-                        line=node.lineno,
-                        bases=bases_full,
-                        matched_base=sorted(matched)[0],
-                        fields=fields_list,
-                    ))
+                            fields_list.append(
+                                FieldInfo(
+                                    name=stmt.target.id,
+                                    type=_type_str(stmt.annotation),
+                                    default=_default_str(stmt.value),
+                                )
+                            )
+                    contracts.append(
+                        ClassContract(
+                            name=node.name,
+                            file=rel,
+                            line=node.lineno,
+                            bases=bases_full,
+                            matched_base=sorted(matched)[0],
+                            fields=fields_list,
+                        )
+                    )
             # глубже — только если разрешено
             if cfg.include_nested:
                 for child in ast.iter_child_nodes(node):
@@ -307,9 +311,12 @@ def render_json(contracts: list[ClassContract], cfg: Config) -> str:
     if cfg.group_by == "module":
         groups: dict[str, list] = {}
         for c in contracts:
-            groups.setdefault(_module_key(c.file), []).append({
-                "name": c.name, "fields": [f.__dict__ for f in c.fields],
-            })
+            groups.setdefault(_module_key(c.file), []).append(
+                {
+                    "name": c.name,
+                    "fields": [f.__dict__ for f in c.fields],
+                }
+            )
         return json.dumps({"by_module": groups, "count": len(contracts)}, ensure_ascii=False, indent=2)
     payload = [
         {
@@ -344,8 +351,7 @@ def render_csv(contracts: list[ClassContract]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="message_contracts",
-                                description="Дамп контрактов SchemaBase/Message/BaseModel.")
+    p = argparse.ArgumentParser(prog="message_contracts", description="Дамп контрактов SchemaBase/Message/BaseModel.")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
@@ -365,12 +371,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     overrides = {}
-    if args.root is not None: overrides["root"] = args.root
-    if args.format is not None: overrides["output_format"] = args.format
-    if args.group_by is not None: overrides["group_by"] = args.group_by
-    if args.sort_by is not None: overrides["sort_by"] = args.sort_by
-    if args.limit is not None: overrides["limit"] = args.limit
-    if args.no_fields: overrides["show_fields"] = False
+    if args.root is not None:
+        overrides["root"] = args.root
+    if args.format is not None:
+        overrides["output_format"] = args.format
+    if args.group_by is not None:
+        overrides["group_by"] = args.group_by
+    if args.sort_by is not None:
+        overrides["sort_by"] = args.sort_by
+    if args.limit is not None:
+        overrides["limit"] = args.limit
+    if args.no_fields:
+        overrides["show_fields"] = False
     if overrides:
         cfg = Config(**{**cfg.__dict__, **overrides})
 

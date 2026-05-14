@@ -2,9 +2,18 @@
 """
 VirtualKeyboard — полноценная виртуальная клавиатура (буквы, цифры, символы, RU/EN).
 """
+
 from __future__ import annotations
 
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QApplication, QFont, QGridLayout, QPushButton, QSize, QWidget, Qt
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QApplication,
+    QFont,
+    QGridLayout,
+    QPushButton,
+    QSize,
+    QWidget,
+    Qt,
+)
 from multiprocess_framework.modules.frontend_module.widgets.widget_signal_bus import WidgetSignalBus
 
 
@@ -33,17 +42,77 @@ class VirtualKeyboard(QWidget):
         self.layout = QGridLayout()
         self.layout.setSpacing(5)
         self.buttons_text_english = [
-            'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
-            'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', '?',
-            'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '!'
+            "q",
+            "w",
+            "e",
+            "r",
+            "t",
+            "y",
+            "u",
+            "i",
+            "o",
+            "p",
+            "a",
+            "s",
+            "d",
+            "f",
+            "g",
+            "h",
+            "j",
+            "k",
+            "l",
+            "?",
+            "z",
+            "x",
+            "c",
+            "v",
+            "b",
+            "n",
+            "m",
+            ",",
+            ".",
+            "!",
         ]
         self.buttons_text_russian = [
-            'й', 'ц', 'у', 'к', 'е', 'н', 'г', 'ш', 'щ', 'з', 'х', 'ъ',
-            'ф', 'ы', 'в', 'а', 'п', 'р', 'о', 'л', 'д', 'ж', 'э', '?',
-            'я', 'ч', 'с', 'м', 'и', 'т', 'ь', 'б', 'ю', ',', '.', '!'
+            "й",
+            "ц",
+            "у",
+            "к",
+            "е",
+            "н",
+            "г",
+            "ш",
+            "щ",
+            "з",
+            "х",
+            "ъ",
+            "ф",
+            "ы",
+            "в",
+            "а",
+            "п",
+            "р",
+            "о",
+            "л",
+            "д",
+            "ж",
+            "э",
+            "?",
+            "я",
+            "ч",
+            "с",
+            "м",
+            "и",
+            "т",
+            "ь",
+            "б",
+            "ю",
+            ",",
+            ".",
+            "!",
         ]
-        self.buttons_text_numbers = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
-        self.buttons_text_symbols = ['+', '-', '*', '/', '=', '@', '#', '%', '(', ')']
+        self.buttons_text_numbers = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+        self.buttons_text_symbols = ["+", "-", "*", "/", "=", "@", "#", "%", "(", ")"]
         self.setup_ui()
 
     def setup_ui(self):
@@ -179,14 +248,14 @@ class VirtualKeyboard(QWidget):
             btn.setText(new_text)
         self.shift_btn.setText("shift" if self.shift_active else "SHIFT")
         if self.btn_е:
-            new_text = 'Ё' if self.shift_active else 'ё'
+            new_text = "Ё" if self.shift_active else "ё"
             self.btn_е.setText(new_text)
 
     def on_language_clicked(self):
         self.language_english = not self.language_english
         self.setup_ui()
         if not self.language_english:
-            self.btn_е = QPushButton('Ё' if self.shift_active else 'ё')
+            self.btn_е = QPushButton("Ё" if self.shift_active else "ё")
             self.btn_е.setFixedSize(QSize(self.button_width, self.button_height))
             self.btn_е.setFont(QFont(self.font_name, self.font_size_letters))
             self.btn_е.clicked.connect(self.on_button_clicked)
@@ -206,7 +275,7 @@ class VirtualKeyboard(QWidget):
                 btn.setText(text.upper())
             self.shift_btn.setText("shift")
             if self.btn_е:
-                self.btn_е.setText('Ё')
+                self.btn_е.setText("Ё")
         if self.symbol_mode:
             current_buttons_text = self.buttons_text_symbols
             for btn, text in zip(self.buttons[:10], current_buttons_text):

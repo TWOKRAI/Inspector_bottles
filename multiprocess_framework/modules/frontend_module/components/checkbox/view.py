@@ -4,6 +4,7 @@ CheckboxView — QLabel + QCheckBox с настраиваемой позицие
 
 Реализует контракт `IControlView[bool]` для `CheckboxPresenter`.
 """
+
 from __future__ import annotations
 
 from typing import Callable, Literal, Optional
@@ -18,7 +19,6 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QMessageBox,
     QVBoxLayout,
     QWidget,
-    Qt,
 )
 
 # Геометрия квадрата чекбокса и отступы layout (px).
@@ -54,18 +54,10 @@ class CheckboxView(QWidget):
         """Собрать `QHBoxLayout` или `QVBoxLayout` в соответствии с `position`."""
         if self._position in ("top", "bottom"):
             layout: QHBoxLayout | QVBoxLayout = QVBoxLayout()
-            items: tuple = (
-                (self._label, self._checkbox)
-                if self._position == "top"
-                else (self._checkbox, self._label)
-            )
+            items: tuple = (self._label, self._checkbox) if self._position == "top" else (self._checkbox, self._label)
         else:
             layout = QHBoxLayout()
-            items = (
-                (self._label, self._checkbox)
-                if self._position == "left"
-                else (self._checkbox, self._label)
-            )
+            items = (self._label, self._checkbox) if self._position == "left" else (self._checkbox, self._label)
 
         layout.setContentsMargins(
             LAYOUT_CONTENT_MARGINS_PX,
@@ -105,9 +97,7 @@ class CheckboxView(QWidget):
         """Подписка на смену состояния; в callback передаётся bool (отмечен / нет)."""
         # PySide6: stateChanged(int) и Qt.Checked = Qt.CheckState.Checked (enum) — прямое
         # сравнение int==enum даёт False. Читаем актуальное состояние через isChecked().
-        self._checkbox.stateChanged.connect(
-            lambda _state: callback(self._checkbox.isChecked())
-        )
+        self._checkbox.stateChanged.connect(lambda _state: callback(self._checkbox.isChecked()))
 
     def on_finished(self, callback: Callable[[bool], None]) -> None:
         """Заглушка контракта `IControlView`: для чекбокса запись идёт сразу в `on_changed`."""

@@ -2,10 +2,11 @@
 """
 LabelConfig — настройки отображения подписи.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from multiprocess_framework.modules.frontend_module.components.base.config import BaseControlConfig
 

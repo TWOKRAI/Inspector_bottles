@@ -2,7 +2,6 @@
 """
 Тесты для StatsManagerConfig.
 """
-import pytest
 
 from .. import StatsManagerConfig
 

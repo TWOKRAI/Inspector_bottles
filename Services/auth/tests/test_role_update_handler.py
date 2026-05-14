@@ -4,11 +4,11 @@
 
 Тесты не требуют Qt и не зависят от GUI.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_prototype.frontend.actions.handlers.role_update_handler import RoleUpdateHandler
@@ -67,9 +67,7 @@ class TestRoleUpdateHandlerApply:
 
         handler.apply(action, rm=None)
 
-        auth_manager.update_role_permissions.assert_called_once_with(
-            "operator", ["tabs.recipes.view"]
-        )
+        auth_manager.update_role_permissions.assert_called_once_with("operator", ["tabs.recipes.view"])
 
     def test_apply_passes_empty_permissions(self) -> None:
         """apply() с пустыми new_permissions — update_role_permissions([])."""

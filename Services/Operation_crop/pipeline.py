@@ -8,7 +8,7 @@
   - selected_region: имя выбранной области (для режима region)
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Tuple
 import numpy as np
 
 from .regions import crop_all_regions
@@ -31,6 +31,7 @@ def run_pipeline(
         out = image.copy()
         if len(out.shape) == 2:
             import cv2
+
             out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
         return out, []
 
@@ -49,6 +50,7 @@ def run_pipeline(
 
     # Рисуем результаты на главном изображении
     import cv2
+
     result = image.copy()
     if len(result.shape) == 2:
         result = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)

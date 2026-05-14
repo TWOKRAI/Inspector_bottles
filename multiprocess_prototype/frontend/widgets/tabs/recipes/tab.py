@@ -10,6 +10,7 @@ Layout: новый шаблон ``StandardTabLayout``.
 Legacy-атрибуты ``_btn_*``, ``_nav_list``, ``_name_edit``, ``_selected_slot``,
 ``_on_slot_selected``, ``_sync_slots`` сохранены для совместимости тестов.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -21,7 +22,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QPushButton,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -110,6 +110,7 @@ class RecipesTab(QWidget):
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
+
         _auth = self._ctx.auth
         auth_state = _auth.state if _auth is not None else None
         for btn in (self._btn_load, self._btn_save, self._btn_delete):
@@ -144,12 +145,8 @@ class RecipesTab(QWidget):
         """Табличный вид — все рецепты в таблице."""
         self._recipes_table = QTableWidget(0, len(_TABLE_COLUMNS))
         self._recipes_table.setHorizontalHeaderLabels(_TABLE_COLUMNS)
-        self._recipes_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self._recipes_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
+        self._recipes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._recipes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         h = self._recipes_table.horizontalHeader()
         if h:
             h.setStretchLastSection(True)
@@ -196,11 +193,15 @@ class RecipesTab(QWidget):
         recipes = self._presenter.get_all_recipes()
         for info in recipes:
             self._tab_layout.add_sub_nav_section(
-                key=str(info.slot), title=info.name, widget=None,
+                key=str(info.slot),
+                title=info.name,
+                widget=None,
             )
         # Элемент «+ Новый рецепт» — ключ "-1".
         self._tab_layout.add_sub_nav_section(
-            key="-1", title="+ Новый рецепт", widget=None,
+            key="-1",
+            title="+ Новый рецепт",
+            widget=None,
         )
 
     def _on_sub_nav_selected(self, key: str) -> None:
@@ -261,8 +262,11 @@ class RecipesTab(QWidget):
                 bus = self._ctx.get("action_bus")
                 if bus is not None:
                     from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
                     action = V2ActionBuilder.recipe_apply(
-                        recipe_name, result["previous"], result["current"],
+                        recipe_name,
+                        result["previous"],
+                        result["current"],
                     )
                     bus.record(action)
 

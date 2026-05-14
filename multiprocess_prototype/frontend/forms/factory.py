@@ -74,7 +74,8 @@ def _unwrap_optional(t: type) -> type:
     # Union[X, None] — это Optional[X]
     import types as _types
 
-    if origin is _types.UnionType or (origin is not None and repr(origin) in ("typing.Union", "<class 'types.UnionType'>")):
+    _union_reprs = ("typing.Union", "<class 'types.UnionType'>")
+    if origin is _types.UnionType or (origin is not None and repr(origin) in _union_reprs):
         args = get_args(t)
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
@@ -136,6 +137,7 @@ def _resolve_kind(field_info: FieldInfo) -> str:
 # ---------------------------------------------------------------------------
 # Внутренние builders по kind-у
 # ---------------------------------------------------------------------------
+
 
 def _make_label(field_info: FieldInfo) -> QLabel:
     """Создать QLabel для поля (title + unit)."""
@@ -384,6 +386,7 @@ _BUILDERS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 # Публичный API
 # ---------------------------------------------------------------------------
+
 
 class CardsFieldFactory:
     """Фабрика Qt-виджетов из Pydantic FieldInfo.

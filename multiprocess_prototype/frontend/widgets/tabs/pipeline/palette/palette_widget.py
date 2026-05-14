@@ -1,4 +1,5 @@
 """PluginPalette — палитра плагинов с поиском и drag-and-drop."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ..graph.constants import CATEGORY_COLORS
 
 if TYPE_CHECKING:
     pass
@@ -32,8 +35,6 @@ CATEGORY_LABELS: dict[str, str] = {
     "utility": "Utility — утилиты",
     "service": "Service — сервисы",
 }
-
-from ..graph.constants import CATEGORY_COLORS
 
 UNCATEGORIZED_LABEL = "Other — прочее"
 
@@ -160,12 +161,7 @@ class PluginPalette(QWidget):
                 tooltip = (child.toolTip(0) or "").lower()
                 display = child.text(0).lower()
 
-                match = (
-                    text in name
-                    or text in display
-                    or text in tooltip
-                    or text in cat_label
-                )
+                match = text in name or text in display or text in tooltip or text in cat_label
                 child.setHidden(not match)
                 if match:
                     visible_children += 1
@@ -177,7 +173,4 @@ class PluginPalette(QWidget):
         cat_item = self._category_items.get(category)
         if not cat_item:
             return []
-        return [
-            cat_item.child(i).data(0, Qt.ItemDataRole.UserRole)
-            for i in range(cat_item.childCount())
-        ]
+        return [cat_item.child(i).data(0, Qt.ItemDataRole.UserRole) for i in range(cat_item.childCount())]

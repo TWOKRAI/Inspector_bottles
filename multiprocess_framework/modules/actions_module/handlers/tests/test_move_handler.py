@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """Тесты для NodeMoveHandler (FW)."""
+
 from __future__ import annotations
 
 import logging
 from unittest.mock import MagicMock
 
-import pytest
 
 from multiprocess_framework.modules.actions_module.handlers.move_handler import (
     NodeMoveHandler,
@@ -16,6 +16,7 @@ from multiprocess_framework.modules.actions_module.schemas import Action
 # ---------------------------------------------------------------------------
 # Вспомогательные фабрики
 # ---------------------------------------------------------------------------
+
 
 def _make_move_action(
     forward_node_id: str,
@@ -37,6 +38,7 @@ def _make_move_action(
 # Тест 1: apply вызывает callback с координатами из forward_patch
 # ---------------------------------------------------------------------------
 
+
 def test_apply_calls_callback_with_forward_coords():
     """apply() передаёт node_id, x, y из forward_patch в callback."""
     callback = MagicMock()
@@ -51,6 +53,7 @@ def test_apply_calls_callback_with_forward_coords():
 # ---------------------------------------------------------------------------
 # Тест 2: revert вызывает callback с координатами из backward_patch
 # ---------------------------------------------------------------------------
+
 
 def test_revert_calls_callback_with_backward_coords():
     """revert() передаёт node_id, x, y из backward_patch в callback."""
@@ -74,6 +77,7 @@ def test_revert_calls_callback_with_backward_coords():
 # Тест 3: apply без callback — не падает
 # ---------------------------------------------------------------------------
 
+
 def test_apply_without_callback_no_crash():
     """apply() без callback выполняется без исключений."""
     handler = NodeMoveHandler()
@@ -86,6 +90,7 @@ def test_apply_without_callback_no_crash():
 # Тест 4: revert без callback — не падает
 # ---------------------------------------------------------------------------
 
+
 def test_revert_without_callback_no_crash():
     """revert() без callback выполняется без исключений."""
     handler = NodeMoveHandler()
@@ -97,6 +102,7 @@ def test_revert_without_callback_no_crash():
 # ---------------------------------------------------------------------------
 # Тест 5: set_callback устанавливает callback post-init
 # ---------------------------------------------------------------------------
+
 
 def test_set_callback_post_init():
     """set_callback() позволяет привязать callback после создания объекта."""
@@ -113,6 +119,7 @@ def test_set_callback_post_init():
 # ---------------------------------------------------------------------------
 # Тест 6: apply с пустым node_id — ранний выход, callback не вызывается
 # ---------------------------------------------------------------------------
+
 
 def test_apply_empty_node_id_skips_callback(caplog):
     """apply() с пустым node_id логирует warning и не вызывает callback."""

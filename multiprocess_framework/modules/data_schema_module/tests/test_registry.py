@@ -12,6 +12,7 @@
     - validate_recipe
     - Backward compat: SchemaManager.get_instance()
 """
+
 import threading
 import unittest
 from typing import Annotated
@@ -38,6 +39,7 @@ from multiprocess_framework.modules.data_schema_module.core.exceptions import (
 # Вспомогательные модели
 # =============================================================================
 
+
 class SampleModel(BaseModel):
     name: str = "default"
     count: int = 1
@@ -56,6 +58,7 @@ class SampleSchema(SchemaBase):
 # =============================================================================
 # Тесты изоляции (не Singleton)
 # =============================================================================
+
 
 class TestSchemaRegistryIsolation(unittest.TestCase):
     """Проверяет что SchemaRegistry — не Singleton."""
@@ -94,6 +97,7 @@ class TestSchemaRegistryIsolation(unittest.TestCase):
 # =============================================================================
 # Тесты базовых операций
 # =============================================================================
+
 
 class TestSchemaRegistryBasicOps(unittest.TestCase):
     """Тесты register, get, has, unregister, clear."""
@@ -152,6 +156,7 @@ class TestSchemaRegistryBasicOps(unittest.TestCase):
 # Тесты валидации параметров
 # =============================================================================
 
+
 class TestSchemaRegistryValidation(unittest.TestCase):
     """Тесты валидации входных параметров."""
 
@@ -173,6 +178,7 @@ class TestSchemaRegistryValidation(unittest.TestCase):
     def test_register_non_basemodel_raises(self):
         class NotAModel:
             pass
+
         with self.assertRaises(SchemaRegistrationError):
             self.registry.register("Model", NotAModel)
 
@@ -189,6 +195,7 @@ class TestSchemaRegistryValidation(unittest.TestCase):
 # =============================================================================
 # Тесты create_instance и get_defaults
 # =============================================================================
+
 
 class TestSchemaRegistryCreateInstance(unittest.TestCase):
     """Тесты создания экземпляров и получения дефолтов."""
@@ -231,6 +238,7 @@ class TestSchemaRegistryCreateInstance(unittest.TestCase):
 # Тесты метода validate
 # =============================================================================
 
+
 class TestSchemaRegistryValidateMethod(unittest.TestCase):
     """Тесты метода validate."""
 
@@ -266,6 +274,7 @@ class TestSchemaRegistryValidateMethod(unittest.TestCase):
 # Тесты validate_recipe
 # =============================================================================
 
+
 class TestSchemaRegistryValidateRecipe(unittest.TestCase):
     """Тесты validate_recipe."""
 
@@ -275,17 +284,21 @@ class TestSchemaRegistryValidateRecipe(unittest.TestCase):
         self.registry.register("Another", AnotherModel)
 
     def test_valid_recipe(self):
-        ok, err = self.registry.validate_recipe({
-            "Sample": {"name": "r1", "count": 1},
-            "Another": {"value": 0.5, "active": True},
-        })
+        ok, err = self.registry.validate_recipe(
+            {
+                "Sample": {"name": "r1", "count": 1},
+                "Another": {"value": 0.5, "active": True},
+            }
+        )
         self.assertTrue(ok)
         self.assertIsNone(err)
 
     def test_invalid_recipe_one_register(self):
-        ok, err = self.registry.validate_recipe({
-            "Sample": {"name": "r1", "count": "bad"},
-        })
+        ok, err = self.registry.validate_recipe(
+            {
+                "Sample": {"name": "r1", "count": "bad"},
+            }
+        )
         self.assertFalse(ok)
         self.assertIsNotNone(err)
         self.assertIn("Sample", err)
@@ -297,9 +310,11 @@ class TestSchemaRegistryValidateRecipe(unittest.TestCase):
 
     def test_recipe_unknown_schema_skipped(self):
         """Неизвестные ключи в recipe пропускаются (нет схемы — нет валидации)."""
-        ok, err = self.registry.validate_recipe({
-            "UnknownSchema": {"anything": 1},
-        })
+        ok, err = self.registry.validate_recipe(
+            {
+                "UnknownSchema": {"anything": 1},
+            }
+        )
         self.assertTrue(ok)
 
     def test_recipe_with_register_names_filter(self):
@@ -318,6 +333,7 @@ class TestSchemaRegistryValidateRecipe(unittest.TestCase):
 # Тесты декоратора @register_schema
 # =============================================================================
 
+
 class TestRegisterSchemaDecorator(unittest.TestCase):
     """Тесты декоратора @register_schema."""
 
@@ -331,7 +347,7 @@ class TestRegisterSchemaDecorator(unittest.TestCase):
 
         self.assertTrue(isolated.has_schema("DecoratedModel"))
         # Глобальный реестр не затронут
-        global_reg = get_default_registry()
+        _global_reg = get_default_registry()
         # Не проверяем глобальный, т.к. другие тесты могут его изменить
 
     def test_decorator_sets_schema_name(self):
@@ -376,6 +392,7 @@ class TestRegisterSchemaDecorator(unittest.TestCase):
 # Тесты потокобезопасности
 # =============================================================================
 
+
 class TestSchemaRegistryThreadSafety(unittest.TestCase):
     """Тесты потокобезопасности."""
 
@@ -386,8 +403,10 @@ class TestSchemaRegistryThreadSafety(unittest.TestCase):
         def register_batch(thread_id: int):
             try:
                 for i in range(10):
+
                     class TempModel(BaseModel):
                         value: int = i
+
                     registry.register(f"T{thread_id}_{i}", TempModel)
             except Exception as e:
                 errors.append(e)

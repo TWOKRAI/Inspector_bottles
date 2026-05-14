@@ -4,8 +4,6 @@
 Не требуют SharedMemory, работают на всех платформах.
 """
 
-import pytest
-
 from ...types.types import MemoryAccessStatus
 from ..validation import (
     clear_memory_slot,
@@ -34,24 +32,15 @@ class TestValidateMemoryAccess:
             "handles": [object(), object()],
             "coll": {"shm": 2},
         }
-        assert (
-            validate_memory_access(memory_data, "shm", 2)
-            == MemoryAccessStatus.INDEX_OUT_OF_RANGE
-        )
-        assert (
-            validate_memory_access(memory_data, "shm", -1)
-            == MemoryAccessStatus.INVALID_INDEX
-        )
+        assert validate_memory_access(memory_data, "shm", 2) == MemoryAccessStatus.INDEX_OUT_OF_RANGE
+        assert validate_memory_access(memory_data, "shm", -1) == MemoryAccessStatus.INVALID_INDEX
 
     def test_missing_shm_in_coll_returns_out_of_range(self):
         memory_data = {
             "handles": [object()],
             "coll": {"other": 1},
         }
-        assert (
-            validate_memory_access(memory_data, "shm", 0)
-            == MemoryAccessStatus.INDEX_OUT_OF_RANGE
-        )
+        assert validate_memory_access(memory_data, "shm", 0) == MemoryAccessStatus.INDEX_OUT_OF_RANGE
 
     def test_none_handle_returns_handle_missing(self):
         memory_data = {
@@ -59,24 +48,16 @@ class TestValidateMemoryAccess:
             "coll": {"shm": 2},
         }
         assert validate_memory_access(memory_data, "shm", 0) == MemoryAccessStatus.OK
-        assert (
-            validate_memory_access(memory_data, "shm", 1)
-            == MemoryAccessStatus.HANDLE_MISSING
-        )
+        assert validate_memory_access(memory_data, "shm", 1) == MemoryAccessStatus.HANDLE_MISSING
 
 
 class TestValidateWriteOperation:
     def test_none_memory_data_returns_no_data(self):
-        assert (
-            validate_write_operation(None, "shm", 0, 1) == MemoryAccessStatus.NO_DATA
-        )
+        assert validate_write_operation(None, "shm", 0, 1) == MemoryAccessStatus.NO_DATA
 
     def test_invalid_access_propagates(self):
         memory_data = {"handles": [], "coll": {"shm": 1}, "params": {"shm": (2, (10, 10, 3), None)}}
-        assert (
-            validate_write_operation(memory_data, "shm", 0, 1)
-            == MemoryAccessStatus.HANDLE_MISSING
-        )
+        assert validate_write_operation(memory_data, "shm", 0, 1) == MemoryAccessStatus.HANDLE_MISSING
 
     def test_too_many_images_returns_exceeds(self):
         memory_data = {
@@ -84,10 +65,7 @@ class TestValidateWriteOperation:
             "coll": {"shm": 1},
             "params": {"shm": (2, (10, 10, 3), None)},
         }
-        assert (
-            validate_write_operation(memory_data, "shm", 0, 3)
-            == MemoryAccessStatus.EXCEEDS_MAX_IMAGES
-        )
+        assert validate_write_operation(memory_data, "shm", 0, 3) == MemoryAccessStatus.EXCEEDS_MAX_IMAGES
 
     def test_valid_write_returns_ok(self):
         memory_data = {

@@ -3,7 +3,7 @@
 import pytest
 
 from ..core.shared_resources_manager import SharedResourcesManager
-from ..handles import ProcessHandle, QueueHandle, EventHandle
+from ..handles import ProcessHandle
 from ..types import ProcessStatus
 
 

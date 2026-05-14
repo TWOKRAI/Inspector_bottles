@@ -13,12 +13,11 @@ from multiprocessing import Event as _MpEvent
 from typing import Optional, Dict, Any, List, Tuple, Callable
 
 from ...logger_module.utils import FallbackLogger
-
-_logger = FallbackLogger(__name__)
-
 from ...data_schema_module import merge_with_defaults
 from .schema import DEFAULT_PROCESS_SCHEMA
 from .spawner import ProcessSpawner
+
+_logger = FallbackLogger(__name__)
 
 
 class SystemLauncher:
@@ -95,10 +94,7 @@ class SystemLauncher:
         if self._processes:
             return self._build_processes_config()
         if self._config:
-            return {
-                k: merge_with_defaults(v, DEFAULT_PROCESS_SCHEMA)
-                for k, v in self._config.items()
-            }
+            return {k: merge_with_defaults(v, DEFAULT_PROCESS_SCHEMA) for k, v in self._config.items()}
         return {}
 
     def _create_spawner(self, processes_config: Dict[str, Any]) -> ProcessSpawner:
@@ -120,6 +116,7 @@ class SystemLauncher:
         processes_config = self._get_processes_config()
         try:
             from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
+
             cleanup_known_shm_at_startup(processes_config)
         except Exception:
             pass
@@ -147,6 +144,7 @@ class SystemLauncher:
             raise RuntimeError("No processes. Use add_process() or pass config.")
         try:
             from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
+
             cleanup_known_shm_at_startup(processes_config)
         except Exception:
             pass
@@ -190,9 +188,7 @@ class SystemLauncher:
         while _time.monotonic() < deadline:
             # Проверяем, не упал ли ProcessManagerProcess
             if not self._spawner.is_running():
-                self._log_warning(
-                    "wait_until_ready: ProcessManagerProcess завершился до сигнала готовности"
-                )
+                self._log_warning("wait_until_ready: ProcessManagerProcess завершился до сигнала готовности")
                 return False
 
             # Проверяем event от ProcessManagerProcess
@@ -206,9 +202,7 @@ class SystemLauncher:
                 break
             self._system_ready_event.wait(timeout=min(poll_interval, remaining))
 
-        self._log_warning(
-            f"wait_until_ready: таймаут {timeout}с истёк, система не готова"
-        )
+        self._log_warning(f"wait_until_ready: таймаут {timeout}с истёк, система не готова")
         return False
 
     def stop(self) -> None:
@@ -238,7 +232,9 @@ class SystemLauncher:
                 "name": proc.name if proc else None,
                 "pid": proc.pid if proc and proc.is_alive() else None,
                 "is_alive": proc.is_alive() if proc else False,
-            } if proc else None,
+            }
+            if proc
+            else None,
         }
         if self._spawner.get_shared_resources():
             try:
@@ -258,8 +254,6 @@ class SystemLauncher:
                 "has_process": self._spawner.get_process() is not None,
             },
             "shared_resources": (
-                self._spawner.get_shared_resources().get_stats()
-                if self._spawner.get_shared_resources()
-                else {}
+                self._spawner.get_shared_resources().get_stats() if self._spawner.get_shared_resources() else {}
             ),
         }

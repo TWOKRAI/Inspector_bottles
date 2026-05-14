@@ -9,7 +9,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
-from .types import WorkerStatus, WorkerType, ExecutionMode
+from .types import WorkerStatus, WorkerType
 
 
 class IWorkerRegistry(ABC):

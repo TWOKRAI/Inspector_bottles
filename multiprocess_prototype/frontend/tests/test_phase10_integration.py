@@ -1,9 +1,9 @@
 """Smoke test Phase 10 — все 7 табов создаются и работают."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from PySide6.QtWidgets import QTabWidget
 
 from multiprocess_prototype.frontend.tab_factory import TabFactory, TAB_ORDER
@@ -68,9 +68,7 @@ class TestPhase10Integration:
         # Проверить что ни один таб не PlaceholderTab
         for i in range(tab_widget.count()):
             widget = tab_widget.widget(i)
-            assert not isinstance(widget, PlaceholderTab), (
-                f"Таб {i} ({TAB_ORDER[i]['id']}) — всё ещё PlaceholderTab"
-            )
+            assert not isinstance(widget, PlaceholderTab), f"Таб {i} ({TAB_ORDER[i]['id']}) — всё ещё PlaceholderTab"
 
     def test_tab_factory_titles_match(self, qtbot):
         """Заголовки табов соответствуют TAB_ORDER."""

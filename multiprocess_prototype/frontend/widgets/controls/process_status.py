@@ -1,6 +1,7 @@
 """ProcessStatusWidget — отображение статусов процессов."""
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Slot
 from PySide6.QtGui import QColor
 
 
@@ -9,11 +10,11 @@ class ProcessStatusWidget(QWidget):
 
     # Цвета статусов
     _STATUS_COLORS = {
-        "running": QColor("#4caf50"),    # зелёный
-        "ready": QColor("#8bc34a"),       # светло-зелёный
-        "stopped": QColor("#9e9e9e"),     # серый
-        "error": QColor("#f44336"),       # красный
-        "starting": QColor("#ff9800"),    # оранжевый
+        "running": QColor("#4caf50"),  # зелёный
+        "ready": QColor("#8bc34a"),  # светло-зелёный
+        "stopped": QColor("#9e9e9e"),  # серый
+        "error": QColor("#f44336"),  # красный
+        "starting": QColor("#ff9800"),  # оранжевый
     }
 
     def __init__(self, parent=None):

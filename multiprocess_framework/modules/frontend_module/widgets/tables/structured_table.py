@@ -5,6 +5,7 @@ StructuredTableWidget — универсальная таблица по кон�
 Используется для: регионы, цепочки обработки, рецепты.
 Колонки: текст (readonly/editable), чекбокс.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, List, Optional
@@ -23,7 +24,9 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     Qt,
     Signal,
 )
-from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import TouchLineEditItemDelegate
+from multiprocess_framework.modules.frontend_module.widgets.tables.touch_line_edit_delegate import (
+    TouchLineEditItemDelegate,
+)
 
 
 class StructuredTableWidget(QTableWidget):
@@ -33,6 +36,7 @@ class StructuredTableWidget(QTableWidget):
     data: list of dict (каждая строка — словарь с ключами как в columns).
     row_key: ключ в строке для идентификации (например "name" для регионов).
     """
+
     cell_changed = Signal(int, str, object)  # row_index, column_key, value
     row_selected = Signal(int)
 
@@ -109,9 +113,7 @@ class StructuredTableWidget(QTableWidget):
             for i in line_cols:
                 self.setItemDelegateForColumn(i, QStyledItemDelegate(self))
             self._touch_line_edit_delegate_installed = False
-            self.setEditTriggers(
-                QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
-            )
+            self.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         if not self._touch_keyboard_effective():
             return
         if not line_cols:
@@ -121,9 +123,7 @@ class StructuredTableWidget(QTableWidget):
             self.setItemDelegateForColumn(i, delegate)
         self._touch_line_edit_delegate_installed = True
         self.setEditTriggers(
-            QAbstractItemView.DoubleClicked
-            | QAbstractItemView.SelectedClicked
-            | QAbstractItemView.EditKeyPressed
+            QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed
         )
 
     def set_columns(self, columns):
@@ -166,9 +166,7 @@ class StructuredTableWidget(QTableWidget):
                 if col_type == "checkbox":
                     cb = QCheckBox()
                     cb.setChecked(bool(value))
-                    cb.stateChanged.connect(
-                        lambda state, r=row_idx, k=key: self._on_cell_checkbox(r, k, state)
-                    )
+                    cb.stateChanged.connect(lambda state, r=row_idx, k=key: self._on_cell_checkbox(r, k, state))
                     self.setCellWidget(row_idx, col_idx, cb)
                 else:
                     item = QTableWidgetItem(str(value) if value is not None else "")
@@ -177,7 +175,8 @@ class StructuredTableWidget(QTableWidget):
                         editable = bool(row["_value_editable"])
                     item.setFlags(
                         item.flags() | Qt.ItemFlag.ItemIsEnabled
-                        if editable else item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                        if editable
+                        else item.flags() & ~Qt.ItemFlag.ItemIsEditable
                     )
                     item.setData(Qt.ItemDataRole.UserRole, key)
                     self.setItem(row_idx, col_idx, item)

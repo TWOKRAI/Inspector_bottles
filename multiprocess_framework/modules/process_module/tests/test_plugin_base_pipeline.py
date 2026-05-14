@@ -4,12 +4,12 @@ import pytest
 
 from multiprocess_framework.modules.process_module.plugins.base import (
     ProcessModulePlugin,
-    PluginContext,
     for_each,
 )
 
 
 # --- Конкретный плагин для тестов (ABC требует configure/start) ---
+
 
 class DummyPlugin(ProcessModulePlugin):
     name = "dummy"
@@ -83,6 +83,7 @@ class TestForEach:
 
     def test_one_to_one(self):
         """dict return → 1:1."""
+
         class DoublePlugin(DummyPlugin):
             @for_each
             def process(self, item):
@@ -96,6 +97,7 @@ class TestForEach:
 
     def test_one_to_many(self):
         """list return → 1:N (extend)."""
+
         class SplitPlugin(DummyPlugin):
             @for_each
             def process(self, item):
@@ -109,6 +111,7 @@ class TestForEach:
 
     def test_filter_none(self):
         """None return → фильтрация (skip)."""
+
         class FilterPlugin(DummyPlugin):
             @for_each
             def process(self, item):
@@ -125,6 +128,7 @@ class TestForEach:
 
     def test_mixed_returns(self):
         """Смешанные возвраты: dict, list, None."""
+
         class MixedPlugin(DummyPlugin):
             @for_each
             def process(self, item):

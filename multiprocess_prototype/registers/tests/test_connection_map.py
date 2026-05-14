@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from multiprocess_prototype.registers.connection_map import ConnectionMap, ResolvedTarget
+from multiprocess_prototype.registers.connection_map import ConnectionMap
 
 
 @pytest.fixture

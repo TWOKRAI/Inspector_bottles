@@ -4,7 +4,6 @@ import queue
 import threading
 import time
 
-import pytest
 
 from multiprocess_framework.modules.process_module.generic.pipeline_executor import (
     PipelineExecutor,
@@ -17,9 +16,11 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 
 # --- Тестовые плагины ---
 
+
 class PassPlugin(ProcessModulePlugin):
     name = "pass"
     category = "processing"
+
     def configure(self, ctx): ...
     def start(self, ctx): ...
 
@@ -28,6 +29,7 @@ class DoublePlugin(ProcessModulePlugin):
     name = "double"
     category = "processing"
     thread_safe = True
+
     def configure(self, ctx): ...
     def start(self, ctx): ...
 
@@ -39,6 +41,7 @@ class DoublePlugin(ProcessModulePlugin):
 class FailPlugin(ProcessModulePlugin):
     name = "fail"
     category = "processing"
+
     def configure(self, ctx): ...
     def start(self, ctx): ...
 
@@ -49,6 +52,7 @@ class FailPlugin(ProcessModulePlugin):
 class FilterPlugin(ProcessModulePlugin):
     name = "filter"
     category = "processing"
+
     def configure(self, ctx): ...
     def start(self, ctx): ...
 

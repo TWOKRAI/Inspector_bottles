@@ -1,9 +1,9 @@
 """
 Тесты для ConsoleLogChannel.
 """
+
 from unittest.mock import MagicMock
 
-import pytest
 
 from ..channels.console_log_channel import ConsoleLogChannel
 

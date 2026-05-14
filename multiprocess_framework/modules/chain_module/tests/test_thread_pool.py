@@ -1,9 +1,9 @@
 """Тесты ChainThreadPool."""
+
 from __future__ import annotations
 
 import time
 
-import numpy as np
 import pytest
 
 from multiprocess_framework.modules.chain_module.thread_pool.pool import ChainThreadPool
@@ -41,6 +41,7 @@ class TestChainThreadPoolInit:
 class TestChainThreadPoolSubmit:
     def test_submit_single_step(self, pool, frame):
         from multiprocess_framework.modules.chain_module.core.context import ChainContext
+
         ctx = ChainContext()
         step = make_pool_step("n1", BrightenOperation(5))
         futures = pool.submit_bundle([step], frame, ctx)
@@ -50,6 +51,7 @@ class TestChainThreadPoolSubmit:
 
     def test_submit_multiple_steps(self, pool, frame):
         from multiprocess_framework.modules.chain_module.core.context import ChainContext
+
         ctx = ChainContext()
         steps = [
             make_pool_step("n1", BrightenOperation(10)),
@@ -65,18 +67,23 @@ class TestChainThreadPoolSubmit:
     def test_frame_is_copied_per_step(self, pool, frame):
         """Каждый шаг получает копию кадра для thread-safety."""
         from multiprocess_framework.modules.chain_module.core.context import ChainContext
+
         received = []
 
         class CaptureOp:
             def execute(self, data, ctx):
                 received.append(id(data))
                 return data
-            def configure(self, p): pass
+
+            def configure(self, p):
+                pass
 
         steps = [make_pool_step(f"n{i}", CaptureOp()) for i in range(3)]
         ctx = ChainContext()
         pool.submit_bundle(steps, frame, ctx)
-        import time; time.sleep(0.1)
+        import time
+
+        time.sleep(0.1)
         # Все id разные (копии)
         if len(received) >= 2:
             assert len(set(received)) == len(received)
@@ -85,6 +92,7 @@ class TestChainThreadPoolSubmit:
 class TestChainThreadPoolCollect:
     def test_collect_all_done(self, pool, frame):
         from multiprocess_framework.modules.chain_module.core.context import ChainContext
+
         ctx = ChainContext()
         steps = [make_pool_step("n1", BrightenOperation(5))]
         futures = pool.submit_bundle(steps, frame, ctx)
@@ -97,6 +105,7 @@ class TestChainThreadPoolCollect:
     def test_collect_with_exception(self, pool, frame):
         from multiprocess_framework.modules.chain_module.core.context import ChainContext
         from .conftest import FailingOperation
+
         ctx = ChainContext()
         step = make_pool_step("n1", FailingOperation())
         futures = pool.submit_bundle([step], frame, ctx)
@@ -111,7 +120,9 @@ class TestChainThreadPoolCollect:
             def execute(self, data, ctx):
                 time.sleep(10)
                 return data
-            def configure(self, p): pass
+
+            def configure(self, p):
+                pass
 
         ctx = ChainContext()
         step = make_pool_step("n1", SlowOp())

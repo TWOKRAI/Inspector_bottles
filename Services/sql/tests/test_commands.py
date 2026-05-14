@@ -1,29 +1,22 @@
 """Тесты typed commands."""
-import pytest
 
 from Services.sql.commands import DBQueryCommand, DBExecuteCommand, DBInsertCommand
 
 
 class TestDBCommands:
     def test_db_query_command(self):
-        cmd = DBQueryCommand.model_validate(
-            {"command": "db.query", "sql": "SELECT 1", "params": None}
-        )
+        cmd = DBQueryCommand.model_validate({"command": "db.query", "sql": "SELECT 1", "params": None})
         assert cmd.command == "db.query"
         assert cmd.sql == "SELECT 1"
         assert cmd.timeout == 30
 
     def test_db_execute_command(self):
-        cmd = DBExecuteCommand.model_validate(
-            {"command": "db.execute", "sql": "INSERT INTO t VALUES (1)"}
-        )
+        cmd = DBExecuteCommand.model_validate({"command": "db.execute", "sql": "INSERT INTO t VALUES (1)"})
         assert cmd.command == "db.execute"
         assert cmd.sql == "INSERT INTO t VALUES (1)"
 
     def test_db_insert_command(self):
-        cmd = DBInsertCommand.model_validate(
-            {"command": "db.insert", "table": "users", "data": {"name": "Alice"}}
-        )
+        cmd = DBInsertCommand.model_validate({"command": "db.insert", "table": "users", "data": {"name": "Alice"}})
         assert cmd.command == "db.insert"
         assert cmd.table == "users"
         assert cmd.data == {"name": "Alice"}

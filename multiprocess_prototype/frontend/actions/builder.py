@@ -1,4 +1,5 @@
 """V2ActionBuilder — расширение FW ActionBuilder доменными методами v2."""
+
 from __future__ import annotations
 
 import time
@@ -7,7 +8,16 @@ from typing import Any
 from multiprocess_framework.modules.actions_module.builder import ActionBuilder
 from multiprocess_framework.modules.actions_module.schemas import Action
 
-from .action_types import FIELD_SET, RECIPE_APPLY, PROCESS_ADD, PROCESS_REMOVE, WIRE_ADD, WIRE_REMOVE, NODE_MOVE, ROLE_UPDATE
+from .action_types import (
+    FIELD_SET,
+    RECIPE_APPLY,
+    PROCESS_ADD,
+    PROCESS_REMOVE,
+    WIRE_ADD,
+    WIRE_REMOVE,
+    NODE_MOVE,
+    ROLE_UPDATE,
+)
 
 
 class V2ActionBuilder(ActionBuilder):

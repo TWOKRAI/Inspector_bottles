@@ -2,6 +2,7 @@
 """
 BaseAsyncAdapter — базовая реализация IAsyncEngineAdapter.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -11,7 +12,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 
-from Services.sql.interfaces import IAsyncEngineAdapter
 from Services.sql.configs import SQLManagerConfig
 
 
@@ -78,6 +78,7 @@ class BaseAsyncAdapter:
         """Освободить ресурсы."""
         if self._engine is not None:
             import asyncio
+
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._engine.dispose())

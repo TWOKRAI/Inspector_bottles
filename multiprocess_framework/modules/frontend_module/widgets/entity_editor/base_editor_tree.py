@@ -6,6 +6,7 @@
 - Save/restore selection при refresh
 - Abstract _populate() для подклассов
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +16,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import QHeaderView, QTreeView, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QTreeView, QVBoxLayout, QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +75,7 @@ class BaseEditorTreeView(QWidget):
         self._tree.header().setStretchLastSection(True)
 
         # Подключение сигнала смены выделения
-        self._tree.selectionModel().currentChanged.connect(
-            self._on_selection_changed
-        )
+        self._tree.selectionModel().currentChanged.connect(self._on_selection_changed)
 
         # Layout
         layout = QVBoxLayout(self)
@@ -195,9 +194,7 @@ class BaseEditorTreeView(QWidget):
         self._collect_expand_state(root, result)
         return result
 
-    def _collect_expand_state(
-        self, parent: QStandardItem, result: dict
-    ) -> None:
+    def _collect_expand_state(self, parent: QStandardItem, result: dict) -> None:
         """Рекурсивно собрать expand state дочерних узлов.
 
         Args:
@@ -227,9 +224,7 @@ class BaseEditorTreeView(QWidget):
         root = self._model.invisibleRootItem()
         self._apply_expand_state(root, state)
 
-    def _apply_expand_state(
-        self, parent: QStandardItem, state: dict
-    ) -> None:
+    def _apply_expand_state(self, parent: QStandardItem, state: dict) -> None:
         """Рекурсивно применить expand state к дочерним узлам.
 
         Args:
@@ -270,7 +265,7 @@ class BaseEditorTreeView(QWidget):
     # Обработчик сигнала выделения
     # ------------------------------------------------------------------
 
-    def _on_selection_changed(self, current, previous) -> None:  # noqa: ANN001
+    def _on_selection_changed(self, current, previous) -> None:
         """Обработать смену выделения в дереве.
 
         Пропускает события при _suppress == True.

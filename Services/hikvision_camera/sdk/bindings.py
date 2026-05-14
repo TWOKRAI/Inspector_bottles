@@ -4,13 +4,13 @@
 Содержит только реально используемые методы (~15 из ~150).
 При отсутствии DLL модуль не падает -- SDK_AVAILABLE = False.
 """
+
 from __future__ import annotations
 
 import ctypes
 import logging
 import sys
 from ctypes import (
-    POINTER,
     byref,
     c_bool,
     c_float,
@@ -25,7 +25,6 @@ from .structures import (
     MV_CC_DEVICE_INFO_LIST,
     MV_FRAME_OUT,
     MVCC_FLOATVALUE,
-    MVCC_INTVALUE,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +36,7 @@ logger = logging.getLogger(__name__)
 _MvCamCtrldll = None
 SDK_AVAILABLE: bool = False
 """True если DLL MvCameraControl.dll успешно загружена."""
+
 
 def _load_sdk_library():
     """Загрузить нативную библиотеку Hikvision SDK.
@@ -66,10 +66,10 @@ def _load_sdk_library():
         # Linux: MVS SDK ставит .so в /opt/MVS/lib/64/ или /opt/MVS/lib/aarch64/
         so_name = "libMvCameraControl.so"
         search_paths = [
-            so_name,                                   # уже в LD_LIBRARY_PATH
-            "/opt/MVS/lib/64/libMvCameraControl.so",   # x86_64 стандартный путь
+            so_name,  # уже в LD_LIBRARY_PATH
+            "/opt/MVS/lib/64/libMvCameraControl.so",  # x86_64 стандартный путь
             "/opt/MVS/lib/aarch64/libMvCameraControl.so",  # Jetson / RPi (ARM64)
-            "/opt/MVS/lib/32/libMvCameraControl.so",   # x86 32-bit (редко)
+            "/opt/MVS/lib/32/libMvCameraControl.so",  # x86 32-bit (редко)
         ]
         for path in search_paths:
             try:
@@ -100,10 +100,7 @@ def _require_dll():
         if sys.platform == "win32":
             hint = "Убедитесь что MvCameraControl.dll доступна в PATH."
         else:
-            hint = (
-                "Установите MVS SDK: sudo dpkg -i MVS-*.deb, "
-                "затем добавьте /opt/MVS/lib/ в LD_LIBRARY_PATH."
-            )
+            hint = "Установите MVS SDK: sudo dpkg -i MVS-*.deb, затем добавьте /opt/MVS/lib/ в LD_LIBRARY_PATH."
         raise RuntimeError(f"Hikvision SDK не загружена. {hint}")
     return _MvCamCtrldll
 
@@ -111,6 +108,7 @@ def _require_dll():
 # ---------------------------------------------------------------------------
 # Класс-обёртка
 # ---------------------------------------------------------------------------
+
 
 class MvCamera:
     """Минимальный Python-wrapper над Hikvision MvCameraControl.dll.
@@ -120,7 +118,7 @@ class MvCamera:
     """
 
     def __init__(self) -> None:
-        self._handle = c_void_p()       # handle текущего устройства
+        self._handle = c_void_p()  # handle текущего устройства
         self.handle = pointer(self._handle)
 
     # === Статические методы ================================================
@@ -290,7 +288,9 @@ class MvCamera:
         dll.MV_CC_SetEnumValue.argtype = (c_void_p, c_void_p, c_uint32)
         dll.MV_CC_SetEnumValue.restype = c_uint
         return dll.MV_CC_SetEnumValue(
-            self.handle, strKey.encode('ascii'), c_uint32(nValue),
+            self.handle,
+            strKey.encode("ascii"),
+            c_uint32(nValue),
         )
 
     def MV_CC_SetBoolValue(self, strKey: str, bValue: bool) -> int:
@@ -307,7 +307,9 @@ class MvCamera:
         dll.MV_CC_SetBoolValue.argtype = (c_void_p, c_void_p, c_bool)
         dll.MV_CC_SetBoolValue.restype = c_uint
         return dll.MV_CC_SetBoolValue(
-            self.handle, strKey.encode('ascii'), bValue,
+            self.handle,
+            strKey.encode("ascii"),
+            bValue,
         )
 
     def MV_CC_SetFloatValue(self, strKey: str, fValue: float) -> int:
@@ -324,7 +326,9 @@ class MvCamera:
         dll.MV_CC_SetFloatValue.argtype = (c_void_p, c_void_p, c_float)
         dll.MV_CC_SetFloatValue.restype = c_uint
         return dll.MV_CC_SetFloatValue(
-            self.handle, strKey.encode('ascii'), c_float(fValue),
+            self.handle,
+            strKey.encode("ascii"),
+            c_float(fValue),
         )
 
     def MV_CC_SetIntValue(self, strKey: str, nValue: int) -> int:
@@ -341,7 +345,9 @@ class MvCamera:
         dll.MV_CC_SetIntValue.argtype = (c_void_p, c_void_p, c_uint32)
         dll.MV_CC_SetIntValue.restype = c_uint
         return dll.MV_CC_SetIntValue(
-            self.handle, strKey.encode('ascii'), c_uint32(nValue),
+            self.handle,
+            strKey.encode("ascii"),
+            c_uint32(nValue),
         )
 
     # === Получение параметров ==============================================
@@ -364,7 +370,9 @@ class MvCamera:
         dll.MV_CC_GetFloatValue.argtype = (c_void_p, c_void_p, c_void_p)
         dll.MV_CC_GetFloatValue.restype = c_uint
         return dll.MV_CC_GetFloatValue(
-            self.handle, strKey.encode('ascii'), byref(stFloatValue),
+            self.handle,
+            strKey.encode("ascii"),
+            byref(stFloatValue),
         )
 
     def MV_CC_GetOptimalPacketSize(self) -> int:

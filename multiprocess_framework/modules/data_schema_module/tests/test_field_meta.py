@@ -33,12 +33,12 @@ Unit-тесты для FieldMeta, FieldRouting и RegisterMixin.
 
 Запуск: из каталога refactored/modules — pytest data_schema_module/tests/ -v
 """
+
 from __future__ import annotations
 
 from typing import Annotated
 
 import pytest
-from pydantic import BaseModel
 
 from ..core.field_meta import FieldMeta
 from ..core.field_routing import FieldRouting
@@ -51,33 +51,43 @@ from ..container.registers_container import RegistersContainer
 # Вспомогательные модели
 # =============================================================================
 
+
 class SampleRegisters(RegisterBase):
-    speed: Annotated[float, FieldMeta(
-        "Скорость",
-        info="Скорость движения",
-        info_i18n={"en": "Movement speed", "ru": "Скорость движения"},
-        unit="м/с",
-        min=0.0,
-        max=50.0,
-        transfer_k=10.0,
-        round_k=1,
-        routing={"channel": "ctrl_speed"},
-        access_level=1,
-    )] = 10.0
+    speed: Annotated[
+        float,
+        FieldMeta(
+            "Скорость",
+            info="Скорость движения",
+            info_i18n={"en": "Movement speed", "ru": "Скорость движения"},
+            unit="м/с",
+            min=0.0,
+            max=50.0,
+            transfer_k=10.0,
+            round_k=1,
+            routing={"channel": "ctrl_speed"},
+            access_level=1,
+        ),
+    ] = 10.0
 
-    temperature: Annotated[float, FieldMeta(
-        "Температура",
-        unit="°C",
-        min=-40.0,
-        max=120.0,
-        readonly=True,
-    )] = 25.0
+    temperature: Annotated[
+        float,
+        FieldMeta(
+            "Температура",
+            unit="°C",
+            min=-40.0,
+            max=120.0,
+            readonly=True,
+        ),
+    ] = 25.0
 
-    label: Annotated[str, FieldMeta(
-        "Метка",
-        hidden=True,
-        access_level=5,
-    )] = "default"
+    label: Annotated[
+        str,
+        FieldMeta(
+            "Метка",
+            hidden=True,
+            access_level=5,
+        ),
+    ] = "default"
 
     # Plain-поле без FieldMeta
     enabled: bool = True
@@ -91,8 +101,8 @@ class AnotherRegisters(RegisterBase):
 # FieldMeta: базовые свойства
 # =============================================================================
 
-class TestFieldMetaInit:
 
+class TestFieldMetaInit:
     def test_defaults(self):
         m = FieldMeta("Описание")
         assert m.description == "Описание"
@@ -139,8 +149,8 @@ class TestFieldMetaInit:
 # FieldMeta: локализация
 # =============================================================================
 
-class TestFieldMetaI18n:
 
+class TestFieldMetaI18n:
     def test_get_description_no_lang(self):
         m = FieldMeta("Default")
         assert m.get_description() == "Default"
@@ -164,8 +174,8 @@ class TestFieldMetaI18n:
 # FieldMeta: доступ
 # =============================================================================
 
-class TestFieldMetaAccess:
 
+class TestFieldMetaAccess:
     def test_can_modify_default(self):
         m = FieldMeta("X")
         assert m.can_modify(0) is True
@@ -201,8 +211,8 @@ class TestFieldMetaAccess:
 # FieldMeta: валидация и числовые операции
 # =============================================================================
 
-class TestFieldMetaValidation:
 
+class TestFieldMetaValidation:
     def test_validate_value_no_constraints(self):
         m = FieldMeta("X")
         ok, err = m.validate_value(999.0)
@@ -275,13 +285,25 @@ class TestFieldMetaValidation:
 # FieldMeta: сериализация
 # =============================================================================
 
-class TestFieldMetaToDict:
 
+class TestFieldMetaToDict:
     def test_to_dict_keys(self):
         m = FieldMeta("Desc", info="Info", unit="px", min=0.0, max=10.0)
         d = m.to_dict()
-        for key in ("description", "info", "unit", "min", "max", "transfer_k",
-                    "round_k", "routing", "access_level", "readonly", "hidden", "examples"):
+        for key in (
+            "description",
+            "info",
+            "unit",
+            "min",
+            "max",
+            "transfer_k",
+            "round_k",
+            "routing",
+            "access_level",
+            "readonly",
+            "hidden",
+            "examples",
+        ):
             assert key in d
 
     def test_to_dict_values(self):
@@ -302,8 +324,8 @@ class TestFieldMetaToDict:
 # RegisterMixin: метаданные и кэш
 # =============================================================================
 
-class TestRegisterMixinMeta:
 
+class TestRegisterMixinMeta:
     def test_get_field_meta_returns_field_meta(self):
         meta = SampleRegisters.get_field_meta("speed")
         assert meta is not None
@@ -333,8 +355,7 @@ class TestRegisterMixinMeta:
     def test_different_classes_have_separate_caches(self):
         SampleRegisters.get_all_fields_meta()
         AnotherRegisters.get_all_fields_meta()
-        assert _ALL_FIELDS_META_CACHE.get(SampleRegisters) is not \
-               _ALL_FIELDS_META_CACHE.get(AnotherRegisters)
+        assert _ALL_FIELDS_META_CACHE.get(SampleRegisters) is not _ALL_FIELDS_META_CACHE.get(AnotherRegisters)
 
     def test_get_field_metadata_returns_dict(self):
         r = SampleRegisters()
@@ -363,8 +384,8 @@ class TestRegisterMixinMeta:
 # RegisterMixin: валидация
 # =============================================================================
 
-class TestRegisterMixinValidation:
 
+class TestRegisterMixinValidation:
     def test_validate_field_valid(self):
         r = SampleRegisters()
         ok, err = r.validate_field("speed", 20.0, access_level=1)
@@ -405,8 +426,8 @@ class TestRegisterMixinValidation:
 # RegisterMixin: доступ
 # =============================================================================
 
-class TestRegisterMixinAccess:
 
+class TestRegisterMixinAccess:
     def test_can_modify_field_requires_level(self):
         r = SampleRegisters()
         assert r.can_modify_field("speed", access_level=0) is False
@@ -419,8 +440,8 @@ class TestRegisterMixinAccess:
     def test_get_visible_fields_level_0(self):
         r = SampleRegisters()
         visible = r.get_visible_fields(access_level=0)
-        assert "speed" not in visible   # access_level=1 требуется
-        assert "label" not in visible   # hidden=True
+        assert "speed" not in visible  # access_level=1 требуется
+        assert "label" not in visible  # hidden=True
         assert "enabled" in visible
 
     def test_get_visible_fields_level_5(self):
@@ -442,8 +463,8 @@ class TestRegisterMixinAccess:
 # RegisterMixin: маршрутизация
 # =============================================================================
 
-class TestRegisterMixinRouting:
 
+class TestRegisterMixinRouting:
     def test_get_routing_channels(self):
         r = SampleRegisters()
         channels = r.get_routing_channels()
@@ -463,8 +484,8 @@ class TestRegisterMixinRouting:
 # RegisterMixin: обновление значений
 # =============================================================================
 
-class TestRegisterMixinUpdate:
 
+class TestRegisterMixinUpdate:
     def test_update_field_valid(self):
         r = SampleRegisters()
         ok, err = r.update_field("speed", 30.0, access_level=1)
@@ -492,8 +513,8 @@ class TestRegisterMixinUpdate:
 # RegisterBase: @model_validator constraints
 # =============================================================================
 
-class TestRegisterBaseConstraints:
 
+class TestRegisterBaseConstraints:
     def test_valid_creation(self):
         r = SampleRegisters(speed=5.0)
         assert r.speed == 5.0
@@ -516,8 +537,8 @@ class TestRegisterBaseConstraints:
 # FieldRouting
 # =============================================================================
 
-class TestFieldRouting:
 
+class TestFieldRouting:
     def test_basic(self):
         fr = FieldRouting(channel="ctrl")
         assert fr.channel == "ctrl"
@@ -559,14 +580,16 @@ class TestFieldRouting:
 # RegistersContainer: единое состояние + дандеры + diff
 # =============================================================================
 
-class TestRegistersContainerEnhanced:
 
+class TestRegistersContainerEnhanced:
     @pytest.fixture()
     def container(self):
-        return RegistersContainer({
-            "sample": SampleRegisters,
-            "another": AnotherRegisters,
-        })
+        return RegistersContainer(
+            {
+                "sample": SampleRegisters,
+                "another": AnotherRegisters,
+            }
+        )
 
     def test_getattr_access(self, container):
         assert container.sample is not None

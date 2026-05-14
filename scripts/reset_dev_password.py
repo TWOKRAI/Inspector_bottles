@@ -16,6 +16,7 @@
 Безопасность: пароль валидируется PasswordPolicy (минимум 8 символов,
 3 из 4 классов символов). Скрипт работает только локально, на YAML-файле.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,16 +28,13 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser(description="Сбросить пароль dev-пользователя")
     parser.add_argument("password", help="Новый пароль (plain-text)")
-    parser.add_argument(
-        "--user", default="dev", help="Имя пользователя (по умолчанию: dev)"
-    )
+    parser.add_argument("--user", default="dev", help="Имя пользователя (по умолчанию: dev)")
     args = parser.parse_args()
 
     # Импорты после парсинга — быстрый ответ на --help
     from Services.auth import (
         AuthConfig,
         AuthManager,
-        UserNotFound,
         WeakPassword,
     )
 
@@ -75,18 +73,13 @@ def main() -> int:
         print(f"        Доступные: {sorted(users.keys())}", file=sys.stderr)
         return 3
 
-    updated = user.model_copy(
-        update={"password_hash": hasher.hash(args.password)}
-    )
+    updated = user.model_copy(update={"password_hash": hasher.hash(args.password)})
     users[args.user] = updated
     storage.save(users)
 
     print(f"[OK] Пароль пользователя '{args.user}' обновлён.")
     print(f"     Файл: {users_path}")
-    print(
-        f"     Теперь пропиши тот же пароль в "
-        f"multiprocess_prototype/dev_settings.py: DEV_PASSWORD = \"...\""
-    )
+    print('     Теперь пропиши тот же пароль в multiprocess_prototype/dev_settings.py: DEV_PASSWORD = "..."')
     return 0
 
 

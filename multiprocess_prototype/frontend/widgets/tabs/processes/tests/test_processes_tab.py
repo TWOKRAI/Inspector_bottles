@@ -1,7 +1,7 @@
 """Тесты для ProcessesTab и ProcessesPresenter."""
+
 from unittest.mock import MagicMock
 
-import pytest
 
 from PySide6.QtCore import Qt
 
@@ -18,7 +18,9 @@ def _make_mock_ctx(topology_processes=None):
     ctx = MagicMock()
     ctx.config = {
         "topology": {
-            "processes": topology_processes if topology_processes is not None else [
+            "processes": topology_processes
+            if topology_processes is not None
+            else [
                 {
                     "process_name": "camera_0",
                     "plugins": [{"plugin_name": "capture", "category": "source"}],
@@ -78,9 +80,7 @@ class TestProcessesPresenter:
         ctx = _make_mock_ctx()
         p = ProcessesPresenter(ctx)
         p.on_process_action("camera_0", "start")
-        ctx.command_sender.send_command.assert_called_once_with(
-            "camera_0", "process.start", {}
-        )
+        ctx.command_sender.send_command.assert_called_once_with("camera_0", "process.start", {})
 
     def test_get_processes_from_extras(self):
         """Проверяем fallback на extras когда topology нет в config."""
@@ -117,17 +117,13 @@ class TestProcessesPresenter:
         ctx = _make_mock_ctx()
         p = ProcessesPresenter(ctx)
         p.on_process_action("processor", "stop")
-        ctx.command_sender.send_command.assert_called_once_with(
-            "processor", "process.stop", {}
-        )
+        ctx.command_sender.send_command.assert_called_once_with("processor", "process.stop", {})
 
     def test_on_process_action_restart(self):
         ctx = _make_mock_ctx()
         p = ProcessesPresenter(ctx)
         p.on_process_action("renderer", "restart")
-        ctx.command_sender.send_command.assert_called_once_with(
-            "renderer", "process.restart", {}
-        )
+        ctx.command_sender.send_command.assert_called_once_with("renderer", "process.restart", {})
 
     def test_category_title_unknown(self):
         """Неизвестная категория возвращает capitalize."""
@@ -263,10 +259,7 @@ class TestProcessesTab:
         qtbot.addWidget(tab)
         # 1 (Все процессы) + 3 процесса
         assert tab._nav_list.count() == 4
-        names = [
-            tab._nav_list.item(i).text()
-            for i in range(1, tab._nav_list.count())
-        ]
+        names = [tab._nav_list.item(i).text() for i in range(1, tab._nav_list.count())]
         assert "camera_0" in names
         assert "processor" in names
         assert "renderer" in names
@@ -288,6 +281,7 @@ class TestProcessesTab:
         assert tab._center_stack.currentIndex() == 0
         # Переключаем на Table
         from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
+
         tab._toggle.set_mode(ViewMode.TABLE)
         assert tab._center_stack.currentIndex() == 1  # _PAGE_ALL_TABLE
 
@@ -339,6 +333,7 @@ class TestProcessesTab:
         qtbot.addWidget(tab)
         tab._nav_list.setCurrentRow(1)
         from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
+
         tab._toggle.set_mode(ViewMode.TABLE)
         assert tab._center_stack.currentIndex() == 3  # _PAGE_SINGLE_TABLE
         assert tab._detail_table.rowCount() > 0

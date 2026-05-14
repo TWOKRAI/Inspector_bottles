@@ -1,7 +1,7 @@
 """Тесты bind_edit_permission — gating виджетов по permission через AuthState."""
+
 from __future__ import annotations
 
-import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QPushButton
 
@@ -49,9 +49,7 @@ class TestBindEditPermission:
     def test_enables_when_permission_present(self, qtbot):
         btn = QPushButton()
         qtbot.addWidget(btn)
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"tabs.recipes.edit"})))
 
         bind_edit_permission(btn, "tabs.recipes.edit", stub)
 
@@ -67,9 +65,7 @@ class TestBindEditPermission:
         assert btn.isEnabled() is False
 
         # Login: получаем permission
-        stub.set_context(
-            AccessContext(permissions=frozenset({"tabs.pipeline.edit"}))
-        )
+        stub.set_context(AccessContext(permissions=frozenset({"tabs.pipeline.edit"})))
         assert btn.isEnabled() is True
 
         # Logout: permission уходит
@@ -79,9 +75,7 @@ class TestBindEditPermission:
     def test_wildcard_grants_access(self, qtbot):
         btn = QPushButton()
         qtbot.addWidget(btn)
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"*"}), role_name="dev")
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"*"}), role_name="dev"))
 
         bind_edit_permission(btn, "tabs.any.edit", stub)
 
@@ -100,9 +94,7 @@ class TestGateEditWidgets:
         assert b1.isEnabled() is False
         assert b2.isEnabled() is False
 
-        stub.set_context(
-            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
-        )
+        stub.set_context(AccessContext(permissions=frozenset({"tabs.recipes.edit"})))
         assert b1.isEnabled() is True
         assert b2.isEnabled() is True
 
@@ -162,9 +154,7 @@ class TestPropagateAccessContextToTree:
         )
 
         root, child1, child2, applied_flag, presenter_calls = self._make_tree(qtbot)
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"})))
         propagate_access_context_to_tree(root, stub)
 
         # child1._trait получил ctx через update + _apply_access вызван
@@ -185,9 +175,7 @@ class TestPropagateAccessContextToTree:
         initial_apply_count = applied_flag["count"]
 
         # Login → re-apply
-        stub.set_context(
-            AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"}))
-        )
+        stub.set_context(AccessContext(permissions=frozenset({"tabs.x.view", "tabs.x.edit"})))
         assert applied_flag["count"] > initial_apply_count
         assert child1._trait.can_modify() is True
         assert len(presenter_calls) >= 2  # initial + login
@@ -209,10 +197,7 @@ class TestGateRegisterView:
         class _View(QWidget):
             def __init__(self) -> None:
                 super().__init__()
-                self._editors = {
-                    f"e{i}": _Editor(widget=QPushButton())
-                    for i in range(editors_count)
-                }
+                self._editors = {f"e{i}": _Editor(widget=QPushButton()) for i in range(editors_count)}
 
             def editors(self):
                 return self._editors
@@ -249,9 +234,7 @@ class TestGateRegisterView:
         from multiprocess_prototype.frontend.widgets.access import gate_register_view
 
         view = self._make_view(qtbot)
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"tabs.plugins.edit"}))
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"tabs.plugins.edit"})))
         gate_register_view(view, "tabs.plugins.edit", stub)
 
         for ed in view.editors().values():
@@ -262,9 +245,7 @@ class TestGateRegisterView:
 
         view = self._make_view(qtbot)
         view.show()
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"tabs.plugins.view"}))
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"tabs.plugins.view"})))
         gate_register_view(
             view,
             edit_permission="tabs.plugins.edit",
@@ -285,9 +266,7 @@ class TestGateRegisterView:
         gate_register_view(view, "tabs.plugins.edit", stub)
 
         # Login → permission получен
-        stub.set_context(
-            AccessContext(permissions=frozenset({"tabs.plugins.edit"}))
-        )
+        stub.set_context(AccessContext(permissions=frozenset({"tabs.plugins.edit"})))
         for ed in view.editors().values():
             assert ed.widget.isEnabled() is True
 
@@ -326,9 +305,7 @@ class TestInstallPermissionAwareEnable:
         assert btn.isEnabled() is False
 
         # После получения permission — таб-код вызывает setEnabled(True) — теперь работает
-        stub.set_context(
-            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
-        )
+        stub.set_context(AccessContext(permissions=frozenset({"tabs.recipes.edit"})))
         assert btn.isEnabled() is True
 
     def test_base_false_always_disabled(self, qtbot):
@@ -338,9 +315,7 @@ class TestInstallPermissionAwareEnable:
 
         btn = QPushButton()
         qtbot.addWidget(btn)
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"tabs.recipes.edit"})))
         install_permission_aware_enable(btn, "tabs.recipes.edit", stub)
         # base=True + permission → enabled
         btn.setEnabled(True)
@@ -356,9 +331,7 @@ class TestInstallPermissionAwareEnable:
 
         btn = QPushButton()
         qtbot.addWidget(btn)
-        stub = _StubAuthState(
-            AccessContext(permissions=frozenset({"tabs.recipes.edit"}))
-        )
+        stub = _StubAuthState(AccessContext(permissions=frozenset({"tabs.recipes.edit"})))
         install_permission_aware_enable(btn, "tabs.recipes.edit", stub)
         btn.setEnabled(True)
         assert btn.isEnabled() is True

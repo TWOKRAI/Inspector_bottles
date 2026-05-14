@@ -4,6 +4,7 @@ BaseSyncAdapter — базовая реализация ISyncEngineAdapter.
 
 Общая логика: execute через text(), query с fetchall, connection context.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -12,7 +13,6 @@ from typing import Any, Dict, List, Optional, Union
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from Services.sql.interfaces import ISyncEngineAdapter
 from Services.sql.configs import SQLManagerConfig
 from Services.sql.core.engine_factory import create_sync_engine
 

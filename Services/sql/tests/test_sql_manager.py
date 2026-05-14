@@ -1,18 +1,15 @@
 """Тесты SQLManager."""
+
+import importlib.util
+
 import pytest
 from unittest.mock import MagicMock
 
-from Services.sql import SQLManager, SQLManagerConfig
+from Services.sql import SQLManager
 
-try:
-    import pytest_asyncio  # noqa: F401
-    HAS_ASYNCIO = True
-except ImportError:
-    HAS_ASYNCIO = False
+HAS_ASYNCIO = importlib.util.find_spec("pytest_asyncio") is not None
 
-skip_no_asyncio = pytest.mark.skipif(
-    not HAS_ASYNCIO, reason="pytest-asyncio not installed"
-)
+skip_no_asyncio = pytest.mark.skipif(not HAS_ASYNCIO, reason="pytest-asyncio not installed")
 
 
 class TestSQLManager:
@@ -35,9 +32,7 @@ class TestSQLManager:
     def test_execute_command_query(self, sql_manager):
         sql_manager.execute("CREATE TABLE t (x INT)")
         sql_manager.execute("INSERT INTO t VALUES (1)")
-        result = sql_manager.execute_command(
-            {"command": "db.query", "sql": "SELECT * FROM t"}
-        )
+        result = sql_manager.execute_command({"command": "db.query", "sql": "SELECT * FROM t"})
         assert result["status"] == "success"
         assert result["data"] == [{"x": 1}]
 
@@ -73,6 +68,7 @@ class TestSQLManager:
         uow = sql_manager.uow()
         with uow.connection() as conn:
             from sqlalchemy import text
+
             conn.execute(text("CREATE TABLE uow_test (id INT)"))
             conn.execute(text("INSERT INTO uow_test VALUES (1)"))
 
@@ -83,6 +79,7 @@ class TestSQLManager:
         uow = sql_manager.uow_async()
         async with uow.connection() as conn:
             from sqlalchemy import text
+
             await conn.execute(text("CREATE TABLE uow_async_test (id INT)"))
             await conn.execute(text("INSERT INTO uow_async_test VALUES (1)"))
             result = await conn.execute(text("SELECT * FROM uow_async_test"))
@@ -100,6 +97,7 @@ class TestSQLManager:
         assert mgr._async_adapter is not None
         async with uow.connection() as conn:
             from sqlalchemy import text
+
             await conn.execute(text("SELECT 1"))
         mgr.shutdown()
         assert mgr._async_adapter is None
@@ -143,6 +141,7 @@ class TestSQLManager:
     def test_no_metrics_collector_export(self):
         """IMetricsCollector не экспортируется из sql_module верхнего уровня."""
         import Services.sql as sql_module
+
         assert not hasattr(sql_module, "IMetricsCollector"), (
             "IMetricsCollector не должен быть в публичном API sql_module"
         )

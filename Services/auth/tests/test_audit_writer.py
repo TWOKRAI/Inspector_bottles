@@ -4,16 +4,15 @@
 
 Все тесты используют in-memory SQLite и tmp_path (без сетевых вызовов).
 """
+
 from __future__ import annotations
 
 import json
-import time
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
 from Services.auth.audit_writer import AuditWriter
 from Services.auth.models import AuditEntry
@@ -89,7 +88,7 @@ def test_fallback_on_storage_error(tmp_path: Path) -> None:
 
     # JSONL файл должен существовать и содержать запись
     assert fallback.exists(), "JSONL fallback файл не создан"
-    lines = [l for l in fallback.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [line for line in fallback.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == 1
 
     data = json.loads(lines[0])
@@ -166,6 +165,4 @@ def test_stop_flush(tmp_path: Path) -> None:
     writer.stop()
 
     results = storage.list_audit()
-    assert len(results) == n, (
-        f"После stop() ожидалось {n} записей в БД, получено {len(results)}"
-    )
+    assert len(results) == n, f"После stop() ожидалось {n} записей в БД, получено {len(results)}"

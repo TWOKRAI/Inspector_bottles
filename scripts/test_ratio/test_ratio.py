@@ -102,7 +102,7 @@ def count_lines(path: Path, mode: str, encoding: str) -> int:
 
 @dataclass
 class ModuleRow:
-    name: str            # "modules/X" или "Services/Y"
+    name: str  # "modules/X" или "Services/Y"
     code_loc: int = 0
     test_loc: int = 0
     code_files: int = 0
@@ -178,7 +178,7 @@ def collect(cfg: Config, base: Path) -> list[ModuleRow]:
 
 def _health_mark(row: ModuleRow, cfg: Config) -> str:
     if not row.has_tests:
-        return "x"   # без тестов
+        return "x"  # без тестов
     if row.ratio >= cfg.warn_threshold:
         return "ok"
     return "!"
@@ -189,8 +189,7 @@ def render_table(rows: list[ModuleRow], cfg: Config) -> str:
     data = []
     for r in rows:
         ratio_str = f"{r.ratio:.2f}" if r.code_loc else "—"
-        data.append([_health_mark(r, cfg), r.name, r.code_loc, r.test_loc, ratio_str,
-                     r.code_files, r.test_files])
+        data.append([_health_mark(r, cfg), r.name, r.code_loc, r.test_loc, ratio_str, r.code_files, r.test_files])
 
     widths = [len(h) for h in headers]
     for row in data:
@@ -243,11 +242,14 @@ def render_csv(rows: list[ModuleRow]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="test_ratio",
-                                description="Отношение объёма тестов к коду на модуль.")
+    p = argparse.ArgumentParser(prog="test_ratio", description="Отношение объёма тестов к коду на модуль.")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    p.add_argument("--base", type=Path, default=Path("."),
-                   help="База, к которой относятся module_roots (default: текущая директория).")
+    p.add_argument(
+        "--base",
+        type=Path,
+        default=Path("."),
+        help="База, к которой относятся module_roots (default: текущая директория).",
+    )
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
     p.add_argument("--sort-by", choices=["ratio", "code", "tests", "name"], default=None)
     p.add_argument("--sort-order", choices=["asc", "desc"], default=None)
@@ -264,10 +266,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     overrides = {}
-    if args.format is not None: overrides["output_format"] = args.format
-    if args.sort_by is not None: overrides["sort_by"] = args.sort_by
-    if args.sort_order is not None: overrides["sort_order"] = args.sort_order
-    if args.limit is not None: overrides["limit"] = args.limit
+    if args.format is not None:
+        overrides["output_format"] = args.format
+    if args.sort_by is not None:
+        overrides["sort_by"] = args.sort_by
+    if args.sort_order is not None:
+        overrides["sort_order"] = args.sort_order
+    if args.limit is not None:
+        overrides["limit"] = args.limit
     if overrides:
         cfg = Config(**{**cfg.__dict__, **overrides})
 

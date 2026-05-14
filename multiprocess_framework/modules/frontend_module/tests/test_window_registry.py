@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Тесты WindowRegistry и WindowConfig."""
-import pytest
 
 from multiprocess_framework.modules.frontend_module.core.window_registry import WindowRegistry
 from multiprocess_framework.modules.frontend_module.schemas.window_config import WindowConfig
@@ -38,16 +37,18 @@ class TestWindowRegistry:
 
 class TestWindowConfig:
     def test_from_dict(self) -> None:
-        cfg = WindowConfig.model_validate({
-            "window_id": "main",
-            "title": "Inspector",
-            "width": 1024,
-            "height": 768,
-            "widgets": [
-                {"widget_type": "slider", "register_name": "draw", "field_name": "dp"},
-                {"widget_type": "checkbox", "register_name": "draw", "field_name": "circles"},
-            ],
-        })
+        cfg = WindowConfig.model_validate(
+            {
+                "window_id": "main",
+                "title": "Inspector",
+                "width": 1024,
+                "height": 768,
+                "widgets": [
+                    {"widget_type": "slider", "register_name": "draw", "field_name": "dp"},
+                    {"widget_type": "checkbox", "register_name": "draw", "field_name": "circles"},
+                ],
+            }
+        )
         assert cfg.window_id == "main"
         assert cfg.title == "Inspector"
         assert len(cfg.widgets) == 2

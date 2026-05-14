@@ -3,7 +3,6 @@
 Покрывает: MasterDetailLayout, SlotSelector, CrudTable, SectionedForm.
 """
 
-import pytest
 from multiprocess_prototype.frontend.widgets.primitives.master_detail import MasterDetailLayout
 from multiprocess_prototype.frontend.widgets.primitives.slot_selector import SlotSelector
 from multiprocess_prototype.frontend.widgets.primitives.crud_table import CrudTable
@@ -13,6 +12,7 @@ from multiprocess_prototype.frontend.widgets.primitives.sectioned_form import Se
 # ===========================================================================
 # MasterDetailLayout
 # ===========================================================================
+
 
 class TestMasterDetailLayout:
     def test_create(self, qtbot):
@@ -57,11 +57,13 @@ class TestMasterDetailLayout:
         """После set_items количество элементов в списке совпадает с переданным."""
         w = MasterDetailLayout()
         qtbot.addWidget(w)
-        w.set_items([
-            ("k1", "Item 1", "cat_a"),
-            ("k2", "Item 2", "cat_b"),
-            ("k3", "Item 3", "cat_a"),
-        ])
+        w.set_items(
+            [
+                ("k1", "Item 1", "cat_a"),
+                ("k2", "Item 2", "cat_b"),
+                ("k3", "Item 3", "cat_a"),
+            ]
+        )
         assert w._item_list.count() == 3
 
     def test_categories_include_all(self, qtbot):
@@ -93,6 +95,7 @@ class TestMasterDetailLayout:
 # ===========================================================================
 # SlotSelector
 # ===========================================================================
+
 
 class TestSlotSelector:
     def test_create(self, qtbot):
@@ -164,6 +167,7 @@ class TestSlotSelector:
 # ===========================================================================
 # CrudTable
 # ===========================================================================
+
 
 class TestCrudTable:
     def test_create(self, qtbot):
@@ -260,6 +264,7 @@ class TestCrudTable:
 # ===========================================================================
 # SectionedForm
 # ===========================================================================
+
 
 class TestSectionedForm:
     def test_create(self, qtbot):

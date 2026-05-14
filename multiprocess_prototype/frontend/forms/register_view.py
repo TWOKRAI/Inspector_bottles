@@ -30,8 +30,6 @@ from .form_builder import _TABLE_COLUMNS, _editor_key
 from .view_mode_toggle import ViewMode, ViewModeToggle
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QHeaderView
-
     from multiprocess_prototype.registers.field_info import FieldInfo
 
     from .field_editor import FieldEditor

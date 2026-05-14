@@ -16,9 +16,10 @@ Usage::
 Pydantic v2 игнорирует вложенные классы, поэтому SQLMeta не влияет на
 serialization или model_fields.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Dict, Type
 
 
 class SQLMeta:

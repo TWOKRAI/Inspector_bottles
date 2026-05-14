@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -112,9 +112,7 @@ class TestProcessManagerProcessApp:
         pm._setup_state_store()
 
         # Проверяем доступ к initial state через store
-        value = pm._state_store_manager.store.get(
-            "processes.camera_0.state.status"
-        )
+        value = pm._state_store_manager.store.get("processes.camera_0.state.status")
         assert value == "stopped"
 
     def test_middleware_attached(self, router, initial_state, throttle_rules):
@@ -143,10 +141,7 @@ class TestProcessManagerProcessApp:
 
         # register_commands вызывает command_manager.register_command N раз
         assert pm.command_manager.register_command.called
-        registered_names = [
-            call.args[0]
-            for call in pm.command_manager.register_command.call_args_list
-        ]
+        registered_names = [call.args[0] for call in pm.command_manager.register_command.call_args_list]
         assert "state.set" in registered_names
         assert "state.get" in registered_names
         assert "state.subscribe" in registered_names
@@ -212,9 +207,7 @@ class TestGenericProcessApp:
         proxy = gp._state_proxy
 
         # Mock super().shutdown() чтобы не лезть в ProcessModule
-        with patch.object(
-            type(gp).__mro__[2], "shutdown", return_value=True
-        ):
+        with patch.object(type(gp).__mro__[2], "shutdown", return_value=True):
             gp.shutdown()
 
         assert not proxy.is_initialized
@@ -263,9 +256,7 @@ class TestBootstrapIntegration:
 
             launcher = bootstrap(str(bp_path))
 
-        assert launcher._orchestrator_class_path == (
-            "multiprocess_prototype.orchestrator.ProcessManagerProcessApp"
-        )
+        assert launcher._orchestrator_class_path == ("multiprocess_prototype.orchestrator.ProcessManagerProcessApp")
         assert "initial_state" in launcher._orchestrator_config
         assert "state_throttle_rules" in launcher._orchestrator_config
 

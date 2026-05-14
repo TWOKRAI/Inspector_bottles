@@ -3,6 +3,7 @@
 Универсальный виджет: не привязан к конкретным сущностям.
 Цвет определяется по строковому состоянию из настраиваемого color_map.
 """
+
 from __future__ import annotations
 
 from typing import ClassVar
@@ -53,7 +54,7 @@ class StatusIndicator(QWidget):
     #  Qt overrides                                                        #
     # ------------------------------------------------------------------ #
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         """Рисует закрашенный круг."""
         color_hex = self._color_map.get(self._state, self._color_map["unknown"])
         painter = QPainter(self)
@@ -65,8 +66,8 @@ class StatusIndicator(QWidget):
         painter.drawEllipse(margin, margin, self._size - 2 * margin, self._size - 2 * margin)
         painter.end()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(self._size, self._size)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(self._size, self._size)

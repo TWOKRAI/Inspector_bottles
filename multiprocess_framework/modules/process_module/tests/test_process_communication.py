@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Тесты для ProcessCommunication — send/receive через мок router."""
 
-import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
 from ..communication.process_communication import ProcessCommunication
 
@@ -119,6 +118,7 @@ class TestProcessCommunicationQueueStats:
 
     def test_queue_stats_with_queues(self):
         from multiprocessing import Queue
+
         q = Queue(maxsize=10)
         comm = ProcessCommunication("proc1", {"system": q}, None)
 

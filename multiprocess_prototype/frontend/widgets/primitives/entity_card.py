@@ -3,9 +3,10 @@
 Универсальный виджет для отображения любой сущности с состоянием.
 Не импортирует ничего из multiprocess_prototype.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -83,11 +84,7 @@ class EntityCard(QFrame):
             btn = QPushButton(act.label)
             btn.setEnabled(act.enabled)
             btn.setFixedWidth(80)
-            btn.clicked.connect(
-                lambda checked=False, aid=act.action_id: self.action_clicked.emit(
-                    self._entity_id, aid
-                )
-            )
+            btn.clicked.connect(lambda checked=False, aid=act.action_id: self.action_clicked.emit(self._entity_id, aid))
             actions_layout.addWidget(btn)
             self._action_buttons[act.action_id] = btn
         actions_layout.addStretch()

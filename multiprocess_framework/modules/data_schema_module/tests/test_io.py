@@ -9,6 +9,8 @@
     - registers_to_flat_dict / registers_from_flat_dict
     - Работа с реальным RegistersContainer
 """
+
+import importlib.util
 import json
 import unittest
 from typing import Any, Dict
@@ -32,6 +34,7 @@ from typing import Annotated
 # =============================================================================
 # Вспомогательные классы
 # =============================================================================
+
 
 class FakeRegisters:
     """Минимальный объект с model_dump_all / model_validate_all."""
@@ -67,6 +70,7 @@ class ControlRegisters(SchemaBase):
 # Тесты registers_to_dict / registers_from_dict
 # =============================================================================
 
+
 class TestRegistersToDictFromDict(unittest.TestCase):
     """Тесты экспорта/импорта в dict."""
 
@@ -95,10 +99,12 @@ class TestRegistersToDictFromDict(unittest.TestCase):
         self.assertEqual(r2.model_dump_all(), original)
 
     def test_to_dict_with_container(self):
-        container = RegistersContainer({
-            "sensor": SensorRegisters,
-            "control": ControlRegisters,
-        })
+        container = RegistersContainer(
+            {
+                "sensor": SensorRegisters,
+                "control": ControlRegisters,
+            }
+        )
         d = registers_to_dict(container)
         self.assertIn("sensor", d)
         self.assertIn("control", d)
@@ -108,6 +114,7 @@ class TestRegistersToDictFromDict(unittest.TestCase):
 # =============================================================================
 # Тесты registers_to_json / registers_from_json
 # =============================================================================
+
 
 class TestRegistersToJsonFromJson(unittest.TestCase):
     """Тесты экспорта/импорта в JSON."""
@@ -143,10 +150,12 @@ class TestRegistersToJsonFromJson(unittest.TestCase):
         self.assertEqual(r2.model_dump_all(), original)
 
     def test_json_round_trip_with_container(self):
-        container = RegistersContainer({
-            "sensor": SensorRegisters,
-            "control": ControlRegisters,
-        })
+        container = RegistersContainer(
+            {
+                "sensor": SensorRegisters,
+                "control": ControlRegisters,
+            }
+        )
         js = registers_to_json(container)
         parsed = json.loads(js)
         self.assertEqual(parsed["sensor"]["temperature"], 25.0)
@@ -157,15 +166,12 @@ class TestRegistersToJsonFromJson(unittest.TestCase):
 # Тесты registers_to_yaml / registers_from_yaml
 # =============================================================================
 
+
 class TestRegistersToYamlFromYaml(unittest.TestCase):
     """Тесты экспорта/импорта в YAML."""
 
     def setUp(self):
-        try:
-            import yaml
-            self.yaml_available = True
-        except ImportError:
-            self.yaml_available = False
+        self.yaml_available = importlib.util.find_spec("yaml") is not None
 
     def test_to_yaml_is_string(self):
         if not self.yaml_available:
@@ -194,6 +200,7 @@ class TestRegistersToYamlFromYaml(unittest.TestCase):
         if not self.yaml_available:
             self.skipTest("PyYAML не установлен")
         import yaml
+
         data = {"sensor": {"temperature": 40.0, "humidity": 90.0}}
         ys = yaml.dump(data)
         r = registers_from_yaml(ys, _fake_factory)
@@ -203,6 +210,7 @@ class TestRegistersToYamlFromYaml(unittest.TestCase):
 # =============================================================================
 # Тесты registers_to_flat_dict / registers_from_flat_dict
 # =============================================================================
+
 
 class TestRegistersFlatDict(unittest.TestCase):
     """Тесты плоского словаря."""
@@ -249,10 +257,12 @@ class TestRegistersFlatDict(unittest.TestCase):
         self.assertEqual(result["b"]["y"], 2)
 
     def test_flat_dict_with_container(self):
-        container = RegistersContainer({
-            "sensor": SensorRegisters,
-            "control": ControlRegisters,
-        })
+        container = RegistersContainer(
+            {
+                "sensor": SensorRegisters,
+                "control": ControlRegisters,
+            }
+        )
         flat = registers_to_flat_dict(container)
         self.assertIn("sensor.temperature", flat)
         self.assertIn("control.speed", flat)

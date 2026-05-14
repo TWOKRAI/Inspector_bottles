@@ -1,7 +1,6 @@
 """
 Unit-тесты для config_module.tools.merge — deep_merge и multi_merge.
 """
-import pytest
 
 from multiprocess_framework.modules.config_module.tools.merge import deep_merge, multi_merge
 
@@ -9,6 +8,7 @@ from multiprocess_framework.modules.config_module.tools.merge import deep_merge,
 # ---------------------------------------------------------------------------
 # deep_merge — базовые сценарии
 # ---------------------------------------------------------------------------
+
 
 def test_empty_overlay_returns_copy():
     base = {"a": 1}
@@ -47,6 +47,7 @@ def test_deep_nested_merge():
 # deep_merge — изоляция (deepcopy)
 # ---------------------------------------------------------------------------
 
+
 def test_copy_base_true_no_mutation():
     base = {"a": {"nested": [1, 2]}}
     overlay = {"a": {"nested": [3]}}
@@ -76,6 +77,7 @@ def test_overlay_values_are_deepcopied():
 # deep_merge — list_strategy
 # ---------------------------------------------------------------------------
 
+
 def test_list_replace_default():
     base = {"tags": ["a", "b"]}
     overlay = {"tags": ["c"]}
@@ -100,6 +102,7 @@ def test_list_append_nested():
 # ---------------------------------------------------------------------------
 # deep_merge — edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_overlay_dict_over_scalar():
     """Overlay dict заменяет scalar в base."""
@@ -130,6 +133,7 @@ def test_none_values_preserved():
 # ---------------------------------------------------------------------------
 # multi_merge
 # ---------------------------------------------------------------------------
+
 
 def test_multi_merge_basic():
     defaults = {"a": 1, "b": 2}

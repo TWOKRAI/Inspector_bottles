@@ -7,13 +7,14 @@
   - test_pagination_next     — кнопка «→» увеличивает offset на 100
   - test_detail_dialog_opens — двойной клик открывает _AuditDetailDialog
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import Qt
 
 from multiprocess_prototype.frontend.widgets.tabs.settings.administration.audit_log_panel import (
     AuditLogPanel,
@@ -197,9 +198,7 @@ class TestAuditLogPanelPaginationNext:
     def test_pagination_next_increases_offset(self, qtbot, mock_ctx, mock_storage):
         """После «→» offset увеличивается на 100."""
         # Возвращаем полную страницу, чтобы кнопка «→» была enabled
-        mock_storage.list_audit.return_value = [
-            _make_entry() for _ in range(100)
-        ]
+        mock_storage.list_audit.return_value = [_make_entry() for _ in range(100)]
 
         panel = AuditLogPanel(mock_ctx)
         qtbot.addWidget(panel)
@@ -212,9 +211,7 @@ class TestAuditLogPanelPaginationNext:
 
     def test_pagination_next_twice(self, qtbot, mock_ctx, mock_storage):
         """Два нажатия «→» → offset = 200."""
-        mock_storage.list_audit.return_value = [
-            _make_entry() for _ in range(100)
-        ]
+        mock_storage.list_audit.return_value = [_make_entry() for _ in range(100)]
 
         panel = AuditLogPanel(mock_ctx)
         qtbot.addWidget(panel)
@@ -226,9 +223,7 @@ class TestAuditLogPanelPaginationNext:
 
     def test_pagination_prev_decreases_offset(self, qtbot, mock_ctx, mock_storage):
         """После «←» offset уменьшается на 100 (не ниже 0)."""
-        mock_storage.list_audit.return_value = [
-            _make_entry() for _ in range(100)
-        ]
+        mock_storage.list_audit.return_value = [_make_entry() for _ in range(100)]
 
         panel = AuditLogPanel(mock_ctx)
         qtbot.addWidget(panel)
@@ -317,6 +312,7 @@ class TestAuditLogPanelDetailDialog:
 
         # Создаём item с невалидным row (не добавлен в таблицу)
         from PySide6.QtWidgets import QTableWidgetItem
+
         item = QTableWidgetItem("x")
         # row() вернёт -1 для item'а не в таблице → _on_row_double_clicked должен молча выйти
         panel._on_row_double_clicked(item)
@@ -331,9 +327,7 @@ class TestAuditLogPanelDetailDialog:
 class TestAuditLogPanelUserIdFilter:
     """ComboBox хранит user_id, а не username — фильтр передаёт правильное значение."""
 
-    def test_user_filter_passes_user_id_not_username(
-        self, qtbot, mock_storage, mock_auth_manager
-    ):
+    def test_user_filter_passes_user_id_not_username(self, qtbot, mock_storage, mock_auth_manager):
         """После выбора пользователя в ComboBox list_audit вызывается с user_id, не username."""
         # Настраиваем auth_manager с одним пользователем
         mock_auth_manager.list_users.return_value = [
@@ -359,9 +353,7 @@ class TestAuditLogPanelUserIdFilter:
         assert call_kwargs.get("user_id") == "u-alice"
         assert call_kwargs.get("user_id") != "alice"
 
-    def test_user_filter_all_passes_none(
-        self, qtbot, mock_storage, mock_auth_manager
-    ):
+    def test_user_filter_all_passes_none(self, qtbot, mock_storage, mock_auth_manager):
         """Выбор «Все» (индекс 0) → user_id=None в list_audit."""
         mock_auth_manager.list_users.return_value = [
             {"username": "alice", "user_id": "u-alice"},
@@ -400,6 +392,7 @@ class TestAuditDetailDialogEscapesHtml:
         qtbot.addWidget(dlg)
 
         from PySide6.QtWidgets import QLabel
+
         labels = dlg.findChildren(QLabel)
         all_text = " ".join(lbl.text() for lbl in labels)
 
@@ -424,6 +417,7 @@ class TestAuditDetailDialogEscapesHtml:
         qtbot.addWidget(dlg)
 
         from PySide6.QtWidgets import QLabel
+
         labels = dlg.findChildren(QLabel)
         all_text = " ".join(lbl.text() for lbl in labels)
 

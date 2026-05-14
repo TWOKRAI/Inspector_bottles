@@ -7,6 +7,7 @@ and SQLMeta nested class for rich table metadata.
 
 entity_to_row / row_to_entity via model_dump / model_validate.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -16,7 +17,6 @@ from pydantic_core import PydanticUndefined
 from sqlalchemy import Integer, String, Float, Boolean, DateTime, Date
 from sqlalchemy.sql.sqltypes import TypeEngine
 
-from Services.sql.interfaces import ISchemaMapper
 from Services.sql.adapters.sql_meta import extract_sql_meta
 
 try:

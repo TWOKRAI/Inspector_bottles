@@ -4,7 +4,6 @@ import queue
 import threading
 import time
 
-import pytest
 
 from multiprocess_framework.modules.process_module.generic.data_receiver import (
     DataReceiver,

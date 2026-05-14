@@ -4,9 +4,9 @@
 
 Покрывают: CRUD на tmp_path, atomic write (файл не повреждается при прерывании).
 """
+
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch

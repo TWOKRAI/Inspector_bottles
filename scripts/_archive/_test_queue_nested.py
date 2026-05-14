@@ -2,13 +2,14 @@
 Тест: Queue создаётся В mid_process (не в main), затем передаётся worker_a и worker_b.
 Это точно воспроизводит паттерн фреймворка.
 """
+
 import multiprocessing as mp
 import time
 import sys
 
 
 def worker_a(q_send, q_recv):
-    print(f"[A] started", flush=True)
+    print("[A] started", flush=True)
     time.sleep(0.3)
     q_send.put({"msg": "ping from A"})
     print("[A] sent ping", flush=True)
@@ -20,7 +21,7 @@ def worker_a(q_send, q_recv):
 
 
 def worker_b(q_send, q_recv):
-    print(f"[B] started", flush=True)
+    print("[B] started", flush=True)
     try:
         msg = q_recv.get(timeout=5)
         print(f"[B] got: {msg}", flush=True)

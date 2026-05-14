@@ -2,13 +2,22 @@
 """
 TwoLevelTreeWithToolbar — дерево двух уровней + панель кнопок (как TableWithToolbar).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base.touch_keyboard_config import TouchKeyboardConfig
-from multiprocess_framework.modules.frontend_module.core.qt_imports import QHBoxLayout, QPushButton, QVBoxLayout, QWidget, Signal
-from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import StructuredTwoLevelTreeWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+)
+from multiprocess_framework.modules.frontend_module.widgets.tables.structured_two_level_tree import (
+    StructuredTwoLevelTreeWidget,
+)
 
 
 class TwoLevelTreeWithToolbar(QWidget):

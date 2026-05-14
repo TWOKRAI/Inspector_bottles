@@ -1,4 +1,5 @@
 """Тесты ActionBus — шина действий с undo/redo и coalescing."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -223,7 +224,10 @@ class TestActionBusCallbacks:
         b, rm = bus
         b.register_handler("SET_VALUE", make_handler())
         called = []
-        cb = lambda: called.append(1)
+
+        def cb():
+            called.append(1)
+
         b.add_change_callback(cb)
         b.execute(make_action())
         assert len(called) == 1

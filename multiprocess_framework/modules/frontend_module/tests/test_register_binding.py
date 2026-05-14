@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Тесты RegisterBinding, RegisterFieldMeta, ResolvedMeta."""
-import pytest
 
 from multiprocess_framework.modules.frontend_module.schemas.register_binding import (
     RegisterBinding,
@@ -30,15 +29,17 @@ class TestRegisterFieldMeta:
         assert m.unit == ""
 
     def test_from_dict_full(self) -> None:
-        m = RegisterFieldMeta.from_dict({
-            "min": 10,
-            "max": 5000,
-            "default": 500,
-            "unit": "px",
-            "info": "Минимальная площадь",
-            "transfer_k": 1.0,
-            "round_k": 0,
-        })
+        m = RegisterFieldMeta.from_dict(
+            {
+                "min": 10,
+                "max": 5000,
+                "default": 500,
+                "unit": "px",
+                "info": "Минимальная площадь",
+                "transfer_k": 1.0,
+                "round_k": 0,
+            }
+        )
         assert m.min == 10
         assert m.max == 5000
         assert m.default == 500
@@ -58,13 +59,15 @@ class TestResolvedMeta:
         assert resolved.round_k == 0
 
     def test_merge_config_overrides(self) -> None:
-        meta = RegisterFieldMeta.from_dict({
-            "min": 10,
-            "max": 5000,
-            "default": 500,
-            "info": "Area",
-            "transfer_k": 0.5,
-        })
+        meta = RegisterFieldMeta.from_dict(
+            {
+                "min": 10,
+                "max": 5000,
+                "default": 500,
+                "info": "Area",
+                "transfer_k": 0.5,
+            }
+        )
         config = {"label": "Custom label", "transfer_k": 2.0}
         resolved = ResolvedMeta.merge(meta, config, "min_area")
         assert resolved.label == "Custom label"

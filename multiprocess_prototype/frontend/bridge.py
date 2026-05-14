@@ -3,12 +3,12 @@
 Использует QMetaObject.invokeMethod для гарантированной доставки
 из произвольного Python thread (не обязательно QThread) в Qt main thread.
 """
+
 from __future__ import annotations
 
-from functools import partial
 from typing import Callable
 
-from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 
 
 class DataReceiverBridge(QObject):

@@ -8,12 +8,15 @@
 `BindingConfig` и `RegisterAdapter` — эталонные реализации портов; другие типы допустимы
 структурно (duck typing), если поля/методы совпадают.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.frontend_module.schemas.register_binding import ResolvedMeta
+
+from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 T = TypeVar("T")
 
@@ -34,10 +37,7 @@ class IFieldBinding(Protocol):
 class IRegisterPort(Protocol):
     """Минимум методов регистра, который используют traits (реализация — `RegisterAdapter`)."""
 
-    def read(
-        self, register_name: str, field_name: str, index: Optional[int] = None
-    ) -> Any:
-        ...
+    def read(self, register_name: str, field_name: str, index: Optional[int] = None) -> Any: ...
 
     def write(
         self,
@@ -45,8 +45,7 @@ class IRegisterPort(Protocol):
         field_name: str,
         value: Any,
         index: Optional[int] = None,
-    ) -> tuple[bool, Optional[str]]:
-        ...
+    ) -> tuple[bool, Optional[str]]: ...
 
     def subscribe(
         self,
@@ -54,21 +53,17 @@ class IRegisterPort(Protocol):
         field_name: str,
         callback: Callable[[Any], None],
         index: Optional[int] = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def resolve_meta(
         self,
         register_name: str,
         field_name: str,
         config: Any,
-    ) -> Optional[ResolvedMeta]:
-        ...
+    ) -> Optional[ResolvedMeta]: ...
 
 
 # --- Минимум RegistersManager для адаптера регистра ---
-
-from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
 # Алиас для обратной совместимости; единый контракт для GUI (ADR-071).
 RegistersManagerLike = IRegistersManagerGui

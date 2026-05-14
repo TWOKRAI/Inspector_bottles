@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 from multiprocess_framework.modules.process_manager_module.process.process_manager_process import (
     ProcessManagerProcess,

@@ -6,7 +6,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..plugins.interfaces import IProcessServices
+    pass
 
 
 class ProcessHeartbeat:
@@ -73,9 +73,7 @@ class ProcessHeartbeat:
                 # Данные о воркерах для ProcessMonitor
                 # Dict at Boundary: get_all_workers_status() уже возвращает чистые dict
                 if self._services.worker_manager:
-                    get_status = getattr(
-                        self._services.worker_manager, "get_all_workers_status", None
-                    )
+                    get_status = getattr(self._services.worker_manager, "get_all_workers_status", None)
                     if get_status is not None:
                         try:
                             workers = get_status()

@@ -11,17 +11,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar
+from typing import Annotated
 from unittest.mock import MagicMock
 
 import pytest
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_framework.modules.data_schema_module import SchemaBase
-from multiprocess_framework.modules.process_module.plugins.base import ProcessModulePlugin
 from multiprocess_framework.modules.process_module.plugins.registry import PluginEntry
 
-from multiprocess_prototype.registers.field_info import FieldInfo, extract_fields
+from multiprocess_prototype.registers.field_info import extract_fields
 from multiprocess_prototype.registers.manager import RegistersManagerV2
 
 
@@ -30,12 +29,14 @@ from multiprocess_prototype.registers.manager import RegistersManagerV2
 
 class _TestRegA(SchemaBase):
     """Register A — с FieldMeta."""
+
     threshold: Annotated[int, FieldMeta("Порог", min=0, max=100, unit="%")] = 50
     enabled: Annotated[bool, FieldMeta("Включён")] = True
 
 
 class _TestRegB(SchemaBase):
     """Register B — для второго плагина."""
+
     gain: Annotated[float, FieldMeta("Усиление", min=0.0, max=10.0)] = 1.0
     mode: Annotated[str, FieldMeta("Режим")] = "auto"
 
@@ -66,11 +67,13 @@ def _make_entry(name: str, category: str, reg_classes: list) -> PluginEntry:
 @pytest.fixture
 def registry_with_plugins() -> _MockRegistry:
     """Registry с двумя плагинами."""
-    return _MockRegistry([
-        _make_entry("plugin_a", "processing", [_TestRegA]),
-        _make_entry("plugin_b", "source", [_TestRegB]),
-        _make_entry("plugin_c", "lifecycle", []),  # без register
-    ])
+    return _MockRegistry(
+        [
+            _make_entry("plugin_a", "processing", [_TestRegA]),
+            _make_entry("plugin_b", "source", [_TestRegB]),
+            _make_entry("plugin_c", "lifecycle", []),  # без register
+        ]
+    )
 
 
 @pytest.fixture
@@ -134,7 +137,8 @@ class TestFromTopology:
     def test_builds_with_yaml_overrides(self, topology_dict, registry_with_plugins):
         """Строит менеджер с YAML overrides."""
         mgr = RegistersManagerV2.from_topology(
-            topology_dict, plugin_registry=registry_with_plugins,
+            topology_dict,
+            plugin_registry=registry_with_plugins,
         )
         reg_a = mgr.get_register("plugin_a")
         assert reg_a is not None
@@ -143,7 +147,8 @@ class TestFromTopology:
     def test_multiple_processes(self, topology_dict, registry_with_plugins):
         """Плагины из разных процессов."""
         mgr = RegistersManagerV2.from_topology(
-            topology_dict, plugin_registry=registry_with_plugins,
+            topology_dict,
+            plugin_registry=registry_with_plugins,
         )
         reg_b = mgr.get_register("plugin_b")
         assert reg_b.gain == 2.5

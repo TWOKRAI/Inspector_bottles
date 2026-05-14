@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-import pytest
 
 from multiprocess_prototype.config.schemas import SystemConfig
 from multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io import (

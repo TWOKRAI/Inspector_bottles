@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 
 from multiprocess_framework.modules.state_store_module.middleware.throttle import ThrottleMiddleware
 
@@ -69,9 +68,7 @@ class TestBlockedPath:
         mw = ThrottleMiddleware({"**.state.last_frame_seq": 0})
         context: dict = {}
 
-        proceed, value = mw.before_set(
-            "cameras.0.state.last_frame_seq", 42, SOURCE, context
-        )
+        proceed, value = mw.before_set("cameras.0.state.last_frame_seq", 42, SOURCE, context)
 
         assert proceed is False
         assert value == 42
@@ -83,9 +80,7 @@ class TestBlockedPath:
 
         for i in range(10):
             context: dict = {}
-            proceed, _ = mw.before_set(
-                "cameras.0.state.last_frame_seq", i, SOURCE, context
-            )
+            proceed, _ = mw.before_set("cameras.0.state.last_frame_seq", i, SOURCE, context)
             assert proceed is False
 
 
@@ -114,9 +109,7 @@ class TestThrottleInterval:
 
         with patch("time.monotonic", return_value=100.1):
             context: dict = {}
-            proceed, _ = mw.before_set(
-                "cameras.0.state.actual_fps", 26.0, SOURCE, context
-            )
+            proceed, _ = mw.before_set("cameras.0.state.actual_fps", 26.0, SOURCE, context)
 
         assert proceed is False
         assert context.get("rejection_reason") == "throttled"
@@ -131,9 +124,7 @@ class TestThrottleInterval:
         # Прошло ровно 1.0 сек — должно пропустить
         with patch("time.monotonic", return_value=101.0):
             context: dict = {}
-            proceed, value = mw.before_set(
-                "cameras.0.state.actual_fps", 27.0, SOURCE, context
-            )
+            proceed, value = mw.before_set("cameras.0.state.actual_fps", 27.0, SOURCE, context)
 
         assert proceed is True
         assert value == 27.0
@@ -148,9 +139,7 @@ class TestThrottleInterval:
 
         with patch("time.monotonic", return_value=201.99):
             context: dict = {}
-            proceed, _ = mw.before_set(
-                "cameras.0.state.actual_fps", 30.0, SOURCE, context
-            )
+            proceed, _ = mw.before_set("cameras.0.state.actual_fps", 30.0, SOURCE, context)
 
         assert proceed is False
 
@@ -284,9 +273,7 @@ class TestGlobMatching:
         context: dict = {}
 
         with patch("time.monotonic", return_value=100.0):
-            proceed, _ = mw.before_set(
-                "cameras.0.state.actual_fps", 30.0, SOURCE, context
-            )
+            proceed, _ = mw.before_set("cameras.0.state.actual_fps", 30.0, SOURCE, context)
 
         assert proceed is True
 
@@ -295,9 +282,7 @@ class TestGlobMatching:
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         context: dict = {}
 
-        proceed, _ = mw.before_set(
-            "cameras.0.state.drops_count", 5, SOURCE, context
-        )
+        proceed, _ = mw.before_set("cameras.0.state.drops_count", 5, SOURCE, context)
 
         assert proceed is True  # Нет правила → пропускаем
 
@@ -311,10 +296,12 @@ class TestFirstMatchingRule:
     def test_first_rule_wins(self):
         """Первое матчащее правило имеет приоритет над остальными."""
         # Оба правила матчат путь, но первое имеет интервал 5.0
-        mw = ThrottleMiddleware({
-            "cameras.0.state.actual_fps": 5.0,
-            "**.state.actual_fps": 1.0,
-        })
+        mw = ThrottleMiddleware(
+            {
+                "cameras.0.state.actual_fps": 5.0,
+                "**.state.actual_fps": 1.0,
+            }
+        )
         path = "cameras.0.state.actual_fps"
 
         with patch("time.monotonic", return_value=100.0):
@@ -329,10 +316,12 @@ class TestFirstMatchingRule:
 
     def test_blocked_rule_before_interval_rule(self):
         """Правило с interval=0 перед правилом с interval>0: блокирует."""
-        mw = ThrottleMiddleware({
-            "cameras.**.state.actual_fps": 0,
-            "**.state.actual_fps": 1.0,
-        })
+        mw = ThrottleMiddleware(
+            {
+                "cameras.**.state.actual_fps": 0,
+                "**.state.actual_fps": 1.0,
+            }
+        )
         path = "cameras.0.state.actual_fps"
         context: dict = {}
 
@@ -392,14 +381,14 @@ class TestRejectionContext:
 class TestBeforeMergeNotAffected:
     def test_before_merge_always_passes(self):
         """ThrottleMiddleware не переопределяет before_merge — всегда пропускает."""
-        mw = ThrottleMiddleware({
-            "cameras.0.state.actual_fps": 0,  # полная блокировка для set
-        })
+        mw = ThrottleMiddleware(
+            {
+                "cameras.0.state.actual_fps": 0,  # полная блокировка для set
+            }
+        )
         context: dict = {}
 
-        proceed, data = mw.before_merge(
-            "cameras.0.state", {"actual_fps": 25.0}, SOURCE, context
-        )
+        proceed, data = mw.before_merge("cameras.0.state", {"actual_fps": 25.0}, SOURCE, context)
 
         assert proceed is True
         assert data == {"actual_fps": 25.0}

@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты для core/thread_config.py."""
 
-import pytest
-
 from ..core.thread_config import ThreadConfig
 from ..types import ThreadPriority, WorkerType, ExecutionMode
 
@@ -32,8 +30,12 @@ class TestThreadConfigToDict:
         cfg = ThreadConfig()
         d = cfg.to_dict()
         assert set(d.keys()) == {
-            "priority", "restart_on_failure", "max_restarts",
-            "dependencies", "worker_type", "execution_mode",
+            "priority",
+            "restart_on_failure",
+            "max_restarts",
+            "dependencies",
+            "worker_type",
+            "execution_mode",
         }
 
     def test_to_dict_values(self):

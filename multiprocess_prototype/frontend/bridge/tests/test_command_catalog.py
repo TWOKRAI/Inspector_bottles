@@ -16,8 +16,6 @@ import pytest
 
 from multiprocess_prototype.frontend.bridge.command_catalog import (
     CommandCatalog,
-    PluginCommands,
-    ResolvedCommand,
 )
 
 
@@ -133,12 +131,14 @@ def catalog(
 ) -> CommandCatalog:
     """Каталог из 3 плагинов в topology + 1 orphan (не в topology)."""
     registry = MockRegistry([color_mask_entry, capture_entry, grayscale_entry, orphan_entry])
-    cmap = MockConnectionMap({
-        "color_mask": "processor_0",
-        "capture": "camera_0",
-        "grayscale": "processor_0",
-        # orphan_plugin НЕ в маппинге
-    })
+    cmap = MockConnectionMap(
+        {
+            "color_mask": "processor_0",
+            "capture": "camera_0",
+            "grayscale": "processor_0",
+            # orphan_plugin НЕ в маппинге
+        }
+    )
     return CommandCatalog.from_registry_and_map(registry, cmap)
 
 

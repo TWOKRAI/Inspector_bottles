@@ -1,4 +1,5 @@
 """Тесты DagRunnable — исполнитель DAG с ветвлениями."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -15,7 +16,6 @@ from .conftest import (
     FakeNode,
     PassthroughOperation,
     RunnableStep,
-    make_step,
 )
 
 
@@ -111,10 +111,13 @@ class TestDagRunnablePortWiring:
     def test_node_without_inputs_gets_original_frame(self, frame):
         class FrameCapture:
             received = None
+
             def execute(self, data, ctx):
                 FrameCapture.received = data
                 return data
-            def configure(self, p): pass
+
+            def configure(self, p):
+                pass
 
         op = FrameCapture()
         step = make_dag_step("n1", op, inputs=[])

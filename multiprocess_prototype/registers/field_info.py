@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
@@ -67,13 +67,15 @@ def extract_fields(plugin_name: str, register_cls: type, category: str = "") -> 
                 meta = m
                 break
 
-        result.append(FieldInfo(
-            plugin_name=plugin_name,
-            field_name=name,
-            field_type=field_info.annotation or type(None),
-            default=field_info.default,
-            meta=meta,
-            category=category,
-        ))
+        result.append(
+            FieldInfo(
+                plugin_name=plugin_name,
+                field_name=name,
+                field_type=field_info.annotation or type(None),
+                default=field_info.default,
+                meta=meta,
+                category=category,
+            )
+        )
 
     return result

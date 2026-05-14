@@ -92,9 +92,9 @@ warnings = []
 
 
 def check_header(text: str) -> None:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {text}")
-    print('='*60)
+    print("=" * 60)
 
 
 def check_imports() -> None:
@@ -243,7 +243,7 @@ def check_adr_sync() -> None:
 
 
 def main() -> int:
-    print(f"\nMULTIPROCESS FRAMEWORK — Валидация")
+    print("\nMULTIPROCESS FRAMEWORK — Валидация")
     print(f"Base: {BASE}")
 
     check_imports()
@@ -255,23 +255,23 @@ def main() -> int:
     check_services()
     check_adr_sync()
 
-    print(f"\n{'='*60}")
-    print(f"  ИТОГ")
-    print('='*60)
+    print(f"\n{'=' * 60}")
+    print("  ИТОГ")
+    print("=" * 60)
 
     if errors:
         print(f"\n  ОШИБОК: {len(errors)}")
         for e in errors:
             print(f"    {e.strip()}")
     else:
-        print(f"\n  Ошибок нет!")
+        print("\n  Ошибок нет!")
 
     if warnings:
         print(f"\n  ПРЕДУПРЕЖДЕНИЙ: {len(warnings)}")
         for w in warnings:
             print(f"    {w.strip()}")
     else:
-        print(f"  Предупреждений нет!")
+        print("  Предупреждений нет!")
 
     print()
     return 1 if errors else 0
