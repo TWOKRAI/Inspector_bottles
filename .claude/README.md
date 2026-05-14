@@ -7,25 +7,50 @@
 
 ---
 
+## Документация
+
+| Файл | Что внутри | Когда читать |
+|------|-----------|--------------|
+| [`BOOTSTRAP.md`](BOOTSTRAP.md) | **Полная установка стека в новый проект** (системные пакеты, Python, MCP, VS Code) | Создаёшь новый проект |
+| [`STACK.md`](STACK.md) | Описание всех инструментов: что делает, зачем нужен, как использовать | Хочешь понять стек |
+| [`VSCODE_EXTENSIONS.md`](VSCODE_EXTENSIONS.md) | VS Code расширения по категориям + рекомендуемые `settings.json` | Настраиваешь IDE |
+| [`CLAUDE-SETUP.md`](CLAUDE-SETUP.md) | Краткий гайд по `.claude/` (только Claude Code часть) | Только MCP / агенты |
+| [`templates/README.md`](templates/README.md) | Готовые шаблоны конфигов (pyproject, pre-commit, Makefile, ...) | Копируешь в новый проект |
+| [`mcp/PORTABLE.md`](mcp/PORTABLE.md) | Детальный перенос MCP-серверов | Перенос MCP вручную |
+
+---
+
 ## Структура
 
 ```
 .claude/
+├── BOOTSTRAP.md           # ★ Главный гайд установки стека (новый)
+├── STACK.md               # ★ Описание всех инструментов (новый)
+├── VSCODE_EXTENSIONS.md   # ★ VS Code расширения (новый)
+├── CLAUDE-SETUP.md        # Краткий гайд по .claude/
 ├── CLAUDE.md              # Режимы + language policy
+├── README.md              # Этот файл
 ├── settings.json          # Permissions, hooks, statusLine
 ├── settings.local.json    # Локальный override (gitignored)
 ├── agents/company/        # 10 агентов (manager, developer, reviewer, investigator...)
-├── commands/              # 35 slash-команд по категориям
+├── commands/              # 37 slash-команд по категориям
 │   ├── dev/               #   цикл разработки (8)
-│   ├── quality/           #   метрики и анализ качества (14)
+│   ├── quality/           #   метрики и анализ качества (15) — +arch-review
 │   ├── analysis/          #   инспекция кода (3)
 │   ├── spec/              #   спецификации (2)
-│   ├── infra/             #   инфраструктура (5)
+│   ├── infra/             #   инфраструктура (6) — +diagrams
 │   └── team/              #   команда и документация (4)
 ├── modes/                 # dev.md, spec.md
 ├── hooks/                 # SessionStart / PreToolUse / PostToolUse / PostCompact
 ├── skills/                # (расширяемо, kb-* удалены)
-├── mcp/                   # MCP-инфраструктура (qex, sentrux)
+├── mcp/                   # MCP-инфраструктура (qex, sentrux, context7)
+├── templates/             # ★ Шаблоны для нового проекта (новое)
+│   ├── pyproject.template.toml
+│   ├── pre-commit-config.template.yaml
+│   ├── Makefile.template
+│   ├── gitignore.template
+│   ├── sentrux-rules.template.toml
+│   └── claude-md.template.md
 ├── memory/                # Git-tracked project memory
 └── platforms/             # settings.local шаблоны (macOS/Windows)
 ```

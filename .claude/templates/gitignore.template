@@ -1,0 +1,62 @@
+# .gitignore — шаблон для Python-проекта
+# Адаптировать: добавить специфичные для проекта правила
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+
+# ── Virtual environments ──
+.venv/
+.env
+env/
+venv/
+ENV/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── OS ──
+.DS_Store
+**/.DS_Store
+*.lnk
+
+# ── Testing ──
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+
+# ── Build ──
+build/
+dist/
+*.egg-info/
+
+# ── Logs ──
+*.log
+logs/
+**/logs/
+
+# ── Claude Code (локальные настройки) ──
+CLAUDE.local.md
+.claude/CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.mcp.json
+
+# ── Сгенерированные диаграммы (регенерируются: make diagrams) ──
+docs/diagrams/classes/*.puml
+docs/diagrams/deps/*.svg
+# Ручные диаграммы (.mmd, .drawio) НЕ игнорируются — они в git
+
+# ── ML / большие бинарники (если применимо) ──
+# *.pt
+# *.onnx
+# *.bin
+# **/Models/

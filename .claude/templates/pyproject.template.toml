@@ -1,0 +1,70 @@
+# pyproject.toml — шаблон для нового Python-проекта
+# Адаптировать: name, description, dependencies, testpaths, mypy/coverage source
+
+[project]
+name = "PROJECT_NAME"                           # ← замени
+version = "0.1.0"
+description = "PROJECT_DESCRIPTION"             # ← замени
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Базовые — добавь под свой стек
+    "pydantic>=2.13",
+    "pydantic-settings>=2.6",
+    "loguru>=0.7",
+    "PyYAML>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",       # coverage-отчёты
+    "mypy>=1.15",            # gradual type checking
+    "bandit>=1.9",           # security scanning
+    "pre-commit>=4.6",       # фреймворк хуков
+]
+diagrams = [
+    "pylint>=3.3",           # pyreverse → UML PlantUML
+    "pydeps>=3.0",           # граф зависимостей (требует Graphviz)
+]
+
+# ── pytest ──
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]                           # ← адаптируй
+norecursedirs = [".git", "__pycache__", ".venv"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+# ── ruff (lint + format) ──
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]                             # базовый набор, расширяй по желанию
+
+# ── mypy (type checking, gradual) ──
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true                   # gradual
+exclude = ["tests", "build", "dist"]
+
+# ── bandit (security) ──
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101"]                                # assert допустим в не-prod
+
+# ── coverage ──
+[tool.coverage.run]
+source = ["PROJECT_NAME"]                       # ← замени на главный пакет
+omit = ["*/tests/*", "*/test_*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+# fail_under = 60                               # включить когда покрытие будет 60%+
