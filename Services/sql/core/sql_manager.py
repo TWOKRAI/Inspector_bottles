@@ -6,6 +6,7 @@ SQLManager — менеджер доступа к БД.
 Интеграция: logger_module (_log_*), error_module (_track_error), statistics_module (_record_timing).
 Поддерживает execute, query, uow, get_repository, execute_command.
 """
+
 from __future__ import annotations
 
 import time
@@ -106,13 +107,11 @@ class SQLManager(BaseManager, ObservableMixin):
             self._record_timing("db.execute.duration", time.perf_counter() - start, {"op": "execute"})
             return rows
         except Exception as e:
-            self._record_timing("db.execute.duration", time.perf_counter() - start, {"op": "execute", "error": True})
+            self._record_timing("db.execute.duration", time.perf_counter() - start, {"op": "execute", "error": "true"})
             self._track_error(e, {"context": "execute", "sql": sql[:100], "module": "sql_module"})
             raise
 
-    def query(
-        self, sql: str, params: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+    def query(self, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Выполнить SELECT."""
         if not self._adapter:
             raise RuntimeError("SQLManager not initialized")
@@ -122,7 +121,7 @@ class SQLManager(BaseManager, ObservableMixin):
             self._record_timing("db.query.duration", time.perf_counter() - start, {"op": "query"})
             return data
         except Exception as e:
-            self._record_timing("db.query.duration", time.perf_counter() - start, {"op": "query", "error": True})
+            self._record_timing("db.query.duration", time.perf_counter() - start, {"op": "query", "error": "true"})
             self._track_error(e, {"context": "query", "sql": sql[:100], "module": "sql_module"})
             raise
 
@@ -147,7 +146,8 @@ class SQLManager(BaseManager, ObservableMixin):
         """
         self._validate_identifier(table)
         self._validate_identifier(order_by)
-        sql = f'SELECT * FROM "{table}" ORDER BY "{order_by}"'
+        # table/order_by прошли _validate_identifier; LIMIT/OFFSET идут как bind-параметры
+        sql = f'SELECT * FROM "{table}" ORDER BY "{order_by}"'  # nosec B608
         params: Dict[str, Any] = {}
         if limit is not None:
             sql += " LIMIT :limit"
@@ -179,6 +179,8 @@ class SQLManager(BaseManager, ObservableMixin):
     ) -> IRepository[Any, Any]:
         """Получить репозиторий по классу схемы."""
         if schema_class not in self._repositories:
+            if not self._adapter:
+                raise RuntimeError("SQLManager not initialized")
             self._repositories[schema_class] = GenericRepository(
                 self._adapter,
                 schema_class,
@@ -254,7 +256,8 @@ class SQLManager(BaseManager, ObservableMixin):
     @staticmethod
     def _validate_identifier(name: str) -> str:
         import re
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
             raise ValueError(f"Invalid SQL identifier: {name!r}")
         return name
 
@@ -277,18 +280,18 @@ class SQLManager(BaseManager, ObservableMixin):
             if command == "db.query":
                 from Services.sql.commands import DBQueryCommand
 
-                validated = DBQueryCommand.model_validate(cmd_flat)
-                return self._handle_query(validated)
+                query_cmd = DBQueryCommand.model_validate(cmd_flat)
+                return self._handle_query(query_cmd)
             if command == "db.execute":
                 from Services.sql.commands import DBExecuteCommand
 
-                validated = DBExecuteCommand.model_validate(cmd_flat)
-                return self._handle_execute(validated)
+                execute_cmd = DBExecuteCommand.model_validate(cmd_flat)
+                return self._handle_execute(execute_cmd)
             if command == "db.insert":
                 from Services.sql.commands import DBInsertCommand
 
-                validated = DBInsertCommand.model_validate(cmd_flat)
-                return self._handle_insert(validated)
+                insert_cmd = DBInsertCommand.model_validate(cmd_flat)
+                return self._handle_insert(insert_cmd)
             return {"status": "error", "reason": f"unknown command: {command}"}
         except Exception as e:
             self._track_error(e, {"context": "execute_command", "module": "sql_module"})
@@ -310,6 +313,7 @@ class SQLManager(BaseManager, ObservableMixin):
             self._validate_identifier(key)
         cols = ", ".join(f'"{k}"' for k in data.keys())
         placeholders = ", ".join(f":{k}" for k in data.keys())
-        sql = f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders})'
+        # table и все keys прошли _validate_identifier; data биндится через :name
+        sql = f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders})'  # nosec B608
         rows = self.execute(sql, data)
         return {"status": "success", "rows": rows}
