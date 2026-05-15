@@ -210,11 +210,11 @@ view → presenter → form_ctx.write(binding, value)
 **Discovery findings:** инфраструктура `FieldRouting.process_targets` есть в FW (8 тестов в `test_dispatch_routing.py`), но **`TopologyBridge.on_field_set` НЕ делает fan-out** — [`CommandCatalog.resolve_field_command`](multiprocess_prototype/frontend/bridge/command_catalog.py#L147) возвращает `ResolvedCommand(process_name=...)` (один target). GUI-мост шлёт только в один процесс. Это **разрыв контракта** — схема обещает multi-target, мост не выполняет.
 
 **Делаем:**
-- [ ] Расширить `ResolvedCommand`: `process_names: tuple[str, ...]` вместо `process_name: str` (alias `process_name` для backward-compat ← deprecated).
-- [ ] `CommandCatalog.resolve_field_command` — читать `FieldRouting.process_targets` из meta. Если `process_targets` непусто → `process_names=process_targets`; иначе → `(pc.process_name,)` (current behaviour для single-target).
-- [ ] `TopologyBridge.on_field_set` — цикл `for proc in resolved.process_names: sender.send_field_command(proc, ...)`. Возвращаемое значение — `True` если **все** отправки успешны.
-- [ ] Регрессионный тест: `pilot_widgets.broadcast_flag` (новое поле с `process_targets=("pilot_a","pilot_b")`) → `bridge.on_field_set` → 2 вызова `sender.send_field_command`.
-- [ ] Добавить поле `broadcast_flag` в `Plugins/utility/pilot_widgets/registers.py` (опциональное, для smoke).
+- [x] Расширить `ResolvedCommand`: `process_names: tuple[str, ...]` вместо `process_name: str` (alias `process_name` для backward-compat ← deprecated).
+- [x] `CommandCatalog.resolve_field_command` — читать `FieldRouting.process_targets` из meta. Если `process_targets` непусто → `process_names=process_targets`; иначе → `(pc.process_name,)` (current behaviour для single-target).
+- [x] `TopologyBridge.on_field_set` — цикл `for proc in resolved.process_names: sender.send_field_command(proc, ...)`. Возвращаемое значение — `True` если **все** отправки успешны.
+- [x] Регрессионный тест: `pilot_widgets.broadcast_flag` (новое поле с `process_targets=("pilot_a","pilot_b")`) → `bridge.on_field_set` → 2 вызова `sender.send_field_command`.
+- [x] Добавить поле `broadcast_flag` в `Plugins/utility/pilot_widgets/registers.py` (опциональное, для smoke).
 - [ ] Smoke (manual): toggle через GUI → 2 IPC-сообщения в логах router_module.
 
 **Коммит:** `feat(bridge): multi-target fan-out по FieldRouting.process_targets`
@@ -223,17 +223,22 @@ view → presenter → form_ctx.write(binding, value)
 
 ---
 
-### H. Удалить legacy путь в `_build_bool`
+### H. Удалить legacy путь в `_build_bool` — **DEFERRED → Phase 2.6**
 
-**Делаем:**
-- [ ] `_build_bool(field_info, parent, form_ctx)` — `form_ctx` обязательный.
-- [ ] Удалить legacy QCheckBox-ветку и `_build_bool_binding_aware` (растворить в `_build_bool`).
-- [ ] Все callers `CardsFieldFactory.create` — передают `form_ctx` (после F они и так все передают).
-- [ ] Удалить `DeprecationWarning`-TODO в комментариях.
+**Обоснование переноса (2026-05-15):** `_build_bool` сейчас `if form_ctx is not None → binding-aware, else → QCheckBox legacy`. Legacy ветка используется **5+ callers** в прототипе, которые НЕ имеют ActionBus/plugin binding:
+- `InspectorPanel` (pipeline tab — inspector params)
+- `ServicesTab` (services config)
+- `SettingsSystem section` (GUI theme/settings)
+- `form_builder` (generic form builder)
+- yaml_io / другие
 
-**Коммит:** `refactor(forms): _build_bool без dual-mode, form_ctx обязательный`
+Эти callers — не plugin-формы; они рисуют конфиги без binding на регистры плагинов. Удаление legacy пути сломает их.
 
-**Слоёв убрали:** if-branch (10 LOC), DeprecationWarning TODO.
+**Условие активации Task H:** после перевода всех 5+ callers на FormContext (это Phase 2.1-2.6 — миграция оставшихся builders на framework-фасады).
+
+**Что НЕ блокируется:** B (multi-target) и G (RM merge) не зависят от H — продолжаем без H.
+
+**Не отменено, только отложено.**
 
 ---
 
@@ -244,7 +249,7 @@ view → presenter → form_ctx.write(binding, value)
 - [ ] **Прокси-мост удалён**, ActionBus передаётся явно
 - [ ] `FieldInfo` либо read-only view, либо растворён
 - [ ] `RegistersManager` единый, без V2-wrapper
-- [ ] Legacy путь в `_build_bool` удалён
+- [DEFERRED] Legacy путь в `_build_bool` удалён → Phase 2.6 (после миграции остальных callers)
 - [ ] Multi-target fan-out verified тестом
 - [ ] **Линии кода:** должно стать **меньше**, не больше (delta LOC < 0)
 - [ ] `python scripts/validate.py`, `python scripts/run_framework_tests.py`, factory-tests — зелёные

@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from multiprocess_prototype.frontend.bridge.command_catalog import ResolvedCommand
 from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
 
 
@@ -26,6 +27,11 @@ class MockResolvedCommand:
     process_name: str
     command_name: str
     plugin_name: str
+
+    @property
+    def process_names(self) -> tuple[str, ...]:
+        """Совместимость с ResolvedCommand.process_names для fan-out цикла в bridge."""
+        return (self.process_name,) if self.process_name else ()
 
 
 @dataclass(frozen=True)
@@ -394,3 +400,97 @@ class TestTopologyChanged:
 class TestProperties:
     def test_is_connected_default(self, bridge: TopologyBridge) -> None:
         assert bridge.is_connected is True
+
+
+# --- Multi-target fan-out ---
+
+
+class TestMultiTargetFanOut:
+    """Тесты fan-out по FieldRouting.process_targets."""
+
+    def test_fanout_calls_sender_for_each_target(
+        self,
+        sender: MockSender,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        holder: MockTopologyHolder,
+    ) -> None:
+        """FieldRouting.process_targets → bridge шлёт команду в каждый target.
+
+        Регрессионный тест: одно GUI-изменение → N IPC-сообщений (fan-out).
+        """
+        # ResolvedCommand с двумя targets
+        multi_resolved = ResolvedCommand(
+            process_names=("pilot_a", "pilot_b"),
+            command_name="set_broadcast_flag",
+            plugin_name="pilot_widgets",
+        )
+        catalog = MockCatalog(
+            field_resolves={
+                ("pilot_widgets", "broadcast_flag"): multi_resolved,
+            }
+        )
+        bridge = TopologyBridge(sender, catalog, validator, rm, holder)
+
+        ok = bridge.on_field_set("pilot_widgets", "broadcast_flag", True)
+
+        assert ok is True
+        # Fan-out: ровно два вызова sender.send_field_command
+        assert len(sender.field_commands) == 2
+        targets = {cmd[0] for cmd in sender.field_commands}
+        assert targets == {"pilot_a", "pilot_b"}
+
+    def test_fanout_single_target_unchanged(
+        self,
+        bridge: TopologyBridge,
+        sender: MockSender,
+    ) -> None:
+        """Одиночный target (без process_targets) — поведение не изменилось."""
+        ok = bridge.on_field_set("color_mask", "h_min", 90)
+
+        assert ok is True
+        assert len(sender.field_commands) == 1
+        assert sender.field_commands[0][0] == "processor_0"
+
+    def test_fanout_validation_fail_no_sends(
+        self,
+        sender: MockSender,
+        rm: MockRegistersManager,
+        holder: MockTopologyHolder,
+    ) -> None:
+        """Если валидация провалена — fan-out не происходит ни для одного target."""
+        multi_resolved = ResolvedCommand(
+            process_names=("pilot_a", "pilot_b"),
+            command_name="set_broadcast_flag",
+            plugin_name="pilot_widgets",
+        )
+        catalog = MockCatalog(
+            field_resolves={
+                ("pilot_widgets", "broadcast_flag"): multi_resolved,
+            }
+        )
+        validator = MockValidator(field_results={"pilot_widgets.broadcast_flag": MockValidationResult.fail("denied")})
+        bridge = TopologyBridge(sender, catalog, validator, rm, holder)
+
+        ok = bridge.on_field_set("pilot_widgets", "broadcast_flag", True)
+
+        assert ok is False
+        assert len(sender.field_commands) == 0
+
+    def test_resolved_command_process_name_backward_compat(self) -> None:
+        """ResolvedCommand.process_name property возвращает первый элемент process_names."""
+        cmd = ResolvedCommand(
+            process_names=("proc_a", "proc_b"),
+            command_name="set_config",
+            plugin_name="my_plugin",
+        )
+        assert cmd.process_name == "proc_a"
+
+    def test_resolved_command_empty_process_names(self) -> None:
+        """ResolvedCommand.process_name для пустого tuple → пустая строка."""
+        cmd = ResolvedCommand(
+            process_names=(),
+            command_name="set_config",
+            plugin_name="my_plugin",
+        )
+        assert cmd.process_name == ""

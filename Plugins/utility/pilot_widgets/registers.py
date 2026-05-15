@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
+    FieldRouting,
     SchemaBase,
     register_schema,
 )
@@ -181,5 +182,22 @@ class PilotWidgetsRegisters(SchemaBase):
             info="Требуется уровень доступа 5+ — UI должен быть disabled при user_level<5",
             widget="checkbox",
             access_level=5,
+        ),
+    ] = False
+
+    # -------------------------------------------------------------------------
+    # 13. Multi-target smoke — broadcast_flag (fan-out в pilot_a + pilot_b)
+    # -------------------------------------------------------------------------
+    broadcast_flag: Annotated[
+        bool,
+        FieldMeta(
+            "Broadcast flag",
+            info=(
+                "Smoke multi-target: при изменении → fan-out в 2 fake процесса (для теста). "
+                "pilot_a и pilot_b — фиктивные targets; bridge попытается отправить, "
+                "sender выдаст warning о неизвестном target — это ожидаемо."
+            ),
+            widget="checkbox",
+            routing=FieldRouting(channel="control_pilot", process_targets=("pilot_a", "pilot_b")),
         ),
     ] = False

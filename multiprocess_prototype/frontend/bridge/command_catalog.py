@@ -37,11 +37,23 @@ class IConnectionMap(Protocol):
 # --- Результаты ---
 @dataclass(frozen=True)
 class ResolvedCommand:
-    """Результат resolve — куда и какую команду отправить."""
+    """Результат resolve — куда и какую команду отправить.
 
-    process_name: str
+    Основное поле: process_names — tuple всех целевых процессов.
+    Backward-compat: process_name property возвращает первый target.
+    """
+
+    process_names: tuple[str, ...]
     command_name: str
     plugin_name: str
+
+    @property
+    def process_name(self) -> str:
+        """Первый target для backward-compat.
+
+        DEPRECATED: используй process_names для поддержки multi-target fan-out.
+        """
+        return self.process_names[0] if self.process_names else ""
 
 
 @dataclass
@@ -53,6 +65,10 @@ class PluginCommands:
     category: str
     commands: dict[str, str] = field(default_factory=dict)
     register_fields: list[str] = field(default_factory=list)
+    # Кеш маршрутизации: field_name → tuple process_targets.
+    # Заполняется из FieldMeta.routing["process_targets"] при построении каталога.
+    # Используется в resolve_field_command для поддержки multi-target fan-out.
+    field_routing: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def has_commands(self) -> bool:
@@ -103,12 +119,22 @@ class CommandCatalog:
             plugin_cls = entry.plugin_class
             commands: dict[str, str] = dict(getattr(plugin_cls, "commands", {}) or {})
 
-            # Получаем имена полей из register_classes
+            # Получаем имена полей из register_classes и кешируем field_routing
             register_fields: list[str] = []
+            field_routing: dict[str, tuple[str, ...]] = {}
             for rc in getattr(entry, "register_classes", []):
                 if rc is not None:
-                    for field_name in getattr(rc, "model_fields", {}):
+                    model_fields = getattr(rc, "model_fields", {})
+                    for field_name, pydantic_field_info in model_fields.items():
                         register_fields.append(field_name)
+                        # Читаем process_targets из FieldMeta.routing (уже dict после to_dict())
+                        for meta in getattr(pydantic_field_info, "metadata", []):
+                            routing = getattr(meta, "routing", None)
+                            if isinstance(routing, dict):
+                                targets = routing.get("process_targets")
+                                if targets:
+                                    # FieldRouting.to_dict() сериализует как list → конвертируем в tuple
+                                    field_routing[field_name] = tuple(targets)
 
             # Зеркалит runtime-авторегистрацию из ProcessModulePlugin._auto_register_commands:
             # плагин с register_class и без явного set_config получает generic set_config.
@@ -123,6 +149,7 @@ class CommandCatalog:
                 category=getattr(entry, "category", ""),
                 commands=commands,
                 register_fields=register_fields,
+                field_routing=field_routing,
             )
 
         return cls(entries)
@@ -154,8 +181,12 @@ class CommandCatalog:
         Логика:
         1. Плагин не найден → None
         2. commands пуст → None (stateless, IPC не нужен)
-        3. commands содержит "set_{field_name}" → вернуть
-        4. Иначе → convention "set_config" (generic setter)
+        3. Определить process_names: FieldRouting.process_targets > connection_map fallback
+        4. commands содержит "set_{field_name}" → вернуть
+        5. Иначе → convention "set_config" (generic setter)
+
+        Multi-target fan-out: если FieldMeta.routing содержит process_targets,
+        process_names включает все заданные процессы (а не только один из connection_map).
 
         Returns:
             ResolvedCommand или None если команда не нужна.
@@ -167,11 +198,21 @@ class CommandCatalog:
         if not pc.has_commands:
             return None
 
+        # Определить целевые процессы: field_routing имеет приоритет над connection_map
+        field_targets = pc.field_routing.get(field_name)
+        if field_targets:
+            process_names = field_targets
+        else:
+            process_names = (pc.process_name,) if pc.process_name else ()
+
+        if not process_names:
+            return None  # pragma: no cover
+
         # Точное совпадение: set_{field_name}
         exact = f"set_{field_name}"
         if exact in pc.commands:
             return ResolvedCommand(
-                process_name=pc.process_name,
+                process_names=process_names,
                 command_name=exact,
                 plugin_name=plugin_name,
             )
@@ -179,7 +220,7 @@ class CommandCatalog:
         # Convention: generic set_config
         if pc.has_commands:
             return ResolvedCommand(
-                process_name=pc.process_name,
+                process_names=process_names,
                 command_name="set_config",
                 plugin_name=plugin_name,
             )
@@ -204,7 +245,7 @@ class CommandCatalog:
             return None
 
         return ResolvedCommand(
-            process_name=pc.process_name,
+            process_names=(pc.process_name,) if pc.process_name else (),
             command_name=command_name,
             plugin_name=plugin_name,
         )
