@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
-"""RegistersManager: контейнер, делегирование, подписки, set_field_value."""
+"""RegistersManager: контейнер, делегирование, подписки, set_field_value, plugin-расширения."""
 
 from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Dict, List
 
+import pytest
+
 from multiprocess_framework.modules.data_schema_module import FieldMeta, RegisterDispatchMeta, SchemaBase
 
 from multiprocess_framework.modules.registers_module import RegistersManager
+from multiprocess_framework.modules.registers_module.core.field_info import extract_fields
 
 
 class _Draw(SchemaBase):
@@ -309,3 +312,192 @@ def test_set_field_value_snapshot_in_send_callback() -> None:
     rm.set_field_value("x", "n", 5)
     assert len(snapshots) == 1
     assert snapshots[0]["n"] == 5
+
+
+# ===========================================================================
+# Plugin-based расширения: from_registry, get_fields, get_categories,
+# set_value, validate, extract_fields
+# ===========================================================================
+
+
+class _PluginRegA(SchemaBase):
+    """Register A — с FieldMeta для plugin-тестов."""
+
+    threshold: Annotated[int, FieldMeta("Порог", min=0, max=100, unit="%")] = 50
+    enabled: Annotated[bool, FieldMeta("Включён")] = True
+
+
+class _PluginRegB(SchemaBase):
+    """Register B — для второго плагина."""
+
+    gain: Annotated[float, FieldMeta("Усиление", min=0.0, max=10.0)] = 1.0
+    mode: Annotated[str, FieldMeta("Режим")] = "auto"
+
+
+class _MockPluginEntry:
+    """Мок PluginEntry (duck-typing _PluginEntryLike)."""
+
+    def __init__(self, name: str, category: str, register_classes: list[type]) -> None:
+        self.name = name
+        self.category = category
+        self.register_classes = register_classes
+
+
+class _MockRegistry:
+    """Мок PluginRegistry (duck-typing _PluginRegistryLike)."""
+
+    def __init__(self, entries: list[_MockPluginEntry]) -> None:
+        self._entries = entries
+
+    def list(self) -> list[_MockPluginEntry]:
+        return self._entries
+
+
+@pytest.fixture
+def mock_registry() -> _MockRegistry:
+    """Registry с двумя плагинами и одним без register_classes."""
+    return _MockRegistry(
+        [
+            _MockPluginEntry("plugin_a", "processing", [_PluginRegA]),
+            _MockPluginEntry("plugin_b", "source", [_PluginRegB]),
+            _MockPluginEntry("plugin_c", "lifecycle", []),  # без register
+        ]
+    )
+
+
+# --- from_registry ---
+
+
+class TestFromRegistry:
+    """RegistersManager.from_registry()."""
+
+    def test_builds_from_registry(self, mock_registry: _MockRegistry) -> None:
+        """Строит менеджер из PluginRegistry."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        names = mgr.register_names()
+        assert "plugin_a" in names
+        assert "plugin_b" in names
+        assert "plugin_c" not in names  # нет register_classes
+
+    def test_registers_have_defaults(self, mock_registry: _MockRegistry) -> None:
+        """Регистры создаются с defaults."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        reg_a = mgr.get_register("plugin_a")
+        assert reg_a.threshold == 50
+        assert reg_a.enabled is True
+
+    def test_categories_populated(self, mock_registry: _MockRegistry) -> None:
+        """Категории заполнены."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        cats = mgr.get_categories()
+        assert "processing" in cats
+        assert "plugin_a" in cats["processing"]
+        assert "source" in cats
+        assert "plugin_b" in cats["source"]
+
+    def test_empty_registry(self) -> None:
+        """Пустой registry → пустой менеджер."""
+        mgr = RegistersManager.from_registry(_MockRegistry([]))
+        assert mgr.register_names() == []
+
+
+# --- get_fields ---
+
+
+class TestGetFields:
+    """get_fields() -> list[FieldInfo]."""
+
+    def test_fields_extracted(self, mock_registry: _MockRegistry) -> None:
+        """Поля извлекаются с метаданными."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        fields = mgr.get_fields("plugin_a")
+        assert len(fields) == 2  # threshold + enabled
+        names = {f.field_name for f in fields}
+        assert names == {"threshold", "enabled"}
+
+    def test_field_has_meta(self, mock_registry: _MockRegistry) -> None:
+        """FieldInfo содержит FieldMeta."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        fields = mgr.get_fields("plugin_a")
+        threshold_field = next(f for f in fields if f.field_name == "threshold")
+        assert threshold_field.meta is not None
+        assert threshold_field.min_value == 0
+        assert threshold_field.max_value == 100
+        assert threshold_field.unit == "%"
+
+    def test_field_title(self, mock_registry: _MockRegistry) -> None:
+        """FieldInfo.title из FieldMeta.description."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        fields = mgr.get_fields("plugin_a")
+        threshold_field = next(f for f in fields if f.field_name == "threshold")
+        assert threshold_field.title == "Порог"
+
+    def test_unknown_plugin_returns_empty(self, mock_registry: _MockRegistry) -> None:
+        """Несуществующий плагин -> пустой список."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        assert mgr.get_fields("nonexistent") == []
+
+    def test_fields_cached(self, mock_registry: _MockRegistry) -> None:
+        """Повторный вызов — из кэша."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        fields1 = mgr.get_fields("plugin_a")
+        fields2 = mgr.get_fields("plugin_a")
+        assert fields1 is fields2
+
+
+# --- set_value / validate ---
+
+
+class TestSetValueValidate:
+    """set_value / validate — алиасы для FW API."""
+
+    def test_set_value_ok(self, mock_registry: _MockRegistry) -> None:
+        """set_value обновляет значение."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        ok = mgr.set_value("plugin_a", "threshold", 75)
+        assert ok is True
+        assert mgr.get_register("plugin_a").threshold == 75
+
+    def test_set_value_invalid(self, mock_registry: _MockRegistry) -> None:
+        """set_value с невалидным значением -> False."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        ok = mgr.set_value("plugin_a", "threshold", 999)
+        assert ok is False
+
+    def test_validate_ok(self, mock_registry: _MockRegistry) -> None:
+        """validate проходит для корректного значения."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        ok, err = mgr.validate("plugin_a", "threshold", 50)
+        assert ok is True
+        assert err is None
+
+    def test_validate_fail(self, mock_registry: _MockRegistry) -> None:
+        """validate не проходит для невалидного значения."""
+        mgr = RegistersManager.from_registry(mock_registry)
+        ok, err = mgr.validate("plugin_a", "threshold", -10)
+        assert ok is False
+        assert err is not None
+
+
+# --- extract_fields ---
+
+
+class TestExtractFields:
+    """extract_fields() утилита."""
+
+    def test_extract_all_fields(self) -> None:
+        """Извлекает все поля."""
+        fields = extract_fields("test", _PluginRegA, category="processing")
+        assert len(fields) == 2
+
+    def test_field_default(self) -> None:
+        """default корректен."""
+        fields = extract_fields("test", _PluginRegA)
+        threshold = next(f for f in fields if f.field_name == "threshold")
+        assert threshold.default == 50
+
+    def test_field_info_is_frozen(self) -> None:
+        """FieldInfo — frozen dataclass."""
+        fields = extract_fields("test", _PluginRegA)
+        with pytest.raises(AttributeError):
+            fields[0].field_name = "hacked"  # type: ignore[misc]

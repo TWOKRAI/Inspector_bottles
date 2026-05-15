@@ -5,17 +5,43 @@
 Композиция ``RegistersContainer`` (data_schema_module): хранение, метаданные, dump/validate.
 Уникально здесь: pub/sub, ``set_field_value`` + dispatch, ``send_callback``.
 
+Расширения для plugin-based приложений:
+- ``from_registry()`` — автобилд из PluginRegistry (Protocol-based, без cross-module импортов).
+- ``get_fields()`` → ``list[FieldInfo]`` для GUI-генерации.
+- ``get_categories()`` — группировка плагинов по категориям.
+
 См. ``registers_module/DECISIONS.md`` (ADR-RM-001).
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...data_schema_module import RegistersContainer
 
 from .dispatch import resolve_dispatch_targets
+from .field_info import FieldInfo, extract_fields
+
+
+# ---------------------------------------------------------------------------
+# Protocols для duck-typing PluginRegistry (layer-safe: нет cross-module импортов)
+# ---------------------------------------------------------------------------
+
+
+class _PluginEntryLike(Protocol):
+    """Минимальный контракт для plugin entry (duck-typing PluginEntry)."""
+
+    name: str
+    category: str
+    register_classes: list[type]
+
+
+class _PluginRegistryLike(Protocol):
+    """Минимальный контракт для plugin registry (duck-typing PluginRegistry)."""
+
+    def list(self) -> Iterable[_PluginEntryLike]: ...
 
 
 class RegistersManager(BaseManager, ObservableMixin):
@@ -26,6 +52,7 @@ class RegistersManager(BaseManager, ObservableMixin):
     connection_map: опциональный override — register_name -> имя процесса для register_update
         (если нет process_targets в routing поля и нет register_dispatch на классе).
     send_callback: вызывается при изменении регистра, если есть хотя бы одна цель доставки.
+    plugin_categories: mapping plugin_name → category (заполняется from_registry).
     """
 
     def __init__(
@@ -35,6 +62,7 @@ class RegistersManager(BaseManager, ObservableMixin):
         send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = None,
         logger: Any = None,
         stats: Any = None,
+        plugin_categories: Optional[Dict[str, str]] = None,
     ):
         """
         Args:
@@ -51,6 +79,9 @@ class RegistersManager(BaseManager, ObservableMixin):
         self._send_callback: Optional[Callable[[str, str, str, Any, Dict[str, Any]], None]] = send_callback
         self._global_observers: List[Callable[[str, str, Any], None]] = []
         self._field_observers: Dict[Tuple[str, str], List[Callable[[Any], None]]] = defaultdict(list)
+        self._plugin_categories: Dict[str, str] = dict(plugin_categories) if plugin_categories else {}
+        # Кэш FieldInfo по plugin_name (заполняется лениво в get_fields)
+        self._fields_cache: Dict[str, List[FieldInfo]] = {}
 
     def initialize(self) -> bool:
         self.is_initialized = True
@@ -143,23 +174,13 @@ class RegistersManager(BaseManager, ObservableMixin):
                 self._get_field_metadata_for_dispatch,
             )
             if targets:
-                snapshot = (
-                    reg.model_dump(mode="json")
-                    if hasattr(reg, "model_dump")
-                    else {}
-                )
+                snapshot = reg.model_dump(mode="json") if hasattr(reg, "model_dump") else {}
                 for channel in targets:
-                    full_channel = (
-                        f"control_{channel}" if not channel.startswith("control_") else channel
-                    )
+                    full_channel = f"control_{channel}" if not channel.startswith("control_") else channel
                     try:
-                        self._send_callback(
-                            full_channel, register_name, field_name, value, snapshot
-                        )
+                        self._send_callback(full_channel, register_name, field_name, value, snapshot)
                     except Exception as e:
-                        self._log_error(
-                            f"send_callback failed for {register_name}.{field_name} → {full_channel}: {e}"
-                        )
+                        self._log_error(f"send_callback failed for {register_name}.{field_name} → {full_channel}: {e}")
         return True, None
 
     def _get_field_metadata_for_dispatch(self, register_name: str, field_name: str) -> Dict[str, Any]:
@@ -176,9 +197,7 @@ class RegistersManager(BaseManager, ObservableMixin):
             try:
                 cb(value)
             except Exception as e:
-                self._log_warning(
-                    f"notify_field_changed observer failed for {register_name}.{field_name}: {e}"
-                )
+                self._log_warning(f"notify_field_changed observer failed for {register_name}.{field_name}: {e}")
 
     def _notify_observers(self, register_name: str, field_name: str, value: Any) -> None:
         """Уведомить field- и global-подписчиков."""
@@ -243,3 +262,85 @@ class RegistersManager(BaseManager, ObservableMixin):
     def model_validate_all(self, data: Dict[str, Any], strict: bool = False) -> None:
         """Загрузить данные в регистры (in-place в контейнере)."""
         self._container.model_validate_all(data, strict=strict)
+
+    # ------------------------------------------------------------------
+    # Plugin-based расширения (from_registry, get_fields, get_categories)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_registry(cls, registry: Any, **kwargs: Any) -> "RegistersManager":
+        """Построить из PluginRegistry — сканирует register_classes всех плагинов.
+
+        Args:
+            registry: Объект с методом ``.list()`` → iterable of entries.
+                      Каждый entry должен иметь атрибуты: ``name``, ``category``,
+                      ``register_classes`` (duck-typing _PluginRegistryLike).
+            **kwargs: Дополнительные аргументы для __init__ (connection_map, send_callback, ...).
+
+        Returns:
+            Новый RegistersManager с автоматически инстанцированными регистрами.
+        """
+        registers: Dict[str, Any] = {}
+        categories: Dict[str, str] = {}
+
+        for entry in registry.list():
+            reg_classes = getattr(entry, "register_classes", None) or []
+            if reg_classes:
+                # Инстанцируем первый register-класс (convention: 1 register per plugin)
+                instance = reg_classes[0]()
+                registers[entry.name] = instance
+                categories[entry.name] = entry.category
+
+        return cls(registers=registers, plugin_categories=categories, **kwargs)
+
+    def get_fields(self, plugin_name: str) -> List[FieldInfo]:
+        """Список FieldInfo для GUI-генерации виджетов.
+
+        Args:
+            plugin_name: Имя плагина (= имя регистра).
+
+        Returns:
+            Список FieldInfo с метаданными полей. Пустой если регистр не найден.
+        """
+        if plugin_name in self._fields_cache:
+            return self._fields_cache[plugin_name]
+
+        reg = self.get_register(plugin_name)
+        if reg is None:
+            return []
+
+        category = self._plugin_categories.get(plugin_name, "")
+        fields = extract_fields(plugin_name, type(reg), category=category)
+        self._fields_cache[plugin_name] = fields
+        return fields
+
+    def get_categories(self) -> Dict[str, List[str]]:
+        """Группировка плагинов по категориям.
+
+        Returns:
+            {category: [plugin_name, ...]}
+        """
+        result: Dict[str, List[str]] = {}
+        for name in self.register_names():
+            cat = self._plugin_categories.get(name, "other")
+            result.setdefault(cat, []).append(name)
+        return result
+
+    def set_value(
+        self,
+        plugin_name: str,
+        field_name: str,
+        value: Any,
+    ) -> bool:
+        """Установить значение (алиас для set_field_value, возвращает bool)."""
+        ok, _err = self.set_field_value(plugin_name, field_name, value)
+        return ok
+
+    def validate(
+        self,
+        plugin_name: str,
+        field_name: str,
+        value: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        """Валидировать значение (алиас для validate_field_value)."""
+        return self.validate_field_value(plugin_name, field_name, value)

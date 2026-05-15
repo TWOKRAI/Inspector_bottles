@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .bridge import DataReceiverBridge
     from .bridge.command_catalog import CommandCatalog
     from .bridge.topology_bridge import TopologyBridge
-    from multiprocess_prototype.registers.manager import RegistersManagerV2
+    from multiprocess_framework.modules.registers_module import RegistersManager
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
     from multiprocess_prototype.frontend.state.auth_state import AuthState
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
@@ -69,8 +69,8 @@ class AppContext:
         """Доступ к extras по ключу."""
         return self.extras.get(key, default)
 
-    def registers_manager(self) -> "RegistersManagerV2 | None":
-        """Вернуть RegistersManagerV2 из extras, если был передан при сборке контекста."""
+    def registers_manager(self) -> "RegistersManager | None":
+        """Вернуть RegistersManager из extras, если был передан при сборке контекста."""
         return self.extras.get("registers_manager")
 
     def plugin_registry(self) -> Any | None:
@@ -168,7 +168,7 @@ def build_app_context(
     config: dict | None = None,
     *,
     plugin_registry: Any | None = None,
-    registers_manager: "RegistersManagerV2 | None" = None,
+    registers_manager: "RegistersManager | None" = None,
 ) -> AppContext:
     """Собрать AppContext из GuiProcess.
 

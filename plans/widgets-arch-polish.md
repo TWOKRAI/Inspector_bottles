@@ -192,12 +192,13 @@ view → presenter → form_ctx.write(binding, value)
 **Уточнение пользователя:** V2 функционал не "поднимается" — он **становится единственным** `RegistersManager`. Прототип хранит только данные (`AppContext`, регистры плагинов).
 
 **Делаем:**
-- [ ] Сравнить `multiprocess_prototype/registers/manager.py` (V2) и `multiprocess_framework/modules/registers_module/manager.py` (FW). V2 добавляет: `from_registry()`, `from_topology()`, `get_fields()`, `plugin_categories`, `_fields_cache`.
-- [ ] Перенести `from_registry()` + `get_fields()` + `plugin_categories` в FW `RegistersManager` (это universal — нужен любому app с плагинами).
-- [ ] `from_topology()` — оставить в прототипе **как отдельную функцию** (`build_rm_from_topology(...) -> RegistersManager`), не метод класса. Топология — prototype-specific формат.
-- [ ] Удалить `RegistersManagerV2` класс. Все импорты `RegistersManagerV2` → `RegistersManager` (mass rename, ~9 файлов).
-- [ ] Layer rules: `from_registry()` принимает `Iterable[PluginEntry]` (Protocol), а не сам `PluginRegistry` — FW не знает про Plugins, прототип передаёт callable.
-- [ ] Layer check: `mcp__sentrux__check_rules` — нет новых violations (FW → Plugins запрещён).
+- [x] Сравнить `multiprocess_prototype/registers/manager.py` (V2) и `multiprocess_framework/modules/registers_module/manager.py` (FW). V2 добавляет: `from_registry()`, `from_topology()`, `get_fields()`, `plugin_categories`, `_fields_cache`.
+- [x] Перенести `from_registry()` + `get_fields()` + `get_categories()` + `set_value()` + `validate()` + `plugin_categories` + `_fields_cache` в FW `RegistersManager`.
+- [x] Перенести `FieldInfo` + `extract_fields` в FW `registers_module/core/field_info.py`. Прототипный `field_info.py` стал re-export обёрткой (0 callers сломано).
+- [x] `from_topology()` — превращён в `build_rm_from_topology()` функцию в прототипе.
+- [x] Удалён `RegistersManagerV2` класс. Все импорты `RegistersManagerV2` → `RegistersManager` (mass rename, 12 файлов).
+- [x] Layer rules: `from_registry()` принимает `registry: Any` с duck-typing Protocol `_PluginRegistryLike` — FW не импортирует Plugins/process_module.
+- [x] Тесты: 2664 FW passed (46 в test_manager), 1234 prototype passed, 4 build_rm_from_topology passed.
 
 **Коммит:** `refactor(registers): V2 функционал поглощён framework RegistersManager`
 

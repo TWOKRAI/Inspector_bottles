@@ -26,7 +26,7 @@ processes:
         category: utility
         # Без YAML-overrides: начальные значения берутся из PilotWidgetsRegisters
         # class-defaults (enabled=False, info=True, time_value=1).
-        # Это критично — GUI строит RM через RegistersManagerV2.from_registry,
+        # Это критично — GUI строит RM через RegistersManager.from_registry,
         # которая НЕ применяет YAML overrides. Если задать здесь enabled: true,
         # плагин стартует с enabled=True, а GUI рисует чекбокс по class-default
         # → визуальный десинхрон.

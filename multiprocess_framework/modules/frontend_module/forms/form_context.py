@@ -4,7 +4,7 @@
 опциональные callable-хуки on_write_rejected / on_access_denied.
 
 Живёт в framework чтобы прототип мог быть переиспользован как библиотека.
-V2ActionBuilder, RegistersManagerV2 и AppContext остаются в прототипе пока,
+V2ActionBuilder и AppContext остаются в прототипе пока,
 но FormContext не зависит от них напрямую — использует Protocol.
 """
 
