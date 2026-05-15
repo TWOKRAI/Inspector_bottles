@@ -32,7 +32,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 PLUGINS_DIR = PROJECT_ROOT / "Plugins"
 CONFIG_PATH = HERE / "config" / "system.yaml"
-DEFAULT_BLUEPRINT = HERE / "topology" / "region_pipeline.yaml"
+# Phase 2.0 pilot rollout: дефолтная топология — pilot_widgets стенд.
+# После завершения rollout вернуть на region_pipeline.yaml или сделать выбор
+# через env-переменную / system.yaml.
+DEFAULT_BLUEPRINT = HERE / "topology" / "pilot_widgets.yaml"
 
 
 def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:

@@ -126,8 +126,9 @@ class PluginsTab(QWidget):
         Returns:
             FormBuildingContext если доступен ActionBus и RM, иначе None.
         """
-        # Phase 2.0 pilot: только для robot_control
-        if plugin_name != "robot_control":
+        # Phase 2.0 pilot: whitelist плагинов с binding-aware form_ctx.
+        # Остальные пока через legacy путь (field_changed → tab._on_field_changed).
+        if plugin_name not in ("robot_control", "pilot_widgets"):
             return None
 
         bus = self._ctx.action_bus()
