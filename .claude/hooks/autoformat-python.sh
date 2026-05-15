@@ -4,8 +4,10 @@
 # Выход 0 всегда — не блокирует работу при ошибках ruff
 
 INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null)
-FILE_PATH=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))" 2>/dev/null)
+# Один python-вызов вместо двух — на Windows экономит ~300-500мс на каждый Edit/Write
+read -r TOOL_NAME FILE_PATH < <(python3 -c "import sys,json
+d=json.load(sys.stdin)
+print(d.get('tool_name',''), d.get('tool_input',{}).get('file_path',''))" <<< "$INPUT" 2>/dev/null)
 
 # Только Edit и Write
 if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
