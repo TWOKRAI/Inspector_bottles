@@ -88,24 +88,20 @@ class CommandValidator:
         # 1. Плагин в каталоге?
         pc = self._catalog.get_plugin(plugin_name)
         if pc is None:
-            return ValidationResult.fail(
-                f"Плагин '{plugin_name}' не найден в каталоге команд"
-            )
+            return ValidationResult.fail(f"Плагин '{plugin_name}' не найден в каталоге команд")
 
         # 2. Поле существует?
+        # FieldInfo (multiprocess_prototype.registers.field_info) использует
+        # атрибут `field_name`. Pydantic FieldInfo (legacy fallback) — `name`.
         fields = self._rm.get_fields(plugin_name)
-        field_names = {f.name for f in fields}
+        field_names = {getattr(f, "field_name", None) or getattr(f, "name", None) for f in fields}
         if field_name not in field_names:
-            return ValidationResult.fail(
-                f"Поле '{field_name}' не найдено в регистре '{plugin_name}'"
-            )
+            return ValidationResult.fail(f"Поле '{field_name}' не найдено в регистре '{plugin_name}'")
 
         # 3. Значение валидно?
         ok, err = self._rm.validate(plugin_name, field_name, value)
         if not ok:
-            return ValidationResult.fail(
-                f"Невалидное значение для '{plugin_name}.{field_name}': {err}"
-            )
+            return ValidationResult.fail(f"Невалидное значение для '{plugin_name}.{field_name}': {err}")
 
         return ValidationResult.success()
 
@@ -122,14 +118,10 @@ class CommandValidator:
         """
         pc = self._catalog.get_plugin(plugin_name)
         if pc is None:
-            return ValidationResult.fail(
-                f"Плагин '{plugin_name}' не найден в каталоге команд"
-            )
+            return ValidationResult.fail(f"Плагин '{plugin_name}' не найден в каталоге команд")
 
         resolved = self._catalog.resolve_action_command(plugin_name, command_name)
         if resolved is None:
-            return ValidationResult.fail(
-                f"Команда '{command_name}' не найдена у плагина '{plugin_name}'"
-            )
+            return ValidationResult.fail(f"Команда '{command_name}' не найдена у плагина '{plugin_name}'")
 
         return ValidationResult.success()

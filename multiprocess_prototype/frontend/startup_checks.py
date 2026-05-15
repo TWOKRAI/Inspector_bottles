@@ -3,6 +3,7 @@
 Чистый Python — без Qt зависимостей.
 Используется в app.py для диагностики перед инициализацией GUI.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -80,9 +81,7 @@ class StartupChecker:
             pname = proc.get("process_name", "?")
             for target in proc.get("chain_targets", []):
                 if target not in name_set:
-                    issues.append(
-                        f"Процесс '{pname}': chain_target '{target}' не найден в topology"
-                    )
+                    issues.append(f"Процесс '{pname}': chain_target '{target}' не найден в topology")
 
             plugins = proc.get("plugins")
             if plugins is None:
@@ -108,22 +107,39 @@ class StartupChecker:
         """
         issues: list[str] = []
 
-        # Получить список зарегистрированных плагинов
+        # Получить список зарегистрированных плагинов.
+        # Поддерживаемые API: _PluginRegistry (names()/_plugins) и legacy
+        # mock-объекты в тестах (list_plugins()/_registry).
+        # MagicMock даёт hasattr=True для всего, поэтому проверяем
+        # порядок legacy-first (он явно используется в test_startup_checks).
         registered: set[str] = set()
         if hasattr(registry, "list_plugins"):
-            registered = set(registry.list_plugins())
-        elif hasattr(registry, "_registry"):
-            registered = set(registry._registry.keys())
+            try:
+                registered = set(registry.list_plugins())
+            except TypeError:
+                registered = set()
+        if not registered and hasattr(registry, "names"):
+            try:
+                registered = set(registry.names())
+            except TypeError:
+                registered = set()
+        if not registered and hasattr(registry, "_plugins"):
+            try:
+                registered = set(registry._plugins.keys())
+            except (TypeError, AttributeError):
+                registered = set()
+        if not registered and hasattr(registry, "_registry"):
+            try:
+                registered = set(registry._registry.keys())
+            except (TypeError, AttributeError):
+                registered = set()
 
         for proc in topology.get("processes", []):
             pname = proc.get("process_name", "?")
             for plugin_cfg in proc.get("plugins", []):
                 plugin_name = plugin_cfg.get("plugin_name", "")
                 if plugin_name and plugin_name not in registered:
-                    issues.append(
-                        f"Процесс '{pname}': плагин '{plugin_name}' "
-                        f"не найден в PluginRegistry"
-                    )
+                    issues.append(f"Процесс '{pname}': плагин '{plugin_name}' не найден в PluginRegistry")
 
         return issues
 
