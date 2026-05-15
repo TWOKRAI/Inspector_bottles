@@ -239,20 +239,22 @@ class ActionBusRegistersManager:
   - state_store обратный путь: если worker меняет `enabled` (например, плагин сам его установит и опубликует через `ctx.state_proxy.set("processes.robot.config.enabled", False)`) → UI обновляется silent через `TopologyBridge.on_state_delta → rm.set_value → subscribe callback`
 
 **Acceptance Phase 2.0 (Pilot):**
-- [ ] `ActionBus.execute() -> bool` + 3 теста (success, pre_execute reject, handler not found)
-- [ ] `CheckboxView.value_changed: Signal` + тест
-- [ ] `ActionBusRegistersManager` + 5 unit-тестов + **1 интеграционный pytest-qt round-trip тест** (создать Checkbox с мостом → click → assert action в undo_stack → bus.undo() → assert view значение откатилось). Это даёт regression safety без ручного smoke
-- [ ] `_build_bool` поддерживает оба пути (form_ctx и legacy); **legacy путь эмитит `DeprecationWarning`** (`warnings.warn("Legacy QCheckBox path; pass form_ctx", DeprecationWarning, stacklevel=2)`) — страховка от незамеченных callers
-- [ ] PluginsTab прокидывает form_ctx для robot_control
-- [ ] Smoke: 5 чекпоинтов выше пройдены
-- [ ] `mcp__sentrux__check_rules`, `make check`, `make test` — зелёные
-- [ ] **Точка решения:** оценка результата с пользователем — расширять ли на остальные компоненты, или скорректировать архитектуру
+- [x] `ActionBus.execute() -> bool` + 3 теста (success, pre_execute reject, handler not found) — `2222204` + регрессионный `2938cf9` (rejected actions не загрязняют undo_stack)
+- [x] `CheckboxView.value_changed: Signal` + тест — `2222204`
+- [x] `ActionBusRegistersManager` + 5 unit-тестов + 1 интеграционный pytest-qt round-trip — `ca32cdc` (+ регрессионный «один user-click = один action» в `cd23adc`)
+- [x] `_build_bool` поддерживает оба пути (form_ctx и legacy) — `1e9ba6d`. **Отступление:** `DeprecationWarning` убран в `cd23adc` по результатам ревью (он зашумлял логи для всех bool-полей вне robot_control). TODO Phase 2.6: re-enable когда `form_ctx` станет обязательным во всех callers.
+- [x] PluginsTab прокидывает form_ctx для robot_control — `bcdb061`
+- [N/A] Smoke (5 чекпоинтов) — **blocked**: агентская среда без camera runtime (`run.py` требует физические камеры + ProcessManagerProcess). End-to-end pipeline покрыт автотестами: `CheckboxControl click → ActionBusRegistersManager → ActionBus.execute → FieldSetHandler.apply → rm.set_field_value → subscribe callback → view update` + `bus.undo() → view rollback` (integration test в `test_action_bus_register_adapter.py`). Ручной smoke рекомендуется при следующем запуске приложения.
+- [x] `mcp__sentrux__check_rules` (9 правил, 0 violations), `python scripts/validate.py` (OK), `python scripts/run_framework_tests.py` (2638 passed, 8 skipped) — зелёные
+- [ ] **Точка решения:** оценка результата с пользователем — расширять ли на остальные компоненты (Phase 2.1-2.7), или скорректировать архитектуру
 
-**Коммиты Phase 2.0 (3-4):**
-1. `feat(framework): ActionBus.execute() -> bool, CheckboxView.value_changed Signal`
-2. `feat(actions): ActionBusRegistersManager + тесты`
-3. `refactor(forms): пилотная интеграция CheckboxControl в factory для bool через form_ctx`
-4. `feat(plugins-tab): прокидывать form_ctx для robot_control (пилот binding-aware)`
+**Коммиты Phase 2.0 (фактически 6):**
+1. `2222204` feat(framework): ActionBus.execute() -> bool, CheckboxView.value_changed Signal
+2. `ca32cdc` feat(actions): ActionBusRegistersManager — мост между framework-фасадами и ActionBus
+3. `1e9ba6d` refactor(forms): пилотная интеграция CheckboxControl в factory для bool через form_ctx
+4. `bcdb061` feat(plugins-tab): прокидывать form_ctx для robot_control (пилот binding-aware)
+5. `2938cf9` test(actions): pre_execute reject не должен попадать в undo_stack (регрессия от tester)
+6. `cd23adc` fix(forms): устранение двойной записи в ActionBus для binding-aware checkbox (review iter 1)
 
 ---
 
