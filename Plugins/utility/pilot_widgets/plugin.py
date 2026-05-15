@@ -34,6 +34,21 @@ class PilotWidgetsPlugin(ProcessModulePlugin):
     outputs = []
     register_class = PilotWidgetsRegisters
 
+    # Generic setter — TopologyBridge.on_field_set роутит сюда любое
+    # изменение поля из GUI через ActionBus → router_module → этот процесс.
+    # Без commands плагин считается stateless и IPC не уходит в worker.
+    commands = {"set_config": "cmd_set_config"}
+
+    def cmd_set_config(self, data: dict) -> dict:
+        """Применить изменение полей из GUI к локальному register."""
+        applied = {}
+        for field, value in data.items():
+            if hasattr(self._reg, field):
+                setattr(self._reg, field, value)
+                applied[field] = value
+        self._ctx.log_info(f"[pilot_widgets cmd_set_config] applied={applied} → enabled={self._reg.enabled}")
+        return {"status": "ok", "applied": applied}
+
     def configure(self, ctx: PluginContext) -> None:
         """IDLE → READY: register + counters."""
         self._ctx = ctx
