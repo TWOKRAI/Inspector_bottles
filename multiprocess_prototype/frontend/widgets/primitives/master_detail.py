@@ -116,12 +116,20 @@ class MasterDetailLayout(QSplitter):
     def set_detail_widget(self, key: str, widget: QWidget) -> None:
         """Добавить виджет деталей для заданного ключа.
 
+        Если этот key — текущий выбранный, стек сразу переключается на новый
+        виджет. Без этого первый клик на новый элемент списка показывал
+        предыдущую страницу: _on_item_selected переключал стек ДО того,
+        как слушатель selection_changed успевал создать и зарегистрировать
+        виджет.
+
         Args:
             key:    ключ элемента из set_items.
             widget: виджет, который показывать при выборе этого ключа.
         """
         index = self._stack.addWidget(widget)
         self._key_to_index[key] = index
+        if key == self.selected_key():
+            self._stack.setCurrentIndex(index)
 
     def selected_key(self) -> str | None:
         """Вернуть ключ текущего выбранного элемента или None."""
