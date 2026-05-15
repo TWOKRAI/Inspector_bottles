@@ -3,6 +3,7 @@
 Переиспользует FW ActionBus, Action, ActionBuilder.
 V2 добавляет: handlers, builder extension, bus factory.
 """
+
 from multiprocess_framework.modules.actions_module.bus import ActionBus
 from multiprocess_framework.modules.actions_module.schemas import Action
 from multiprocess_framework.modules.actions_module.builder import ActionBuilder
@@ -20,12 +21,14 @@ from .builder import V2ActionBuilder
 from .bus_factory import create_action_bus
 from .handlers.topology_mutation_handler import TopologyMutationHandler
 from .handlers.node_move_handler import NodeMoveHandler
+from .action_bus_register_adapter import ActionBusRegistersManager
 
 __all__ = [
     "ActionBus",
     "Action",
     "ActionBuilder",
     "V2ActionBuilder",
+    "ActionBusRegistersManager",
     "create_action_bus",
     "FIELD_SET",
     "RECIPE_APPLY",
