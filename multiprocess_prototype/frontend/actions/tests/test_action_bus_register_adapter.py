@@ -245,9 +245,7 @@ class TestActionBusRegistersManagerIntegration:
         После фикса: change_signal=None → RegisterView НЕ подключается к value_changed,
         write идёт только через presenter → ActionBusRegistersManager.
         """
-        from multiprocess_prototype.frontend.forms.factory import (
-            FormBuildingContext,
-        )
+        from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
         from multiprocess_prototype.frontend.forms.register_view import RegisterView
         from multiprocess_prototype.registers.field_info import FieldInfo
 
@@ -256,7 +254,7 @@ class TestActionBusRegistersManagerIntegration:
         bus = ActionBus(rm, max_history=50)
         bus.register_handler("field_set", FieldSetHandler())
 
-        form_ctx = FormBuildingContext(
+        form_ctx = FormContext(
             registers_manager=rm,
             action_bus=bus,
             action_builder=V2ActionBuilder,

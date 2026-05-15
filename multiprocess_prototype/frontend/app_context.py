@@ -1,4 +1,5 @@
 """AppContext — DI-контейнер для v2 GUI."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.auth_state import AuthState
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_framework.modules.actions_module.bus import ActionBus
+    from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
     from Services.auth.interfaces import IAuthManager
     from Services.auth.storage.audit_storage import SqliteAuditStorage
 
@@ -110,6 +112,39 @@ class AppContext:
         Каталог IPC-команд, собранный из PluginRegistry + ConnectionMap.
         """
         return self.extras.get("command_catalog")
+
+    def form_context(self) -> "FormContext | None":
+        """Собрать FormContext из доступных в AppContext компонентов.
+
+        Объединяет: RegistersManager, ActionBus, V2ActionBuilder, access_level
+        (из auth.state.access_context, если доступен).
+
+        Returns:
+            FormContext если RM и ActionBus доступны; None иначе
+            (например, в legacy тестах без полного GUI-контекста).
+        """
+        from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
+        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
+        rm = self.registers_manager()
+        bus = self.action_bus()
+        if rm is None or bus is None:
+            return None
+
+        # access_level из auth context (паттерн из PluginsTab._build_form_ctx)
+        level = 0
+        auth = self.auth
+        if auth is not None and hasattr(auth.state, "access_context"):
+            ctx_acc = auth.state.access_context
+            if ctx_acc is not None and hasattr(ctx_acc, "level"):
+                level = ctx_acc.level
+
+        return FormContext(
+            registers_manager=rm,
+            action_bus=bus,
+            action_builder=V2ActionBuilder,
+            access_level=level,
+        )
 
     def auth_manager(self) -> "IAuthManager | None":
         """IAuthManager из extras, если был инициализирован в run_gui()."""

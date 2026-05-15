@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .factory import CardsFieldFactory, FormBuildingContext
+from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
+from .factory import CardsFieldFactory
 from .form_builder import _TABLE_COLUMNS, _editor_key
 from .view_mode_toggle import ViewMode, ViewModeToggle
 
@@ -62,7 +63,7 @@ class RegisterView(QWidget):
         *,
         initial_mode: ViewMode = ViewMode.CARDS,
         category_titles: dict[str, str] | None = None,
-        form_ctx: FormBuildingContext | None = None,
+        form_ctx: FormContext | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)

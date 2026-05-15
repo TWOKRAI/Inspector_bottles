@@ -229,16 +229,16 @@ class TestCardsFieldFactoryFormCtx:
 
     @staticmethod
     def _make_form_ctx():
-        """Собрать FormBuildingContext с фейковым RM и реальным ActionBus."""
+        """Собрать FormContext с фейковым RM и реальным ActionBus."""
         from dataclasses import dataclass
         from typing import Any
 
         from multiprocess_framework.modules.actions_module.bus import ActionBus
+        from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
         from multiprocess_prototype.frontend.actions.handlers.field_set_handler import (
             FieldSetHandler,
         )
-        from multiprocess_prototype.frontend.forms.factory import FormBuildingContext
 
         @dataclass
         class _FakeReg:
@@ -275,7 +275,7 @@ class TestCardsFieldFactoryFormCtx:
         rm = _FakeRM()
         bus = ActionBus(rm, max_history=50)
         bus.register_handler("field_set", FieldSetHandler())
-        ctx = FormBuildingContext(
+        ctx = FormContext(
             registers_manager=rm,
             action_bus=bus,
             action_builder=V2ActionBuilder,
