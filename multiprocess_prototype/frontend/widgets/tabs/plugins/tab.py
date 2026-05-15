@@ -2,6 +2,7 @@
 
 Композиция: MasterDetailLayout (список слева, RegisterView/InfoCard справа).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -10,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from multiprocess_prototype.frontend.widgets.primitives import MasterDetailLayout
-from multiprocess_prototype.frontend.forms import RegisterView
+from multiprocess_prototype.frontend.forms import RegisterView, FormBuildingContext
 
 from .detail_panels import PluginInfoCard
 from .presenter import PluginsPresenter
@@ -87,13 +88,18 @@ class PluginsTab(QWidget):
             # Плагин с registers → RegisterView
             fields = self._presenter.get_register_fields(plugin_name)
             if fields:
-                detail: QWidget = RegisterView(fields)
+                # Phase 2.0 pilot: form_ctx для robot_control —
+                # bool-поля рендерятся через binding-aware CheckboxControl.
+                form_ctx = self._build_form_ctx(plugin_name)
+                detail: QWidget = RegisterView(fields, form_ctx=form_ctx)
                 # Подключить field_changed → ActionBus
+                # (для legacy-полей без form_ctx — int/float/literal/str)
                 detail.field_changed.connect(self._on_field_changed)
                 # PR3: весь RegisterView — read-only без tabs.plugins.edit.
                 from multiprocess_prototype.frontend.widgets.access import (
                     bind_edit_permission,
                 )
+
                 _auth = self._ctx.auth
                 bind_edit_permission(
                     detail,
@@ -109,16 +115,61 @@ class PluginsTab(QWidget):
         self._detail_cache[plugin_name] = detail
         self._master_detail.set_detail_widget(plugin_name, detail)
 
+    def _build_form_ctx(self, plugin_name: str) -> FormBuildingContext | None:
+        """Собрать FormBuildingContext для binding-aware builders (Phase 2.0 pilot).
+
+        Пока включается только для robot_control. Остальные plugins —
+        legacy путь (form_ctx=None, DeprecationWarning для bool).
+        Когда Phase 2.1-2.7 будут завершены — form_ctx будет собираться
+        для всех plugins безусловно.
+
+        Returns:
+            FormBuildingContext если доступен ActionBus и RM, иначе None.
+        """
+        # Phase 2.0 pilot: только для robot_control
+        if plugin_name != "robot_control":
+            return None
+
+        bus = self._ctx.action_bus()
+        rm = self._ctx.registers_manager()
+        if bus is None or rm is None:
+            return None
+
+        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
+        # access_level из auth context
+        current_access_level = 0
+        auth = self._ctx.auth
+        if auth is not None and hasattr(auth.state, "access_context"):
+            ctx = auth.state.access_context
+            if ctx is not None and hasattr(ctx, "level"):
+                current_access_level = ctx.level
+
+        return FormBuildingContext(
+            registers_manager=rm,
+            action_bus=bus,
+            action_builder=V2ActionBuilder,
+            current_access_level=current_access_level,
+        )
+
     def _on_field_changed(
-        self, register_name: str, field_name: str, old_value: object, new_value: object,
+        self,
+        register_name: str,
+        field_name: str,
+        old_value: object,
+        new_value: object,
     ) -> None:
         """Изменение параметра плагина → ActionBus.execute(field_set)."""
         bus = self._ctx.action_bus()
         if bus is None:
             return
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
         action = V2ActionBuilder.field_set_timed(
-            register_name, field_name, new_value, old_value,
+            register_name,
+            field_name,
+            new_value,
+            old_value,
             description=f"{register_name}.{field_name} = {new_value}",
         )
         bus.execute(action)
@@ -142,10 +193,6 @@ class PluginsTab(QWidget):
         if detail is None or not isinstance(detail, RegisterView):
             return
         # Определить значение для восстановления
-        value = (
-            action.backward_patch.get("value")
-            if event_type == "undo"
-            else action.forward_patch.get("value")
-        )
+        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
         key = f"{register_name}.{action.field_name}"
         detail.set_editor_value(key, value)

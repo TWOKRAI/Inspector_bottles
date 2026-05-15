@@ -10,7 +10,7 @@ Re-exports:
     build_table_for_register — table-представление (standalone)
 """
 
-from .factory import CardsFieldFactory
+from .factory import CardsFieldFactory, FormBuildingContext
 from .field_editor import FieldEditor
 from .form_builder import build_form_for_register, build_table_for_register
 from .register_view import RegisterView
@@ -19,6 +19,7 @@ from .view_mode_toggle import ViewMode, ViewModeToggle
 __all__ = [
     "CardsFieldFactory",
     "FieldEditor",
+    "FormBuildingContext",
     "ViewMode",
     "ViewModeToggle",
     "RegisterView",

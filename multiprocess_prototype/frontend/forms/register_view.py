@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .factory import CardsFieldFactory
+from .factory import CardsFieldFactory, FormBuildingContext
 from .form_builder import _TABLE_COLUMNS, _editor_key
 from .view_mode_toggle import ViewMode, ViewModeToggle
 
@@ -62,6 +62,7 @@ class RegisterView(QWidget):
         *,
         initial_mode: ViewMode = ViewMode.CARDS,
         category_titles: dict[str, str] | None = None,
+        form_ctx: FormBuildingContext | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -73,7 +74,7 @@ class RegisterView(QWidget):
         self._editors: dict[str, FieldEditor] = {}
         for fi in fields:
             key = _editor_key(fi)
-            self._editors[key] = CardsFieldFactory.create(fi)
+            self._editors[key] = CardsFieldFactory.create(fi, form_ctx=form_ctx)
 
         # 2. Группировка
         self._groups: dict[str, list[FieldInfo]] = {}
