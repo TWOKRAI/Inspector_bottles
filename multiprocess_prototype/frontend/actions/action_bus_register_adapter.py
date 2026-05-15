@@ -99,8 +99,9 @@ class ActionBusRegistersManager:
             (False, error_msg) — ActionBus отклонил или handler error.
         """
         # Runtime thread guard: вызов из worker thread сломает blockSignals.
-        # Cost 2 строки, zero overhead в `python -O`.
-        assert _is_gui_thread(), "ActionBusRegistersManager.set_field_value must be called from GUI thread"
+        # RuntimeError вместо assert — работает и при `python -O`.
+        if not _is_gui_thread():
+            raise RuntimeError("ActionBusRegistersManager.set_field_value must be called from GUI thread")
 
         # Извлечь текущее (old) значение для backward_patch
         reg = self._rm.get_register(register_name)

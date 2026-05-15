@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin
@@ -194,12 +193,10 @@ def _build_bool(
     if form_ctx is not None:
         return _build_bool_binding_aware(field_info, form_ctx, parent)
 
-    # Legacy путь — DeprecationWarning для отслеживания незамеченных callers
-    warnings.warn(
-        "Legacy QCheckBox path; pass form_ctx",
-        DeprecationWarning,
-        stacklevel=3,
-    )
+    # Legacy путь — QCheckBox без binding-aware моста.
+    # TODO Phase 2.6: re-enable DeprecationWarning when form_ctx becomes mandatory.
+    # Сейчас десятки callers (InspectorPanel, ServicesTab, settings) не передают
+    # form_ctx → warning зашумляет логи без пользы.
     cb = QCheckBox(parent)
     default = _safe_default(field_info, False)
     cb.setChecked(bool(default))
@@ -259,12 +256,16 @@ def _build_bool_binding_aware(
     )
 
     label = _make_label(field_info)
+    # change_signal=None: binding-aware путь пишет через presenter →
+    # ActionBusRegistersManager, RegisterView НЕ должен дублировать write
+    # через _on_editor_changed → field_changed → PluginsTab._on_field_changed.
+    # Без этого один user-click создавал два action в undo_stack.
     return FieldEditor(
         field_info=field_info,
         widget=result.widget,
         getter=result.widget.get_value,
         setter=result.widget.set_value_silent,
-        change_signal=result.widget.value_changed,
+        change_signal=None,  # type: ignore[arg-type]
         label=label,
     )
 

@@ -233,3 +233,70 @@ class TestActionBusRegistersManagerIntegration:
         assert rm.get_register("robot_control").enabled is False
         # View тоже должен откатиться (через subscribe callback)
         assert result.widget.get_value() is False
+
+    def test_binding_aware_checkbox_in_register_view_single_action(self, qtbot):
+        """Регрессия: binding-aware checkbox через RegisterView — один user-click = один action.
+
+        До фикса: change_signal=value_changed попадал в RegisterView._on_editor_changed →
+        field_changed → PluginsTab._on_field_changed → bus.execute(action2),
+        параллельно presenter уже создавал action1. Результат: два action на один клик,
+        Ctrl+Z откатывал только последний.
+
+        После фикса: change_signal=None → RegisterView НЕ подключается к value_changed,
+        write идёт только через presenter → ActionBusRegistersManager.
+        """
+        from multiprocess_prototype.frontend.forms.factory import (
+            FormBuildingContext,
+        )
+        from multiprocess_prototype.frontend.forms.register_view import RegisterView
+        from multiprocess_prototype.registers.field_info import FieldInfo
+
+        # 1. Собрать инфраструктуру
+        rm = _FakeRegistersManager()
+        bus = ActionBus(rm, max_history=50)
+        bus.register_handler("field_set", FieldSetHandler())
+
+        form_ctx = FormBuildingContext(
+            registers_manager=rm,
+            action_bus=bus,
+            action_builder=V2ActionBuilder,
+        )
+
+        # 2. Создать RegisterView с одним bool-полем через form_ctx
+        fi = FieldInfo(
+            plugin_name="robot_control",
+            field_name="enabled",
+            field_type=bool,
+            default=False,
+        )
+        view = RegisterView([fi], form_ctx=form_ctx)
+        qtbot.addWidget(view)
+
+        # Подсчитаем сколько раз field_changed эмитится
+        field_changed_count = [0]
+        view.field_changed.connect(lambda *_args: field_changed_count.__setitem__(0, field_changed_count[0] + 1))
+
+        # 3. Эмулируем user-click через set_value (не silent)
+        editors = view.editors()
+        key = list(editors.keys())[0]
+        editor = editors[key]
+        editor.widget.set_value(True)
+
+        # 4. Assert: РОВНО один action в undo_stack (не два)
+        history = bus.history(100)
+        assert len(history) == 1, (
+            f"Ожидался 1 action в undo_stack, получено {len(history)}. "
+            "Двойная запись: RegisterView._on_editor_changed дублирует presenter path."
+        )
+
+        # 5. field_changed НЕ должен был эмититься для binding-aware поля
+        # (change_signal=None → RegisterView не подключил _on_editor_changed)
+        assert field_changed_count[0] == 0, (
+            f"field_changed эмитился {field_changed_count[0]} раз(а) для binding-aware поля. "
+            "change_signal должен быть None для binding-aware editors."
+        )
+
+        # 6. Undo корректно откатывает (один Ctrl+Z = полный откат)
+        bus.undo()
+        assert rm.get_register("robot_control").enabled is False
+        assert editor.widget.get_value() is False

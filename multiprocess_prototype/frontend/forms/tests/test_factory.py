@@ -315,8 +315,11 @@ class TestCardsFieldFactoryFormCtx:
         assert last.action_type == "field_set"
         assert last.forward_patch["value"] is True
 
-    def test_legacy_bool_without_form_ctx_emits_deprecation(self, qtbot):
-        """bool без form_ctx → DeprecationWarning + QCheckBox."""
+    def test_legacy_bool_without_form_ctx_no_deprecation_in_phase2(self, qtbot):
+        """bool без form_ctx → QCheckBox, но DeprecationWarning НЕ эмитится в Phase 2.0.
+
+        Warning деактивирован до Phase 2.6, когда form_ctx станет обязательным.
+        """
         import warnings
 
         fi = _fi(bool, default=False)
@@ -326,6 +329,5 @@ class TestCardsFieldFactoryFormCtx:
             qtbot.addWidget(editor.widget)
 
         deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-        assert len(deprecation_warnings) >= 1
-        assert "Legacy QCheckBox path" in str(deprecation_warnings[0].message)
+        assert len(deprecation_warnings) == 0, "DeprecationWarning не должен эмититься в Phase 2.0"
         assert isinstance(editor.widget, QCheckBox)
