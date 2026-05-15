@@ -13,9 +13,10 @@ apply_topology_diff, get_capabilities.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+from multiprocess_framework.modules.logger_module import get_logger
 
 from .diff_engine import compute_diff
 from .wire_protocol import WireConfig, ShmConfig, validate_wire
@@ -27,7 +28,35 @@ from .system_commands import (
 )
 from .wire_monitor import WireStatusMonitor
 
-logger = logging.getLogger(__name__)
+
+def _log(msg: str, level: str = "info") -> None:
+    """Записать в LoggerManager (если инициализирован), иначе тихо."""
+    lm = get_logger()
+    if lm is None:
+        return
+    getattr(lm, level)(msg, module="topology_bridge")
+
+
+# Тонкая прокси-обёртка чтобы прежний `logger.warning(...)` стиль работал
+# без массовых правок в файле. Все вызовы делегируются в LoggerManager.
+class _LegacyLoggerShim:
+    def info(self, msg: str, *args: Any) -> None:
+        _log(msg % args if args else msg)
+
+    def warning(self, msg: str, *args: Any) -> None:
+        _log(msg % args if args else msg, level="warning")
+
+    def error(self, msg: str, *args: Any) -> None:
+        _log(msg % args if args else msg, level="error")
+
+    def debug(self, msg: str, *args: Any) -> None:
+        _log(msg % args if args else msg, level="debug")
+
+    def exception(self, msg: str, *args: Any) -> None:
+        _log(msg % args if args else msg, level="error")
+
+
+logger = _LegacyLoggerShim()
 
 # Дефолтный debounce для числовых полей с min/max (slider)
 _DEFAULT_SLIDER_DEBOUNCE_MS = 50
@@ -177,19 +206,18 @@ class TopologyBridge:
         """
         # Resolve
         resolved = self._catalog.resolve_field_command(plugin_name, field_name)
+        _log(f"[trace bridge] on_field_set({plugin_name}.{field_name}={value!r}) → resolved={resolved!r}")
         if resolved is None:
             # Stateless плагин или не в каталоге — IPC не нужен
+            _log(f"[trace bridge] {plugin_name} stateless или не в каталоге — IPC пропущен")
             return True
 
         # Валидация
         result = self._validator.validate_field_command(plugin_name, field_name, value)
         if not result.ok:
-            logger.warning(
-                "TopologyBridge: валидация отклонена — %s.%s = %r: %s",
-                plugin_name,
-                field_name,
-                value,
-                result.error,
+            _log(
+                f"TopologyBridge: валидация отклонена — {plugin_name}.{field_name} = {value!r}: {result.error}",
+                level="warning",
             )
             return False
 
@@ -197,6 +225,10 @@ class TopologyBridge:
         debounce_ms = self._get_debounce(plugin_name, field_name)
 
         # Отправка
+        _log(
+            f"[trace bridge] send_field_command(target={resolved.process_name}, "
+            f"cmd={resolved.command_name}, args={ {field_name: value}!r}, debounce_ms={debounce_ms})"
+        )
         self._sender.send_field_command(
             resolved.process_name,
             resolved.command_name,

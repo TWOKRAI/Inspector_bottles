@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
+from multiprocess_framework.modules.logger_module import get_logger
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -22,6 +24,14 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
 
     from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
+
+def _log(msg: str, level: str = "info") -> None:
+    """Записать в LoggerManager (если инициализирован), иначе тихо."""
+    lm = get_logger()
+    if lm is None:
+        return
+    getattr(lm, level)(msg, module="action_bus_rm")
 
 
 def _extract_field_value(reg: Any, field_name: str) -> Any:
@@ -107,6 +117,8 @@ class ActionBusRegistersManager:
         reg = self._rm.get_register(register_name)
         old_value = _extract_field_value(reg, field_name) if reg is not None else None
 
+        _log(f"[trace bus_rm] set_field_value: {register_name}.{field_name} = {value!r} (old={old_value!r})")
+
         # ПОРЯДОК АРГУМЕНТОВ: field_set_timed(register, field, NEW, OLD)
         # Перепутывание new/old → инвертированный undo (баг из ревью)
         action = self._builder.field_set_timed(
@@ -119,7 +131,10 @@ class ActionBusRegistersManager:
         try:
             result = self._bus.execute(action)
         except Exception as exc:
+            _log(f"[trace bus_rm] ActionBus.execute raised: {exc!r}", level="error")
             return (False, f"ActionBus handler error: {exc!r}")
+
+        _log(f"[trace bus_rm] ActionBus.execute returned {result!r}")
 
         if result is True:
             return (True, None)
