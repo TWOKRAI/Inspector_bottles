@@ -135,6 +135,15 @@ class TestActionBusExecuteReturnValue:
         result = b.execute(make_action("UNKNOWN_TYPE"))
         assert result is False
 
+    def test_pre_execute_reject_does_not_add_to_undo_stack(self, bus):
+        """pre_execute_hook=False: action НЕ попадает в undo_stack (целостность стека)."""
+        b, rm = bus
+        b.register_handler("SET_VALUE", make_handler())
+        b.set_pre_execute_hook(lambda action: False)
+        b.execute(make_action("SET_VALUE"))
+        # Стек должен быть пустым — rejected action не должен туда попасть
+        assert b.can_undo() is False
+
 
 class TestActionBusCoalescing:
     def test_coalesce_same_key_merges(self, bus):
