@@ -415,8 +415,12 @@ class ProcessModulePlugin(ABC):
 
         commands = {"set_hsv_range": "set_range"} → ищет метод self.set_range,
         регистрирует как команду "set_hsv_range" в CommandManager.
+
+        Плюс: если плагин имеет register_class и не определил свою команду
+        "set_config", автоматически регистрируется generic cmd_set_config —
+        bridge.on_field_set → set_config → setattr(self._reg, field, value).
         """
-        if not self.commands or not ctx.command_manager:
+        if not ctx.command_manager:
             return
 
         for cmd_name, method_name in self.commands.items():
@@ -426,3 +430,45 @@ class ProcessModulePlugin(ABC):
                 continue
 
             ctx.command_manager.register_command(cmd_name, method)
+
+        # Generic set_config — поднимает boilerplate из плагинов с register_class.
+        # Регистрируется только если у плагина есть register_class и команда
+        # set_config не была переопределена явно в self.commands.
+        has_register = getattr(self, "register_class", None) is not None
+        explicit_set_config = "set_config" in self.commands
+        if has_register and not explicit_set_config:
+            ctx.command_manager.register_command("set_config", self.cmd_set_config)
+
+    def cmd_set_config(self, data: dict) -> dict:
+        """Generic handler для bridge.on_field_set → applied dict из GUI.
+
+        Применяет {field: value} к self._reg через setattr. Поля без
+        соответствующего атрибута игнорируются (graceful skip с логом).
+
+        Плагин может переопределить, добавив "set_config" в self.commands —
+        тогда этот generic не регистрируется (см. _auto_register_commands).
+
+        Returns:
+            {"status": "ok", "applied": {...}, "skipped": [...]}
+        """
+        reg = getattr(self, "_reg", None)
+        if reg is None:
+            return {"status": "error", "error": "_reg not initialized"}
+
+        applied: dict[str, Any] = {}
+        skipped: list[str] = []
+        for field_name, value in data.items():
+            if hasattr(reg, field_name):
+                setattr(reg, field_name, value)
+                applied[field_name] = value
+            else:
+                skipped.append(field_name)
+
+        ctx = getattr(self, "_ctx", None)
+        if ctx is not None and hasattr(ctx, "log_info"):
+            ctx.log_info(f"[{self.name} set_config] applied={applied}" + (f" skipped={skipped}" if skipped else ""))
+
+        result: dict[str, Any] = {"status": "ok", "applied": applied}
+        if skipped:
+            result["skipped"] = skipped
+        return result

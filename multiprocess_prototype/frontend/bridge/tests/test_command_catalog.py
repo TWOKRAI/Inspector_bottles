@@ -160,10 +160,18 @@ class TestCatalogBuilding:
         assert "orphan_plugin" not in catalog
 
     def test_plugin_commands_stored(self, catalog: CommandCatalog) -> None:
-        """commands dict сохраняется в PluginCommands."""
+        """commands dict сохраняется в PluginCommands.
+
+        Каталог дополнительно автодобавляет generic set_config, если у
+        плагина есть register_class — зеркалит runtime-авторегистрацию
+        из ProcessModulePlugin._auto_register_commands.
+        """
         pc = catalog.get_plugin("color_mask")
         assert pc is not None
-        assert pc.commands == {"set_hsv_range": "set_hsv_range"}
+        assert pc.commands == {
+            "set_hsv_range": "set_hsv_range",
+            "set_config": "cmd_set_config",
+        }
         assert pc.process_name == "processor_0"
         assert pc.category == "processing"
 

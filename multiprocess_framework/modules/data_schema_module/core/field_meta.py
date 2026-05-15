@@ -29,7 +29,7 @@ FieldMeta — дескриптор метаданных поля для Annotate
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 if TYPE_CHECKING:
     from pydantic import GetCoreSchemaHandler
@@ -38,6 +38,26 @@ if TYPE_CHECKING:
 
 # Тип для параметра routing: принимаем FieldRouting, dict или None
 _RoutingType = Union["FieldRouting", dict, None]
+
+# Допустимые виджеты UI. Пустая строка = автовыбор фабрикой по Python-типу.
+# Аliasы (combo↔literal, spinbox↔int, numeric↔float) сохранены для совместимости
+# с маппингом фабрики форм (factory.hint_to_kind).
+WidgetType = Literal[
+    "",
+    "checkbox",
+    "slider",
+    "spinbox",
+    "int",
+    "numeric",
+    "float",
+    "combo",
+    "literal",
+    "color3",
+    "str",
+    "text",
+    "path",
+    "label",
+]
 
 
 class FieldMeta:
@@ -79,6 +99,7 @@ class FieldMeta:
         "max",
         "transfer_k",
         "round_k",
+        "widget",
     )
 
     def __init__(
@@ -101,6 +122,10 @@ class FieldMeta:
         description_i18n: dict[str, str] | None = None,
         info_i18n: dict[str, str] | None = None,
         examples: list[Any] | None = None,
+        # Какой UI-виджет рисовать фабрикой форм.
+        # "" (default) — автовыбор по Python-типу.
+        # Явные значения: см. WidgetType (Literal); IDE подсказывает варианты.
+        widget: WidgetType = "",
     ) -> None:
         self.description = description
         self.info = info
@@ -122,6 +147,7 @@ class FieldMeta:
         self.description_i18n = description_i18n or {}
         self.info_i18n = info_i18n or {}
         self.examples = examples or []
+        self.widget = widget
 
     # =========================================================================
     # Интеграция с Pydantic v2
@@ -240,4 +266,5 @@ class FieldMeta:
             "readonly": self.readonly,
             "hidden": self.hidden,
             "examples": self.examples,
+            "widget": self.widget,
         }

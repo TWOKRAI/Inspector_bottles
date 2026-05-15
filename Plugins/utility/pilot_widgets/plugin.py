@@ -1,8 +1,10 @@
 """PilotWidgetsPlugin — тестовый стенд для проверки form-фабрики.
 
-Самодостаточный плагин (без data flow): worker LOOP каждые `interval_sec`
-секунд читает self._reg.enabled и логирует tick. Если включено — пишет
-счётчик в state_proxy для проверки worker→GUI пути через TopologyBridge.
+Самодостаточный плагин (без data flow). worker LOOP каждые self._reg.time_value
+секунд читает регистры:
+    enabled — гейтит инкремент счётчика (работа)
+    info    — гейтит лог "[pilot_widgets] tick #N / paused"
+Tick-счётчик публикуется в state_proxy (worker→GUI путь через TopologyBridge).
 """
 
 from __future__ import annotations
@@ -34,29 +36,18 @@ class PilotWidgetsPlugin(ProcessModulePlugin):
     outputs = []
     register_class = PilotWidgetsRegisters
 
-    # Generic setter — TopologyBridge.on_field_set роутит сюда любое
-    # изменение поля из GUI через ActionBus → router_module → этот процесс.
-    # Без commands плагин считается stateless и IPC не уходит в worker.
-    commands = {"set_config": "cmd_set_config"}
-
-    def cmd_set_config(self, data: dict) -> dict:
-        """Применить изменение полей из GUI к локальному register."""
-        applied = {}
-        for field, value in data.items():
-            if hasattr(self._reg, field):
-                setattr(self._reg, field, value)
-                applied[field] = value
-        self._ctx.log_info(f"[pilot_widgets cmd_set_config] applied={applied} → enabled={self._reg.enabled}")
-        return {"status": "ok", "applied": applied}
+    # commands и cmd_set_config — наследуются из ProcessModulePlugin.
+    # При наличии register_class фреймворк автоматически регистрирует
+    # generic set_config handler в CommandManager.
 
     def configure(self, ctx: PluginContext) -> None:
-        """IDLE → READY: register + counters."""
+        """IDLE → READY: register + counter."""
         self._ctx = ctx
         self._reg = self._init_register(ctx)
         self._state_proxy = ctx.state_proxy
-        self._interval = float(ctx.config.get("interval_sec", 1.0))
+        # Интервал, счётчик и логирование — динамически из self._reg на каждой итерации loop.
+        # enabled гейтит инкремент счётчика, info гейтит лог.
         self._tick_count = 0
-        self._active_tick_count = 0
 
     def start(self, ctx: PluginContext) -> None:
         """READY → RUNNING: запустить worker LOOP."""
@@ -67,12 +58,14 @@ class PilotWidgetsPlugin(ProcessModulePlugin):
             cfg,
             auto_start=True,
         )
-        ctx.log_info(f"PilotWidgetsPlugin запущен (interval={self._interval}s, enabled={self._reg.enabled})")
+        ctx.log_info(
+            f"PilotWidgetsPlugin запущен "
+            f"(enabled={self._reg.enabled}, info={self._reg.info}, "
+            f"time_value={self._reg.time_value}s)"
+        )
 
     def shutdown(self, ctx: PluginContext) -> None:
-        ctx.log_info(
-            f"PilotWidgetsPlugin остановлен (total ticks={self._tick_count}, active ticks={self._active_tick_count})"
-        )
+        ctx.log_info(f"PilotWidgetsPlugin остановлен (total ticks={self._tick_count})")
 
     def _loop(self, stop_event, pause_event) -> None:
         while not stop_event.is_set():
@@ -80,21 +73,25 @@ class PilotWidgetsPlugin(ProcessModulePlugin):
                 time.sleep(0.05)
                 continue
 
-            self._tick_count += 1
-
+            # enabled гейтит работу — инкрементируем счётчик только когда включено.
             if self._reg.enabled:
-                self._active_tick_count += 1
-                self._ctx.log_info(
-                    f"[pilot_widgets tick #{self._tick_count}] active (active={self._active_tick_count})"
-                )
-            else:
-                self._ctx.log_info(f"[pilot_widgets tick #{self._tick_count}] paused")
+                self._tick_count += 1
+
+            # info гейтит лог — независимо от enabled.
+            if self._reg.info:
+                status = f"tick #{self._tick_count}" if self._reg.enabled else "paused"
+                self._ctx.log_info(f"[pilot_widgets] {status} (interval={self._reg.time_value}s)")
 
             self._publish_state()
-            stop_event.wait(self._interval)
+
+            # Интервал — динамически из регистра. Изменение time_value в GUI
+            # применяется на следующей итерации loop.
+            interval = max(1, int(self._reg.time_value))
+            if stop_event.wait(interval):
+                return
 
     def _publish_state(self) -> None:
-        """Публикация tick-счётчиков в state_proxy для worker→GUI пути."""
+        """Публикация tick-счётчика в state_proxy для worker→GUI пути."""
         if self._state_proxy is None:
             return
         path = f"processes.{self._ctx.process_name}.state"
@@ -102,7 +99,8 @@ class PilotWidgetsPlugin(ProcessModulePlugin):
             path,
             {
                 "tick_count": self._tick_count,
-                "active_tick_count": self._active_tick_count,
                 "enabled": self._reg.enabled,
+                "info": self._reg.info,
+                "time_value": self._reg.time_value,
             },
         )

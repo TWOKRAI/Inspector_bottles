@@ -35,8 +35,6 @@ class IConnectionMap(Protocol):
 
 
 # --- Результаты ---
-
-
 @dataclass(frozen=True)
 class ResolvedCommand:
     """Результат resolve — куда и какую команду отправить."""
@@ -111,6 +109,13 @@ class CommandCatalog:
                 if rc is not None:
                     for field_name in getattr(rc, "model_fields", {}):
                         register_fields.append(field_name)
+
+            # Зеркалит runtime-авторегистрацию из ProcessModulePlugin._auto_register_commands:
+            # плагин с register_class и без явного set_config получает generic set_config.
+            # Без этого каталог считает плагин stateless и не отправляет field-set IPC.
+            has_register = bool(register_fields) or getattr(plugin_cls, "register_class", None) is not None
+            if has_register and "set_config" not in commands:
+                commands["set_config"] = "cmd_set_config"
 
             entries[name] = PluginCommands(
                 plugin_name=name,

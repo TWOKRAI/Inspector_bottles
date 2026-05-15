@@ -24,8 +24,12 @@ processes:
       - plugin_class: Plugins.utility.pilot_widgets.plugin.PilotWidgetsPlugin
         plugin_name: pilot_widgets
         category: utility
-        enabled: true
-        interval_sec: 1.0
+        # Без YAML-overrides: начальные значения берутся из PilotWidgetsRegisters
+        # class-defaults (enabled=False, info=True, time_value=1).
+        # Это критично — GUI строит RM через RegistersManagerV2.from_registry,
+        # которая НЕ применяет YAML overrides. Если задать здесь enabled: true,
+        # плагин стартует с enabled=True, а GUI рисует чекбокс по class-default
+        # → визуальный десинхрон.
 
   - process_name: gui
     process_class: multiprocess_prototype.frontend.process.GuiProcess

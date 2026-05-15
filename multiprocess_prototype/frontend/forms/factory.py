@@ -124,7 +124,34 @@ def _resolve_kind(field_info: FieldInfo) -> str:
     """Определить kind виджета по типу поля.
 
     Порядок проверок критичен — более специфичные типы проверяются первыми.
+    Перед type-based dispatch проверяется FieldMeta.widget — явный override
+    позволяет требовать slider для int с диапазоном или label для bool.
     """
+    # 0. Явный FieldMeta.widget перекрывает type-dispatch.
+    meta = field_info.meta
+    widget = getattr(meta, "widget", "") if meta is not None else ""
+    if widget:
+        # Маппинг widget → внутренняя kind-константа.
+        # Неизвестное значение игнорируется (graceful fallback на type-dispatch).
+        widget_to_kind = {
+            "checkbox": _KIND_BOOL,
+            "literal": _KIND_LITERAL,
+            "combo": _KIND_LITERAL,
+            "color3": _KIND_COLOR3,
+            "spinbox": _KIND_INT,
+            "slider": _KIND_INT,
+            "int": _KIND_INT,
+            "float": _KIND_FLOAT,
+            "numeric": _KIND_FLOAT,
+            "str": _KIND_STR_SHORT,
+            "text": _KIND_STR_LONG,
+            "path": _KIND_PATH,
+            "label": _KIND_UNSUPPORTED,
+        }
+        kind = widget_to_kind.get(widget)
+        if kind is not None:
+            return kind
+
     t = _unwrap_optional(field_info.field_type)
 
     # 1. bool ДО int (bool — подкласс int в Python)

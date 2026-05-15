@@ -80,7 +80,8 @@ from .core.exceptions import (
     SchemaValidationError,
     VersionManagerError,
 )
-from .core.field_meta import FieldMeta
+from .core.descriptor_meta import DescriptorSchemaMeta, RegisterDescriptor
+from .core.field_meta import FieldMeta, WidgetType
 from .core.field_routing import FieldRouting
 from .core.field_types import (
     FpsLimit,
@@ -187,9 +188,13 @@ __all__ = [
     "SchemaMixin",
     "RegisterMixin",
     "FieldMeta",
+    "WidgetType",
     "FieldRouting",
     "RegisterDispatchMeta",
     "DataValidator",
+    # Declarative API (Django-style descriptors)
+    "RegisterDescriptor",
+    "DescriptorSchemaMeta",
     # Field types
     "Percent",
     "NormalizedFloat",
