@@ -3,7 +3,8 @@
 **Slug:** widgets-arch-polish
 **Дата:** 2026-05-15
 **Ветка:** refactor/widgets-arch-polish
-**Родительский план:** [`plans/frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md) (Phase 2.0 завершён, эта работа — между 2.0 и 2.1)
+**Родительский план:** [`phase2-pilot.md`](phase2-pilot.md) (Phase 2.0 завершён, эта работа — между 2.0 и 2.1)
+**Продолжение:** [`rollout-finish.md`](rollout-finish.md) — параллельный rollout на остальные builders
 **Принцип:** **только упрощения**. Каждая задача снимает слой/дубликат, не добавляет новых.
 
 ---

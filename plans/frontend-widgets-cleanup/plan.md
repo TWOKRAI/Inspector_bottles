@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-cleanup
 - **Дата:** 2026-05-14
-- **Статус:** IN_PROGRESS (Phase 0+1 done, Phase 2.0+2.0.5 done, Phase 2.1+ → widgets-rollout-finish)
+- **Статус:** IN_PROGRESS (Phase 0+1 done, Phase 2.0+2.0.5 done, Phase 2.1+ → rollout-finish.md)
 - **Ветка:** refactor/frontend-widgets-cleanup (Phase 0-2.0.5), `refactor/widgets-rollout-finish` (Phase 2.1+)
 - **Автор:** Director + User
 
@@ -14,9 +14,9 @@
 
 | План | Статус | Что закрывает |
 |------|--------|---------------|
-| [`plans/frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md) | Phase 2.0 done, **2.1-2.7 superseded** | Pilot Checkbox на pilot_widgets через FormBuildingContext + ActionBusRegistersManager. Phase 2.1-2.7 переоформлены через widgets-rollout-finish |
-| [`plans/widgets-arch-polish.md`](widgets-arch-polish.md) | **DONE** 2026-05-15 (5 коммитов, H deferred) | Полировка архитектуры на пилоте: FieldMeta.widget единый, FormContext в FW, явный ActionBus (прокси удалён), multi-target fan-out, V2 поглощён framework'ом |
-| [`plans/widgets-rollout-finish.md`](widgets-rollout-finish.md) | **IN_PROGRESS** | Параллельный rollout на все builders + закрытие всех техдолгов одной волной (заменяет Phase 2.1-2.7) |
+| [`phase2-pilot.md`](phase2-pilot.md) | Phase 2.0 done, **2.1-2.7 superseded** | Pilot Checkbox на pilot_widgets через FormBuildingContext + ActionBusRegistersManager. Phase 2.1-2.7 переоформлены через rollout-finish |
+| [`arch-polish.md`](arch-polish.md) | **DONE** 2026-05-15 (5 коммитов, H deferred) | Полировка архитектуры на пилоте: FieldMeta.widget единый, FormContext в FW, явный ActionBus (прокси удалён), multi-target fan-out, V2 поглощён framework'ом |
+| [`rollout-finish.md`](rollout-finish.md) | **IN_PROGRESS** | Параллельный rollout на все builders + закрытие всех техдолгов одной волной (заменяет Phase 2.1-2.7) |
 
 ## Стратегия: 4 этапа
 
@@ -46,7 +46,7 @@ Phase 3: Сравнить widgets прототипа с widgets фреймвор
 
 **Цель:** пройтись по каждому framework component, убедиться что он лучше прототипных аналогов.
 
-**Артефакт:** [`docs/refactors/widgets-component-review.md`](../docs/refactors/widgets-component-review.md) — 8 секций, решения по каждому компоненту.
+**Артефакт:** [`docs/refactors/widgets-component-review.md`](../../docs/refactors/widgets-component-review.md) — 8 секций, решения по каждому компоненту.
 
 | # | Компонент | LOC | Прототипный аналог | Решение для Phase 2 | Статус |
 |---|---|---|---|---|---|
@@ -64,13 +64,13 @@ Phase 3: Сравнить widgets прототипа с widgets фреймвор
 ## Phase 2: Замена в прототипе (после Phase 1)
 
 ### Phase 2.0 — Pilot (DONE)
-Checkbox для `robot_control.enabled` через FormBuildingContext + ActionBusRegistersManager. Закрыт `bcdb061` + 5 предшествующих коммитов. См. [`frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md).
+Checkbox для `robot_control.enabled` через FormBuildingContext + ActionBusRegistersManager. Закрыт `bcdb061` + 5 предшествующих коммитов. См. [`phase2-pilot.md`](phase2-pilot.md).
 
 ### Phase 2.0.5 — Архитектурная полировка на пилоте (DONE 2026-05-15)
-FieldMeta.widget единый источник, FormContext в FW, явный ActionBus (прокси удалён, -94 LOC production), multi-target fan-out в TopologyBridge, V2 поглощён framework'ом. **5 коммитов:** `09191e3`, `fe25d12`, `d67ca70`, `0550f04`, `53a14cf`. См. [`widgets-arch-polish.md`](widgets-arch-polish.md).
+FieldMeta.widget единый источник, FormContext в FW, явный ActionBus (прокси удалён, -94 LOC production), multi-target fan-out в TopologyBridge, V2 поглощён framework'ом. **5 коммитов:** `09191e3`, `fe25d12`, `d67ca70`, `0550f04`, `53a14cf`. См. [`arch-polish.md`](arch-polish.md).
 
-### Phase 2.1+ — Rollout на остальные builders (IN_PROGRESS → widgets-rollout-finish)
-Sequential Phase 2.1-2.7 из родительского phase2-плана **переоформлены через параллельные треки** в [`widgets-rollout-finish.md`](widgets-rollout-finish.md):
+### Phase 2.1+ — Rollout на остальные builders (IN_PROGRESS → rollout-finish.md)
+Sequential Phase 2.1-2.7 из родительского phase2-плана **переоформлены через параллельные треки** в [`rollout-finish.md`](rollout-finish.md):
 - Track 1: Framework facades (SpinBox/Slider/Numeric/Compound/Combo NEW + value_changed Signal)
 - Track 2: Factory builders (`_build_int/float/literal/color3/str/path` — binding-aware)
 - Track 3: Callers migration (InspectorPanel, ServicesTab, SettingsSystem, form_builder)

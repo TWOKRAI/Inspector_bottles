@@ -3,7 +3,8 @@
 **Дата:** 2026-05-14
 **Статус:** review
 **Область:** `multiprocess_framework/modules/frontend_module/components/`
-**План:** [`plans/frontend-widgets-cleanup-phase2.md`](../../plans/frontend-widgets-cleanup-phase2.md) — Phase 1 артефакт (PR1)
+**План:** [`plans/frontend-widgets-cleanup/phase2-pilot.md`](../../plans/frontend-widgets-cleanup/phase2-pilot.md) — Phase 1 артефакт (PR1)
+**Связанные планы:** [`arch-polish.md`](../../plans/frontend-widgets-cleanup/arch-polish.md) (DONE), [`rollout-finish.md`](../../plans/frontend-widgets-cleanup/rollout-finish.md) (IN_PROGRESS)
 
 ---
 
@@ -404,14 +405,16 @@ ComboBoxControl.create(
 ## Verification (PR1)
 
 - [x] `docs/refactors/widgets-component-review.md` создан, 8 секций
-- [ ] `plans/frontend-widgets-cleanup.md` — чекбоксы 1.1–1.7 отмечены `[x]`, добавлен 1.8 (см. следующий шаг)
+- [x] `plans/frontend-widgets-cleanup/plan.md` — чекбоксы 1.1–1.7 отмечены `[x]`, добавлен 1.8
 - [x] Все правки фреймворка зафиксированы (value_changed × 2, combo пакет, ActionBus.execute → bool)
 
 ---
 
 ## Связанные документы
 
-- План Phase 1+2: [`plans/frontend-widgets-cleanup-phase2.md`](../../plans/frontend-widgets-cleanup-phase2.md)
-- Родительский план: [`plans/frontend-widgets-cleanup.md`](../../plans/frontend-widgets-cleanup.md)
+- Родительский план: [`plans/frontend-widgets-cleanup/plan.md`](../../plans/frontend-widgets-cleanup/plan.md)
+- Phase 2 (Pilot): [`plans/frontend-widgets-cleanup/phase2-pilot.md`](../../plans/frontend-widgets-cleanup/phase2-pilot.md)
+- Arch polish (DONE): [`plans/frontend-widgets-cleanup/arch-polish.md`](../../plans/frontend-widgets-cleanup/arch-polish.md)
+- Rollout & finish (IN_PROGRESS): [`plans/frontend-widgets-cleanup/rollout-finish.md`](../../plans/frontend-widgets-cleanup/rollout-finish.md)
 - Прототипная фабрика: [`multiprocess_prototype/frontend/forms/factory.py`](../../multiprocess_prototype/frontend/forms/factory.py)
 - Реорг widgets v3 (предыдущий refactor): [`docs/refactors/2026-04_widgets_reorg.md`](2026-04_widgets_reorg.md)

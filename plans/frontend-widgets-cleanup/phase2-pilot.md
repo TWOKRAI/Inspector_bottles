@@ -3,7 +3,8 @@
 **Slug:** frontend-widgets-cleanup-phase2 (детализация продолжения)
 **Дата:** 2026-05-14
 **Ветка:** refactor/frontend-widgets-cleanup
-**Родительский план:** [`plans/frontend-widgets-cleanup.md`](frontend-widgets-cleanup.md) — верхнеуровневая карта (Phase 0-3)
+**Родительский план:** [`plan.md`](plan.md) — верхнеуровневая карта (Phase 0-3)
+**Связанные планы:** [`arch-polish.md`](arch-polish.md) (DONE, between 2.0 и 2.1), [`rollout-finish.md`](rollout-finish.md) (заменяет Phase 2.1-2.7)
 **PR-стратегия:** 2 раздельных PR (PR1 = Phase 1 docs, PR2 = Phase 2 code)
 
 ---
@@ -191,7 +192,7 @@ class ActionBusRegistersManager:
 
 **Acceptance Phase 1:**
 - [ ] `docs/refactors/widgets-component-review.md` создан, 8 секций
-- [ ] В `plans/frontend-widgets-cleanup.md` чекбоксы 1.1-1.7 отмечены `[x]`, добавлен 1.8
+- [ ] В `plans/frontend-widgets-cleanup/plan.md` чекбоксы 1.1-1.7 отмечены `[x]`, добавлен 1.8
 - [ ] Все решения по правкам фреймворка зафиксированы (value_changed × 4, новый combo/)
 
 **Коммиты PR1:**
@@ -475,7 +476,7 @@ class AppContext:
 
 **Запись (PR1, docs):**
 - `docs/refactors/widgets-component-review.md` — новый
-- `plans/frontend-widgets-cleanup.md` — отметить [x] 1.1-1.7, добавить 1.8
+- `plans/frontend-widgets-cleanup/plan.md` — отметить [x] 1.1-1.7, добавить 1.8
 
 **Запись (PR2, code):**
 
@@ -512,7 +513,7 @@ Prototype:
 
 **PR1 (docs only):**
 - `docs/refactors/widgets-component-review.md` читается за 5 минут, даёт решение по каждому из 8 компонентов
-- В `plans/frontend-widgets-cleanup.md` отмечены 1.1-1.7, добавлен 1.8
+- В `plans/frontend-widgets-cleanup/plan.md` отмечены 1.1-1.7, добавлен 1.8
 
 **PR2 (code):**
 ```pwsh
