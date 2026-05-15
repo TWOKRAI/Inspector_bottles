@@ -223,7 +223,7 @@ def _build_bool_binding_aware(
     form_ctx: FormContext,
     parent: QWidget | None = None,
 ) -> FieldEditor:
-    """CheckboxControl через ActionBusRegistersManager — binding-aware путь.
+    """CheckboxControl через FormContext.write — binding-aware путь.
 
     Coalescing, undo/redo, IPC bridge — автоматически через ActionBus.
     """
@@ -233,17 +233,6 @@ def _build_bool_binding_aware(
     from multiprocess_framework.modules.frontend_module.components.checkbox import (
         CheckboxControl,
         CheckboxViewConfig,
-    )
-
-    from multiprocess_prototype.frontend.actions.action_bus_register_adapter import (
-        ActionBusRegistersManager,
-    )
-
-    # Собрать мост для фреймворк-фасада
-    bus_rm = ActionBusRegistersManager(
-        form_ctx.registers_manager,
-        form_ctx.action_bus,
-        form_ctx.action_builder,
     )
 
     binding = BindingConfig(
@@ -256,15 +245,16 @@ def _build_bool_binding_aware(
     )
 
     result = CheckboxControl.create(
-        bus_rm,
+        form_ctx.registers_manager,
         binding,
         view_config,
         current_access_level=form_ctx.access_level,
+        form_ctx=form_ctx,
     )
 
     label = _make_label(field_info)
     # change_signal=None: binding-aware путь пишет через presenter →
-    # ActionBusRegistersManager, RegisterView НЕ должен дублировать write
+    # FormContext.write, RegisterView НЕ должен дублировать write
     # через _on_editor_changed → field_changed → PluginsTab._on_field_changed.
     # Без этого один user-click создавал два action в undo_stack.
     return FieldEditor(
@@ -522,7 +512,7 @@ class CardsFieldFactory:
             parent: Родительский Qt-виджет.
             form_ctx: FormContext — единый контекст binding-aware сборки.
                 Если передан — bool-поля рендерятся через CheckboxControl +
-                ActionBusRegistersManager. Остальные builders (int/float/...)
+                FormContext.write (ActionBus). Остальные builders (int/float/...)
                 пока игнорируют form_ctx. Legacy callers без form_ctx
                 продолжают работать (bool → QCheckBox).
         """

@@ -7,7 +7,7 @@ CheckboxPresenter — композиция traits для чекбокса.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlHooks,
@@ -30,6 +30,9 @@ from multiprocess_framework.modules.frontend_module.managers.access_context impo
     AccessContext,
 )
 
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
+
 
 class CheckboxPresenter:
     """
@@ -45,6 +48,8 @@ class CheckboxPresenter:
         view_config: CheckboxViewConfig | None = None,
         current_access_level: int = 0,
         hooks: ControlHooks | None = None,
+        *,
+        form_ctx: "FormContext | None" = None,
     ) -> None:
         """
         Args:
@@ -54,10 +59,14 @@ class CheckboxPresenter:
                 над метаданными регистра).
             current_access_level: Текущий уровень доступа пользователя для `AccessTrait`.
             hooks: Колбэки для внешних менеджеров (лог / ошибки / статистика).
+            form_ctx: FormContext — если передан, write идёт через
+                ``form_ctx.write(...)`` (ActionBus + coalescing + undo/redo).
+                Если None — legacy путь через ``SyncTrait.write`` → ``RegisterAdapter``.
         """
         self._binding = binding
         self._hooks = hooks
         self._view_config = view_config
+        self._form_ctx = form_ctx
         self._schema = SchemaTrait(binding, adapter, view_config)
         self._sync = SyncTrait(binding, adapter)
         view_perm = view_config.required_view_permission if view_config else None
@@ -118,7 +127,21 @@ class CheckboxPresenter:
             )
             self._sync_from_model()
             return
-        ok, err = self._sync.write(value)
+
+        if self._form_ctx is not None:
+            # Новый путь: write через ActionBus (coalescing, undo/redo, IPC bridge).
+            old_value = self._sync.read()
+            ok = self._form_ctx.write(
+                self._binding.register_name,
+                self._binding.field_name,
+                value,
+                old_value,
+            )
+            err = None if ok else "write failed"
+        else:
+            # Legacy путь: прямая запись через SyncTrait → RegisterAdapter → rm.
+            ok, err = self._sync.write(value)
+
         if not ok:
             msg = err or "write failed"
             emit_write_rejected(

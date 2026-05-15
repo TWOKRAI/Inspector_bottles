@@ -163,25 +163,15 @@ view → presenter → form_ctx.write(binding, value)
 **Сейчас:** [`ActionBusRegistersManager`](multiprocess_prototype/frontend/actions/action_bus_register_adapter.py) — прокси-RM (~60 LOC), который превращает `rm.set_field_value(...)` в `bus.execute(field_set_action)`. Существует только потому, что framework-фасады принимают `RegistersManagerLike` и не знают про ActionBus.
 
 **Делаем:**
-- [ ] Расширить framework-фасад: `CheckboxControl.create(form_ctx_or_rm, binding, ...)`.
-  - Если первый аргумент — `FormContext` (имеет `.action_bus`) → write идёт через `form_ctx.write(binding, value)` (новый helper в `FormContext`).
-  - Если `RegistersManagerLike` (legacy для unit-тестов в framework без ActionBus) → старый путь через `RegisterAdapter.write` → `rm.set_field_value`.
-- [ ] Helper `FormContext.write(binding, new_value, old_value) -> bool`:
-  ```python
-  def write(self, binding, new_value, old_value) -> bool:
-      action = self.action_builder.field_set_timed(binding.plugin, binding.field, new_value, old_value)
-      try:
-          return bool(self.action_bus.execute(action))
-      except Exception as exc:
-          if self.on_write_rejected:
-              self.on_write_rejected(f"ActionBus error: {exc!r}")
-          return False
-  ```
-- [ ] Thread-guard (`assert QThread.current == QApplication.thread()`) — переехать в `FormContext.write`.
-- [ ] Удалить `multiprocess_prototype/frontend/actions/action_bus_register_adapter.py` и его 5 тестов (поглощены тестами FormContext.write).
-- [ ] 1 интеграционный тест: `FormContext.write` → action в `bus.undo_stack`, `bus.undo()` откатывает значение.
+- [x] Расширить framework-фасад: `CheckboxControl.create(..., form_ctx=...)` kwarg.
+  - Если `form_ctx` передан → presenter пишет через `form_ctx.write(register, field, new, old)` (ActionBus + coalescing + undo/redo).
+  - Если `form_ctx=None` (legacy для unit-тестов framework без ActionBus) → старый путь через `SyncTrait.write` → `RegisterAdapter` → `rm.set_field_value`.
+- [x] Helper `FormContext.write(register_name, field_name, new_value, old_value) -> bool` с thread-guard и on_write_rejected hook.
+- [x] Thread-guard (`QThread.currentThread() != app.thread()`) — в `FormContext.write`.
+- [x] Удалён `multiprocess_prototype/frontend/actions/action_bus_register_adapter.py` (160 LOC) + его тесты (300 LOC), экспорт в `__init__.py`.
+- [x] 5 тестов `FormContext.write` в FW (`test_form_context_write.py`): write/undo/reject/exception/no-callback.
 
-**Коммит:** `refactor(actions): ActionBus явная зависимость FormContext, удалён прокси-мост`
+**Коммит:** `refactor(actions): FormContext.write — явный ActionBus, удалён прокси-мост`
 
 **Слоёв убрали:** -1 слой (60 LOC), на ровном месте.
 
