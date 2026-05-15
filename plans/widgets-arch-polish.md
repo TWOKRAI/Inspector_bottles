@@ -111,13 +111,15 @@ view → presenter → form_ctx.write(binding, value)
 **Сейчас:** [`FieldMeta.WidgetType`](multiprocess_framework/modules/data_schema_module/core/field_meta.py#L45) — Literal с 14 вариантами; [`factory._resolve_kind`](multiprocess_prototype/frontend/forms/factory.py#L136) — `widget_to_kind` dict, дублирует маппинг (combo↔literal, spinbox↔int, numeric↔float).
 
 **Делаем:**
-- [ ] Внести нормализацию алиасов в `FieldMeta.__init__` (combo→literal, spinbox→int, numeric→float). После нормализации `meta.widget` хранит каноническое имя kind'а.
-- [ ] `factory._resolve_kind`: если `meta.widget` != "" — взять как kind напрямую (без dict). Type-based fallback оставить для пустого widget.
-- [ ] Удалить `widget_to_kind` dict.
-- [ ] 1 регрессионный тест: `FieldMeta(widget="combo").widget == "literal"`; factory резолвит "combo" как `_KIND_LITERAL`.
-- [ ] Все 18 `test_factory.py` зелёные без правок.
+- [x] Внести нормализацию алиасов в `FieldMeta.__init__` (combo→literal, spinbox→int, numeric→float). После нормализации `meta.widget` хранит каноническое имя kind'а. — `09191e3`
+- [x] `factory._resolve_kind`: dict упрощён, алиасы удалены, на модульном уровне. — `09191e3`
+- [x] Удалить алиасы из `widget_to_kind` dict (combo/spinbox/numeric). — `09191e3`
+- [x] 5 regression-тестов на нормализацию в `test_field_meta.py` + 1 в `test_factory.py`. — `09191e3`
+- [x] Все 19 `test_factory.py` зелёные; 89 `test_field_meta.py` зелёные; 2643 framework-тестов зелёные. — `09191e3`
 
-**Коммит:** `refactor(factory): FieldMeta.widget — единственный источник widget→kind`
+**Коммит:** `09191e3 refactor(factory): FieldMeta.widget — единственный источник widget→kind` (LOC: +76/−21, рост за счёт тестов; production-код нейтрально).
+
+**Reviewer (Opus) APPROVED** с backlog-замечанием: docstring `FieldMeta` не описывает параметр `widget` — техдолг, не регрессия.
 
 **Слоёв убрали:** дубликат маппинга.
 
@@ -132,7 +134,7 @@ view → presenter → form_ctx.write(binding, value)
 - `AccessContext(level, ...)` — для AccessTrait (передаётся внутри FormContext)
 
 **Делаем:**
-- [ ] Спроектировать `FormContext` (один dataclass) в **`multiprocess_framework/modules/frontend_module/forms/form_context.py`** (учитываем "FW = механизмы"):
+- [x] Спроектировать `FormContext` (один dataclass) в **`multiprocess_framework/modules/frontend_module/forms/form_context.py`** (учитываем "FW = механизмы"):
   ```python
   @dataclass(frozen=True)
   class FormContext:
@@ -143,14 +145,14 @@ view → presenter → form_ctx.write(binding, value)
       on_write_rejected: Callable[[str], None] | None = None
       on_access_denied: Callable[[str], None] | None = None
   ```
-- [ ] Метод `AppContext.form_context() -> FormContext` (заменяет текущий `form_building_context()`).
-- [ ] `CardsFieldFactory.create(field_info, form_ctx, parent=None)` — `form_ctx: FormContext`.
-- [ ] `BindingConfig` оставляем как идентификатор поля (plugin, field) — внутри фасадов. Caller передаёт `binding=("pilot_widgets", "enabled")` (или объект — решить в Discovery).
-- [ ] Обновить пилот `_build_bool_binding_aware` под новый `FormContext`.
-- [ ] Удалить `FormBuildingContext` (старый dataclass).
-- [ ] Тесты: переписать 3 form_ctx-теста в `test_factory.py` под новое имя; остальные 15 не трогаем.
+- [x] Метод `AppContext.form_context() -> FormContext` (заменяет текущий `form_building_context()`).
+- [x] `CardsFieldFactory.create(field_info, form_ctx, parent=None)` — `form_ctx: FormContext`.
+- [x] `BindingConfig` оставляем как идентификатор поля (plugin, field) — внутри фасадов. Caller передаёт `binding=("pilot_widgets", "enabled")` (или объект — решить в Discovery).
+- [x] Обновить пилот `_build_bool_binding_aware` под новый `FormContext`.
+- [x] Удалить `FormBuildingContext` (старый dataclass).
+- [x] Тесты: переписать 3 form_ctx-теста в `test_factory.py` под новое имя; остальные 15 не трогаем.
 
-**Коммит:** `refactor(forms): FormContext — единый контекст вместо 4 объектов`
+**Коммит:** `fe25d12 refactor(forms): FormContext в framework — единый контекст вместо FormBuildingContext`
 
 **Слоёв убрали:** 3 контекста сливаются в один.
 
