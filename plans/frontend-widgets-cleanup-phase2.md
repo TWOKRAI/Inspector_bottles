@@ -258,7 +258,19 @@ class ActionBusRegistersManager:
 
 ---
 
-### Phase 2.1 — Расширение после успеха пилота
+### Phase 2.1+ — Расширение после успеха пилота — **SUPERSEDED через widgets-rollout-finish.md**
+
+> **⚠️ ВНИМАНИЕ (2026-05-15):** Sequential Phase 2.1-2.7 ниже **переоформлены** в параллельные треки через [`widgets-rollout-finish.md`](widgets-rollout-finish.md). Причина: чтобы dual-mode в presenters, legacy в `_build_bool`, FieldInfo re-export и backward-compat shims не жили долго в half-state. Вместо последовательного «один builder — один PR — один deferred техдолг» делаем **vertical slices** (facade + builder + caller + tests в одном коммите) с **финальным cleanup'ом одной волной**.
+>
+> Также между Phase 2.0 и Phase 2.1 закрыт промежуточный [`widgets-arch-polish.md`](widgets-arch-polish.md) (5 коммитов 2026-05-15) — единый widget mapping, FormContext в FW, явный ActionBus (прокси удалён), multi-target fan-out, V2 поглощён framework'ом.
+>
+> Маппинг старой нумерации → новые треки:
+> - **2.1 (SpinBox)**, **2.2 (Numeric)**, **2.4 (Slider)**, **2.5 (Compound для color3)** → Track 1+2 (vertical slices)
+> - **2.3 (Combo)** → Track 1.5 (новый компонент FW) + Track 2.3 (factory)
+> - **2.6 (callers миграция)** → Track 3
+> - **2.7 (удаление legacy)** → Track 4 — итоговый cleanup, **не до Track 3**. Legacy QCheckBox-путь остаётся для non-plugin forms (SettingsSystem theme), это intentional разделение «binding-aware форма плагина» vs «GUI-локальная форма настроек».
+>
+> **Исторические записи ниже сохранены** как контекст того, какой объём работы планировался изначально и почему его пришлось перегруппировать.
 
 После подтверждения концепции на пилоте — последовательно расширяем (каждое — отдельный коммит/PR):
 

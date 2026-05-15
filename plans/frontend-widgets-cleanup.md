@@ -2,16 +2,21 @@
 
 - **Slug:** frontend-widgets-cleanup
 - **Дата:** 2026-05-14
-- **Статус:** IN_PROGRESS
-- **Ветка:** refactor/frontend-widgets-cleanup (создать при первом коммите)
+- **Статус:** IN_PROGRESS (Phase 0+1 done, Phase 2.0+2.0.5 done, Phase 2.1+ → widgets-rollout-finish)
+- **Ветка:** refactor/frontend-widgets-cleanup (Phase 0-2.0.5), `refactor/widgets-rollout-finish` (Phase 2.1+)
 - **Автор:** Director + User
 
 ## Context
 
 В `multiprocess_prototype/frontend/widgets/` — 7 мёртвых папок (пустые, 0 LOC), создающих путаницу с рабочими (`widgets/pipeline/` vs `widgets/tabs/pipeline/`). Framework components (`checkbox/`, `slider/`, `spinbox/` и т.д.) — зрелые, с кастомной клавиатурой и фичами, но прототип их не использует — вместо этого создаёт сырые Qt-виджеты. Нужно навести порядок снизу вверх.
 
-> **Детальный план Phase 1 + Phase 2:** [`plans/frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md)
-> Включает целевую архитектуру (мост `ActionBusRegistersManager`, FormBuildingContext, dual-flow GUI↔worker через FieldMeta.routing + TopologyBridge + state_store), пилотную стратегию (Phase 2.0 — Checkbox/robot_control), карту интеграций, ревью-замечания.
+## Подпланы (дочерние)
+
+| План | Статус | Что закрывает |
+|------|--------|---------------|
+| [`plans/frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md) | Phase 2.0 done, **2.1-2.7 superseded** | Pilot Checkbox на pilot_widgets через FormBuildingContext + ActionBusRegistersManager. Phase 2.1-2.7 переоформлены через widgets-rollout-finish |
+| [`plans/widgets-arch-polish.md`](widgets-arch-polish.md) | **DONE** 2026-05-15 (5 коммитов, H deferred) | Полировка архитектуры на пилоте: FieldMeta.widget единый, FormContext в FW, явный ActionBus (прокси удалён), multi-target fan-out, V2 поглощён framework'ом |
+| [`plans/widgets-rollout-finish.md`](widgets-rollout-finish.md) | **IN_PROGRESS** | Параллельный rollout на все builders + закрытие всех техдолгов одной волной (заменяет Phase 2.1-2.7) |
 
 ## Стратегия: 4 этапа
 
@@ -58,13 +63,30 @@ Phase 3: Сравнить widgets прототипа с widgets фреймвор
 
 ## Phase 2: Замена в прототипе (после Phase 1)
 
-| Тип поля | Сейчас | После |
+### Phase 2.0 — Pilot (DONE)
+Checkbox для `robot_control.enabled` через FormBuildingContext + ActionBusRegistersManager. Закрыт `bcdb061` + 5 предшествующих коммитов. См. [`frontend-widgets-cleanup-phase2.md`](frontend-widgets-cleanup-phase2.md).
+
+### Phase 2.0.5 — Архитектурная полировка на пилоте (DONE 2026-05-15)
+FieldMeta.widget единый источник, FormContext в FW, явный ActionBus (прокси удалён, -94 LOC production), multi-target fan-out в TopologyBridge, V2 поглощён framework'ом. **5 коммитов:** `09191e3`, `fe25d12`, `d67ca70`, `0550f04`, `53a14cf`. См. [`widgets-arch-polish.md`](widgets-arch-polish.md).
+
+### Phase 2.1+ — Rollout на остальные builders (IN_PROGRESS → widgets-rollout-finish)
+Sequential Phase 2.1-2.7 из родительского phase2-плана **переоформлены через параллельные треки** в [`widgets-rollout-finish.md`](widgets-rollout-finish.md):
+- Track 1: Framework facades (SpinBox/Slider/Numeric/Compound/Combo NEW + value_changed Signal)
+- Track 2: Factory builders (`_build_int/float/literal/color3/str/path` — binding-aware)
+- Track 3: Callers migration (InspectorPanel, ServicesTab, SettingsSystem, form_builder)
+- Track 4: Final cleanup — dual-mode уход, FieldInfo re-export delete, process_name property delete, ColorTripletWidget delete
+
+**Целевая таблица замен:**
+
+| Тип поля | Сейчас | После Phase 2.1+ |
 |---|---|---|
-| `bool` | `QCheckBox()` | `CheckboxControl.create(...)` |
-| `int` | `QSpinBox()` | `SpinBoxControl.create(...)` |
-| `float` | `QDoubleSpinBox()` | `NumericControl.create(...)` |
-| `color3` | `ColorTripletWidget()` | `CompoundNumericControl.create(...)` |
-| `str` | `QLineEdit()` | остаётся (нет framework аналога) |
+| `bool` | `CheckboxControl.create` (DONE) | то же + form_ctx обязателен в plugin path |
+| `int` | `QSpinBox()` | `SpinBoxControl.create` или `SliderControl.create` (по meta.widget) |
+| `float` | `QDoubleSpinBox()` | `NumericControl.create` |
+| `literal` | `QComboBox()` | `ComboControl.create` (новый компонент FW) |
+| `color3` | `ColorTripletWidget()` | `CompoundNumericControl.create` (ColorTripletWidget удалён) |
+| `str/text/path` | `QLineEdit/QPlainTextEdit` | то же + form_ctx binding wrapper (без нового FW-компонента) |
+| `label` | disabled QLabel | то же |
 
 ---
 
