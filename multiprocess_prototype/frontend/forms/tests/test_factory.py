@@ -217,3 +217,115 @@ class TestCardsFieldFactory:
 
         assert "°" in editor.label.text()
         assert "Угол" in editor.label.text()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.0 pilot: bool через form_ctx → CheckboxControl
+# ---------------------------------------------------------------------------
+
+
+class TestCardsFieldFactoryFormCtx:
+    """Тесты для bool через form_ctx (binding-aware CheckboxControl)."""
+
+    @staticmethod
+    def _make_form_ctx():
+        """Собрать FormBuildingContext с фейковым RM и реальным ActionBus."""
+        from dataclasses import dataclass
+        from typing import Any
+
+        from multiprocess_framework.modules.actions_module.bus import ActionBus
+        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+        from multiprocess_prototype.frontend.actions.handlers.field_set_handler import (
+            FieldSetHandler,
+        )
+        from multiprocess_prototype.frontend.forms.factory import FormBuildingContext
+
+        @dataclass
+        class _FakeReg:
+            enabled: bool = False
+
+        class _FakeRM:
+            def __init__(self):
+                self._regs = {"test": _FakeReg()}
+                self._subs: dict[tuple, list] = {}
+
+            def get_register(self, name: str) -> Any:
+                return self._regs.get(name)
+
+            def get_field_metadata(self, register_name: str, field_name: str, **kw: Any) -> dict:
+                return {"description": "test field"}
+
+            def set_field_value(self, register_name: str, field_name: str, value: Any) -> tuple[bool, Optional[str]]:
+                reg = self.get_register(register_name)
+                if not reg:
+                    return False, "no reg"
+                setattr(reg, field_name, value)
+                for cb in list(self._subs.get((register_name, field_name), [])):
+                    cb(value)
+                return True, None
+
+            def subscribe(self, reg: str, field: str, cb: Any) -> None:
+                self._subs.setdefault((reg, field), []).append(cb)
+
+            def unsubscribe(self, reg: str, field: str, cb: Any) -> None:
+                lst = self._subs.get((reg, field))
+                if lst and cb in lst:
+                    lst.remove(cb)
+
+        rm = _FakeRM()
+        bus = ActionBus(rm, max_history=50)
+        bus.register_handler("field_set", FieldSetHandler())
+        ctx = FormBuildingContext(
+            registers_manager=rm,
+            action_bus=bus,
+            action_builder=V2ActionBuilder,
+        )
+        return ctx, rm, bus
+
+    def test_bool_with_form_ctx_creates_checkbox_view(self, qtbot):
+        """bool + form_ctx → CheckboxView (не QCheckBox)."""
+        from multiprocess_framework.modules.frontend_module.components.checkbox.view import (
+            CheckboxView,
+        )
+
+        ctx, rm, bus = self._make_form_ctx()
+        fi = _fi(bool, default=False, plugin_name="test", field_name="enabled")
+        editor = CardsFieldFactory.create(fi, form_ctx=ctx)
+        qtbot.addWidget(editor.widget)
+
+        assert isinstance(editor.widget, CheckboxView)
+        # getter/setter работают
+        assert editor.getter() is False
+        editor.setter(True)
+        assert editor.getter() is True
+
+    def test_bool_with_form_ctx_toggle_creates_action(self, qtbot):
+        """bool + form_ctx: toggle → action в undo_stack."""
+        ctx, rm, bus = self._make_form_ctx()
+        fi = _fi(bool, default=False, plugin_name="test", field_name="enabled")
+        editor = CardsFieldFactory.create(fi, form_ctx=ctx)
+        qtbot.addWidget(editor.widget)
+
+        # Эмулировать пользовательский toggle через set_value (не silent)
+        editor.widget.set_value(True)
+
+        assert bus.can_undo() is True
+        last = bus.last_action()
+        assert last is not None
+        assert last.action_type == "field_set"
+        assert last.forward_patch["value"] is True
+
+    def test_legacy_bool_without_form_ctx_emits_deprecation(self, qtbot):
+        """bool без form_ctx → DeprecationWarning + QCheckBox."""
+        import warnings
+
+        fi = _fi(bool, default=False)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            editor = CardsFieldFactory.create(fi)
+            qtbot.addWidget(editor.widget)
+
+        deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        assert len(deprecation_warnings) >= 1
+        assert "Legacy QCheckBox path" in str(deprecation_warnings[0].message)
+        assert isinstance(editor.widget, QCheckBox)

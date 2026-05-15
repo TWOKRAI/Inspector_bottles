@@ -9,8 +9,10 @@
 
 from __future__ import annotations
 
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,6 +29,33 @@ from multiprocess_prototype.registers.field_info import FieldInfo
 
 from .field_editor import FieldEditor
 from .widgets.color_picker import ColorTripletWidget
+
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.actions_module.bus import ActionBus
+    from multiprocess_framework.modules.frontend_module.interfaces import IRegistersManagerGui
+
+    from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
+
+# ---------------------------------------------------------------------------
+# FormBuildingContext — контекст для binding-aware builders (Phase 2.0 pilot)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FormBuildingContext:
+    """Контекст для binding-aware builders: ActionBus + RegistersManager.
+
+    Передаётся в CardsFieldFactory.create(form_ctx=...) для переключения
+    bool-builder на CheckboxControl + ActionBusRegistersManager.
+    Остальные builders (int/float/literal/...) пока игнорируют form_ctx.
+    """
+
+    registers_manager: "IRegistersManagerGui"
+    action_bus: "ActionBus"
+    action_builder: "type[V2ActionBuilder]"
+    current_access_level: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Sentinel для pydantic_core.PydanticUndefined (чтобы не тянуть зависимость)
@@ -156,8 +185,21 @@ def _safe_default(field_info: FieldInfo, fallback: Any = None) -> Any:
     return val
 
 
-def _build_bool(field_info: FieldInfo, parent: QWidget | None = None) -> FieldEditor:
-    """QCheckBox для bool."""
+def _build_bool(
+    field_info: FieldInfo,
+    parent: QWidget | None = None,
+    form_ctx: FormBuildingContext | None = None,
+) -> FieldEditor:
+    """Binding-aware CheckboxControl (form_ctx) или legacy QCheckBox."""
+    if form_ctx is not None:
+        return _build_bool_binding_aware(field_info, form_ctx, parent)
+
+    # Legacy путь — DeprecationWarning для отслеживания незамеченных callers
+    warnings.warn(
+        "Legacy QCheckBox path; pass form_ctx",
+        DeprecationWarning,
+        stacklevel=3,
+    )
     cb = QCheckBox(parent)
     default = _safe_default(field_info, False)
     cb.setChecked(bool(default))
@@ -168,6 +210,61 @@ def _build_bool(field_info: FieldInfo, parent: QWidget | None = None) -> FieldEd
         getter=cb.isChecked,
         setter=lambda v: cb.setChecked(bool(v)),
         change_signal=cb.toggled,
+        label=label,
+    )
+
+
+def _build_bool_binding_aware(
+    field_info: FieldInfo,
+    form_ctx: FormBuildingContext,
+    parent: QWidget | None = None,
+) -> FieldEditor:
+    """CheckboxControl через ActionBusRegistersManager — binding-aware путь.
+
+    Coalescing, undo/redo, IPC bridge — автоматически через ActionBus.
+    """
+    from multiprocess_framework.modules.frontend_module.components.base.config import (
+        BindingConfig,
+    )
+    from multiprocess_framework.modules.frontend_module.components.checkbox import (
+        CheckboxControl,
+        CheckboxViewConfig,
+    )
+
+    from multiprocess_prototype.frontend.actions.action_bus_register_adapter import (
+        ActionBusRegistersManager,
+    )
+
+    # Собрать мост для фреймворк-фасада
+    bus_rm = ActionBusRegistersManager(
+        form_ctx.registers_manager,
+        form_ctx.action_bus,
+        form_ctx.action_builder,
+    )
+
+    binding = BindingConfig(
+        field_info.plugin_name or "",
+        field_info.field_name or "",
+    )
+    view_config = CheckboxViewConfig(
+        label=field_info.title,
+        position="left",
+    )
+
+    result = CheckboxControl.create(
+        bus_rm,
+        binding,
+        view_config,
+        current_access_level=form_ctx.current_access_level,
+    )
+
+    label = _make_label(field_info)
+    return FieldEditor(
+        field_info=field_info,
+        widget=result.widget,
+        getter=result.widget.get_value,
+        setter=result.widget.set_value_silent,
+        change_signal=result.widget.value_changed,
         label=label,
     )
 
@@ -402,13 +499,33 @@ class CardsFieldFactory:
     """
 
     @classmethod
-    def create(cls, field_info: FieldInfo, parent: QWidget | None = None) -> FieldEditor:
+    def create(
+        cls,
+        field_info: FieldInfo,
+        parent: QWidget | None = None,
+        form_ctx: FormBuildingContext | None = None,
+    ) -> FieldEditor:
         """Создать FieldEditor для данного FieldInfo.
 
         Определяет kind по типу поля и вызывает соответствующий builder.
+
+        Args:
+            field_info: Метаданные поля.
+            parent: Родительский Qt-виджет.
+            form_ctx: Контекст binding-aware сборки (Phase 2.0 pilot).
+                Если передан — bool-поля рендерятся через CheckboxControl +
+                ActionBusRegistersManager. Остальные builders (int/float/...)
+                пока игнорируют form_ctx. Legacy callers без form_ctx
+                продолжают работать (bool → QCheckBox + DeprecationWarning).
         """
         kind = _resolve_kind(field_info)
         builder = _BUILDERS.get(kind, _build_unsupported)
+
+        # Phase 2.0 pilot: bool с form_ctx → binding-aware CheckboxControl.
+        # Проверяем, что builder не был переопределён через register_type().
+        if kind == _KIND_BOOL and builder is _build_bool:
+            return _build_bool(field_info, parent, form_ctx)
+
         return builder(field_info, parent)
 
     @classmethod
