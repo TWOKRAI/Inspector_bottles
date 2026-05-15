@@ -654,3 +654,28 @@ class TestRegistersContainerEnhanced:
     def test_getattr_raises_for_unknown(self, container):
         with pytest.raises(AttributeError, match="nonexistent"):
             _ = container.nonexistent
+
+
+# =============================================================================
+# FieldMeta: нормализация алиасов widget
+# =============================================================================
+
+
+class TestFieldMetaWidgetAliases:
+    """Нормализация алиасов widget — один источник истины."""
+
+    def test_combo_normalizes_to_literal(self):
+        assert FieldMeta(widget="combo").widget == "literal"
+
+    def test_spinbox_normalizes_to_int(self):
+        assert FieldMeta(widget="spinbox").widget == "int"
+
+    def test_numeric_normalizes_to_float(self):
+        assert FieldMeta(widget="numeric").widget == "float"
+
+    def test_canonical_unchanged(self):
+        for w in ("checkbox", "slider", "int", "literal", "color3", "float", "str", "text", "path", "label"):
+            assert FieldMeta(widget=w).widget == w, f"Канонический widget '{w}' не должен нормализоваться"
+
+    def test_empty_widget_unchanged(self):
+        assert FieldMeta(widget="").widget == ""

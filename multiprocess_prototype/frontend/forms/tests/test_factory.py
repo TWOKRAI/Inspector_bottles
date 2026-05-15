@@ -331,3 +331,19 @@ class TestCardsFieldFactoryFormCtx:
         deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
         assert len(deprecation_warnings) == 0, "DeprecationWarning не должен эмититься в Phase 2.0"
         assert isinstance(editor.widget, QCheckBox)
+
+
+# ---------------------------------------------------------------------------
+# Regression: алиасы widget нормализуются в FieldMeta, factory читает canonical
+# ---------------------------------------------------------------------------
+
+
+class TestWidgetAliasNormalization:
+    """FieldMeta нормализует алиасы до factory — единый источник истины."""
+
+    def test_combo_alias_resolves_to_literal_kind(self):
+        """widget=combo → нормализуется в literal в FieldMeta → kind=literal в factory."""
+        meta = FieldMeta(widget="combo")  # после __init__: meta.widget == "literal"
+        assert meta.widget == "literal"
+        fi = _fi(str, default="a", meta=meta)
+        assert CardsFieldFactory.resolve_kind(fi) == "literal"

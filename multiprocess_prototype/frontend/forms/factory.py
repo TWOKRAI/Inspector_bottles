@@ -120,6 +120,23 @@ def _is_tuple_3int(t: type) -> bool:
     return len(args) == 3 and all(a is int for a in args)
 
 
+# Маппинг канонических widget → внутренняя kind-константа.
+# Алиасы (combo/spinbox/numeric) нормализуются в FieldMeta.__init__ —
+# здесь только канонические значения + slider (отдельный UI hint для Phase 2.4).
+_WIDGET_TO_KIND: dict[str, str] = {
+    "checkbox": _KIND_BOOL,
+    "literal": _KIND_LITERAL,
+    "color3": _KIND_COLOR3,
+    "slider": _KIND_INT,  # slider — UI variant int, до Phase 2.4 рендерится как _build_int
+    "int": _KIND_INT,
+    "float": _KIND_FLOAT,
+    "str": _KIND_STR_SHORT,
+    "text": _KIND_STR_LONG,
+    "path": _KIND_PATH,
+    "label": _KIND_UNSUPPORTED,
+}
+
+
 def _resolve_kind(field_info: FieldInfo) -> str:
     """Определить kind виджета по типу поля.
 
@@ -128,27 +145,13 @@ def _resolve_kind(field_info: FieldInfo) -> str:
     позволяет требовать slider для int с диапазоном или label для bool.
     """
     # 0. Явный FieldMeta.widget перекрывает type-dispatch.
+    # FieldMeta.__init__ нормализует алиасы (combo→literal, spinbox→int, numeric→float),
+    # поэтому здесь всегда каноническое значение.
     meta = field_info.meta
     widget = getattr(meta, "widget", "") if meta is not None else ""
     if widget:
-        # Маппинг widget → внутренняя kind-константа.
-        # Неизвестное значение игнорируется (graceful fallback на type-dispatch).
-        widget_to_kind = {
-            "checkbox": _KIND_BOOL,
-            "literal": _KIND_LITERAL,
-            "combo": _KIND_LITERAL,
-            "color3": _KIND_COLOR3,
-            "spinbox": _KIND_INT,
-            "slider": _KIND_INT,
-            "int": _KIND_INT,
-            "float": _KIND_FLOAT,
-            "numeric": _KIND_FLOAT,
-            "str": _KIND_STR_SHORT,
-            "text": _KIND_STR_LONG,
-            "path": _KIND_PATH,
-            "label": _KIND_UNSUPPORTED,
-        }
-        kind = widget_to_kind.get(widget)
+        # Неизвестный widget → graceful fallback на type-dispatch.
+        kind = _WIDGET_TO_KIND.get(widget)
         if kind is not None:
             return kind
 
