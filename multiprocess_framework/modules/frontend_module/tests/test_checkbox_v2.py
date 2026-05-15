@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты checkbox v2: presenter без Qt, smoke фасада с QApplication."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,14 +42,10 @@ class _FakeRegistersManager:
     def get_register(self, name: str) -> Any:
         return self._registers.get(name)
 
-    def get_field_metadata(
-        self, register_name: str, field_name: str
-    ) -> Optional[dict]:
+    def get_field_metadata(self, register_name: str, field_name: str) -> Optional[dict]:
         return self._meta.get((register_name, field_name))
 
-    def set_field_value(
-        self, register_name: str, field_name: str, value: Any
-    ) -> tuple[bool, Optional[str]]:
+    def set_field_value(self, register_name: str, field_name: str, value: Any) -> tuple[bool, Optional[str]]:
         reg = self.get_register(register_name)
         if not reg:
             return False, "no register"
@@ -58,15 +55,11 @@ class _FakeRegistersManager:
             cb(value)
         return True, None
 
-    def subscribe(
-        self, register_name: str, field_name: str, callback: Callable[[Any], None]
-    ) -> None:
+    def subscribe(self, register_name: str, field_name: str, callback: Callable[[Any], None]) -> None:
         key = (register_name, field_name)
         self._subs.setdefault(key, []).append(callback)
 
-    def unsubscribe(
-        self, register_name: str, field_name: str, callback: Callable[[Any], None]
-    ) -> None:
+    def unsubscribe(self, register_name: str, field_name: str, callback: Callable[[Any], None]) -> None:
         key = (register_name, field_name)
         lst = self._subs.get(key)
         if lst and callback in lst:
@@ -163,6 +156,27 @@ def qapp():
     if app is None:
         app = QApplication([])
     return app
+
+
+class TestCheckboxViewValueChangedSignal:
+    """Тест на публичный сигнал value_changed: Signal(bool) (Phase 2.0 pilot)."""
+
+    def test_value_changed_emits_bool_on_toggle(self, qapp) -> None:
+        """value_changed эмитит bool при программном изменении состояния чекбокса."""
+        from multiprocess_framework.modules.frontend_module.components.checkbox.view import (
+            CheckboxView,
+        )
+
+        view = CheckboxView(position="left")
+        received: list[bool] = []
+        view.value_changed.connect(lambda v: received.append(v))
+
+        # set_value (не silent) — триггерит stateChanged → value_changed
+        view.set_value(True)
+        assert received == [True]
+
+        view.set_value(False)
+        assert received == [True, False]
 
 
 class TestCheckboxControlFacade:

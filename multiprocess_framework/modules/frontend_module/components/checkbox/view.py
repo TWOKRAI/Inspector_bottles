@@ -19,6 +19,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QMessageBox,
     QVBoxLayout,
     QWidget,
+    Signal,
 )
 
 # Геометрия квадрата чекбокса и отступы layout (px).
@@ -32,6 +33,11 @@ Position = Literal["left", "right", "top", "bottom"]
 
 class CheckboxView(QWidget):
     """Композитный виджет: подпись (`QLabel`) + `QCheckBox` в одном из четырёх порядков."""
+
+    # Публичный сигнал: эмитится при смене состояния чекбокса пользователем.
+    # Передаёт bool (отмечен / нет). Используется для binding через
+    # ActionBusRegistersManager и других внешних подписчиков.
+    value_changed = Signal(bool)
 
     def __init__(
         self,
@@ -49,6 +55,12 @@ class CheckboxView(QWidget):
         self._checkbox = QCheckBox()
         self._checkbox.setFixedSize(CHECKBOX_FIXED_WIDTH_PX, CHECKBOX_FIXED_HEIGHT_PX)
         self._build_layout()
+
+        # Эмит value_changed при смене состояния (stateChanged → bool).
+        # Не конфликтует с on_changed() — тот подключает дополнительный callback.
+        self._checkbox.stateChanged.connect(
+            lambda _state: self.value_changed.emit(self._checkbox.isChecked()),
+        )
 
     def _build_layout(self) -> None:
         """Собрать `QHBoxLayout` или `QVBoxLayout` в соответствии с `position`."""

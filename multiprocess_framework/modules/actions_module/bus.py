@@ -196,7 +196,7 @@ class ActionBus:
     # Основные операции
     # ------------------------------------------------------------------
 
-    def execute(self, action: Action) -> None:
+    def execute(self, action: Action) -> bool:
         """
         Выполнить действие: вызвать handler.apply, добавить в undo_stack.
 
@@ -207,14 +207,23 @@ class ActionBus:
         COMMAND (undoable=False): выполняется, но НЕ добавляется в стек.
 
         Pre-execute hook: если задан и вернул False — action не выполняется,
-        undo_stack не изменяется, on_blocked вызывается. Undo/redo хук не проходят.
+        undo_stack не изменяется, on_blocked вызывается.
+
+        Returns:
+            True — handler.apply() выполнился успешно, action в undo_stack
+            (или выполнен как COMMAND). False — pre_execute_hook отклонил
+            или handler не найден. Exception из handler.apply() не ловится
+            (пробрасывается наверх).
+
+        Обратная совместимость: существующие callers, игнорирующие return
+        value (``bus.execute(action)``), продолжают работать без изменений.
         """
         # Pre-execute hook (AD-1, PR2 auth-rbac)
         if self._pre_execute_hook is not None:
             if not self._pre_execute_hook(action):
                 if self._on_blocked_callback is not None:
                     self._on_blocked_callback(action)
-                return
+                return False
 
         handler = self._handlers.get(action.action_type)
         if handler is None:
@@ -222,7 +231,7 @@ class ActionBus:
                 "Handler не зарегистрирован для %s, action пропущен",
                 action.action_type,
             )
-            return
+            return False
 
         # Применяем действие
         handler.apply(action, self._rm)
@@ -235,7 +244,7 @@ class ActionBus:
         if not action.undoable:
             self._last_event = ("execute", action)
             self._notify_callbacks()
-            return
+            return True
 
         # Coalescing
         if (
@@ -269,6 +278,8 @@ class ActionBus:
             # Берём актуальный (возможно merged) action из вершины стека
             logged_action = self._undo_stack[-1] if self._undo_stack else action
             self._log_writer.enqueue(logged_action)
+
+        return True
 
     def record(self, action: Action) -> None:
         """Записать действие, уже применённое извне, в undo-стек (без вызова handler.apply).

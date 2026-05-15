@@ -111,6 +111,31 @@ class TestActionBusExecute:
         assert len(b.history(100)) == 10
 
 
+class TestActionBusExecuteReturnValue:
+    """Тесты на возвращаемое значение execute() -> bool (Phase 2.0 pilot)."""
+
+    def test_execute_returns_true_on_success(self, bus):
+        """execute() возвращает True при успешном handler.apply()."""
+        b, rm = bus
+        b.register_handler("SET_VALUE", make_handler())
+        result = b.execute(make_action("SET_VALUE"))
+        assert result is True
+
+    def test_execute_returns_false_when_pre_execute_hook_rejects(self, bus):
+        """execute() возвращает False если pre_execute_hook вернул False."""
+        b, rm = bus
+        b.register_handler("SET_VALUE", make_handler())
+        b.set_pre_execute_hook(lambda action: False)
+        result = b.execute(make_action("SET_VALUE"))
+        assert result is False
+
+    def test_execute_returns_false_when_handler_not_found(self, bus):
+        """execute() возвращает False если handler не зарегистрирован."""
+        b, rm = bus
+        result = b.execute(make_action("UNKNOWN_TYPE"))
+        assert result is False
+
+
 class TestActionBusCoalescing:
     def test_coalesce_same_key_merges(self, bus):
         b, rm = bus
