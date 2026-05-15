@@ -30,11 +30,15 @@ from .wire_monitor import WireStatusMonitor
 
 
 def _log(msg: str, level: str = "info") -> None:
-    """Записать в LoggerManager (если инициализирован), иначе тихо."""
+    """Записать в LoggerManager (если инициализирован), иначе тихо.
+
+    module="trace" — диагностические сообщения уходят в logs/<proc>/trace.log
+    (см. LoggerManagerConfig.modules["trace"]) плюс в scope-каналы.
+    """
     lm = get_logger()
     if lm is None:
         return
-    getattr(lm, level)(msg, module="topology_bridge")
+    getattr(lm, level)(msg, module="trace")
 
 
 # Тонкая прокси-обёртка чтобы прежний `logger.warning(...)` стиль работал

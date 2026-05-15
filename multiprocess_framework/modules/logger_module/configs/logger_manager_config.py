@@ -70,7 +70,6 @@ class LoggerModuleSchema(SchemaBase):
     rotate: bool = True
 
 
-
 @register_schema("LoggerManagerConfig")
 class LoggerManagerConfig(ChannelRoutingConfig):
     """Конфигурация LoggerManager: каналы, scopes, modules."""
@@ -136,6 +135,14 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             file_path="gui.log",
             min_level="INFO",
         ),
+        # trace — отдельный файл для диагностики cross-layer цепочек.
+        # Логи с module="trace" уходят сюда (плюс в scope-каналы:
+        # system_file/messages_file/console).
+        "trace": LoggerModuleSchema(
+            enabled=True,
+            file_path="trace.log",
+            min_level="DEBUG",
+        ),
     }
 
     channels: Annotated[
@@ -177,7 +184,10 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         "BUSINESS": LoggerScopeSchema(
             enabled=True,
             min_level=_LEVEL_ORDER[1],
-            channels=["system_file", "messages_file"],
+            # console добавлен в BUSINESS — все INFO видны в stdout
+            # (раньше там был только WARNING+ через SYSTEM scope).
+            # Для production можно убрать console и оставить только файлы.
+            channels=["system_file", "messages_file", "console"],
         ),
         "PERFORMANCE": LoggerScopeSchema(
             enabled=True,

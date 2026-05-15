@@ -16,11 +16,15 @@ if TYPE_CHECKING:
 
 
 def _log(msg: str, level: str = "info") -> None:
-    """Записать в LoggerManager (если инициализирован), иначе тихо."""
+    """Записать в LoggerManager (если инициализирован), иначе тихо.
+
+    module="trace" — диагностические сообщения уходят в logs/<proc>/trace.log
+    (см. LoggerManagerConfig.modules["trace"]) плюс в scope-каналы.
+    """
     lm = get_logger()
     if lm is None:
         return
-    getattr(lm, level)(msg, module="field_set_handler")
+    getattr(lm, level)(msg, module="trace")
 
 
 class FieldSetHandler:
