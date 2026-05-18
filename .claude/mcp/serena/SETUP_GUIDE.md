@@ -43,19 +43,32 @@ serena --help
 
 ## Активация проекта
 
-Serena хранит индекс LSP по проектам. Один раз для Inspector_bottles:
+Активация **автоматическая**: при первом старте MCP-сервера Serena (`uvx ... --project .` из `.mcp.json`) она создаёт `.serena/project.yml` и `.serena/memories/` в корне проекта. Никаких ручных команд не нужно.
+
+Если хочется создать конфиг вручную до старта MCP:
 
 ```powershell
-cd D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles
-serena project activate .
+serena project create .
+# Опционально с указанием языков и сразу индексацией:
+serena project create . --language python --index
 ```
 
-Это создаст `.serena/` с конфигом и кэшем LSP. Папку добавь в `.gitignore`:
+Папку `.serena/` нужно добавить в `.gitignore` — там кэш LSP и project-конфиг:
 
 ```
 # .gitignore
 .serena/
 ```
+
+Полезные команды:
+
+```powershell
+serena project index .          # обновить LSP-индекс
+serena project health-check .   # диагностика проекта
+serena project --help           # все subcommands
+```
+
+> ⚠️ В версии 1.3.0 нет команды `serena project activate` — конфиг создаётся через `create`, а активным проект становится при подключении MCP-сервера с флагом `--project .`.
 
 ## Конфигурация MCP
 

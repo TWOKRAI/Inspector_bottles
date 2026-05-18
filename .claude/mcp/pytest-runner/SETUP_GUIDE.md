@@ -1,183 +1,71 @@
-# test-runner-mcp — полный гайд установки
+# pytest-runner — детальный статус
 
-## Что это и почему такой выбор
+Полный обзор причин отложения и проведённого ресёрча. См. также [README.md](README.md) — короткое резюме.
 
-MCP-сервер для запуска тестов с парсингом результатов в структурный формат. На вход — команда (`pytest ...`), на выход — JSON с `pass/fail/skip` по каждому test-id, длительности, трейсбэками.
+## Хронология
 
-Альтернативы и почему не они:
+1. **План:** интегрировать MCP-сервер `jwilger/mcp-pytest-runner` (был упомянут в lobehub-каталоге).
+2. **Обнаружено:** репо `jwilger/mcp-pytest-runner` — **GitHub 404**, удалён.
+3. **Поиск замены:** найден `privsim/mcp-test-runner` (Node.js, multi-framework). Его README рекомендует `npm install test-runner-mcp`.
+4. **Установка на Windows:** все варианты упёрлись в две стены:
+   - `npm install -g test-runner-mcp` → блок permission-системой Claude Code
+   - `npx -y test-runner-mcp` (без global install) → **`404 Not Found` в npm registry**
+5. **Прямая проверка:** `npm view test-runner-mcp` →
+   ```
+   npm error code E404
+   npm error 404 Not Found - GET https://registry.npmjs.org/test-runner-mcp
+   ```
+   Пакет с таким именем **в npm registry не существует**.
+6. **Решение:** убрать из `.mcp.json` и `mcp.template.json`. Документация остаётся как референс.
 
-| Кандидат | Минус |
-|----------|-------|
-| `jwilger/mcp-pytest-runner` | Репо 404 |
-| `kieranlal/mcp_pytest_service` | 3 коммита, npm-пакет неопубликован |
-| `pytest-mcp` (PyPI) | Это фреймворк для **тестирования MCP-серверов**, не runner pytest |
-| Bash `pytest ...` | Работает, но stdout-парсинг хуже |
+## Проверенные кандидаты
 
-`test-runner-mcp` (privsim) — живой, multi-framework, стабильный npm-пакет.
+| Пакет | Стек | Живой? | Pypi/npm | Вердикт |
+|-------|------|--------|----------|---------|
+| `jwilger/mcp-pytest-runner` | Python | ❌ GitHub 404 | — | Удалён |
+| `test-runner-mcp` (npm имя) | Node.js | — | ❌ 404 | Не опубликован |
+| `privsim/mcp-test-runner` | Node.js | ✅ GitHub | ❌ нет npm-пакета | Только из git, не стабильно |
+| `kieranlal/mcp_pytest_service` | Python | ⚠️ 3 коммита | ❌ | Слишком экспериментально |
+| `pytest-mcp` (PyPI) | Python | ✅ PyPI | ✅ | Это **тестирование MCP-серверов**, не runner pytest |
 
-## Зависимости
+## Альтернатива: Bash MCP
 
-| Компонент | Версия | Установка (Windows) |
-|-----------|--------|---------------------|
-| Node.js | ≥ 18 LTS | `winget install OpenJS.NodeJS.LTS` |
-| npm | поставляется с Node | автоматически |
-| pytest | уже в проекте | `uv sync` |
+Прямой запуск pytest через встроенный `Bash` MCP **работает** и закрывает 80% сценария. Минус — стандартный stdout-output вместо структурного JSON. Для агентских циклов (Tester / Debugger) этого хватает.
 
-Проверь:
-
-```powershell
-node --version    # должно быть v18+
-npm --version
-pytest --version
-```
-
-## Установка
-
-Глобальная установка **не требуется** — используем `npx -y` (как Context7). Первый запуск Claude Code скачает пакет в кэш npm (`~/AppData/Local/npm-cache/_npx` на Windows).
-
-```powershell
-# Smoke-проверка
-npx -y test-runner-mcp --help
-```
-
-Если нужно ускорить запуск (избавиться от cold-start npx) — можно поставить глобально:
+Типовые команды:
 
 ```powershell
-npm install -g test-runner-mcp
-where.exe test-runner-mcp
+# Полный gate перед коммитом
+make gate                                    # ruff + mypy + pytest + coverage
+make test                                    # только pytest с coverage
+
+# Прицельный run
+python -m pytest path/to/test_file.py -v
+python -m pytest -k pattern -v
+python -m pytest path::test_name -v          # по nodeid
+
+# С env
+$env:INSPECTOR_LOG_DIR = "logs/test"
+python -m pytest -v
 ```
 
-⚠️ `npm install -g` иногда блокируется permission-настройками Claude Code или системы. Если упало — оставляй `npx -y`, оно работает без глобального бинаря.
+## Когда возвращаться
 
-## Конфигурация MCP
+Возобновить интеграцию, если появится:
 
-В `.mcp.json`:
+1. **Anthropic-official MCP test server** — самый надёжный вариант
+2. **PyPI-опубликованный pytest-MCP** с поддержкой Windows
+3. **Зрелый npm-пакет** с structured pytest output (не git-only)
 
-```json
-"test-runner": {
-  "command": "npx",
-  "args": ["-y", "test-runner-mcp"]
-}
-```
+Чек-лист возврата:
+- [ ] Добавить блок в `.mcp.json` + `mcp.template.json`
+- [ ] Переписать `README.md` + этот файл под актуальный пакет
+- [ ] Прописать в промптах Tester / Debugger использование `mcp__<name>__run_tests`
+- [ ] Smoke-проверка на одном модуле проекта
+- [ ] Документация в `.claude/mcp/README.md` (вернуть в таблицу активных)
 
-`-y` — auto-confirm для скачивания/обновления пакета. После — **перезапуск Claude Code**, проверка `/mcp`.
+## Полезные ссылки на будущее
 
-## Использование с pytest
-
-Сервер экспортирует один tool — `run_tests`. Параметры (типовые сценарии для проекта):
-
-### Прогон всего suite
-
-```
-{
-  "command": "python -m pytest",
-  "framework": "pytest"
-}
-```
-
-### Прогон тестов одного модуля
-
-```
-{
-  "command": "python -m pytest multiprocess_framework/modules/router/tests -v",
-  "framework": "pytest",
-  "timeout": 60000
-}
-```
-
-### Прогон одного теста по nodeid
-
-```
-{
-  "command": "python -m pytest multiprocess_framework/modules/router/tests/test_routing.py::test_field_routing -v",
-  "framework": "pytest"
-}
-```
-
-### С env
-
-```
-{
-  "command": "python -m pytest -v",
-  "framework": "pytest",
-  "env": {
-    "INSPECTOR_LOG_DIR": "logs/test",
-    "MULTIPROCESS_LOG_DIR": "logs/test"
-  }
-}
-```
-
-## Важно: PYTHONPATH и cwd
-
-Из правил проекта: **ручной pytest запускать из корня** (иначе `ModuleNotFoundError`). test-runner-mcp получает cwd от Claude Code — это уже корень проекта. Но если будут падения с `ImportError`, явно укажи `workingDir`:
-
-```json
-{
-  "command": "python -m pytest",
-  "framework": "pytest",
-  "workingDir": "D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles"
-}
-```
-
-## Конфликт с pytest-qt
-
-Тесты PySide6 через `pytest-qt` требуют:
-- `qt_api = pyside6` в `pyproject.toml` (уже есть)
-- `pytest-qt` plugin (тоже есть)
-- Иногда — display server. На Windows работает «из коробки».
-
-test-runner-mcp **прозрачен** для pytest-qt — он просто запускает `pytest` как subprocess. Никаких дополнительных настроек не нужно.
-
-## Сравнение с make test
-
-| Сценарий | Чем пользоваться |
-|----------|------------------|
-| Полный gate перед коммитом | `make gate` (ruff + mypy + pytest + coverage) |
-| Прогон одного модуля для дебага | **test-runner-mcp** через агента |
-| CI | `make test` (без MCP вообще) |
-| Структурный анализ failures агентом | **test-runner-mcp** |
-
-test-runner-mcp **не заменяет** `make test` — он дополняет его для агентских циклов.
-
-## Использование в агентах
-
-В промпт Tester / Debugger:
-
-```
-**test-runner-mcp:** для прицельного запуска конкретного теста (по nodeid
-или -k pattern) — звать mcp__test_runner__run_tests. Парсить stdout
-вручную не нужно — приходит структурный JSON с pass/fail/durations.
-Для полного gate перед /ship — оставлять `make gate`.
-```
-
-## Troubleshooting
-
-### `test-runner-mcp` не найден после `npm install -g`
-
-```powershell
-# Проверь npm prefix
-npm config get prefix
-# Обычно %APPDATA%\npm — должно быть в PATH
-$env:Path += ";$env:APPDATA\npm"
-```
-
-### MCP-сервер падает на старте
-
-Версия Node старше 18? `node --version`. Обнови через winget.
-
-### Тесты падают по `ImportError` хотя `make test` проходит
-
-cwd не корень проекта. Прописать `workingDir` в параметрах вызова (см. выше).
-
-### Timeout на больших suite
-
-```json
-{ "timeout": 600000 }  // 10 минут
-```
-
-## Ссылки
-
-- Репо: https://github.com/privsim/mcp-test-runner
-- npm-пакет: https://www.npmjs.com/package/test-runner-mcp
-- pytest docs: https://docs.pytest.org/
-- pytest-qt docs: https://pytest-qt.readthedocs.io/
+- GitHub: [privsim/mcp-test-runner](https://github.com/privsim/mcp-test-runner) — следить за npm-публикацией
+- Анализ: [skywork pytest-mcp-server deep dive](https://skywork.ai/skypage/en/A-Deep-Dive-into-pytest-mcp-server:-Bridging-Pytest-with-AI-Agents/)
+- Список MCP-серверов: [awesome-mcp.tools](https://awesome-mcp.tools/) — фильтр по pytest

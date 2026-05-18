@@ -1,18 +1,48 @@
-# pytest-runner (test-runner-mcp) — структурный запуск pytest
+# pytest-runner — **отложено** ⚠️
 
-[test-runner-mcp](https://github.com/privsim/mcp-test-runner) — мульти-фреймворковый MCP-сервер на Node.js. Даёт агенту структурный (parseable) запуск pytest вместо парсинга `stdout`. Поддерживает pytest, jest, bats, flutter, go, rust.
+> **Статус на 2026-05:** интеграция MCP-сервера для структурного запуска pytest **отложена**. На рынке нет зрелого опубликованного пакета. Эта папка остаётся как живая референс-документация на случай появления подходящего проекта.
 
-## ⚠️ Статус выбора пакета
+## Что не получилось
 
-Первоначально упомянутый `jwilger/mcp-pytest-runner` — **репо больше не существует** (404). Из живых альтернатив:
+Проверены три кандидата — ни один не подошёл:
 
-| Пакет | Зрелость | Стек | Решение |
-|-------|----------|------|---------|
-| `privsim/mcp-test-runner` | Активен, multi-framework | Node.js (npm) | **Берём** |
-| `kieranlal/mcp_pytest_service` | 3 commit, эксп. | Python | Слишком сырой |
-| Прямой запуск через Bash MCP | — | — | Workable fallback |
+| Кандидат | Проблема |
+|----------|----------|
+| `jwilger/mcp-pytest-runner` | GitHub 404 — репо удалено |
+| `test-runner-mcp` (npm) | **404 в npm registry** (`npm view` подтверждает) — пакет упомянут только в README `privsim/mcp-test-runner`, но не публикуется |
+| `privsim/mcp-test-runner` | Node-проект на GitHub: требует `git clone` + `npm run build` локально; нестабильно для long-term зависимости |
+| `kieranlal/mcp_pytest_service` | 3 коммита, экспериментальный, npm-пакет не существует |
 
-Если в будущем появится зрелый Python-native pytest-MCP — заменим. Сейчас Node-вариант стабильнее.
+Из конфига MCP сервер `test-runner` **убран** — он стабильно падал с Failed при попытке `npx -y test-runner-mcp` (нечего скачивать).
+
+## Текущее решение
+
+Прямой запуск pytest через **Bash MCP** (встроенный в Claude Code) — рабочий fallback. Команды:
+
+```powershell
+# полный suite
+make test
+
+# прицельный тест через Bash MCP
+python -m pytest multiprocess_framework/modules/router/tests/test_routing.py::test_field_routing -v
+
+# по marker / -k pattern
+python -m pytest -k routing -v
+```
+
+Tester / Debugger агенты — пользуются обычным `Bash` MCP. Это работает; теряем только структурный JSON-output для парсинга агентом.
+
+## Когда вернуться
+
+Появится один из:
+- Pytest-native MCP-сервер с реальной публикацией на PyPI
+- Опубликованный npm-пакет (не git-only) с поддержкой Windows
+- Anthropic-official Test MCP Server
+
+Тогда:
+1. Восстановить блок `test-runner` в `.mcp.json` / `mcp.template.json`
+2. Обновить этот README и SETUP_GUIDE под актуальный пакет
+3. Прописать в промптах Tester/Debugger
 
 ## Когда звать
 

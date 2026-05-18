@@ -25,11 +25,9 @@ uv tool install -p 3.13 serena-agent@latest --prerelease=allow
 
 # 3. Проверить
 serena --version
-
-# 4. Активировать проект (один раз)
-cd D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles
-serena project activate
 ```
+
+> При первом запуске MCP-сервер Serena сам создаёт `.serena/project.yml` в корне проекта (через `--project .` в `.mcp.json`). Ничего активировать вручную не нужно.
 
 ## Подключение к Claude Code
 

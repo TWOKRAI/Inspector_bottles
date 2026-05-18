@@ -26,12 +26,6 @@
       "_note": "Требует probe в frontend/app.py + env QT_MCP_PROBE=1 в момент запуска приложения",
       "command": "uv",
       "args": ["run", "qt-mcp"]
-    },
-    "test-runner": {
-      "_doc": ".claude/mcp/pytest-runner/SETUP_GUIDE.md",
-      "_install": "Не требуется — npx -y скачает на первом запуске",
-      "command": "npx",
-      "args": ["-y", "test-runner-mcp"]
     }
   }
 }
