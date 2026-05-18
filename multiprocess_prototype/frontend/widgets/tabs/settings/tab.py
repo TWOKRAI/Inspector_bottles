@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Signal
@@ -42,8 +43,6 @@ class SettingsTab(BaseTreeNavTab):
         self.enable_undo_redo(bus)
         self.section_dirty_changed.connect(self._on_section_dirty)
         self.section_data_saved.connect(self._on_section_saved)
-        if bus is not None:
-            bus.add_change_callback(self._presenter.on_bus_change)
         self.populate()
         dashboard = self._presenter.section("admin_dashboard")
         if dashboard is not None:
@@ -64,26 +63,42 @@ class SettingsTab(BaseTreeNavTab):
     def _make_presenter(self) -> TreeNavTabPresenter:
         return SettingsPresenter(view=self, rm=None, ui=None, ctx=self._ctx)
 
+    # --- Backward-compat: deprecated в Phase 4, удаляется в Phase 7.1 ---
+    # Тестам и внешнему коду — через ``tab.presenter.section("system_settings")``.
+
+    def _warn(self, name: str) -> None:
+        warnings.warn(
+            f"SettingsTab.{name}() is deprecated (Phase 4); use tab.presenter.section('system_settings') instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+    def _sys(self) -> object | None:
+        return self._presenter.section("system_settings")
+
     def reload(self) -> None:
-        s = self._presenter.section("system_settings")
-        if s is not None:
+        self._warn("reload")
+        if (s := self._sys()) is not None:
             s.presenter.reload()  # type: ignore[attr-defined]
 
     def save(self) -> bool:
-        s = self._presenter.section("system_settings")
+        self._warn("save")
+        s = self._sys()
         return s.presenter.save() if s is not None else False  # type: ignore[attr-defined]
 
     def is_dirty(self) -> bool:
-        s = self._presenter.section("system_settings")
+        self._warn("is_dirty")
+        s = self._sys()
         return s.presenter.is_dirty() if s is not None else False  # type: ignore[attr-defined]
 
     def field_editors(self) -> "dict[str, FieldEditor]":
-        s = self._presenter.section("system_settings")
+        self._warn("field_editors")
+        s = self._sys()
         return s.field_editors() if s is not None else {}  # type: ignore[attr-defined]
 
     def view_mode(self) -> "ViewMode":
-        s = self._presenter.section("system_settings")
-        if s is not None:
+        self._warn("view_mode")
+        if (s := self._sys()) is not None:
             return s.view_mode()  # type: ignore[attr-defined]
         from multiprocess_prototype.frontend.forms import ViewMode
 

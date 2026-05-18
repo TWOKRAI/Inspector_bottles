@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """SettingsPresenter — app-specific обёртка над TreeNavTabPresenter.
 
-Только undo/redo через ActionBus. Конфигурация секций — в _sections.py,
-универсальная навигация — в TreeNavTabPresenter.
+После Phase 4 post-review (ffa6f92→) presenter не содержит логики undo/redo:
+`DiffScrollTabLayout.enable_undo_redo()` сам подписывает свои кнопки на
+ActionBus. Класс оставлен ради явного типа `SettingsView` и точки расширения
+для app-specific логики, которая может появиться в Phase 5+.
 
 См. ADR-126.
 """
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
 
 
 class SettingsPresenter(TreeNavTabPresenter[SettingsView, None]):
-    """Презентер таба Settings — undo/redo подписан на ActionBus."""
+    """Презентер таба Settings — тонкая обёртка над TreeNavTabPresenter."""
 
     def __init__(
         self,
@@ -34,18 +36,3 @@ class SettingsPresenter(TreeNavTabPresenter[SettingsView, None]):
     ) -> None:
         super().__init__(view=view, rm=rm, ui=ui)
         self._ctx = ctx
-
-    def on_bus_change(self) -> None:
-        """Обновить состояние кнопок Undo/Redo по текущему ActionBus."""
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        layout = getattr(self._view, "_layout", None)
-        if layout is None:
-            return
-        undo_btn = getattr(layout, "undo_button", None)
-        redo_btn = getattr(layout, "redo_button", None)
-        if undo_btn is not None:
-            undo_btn.setEnabled(bus.can_undo())
-        if redo_btn is not None:
-            redo_btn.setEnabled(bus.can_redo())

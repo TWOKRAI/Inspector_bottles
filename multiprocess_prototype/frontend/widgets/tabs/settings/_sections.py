@@ -19,6 +19,9 @@ from PySide6.QtWidgets import QWidget
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
 
 if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.widgets.tabs.section_protocol import (
+        SectionProtocol,
+    )
     from multiprocess_prototype.frontend.app_context import AppContext
 
 
@@ -116,21 +119,21 @@ def _audit_log_factory(ctx: "AppContext") -> _SectionAdapter:
     return _SectionAdapter(key="audit_log", title="Audit log", widget=widget)
 
 
-def _system_factory(ctx: "AppContext") -> QWidget:
+def _system_factory(ctx: "AppContext") -> "SectionProtocol":
     """Фабрика SystemSection — системные настройки."""
     from .system import SystemSection
 
     return SystemSection(ctx)
 
 
-def _interface_factory(ctx: "AppContext") -> QWidget:
+def _interface_factory(ctx: "AppContext") -> "SectionProtocol":
     """Фабрика InterfaceSection — настройки интерфейса."""
     from .interface import InterfaceSection
 
     return InterfaceSection(ctx)
 
 
-def _appearance_factory(ctx: "AppContext") -> QWidget:
+def _appearance_factory(ctx: "AppContext") -> "SectionProtocol":
     """Фабрика AppearanceSection — оформление (не использует ctx)."""
     from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
     from multiprocess_prototype.frontend.managers.theme_presets_manager import (
@@ -144,7 +147,7 @@ def _appearance_factory(ctx: "AppContext") -> QWidget:
     )
 
 
-def _history_factory(ctx: "AppContext") -> QWidget:
+def _history_factory(ctx: "AppContext") -> "SectionProtocol":
     """Фабрика HistorySection — история действий."""
     from .history import HistorySection
 
