@@ -7,6 +7,7 @@
 callbacks_base, placeholder_utils.
 """
 
+from .base_columnar_tab import BaseColumnarTab
 from .base_tree_nav_tab import BaseTreeNavTab
 from .binding_context import RegisterBindingContext
 from .current_page_stack import CurrentPageStack
@@ -31,6 +32,7 @@ from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
 
 __all__ = [
+    "BaseColumnarTab",
     "BaseTab",
     "BaseTreeNavTab",
     "CurrentPageStack",

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """BaseTreeNavTab --- QWidget-каркас вкладки с tree-навигацией.
 
-Циклом по ``list[SectionSpec]`` строит то, что раньше делали 5 методов
-``add_*_page()`` в ``SettingsTab``. Потребитель передаёт:
+Наследует ``BaseColumnarTab`` (nav-агностичную базу) и добавляет
+tree-навигацию по ``list[SectionSpec]``:
 
-* ``sections`` --- список деклараций секций;
-* ``layout_factory`` --- фабрика layout'а (``DiffScrollTabLayout`` и т.п.),
-  удовлетворяющего ``TabLayoutProtocol``. Framework не знает о конкретных
-  layout-виджетах из prototype --- связь через Protocol.
+* Строит ``QTreeWidget`` из списка ``SectionSpec``.
+* Управляет секциями через ``TreeNavTabPresenter``.
+* Поддерживает ленивое создание секций.
+* Ретранслирует события секций (dirty, saved).
 
 Подклассы (``SettingsTab``, ``RecipesTab``, ...) добавляют:
 
@@ -16,11 +16,12 @@
 * Объектные имена для QSS (``_tree_object_name`` hook).
 
 Сигналы:
-    section_changed(str):           ключ активной секции после навигации.
+    section_changed(str):           ключ активной секции после навигации
+                                    (наследован от BaseColumnarTab).
     section_dirty_changed(str, bool): (key, dirty) --- ретранслирован от секции.
     section_data_saved(str, dict):  (key, data) --- ретранслирован от секции.
 
-См. ADR-126, Phase 3.
+См. ADR-126, Phase 3, Phase 6b.
 """
 
 from __future__ import annotations
@@ -30,12 +31,14 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from .base_columnar_tab import BaseColumnarTab
 from .current_page_stack import CurrentPageStack
 from .nav_tree_utils import (
     build_nav_tree_from_specs,
@@ -52,7 +55,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BaseTreeNavTab(QWidget):
+class BaseTreeNavTab(BaseColumnarTab):
     """QWidget-каркас вкладки с tree-навигацией.
 
     Принимает список ``SectionSpec`` и автоматически строит UI: nav-дерево,
@@ -61,8 +64,7 @@ class BaseTreeNavTab(QWidget):
     Подкласс **обязан** передать ``layout_factory`` (или получит ``RuntimeError``).
     """
 
-    # Сигналы наружу
-    section_changed = Signal(str)
+    # Сигналы наружу (section_changed наследуется от BaseColumnarTab)
     section_dirty_changed = Signal(str, bool)
     section_data_saved = Signal(str, dict)
 
@@ -88,23 +90,24 @@ class BaseTreeNavTab(QWidget):
                                     ``None`` --- секции не подписываются.
             parent:                 родительский виджет.
         """
-        super().__init__(parent)
-        self._ctx = ctx
-        self._sections_specs = list(sections)
+        # --- Сохранить данные ДО super().__init__, т.к. _build_nav_widget()
+        #     вызывается из BaseColumnarTab.__init__ и требует _sections_specs.
+        self._sections_specs: list[SectionSpec[Any]] = list(sections)
         self._bus_change_subscriber = bus_change_subscriber
 
-        # --- Layout ---
-        if layout_factory is None:
-            raise RuntimeError(
-                "BaseTreeNavTab: layout_factory обязателен. "
-                "Подкласс должен передать фабрику layout'а, удовлетворяющего "
-                "TabLayoutProtocol (например DiffScrollTabLayout).",
-            )
-        self._layout: "TabLayoutProtocol" = layout_factory()
+        # --- BaseColumnarTab.__init__ ---
+        # Вызовет _create_content_stack() → CurrentPageStack,
+        # _build_nav_widget() → QTreeWidget с items,
+        # set_nav_widget, set_content_widget, set_title, QVBoxLayout(self).
+        super().__init__(
+            title=title,
+            ctx=ctx,
+            layout_factory=layout_factory,
+            parent=parent,
+        )
 
-        # --- Content / Action стеки ---
+        # --- Action stack (SectionSpec-specific, не в BaseColumnarTab) ---
         self._action_stack = CurrentPageStack()
-        self._content_stack = CurrentPageStack()
 
         # Пустая action-страница (для секций без кнопок)
         empty_page = QWidget()
@@ -114,20 +117,6 @@ class BaseTreeNavTab(QWidget):
         self._presenter = self._make_presenter()
         self._presenter.register_action_page("_empty", empty_idx)
 
-        # --- Nav tree ---
-        self._tree_nav = QTreeWidget()
-        self._tree_nav.setObjectName(self._tree_object_name())
-        self._tree_nav.setHeaderHidden(True)
-        self._tree_nav.setRootIsDecorated(True)
-        self._tree_nav.setIndentation(16)
-        self._tree_nav.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-        )
-        self._tree_nav.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-        )
-        self._tree_nav.currentItemChanged.connect(self._on_tree_item_changed)
-
         # --- Наполнение секциями ---
         for spec in self._sections_specs:
             if spec.lazy:
@@ -136,31 +125,52 @@ class BaseTreeNavTab(QWidget):
                 section = spec.factory(ctx)
                 self._attach_section(section, spec.key)
 
-        # --- Заполнить nav-tree ---
-        build_nav_tree_from_specs(self._tree_nav, self._sections_specs)
-
-        # --- Собрать layout ---
-        # Action wrapper
+        # --- Собрать action layout ---
         action_widget = QWidget()
         action_layout = QVBoxLayout(action_widget)
         action_layout.setContentsMargins(4, 4, 4, 4)
         action_layout.setSpacing(0)
         action_layout.addWidget(self._action_stack, 1)
 
-        self._layout.set_action_widget(action_widget)
-        self._layout.set_nav_widget(self._tree_nav)
-        self._layout.set_content_widget(self._content_stack)
-        self._layout.set_title(title)
+        self._tab_layout.set_action_widget(action_widget)
 
         # --- Подключить авто-refresh при смене страниц ---
-        self._layout.connect_stack(self._content_stack, "content")
-        self._layout.connect_stack(self._action_stack, "action")
+        self._tab_layout.connect_stack(self._content_stack, "content")
+        self._tab_layout.connect_stack(self._action_stack, "action")
 
-        # --- Вставить layout в виджет ---
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
-        main_layout.addWidget(self._layout)  # type: ignore[arg-type]
+    # ------------------------------------------------------------------
+    # Хуки BaseColumnarTab --- реализация
+    # ------------------------------------------------------------------
+
+    def _create_content_stack(self) -> QStackedWidget:
+        """Вернуть ``CurrentPageStack`` для smart-sizing в DiffScrollTabLayout."""
+        return CurrentPageStack()
+
+    def _build_nav_widget(self) -> QWidget:
+        """Построить QTreeWidget с items из ``_sections_specs``."""
+        tree = QTreeWidget()
+        tree.setObjectName(self._tree_object_name())
+        tree.setHeaderHidden(True)
+        tree.setRootIsDecorated(True)
+        tree.setIndentation(16)
+        tree.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+        tree.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+        tree.currentItemChanged.connect(self._on_tree_item_changed)
+
+        # Заполнить nav-tree по SectionSpec
+        build_nav_tree_from_specs(tree, self._sections_specs)
+
+        # Сохранить ссылку для публичного API
+        self._tree_nav = tree
+        return tree
+
+    def _on_nav_changed(self, key: str) -> None:
+        """Делегировать смену навигации в presenter."""
+        self._presenter.on_tree_item_changed(key)
 
     # ------------------------------------------------------------------
     # Хуки для подклассов
@@ -200,7 +210,7 @@ class BaseTreeNavTab(QWidget):
 
     def enable_undo_redo(self, bus: object | None) -> None:
         """Делегировать создание undo/redo кнопок в layout."""
-        self._layout.enable_undo_redo(bus)
+        self._tab_layout.enable_undo_redo(bus)
 
     @property
     def presenter(self) -> TreeNavTabPresenter:
@@ -215,7 +225,8 @@ class BaseTreeNavTab(QWidget):
     @property
     def content_stack(self) -> CurrentPageStack:
         """Content стек (для подклассов)."""
-        return self._content_stack
+        # _content_stack создаётся через _create_content_stack() → CurrentPageStack
+        return self._content_stack  # type: ignore[return-value]
 
     @property
     def action_stack(self) -> CurrentPageStack:
@@ -295,7 +306,7 @@ class BaseTreeNavTab(QWidget):
         # Реестр секции
         self._presenter.register_section(section)
 
-        # Инжект presenter'а (если spec задаёт presenter_factory) —
+        # Инжект presenter'а (если spec задаёт presenter_factory) ---
         # ПЕРЕД _connect_section_events, т.к. bus_change_callback() секции
         # обращается к self._presenter, который должен уже быть установлен.
         self._apply_presenter_factory(section, key)
@@ -310,10 +321,10 @@ class BaseTreeNavTab(QWidget):
         section: "SectionProtocol",
         key: str,
     ) -> None:
-        """Если у spec есть presenter_factory — создать presenter и inject в секцию.
+        """Если у spec есть presenter_factory --- создать presenter и inject в секцию.
 
         Ищет SectionSpec с данным ключом. Если у spec задана presenter_factory
-        и у секции есть метод set_presenter — создаёт presenter через фабрику
+        и у секции есть метод set_presenter --- создаёт presenter через фабрику
         и передаёт его в секцию. Через getattr + callable, чтобы не ломать
         секции без setter'а (адаптеры admin-панелей).
         """
@@ -377,5 +388,5 @@ class BaseTreeNavTab(QWidget):
         collapse_other_branches(self._tree_nav, current)
         # Вся логика (в т.ч. ленивое создание панелей) --- в presenter
         self._presenter.on_tree_item_changed(key)
-        # Сигнал наружу
+        # Сигнал наружу (наследован от BaseColumnarTab)
         self.section_changed.emit(key)
