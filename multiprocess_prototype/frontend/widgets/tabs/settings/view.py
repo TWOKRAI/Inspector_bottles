@@ -4,6 +4,7 @@
 Расширяет TabViewProtocol: все методы, которые presenter вызывает
 на конкретном виджете, не импортируя Qt-классов напрямую.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -79,11 +80,12 @@ class SettingsView(TabViewProtocol, Protocol):
         """Создать и зарегистрировать страницу «История»."""
         ...
 
-    def create_admin_panel(self, key: str) -> None:
-        """Создать admin-панель по ключу и зарегистрировать в presenter.
+    def create_lazy_section(self, key: str) -> None:
+        """Создать ленивую секцию (admin-панель) по ключу.
 
-        Вызывается presenter'ом при ленивой инициализации. View создаёт
-        Qt-виджет и вызывает presenter.notify_admin_panel_created().
+        Вызывается `TreeNavTabPresenter.ensure_lazy_section()` при первой
+        активации узла. View создаёт Qt-виджет и вызывает
+        `presenter.notify_lazy_section_created(...)` для регистрации индексов.
         """
         ...
 

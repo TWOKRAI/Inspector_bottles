@@ -19,6 +19,7 @@ from .panel_tab_base import PanelTabBase
 from .mvp_pattern import TabPresenterBase, TabViewProtocol
 from .section_protocol import SectionProtocol, SectionWithEvents
 from .section_spec import SectionSpec
+from .tree_nav_presenter import TreeNavTabPresenter
 from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
 
@@ -34,6 +35,7 @@ __all__ = [
     "TabPresenterBase",
     "TabViewProtocol",
     "TabWidget",
+    "TreeNavTabPresenter",
     "callback_no_args",
     "create_registers_placeholder",
     "tab_callbacks_from_dict",

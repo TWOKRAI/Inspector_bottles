@@ -259,11 +259,11 @@ class SettingsTab(QWidget):
         # Зарегистрировать секцию в presenter'е для on_activated / on_deactivated
         self._presenter.register_section(section)
 
-    def create_admin_panel(self, key: str) -> None:
-        """Создать admin-панель и уведомить presenter (ленивая инициализация).
+    def create_lazy_section(self, key: str) -> None:
+        """Создать ленивую секцию (admin-панель) и уведомить presenter.
 
         Presenter вызывает этот метод, когда панель ещё не была создана.
-        View создаёт Qt-виджет и вызывает notify_admin_panel_created().
+        View создаёт Qt-виджет и вызывает notify_lazy_section_created().
         """
         auth = self._ctx.auth
         bus = self._ctx.action_bus()
@@ -298,7 +298,7 @@ class SettingsTab(QWidget):
         content_idx = self._content_stack.addWidget(panel)
         # Подключить вложенные QScrollArea admin-панели к диф-скроллу
         self._diff_layout.register_inner_scrolls(panel)
-        self._presenter.notify_admin_panel_created(key, panel, action_idx, content_idx)
+        self._presenter.notify_lazy_section_created(key, panel, action_idx, content_idx)
 
     # ------------------------------------------------------------------
     # UI Build

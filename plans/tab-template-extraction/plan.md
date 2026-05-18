@@ -212,20 +212,33 @@ Phase 7: Очистка техдолгов + документация
 
 **Цель:** обобщённый презентер, в который Settings передаёт `list[SectionSpec]`.
 
-- [ ] **2.1** Создать `framework/.../widgets/tabs/tree_nav_presenter.py`:
-      `TreeNavTabPresenter(TabPresenterBase[TView, TUi])` — принимает
-      `sections: list[SectionSpec]`, владеет всеми существующими методами:
-      `populate`, `on_tree_item_changed`, `navigate_to`,
-      `register_section`, `ensure_lazy_section`, `_switch_action_buttons`.
-- [ ] **2.2** Из `SettingsPresenter` удалить всё универсальное; оставить
-      app-specific (вызов `_ctx.action_bus()`, undo/redo координацию —
-      и то опционально).
-- [ ] **2.3** Pure-Python тесты `TreeNavTabPresenter` с фейковым view
-      (без Qt) — навигация, ленивая инициализация, реестр секций.
-- [ ] **2.4** **Acceptance:**
-      - [ ] `TreeNavTabPresenter` — 100% pure Python (импорт без Qt)
-      - [ ] `SettingsPresenter` < 80 LOC (только app-specific)
-      - [ ] Зелёный `test_settings_tab.py` + новый `test_tree_nav_presenter.py`
+- [x] **2.1** Создан `framework/.../widgets/tabs/tree_nav_presenter.py`:
+      `TreeNavTabPresenter(TabPresenterBase[TView, TUi])` — pure-Python база
+      с реестром секций, ленивыми узлами, навигацией. Не привязан к
+      Settings (sections передаются подклассом через `populate()` или
+      вызовом `register_section()`). На Phase 2 контракт «sections: list[SectionSpec]»
+      не реализован напрямую — он появится в Phase 3 (`BaseTreeNavTab`),
+      пока SettingsPresenter использует явные `view.add_X_page()` вызовы.
+- [x] **2.2** `SettingsPresenter` теперь наследует `TreeNavTabPresenter`.
+      В нём остались только app-specific: константы `_TOP_SECTIONS` /
+      `_ADMIN_CHILDREN`, `populate()` через view-методы, `on_bus_change()`
+      с доступом к `ctx.action_bus()`. Универсальный код (реестр секций,
+      ленивые узлы, навигация) живёт в базе. Алиас `notify_admin_panel_created`
+      удалён, `tab.py:create_admin_panel` переименован в `create_lazy_section`.
+- [x] **2.3** Pure-Python тесты `test_tree_nav_presenter.py` — 18 тестов
+      на фейковом view (без Qt): реестр секций, регистрация content/action
+      страниц, переключение через `on_tree_item_changed`, lifecycle
+      `on_activated`/`on_deactivated`, навигация, ленивая инициализация
+      секций через `create_lazy_section`, robustness при исключениях.
+- [x] **2.4** **Acceptance:**
+      - [x] `TreeNavTabPresenter` — pure-Python (тест
+            `test_tree_nav_presenter_module_imports_without_qt`).
+      - [~] `SettingsPresenter` = 98 LOC (было 256, цель плана <80).
+            Финальное сжатие до <80 LOC — Phase 4.4 (после миграции на
+            `BaseTreeNavTab`, когда `populate()` уйдёт в базу, а константы
+            переедут в `settings/_sections.py`).
+      - [x] Зелёные тесты: `test_settings_tab.py` (22), весь `settings/` (128),
+            новый `test_tree_nav_presenter.py` (18), `test_section_spec.py` (14).
 
 ## Phase 3 — `BaseTreeNavTab` + чистый публичный API DiffScrollLayout
 
