@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
@@ -49,7 +50,14 @@ class SystemSection(QWidget):
 
     Реализует SectionProtocol и SystemSettingsView — presenter вызывает view-методы
     напрямую на объекте секции.
+
+    Сигналы (SectionWithEvents):
+        section_dirty_changed(bool): эмитится при смене dirty-флага.
+        section_data_saved(dict):    эмитится при успешном сохранении.
     """
+
+    section_dirty_changed = Signal(bool)
+    section_data_saved = Signal(dict)
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -90,6 +98,10 @@ class SystemSection(QWidget):
 
         # Создать presenter (до подключения сигналов, чтобы view был готов)
         self._presenter = SystemSettingsPresenter(view=self, rm=None, ui=None, ctx=ctx)
+
+        # Подключить callback'и presenter'а к Qt-сигналам секции (SectionWithEvents)
+        self._presenter.on_dirty_changed = lambda dirty: self.section_dirty_changed.emit(dirty)
+        self._presenter.on_settings_saved = lambda data: self.section_data_saved.emit(data)
 
         # Подключить сигналы редакторов к presenter'у.
         # АУДИТ (Track 3.5): две подписки намеренны — они обслуживают РАЗНЫЕ цели:
@@ -132,6 +144,10 @@ class SystemSection(QWidget):
 
     def on_deactivated(self) -> None:
         """Ничего не делаем при уходе с секции."""
+
+    def bus_change_callback(self) -> "Callable[[], None] | None":
+        """Вернуть колбэк для подписки на изменения ActionBus (SectionWithEvents)."""
+        return self._presenter.on_bus_undo_redo_sync
 
     # ------------------------------------------------------------------
     # SystemSettingsView Protocol

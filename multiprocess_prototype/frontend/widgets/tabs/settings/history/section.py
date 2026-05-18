@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -118,6 +118,10 @@ class HistorySection(QWidget):
         )
         return path if path else None
 
+    def bus_change_callback(self) -> "Callable[[], None] | None":
+        """Вернуть колбэк для подписки на изменения ActionBus (SectionWithEvents)."""
+        return self._presenter.refresh
+
     # ------------------------------------------------------------------
     # Публичный аксессор presenter'а (для подписки из tab.py)
     # ------------------------------------------------------------------
@@ -155,9 +159,7 @@ class HistorySection(QWidget):
         self._table.setSizeAdjustPolicy(
             QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents,
         )
-        self._table.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         h = self._table.horizontalHeader()
         if h:
