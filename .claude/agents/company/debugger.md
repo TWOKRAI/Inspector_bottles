@@ -112,6 +112,24 @@ If you can't find root cause in reasonable time:
 - Bug looks like race condition / memory corruption → immediate teamlead
 - Requires architecture change → immediate teamlead
 
+## GUI bugs — qt-mcp для live-диагностики
+
+Если баг про виджет (не виден / disabled / неверное значение / неверная структура
+после рефакторинга), быстрее всего через qt-mcp probe в живом прототипе:
+
+1. Запусти прототип: `QT_MCP_PROBE=1 python multiprocess_prototype/run.py` (POSIX bash из Claude Code, не `$env:`)
+2. Подожди ≥12 сек для старта.
+3. `qt_list_windows` → подтвердить connection.
+4. `qt_find_widget(class_name="...")` или `pattern="..."` → найти подозрительный виджет.
+5. `qt_widget_details(ref="wN")` → properties, parent chain, geometry, visible/enabled.
+6. Для регрессий структуры — `qt_snapshot(max_depth=4)` против сохранённого baseline в `plans/<slug>/baseline-*.md`.
+
+Гайд: [`.claude/mcp/qt-mcp/README.md`](../../mcp/qt-mcp/README.md).
+
+Для unit-репродукции используй `pytest-qt` (фикстура `qtbot` + `qtbot.waitSignal`).
+qt-mcp и pytest-qt — взаимодополняющие, не заменяют друг друга. **НЕ** запускай
+pytest с `QT_MCP_PROBE=1` (конфликт по порту 9142).
+
 ## What NOT to do
 
 - DO NOT guess — reproduce and prove
