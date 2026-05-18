@@ -295,10 +295,36 @@ class BaseTreeNavTab(QWidget):
         # Реестр секции
         self._presenter.register_section(section)
 
+        # Инжект presenter'а (если spec задаёт presenter_factory) —
+        # ПЕРЕД _connect_section_events, т.к. bus_change_callback() секции
+        # обращается к self._presenter, который должен уже быть установлен.
+        self._apply_presenter_factory(section, key)
+
         # Подключение событий (SectionWithEvents)
         self._connect_section_events(section, key)
 
         return content_idx, action_idx
+
+    def _apply_presenter_factory(
+        self,
+        section: "SectionProtocol",
+        key: str,
+    ) -> None:
+        """Если у spec есть presenter_factory — создать presenter и inject в секцию.
+
+        Ищет SectionSpec с данным ключом. Если у spec задана presenter_factory
+        и у секции есть метод set_presenter — создаёт presenter через фабрику
+        и передаёт его в секцию. Через getattr + callable, чтобы не ломать
+        секции без setter'а (адаптеры admin-панелей).
+        """
+        spec = next((s for s in self._sections_specs if s.key == key), None)
+        if spec is None or spec.presenter_factory is None:
+            return
+        set_presenter = getattr(section, "set_presenter", None)
+        if not callable(set_presenter):
+            return
+        presenter = spec.presenter_factory(self._ctx, section)
+        set_presenter(presenter)
 
     def _connect_section_events(
         self,

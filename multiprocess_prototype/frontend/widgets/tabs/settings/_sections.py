@@ -126,6 +126,13 @@ def _system_factory(ctx: "AppContext") -> "SectionProtocol":
     return SystemSection(ctx)
 
 
+def _system_presenter_factory(ctx: "AppContext", section: object) -> object:
+    """Фабрика SystemSettingsPresenter для инжекта через set_presenter."""
+    from .system.presenter import SystemSettingsPresenter
+
+    return SystemSettingsPresenter(view=section, rm=None, ui=None, ctx=ctx)
+
+
 def _interface_factory(ctx: "AppContext") -> "SectionProtocol":
     """Фабрика InterfaceSection — настройки интерфейса."""
     from .interface import InterfaceSection
@@ -134,14 +141,22 @@ def _interface_factory(ctx: "AppContext") -> "SectionProtocol":
 
 
 def _appearance_factory(ctx: "AppContext") -> "SectionProtocol":
-    """Фабрика AppearanceSection — оформление (не использует ctx)."""
+    """Фабрика AppearanceSection — оформление (не принимает ctx)."""
+    from .appearance import AppearanceSection
+
+    return AppearanceSection()
+
+
+def _appearance_presenter_factory(ctx: "AppContext", section: object) -> object:
+    """Фабрика AppearancePresenter — создаёт theme_manager и presets_manager."""
     from multiprocess_prototype.frontend.styles.theme_loader import create_theme_manager
     from multiprocess_prototype.frontend.managers.theme_presets_manager import (
         ThemePresetsManager,
     )
-    from .appearance import AppearanceSection
+    from .appearance.presenter import AppearancePresenter
 
-    return AppearanceSection(
+    return AppearancePresenter(
+        view=section,
         theme_manager=create_theme_manager(),
         presets_manager=ThemePresetsManager(),
     )
@@ -152,6 +167,13 @@ def _history_factory(ctx: "AppContext") -> "SectionProtocol":
     from .history import HistorySection
 
     return HistorySection(ctx)
+
+
+def _history_presenter_factory(ctx: "AppContext", section: object) -> object:
+    """Фабрика HistoryPresenter для инжекта через set_presenter."""
+    from .history.presenter import HistoryPresenter
+
+    return HistoryPresenter(view=section, rm=None, ui=None, ctx=ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +231,7 @@ def build_settings_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
             key="system_settings",
             title="Настройки системы",
             factory=_system_factory,
+            presenter_factory=_system_presenter_factory,
         ),
         SectionSpec(
             key="interface_settings",
@@ -219,10 +242,12 @@ def build_settings_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
             key="appearance",
             title="Оформление",
             factory=_appearance_factory,
+            presenter_factory=_appearance_presenter_factory,
         ),
         SectionSpec(
             key="history",
             title="История",
             factory=_history_factory,
+            presenter_factory=_history_presenter_factory,
         ),
     ]

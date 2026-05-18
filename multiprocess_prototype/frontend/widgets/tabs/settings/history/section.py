@@ -32,9 +32,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .presenter import HistoryPresenter
-
 if TYPE_CHECKING:
+    from .presenter import HistoryPresenter
     from multiprocess_prototype.frontend.app_context import AppContext
 
 # Заголовки колонок таблицы истории
@@ -51,8 +50,10 @@ class HistorySection(QWidget):
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctx = ctx
+        # Presenter инжектируется позже через set_presenter() — до этого None.
+        # Первый refresh() произойдёт при on_activated() после inject'а.
+        self._presenter: "HistoryPresenter | None" = None
         self._build_ui()
-        self._presenter = HistoryPresenter(view=self, rm=None, ui=None, ctx=ctx)
 
     # ------------------------------------------------------------------
     # SectionProtocol
@@ -78,7 +79,8 @@ class HistorySection(QWidget):
 
     def on_activated(self) -> None:
         """Обновить таблицу при переключении на секцию."""
-        self._presenter.refresh()
+        if self._presenter is not None:
+            self._presenter.refresh()
 
     def on_deactivated(self) -> None:
         """Ничего не делаем при уходе с секции."""
@@ -120,16 +122,28 @@ class HistorySection(QWidget):
 
     def bus_change_callback(self) -> "Callable[[], None] | None":
         """Вернуть колбэк для подписки на изменения ActionBus (SectionWithEvents)."""
-        return self._presenter.refresh
+        return self._presenter.refresh if self._presenter is not None else None
 
     # ------------------------------------------------------------------
     # Публичный аксессор presenter'а (для подписки из tab.py)
     # ------------------------------------------------------------------
 
     @property
-    def presenter(self) -> HistoryPresenter:
+    def presenter(self) -> "HistoryPresenter | None":
         """Вернуть presenter секции (для подписки refresh на ActionBus)."""
         return self._presenter
+
+    def set_presenter(self, presenter: "HistoryPresenter") -> None:
+        """Инжектировать presenter в секцию.
+
+        HistoryPresenter не требует явного initialize() — данные загружаются
+        при первом on_activated() через refresh().
+
+        ВАЖНО: вызывается из BaseTreeNavTab._apply_presenter_factory ПЕРЕД
+        _connect_section_events, чтобы bus_change_callback() уже возвращал
+        валидный callable.
+        """
+        self._presenter = presenter
 
     # ------------------------------------------------------------------
     # Построение UI
@@ -190,9 +204,11 @@ class HistorySection(QWidget):
     # ------------------------------------------------------------------
 
     def _on_save_clicked(self) -> None:
-        """Делегировать сохранение CSV presenter'у."""
-        self._presenter.save_to_csv()
+        """Делегировать сохранение CSV presenter'у (guard на случай None)."""
+        if self._presenter is not None:
+            self._presenter.save_to_csv()
 
     def _on_clear_clicked(self) -> None:
-        """Делегировать очистку истории presenter'у."""
-        self._presenter.clear()
+        """Делегировать очистку истории presenter'у (guard на случай None)."""
+        if self._presenter is not None:
+            self._presenter.clear()

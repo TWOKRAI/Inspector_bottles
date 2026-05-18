@@ -29,10 +29,10 @@ from multiprocess_prototype.frontend.forms import RegisterView, ViewMode
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewModeToggle
 from multiprocess_prototype.frontend.prefs.store import UiPrefsStore
 
-from .presenter import SystemSettingsPresenter
 from ..yaml_io import schema_to_field_infos, load_settings
 
 if TYPE_CHECKING:
+    from .presenter import SystemSettingsPresenter
     from multiprocess_prototype.frontend.app_context import AppContext
 
 # Русские названия секций для group-box (RegisterView)
@@ -96,25 +96,11 @@ class SystemSection(QWidget):
         # Сохранять режим в prefs при смене
         self._register_view.mode_changed.connect(lambda mode_str: self._prefs.set("settings.view_mode", mode_str))
 
-        # Создать presenter (до подключения сигналов, чтобы view был готов)
-        self._presenter = SystemSettingsPresenter(view=self, rm=None, ui=None, ctx=ctx)
+        # Presenter инжектируется позже через set_presenter() — до этого момента None.
+        # Это позволяет тестам подсунуть mock-presenter через SectionSpec.presenter_factory.
+        self._presenter: "SystemSettingsPresenter | None" = None
 
-        # Подключить callback'и presenter'а к Qt-сигналам секции (SectionWithEvents)
-        self._presenter.on_dirty_changed = lambda dirty: self.section_dirty_changed.emit(dirty)
-        self._presenter.on_settings_saved = lambda data: self.section_data_saved.emit(data)
-
-        # Подключить сигналы редакторов к presenter'у.
-        # АУДИТ (Track 3.5): две подписки намеренны — они обслуживают РАЗНЫЕ цели:
-        #   1. editor.change_signal → on_field_changed: только dirty-флаг (кнопки Сохранить/Сбросить).
-        #      Сигнатура: () — без аргументов.
-        #   2. RegisterView.field_changed → on_field_changed_action_bus: запись в ActionBus (undo/redo).
-        #      Сигнатура: (register_name, field_name, old_value, new_value).
-        # Удаление любой из подписок нарушит UX (исчезнет dirty-флаг) или undo/redo.
-        for editor in self._register_view.editors().values():
-            editor.change_signal.connect(self._presenter.on_field_changed)
-        self._register_view.field_changed.connect(self._presenter.on_field_changed_action_bus)
-
-        # Построить UI
+        # Построить UI (кнопки используют слоты-врапперы, не _presenter напрямую)
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -147,7 +133,7 @@ class SystemSection(QWidget):
 
     def bus_change_callback(self) -> "Callable[[], None] | None":
         """Вернуть колбэк для подписки на изменения ActionBus (SectionWithEvents)."""
-        return self._presenter.on_bus_undo_redo_sync
+        return self._presenter.on_bus_undo_redo_sync if self._presenter is not None else None
 
     # ------------------------------------------------------------------
     # SystemSettingsView Protocol
@@ -198,9 +184,41 @@ class SystemSection(QWidget):
     # ------------------------------------------------------------------
 
     @property
-    def presenter(self) -> SystemSettingsPresenter:
+    def presenter(self) -> "SystemSettingsPresenter | None":
         """Вернуть presenter секции (для подписки на ActionBus)."""
         return self._presenter
+
+    def set_presenter(self, presenter: "SystemSettingsPresenter") -> None:
+        """Инжектировать presenter в секцию.
+
+        Подключает callback'и presenter'а к Qt-сигналам секции, регистрирует
+        change_signal редакторов и вызывает _sync_editors_to_cfg для заполнения
+        полей начальными значениями из конфига.
+
+        ВАЖНО: вызывается из BaseTreeNavTab._apply_presenter_factory ПЕРЕД
+        _connect_section_events — так bus_change_callback() уже возвращает
+        валидный callable.
+        """
+        self._presenter = presenter
+
+        # Подключить callback'и presenter'а к Qt-сигналам секции (SectionWithEvents)
+        self._presenter.on_dirty_changed = lambda dirty: self.section_dirty_changed.emit(dirty)
+        self._presenter.on_settings_saved = lambda data: self.section_data_saved.emit(data)
+
+        # Подключить сигналы редакторов к presenter'у.
+        # АУДИТ (Track 3.5): две подписки намеренны — они обслуживают РАЗНЫЕ цели:
+        #   1. editor.change_signal → on_field_changed: только dirty-флаг (кнопки Сохранить/Сбросить).
+        #      Сигнатура: () — без аргументов.
+        #   2. RegisterView.field_changed → on_field_changed_action_bus: запись в ActionBus (undo/redo).
+        #      Сигнатура: (register_name, field_name, old_value, new_value).
+        # Удаление любой из подписок нарушит UX (исчезнет dirty-флаг) или undo/redo.
+        for editor in self._register_view.editors().values():
+            editor.change_signal.connect(self._presenter.on_field_changed)
+        self._register_view.field_changed.connect(self._presenter.on_field_changed_action_bus)
+
+        # Синхронизировать редакторы с конфигом — presenter.__init__ вызывал это
+        # сам, но теперь presenter создаётся после секции через presenter_factory.
+        self._presenter._sync_editors_to_cfg()
 
     def field_editors(self) -> dict:
         """Вернуть словарь редакторов (делегация от SettingsTab)."""
@@ -234,7 +252,8 @@ class SystemSection(QWidget):
         self._btn_reset = QPushButton("Сбросить")
         self._btn_reset.setToolTip("Сбросить изменения и загрузить данные с диска")
         self._btn_reset.setEnabled(False)
-        self._btn_reset.clicked.connect(self._presenter.reload)
+        # Используем слот-враппер: в момент _build_ui presenter ещё None
+        self._btn_reset.clicked.connect(self._on_reset_clicked)
 
         # Кнопка «Сохранить»
         self._btn_save = QPushButton("Сохранить")
@@ -246,6 +265,12 @@ class SystemSection(QWidget):
     # Слоты кнопок
     # ------------------------------------------------------------------
 
+    def _on_reset_clicked(self) -> None:
+        """Делегировать сброс presenter'у (guard на случай None)."""
+        if self._presenter is not None:
+            self._presenter.reload()
+
     def _on_save_clicked(self) -> None:
-        """Делегировать сохранение presenter'у."""
-        self._presenter.save()
+        """Делегировать сохранение presenter'у (guard на случай None)."""
+        if self._presenter is not None:
+            self._presenter.save()
