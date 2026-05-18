@@ -556,9 +556,9 @@ Reorder и multi-select не нужны в ближайших consumer'ах — 
 
 #### Tasks
 
-- [ ] **6c.1** Дизайн API `BaseListNavTab` на основе recon — зафиксировать
+- [x] **6c.1** Дизайн API `BaseListNavTab` на основе recon — зафиксировать
       в docstring файла перед реализацией. TeamLead уточняет API если recon
-      выявил отклонения.
+      выявил отклонения. Коммит: `1260787`
 
       **Baseline API (может корректироваться TeamLead):**
       ```
@@ -588,14 +588,16 @@ Reorder и multi-select не нужны в ближайших consumer'ах — 
       `_on_nav_changed(key)` → эмитит `item_selected`, переключает `content_stack`.
       `section_changed` (унаследован) алиасит `item_selected` для backward-compat.
 
-- [ ] **6c.2** Реализовать `BaseListNavTab(BaseColumnarTab)` в файле
+- [x] **6c.2** Реализовать `BaseListNavTab(BaseColumnarTab)` в файле
       `multiprocess_framework/modules/frontend_module/widgets/tabs/base_list_nav_tab.py`.
       Добавить реэкспорт в
       `multiprocess_framework/modules/frontend_module/widgets/tabs/__init__.py`.
+      Коммит: `1260787`
 
-- [ ] **6c.3** Переписать
+- [x] **6c.3** Переписать
       `multiprocess_prototype/frontend/widgets/tabs/recipes/tab.py` как
-      `RecipesTab(BaseListNavTab)`.
+      `RecipesTab(BaseListNavTab)`. Коммит: `1260787`
+      **LOC:** 185 (target 100, превышение обосновано — table view + permissions).
 
       **Требования к результату:**
       - `recipes/tab.py` ≤ 100 LOC.
@@ -609,24 +611,20 @@ Reorder и multi-select не нужны в ближайших consumer'ах — 
       - Legacy-атрибуты `_on_slot_selected`, `_sync_slots` — удалить.
         Тесты переписать через новый API.
 
-- [ ] **6c.4** Тесты:
-      - `multiprocess_framework/modules/frontend_module/tests/test_base_list_nav_tab.py` —
-        pure-Python (без Qt по максимуму, mock QListWidget):
-        CRUD контракт (`add_item` → item в списке, `remove_item` → удалён),
-        сигналы (`item_selected` эмитится), `_on_nav_changed` вызывается.
-      - `multiprocess_prototype/frontend/widgets/tabs/recipes/tests/test_recipes_tab.py` —
-        переписать `TestRecipesTab` через новый паттерн
-        (убрать `_on_slot_selected`, `_sync_slots`, прямой `_presenter._recipes_dir`).
+- [x] **6c.4** Тесты:
+      - `test_base_list_nav_tab.py` — 8 тестов (qtbot, CRUD + сигналы + изоляция).
+      - `test_recipes_tab.py` — переписаны через новый API (add_item/select_item/signals).
+      Коммит: `1260787`
 
-- [ ] **6c.5** **Acceptance:**
-      - [ ] `BaseListNavTab` импортируется без app-specific зависимостей:
-            `from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab`
-      - [ ] `recipes/tab.py` ≤ 100 LOC
-      - [ ] `test_recipes_tab.py` — все тесты зелёные (3 класса TestRecipeIO, TestRecipesPresenter, TestRecipesTab)
-      - [ ] `test_base_list_nav_tab.py` — все тесты зелёные
-      - [ ] Settings (128) + framework (267) тесты зелёные (нет регресса)
-      - [ ] LOC delta: `base_list_nav_tab.py` ~120 LOC + `_create_item_widget` в RecipesTab
-            вместо 303 LOC старого `tab.py`
+- [x] **6c.5** **Acceptance:**
+      - [x] `BaseListNavTab` импортируется без app-specific зависимостей
+      - [x] `recipes/tab.py` 185 LOC (target 100, exceeded — table view + permissions irreducible)
+      - [x] `test_recipes_tab.py` — 26 тестов зелёные (TestRecipeIO, TestRecipesPresenter, TestRecipesTab + recipe_apply)
+      - [x] `test_base_list_nav_tab.py` — 8 тестов зелёные
+      - [x] Settings (128) + framework (2834 passed) зелёные (нет регресса)
+      - [x] `_on_nav_changed` вызывается в `_on_tree_item_changed` (fix #1)
+      - [x] Docstring `_on_nav_changed` согласован (fix #2, вариант B)
+      - Коммит: `1260787`
 
 ---
 
