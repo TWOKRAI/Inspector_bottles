@@ -1,7 +1,8 @@
 ---
 Slug: tab-template-extraction
 Дата: 2026-05-18
-Статус: DRAFT
+Статус: DONE
+Закрыт: 2026-05-18
 Ветка: refactor/tab-template
 Автор: Director (Opus)
 Baseline: 0775d01 (diff-scroll polish, refactor/frontend-widgets-cleanup)
@@ -729,14 +730,17 @@ BaseTreeNavTab (~70 LOC новых хуков, ~150 LOC старого кода 
 
 ## Phase 7 — Очистка техдолгов + документация
 
-- [ ] **7.1** Удалить из `settings/tab.py` техдолги:
+- [x] **7.1** Удалить из `settings/tab.py` техдолги:
       `self._view = section.register_view`, deprecated
       `field_editors()`, `view_mode()`. Тесты переписать через прямой
-      доступ к Section через `tab.section(key)`.
-- [ ] **7.2** Обновить `docs/refactors/` — финальный отчёт `2026-MM_tab_template.md`.
-- [ ] **7.3** `sentrux session_end` → дельта (modularity, depth, acyclicity).
-- [ ] **7.4** Обновить `CONSTRUCTOR_BLUEPRINT.md` — новые контракты.
-- [ ] **7.5** Закрыть план: статус `DONE`, проставить коммиты.
+      доступ к Section через `tab.section(key)`. Коммит: `18b4b04`
+- [x] **7.2** Обновить `docs/refactors/` — финальный отчёт `2026-05_tab_template.md`.
+      Коммит: `274a860`
+- [x] **7.3** Sentrux дельта: quality_signal 7183 → 7180, coupling 0.21 → 0.16,
+      cycles = 0. Зафиксировано в отчёте 7.2. Коммит: `274a860`
+- [x] **7.4** Обновить `CONSTRUCTOR_BLUEPRINT.md` — новые контракты (версия 2.2).
+      Коммит: `7f0910c`
+- [x] **7.5** Закрыть план: статус `DONE`, проставить коммиты. (этот коммит)
 
 ---
 
@@ -814,3 +818,86 @@ BaseTreeNavTab (~70 LOC новых хуков, ~150 LOC старого кода 
    идентично
 6. `sentrux session_end` — modularity не упал, depth не вырос
 7. Метрики из таблицы выше достигнуты
+
+---
+
+## Итоговые коммиты
+
+### Phase 0 — Подготовка
+
+| Хэш | Коммит |
+|-----|--------|
+| `032f6a0` | `docs(plans): tab-template-extraction — рефакторинг шаблона вкладки с tree-навигацией` |
+| `0b24bd5` | `docs(adr): ADR-126 — шаблон вкладки с tree-навигацией` |
+
+### Phase 1 — SectionSpec + SectionProtocol
+
+| Хэш | Коммит |
+|-----|--------|
+| `86c2926` | `feat(framework): SectionSpec + SectionWithEvents — Phase 1 шаблона вкладок` |
+
+### Phase 2 — TreeNavTabPresenter
+
+| Хэш | Коммит |
+|-----|--------|
+| `2868dc1` | `refactor(framework): TreeNavTabPresenter — универсальная база — Phase 2` |
+
+### Phase 3 — BaseTreeNavTab + чистый API DiffScroll
+
+| Хэш | Коммит |
+|-----|--------|
+| `845df32` | `feat(framework): TabLayoutProtocol + публичный API DiffScrollTabLayout — Phase 3.1` |
+| `9974771` | `feat(forms): RegisterView(show_toggle) — Phase 3.4` |
+| `547437f` | `feat(framework): BaseTreeNavTab + nav_tree_utils — Phase 3.2/3.3` |
+| `9ce2a2b` | `fix(framework): post-review fixups Phase 3` |
+| `9a6116f` | `docs(handoff): tab-template Phase 3 done, ready for Phase 4` |
+
+### Phase 4 — Миграция SettingsTab → BaseTreeNavTab
+
+| Хэш | Коммит |
+|-----|--------|
+| `ffa6f92` | `refactor(forms): SettingsTab(BaseTreeNavTab) — Phase 4` |
+| `ce68349` | `fix(forms): post-review fixups Phase 4 — dedup undo/redo, типы, deprecation` |
+| `813615e` | `docs(plans): mark Phase 4 done — tab-template-extraction` |
+| `6fb7cae` | `docs(handoff): tab-template Phase 4 done, ready for Phase 5` |
+
+### Phase 5 — Декаплинг section/presenter
+
+| Хэш | Коммит |
+|-----|--------|
+| `9c59a2a` | `refactor(forms): декаплинг section/presenter — Phase 5` |
+| `2cc0db7` | `fix(forms): post-review fixups Phase 5 -- dirty pri zapuske, inkapsulacia` |
+| `4ed4d12` | `docs(plans): Phase 5 done — tab-template-extraction` |
+| `4c3204c` | `docs(handoff): tab-template Phase 5 done, ready for Phase 6` |
+
+### Phase 6a — Layout в framework
+
+| Хэш | Коммит |
+|-----|--------|
+| `541009f` | `refactor(framework): tab_layouts moved to framework with abstract base — Phase 6a` |
+| `1de3267` | `fix(framework): post-review fixups Phase 6a — layer-respect, set_action_widget` |
+| `86415f4` | `docs(plans): Phase 6a done — tab-template-extraction` |
+
+### Phase 6b — BaseColumnarTab + BaseTreeNavTab(BaseColumnarTab)
+
+| Хэш | Коммит |
+|-----|--------|
+| `684bdb9` | `refactor(framework): BaseColumnarTab extracted from BaseTreeNavTab — Phase 6b` |
+| `28e9879` | `docs(plans): Phase 6b done — tab-template-extraction` |
+
+### Phase 6c — BaseListNavTab + RecipesTab pilot
+
+| Хэш | Коммит |
+|-----|--------|
+| `1260787` | `feat(framework): BaseListNavTab + RecipesTab pilot — Phase 6c` |
+| `b807b46` | `docs(plans): Phase 6c done — tab-template-extraction` |
+| `f1df446` | `docs(handoff): tab-template Phase 6 done (6a+6b+6c)` |
+
+### Phase 7 — Техдолги + документация
+
+| Хэш | Коммит |
+|-----|--------|
+| `18b4b04` | `refactor(settings): drop deprecated tab API — Phase 7.1` |
+| `274a860` | `docs(refactors): final report tab-template-extraction — Phase 7.2+7.3` |
+| `7f0910c` | `docs(blueprint): BaseColumnarTab/Tree/List tab contracts — Phase 7.4` |
+| *(этот)* | `docs(plans): tab-template-extraction DONE — Phase 7.5` |
