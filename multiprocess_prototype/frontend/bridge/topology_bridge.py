@@ -267,7 +267,15 @@ class TopologyBridge:
         if resolved is None:
             return False
 
-        self._sender.send_action_command(resolved.process_name, command_name, args)
+        if not resolved.process_names:
+            logger.warning(
+                "TopologyBridge: action %s.%s — пустой process_names, команда не отправлена",
+                plugin_name,
+                command_name,
+            )
+            return False
+
+        self._sender.send_action_command(resolved.process_names[0], command_name, args)
         return True
 
     # --- Runtime → GUI ---

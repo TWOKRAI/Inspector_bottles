@@ -40,20 +40,12 @@ class ResolvedCommand:
     """Результат resolve — куда и какую команду отправить.
 
     Основное поле: process_names — tuple всех целевых процессов.
-    Backward-compat: process_name property возвращает первый target.
+    Для получения единственного target используй process_names[0] (с проверкой на пустоту).
     """
 
     process_names: tuple[str, ...]
     command_name: str
     plugin_name: str
-
-    @property
-    def process_name(self) -> str:
-        """Первый target для backward-compat.
-
-        DEPRECATED: используй process_names для поддержки multi-target fan-out.
-        """
-        return self.process_names[0] if self.process_names else ""
 
 
 @dataclass

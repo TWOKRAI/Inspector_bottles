@@ -29,7 +29,7 @@ from multiprocess_prototype.frontend.bridge.wire_monitor import WireStatusMonito
 
 @dataclass(frozen=True)
 class MockResolvedCommand:
-    process_name: str
+    process_names: tuple[str, ...]
     command_name: str
     plugin_name: str
 
@@ -107,14 +107,10 @@ class MockSender:
     ) -> None:
         self.field_commands.append((target_process, command, args, debounce_ms))
 
-    def send_action_command(
-        self, target_process: str, command: str, args: dict[str, Any] | None = None
-    ) -> None:
+    def send_action_command(self, target_process: str, command: str, args: dict[str, Any] | None = None) -> None:
         self.action_commands.append((target_process, command, args))
 
-    def send_command(
-        self, target_process: str, command: str, args: dict[str, Any] | None = None
-    ) -> None:
+    def send_command(self, target_process: str, command: str, args: dict[str, Any] | None = None) -> None:
         self.commands.append((target_process, command, args))
 
     def send_system_command(self, command: dict[str, Any]) -> None:
@@ -175,19 +171,21 @@ def rm() -> MockRegistersManager:
 
 @pytest.fixture
 def holder() -> MockTopologyHolder:
-    return MockTopologyHolder({
-        "processes": [
-            {"process_name": "camera_0", "plugin_name": "capture"},
-            {"process_name": "processor_0", "plugin_name": "color_mask"},
-        ],
-        "wires": [
-            {
-                "source": "camera_0.capture.output",
-                "target": "processor_0.color_mask.input",
-                "transport": "router",
-            },
-        ],
-    })
+    return MockTopologyHolder(
+        {
+            "processes": [
+                {"process_name": "camera_0", "plugin_name": "capture"},
+                {"process_name": "processor_0", "plugin_name": "color_mask"},
+            ],
+            "wires": [
+                {
+                    "source": "camera_0.capture.output",
+                    "target": "processor_0.color_mask.input",
+                    "transport": "router",
+                },
+            ],
+        }
+    )
 
 
 @pytest.fixture
@@ -211,7 +209,6 @@ def bridge(
 
 
 class TestHotAddProcess:
-
     def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """hot_add нового процесса → send_system_command вызван."""
         ok = bridge.hot_add_process("new_proc", "my_plugin", {"key": "val"})
@@ -253,7 +250,6 @@ class TestHotAddProcess:
 
 
 class TestHotRemoveProcess:
-
     def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """hot_remove существующего процесса → True."""
         ok = bridge.hot_remove_process("camera_0")
@@ -271,9 +267,7 @@ class TestHotRemoveProcess:
         assert ok is False
         assert len(sender.system_commands) == 0
 
-    def test_cascade_wire_disconnect(
-        self, bridge: TopologyBridge, sender: MockSender
-    ) -> None:
+    def test_cascade_wire_disconnect(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """hot_remove каскадно отключает wire'ы процесса."""
         bridge.hot_remove_process("camera_0")
         # wire camera_0.capture.output|processor_0.color_mask.input должен быть отключён
@@ -292,7 +286,6 @@ class TestHotRemoveProcess:
 
 
 class TestConnectWire:
-
     def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """connect_wire с валидной конфигурацией → True."""
         ok = bridge.connect_wire(
@@ -326,20 +319,18 @@ class TestConnectWire:
         assert ok is False
         assert len(sender.system_commands) == 0
 
-    def test_wire_monitor_notified(
-        self, bridge: TopologyBridge, wire_monitor: WireStatusMonitor
-    ) -> None:
+    def test_wire_monitor_notified(self, bridge: TopologyBridge, wire_monitor: WireStatusMonitor) -> None:
         """wire_monitor.on_wire_setup_sent вызван при успехе."""
         bridge.connect_wire("w2", "proc_a.p.out", "proc_b.p.in_port")
         from multiprocess_prototype.frontend.bridge.wire_monitor import WireStatus
+
         assert wire_monitor.get_status("w2") == WireStatus.PENDING
 
-    def test_wire_monitor_not_notified_on_fail(
-        self, bridge: TopologyBridge, wire_monitor: WireStatusMonitor
-    ) -> None:
+    def test_wire_monitor_not_notified_on_fail(self, bridge: TopologyBridge, wire_monitor: WireStatusMonitor) -> None:
         """wire_monitor НЕ уведомляется при провале валидации."""
         bridge.connect_wire("w_bad", "proc_a.p.port", "proc_a.p.port")
         from multiprocess_prototype.frontend.bridge.wire_monitor import WireStatus
+
         assert wire_monitor.get_status("w_bad") == WireStatus.NOT_CONFIGURED
 
 
@@ -347,7 +338,6 @@ class TestConnectWire:
 
 
 class TestDisconnectWire:
-
     def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """disconnect_wire существующего wire → True."""
         wire_key = "camera_0.capture.output|processor_0.color_mask.input"
@@ -364,14 +354,13 @@ class TestDisconnectWire:
         assert ok is False
         assert len(sender.system_commands) == 0
 
-    def test_wire_monitor_notified(
-        self, bridge: TopologyBridge, wire_monitor: WireStatusMonitor
-    ) -> None:
+    def test_wire_monitor_notified(self, bridge: TopologyBridge, wire_monitor: WireStatusMonitor) -> None:
         """wire_monitor.on_wire_teardown_sent вызван при успехе."""
         wire_key = "camera_0.capture.output|processor_0.color_mask.input"
         # Сначала зарегистрируем wire в мониторе
         wire_monitor.on_wire_setup_sent(wire_key)
         from multiprocess_prototype.frontend.bridge.wire_monitor import WireStatus
+
         assert wire_monitor.get_status(wire_key) == WireStatus.PENDING
 
         bridge.disconnect_wire(wire_key)
@@ -382,10 +371,13 @@ class TestDisconnectWire:
 
 
 class TestApplyTopologyDiff:
-
     def test_happy_path_add_and_remove(
-        self, sender: MockSender, catalog: MockCatalog, validator: MockValidator,
-        rm: MockRegistersManager, wire_monitor: WireStatusMonitor,
+        self,
+        sender: MockSender,
+        catalog: MockCatalog,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        wire_monitor: WireStatusMonitor,
     ) -> None:
         """apply_diff с добавлением и удалением процессов."""
         old = {
@@ -416,8 +408,11 @@ class TestApplyTopologyDiff:
         assert result.summary() == "Нет изменений"
 
     def test_partial_failure(
-        self, catalog: MockCatalog, validator: MockValidator,
-        rm: MockRegistersManager, wire_monitor: WireStatusMonitor,
+        self,
+        catalog: MockCatalog,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        wire_monitor: WireStatusMonitor,
     ) -> None:
         """Частичная ошибка: sender бросает exception на hot_remove."""
 
@@ -453,8 +448,11 @@ class TestApplyTopologyDiff:
         assert "to_add" in result.processes_added
 
     def test_operation_order(
-        self, catalog: MockCatalog, validator: MockValidator,
-        rm: MockRegistersManager, wire_monitor: WireStatusMonitor,
+        self,
+        catalog: MockCatalog,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        wire_monitor: WireStatusMonitor,
     ) -> None:
         """Порядок: teardown wire → remove proc → add proc → setup wire."""
         old = {
@@ -489,8 +487,12 @@ class TestApplyTopologyDiff:
             assert cmds.index("process.hot_remove") < cmds.index("process.hot_add")
 
     def test_guard_applying(
-        self, sender: MockSender, catalog: MockCatalog, validator: MockValidator,
-        rm: MockRegistersManager, holder: MockTopologyHolder,
+        self,
+        sender: MockSender,
+        catalog: MockCatalog,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        holder: MockTopologyHolder,
         wire_monitor: WireStatusMonitor,
     ) -> None:
         """Повторный вызов apply_topology_diff при _applying=True → ошибка."""
@@ -502,8 +504,11 @@ class TestApplyTopologyDiff:
         assert "re-entrant" in result.errors[0]
 
     def test_applying_flag_reset_after_error(
-        self, catalog: MockCatalog, validator: MockValidator,
-        rm: MockRegistersManager, wire_monitor: WireStatusMonitor,
+        self,
+        catalog: MockCatalog,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        wire_monitor: WireStatusMonitor,
     ) -> None:
         """_applying сбрасывается даже при exception внутри."""
 
@@ -522,8 +527,12 @@ class TestApplyTopologyDiff:
         assert bridge._applying is False
 
     def test_diff_with_new_wires(
-        self, sender: MockSender, catalog: MockCatalog, validator: MockValidator,
-        rm: MockRegistersManager, wire_monitor: WireStatusMonitor,
+        self,
+        sender: MockSender,
+        catalog: MockCatalog,
+        validator: MockValidator,
+        rm: MockRegistersManager,
+        wire_monitor: WireStatusMonitor,
     ) -> None:
         """apply_diff с добавлением wire'ов."""
         old = {"processes": [], "wires": []}
@@ -548,7 +557,6 @@ class TestApplyTopologyDiff:
 
 
 class TestGetCapabilities:
-
     def test_returns_full_dict(self, bridge: TopologyBridge) -> None:
         """get_capabilities возвращает все ключи."""
         caps = bridge.get_capabilities()
@@ -570,7 +578,6 @@ class TestGetCapabilities:
 
 
 class TestTopologyApplyResult:
-
     def test_ok_when_no_errors(self) -> None:
         """ok=True когда errors пуст."""
         result = TopologyApplyResult(processes_added=["a"])

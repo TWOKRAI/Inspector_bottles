@@ -216,7 +216,7 @@ class TestResolveFieldCommand:
         """Точное совпадение: set_hsv_range в commands."""
         result = catalog.resolve_field_command("color_mask", "hsv_range")
         assert result is not None
-        assert result.process_name == "processor_0"
+        assert result.process_names[0] == "processor_0"
         assert result.command_name == "set_hsv_range"
         assert result.plugin_name == "color_mask"
 
@@ -225,7 +225,7 @@ class TestResolveFieldCommand:
         result = catalog.resolve_field_command("color_mask", "unknown_field")
         assert result is not None
         assert result.command_name == "set_config"
-        assert result.process_name == "processor_0"
+        assert result.process_names[0] == "processor_0"
 
     def test_stateless_returns_none(self, catalog: CommandCatalog) -> None:
         """Stateless плагин (commands пуст) → None."""
@@ -253,7 +253,7 @@ class TestResolveActionCommand:
         """Команда есть в commands dict."""
         result = catalog.resolve_action_command("capture", "start_capture")
         assert result is not None
-        assert result.process_name == "camera_0"
+        assert result.process_names[0] == "camera_0"
         assert result.command_name == "start_capture"
         assert result.plugin_name == "capture"
 
@@ -347,9 +347,9 @@ class TestSameCommandDifferentProcesses:
         result_b = catalog.resolve_action_command("plugin_b", "set_config")
 
         assert result_a is not None
-        assert result_a.process_name == "process_1"
+        assert result_a.process_names[0] == "process_1"
         assert result_b is not None
-        assert result_b.process_name == "process_2"
+        assert result_b.process_names[0] == "process_2"
 
 
 # --- Вспомогательные объекты для тестов field_routing ---
@@ -413,8 +413,6 @@ class TestFieldRoutingCache:
         result = catalog.resolve_field_command("pilot_widgets", "broadcast_flag")
         assert result is not None
         assert set(result.process_names) == {"pilot_a", "pilot_b"}
-        # process_name backward-compat: первый target
-        assert result.process_name == "pilot_a"
 
     def test_resolve_field_command_fallback_without_targets(self) -> None:
         """Поле без process_targets → fallback на connection_map (один target)."""
@@ -435,7 +433,7 @@ class TestFieldRoutingCache:
         result = catalog.resolve_field_command("simple_plugin", "simple_field")
         assert result is not None
         assert result.process_names == ("proc_0",)
-        assert result.process_name == "proc_0"
+        assert result.process_names[0] == "proc_0"
 
     def test_resolved_command_process_names_tuple(self) -> None:
         """ResolvedCommand.process_names — tuple строк."""
@@ -445,7 +443,7 @@ class TestFieldRoutingCache:
             plugin_name="p",
         )
         assert cmd.process_names == ("a", "b", "c")
-        assert cmd.process_name == "a"  # backward-compat
+        assert cmd.process_names[0] == "a"
 
     def test_field_without_meta_no_routing(self) -> None:
         """Поле без FieldMeta в metadata → нет routing, fallback на connection_map."""

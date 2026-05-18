@@ -477,20 +477,64 @@ class TestMultiTargetFanOut:
         assert ok is False
         assert len(sender.field_commands) == 0
 
-    def test_resolved_command_process_name_backward_compat(self) -> None:
-        """ResolvedCommand.process_name property возвращает первый элемент process_names."""
+    def test_resolved_command_process_names_first(self) -> None:
+        """ResolvedCommand.process_names[0] возвращает первый элемент tuple."""
         cmd = ResolvedCommand(
             process_names=("proc_a", "proc_b"),
             command_name="set_config",
             plugin_name="my_plugin",
         )
-        assert cmd.process_name == "proc_a"
+        assert cmd.process_names[0] == "proc_a"
 
     def test_resolved_command_empty_process_names(self) -> None:
-        """ResolvedCommand.process_name для пустого tuple → пустая строка."""
+        """ResolvedCommand с пустым tuple — атрибут process_name отсутствует."""
         cmd = ResolvedCommand(
             process_names=(),
             command_name="set_config",
             plugin_name="my_plugin",
         )
-        assert cmd.process_name == ""
+        assert not hasattr(cmd, "process_name")
+        assert cmd.process_names == ()
+
+
+# --- Smoke-тест: broadcast_flag через реальное production-поле ---
+
+
+def test_broadcast_flag_fanout_through_bridge(
+    validator: MockValidator,
+    rm: MockRegistersManager,
+    holder: MockTopologyHolder,
+) -> None:
+    """broadcast_flag с двумя process_names → sender.send_field_command вызывается ровно 2 раза.
+
+    Smoke-тест на реальном имени поля "broadcast_flag" из "pilot_widgets":
+    убеждаемся, что fan-out работает без импортов из pilot_widgets/registers.py
+    — только строки-ключи.
+    """
+    # Создаём sender отдельно — без fixture, чтобы иметь чистый счётчик вызовов
+    local_sender = MockSender()
+
+    resolved = ResolvedCommand(
+        process_names=("pilot_a", "pilot_b"),
+        command_name="set_broadcast_flag",
+        plugin_name="pilot_widgets",
+    )
+    catalog = MockCatalog(
+        field_resolves={
+            ("pilot_widgets", "broadcast_flag"): resolved,
+        }
+    )
+    bridge = TopologyBridge(local_sender, catalog, validator, rm, holder)
+
+    ok = bridge.on_field_set("pilot_widgets", "broadcast_flag", True)
+
+    assert ok is True
+    # Fan-out: ровно два вызова send_field_command
+    assert len(local_sender.field_commands) == 2
+
+    targets = [cmd[0] for cmd in local_sender.field_commands]
+    assert targets[0] == "pilot_a"
+    assert targets[1] == "pilot_b"
+
+    # Значение (args) передано верно обоим target-ам
+    assert all(cmd[2] == {"broadcast_flag": True} for cmd in local_sender.field_commands)
