@@ -21,6 +21,11 @@ from .mvp_pattern import TabPresenterBase, TabViewProtocol
 from .section_protocol import SectionProtocol, SectionWithEvents
 from .section_spec import SectionSpec
 from .tab_layout_protocol import TabLayoutProtocol
+from .tab_layouts import (
+    DiffScrollTabLayout,
+    StandardTabLayout,
+    _AbstractColumnarTabLayout,
+)
 from .tree_nav_presenter import TreeNavTabPresenter
 from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
@@ -29,17 +34,20 @@ __all__ = [
     "BaseTab",
     "BaseTreeNavTab",
     "CurrentPageStack",
+    "DiffScrollTabLayout",
     "MvpTabBase",
     "PanelTabBase",
     "RegisterBindingContext",
     "SectionProtocol",
     "SectionSpec",
     "SectionWithEvents",
+    "StandardTabLayout",
     "TabLayoutProtocol",
     "TabPresenterBase",
     "TabViewProtocol",
     "TabWidget",
     "TreeNavTabPresenter",
+    "_AbstractColumnarTabLayout",
     "callback_no_args",
     "create_registers_placeholder",
     "tab_callbacks_from_dict",

@@ -117,11 +117,14 @@ multiprocess_framework/modules/frontend_module/widgets/tabs/
 ├── section_protocol.py         # ESCALATED: добавить опц. сигналы
 ├── section_spec.py             # NEW — декларация секции
 ├── tree_nav_presenter.py       # NEW — обобщённый TreeNavTabPresenter
-├── base_tree_nav_tab.py        # NEW — QWidget-шаблон + view
+├── base_columnar_tab.py        # NEW Phase 6b — nav-агностичная база (QWidget)
+├── base_tree_nav_tab.py        # REFACTORED Phase 6b — теперь BaseColumnarTab подкласс
+├── base_list_nav_tab.py        # NEW Phase 6c — динамический CRUD-список
 ├── current_page_stack.py       # без изменений
 ├── mvp_pattern.py              # без изменений
-└── tab_layouts/                # NEW каталог
+└── tab_layouts/                # NEW каталог (Phase 6a)
     ├── __init__.py
+    ├── _abstract_columnar.py   # NEW Phase 6a — nav-агностичная база layout'а
     ├── diff_scroll_layout.py   # MOVED из prototype, инкапсуляция чище
     └── standard_layout.py      # MOVED из prototype
 
@@ -347,26 +350,383 @@ Phase 7: Очистка техдолгов + документация
       - `_sync_editors_to_cfg` → публичный `sync_editors_to_cfg` (декаплинг).
       - `presenter_factory` типизирован `Callable[[TCtx, SectionProtocol], object]`.
 
-## Phase 6 — Унификация DiffScroll/Standard + Recipes pilot
+## Phase 6 — Унификация DiffScroll/Standard + иерархия Tab + Recipes pilot
 
-**Цель:** один общий каркас для двух layout-стратегий, pilot Recipes.
+**Разбита на три независимых PR (6a → 6b → 6c) по итогам recon (2026-05-18, пересмотрено 2026-05-18).**
+Причины split и смена 6b/6c: см. раздел «Phase 6 — Recon-заметки» ниже.
 
-- [ ] **6.1** Перенести `DiffScrollTabLayout` + `StandardTabLayout` →
-      `framework/.../widgets/tabs/tab_layouts/`. Сохранить objectName
-      (QSS не трогаем).
-- [ ] **6.2** Выделить общую базу `_AbstractColumnarTabLayout(QWidget)`:
-      action-колонка + nav + content + undo/redo. Конкретные классы
-      переопределяют:
-      - тип скролла (диф vs обычный)
-      - тип nav-виджета (по умолчанию None — конкретный таб задаёт)
-- [ ] **6.3** **Pilot Recipes:** переписать `RecipesTab` через
-      `BaseTreeNavTab` (с `StandardTabLayout` как layout_factory).
-      Сравнить LOC: до vs после.
-- [ ] **6.4** ADR: «DiffScroll vs Standard layout — критерии выбора».
-- [ ] **6.5** **Acceptance:**
-      - [ ] Все тесты `test_recipes_tab.py` зелёные
-      - [ ] LOC в `recipes/tab.py` уменьшился на ≥30%
-      - [ ] Smoke: Recipes работает идентично
+---
+
+### Phase 6a — Унификация layout'ов + перенос в framework
+
+**Цель:** добавить `_AbstractColumnarTabLayout` как общую базу,
+перенести оба layout'а в `framework/.../widgets/tabs/tab_layouts/`,
+обеспечить backward-compat реэкспорт из prototype.
+
+**Уровень: Senior+ (TeamLead, Opus). Отдельный PR.**
+
+- [x] **6a.1** Добавить общую базу `_AbstractColumnarTabLayout(QWidget)` в
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/tab_layouts/_abstract_columnar.py`.
+      Содержит: action-колонку (top/bottom), `enable_undo_redo`, интерфейсные
+      методы `set_content_widget / set_title` (abstract).
+      **Ключевое:** `set_nav_widget(widget: QWidget)` принимает произвольный
+      виджет — база не знает про конкретный тип nav (QListWidget, QTreeWidget
+      или что-либо ещё). Реализации (DiffScroll / Standard) могут уточнять
+      тип, но контракт базы — `QWidget`.
+      `StandardTabLayout` реализует sub-nav (QListWidget) + QScrollArea;
+      `DiffScrollTabLayout` — дифференциальный мастер-скролл + QGroupBox.
+- [x] **6a.2** Переместить `DiffScrollTabLayout` →
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/tab_layouts/diff_scroll_layout.py`.
+      Сохранить все objectName: `DiffScrollActions`, `DiffScrollNavGroup`,
+      `DiffScrollNav`, `DiffScrollContent`, `DiffScrollMaster`,
+      `DiffScrollUndo`, `DiffScrollRedo`.
+- [x] **6a.3** Переместить `StandardTabLayout` →
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/tab_layouts/standard_layout.py`.
+      Сохранить objectName: `StandardTabActionColumn`, `StandardTabSubNav`,
+      `StandardTabScroll`. Добавить реализации методов `set_title`,
+      `set_action_widget`, `set_nav_widget`, `register_inner_scrolls`,
+      `connect_stack`, `refresh_after_page_change`
+      (для полного соответствия `TabLayoutProtocol`).
+- [x] **6a.4** Создать
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/tab_layouts/__init__.py`
+      с реэкспортом `DiffScrollTabLayout`, `StandardTabLayout`,
+      `_AbstractColumnarTabLayout`.
+- [x] **6a.5** Backward-compat реэкспорт в
+      `multiprocess_prototype/frontend/widgets/primitives/__init__.py`:
+      удалить прямые импорты из `diff_scroll_tab_layout.py` /
+      `standard_tab_layout.py`, добавить импорт из
+      `multiprocess_framework.modules.frontend_module.widgets.tabs.tab_layouts`.
+      Физические файлы `primitives/diff_scroll_tab_layout.py` и
+      `primitives/standard_tab_layout.py` заменить тонкими реэкспортами
+      (один import-from + `__all__`), чтобы прямые импорты типа
+      `from ...primitives.diff_scroll_tab_layout import DiffScrollTabLayout`
+      продолжали работать (это делает `settings/tab.py`).
+- [x] **6a.6** Обновить `multiprocess_prototype/frontend/widgets/tabs/settings/tab.py`:
+      импорт `DiffScrollTabLayout` остаётся через backward-compat файл
+      `primitives/diff_scroll_tab_layout.py` — решение TeamLead: не ломать
+      git blame на settings/tab.py ради косметического изменения импорта.
+- [x] **6a.7** ADR-127: «DiffScroll vs Standard layout — критерии выбора.
+      Размещение в framework. `_AbstractColumnarTabLayout` как nav-агностичная база».
+      Добавить в `multiprocess_framework/DECISIONS.md`,
+      запустить `python -m scripts.sync`.
+- [x] **6a.8** **Acceptance:**
+      - [x] `StandardTabLayout` удовлетворяет `TabLayoutProtocol` (runtime check через `isinstance`)
+      - [x] `DiffScrollTabLayout` удовлетворяет `TabLayoutProtocol` (runtime check)
+      - [x] `_AbstractColumnarTabLayout.set_nav_widget` принимает `QWidget` — тест с mock-виджетом
+      - [x] Тесты `test_standard_tab_layout.py` (23 тестов) зелёные
+      - [x] Тесты settings (128) зелёные
+      - [x] Framework тесты (267) зелёные (+ 2 pre-existing fail)
+      - [x] LOC в `primitives/diff_scroll_tab_layout.py` = 3 (только реэкспорт)
+      - [x] LOC в `primitives/standard_tab_layout.py` = 3 (только реэкспорт)
+
+---
+
+### Phase 6b — Рефакторинг иерархии Tab: BaseColumnarTab + BaseTreeNavTab(BaseColumnarTab)
+
+**Цель:** вытащить из `BaseTreeNavTab` nav-агностичный слой `BaseColumnarTab(QWidget)`,
+который держит layout + nav-слот + content_stack + сигналы, но не знает про `SectionSpec`.
+`BaseTreeNavTab` становится подклассом, добавляющим tree-навигацию по `list[SectionSpec]`.
+Settings продолжает работать **без изменений**.
+
+**Уровень: Senior+ (TeamLead, Opus). Отдельный PR. Зависит от 6a.**
+
+- [ ] **6b.1** Создать
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/base_columnar_tab.py`.
+
+      **Публичный API `BaseColumnarTab(QWidget)`:**
+      ```
+      __init__(title, ctx, layout_factory=DiffScrollTabLayout, parent=None)
+      self._tab_layout          # экземпляр layout'а (TabLayoutProtocol)
+      self._content_stack       # QStackedWidget — общий для всех типов nav
+
+      # Абстрактные хуки — подкласс обязан реализовать:
+      _build_nav_widget() -> QWidget   # вернуть QTreeWidget / QListWidget / любой QWidget
+      _on_nav_changed(key: str) -> None  # реагировать на смену выбора
+
+      # Helpers:
+      register_content_widget(key: str, widget: QWidget) -> int  # → index в content_stack
+      select_key(key: str) -> None   # переключить content_stack на ключ
+
+      # Сигналы:
+      section_changed = Signal(str)   # имя «section» сохранено для backward-compat
+      ```
+      Базовый `__init__` вызывает `_build_nav_widget()`, передаёт результат в
+      `self._tab_layout.set_nav_widget(...)`, строит `QVBoxLayout(self)`.
+
+- [ ] **6b.2** Переписать `BaseTreeNavTab` как подкласс `BaseColumnarTab`:
+      - `__init__(*, title, sections: list[SectionSpec], ctx, layout_factory, ...)` —
+        передаёт `title, ctx, layout_factory` в `super().__init__`, сохраняет `sections`.
+      - `_build_nav_widget()` → строит и возвращает `QTreeWidget`, заполняет по `SectionSpec`
+        через `build_nav_tree_from_specs`.
+      - `_on_nav_changed(key)` → находит `SectionSpec`, инициализирует через factory,
+        регистрирует в `content_stack`, вызывает `presenter_factory`.
+      - `_attach_section`, `_apply_presenter_factory`, `_connect_section_events`,
+        `create_lazy_section`, `populate` — всё SectionSpec-related остаётся здесь.
+      - `TreeNavTabPresenter` остаётся без изменений (он — деталь `BaseTreeNavTab`).
+
+- [ ] **6b.3** Обновить
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/__init__.py`:
+      добавить реэкспорт `BaseColumnarTab` рядом с `BaseTreeNavTab`.
+
+- [ ] **6b.4** Тест `test_base_columnar_tab.py` в
+      `multiprocess_framework/modules/frontend_module/tests/`:
+      - Конкретная минимальная реализация `_ConcreteColumnarTab(_build_nav_widget → QLabel,
+        _on_nav_changed → записать вызов)`.
+      - Тест: `register_content_widget` добавляет виджет в стек.
+      - Тест: `select_key` переключает индекс стека.
+      - Тест: `section_changed` эмитится при вызове `_on_nav_changed` через слот.
+      - Тест: `layout_factory=None` → `RuntimeError` (унаследованное поведение).
+
+- [ ] **6b.5** **Acceptance:**
+      - [ ] `SettingsTab` (наследует `BaseTreeNavTab(BaseColumnarTab)`) — 22 теста зелёные
+      - [ ] Settings (128 тестов) зелёные — **нет регресса**
+      - [ ] Framework тесты (267) зелёные
+      - [ ] `BaseColumnarTab` импортируется из framework без app-specific зависимостей:
+            `from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseColumnarTab`
+      - [ ] `isinstance(SettingsTab(...), BaseColumnarTab)` == `True`
+      - [ ] `BaseColumnarTab` не импортирует `SectionSpec`, `SectionProtocol`, `TreeNavTabPresenter`
+
+---
+
+### Phase 6c — BaseListNavTab + Recipes pilot
+
+**Цель:** новый `BaseListNavTab(BaseColumnarTab)` для динамических CRUD-навигаций.
+Реализован в framework. `RecipesTab` переписан как pilot-consumer.
+
+**Уровень: Senior+ (TeamLead, Opus). Отдельный PR. Зависит от 6b.**
+
+---
+
+#### Phase 6c — Recon (Processes / Plugins / Recipes CRUD API)
+
+*Recon выполнен manager'ом (2026-05-18) на основе прочтения tab.py и tests/ трёх табов.*
+
+**Табы с динамическим nav-списком:**
+
+| Таб | Nav-виджет | Тип nav | Динамика |
+|-----|-----------|---------|----------|
+| `RecipesTab` | `StandardTabLayout.sub_nav` (QListWidget) | data entities (`RecipeInfo`, slot+name) | CRUD: add/delete (rename через save) |
+| `ProcessesTab` | собственный `QListWidget` (без StandardTabLayout) | mix: «Все процессы» (фикс.) + имена процессов | add/delete (через TODO), readonly status |
+| `PluginsTab` | `MasterDetailLayout._item_list` (QListWidget) | catalog (read-only list из registry) | нет CRUD — только фильтр+поиск |
+
+**a) Какие CRUD-операции реально нужны:**
+
+- `RecipesTab`: `add_item` (slot "−1" = новый), `remove_item` (delete), rename через save (не отдельная операция).
+  Нет: reorder, multi-select, drag-drop.
+- `ProcessesTab` (memory: workers/threads CRUD запланирован, сейчас TODO): `add_item`, `remove_item`.
+  Фикс-элемент «Все процессы» — нужен параметр `header_item: str | None`.
+- `PluginsTab`: CRUD нет — только read-only каталог с фильтрацией. `BaseListNavTab` не применим.
+
+**Вывод по a:** минимум API = `add_item / remove_item / rename_item / select_item`.
+Reorder и multi-select не нужны в ближайших consumer'ах — вне scope Phase 6c.
+
+**b) Какие events наружу хочет каждый таб:**
+
+- `RecipesTab`: `item_selected(key)`, `item_added(key)` — для sync форм.
+- `ProcessesTab`: `item_selected(key)` — для update_buttons_state; `item_added`, `item_removed` — для sync nav.
+- Сигналы базового класса: `item_selected(key: str)`, `item_added(key: str)`,
+  `item_removed(key: str)`, `item_renamed(key: str, label: str)`.
+
+**c) Фиксированные слоты vs неограниченный список:**
+
+- `RecipesTab`: слоты 0..N + псевдослот −1 (новый рецепт). Семантически ограниченный набор слотов,
+  но не фиксированное число. Слот −1 — это не настоящий item, а команда «создать».
+- `ProcessesTab`: неограниченный список имён процессов.
+- Параметр `max_items` не нужен — ограничение — ответственность Presenter'а.
+  `BaseListNavTab` параметра `max_items` не добавляет.
+
+**d) Кто отвечает за persistence:**
+
+- `RecipesPresenter` управляет `_recipes_dir` и файлами — уже так.
+- `ProcessesPresenter` управляет списком процессов через ctx.
+- Шаблон `BaseListNavTab` **не знает про persistence** — только отображает items и эмитит события.
+  Presenter вызывает `tab.add_item / remove_item` напрямую после своих операций.
+
+**e) Иконка/badge возле item:**
+
+- `RecipesTab`: нет.
+- `ProcessesTab`: статус процесса (running/stopped) — желательна цветная точка или иконка.
+  Но сейчас в `ProcessesTab` это не реализовано (TODO).
+- `PluginsTab` (если переедет): enabled/disabled badge.
+- Решение: `add_item(key, label, icon: QIcon | None = None)` — опциональная иконка.
+  Реализация через `QListWidgetItem.setIcon`. Субкласс может переопределять `_make_nav_item`.
+
+---
+
+#### Tasks
+
+- [ ] **6c.1** Дизайн API `BaseListNavTab` на основе recon — зафиксировать
+      в docstring файла перед реализацией. TeamLead уточняет API если recon
+      выявил отклонения.
+
+      **Baseline API (может корректироваться TeamLead):**
+      ```
+      BaseListNavTab(BaseColumnarTab)
+        __init__(*, title, ctx, layout_factory=StandardTabLayout, parent=None)
+
+        # CRUD — вызывает Presenter после своих операций:
+        add_item(key: str, label: str, icon: QIcon | None = None) -> None
+        remove_item(key: str) -> None
+        rename_item(key: str, label: str) -> None
+        select_item(key: str) -> None
+
+        # Хук для кастомизации item-виджета в content_stack:
+        _create_item_widget(key: str) -> QWidget   # подкласс переопределяет
+
+        # Опциональный хук для кастомного QListWidgetItem:
+        _make_nav_item(key: str, label: str, icon: QIcon | None) -> QListWidgetItem
+
+        # Сигналы:
+        item_selected  = Signal(str)    # key
+        item_added     = Signal(str)    # key
+        item_removed   = Signal(str)    # key
+        item_renamed   = Signal(str, str)  # key, new_label
+      ```
+
+      `_build_nav_widget()` → возвращает `QListWidget`.
+      `_on_nav_changed(key)` → эмитит `item_selected`, переключает `content_stack`.
+      `section_changed` (унаследован) алиасит `item_selected` для backward-compat.
+
+- [ ] **6c.2** Реализовать `BaseListNavTab(BaseColumnarTab)` в файле
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/base_list_nav_tab.py`.
+      Добавить реэкспорт в
+      `multiprocess_framework/modules/frontend_module/widgets/tabs/__init__.py`.
+
+- [ ] **6c.3** Переписать
+      `multiprocess_prototype/frontend/widgets/tabs/recipes/tab.py` как
+      `RecipesTab(BaseListNavTab)`.
+
+      **Требования к результату:**
+      - `recipes/tab.py` ≤ 100 LOC.
+      - `RecipesTab.__init__` передаёт `layout_factory=StandardTabLayout`.
+      - Переопределяет `_create_item_widget(key)` — возвращает form-виджет
+        (группа «Информация о рецепте»: name_edit, desc_edit, labels).
+      - `ViewModeToggle` (Cards/Table) остаётся локально в `RecipesTab` —
+        это не часть шаблона (Recipes-специфика).
+      - Presenter (`RecipesPresenter`) вызывает `tab.add_item / remove_item`
+        через callback — persistence остаётся в Presenter.
+      - Legacy-атрибуты `_on_slot_selected`, `_sync_slots` — удалить.
+        Тесты переписать через новый API.
+
+- [ ] **6c.4** Тесты:
+      - `multiprocess_framework/modules/frontend_module/tests/test_base_list_nav_tab.py` —
+        pure-Python (без Qt по максимуму, mock QListWidget):
+        CRUD контракт (`add_item` → item в списке, `remove_item` → удалён),
+        сигналы (`item_selected` эмитится), `_on_nav_changed` вызывается.
+      - `multiprocess_prototype/frontend/widgets/tabs/recipes/tests/test_recipes_tab.py` —
+        переписать `TestRecipesTab` через новый паттерн
+        (убрать `_on_slot_selected`, `_sync_slots`, прямой `_presenter._recipes_dir`).
+
+- [ ] **6c.5** **Acceptance:**
+      - [ ] `BaseListNavTab` импортируется без app-specific зависимостей:
+            `from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab`
+      - [ ] `recipes/tab.py` ≤ 100 LOC
+      - [ ] `test_recipes_tab.py` — все тесты зелёные (3 класса TestRecipeIO, TestRecipesPresenter, TestRecipesTab)
+      - [ ] `test_base_list_nav_tab.py` — все тесты зелёные
+      - [ ] Settings (128) + framework (267) тесты зелёные (нет регресса)
+      - [ ] LOC delta: `base_list_nav_tab.py` ~120 LOC + `_create_item_widget` в RecipesTab
+            вместо 303 LOC старого `tab.py`
+
+---
+
+## Phase 6 — Recon-заметки (2026-05-18, пересмотрено 2026-05-18)
+
+### Findings из первоначального recon
+
+**a) Recipes — list-CRUD, не tree-навигация.**
+
+`RecipesTab` использует `StandardTabLayout(show_sub_nav=True)` в режиме
+«external-content»: sub-nav — `QListWidget` с динамическими рецептами
+(пользователь добавляет/удаляет через CRUD), контент — единый
+`QStackedWidget{Cards, Table}`. Рецепты — data entities (`RecipeInfo`
+со `slot`, `name`, `created`), не UI-секции. `SectionSpec`/`SectionProtocol`
+неприменимы: у рецепта нет `action_buttons()`, нет `on_activated()`,
+нет `presenter_factory`.
+
+**b) `BaseTreeNavTab` не применим к Recipes напрямую.**
+
+`BaseTreeNavTab.__init__` ожидает `list[SectionSpec]` — статичную
+декларацию UI-секций, строит `QTreeWidget` с постоянными узлами.
+
+**c) Overlap DiffScroll / Standard: ~40%, не 60%.**
+
+`DiffScrollTabLayout` (463 LOC): дифференциальный скролл (мастер-скроллбар,
+delta-sync, wheel redirect, eventFilter) — ~200 LOC специфичного кода.
+`StandardTabLayout` (376 LOC): QScrollArea одиночный, QListWidget sub-nav,
+external-content режим.
+
+Общий код: enable_undo_redo (~40 LOC), action-колонка top/bottom (~60 LOC),
+`_make_button` + `action_triggered` (~25 LOC). Итого ~125 LOC overlap.
+Реальная общая база `_AbstractColumnarTabLayout` = ~100-120 LOC.
+
+**d) Impactful imports — 3 файла.**
+
+Прямые импорты layout'ов из prototype:
+1. `settings/tab.py:12` → `from ...primitives.diff_scroll_tab_layout import DiffScrollTabLayout`
+2. `recipes/tab.py:33` → `from ...primitives import StandardTabLayout`
+3. `primitives/tests/test_standard_tab_layout.py:8` → `from ...primitives import StandardTabLayout`
+
+После переноса — достаточно backward-compat реэкспортов в двух местах:
+- `primitives/diff_scroll_tab_layout.py` (тонкий файл-реэкспорт)
+- `primitives/__init__.py` (обновить импорт источника)
+
+**e) `StandardTabLayout` не удовлетворяет `TabLayoutProtocol` сейчас.**
+
+Отсутствуют: `set_title`, `set_action_widget`, `set_nav_widget`,
+`register_inner_scrolls`, `connect_stack`, `refresh_after_page_change`.
+Это известно из `tab_layout_protocol.py:5-6` (комментарий «любой будущий
+StandardTabLayout»). Phase 6a.3 добавляет эти методы.
+
+**f) ViewModeToggle (Cards/Table) — Recipes-специфика, не в шаблон.**
+
+`ViewModeToggle` в `RecipesTab` управляет `QStackedWidget{Cards, Table}`
+внутри единого content-виджета. Это паттерн «два вида данных одного
+типа», не «дерево секций». В общий шаблон не выносить.
+
+### Пересмотр Director'а: почему BaseListNavTab нужен
+
+Первоначальный вывод «`BaseListNavTab` не нужен» был основан на аргументе
+YAGNI — единственный потребитель `RecipesTab`. Этот аргумент некорректен
+в контексте данного проекта с явной целью **constructor ethos** (memory:
+`feedback_constructor_modularity.md` — «всё должно быть модульным
+конструктором: подключаемым, тестируемым, компонуемым блоком»).
+
+**Конкретные будущие consumer'ы `BaseListNavTab` — уже запланированы:**
+
+1. **ProcessesTab** (memory: `project_processes_tab.md`) — workers/threads CRUD
+   запланирован как следующая фаза. Сейчас `ProcessesTab` строит свой `QListWidget`
+   вручную (tab.py ~580 LOC). Миграция на `BaseListNavTab` сократит до ~150 LOC
+   декларации.
+
+2. **PluginManagerTab / SystemTopology Phase 2** (memory:
+   `project_system_topology_phase1.md`) — Phase 2 предполагает миграцию tab на
+   общий шаблон. Topology nodes — это тоже динамический список.
+
+Аналогия с `BaseTreeNavTab` (Phase 3): тогда тоже был один consumer (`SettingsTab`),
+но создали базу, зная что будут другие tree-навигационные табы. Та же логика применима
+к `BaseListNavTab`.
+
+**Риск «designed for the second»** митигирован через recon 6c.0 (секция выше):
+проверены реальные CRUD API трёх табов, зафиксированы общие операции
+(add/remove/rename/select) и события (item_selected/added/removed/renamed),
+подтверждено что PluginsTab не нужен (read-only каталог).
+
+### Итоговый split: 6a + 6b + 6c
+
+- **6a** (layout move + абстрактная база) — механическая но рискованная работа
+  (QSS objectName, TabLayoutProtocol compliance). Отдельный PR — изолирует риск.
+- **6b** (BaseColumnarTab + рефакторинг BaseTreeNavTab) — аккуратный структурный
+  рефакторинг без изменения функциональности. Зависит от 6a (layout'ы в framework).
+- **6c** (BaseListNavTab + Recipes pilot) — новый API + миграция consumer.
+  Зависит от 6b (нужен BaseColumnarTab как база).
+
+**Оценка 6a:** +120 (abstract base) + move ~840 LOC → framework + 2 тонких
+реэкспорта = изменение ~10-12 файлов, ~3h TeamLead.
+**Оценка 6b:** +200 / -150 LOC — BaseColumnarTab (~130 LOC) + рефакторинг
+BaseTreeNavTab (~70 LOC новых хуков, ~150 LOC старого кода переезжает в подкласс),
+4-5 файлов, ~3-4h TeamLead.
+**Оценка 6c:** +250 / -200 LOC — BaseListNavTab (~120 LOC) + RecipesTab (-200 LOC,
+новый ~100 LOC) + тесты (~130 LOC), 6-7 файлов, ~3-4h TeamLead.
 
 ## Phase 7 — Очистка техдолгов + документация
 
@@ -432,12 +792,15 @@ Phase 7: Очистка техдолгов + документация
 | 3 | +350 / −0 | 2-3 | High | **TeamLead** | 6h |
 | 4 | +80 / −400 | 5-6 | Medium-High | Developer + Tester | 4h |
 | 5 | +50 / −30 | 3 | Medium | Developer | 2h |
-| 6 | +200 / −300 | 6-7 | High | **TeamLead** | 6h |
+| 6a | +120 / −0 (move ~840) | 10-12 | High | **TeamLead** | 3h |
+| 6b | +200 / −150 | 4-5 | High (refactor) | **TeamLead** | 3-4h |
+| 6c | +250 / −200 | 6-7 | High | **TeamLead** | 3-4h |
 | 7 | −60 | 4 | Low | Developer + Docs | 2h |
-| | | | | **Итого** | **~26h** |
+| | | | | **Итого** | **~30h** |
 
-**Итого:** ~1100 строк добавится, ~970 удалится. SettingsTab.py:
-**434 → ~80 LOC**. Recipes готов к миграции «бесплатно» после Phase 6.
+**Итого:** ~1450 строк добавится, ~960 удалится. SettingsTab.py:
+**434 → ~80 LOC**. Recipes на `BaseListNavTab` после Phase 6c. Основание split 6→6a/6b/6c:
+три независимых PR, каждый изолирует риск и может проходить review отдельно.
 
 ## Верификация перед закрытием
 

@@ -146,6 +146,7 @@
 - [ADR-124](#adr-124-carve-out-actions_module-отдельный-top-level-модуль-фреймворка): Carve-out `actions_module` → отдельный top-level модуль фреймворка
 - [ADR-125](#adr-125-commit-сообщения-conventional-commits-обязательные-trailers-why-layer-с-hook-валидацией): Commit-сообщения — Conventional Commits + обязательные trailers `Why:` / `Layer:` с hook-валидацией
 - [ADR-126](#adr-126-шаблон-вкладки-с-tree-навигацией-sectionspec-treenavtabpresenter-basetreenavtab): Шаблон вкладки с tree-навигацией — `SectionSpec` + `TreeNavTabPresenter` + `BaseTreeNavTab`
+- [ADR-127](#adr-127-_abstractcolumnartablayout-nav-агностичная-база-layoutов-перенос-в-framework): `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
 <!-- ADR-TOC:END -->
 
 ---
@@ -2099,6 +2100,21 @@
   - **Сразу делать конфиг-driven вкладки (JSON/YAML → tab)** — отклонено: слишком большой шаг. Сначала нужен типизированный `SectionSpec` в коде; конфиг-driven описывает тот же `SectionSpec`, но снаружи. Шаг 2, после стабилизации API.
   - **Сохранить параллельные `DiffScrollTabLayout` и `StandardTabLayout` без общей базы** — отклонено: 60% кода уже дублируется (action-колонка + nav + content + undo/redo). Расхождение API между ними затрудняет смену layout-стратегии у конкретной вкладки.
   - **Удалить `CurrentPageStack` / диф-скролл** — отклонено: они работают (фикс sizeHint остаётся в baseline `0775d01`). Рефакторинг — про переиспользуемость, не про переписывание UI-стратегии.
+
+## ADR-127: `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
+- Дата: 2026-05-18
+- Статус: принято
+- Контекст: `DiffScrollTabLayout` и `StandardTabLayout` жили в `multiprocess_prototype/frontend/widgets/primitives/`. Оба layout'а имеют одинаковую структуру: action-колонка (top/bottom), навигационный слот, контент, undo/redo. Дублирование составляло ~60% кода. `StandardTabLayout` не удовлетворял `TabLayoutProtocol` (отсутствовали 6 методов: `set_title`, `set_action_widget`, `set_nav_widget`, `register_inner_scrolls`, `connect_stack`, `refresh_after_page_change`). Размещение в prototype блокировало переиспользование в других приложениях на базе framework.
+- Решение:
+  1. **`_AbstractColumnarTabLayout(QWidget)`** — общая база в `multiprocess_framework/.../widgets/tabs/tab_layouts/_abstract_columnar.py`. Содержит: action-column builder, enable_undo_redo (ленивое создание кнопок), nav-агностичный `set_nav_widget(QWidget)` (принимает QTreeWidget, QListWidget, произвольный QWidget). Абстрактные методы: `set_title`, `set_action_widget`, `set_content_widget`, `register_inner_scrolls`, `connect_stack`, `refresh_after_page_change`, `_add_undo_redo_buttons`.
+  2. **`DiffScrollTabLayout`** перемещён в `tab_layouts/diff_scroll_layout.py`. Наследует `_AbstractColumnarTabLayout`. Все 7 objectName сохранены (`DiffScrollActions`, `DiffScrollNavGroup`, `DiffScrollNav`, `DiffScrollContent`, `DiffScrollMaster`, `DiffScrollUndo`, `DiffScrollRedo`).
+  3. **`StandardTabLayout`** перемещён в `tab_layouts/standard_layout.py`. Наследует `_AbstractColumnarTabLayout`. Все 3 objectName сохранены (`StandardTabActionColumn`, `StandardTabSubNav`, `StandardTabScroll`). Добавлены 6 методов `TabLayoutProtocol` — часть с реальной логикой (`connect_stack`, `refresh_after_page_change`, `set_nav_widget`), часть no-op (`register_inner_scrolls` — стандартный layout без диф-скролла).
+  4. **Backward-compat**: тонкие реэкспорты (~3 LOC) в `primitives/diff_scroll_tab_layout.py` и `primitives/standard_tab_layout.py` — прямые импорты из prototype продолжают работать.
+- Причина: (1) layout'ы — часть framework-каркаса вкладок (ADR-126), а не app-specific код; (2) общая база устраняет дрейф API между двумя стратегиями скролла; (3) `StandardTabLayout` с `TabLayoutProtocol` compliance позволяет использовать его как `layout_factory` в `BaseTreeNavTab`; (4) nav-агностичный `set_nav_widget(QWidget)` — фундамент для будущих `BaseColumnarTab` (Phase 6b) и `BaseListNavTab` (Phase 6c).
+- Отклонённые альтернативы:
+  - **Оставить layout'ы в prototype, дублировать API** — отклонено: нарушает слои импортов (framework не может импортировать prototype), блокирует `BaseColumnarTab` в framework.
+  - **Глубокий рефакторинг Standard → общая scroll-синхронизация** — отклонено: Standard использует стандартный QScrollArea, дифференциальный скролл ему не нужен. `register_inner_scrolls` как no-op — корректный минимум.
+  - **Удалить `_AbstractColumnarTabLayout`, сделать Protocol вместо базового класса** — отклонено: undo/redo и action-column builder — реальный код (~80 LOC), Protocol потребовал бы дублирования этого кода в обоих layout'ах.
 
 ---
 
