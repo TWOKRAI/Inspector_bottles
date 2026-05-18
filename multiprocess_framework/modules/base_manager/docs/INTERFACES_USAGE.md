@@ -6,7 +6,7 @@
 
 1. **Контракт для разработчиков** - четко определяют, какие методы должны быть реализованы
 2. **Документация** - показывают ожидаемое поведение классов
-3. **Проверка типов** - помогают IDE и type checkers (mypy) находить ошибки
+3. **Проверка типов** - помогают IDE и type checker (pyright) находить ошибки
 4. **Тестирование** - позволяют создавать моки и проверять соответствие контракту
 5. **Рефакторинг** - упрощают изменение реализации без изменения интерфейса
 
@@ -33,7 +33,7 @@ from multiprocess_framework.modules.base_manager import BaseManager
 class MyManager(BaseManager):
     def initialize(self) -> bool:
         return True
-    
+
     def shutdown(self) -> bool:
         return True
 
@@ -54,7 +54,7 @@ def test_manager_contract(manager: IBaseManager):
     assert hasattr(manager, 'shutdown')
     assert hasattr(manager, 'attach_adapter')
     assert hasattr(manager, 'get_adapter')
-    
+
     # Проверка что методы вызываются корректно
     assert manager.initialize() in [True, False]
     assert manager.shutdown() in [True, False]
@@ -141,11 +141,11 @@ def test_manager_implements_interface():
     """Проверка что BaseManager реализует IBaseManager."""
     manager = BaseManager.__new__(BaseManager)  # Создаем без __init__
     # Но BaseManager - абстрактный, поэтому создаем конкретную реализацию
-    
+
     class TestManager(BaseManager):
         def initialize(self): return True
         def shutdown(self): return True
-    
+
     manager = TestManager("test")
     assert isinstance(manager, IBaseManager)
 
@@ -153,7 +153,7 @@ def test_adapter_implements_interface():
     """Проверка что BaseAdapter реализует IBaseAdapter."""
     class TestAdapter(BaseAdapter):
         def setup(self): return True
-    
+
     manager = TestManager("test")
     adapter = TestAdapter(manager)
     assert isinstance(adapter, IBaseAdapter)
@@ -206,7 +206,7 @@ def validate_manager(manager: Any) -> bool:
     """Проверка что объект реализует интерфейс IBaseManager."""
     if not isinstance(manager, IBaseManager):
         return False
-    
+
     # Проверка наличия всех методов
     required_methods = ['initialize', 'shutdown', 'attach_adapter', 'get_adapter']
     for method_name in required_methods:
@@ -214,7 +214,7 @@ def validate_manager(manager: Any) -> bool:
             return False
         if not callable(getattr(manager, method_name)):
             return False
-    
+
     return True
 
 # Использование
@@ -246,7 +246,7 @@ def process_manager(manager: 'IBaseManager') -> None:
 ```
 
 **Преимущества:**
-- ✅ Статическая проверка типов (mypy, IDE)
+- ✅ Статическая проверка типов (pyright, IDE)
 - ✅ Нет циклических импортов
 - ✅ Нет накладных расходов в runtime
 
@@ -278,4 +278,3 @@ def process_manager(manager: 'IBaseManager') -> None:
 - 🔍 **Type checking** - помогают находить ошибки на этапе разработки
 
 Используйте их для улучшения качества кода и упрощения разработки!
-

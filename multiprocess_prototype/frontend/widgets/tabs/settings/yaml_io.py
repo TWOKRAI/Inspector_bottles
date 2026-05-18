@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from multiprocess_prototype.config.schemas import SystemConfig, load_system_config
-from multiprocess_prototype.registers.field_info import FieldInfo, extract_fields
+from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo, extract_fields
 
 # config/system.yaml относительно multiprocess_prototype/
 # parents[4] от tabs/settings/yaml_io.py:

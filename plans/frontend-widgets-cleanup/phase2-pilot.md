@@ -3,7 +3,8 @@
 **Slug:** frontend-widgets-cleanup-phase2 (детализация продолжения)
 **Дата:** 2026-05-14
 **Ветка:** refactor/frontend-widgets-cleanup
-**Родительский план:** [`plans/frontend-widgets-cleanup.md`](frontend-widgets-cleanup.md) — верхнеуровневая карта (Phase 0-3)
+**Родительский план:** [`plan.md`](plan.md) — верхнеуровневая карта (Phase 0-3)
+**Связанные планы:** [`arch-polish.md`](arch-polish.md) (DONE, between 2.0 и 2.1), [`rollout-finish.md`](rollout-finish.md) (заменяет Phase 2.1-2.7)
 **PR-стратегия:** 2 раздельных PR (PR1 = Phase 1 docs, PR2 = Phase 2 code)
 
 ---
@@ -191,7 +192,7 @@ class ActionBusRegistersManager:
 
 **Acceptance Phase 1:**
 - [ ] `docs/refactors/widgets-component-review.md` создан, 8 секций
-- [ ] В `plans/frontend-widgets-cleanup.md` чекбоксы 1.1-1.7 отмечены `[x]`, добавлен 1.8
+- [ ] В `plans/frontend-widgets-cleanup/plan.md` чекбоксы 1.1-1.7 отмечены `[x]`, добавлен 1.8
 - [ ] Все решения по правкам фреймворка зафиксированы (value_changed × 4, новый combo/)
 
 **Коммиты PR1:**
@@ -258,7 +259,19 @@ class ActionBusRegistersManager:
 
 ---
 
-### Phase 2.1 — Расширение после успеха пилота
+### Phase 2.1+ — Расширение после успеха пилота — **SUPERSEDED через widgets-rollout-finish.md**
+
+> **⚠️ ВНИМАНИЕ (2026-05-15):** Sequential Phase 2.1-2.7 ниже **переоформлены** в параллельные треки через [`widgets-rollout-finish.md`](widgets-rollout-finish.md). Причина: чтобы dual-mode в presenters, legacy в `_build_bool`, FieldInfo re-export и backward-compat shims не жили долго в half-state. Вместо последовательного «один builder — один PR — один deferred техдолг» делаем **vertical slices** (facade + builder + caller + tests в одном коммите) с **финальным cleanup'ом одной волной**.
+>
+> Также между Phase 2.0 и Phase 2.1 закрыт промежуточный [`widgets-arch-polish.md`](widgets-arch-polish.md) (5 коммитов 2026-05-15) — единый widget mapping, FormContext в FW, явный ActionBus (прокси удалён), multi-target fan-out, V2 поглощён framework'ом.
+>
+> Маппинг старой нумерации → новые треки:
+> - **2.1 (SpinBox)**, **2.2 (Numeric)**, **2.4 (Slider)**, **2.5 (Compound для color3)** → Track 1+2 (vertical slices)
+> - **2.3 (Combo)** → Track 1.5 (новый компонент FW) + Track 2.3 (factory)
+> - **2.6 (callers миграция)** → Track 3
+> - **2.7 (удаление legacy)** → Track 4 — итоговый cleanup, **не до Track 3**. Legacy QCheckBox-путь остаётся для non-plugin forms (SettingsSystem theme), это intentional разделение «binding-aware форма плагина» vs «GUI-локальная форма настроек».
+>
+> **Исторические записи ниже сохранены** как контекст того, какой объём работы планировался изначально и почему его пришлось перегруппировать.
 
 После подтверждения концепции на пилоте — последовательно расширяем (каждое — отдельный коммит/PR):
 
@@ -463,7 +476,7 @@ class AppContext:
 
 **Запись (PR1, docs):**
 - `docs/refactors/widgets-component-review.md` — новый
-- `plans/frontend-widgets-cleanup.md` — отметить [x] 1.1-1.7, добавить 1.8
+- `plans/frontend-widgets-cleanup/plan.md` — отметить [x] 1.1-1.7, добавить 1.8
 
 **Запись (PR2, code):**
 
@@ -500,7 +513,7 @@ Prototype:
 
 **PR1 (docs only):**
 - `docs/refactors/widgets-component-review.md` читается за 5 минут, даёт решение по каждому из 8 компонентов
-- В `plans/frontend-widgets-cleanup.md` отмечены 1.1-1.7, добавлен 1.8
+- В `plans/frontend-widgets-cleanup/plan.md` отмечены 1.1-1.7, добавлен 1.8
 
 **PR2 (code):**
 ```pwsh

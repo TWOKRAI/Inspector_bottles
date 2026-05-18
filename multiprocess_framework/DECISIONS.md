@@ -145,6 +145,8 @@
 - [ADR-123](#adr-123-категоризация-plugins-по-доменам-phase-5-follow-up): Категоризация `Plugins/` по доменам (Phase 5 follow-up)
 - [ADR-124](#adr-124-carve-out-actions_module-отдельный-top-level-модуль-фреймворка): Carve-out `actions_module` → отдельный top-level модуль фреймворка
 - [ADR-125](#adr-125-commit-сообщения-conventional-commits-обязательные-trailers-why-layer-с-hook-валидацией): Commit-сообщения — Conventional Commits + обязательные trailers `Why:` / `Layer:` с hook-валидацией
+- [ADR-126](#adr-126-шаблон-вкладки-с-tree-навигацией-sectionspec-treenavtabpresenter-basetreenavtab): Шаблон вкладки с tree-навигацией — `SectionSpec` + `TreeNavTabPresenter` + `BaseTreeNavTab`
+- [ADR-127](#adr-127-_abstractcolumnartablayout-nav-агностичная-база-layoutов-перенос-в-framework): `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
 <!-- ADR-TOC:END -->
 
 ---
@@ -2032,7 +2034,7 @@
 - Решение: `git mv multiprocess_framework/modules/frontend_module/actions multiprocess_framework/modules/actions_module` + перенос `tests/test_action_bus.py` → `actions_module/tests/test_bus.py`. Оба внешних edge перерезаны:
   1. `schemas.py` теперь импортирует `SchemaBase` напрямую из `data_schema_module` (вместо `frontend_module.schema_adapter`).
   2. `builder.py` использует локальный `Protocol RegisterBindingLike` (атрибуты `register_name`, `field_name`) вместо TYPE_CHECKING-импорта `RegisterBinding`.
-  
+
   Корневой фасад `multiprocess_framework/__init__.py` экспортирует публичный API actions_module (`Action`, `ActionBuilder`, `ActionBus`, `ActionHandler`, `IRegistersManagerGui`) — правило R-1 «единый канал импортов». Sed-замена обновила импорты в 25 файлах (`multiprocess_prototype/frontend/actions/*`, `Services/sql/action_log/*`, внутренние пути actions_module). Финальная картина: единственная внешняя зависимость actions_module — `data_schema_module.SchemaBase`.
 - Причина: Action-bus (undo/redo, coalescing, persistence-Protocols) — это generic-инфраструктура поведения GUI-приложения, концептуально отдельная от UI-виджетов. До carve-out 12 файлов сидели внутри frontend_module, при этом ничего из frontend не использовали — это «спрятанный» отдельный кластер. После carve-out frontend_module становится тоньше, actions выходит в чистый top-level модуль рядом с `chain_module`/`state_store_module`. Размещение в `multiprocess_framework/modules/` (а не в `Services/actions/`) — потому что ActionBus сам по себе generic-инфраструктура без внешних зависимостей; конкретный writer лога (с зависимостью на sql) живёт в `Services/sql/action_log/`, обращаясь к Protocol-контракту `IActionLogWriter` в actions_module.
 - Отклонённые альтернативы:
@@ -2074,6 +2076,45 @@
   - **Структурированный JSON/YAML в body** — отклонён. `git interpret-trailers` ожидает RFC-822 `Key: Value`; JSON ломает совместимость с GitHub UI, `git log --pretty`, hook-парсингом. Trailer'ы — нативная фича Git.
   - **Custom commit-msg парсер без hook'а** — отклонён. Без блокировки агент забудет через 2-3 коммита. Hook — единственный гарантированный механизм.
   - **Переписать историю с применением правила ретроспективно** — отклонён. Стоимость (rebase + потеря Co-Authored-By + сломанные ссылки в `git log -S`) больше выгоды. Forward-only.
+
+---
+
+## ADR-126: Шаблон вкладки с tree-навигацией — `SectionSpec` + `TreeNavTabPresenter` + `BaseTreeNavTab`
+- Дата: 2026-05-18
+- Статус: принято
+- Контекст: После закрытия плана `settings-mvp` (DONE) у фреймворка появился MVP-каркас для вкладок с tree-навигацией: `SectionProtocol` (контракт секции), `TabPresenterBase` (общая база презентера), `CurrentPageStack` (фикс sizeHint для `QStackedWidget`), `DiffScrollTabLayout` (UI-скелет с диф-скроллом). На этом каркасе работает `SettingsTab` + `SettingsPresenter` + 5 секций (`SystemSection`, `AppearanceSection`, `HistorySection`, `InterfaceSection`, `AdminDashboard`). Связка функциональна (фикс полировки — baseline-коммит `0775d01`), но **не переиспользуема**: (1) `SettingsTab` имеет 5 однотипных методов `add_*_page()` (копипаст ~250 LOC), (2) `SettingsPresenter.populate()` жёстко знает имена секций Settings, (3) `SettingsTab` лезет в приватный API `DiffScrollTabLayout._content_scroll` / `_update_master_range()`, (4) `SystemSection` лезет в `RegisterView._toggle.hide()`, (5) межсекционная коммуникация через присваивание атрибутов презентера (`section.presenter.on_settings_saved = lambda …`), а не через сигналы. Без рефакторинга миграция «Recipes» на шаблон Settings = копирование 700+ LOC с локальными правками; через 2-3 таба фреймворк зарастает копипастом. План — `plans/tab-template-extraction/plan.md` (7 фаз, ~26ч).
+- Решение: ввести **шаблон вкладки с tree-навигацией** в `multiprocess_framework/modules/frontend_module/widgets/tabs/`:
+  1. **`section_spec.py`** — `@dataclass(frozen=True) SectionSpec(key, title, factory, parent_key=None, lazy=False)` — декларативное описание секции; вкладка отдаёт `list[SectionSpec]`, а не вызывает `add_X_page()`.
+  2. **`section_protocol.py`** — расширить опциональными сигналами `section_dirty_changed`, `section_data_saved` и опциональным методом `presenter_for_bus()` для авто-подписки на `ActionBus`. Существующие реализации (`SystemSection`, `AppearanceSection`, …) остаются совместимыми (атрибуты опциональны).
+  3. **`tree_nav_presenter.py`** — `TreeNavTabPresenter(TabPresenterBase)`, принимает `sections: list[SectionSpec]`; pure-Python (импорт без Qt); владеет реестром секций, ленивой инициализацией, переключением `content_stack`/`action_stack`, `navigate_to`. `SettingsPresenter` остаётся тонкой обёрткой с app-specific логикой (undo/redo координация) или удаляется целиком.
+  4. **`base_tree_nav_tab.py`** — `BaseTreeNavTab(QWidget)`, конструктор `(title, sections, ctx, layout_factory=DiffScrollTabLayout)`. Циклом по `sections` делает то, что сейчас 5 `add_*_page()` методов. Эмитит сигналы `section_changed(key)`, `section_dirty_changed(key, dirty)`, `section_data_saved(key, data)`.
+  5. **`tab_layouts/`** — перенести `DiffScrollTabLayout` и `StandardTabLayout` из `multiprocess_prototype/frontend/widgets/primitives/` во фреймворк; ввести общую базу `_AbstractColumnarTabLayout`; добавить публичный API `refresh_after_page_change(stack)`, `connect_stack(stack, role)` (вместо доступа к `_content_scroll`, `_update_master_range()` снаружи).
+  6. **`RegisterView.__init__(..., show_toggle: bool = True)`** — параметр для управления встроенным тумблером режима (замена хака `_toggle.hide()` в `SystemSection`).
+
+  Целевой результат: новая вкладка с tree-навигацией = ~50–80 LOC декларации `list[SectionSpec]` + наследник `BaseTreeNavTab` + секции; никакого копипаста tab.py/presenter.py.
+- Причина: (1) переиспользование — у проекта в очереди вкладки Recipes, Processes, Plugins на похожем layout, без шаблона каждая = 700+ LOC; (2) инкапсуляция — приватные `_content_scroll`/`_update_master_range()` сейчас торчат наружу из 3 мест, нарушая контракт DiffScrollTabLayout; (3) тестируемость — `TreeNavTabPresenter` pure-Python, можно тестировать без Qt-моков; декларативный `SectionSpec` тривиально тестируется; (4) единый канал событий — сигналы вместо `presenter.on_X = lambda` снимают неявные зависимости между Tab и Section; (5) единая база для двух layout-стратегий (Diff vs Standard) исключает дрейф API; (6) green-bar — каждая фаза плана сохраняет публичный API `SettingsTab` и зелёные тесты (`test_settings_tab.py`, admin-тесты, framework-тесты).
+- Отклонённые альтернативы:
+  - **Оставить `SettingsTab` как референс и копипастить для каждой новой вкладки** — отклонено: 5 секций × 700 LOC × 4 будущих таба = ~3000 LOC дублирования, плюс синхронизация багфиксов (например, того же фикса `_update_master_range`) во всех копиях.
+  - **Generic `BaseTab` без `SectionSpec`-декларации, с factory-методом `add_section(section)`** — отклонено: оставляет императивный код в каждом наследнике («сначала добавь A, потом B, потом подпиши C на bus»). `SectionSpec` сводит таб к декларации, что важно для будущей конфиг-driven генерации вкладок (см. `project_config_driven_arch` memory).
+  - **Перенести `BaseTreeNavTab` в `multiprocess_prototype` как локальный mixin** — отклонено: `frontend_module` — это и есть слой переиспользуемых GUI-примитивов (ADR-033, ADR-077). Tree-nav таб — такой же примитив, как `MvpTabBase`, `PanelTabBase`, `TabWidget`. Прятать его в прототип — расщеплять «единый каркас вкладок» по слоям.
+  - **Сразу делать конфиг-driven вкладки (JSON/YAML → tab)** — отклонено: слишком большой шаг. Сначала нужен типизированный `SectionSpec` в коде; конфиг-driven описывает тот же `SectionSpec`, но снаружи. Шаг 2, после стабилизации API.
+  - **Сохранить параллельные `DiffScrollTabLayout` и `StandardTabLayout` без общей базы** — отклонено: 60% кода уже дублируется (action-колонка + nav + content + undo/redo). Расхождение API между ними затрудняет смену layout-стратегии у конкретной вкладки.
+  - **Удалить `CurrentPageStack` / диф-скролл** — отклонено: они работают (фикс sizeHint остаётся в baseline `0775d01`). Рефакторинг — про переиспользуемость, не про переписывание UI-стратегии.
+
+## ADR-127: `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
+- Дата: 2026-05-18
+- Статус: принято
+- Контекст: `DiffScrollTabLayout` и `StandardTabLayout` жили в `multiprocess_prototype/frontend/widgets/primitives/`. Оба layout'а имеют одинаковую структуру: action-колонка (top/bottom), навигационный слот, контент, undo/redo. Дублирование составляло ~60% кода. `StandardTabLayout` не удовлетворял `TabLayoutProtocol` (отсутствовали 6 методов: `set_title`, `set_action_widget`, `set_nav_widget`, `register_inner_scrolls`, `connect_stack`, `refresh_after_page_change`). Размещение в prototype блокировало переиспользование в других приложениях на базе framework.
+- Решение:
+  1. **`_AbstractColumnarTabLayout(QWidget)`** — общая база в `multiprocess_framework/.../widgets/tabs/tab_layouts/_abstract_columnar.py`. Содержит: action-column builder, enable_undo_redo (ленивое создание кнопок), nav-агностичный `set_nav_widget(QWidget)` (принимает QTreeWidget, QListWidget, произвольный QWidget). Абстрактные методы: `set_title`, `set_action_widget`, `set_content_widget`, `register_inner_scrolls`, `connect_stack`, `refresh_after_page_change`, `_add_undo_redo_buttons`.
+  2. **`DiffScrollTabLayout`** перемещён в `tab_layouts/diff_scroll_layout.py`. Наследует `_AbstractColumnarTabLayout`. Все 7 objectName сохранены (`DiffScrollActions`, `DiffScrollNavGroup`, `DiffScrollNav`, `DiffScrollContent`, `DiffScrollMaster`, `DiffScrollUndo`, `DiffScrollRedo`).
+  3. **`StandardTabLayout`** перемещён в `tab_layouts/standard_layout.py`. Наследует `_AbstractColumnarTabLayout`. Все 3 objectName сохранены (`StandardTabActionColumn`, `StandardTabSubNav`, `StandardTabScroll`). Добавлены 6 методов `TabLayoutProtocol` — часть с реальной логикой (`connect_stack`, `refresh_after_page_change`, `set_nav_widget`), часть no-op (`register_inner_scrolls` — стандартный layout без диф-скролла).
+  4. **Backward-compat**: тонкие реэкспорты (~3 LOC) в `primitives/diff_scroll_tab_layout.py` и `primitives/standard_tab_layout.py` — прямые импорты из prototype продолжают работать.
+- Причина: (1) layout'ы — часть framework-каркаса вкладок (ADR-126), а не app-specific код; (2) общая база устраняет дрейф API между двумя стратегиями скролла; (3) `StandardTabLayout` с `TabLayoutProtocol` compliance позволяет использовать его как `layout_factory` в `BaseTreeNavTab`; (4) nav-агностичный `set_nav_widget(QWidget)` — фундамент для будущих `BaseColumnarTab` (Phase 6b) и `BaseListNavTab` (Phase 6c).
+- Отклонённые альтернативы:
+  - **Оставить layout'ы в prototype, дублировать API** — отклонено: нарушает слои импортов (framework не может импортировать prototype), блокирует `BaseColumnarTab` в framework.
+  - **Глубокий рефакторинг Standard → общая scroll-синхронизация** — отклонено: Standard использует стандартный QScrollArea, дифференциальный скролл ему не нужен. `register_inner_scrolls` как no-op — корректный минимум.
+  - **Удалить `_AbstractColumnarTabLayout`, сделать Protocol вместо базового класса** — отклонено: undo/redo и action-column builder — реальный код (~80 LOC), Protocol потребовал бы дублирования этого кода в обоих layout'ах.
 
 ---
 

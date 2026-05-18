@@ -11,7 +11,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from multiprocess_prototype.frontend.widgets.primitives import MasterDetailLayout
-from multiprocess_prototype.frontend.forms import RegisterView, FormBuildingContext
+from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
+from multiprocess_prototype.frontend.forms import RegisterView
 
 from .detail_panels import PluginInfoCard
 from .presenter import PluginsPresenter
@@ -88,8 +89,7 @@ class PluginsTab(QWidget):
             # Плагин с registers → RegisterView
             fields = self._presenter.get_register_fields(plugin_name)
             if fields:
-                # Phase 2.0 pilot: form_ctx для robot_control —
-                # bool-поля рендерятся через binding-aware CheckboxControl.
+                # Track 3.3: form_ctx передаётся для всех плагинов с registers.
                 form_ctx = self._build_form_ctx(plugin_name)
                 detail: QWidget = RegisterView(fields, form_ctx=form_ctx)
                 # Подключить field_changed → ActionBus
@@ -115,43 +115,18 @@ class PluginsTab(QWidget):
         self._detail_cache[plugin_name] = detail
         self._master_detail.set_detail_widget(plugin_name, detail)
 
-    def _build_form_ctx(self, plugin_name: str) -> FormBuildingContext | None:
-        """Собрать FormBuildingContext для binding-aware builders (Phase 2.0 pilot).
+    def _build_form_ctx(self, plugin_name: str) -> FormContext | None:  # noqa: ARG002
+        """Собрать FormContext для binding-aware RegisterView.
 
-        Пока включается только для robot_control. Остальные plugins —
-        legacy путь (form_ctx=None, DeprecationWarning для bool).
-        Когда Phase 2.1-2.7 будут завершены — form_ctx будет собираться
-        для всех plugins безусловно.
+        После завершения Track 2 — form_ctx передаётся для всех плагинов с registers.
+
+        Args:
+            plugin_name: имя плагина (параметр сохранён для совместимости сигнатуры).
 
         Returns:
-            FormBuildingContext если доступен ActionBus и RM, иначе None.
+            FormContext если доступен ActionBus и RM, иначе None.
         """
-        # Phase 2.0 pilot: whitelist плагинов с binding-aware form_ctx.
-        # Остальные пока через legacy путь (field_changed → tab._on_field_changed).
-        if plugin_name not in ("robot_control", "pilot_widgets"):
-            return None
-
-        bus = self._ctx.action_bus()
-        rm = self._ctx.registers_manager()
-        if bus is None or rm is None:
-            return None
-
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-        # access_level из auth context
-        current_access_level = 0
-        auth = self._ctx.auth
-        if auth is not None and hasattr(auth.state, "access_context"):
-            ctx = auth.state.access_context
-            if ctx is not None and hasattr(ctx, "level"):
-                current_access_level = ctx.level
-
-        return FormBuildingContext(
-            registers_manager=rm,
-            action_bus=bus,
-            action_builder=V2ActionBuilder,
-            current_access_level=current_access_level,
-        )
+        return self._ctx.form_context()
 
     def _on_field_changed(
         self,

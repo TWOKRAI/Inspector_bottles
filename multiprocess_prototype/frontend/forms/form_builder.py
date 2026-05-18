@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
 from .factory import CardsFieldFactory
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.registers.field_info import FieldInfo
+    from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
+    from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
 
     from .field_editor import FieldEditor
 
@@ -41,6 +42,7 @@ def build_form_for_register(
     parent: QWidget | None = None,
     group_by_category: bool = True,
     category_titles: dict[str, str] | None = None,
+    form_ctx: FormContext | None = None,
 ) -> tuple[QWidget, dict[str, FieldEditor]]:
     """Построить cards-представление (QGroupBox + QFormLayout в QScrollArea).
 
@@ -51,6 +53,9 @@ def build_form_for_register(
         parent: родительский виджет.
         group_by_category: группировать поля по category в QGroupBox.
         category_titles: маппинг category → русское название группы.
+        form_ctx: передаётся в CardsFieldFactory.create; если None — legacy путь без binding.
+                  NOTE: в shared-mode (editors переданы извне) form_ctx игнорируется —
+                  уже созданные editors не перестраиваются.
 
     Возвращает:
         (scroll_widget, editors_dict) — QScrollArea с формой и словарь editors.
@@ -63,7 +68,7 @@ def build_form_for_register(
         editors = {}
         for fi in fields:
             key = _editor_key(fi)
-            editors[key] = CardsFieldFactory.create(fi)
+            editors[key] = CardsFieldFactory.create(fi, form_ctx=form_ctx)
 
     # Группировка по category
     if group_by_category:
@@ -123,6 +128,7 @@ def build_table_for_register(
     editors: dict[str, FieldEditor] | None = None,
     parent: QWidget | None = None,
     category_titles: dict[str, str] | None = None,
+    form_ctx: FormContext | None = None,
 ) -> tuple[QWidget, dict[str, FieldEditor]]:
     """Построить table-представление (QTableWidget с 4 колонками).
 
@@ -134,6 +140,9 @@ def build_table_for_register(
         editors: если передан — используются существующие editors (shared mode).
         parent: родительский виджет.
         category_titles: маппинг category → русское название.
+        form_ctx: передаётся в CardsFieldFactory.create; если None — legacy путь без binding.
+                  NOTE: в shared-mode (editors переданы извне) form_ctx игнорируется —
+                  уже созданные editors не перестраиваются.
 
     Возвращает:
         (table_widget, editors_dict).
@@ -146,7 +155,7 @@ def build_table_for_register(
         editors = {}
         for fi in fields:
             key = _editor_key(fi)
-            editors[key] = CardsFieldFactory.create(fi)
+            editors[key] = CardsFieldFactory.create(fi, form_ctx=form_ctx)
 
     # Группировка по category для отображения разделителей
     groups: dict[str, list[FieldInfo]] = {}

@@ -26,6 +26,9 @@ def _make_ctx_no_rm():
     ctx.bindings.return_value = None
     ctx.topology_bridge.return_value = None
     ctx.config = {}
+    # form_context() должен возвращать None — тесты используют mock без реального
+    # ActionBus, binding-aware builders не могут работать с MagicMock.
+    ctx.form_context.return_value = None
     return ctx
 
 
@@ -40,7 +43,7 @@ def _make_ctx_with_rm(fields: list):
 
 def _make_field_info(field_name: str, field_type: type = str, default: Any = ""):
     """Создать FieldInfo для теста."""
-    from multiprocess_prototype.registers.field_info import FieldInfo
+    from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
     return FieldInfo(
         plugin_name="test_plugin",
@@ -259,6 +262,9 @@ class TestCardsFieldFactoryBranch:
         fi_b = _make_field_info("threshold", int, 128)
         ctx = MagicMock()
         ctx.registers_manager.return_value = MagicMock()
+        # form_context() = None → legacy путь; binding-aware builders требуют
+        # реального ActionBus, которого здесь нет.
+        ctx.form_context.return_value = None
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)

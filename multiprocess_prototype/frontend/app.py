@@ -1,4 +1,5 @@
 """app.py — запуск Qt event loop для GuiProcess."""
+
 from __future__ import annotations
 
 import sys
@@ -38,17 +39,14 @@ def _resolve_dev_login_settings() -> tuple[bool, str, str]:
     # dev_settings.py — опциональный локальный конфиг (в .gitignore)
     try:
         from multiprocess_prototype import dev_settings  # type: ignore[import-not-found]
+
         ds_enabled = bool(getattr(dev_settings, "DEV_AUTO_LOGIN", False))
         ds_username = str(getattr(dev_settings, "DEV_USERNAME", "dev"))
         ds_password = str(getattr(dev_settings, "DEV_PASSWORD", ""))
     except ImportError:
         ds_enabled, ds_username, ds_password = False, "dev", ""
 
-    enabled = (
-        enabled_env in ("1", "true", "yes")
-        if enabled_env
-        else ds_enabled
-    )
+    enabled = enabled_env in ("1", "true", "yes") if enabled_env else ds_enabled
     username = username_env or ds_username or "dev"
     password = password_env or ds_password
     return enabled, username, password
@@ -58,19 +56,33 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
+    # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
+    # Прод-поведение не меняется без env-флага.
+    import os
+
+    if os.environ.get("QT_MCP_PROBE") == "1":
+        try:
+            from qt_mcp.probe import install
+
+            install()
+            process._log_info("qt-mcp probe installed on localhost:9142", module="startup")
+        except ImportError:
+            process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
+
     # 1. Применить тему
     apply_default_theme(app)
 
-    # 2. Сканировать плагины и построить RegistersManagerV2
+    # 2. Сканировать плагины и построить RegistersManager
     from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
-    from multiprocess_prototype.registers.manager import RegistersManagerV2
+    from multiprocess_framework.modules.registers_module import RegistersManager
 
     try:
         PluginRegistry.discover(str(_PLUGINS_DIR))
     except Exception as e:
         process._log_warning(f"Не удалось обнаружить плагины: {e}", module="startup")
 
-    registers_manager = RegistersManagerV2.from_registry(PluginRegistry)
+    registers_manager = RegistersManager.from_registry(PluginRegistry)
 
     # 3. Создать AppContext
     ctx = build_app_context(
@@ -115,6 +127,7 @@ def run_gui(process: "GuiProcess") -> None:
     # 3b. Создать GuiStateBindings — занимает слот bridge.set_state_callback
     #     (Phase 10B: табы обращаются через ctx.bindings().bind(...))
     from .state.bindings import GuiStateBindings
+
     bindings = GuiStateBindings(process._bridge)
     ctx.extras["bindings"] = bindings
 
@@ -186,6 +199,7 @@ def run_gui(process: "GuiProcess") -> None:
     except Exception as exc:  # включая StorageCorrupted
         process._log_error(f"auth.init.failed: {exc}", module="startup")
         from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
+
         _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
         _dlg.exec()
         sys.exit(1)
@@ -194,6 +208,7 @@ def run_gui(process: "GuiProcess") -> None:
     # Заполняем декларативный каталог permissions (tabs.*, users.*, roles.*).
     # Используется админ-панелью «Роли» и audit-трейлом (PR4).
     from .permissions import register_all_permissions
+
     register_all_permissions(_auth_manager.permissions)
 
     _auth_state = AuthState()
@@ -212,15 +227,12 @@ def run_gui(process: "GuiProcess") -> None:
         try:
             _result = _auth_manager.login(_dev_username, _dev_password)
             _auth_state.set_user(_result, AccessContext.from_dict(_result))
-            process._log_info(
-                f"auth.auto_login: {_dev_username}", module="startup"
-            )
+            process._log_info(f"auth.auto_login: {_dev_username}", module="startup")
         except Exception as exc:
             process._log_error(f"auth.auto_login.failed: {exc}", module="startup")
     elif _dev_password and not _dev_auto_login_enabled:
         process._log_info(
-            "auth.auto_login.disabled: DEV_PASSWORD set, "
-            "DEV_AUTO_LOGIN=False",
+            "auth.auto_login.disabled: DEV_PASSWORD set, DEV_AUTO_LOGIN=False",
             module="startup",
         )
     elif _dev_auto_login_enabled and not _dev_password:
@@ -268,6 +280,7 @@ def run_gui(process: "GuiProcess") -> None:
     # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
     if (auth := ctx.auth) is not None:
         from .widgets.chrome.login_button import LoginButton
+
         _login_btn = LoginButton(auth.state, auth.manager)
         window.header.set_login_button(_login_btn)
 
@@ -280,12 +293,14 @@ def run_gui(process: "GuiProcess") -> None:
 
     # 5. Создать TabFactory и заполнить табы (Phase 10: все 7 табов)
     from .widgets.tabs import register_all_tabs
+
     tab_factory = TabFactory(ctx, custom_factories=register_all_tabs())
     ctx.extras["tab_factory"] = tab_factory
     tab_factory.create_tabs(window.tab_widget)
 
     # 5a. Подключить dirty-индикатор Settings → StatusBar
     from .widgets.tabs.settings.tab import SettingsTab
+
     for i in range(window.tab_widget.count()):
         w = window.tab_widget.widget(i)
         if isinstance(w, SettingsTab):
@@ -296,10 +311,9 @@ def run_gui(process: "GuiProcess") -> None:
     # с `_trait`/`_apply_access`/`presenter.set_access_context` под
     # MainWindow автоматически реагирует на login/logout/смену роли.
     from .widgets.access import propagate_access_context_to_tree
+
     _auth_for_tree = ctx.auth
-    propagate_access_context_to_tree(
-        window, _auth_for_tree.state if _auth_for_tree is not None else None
-    )
+    propagate_access_context_to_tree(window, _auth_for_tree.state if _auth_for_tree is not None else None)
 
     # 6. Подключить bridge callbacks
     _setup_bridge_callbacks(process, image_panel, window)
@@ -377,11 +391,7 @@ def _setup_timers(
 
     # При выходе из Qt — сигнализируем процессу (кроме перезапуска UI)
     app.aboutToQuit.connect(
-        lambda: (
-            setattr(process, '_stop_requested', True)
-            if not getattr(process, '_restart_ui', False)
-            else None
-        )
+        lambda: setattr(process, "_stop_requested", True) if not getattr(process, "_restart_ui", False) else None
     )
 
     # Сохранить ссылки на таймеры чтобы GC не убил их

@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
 """FieldInfo — описание одного поля регистра для GUI.
 
 Извлекает метаданные из Pydantic model_fields + FieldMeta.
-Используется RegistersManager v2 и CardsFieldFactory.
+Используется RegistersManager.get_fields() и прикладными GUI-фабриками.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from multiprocess_framework.modules.data_schema_module import FieldMeta
+from ...data_schema_module import FieldMeta
 
 
 @dataclass(frozen=True)

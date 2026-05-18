@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QTableWidget
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.form_builder import build_table_for_register
-from multiprocess_prototype.registers.field_info import FieldInfo
+from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
 def _fi(

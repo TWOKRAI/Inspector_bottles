@@ -80,6 +80,9 @@ def _make_mock_ctx(with_fields=True):
     ctx.config = {}
     ctx.extras = {}
     ctx.bindings.return_value = None
+    # form_context() должен возвращать None в тестах — тогда RegisterView использует
+    # legacy путь (без binding-aware builders, которые требуют реального ActionBus).
+    ctx.form_context.return_value = None
     return ctx
 
 

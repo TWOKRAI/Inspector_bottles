@@ -3,6 +3,7 @@
 Проверяет что вся инициализация проходит без ошибок:
 AppContext -> RegistersManager -> TopologyBridge -> ActionBus -> TabFactory -> 7 табов.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -46,7 +47,7 @@ class TestPhase15Smoke:
     def test_full_bootstrap(self, qtbot, mock_process, topology_dict):
         """Воспроизвести полный bootstrap из app.py."""
         from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
-        from multiprocess_prototype.registers.manager import RegistersManagerV2
+        from multiprocess_framework.modules.registers_module import RegistersManager
         from multiprocess_prototype.frontend.app_context import build_app_context
         from multiprocess_prototype.frontend.topology_holder import TopologyHolder
         from multiprocess_prototype.frontend.startup_checks import StartupChecker
@@ -65,8 +66,8 @@ class TestPhase15Smoke:
         assert len(registered) >= 19, f"Ожидалось >=19 плагинов, получено {len(registered)}"
 
         # 2. RegistersManager — из реального реестра плагинов
-        rm = RegistersManagerV2.from_registry(PluginRegistry)
-        assert rm is not None, "RegistersManagerV2 создан"
+        rm = RegistersManager.from_registry(PluginRegistry)
+        assert rm is not None, "RegistersManager создан"
 
         # 3. AppContext — DI-контейнер
         ctx = build_app_context(

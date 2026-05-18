@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QSpinBox, QStackedWidget
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.register_view import RegisterView
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
-from multiprocess_prototype.registers.field_info import FieldInfo
+from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
 def _fi(

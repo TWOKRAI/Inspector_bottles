@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QGroupBox, QScrollArea
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.form_builder import build_form_for_register
-from multiprocess_prototype.registers.field_info import FieldInfo
+from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
 def _fi(
@@ -98,7 +98,7 @@ class TestBuildFormForRegister:
     def test_integration_with_capture_plugin(self, qtbot):
         """build_form_for_register с реальным CapturePluginConfig."""
         from Plugins.sources.capture.config import CapturePluginConfig
-        from multiprocess_prototype.registers.field_info import extract_fields
+        from multiprocess_framework.modules.registers_module.core.field_info import extract_fields
 
         fields = extract_fields("capture", CapturePluginConfig)
         form, editors = build_form_for_register(fields)

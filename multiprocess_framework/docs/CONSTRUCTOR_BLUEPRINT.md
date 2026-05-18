@@ -1,6 +1,6 @@
 # Constructor Blueprint — Конструктор многопроцессных приложений
 
-**Версия:** 2.1 · **Обновлено:** 2026-05-02 · **Статус:** Production · **Аудитория:** разработчики и агенты, которые собирают приложения на фреймворке.
+**Версия:** 2.2 · **Обновлено:** 2026-05-18 · **Статус:** Production · **Аудитория:** разработчики и агенты, которые собирают приложения на фреймворке.
 
 > **Цель документа.** Дать сквозную интеграционную карту: 21 модуль = 21 «компонент», как у компьютера. Пользуясь этим документом, разработчик или агент должен уметь собрать многопроцессное приложение средней сложности (3–10 процессов, GUI, БД, IPC, регистры) без глубокого погружения в реализации.
 >
@@ -434,6 +434,128 @@ if __name__ == "__main__":
 ```
 
 Всё остальное (создание Queue, реестры, IPC, signal handlers, heartbeat, graceful shutdown) — берёт на себя фреймворк.
+
+### 5.5 GUI-таб с nav-навигацией (Tab Template, Phase 6)
+
+`frontend_module` содержит готовый constructor-kit для вкладок с навигацией (ADR-126, ADR-127).
+Расположение: `multiprocess_framework/modules/frontend_module/widgets/tabs/`.
+
+#### Иерархия контрактов
+
+```
+_AbstractColumnarTabLayout(QWidget)            <- рама: action + nav-slot + content + undo
+    DiffScrollTabLayout                        (мастер-скролл, для Settings-типа вкладок)
+    StandardTabLayout                          (QScrollArea + sub-nav, для list-CRUD)
+
+BaseColumnarTab(QWidget)                       <- nav-агностичная база Tab
+    BaseTreeNavTab(BaseColumnarTab)            <- статичный nav через list[SectionSpec]
+    BaseListNavTab(BaseColumnarTab)            <- динамический CRUD nav
+```
+
+#### Layout'ы
+
+| Класс | Когда применять | ADR |
+|-------|----------------|-----|
+| `DiffScrollTabLayout` | Статичная многосекционная вкладка (Settings, конфигурация) | ADR-127 |
+| `StandardTabLayout` | Динамический список + единый контент (Recipes, Processes, CRUD) | ADR-127 |
+
+Выбор layout'а передаётся параметром `layout_factory` при создании таба.
+
+#### `SectionSpec[TCtx]` — декларация секции
+
+```python
+from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
+
+specs = [
+    SectionSpec(
+        key="system_settings",
+        title="Система",
+        factory=lambda ctx: SystemSection(ctx),
+        parent_key=None,
+        lazy=False,
+        presenter_factory=lambda ctx, sec: SystemSettingsPresenter(ctx, sec),
+    ),
+]
+```
+
+Поля: `key: str`, `title: str`, `factory: Callable[[TCtx], SectionProtocol]`,
+`parent_key: str | None`, `lazy: bool`, `presenter_factory: Callable[[TCtx, SectionProtocol], object] | None`.
+
+#### `BaseTreeNavTab` — таб со статичной tree-навигацией
+
+```python
+from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTreeNavTab
+
+class MySettingsTab(BaseTreeNavTab):
+    settings_saved = Signal(dict)
+
+    def __init__(self, ctx, parent=None):
+        super().__init__(
+            title="Настройки",
+            sections=build_my_sections(ctx),
+            ctx=ctx,
+            layout_factory=DiffScrollTabLayout,
+            parent=parent,
+        )
+        self.populate()
+
+    def _tree_object_name(self) -> str:
+        return "MySettingsTreeNav"  # для QSS
+
+    def _make_presenter(self) -> TreeNavTabPresenter:
+        return MyPresenter(view=self, rm=None, ui=None, ctx=self._ctx)
+```
+
+Сигналы: `section_changed(str)`, `section_dirty_changed(str, bool)`, `section_data_saved(str, dict)`.
+Property: `presenter` (доступ к presenter после инициализации).
+
+#### `BaseListNavTab` — таб с динамическим CRUD-списком
+
+```python
+from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
+
+class MyRecipesTab(BaseListNavTab):
+    def __init__(self, ctx, parent=None):
+        super().__init__(
+            title="Рецепты",
+            ctx=ctx,
+            layout_factory=StandardTabLayout,
+            parent=parent,
+        )
+
+    def _create_item_widget(self, key: str) -> QWidget:
+        return MyRecipeForm(key)  # контент для выбранного item
+```
+
+CRUD API (вызывает Presenter после своих операций):
+`add_item(key, label, icon=None)`, `remove_item(key)`, `rename_item(key, label)`, `select_item(key)`.
+
+Сигналы: `item_selected(str)`, `item_added(str)`, `item_removed(str)`, `item_renamed(str, str)`.
+
+Опциональный хук `_make_nav_item(key, label, icon)` — кастомный `QListWidgetItem`.
+
+#### `SectionProtocol` и `SectionWithEvents`
+
+`SectionProtocol` — минимальный контракт секции (key, title, widget, action_buttons, on_activated).
+`SectionWithEvents(Protocol)` — опциональный мixin для секций с сигналами dirty/saved и `bus_change_callback`.
+`BaseTreeNavTab` проверяет `isinstance(section, SectionWithEvents)` при подключении bus-callback'а.
+
+#### Когда что применять
+
+| Паттерн | Когда | Пример |
+|---------|-------|--------|
+| `BaseTreeNavTab` + `SectionSpec` | Статичный набор именованных UI-секций | Settings, Appearance |
+| `BaseListNavTab` | Динамический список data-entities с CRUD | Recipes, Processes, Plugins |
+| Прямой `QWidget` (не шаблон) | Простой таб без nav | Dashboard, Preview |
+
+#### Примечания
+
+- `layout_factory` — обязательный параметр. `None` → `RuntimeError` при init.
+- `_on_nav_changed()` вызывается только как signal handler (user-driven навигация).
+  Не вызывается из `select_key()` — во избежание infinite loop (см. ADR-126).
+- `_AbstractColumnarTabLayout` не наследует `ABC` (Shiboken metaclass conflict с PySide6).
+  `@abstractmethod` — декоративный, без enforcement на уровне Python.
+- Persistence — ответственность Presenter'а, не шаблона. `BaseListNavTab` не знает про файлы/БД.
 
 ---
 

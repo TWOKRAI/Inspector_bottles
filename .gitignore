@@ -43,6 +43,8 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/worktrees/
 .mcp.json
+# Serena MCP (LSP cache + project config)
+.serena/
 
 # Runtime logs
 logs/

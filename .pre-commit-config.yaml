@@ -28,18 +28,17 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  # ── mypy (type checking, gradual, ADVISORY) ──
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  # ── pyright (type checking, gradual, ADVISORY) ──
+  # Конфигурация читается из [tool.pyright] в pyproject.toml.
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.408
     hooks:
-      - id: mypy
-        args: [--ignore-missing-imports, --no-error-summary]
+      - id: pyright
         additional_dependencies: [pydantic>=2.13]
         pass_filenames: false
         # gradual: ошибки печатаются в push-логе, но не блокируют push.
-        # baseline ~520 ошибок (см. docs/claude/COMMIT_GUIDE.md и /arch-review).
-        # Когда долг будет снижен — заменить wrapper на голый `mypy ...`.
-        entry: bash -c "mypy multiprocess_framework --ignore-missing-imports --no-error-summary || true"
+        # Когда долг будет снижен — убрать `|| true` (или `--warnings`).
+        entry: bash -c "pyright multiprocess_framework multiprocess_prototype || true"
         language: python
         types: [python]
         stages: [pre-push]

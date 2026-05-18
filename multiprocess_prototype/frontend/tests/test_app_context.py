@@ -1,4 +1,5 @@
 """Тесты для AppContext и build_app_context."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -211,7 +212,7 @@ class TestAppContextExtras:
     def test_registers_manager_stored_in_extras(self):
         """build_app_context сохраняет registers_manager в extras["registers_manager"]."""
         process = _make_mock_process(has_bridge=True)
-        mock_rm = MagicMock(name="RegistersManagerV2")
+        mock_rm = MagicMock(name="RegistersManager")
 
         ctx = build_app_context(process, registers_manager=mock_rm)
 
@@ -238,7 +239,7 @@ class TestAppContextExtras:
     def test_accessor_returns_instance_when_present(self):
         """registers_manager() и plugin_registry() возвращают переданные объекты."""
         process = _make_mock_process(has_bridge=True)
-        mock_rm = MagicMock(name="RegistersManagerV2")
+        mock_rm = MagicMock(name="RegistersManager")
         mock_registry = MagicMock(name="PluginRegistry")
 
         ctx = build_app_context(
@@ -263,8 +264,8 @@ class TestAppContextExtras:
     def test_two_contexts_independent_extras(self):
         """Два AppContext с разными kwargs имеют независимые extras."""
         process = _make_mock_process(has_bridge=True)
-        mock_rm_1 = MagicMock(name="RegistersManagerV2_1")
-        mock_rm_2 = MagicMock(name="RegistersManagerV2_2")
+        mock_rm_1 = MagicMock(name="RegistersManager_1")
+        mock_rm_2 = MagicMock(name="RegistersManager_2")
 
         ctx1 = build_app_context(process, registers_manager=mock_rm_1)
         ctx2 = build_app_context(process, registers_manager=mock_rm_2)

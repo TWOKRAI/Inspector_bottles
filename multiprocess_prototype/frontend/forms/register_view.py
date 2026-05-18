@@ -25,12 +25,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .factory import CardsFieldFactory, FormBuildingContext
+from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
+from .factory import CardsFieldFactory
 from .form_builder import _TABLE_COLUMNS, _editor_key
 from .view_mode_toggle import ViewMode, ViewModeToggle
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.registers.field_info import FieldInfo
+    from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
     from .field_editor import FieldEditor
 
@@ -62,13 +63,16 @@ class RegisterView(QWidget):
         *,
         initial_mode: ViewMode = ViewMode.CARDS,
         category_titles: dict[str, str] | None = None,
-        form_ctx: FormBuildingContext | None = None,
+        form_ctx: FormContext | None = None,
+        scrollable: bool = True,
+        show_toggle: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
 
         self._fields = fields
         self._category_titles = category_titles or {}
+        self._scrollable = scrollable
 
         # 1. Создать общий набор editors — ОДИН раз
         self._editors: dict[str, FieldEditor] = {}
@@ -96,6 +100,11 @@ class RegisterView(QWidget):
         self._toggle = ViewModeToggle(initial_mode=initial_mode)
         header_layout.addWidget(self._toggle)
         main_layout.addLayout(header_layout)
+
+        # Скрыть тумблер если не нужен (например, SystemSection с внешним
+        # переключателем). Атрибут _toggle остаётся — set_mode() работает.
+        if not show_toggle:
+            self._toggle.hide()
 
         # Stacked widget
         self._stack = QStackedWidget(self)
@@ -141,11 +150,16 @@ class RegisterView(QWidget):
     # Построение структур (без размещения editor.widget)
     # ------------------------------------------------------------------
 
-    def _build_cards_structure(self) -> QScrollArea:
+    def _build_cards_structure(self) -> QWidget:
         """Создать скелет cards-представления (QGroupBox + QFormLayout).
 
         QFormLayout-строки создаются пустыми — editor.widget добавляется
         при reparenting в _place_editors_in_cards().
+
+        Если scrollable=True — оборачиваем в QScrollArea (внутренний скролл).
+        Если scrollable=False — возвращаем container напрямую, чтобы внешний
+        скролл-шаблон (DiffScrollTabLayout) видел реальный sizeHint и сам
+        крутил содержимое.
         """
         container = QWidget()
         container_layout = QVBoxLayout(container)
@@ -170,6 +184,9 @@ class RegisterView(QWidget):
             self._cards_form_layouts[cat_key] = form_layout
 
         container_layout.addStretch()
+
+        if not self._scrollable:
+            return container
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

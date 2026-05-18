@@ -2,9 +2,10 @@
 """
 SpinBoxPresenter — тот же состав трейтов, что у ``NumericPresenter``, отдельный тип для спинбокса.
 """
+
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base import RegisterAdapter
 from multiprocess_framework.modules.frontend_module.components.base.control_hooks import ControlHooks
@@ -12,6 +13,9 @@ from multiprocess_framework.modules.frontend_module.components.base.config impor
 from multiprocess_framework.modules.frontend_module.components.base.traits import LegacySyncContext
 from multiprocess_framework.modules.frontend_module.components.numeric.config import NumericViewConfig
 from multiprocess_framework.modules.frontend_module.components.numeric.presenter import NumericPresenter
+
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
 
 
 class SpinBoxPresenter(NumericPresenter):
@@ -26,6 +30,8 @@ class SpinBoxPresenter(NumericPresenter):
         legacy_context: LegacySyncContext | None = None,
         registers_manager: Optional[object] = None,
         hooks: ControlHooks | None = None,
+        *,
+        form_ctx: "FormContext | None" = None,
     ) -> None:
         super().__init__(
             binding,
@@ -36,4 +42,5 @@ class SpinBoxPresenter(NumericPresenter):
             registers_manager=registers_manager,
             hooks=hooks,
             control_kind="spinbox",
+            form_ctx=form_ctx,
         )

@@ -228,17 +228,18 @@ class TopologyBridge:
         # Debounce для slider-полей
         debounce_ms = self._get_debounce(plugin_name, field_name)
 
-        # Отправка
+        # Fan-out — отправить во все target-процессы (может быть несколько при multi-target)
         _log(
-            f"[trace bridge] send_field_command(target={resolved.process_name}, "
+            f"[trace bridge] send_field_command(targets={resolved.process_names}, "
             f"cmd={resolved.command_name}, args={ {field_name: value}!r}, debounce_ms={debounce_ms})"
         )
-        self._sender.send_field_command(
-            resolved.process_name,
-            resolved.command_name,
-            {field_name: value},
-            debounce_ms=debounce_ms,
-        )
+        for process_name in resolved.process_names:
+            self._sender.send_field_command(
+                process_name,
+                resolved.command_name,
+                {field_name: value},
+                debounce_ms=debounce_ms,
+            )
         return True
 
     def on_action_command(
@@ -266,7 +267,15 @@ class TopologyBridge:
         if resolved is None:
             return False
 
-        self._sender.send_action_command(resolved.process_name, command_name, args)
+        if not resolved.process_names:
+            logger.warning(
+                "TopologyBridge: action %s.%s — пустой process_names, команда не отправлена",
+                plugin_name,
+                command_name,
+            )
+            return False
+
+        self._sender.send_action_command(resolved.process_names[0], command_name, args)
         return True
 
     # --- Runtime → GUI ---

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class PluginsPresenter:
     """Presenter для PluginsTab.
 
-    Работает с PluginRegistry и RegistersManagerV2 через AppContext.
+    Работает с PluginRegistry и RegistersManager через AppContext.
     """
 
     # Русские названия категорий

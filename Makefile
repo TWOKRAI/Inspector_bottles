@@ -9,7 +9,7 @@ SHELL := /bin/bash
 PYTHON := python
 PYTEST := $(PYTHON) -m pytest
 RUFF := ruff
-MYPY := mypy
+PYRIGHT := pyright
 BANDIT := bandit
 
 FRAMEWORK := multiprocess_framework
@@ -30,15 +30,15 @@ lint-fix: ## Ruff lint + автофикс
 	$(RUFF) format .
 
 .PHONY: typecheck
-typecheck: ## mypy type checking (gradual)
-	$(MYPY) $(FRAMEWORK) $(PROTOTYPE) --ignore-missing-imports
+typecheck: ## pyright type checking (gradual, basic mode)
+	$(PYRIGHT) $(FRAMEWORK) $(PROTOTYPE)
 
 .PHONY: security
 security: ## bandit security scan
 	$(BANDIT) -r $(FRAMEWORK) $(PROTOTYPE) $(SERVICES) -c pyproject.toml -q
 
 .PHONY: check
-check: lint typecheck security ## Все быстрые проверки (ruff + mypy + bandit)
+check: lint typecheck security ## Все быстрые проверки (ruff + pyright + bandit)
 
 # ── Тесты ──
 
@@ -57,7 +57,7 @@ test-fw: ## Тесты фреймворка (через скрипт)
 # ── Quality gate (полный цикл) ──
 
 .PHONY: gate
-gate: check test ## Полный gate: lint + types + security + tests
+gate: check test ## Полный gate: ruff + pyright + bandit + tests
 
 # ── Диаграммы ──
 

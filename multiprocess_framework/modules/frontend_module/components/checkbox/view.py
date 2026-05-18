@@ -36,7 +36,7 @@ class CheckboxView(QWidget):
 
     # Публичный сигнал: эмитится при смене состояния чекбокса пользователем.
     # Передаёт bool (отмечен / нет). Используется для binding через
-    # ActionBusRegistersManager и других внешних подписчиков.
+    # FormContext.write (ActionBus) и других внешних подписчиков.
     value_changed = Signal(bool)
 
     def __init__(

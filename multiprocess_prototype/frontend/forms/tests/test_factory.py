@@ -17,8 +17,7 @@ from PySide6.QtWidgets import (
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
-from multiprocess_prototype.frontend.forms.widgets.color_picker import ColorTripletWidget
-from multiprocess_prototype.registers.field_info import FieldInfo
+from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +126,14 @@ class TestCardsFieldFactory:
         assert editor.getter() == "b"
 
     def test_color3_creates_triplet_widget(self, qtbot):
-        """tuple[int,int,int] → ColorTripletWidget с 3 спинбоксами 0..255."""
+        """tuple[int,int,int] → legacy inline: 3 raw QSpinBox в QWidget (0..255)."""
         fi = _fi(tuple[int, int, int], default=(100, 200, 50))
         editor = CardsFieldFactory.create(fi)
         qtbot.addWidget(editor.widget)
 
-        assert isinstance(editor.widget, ColorTripletWidget)
+        # Legacy путь: QWidget с 3 QSpinBox внутри (ColorTripletWidget удалён)
+        spins = editor.widget.findChildren(QSpinBox)
+        assert len(spins) == 3
         assert editor.getter() == (100, 200, 50)
 
     def test_str_short_creates_lineedit(self, qtbot):
@@ -229,16 +230,16 @@ class TestCardsFieldFactoryFormCtx:
 
     @staticmethod
     def _make_form_ctx():
-        """Собрать FormBuildingContext с фейковым RM и реальным ActionBus."""
+        """Собрать FormContext с фейковым RM и реальным ActionBus."""
         from dataclasses import dataclass
         from typing import Any
 
         from multiprocess_framework.modules.actions_module.bus import ActionBus
+        from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
         from multiprocess_prototype.frontend.actions.handlers.field_set_handler import (
             FieldSetHandler,
         )
-        from multiprocess_prototype.frontend.forms.factory import FormBuildingContext
 
         @dataclass
         class _FakeReg:
@@ -275,7 +276,7 @@ class TestCardsFieldFactoryFormCtx:
         rm = _FakeRM()
         bus = ActionBus(rm, max_history=50)
         bus.register_handler("field_set", FieldSetHandler())
-        ctx = FormBuildingContext(
+        ctx = FormContext(
             registers_manager=rm,
             action_bus=bus,
             action_builder=V2ActionBuilder,
@@ -331,3 +332,19 @@ class TestCardsFieldFactoryFormCtx:
         deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
         assert len(deprecation_warnings) == 0, "DeprecationWarning не должен эмититься в Phase 2.0"
         assert isinstance(editor.widget, QCheckBox)
+
+
+# ---------------------------------------------------------------------------
+# Regression: алиасы widget нормализуются в FieldMeta, factory читает canonical
+# ---------------------------------------------------------------------------
+
+
+class TestWidgetAliasNormalization:
+    """FieldMeta нормализует алиасы до factory — единый источник истины."""
+
+    def test_combo_alias_resolves_to_literal_kind(self):
+        """widget=combo → нормализуется в literal в FieldMeta → kind=literal в factory."""
+        meta = FieldMeta(widget="combo")  # после __init__: meta.widget == "literal"
+        assert meta.widget == "literal"
+        fi = _fi(str, default="a", meta=meta)
+        assert CardsFieldFactory.resolve_kind(fi) == "literal"

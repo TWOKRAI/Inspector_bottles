@@ -7,9 +7,13 @@ NumericPresenter — композиция traits для числовых пол�
 
 from __future__ import annotations
 
-from typing import Optional
+import warnings
+from typing import TYPE_CHECKING, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base import RegisterAdapter, ValueTransformer
+
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
 from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
     ControlHooks,
     ControlKind,
@@ -37,6 +41,10 @@ class NumericPresenter:
     """
     Presenter для числовых полей.
     Композиция: Schema + Sync + Debounce + Access + ValueTransformer [+ LegacySync].
+
+    Параметр ``form_ctx`` обязателен в production. ``None`` допустим только в
+    ``_examples/`` и FW unit-тестах (без ActionBus). В production ``None``
+    вызовет ``DeprecationWarning`` при попытке записи.
     """
 
     def __init__(
@@ -49,9 +57,12 @@ class NumericPresenter:
         registers_manager: Optional[object] = None,
         hooks: ControlHooks | None = None,
         control_kind: ControlKind = "numeric",
+        *,
+        form_ctx: "FormContext | None" = None,
     ) -> None:
         self._hooks = hooks
         self._control_kind: ControlKind = control_kind
+        self._form_ctx = form_ctx
         self._schema = SchemaTrait(binding, adapter, view_config)
         self._sync = SyncTrait(binding, adapter)
         self._debounce = DebounceTrait(ms=100)
@@ -177,7 +188,25 @@ class NumericPresenter:
         self._write(storage_value)
 
     def _write(self, storage_value: float) -> None:
-        ok, err = self._sync.write(storage_value)
+        if self._form_ctx is not None:
+            # Новый путь: write через ActionBus (coalescing, undo/redo, IPC bridge).
+            old_value = self._sync.read()
+            ok = self._form_ctx.write(
+                self._binding.register_name,
+                self._binding.field_name,
+                storage_value,
+                old_value,
+            )
+            err = None if ok else "write failed"
+        else:
+            # LEGACY ONLY: _examples/ и FW unit-тесты. В production form_ctx обязателен.
+            warnings.warn(
+                "NumericPresenter._write без form_ctx — legacy путь только для "
+                "_examples/ и FW unit-тестов. Передай form_ctx в production-коде.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            ok, err = self._sync.write(storage_value)
         if not ok:
             msg = err or "write failed"
             emit_write_rejected(
@@ -188,7 +217,7 @@ class NumericPresenter:
                 storage_value,
             )
             self._sync_from_model()
-            if err:
+            if err and self._view is not None:
                 self._view.show_error(err)
         else:
             emit_write_committed(

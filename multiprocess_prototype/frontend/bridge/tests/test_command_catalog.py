@@ -16,6 +16,7 @@ import pytest
 
 from multiprocess_prototype.frontend.bridge.command_catalog import (
     CommandCatalog,
+    ResolvedCommand,
 )
 
 
@@ -215,7 +216,7 @@ class TestResolveFieldCommand:
         """Точное совпадение: set_hsv_range в commands."""
         result = catalog.resolve_field_command("color_mask", "hsv_range")
         assert result is not None
-        assert result.process_name == "processor_0"
+        assert result.process_names[0] == "processor_0"
         assert result.command_name == "set_hsv_range"
         assert result.plugin_name == "color_mask"
 
@@ -224,7 +225,7 @@ class TestResolveFieldCommand:
         result = catalog.resolve_field_command("color_mask", "unknown_field")
         assert result is not None
         assert result.command_name == "set_config"
-        assert result.process_name == "processor_0"
+        assert result.process_names[0] == "processor_0"
 
     def test_stateless_returns_none(self, catalog: CommandCatalog) -> None:
         """Stateless плагин (commands пуст) → None."""
@@ -252,7 +253,7 @@ class TestResolveActionCommand:
         """Команда есть в commands dict."""
         result = catalog.resolve_action_command("capture", "start_capture")
         assert result is not None
-        assert result.process_name == "camera_0"
+        assert result.process_names[0] == "camera_0"
         assert result.command_name == "start_capture"
         assert result.plugin_name == "capture"
 
@@ -346,6 +347,119 @@ class TestSameCommandDifferentProcesses:
         result_b = catalog.resolve_action_command("plugin_b", "set_config")
 
         assert result_a is not None
-        assert result_a.process_name == "process_1"
+        assert result_a.process_names[0] == "process_1"
         assert result_b is not None
-        assert result_b.process_name == "process_2"
+        assert result_b.process_names[0] == "process_2"
+
+
+# --- Вспомогательные объекты для тестов field_routing ---
+
+
+@dataclass
+class MockFieldMeta:
+    """Мок FieldMeta с routing dict (как хранится после FieldRouting.to_dict())."""
+
+    routing: dict
+
+
+@dataclass
+class MockPydanticFieldInfo:
+    """Мок pydantic FieldInfo — имитирует model_fields[name] с .metadata list."""
+
+    metadata: list
+
+
+# --- Тесты multi-target fan-out через field_routing ---
+
+
+class TestFieldRoutingCache:
+    """Тесты кеша field_routing в CommandCatalog (multi-target fan-out)."""
+
+    def _make_entry_with_routing(
+        self,
+        plugin_name: str,
+        field_name: str,
+        process_targets: tuple[str, ...],
+    ) -> MockPluginEntry:
+        """Построить MockPluginEntry с FieldMeta.routing.process_targets."""
+        field_meta = MockFieldMeta(routing={"channel": "control_pilot", "process_targets": list(process_targets)})
+        pydantic_fi = MockPydanticFieldInfo(metadata=[field_meta])
+        reg_cls = MockRegisterClass(model_fields={field_name: pydantic_fi})
+        return MockPluginEntry(
+            name=plugin_name,
+            plugin_class=MockPluginClass(commands={"set_config": "cmd_set_config"}),
+            category="utility",
+            register_classes=[reg_cls],
+        )
+
+    def test_field_routing_cache_built(self) -> None:
+        """field_routing кеш заполняется при from_registry_and_map."""
+        entry = self._make_entry_with_routing("pilot_widgets", "broadcast_flag", ("pilot_a", "pilot_b"))
+        catalog = CommandCatalog.from_registry_and_map(
+            MockRegistry([entry]),
+            MockConnectionMap({"pilot_widgets": "pilot_proc"}),
+        )
+        pc = catalog.get_plugin("pilot_widgets")
+        assert pc is not None
+        assert pc.field_routing.get("broadcast_flag") == ("pilot_a", "pilot_b")
+
+    def test_resolve_field_command_uses_process_targets(self) -> None:
+        """resolve_field_command возвращает process_names из FieldRouting.process_targets."""
+        entry = self._make_entry_with_routing("pilot_widgets", "broadcast_flag", ("pilot_a", "pilot_b"))
+        catalog = CommandCatalog.from_registry_and_map(
+            MockRegistry([entry]),
+            MockConnectionMap({"pilot_widgets": "pilot_proc"}),
+        )
+        result = catalog.resolve_field_command("pilot_widgets", "broadcast_flag")
+        assert result is not None
+        assert set(result.process_names) == {"pilot_a", "pilot_b"}
+
+    def test_resolve_field_command_fallback_without_targets(self) -> None:
+        """Поле без process_targets → fallback на connection_map (один target)."""
+        # Поле без routing.process_targets
+        field_meta = MockFieldMeta(routing={"channel": "control"})
+        pydantic_fi = MockPydanticFieldInfo(metadata=[field_meta])
+        reg_cls = MockRegisterClass(model_fields={"simple_field": pydantic_fi})
+        entry = MockPluginEntry(
+            name="simple_plugin",
+            plugin_class=MockPluginClass(commands={"set_config": "cmd_set_config"}),
+            category="utility",
+            register_classes=[reg_cls],
+        )
+        catalog = CommandCatalog.from_registry_and_map(
+            MockRegistry([entry]),
+            MockConnectionMap({"simple_plugin": "proc_0"}),
+        )
+        result = catalog.resolve_field_command("simple_plugin", "simple_field")
+        assert result is not None
+        assert result.process_names == ("proc_0",)
+        assert result.process_names[0] == "proc_0"
+
+    def test_resolved_command_process_names_tuple(self) -> None:
+        """ResolvedCommand.process_names — tuple строк."""
+        cmd = ResolvedCommand(
+            process_names=("a", "b", "c"),
+            command_name="set_config",
+            plugin_name="p",
+        )
+        assert cmd.process_names == ("a", "b", "c")
+        assert cmd.process_names[0] == "a"
+
+    def test_field_without_meta_no_routing(self) -> None:
+        """Поле без FieldMeta в metadata → нет routing, fallback на connection_map."""
+        # metadata пустой список — нет FieldMeta
+        pydantic_fi = MockPydanticFieldInfo(metadata=[])
+        reg_cls = MockRegisterClass(model_fields={"raw_field": pydantic_fi})
+        entry = MockPluginEntry(
+            name="raw_plugin",
+            plugin_class=MockPluginClass(commands={"set_config": "cmd_set_config"}),
+            category="utility",
+            register_classes=[reg_cls],
+        )
+        catalog = CommandCatalog.from_registry_and_map(
+            MockRegistry([entry]),
+            MockConnectionMap({"raw_plugin": "raw_proc"}),
+        )
+        result = catalog.resolve_field_command("raw_plugin", "raw_field")
+        assert result is not None
+        assert result.process_names == ("raw_proc",)

@@ -39,9 +39,18 @@ if TYPE_CHECKING:
 # Тип для параметра routing: принимаем FieldRouting, dict или None
 _RoutingType = Union["FieldRouting", dict, None]
 
+# Нормализация алиасов виджетов: combo→literal, spinbox→int, numeric→float.
+# "slider" НЕ нормализуется — это отдельный UI hint (future Phase 2.4 SliderControl).
+# "text"/"label" НЕ нормализуются — отдельные семантики (длинная строка / readonly).
+_WIDGET_ALIASES: dict[str, str] = {
+    "combo": "literal",
+    "spinbox": "int",
+    "numeric": "float",
+}
+
 # Допустимые виджеты UI. Пустая строка = автовыбор фабрикой по Python-типу.
-# Аliasы (combo↔literal, spinbox↔int, numeric↔float) сохранены для совместимости
-# с маппингом фабрики форм (factory.hint_to_kind).
+# Алиасы (combo, spinbox, numeric) принимаются в __init__ и нормализуются
+# в канонические значения — factory работает только с каноническими.
 WidgetType = Literal[
     "",
     "checkbox",
@@ -147,7 +156,9 @@ class FieldMeta:
         self.description_i18n = description_i18n or {}
         self.info_i18n = info_i18n or {}
         self.examples = examples or []
-        self.widget = widget
+        # Нормализация алиасов: combo→literal, spinbox→int, numeric→float.
+        # Канонические значения и "" проходят без изменений.
+        self.widget = _WIDGET_ALIASES.get(widget, widget)  # type: ignore[assignment]
 
     # =========================================================================
     # Интеграция с Pydantic v2

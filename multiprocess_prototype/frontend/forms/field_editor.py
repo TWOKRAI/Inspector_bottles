@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from PySide6.QtCore import SignalInstance
     from PySide6.QtWidgets import QLabel, QWidget
 
-    from multiprocess_prototype.registers.field_info import FieldInfo
+    from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
 @dataclass
