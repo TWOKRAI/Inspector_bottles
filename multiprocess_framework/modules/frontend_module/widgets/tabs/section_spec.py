@@ -73,4 +73,6 @@ class SectionSpec(Generic[TCtx]):
     factory: Callable[[TCtx], "SectionProtocol"]
     parent_key: str | None = None
     lazy: bool = False
-    presenter_factory: Callable[[TCtx, object], object] | None = field(default=None, compare=False, hash=False)
+    presenter_factory: "Callable[[TCtx, SectionProtocol], object] | None" = field(
+        default=None, compare=False, hash=False
+    )

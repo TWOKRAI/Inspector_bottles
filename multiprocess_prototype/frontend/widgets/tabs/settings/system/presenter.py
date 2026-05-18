@@ -61,8 +61,8 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         self.on_settings_saved: Callable[[dict], None] | None = None
         self.on_dirty_changed: Callable[[bool], None] | None = None
 
-        # Инициализировать редакторы начальными значениями
-        self._sync_editors_to_cfg()
+        # Редакторы синхронизируются через sync_editors_to_cfg() из set_presenter() —
+        # после подключения сигналов порядок вызова контролирует section.
 
     # ------------------------------------------------------------------
     # Публичный API
@@ -115,7 +115,7 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         """Перечитать system.yaml и сбросить все изменения."""
         self._cfg = load_settings()
         self._field_infos = schema_to_field_infos(self._cfg)
-        self._sync_editors_to_cfg()
+        self.sync_editors_to_cfg()
         self._view.clear_validation_errors()
         self._set_dirty(False)
 
@@ -175,8 +175,11 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
     # Приватные методы
     # ------------------------------------------------------------------
 
-    def _sync_editors_to_cfg(self) -> None:
-        """Синхронизировать значения редакторов с текущим self._cfg."""
+    def sync_editors_to_cfg(self) -> None:
+        """Синхронизировать значения редакторов с текущим self._cfg.
+
+        Публичный метод — вызывается из set_presenter() ДО подключения сигналов.
+        """
         for fi in self._field_infos:
             section_name = fi.plugin_name
             field_name = fi.field_name
