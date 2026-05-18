@@ -17,8 +17,7 @@ from PySide6.QtWidgets import (
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
-from multiprocess_prototype.frontend.forms.widgets.color_picker import ColorTripletWidget
-from multiprocess_prototype.registers.field_info import FieldInfo
+from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +126,14 @@ class TestCardsFieldFactory:
         assert editor.getter() == "b"
 
     def test_color3_creates_triplet_widget(self, qtbot):
-        """tuple[int,int,int] → ColorTripletWidget с 3 спинбоксами 0..255."""
+        """tuple[int,int,int] → legacy inline: 3 raw QSpinBox в QWidget (0..255)."""
         fi = _fi(tuple[int, int, int], default=(100, 200, 50))
         editor = CardsFieldFactory.create(fi)
         qtbot.addWidget(editor.widget)
 
-        assert isinstance(editor.widget, ColorTripletWidget)
+        # Legacy путь: QWidget с 3 QSpinBox внутри (ColorTripletWidget удалён)
+        spins = editor.widget.findChildren(QSpinBox)
+        assert len(spins) == 3
         assert editor.getter() == (100, 200, 50)
 
     def test_str_short_creates_lineedit(self, qtbot):

@@ -1,4 +1,5 @@
 """NodeInspectorPanel — панель параметров выбранного узла pipeline."""
+
 from __future__ import annotations
 
 import logging
@@ -134,9 +135,7 @@ class NodeInspectorPanel(QWidget):
             # Badge
             color = CATEGORY_COLORS.get(category, "#9e9e9e")
             self._category_badge.setText(category)
-            self._category_badge.setStyleSheet(
-                f"background-color: {color}; color: #fff;"
-            )
+            self._category_badge.setStyleSheet(f"background-color: {color}; color: #fff;")
 
             # Очистить параметры
             self._clear_params()
@@ -184,8 +183,16 @@ class NodeInspectorPanel(QWidget):
 
         from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
 
+        # Получить form_ctx для binding-aware editors (plugin-bound узлы pipeline).
+        # Если AppContext не содержит RM/ActionBus — form_ctx=None → legacy путь.
+        form_ctx = self._ctx.form_context()
+
         for field_info in fields:
-            editor = CardsFieldFactory.create(field_info, parent=self._params_widget)
+            editor = CardsFieldFactory.create(
+                field_info,
+                parent=self._params_widget,
+                form_ctx=form_ctx,
+            )
 
             # Установить значение из params если передан
             if params and field_info.field_name in params:
@@ -201,9 +208,7 @@ class NodeInspectorPanel(QWidget):
             # Подключить сигнал изменения если есть
             if editor.change_signal is not None:
                 fn = field_info.field_name
-                editor.change_signal.connect(
-                    lambda *_args, _fn=fn, _ed=editor: self._on_field_editor_changed(_fn, _ed)
-                )
+                editor.change_signal.connect(lambda *_args, _fn=fn, _ed=editor: self._on_field_editor_changed(_fn, _ed))
 
             self._field_editors[field_info.field_name] = editor
             self._params_layout.addRow(editor.label, editor.widget)
@@ -215,9 +220,7 @@ class NodeInspectorPanel(QWidget):
         for field_name, value in params.items():
             editor = QLineEdit(str(value))
             editor.setProperty("field_name", field_name)
-            editor.editingFinished.connect(
-                lambda fn=field_name, ed=editor: self._on_field_edited(fn, ed)
-            )
+            editor.editingFinished.connect(lambda fn=field_name, ed=editor: self._on_field_edited(fn, ed))
             self._field_editors[field_name] = editor
             self._params_layout.addRow(field_name, editor)
 

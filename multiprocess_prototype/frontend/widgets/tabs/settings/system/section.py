@@ -13,6 +13,7 @@
 Кнопки «Режим», «Сбросить» и «Сохранить» возвращаются через action_buttons()
 и регистрируются в action-колонке SettingsTab.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -67,31 +68,36 @@ class SystemSection(QWidget):
         except ValueError:
             initial_mode = ViewMode.CARDS
 
-        # RegisterView — основной виджет редактирования полей
+        # RegisterView — основной виджет редактирования полей.
+        # form_ctx=None: SettingsSystem не использует plugin binding.
+        # Поля GUI-локальные (тема, i18n, режим отображения).
+        # Legacy путь: editor.change_signal → presenter.on_field_changed (dirty),
+        #              RegisterView.field_changed → presenter.on_field_changed_action_bus (undo/redo).
         self._register_view = RegisterView(
             field_infos,
             initial_mode=initial_mode,
             category_titles=_SECTION_TITLES,
+            form_ctx=None,
         )
         # Скрыть встроенный тумблер RegisterView (используем внешний)
         self._register_view._toggle.hide()
 
         # Сохранять режим в prefs при смене
-        self._register_view.mode_changed.connect(
-            lambda mode_str: self._prefs.set("settings.view_mode", mode_str)
-        )
+        self._register_view.mode_changed.connect(lambda mode_str: self._prefs.set("settings.view_mode", mode_str))
 
         # Создать presenter (до подключения сигналов, чтобы view был готов)
-        self._presenter = SystemSettingsPresenter(
-            view=self, rm=None, ui=None, ctx=ctx
-        )
+        self._presenter = SystemSettingsPresenter(view=self, rm=None, ui=None, ctx=ctx)
 
-        # Подключить сигналы редакторов к presenter'у
+        # Подключить сигналы редакторов к presenter'у.
+        # АУДИТ (Track 3.5): две подписки намеренны — они обслуживают РАЗНЫЕ цели:
+        #   1. editor.change_signal → on_field_changed: только dirty-флаг (кнопки Сохранить/Сбросить).
+        #      Сигнатура: () — без аргументов.
+        #   2. RegisterView.field_changed → on_field_changed_action_bus: запись в ActionBus (undo/redo).
+        #      Сигнатура: (register_name, field_name, old_value, new_value).
+        # Удаление любой из подписок нарушит UX (исчезнет dirty-флаг) или undo/redo.
         for editor in self._register_view.editors().values():
             editor.change_signal.connect(self._presenter.on_field_changed)
-        self._register_view.field_changed.connect(
-            self._presenter.on_field_changed_action_bus
-        )
+        self._register_view.field_changed.connect(self._presenter.on_field_changed_action_bus)
 
         # Построить UI
         self._build_ui()
@@ -203,9 +209,7 @@ class SystemSection(QWidget):
 
         # Внешний тумблер режима (встроенный в RegisterView скрыт)
         self._external_toggle = ViewModeToggle(initial_mode=self._register_view.mode())
-        self._external_toggle.mode_changed.connect(
-            lambda mode_str: self._register_view.set_mode(ViewMode(mode_str))
-        )
+        self._external_toggle.mode_changed.connect(lambda mode_str: self._register_view.set_mode(ViewMode(mode_str)))
 
         # Кнопка «Сбросить»
         self._btn_reset = QPushButton("Сбросить")

@@ -11,6 +11,7 @@
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через SystemSettingsView Protocol.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +25,7 @@ from ..yaml_io import load_settings, save_settings, schema_to_field_infos
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
     from multiprocess_prototype.config.schemas import SystemConfig
-    from multiprocess_prototype.registers.field_info import FieldInfo
+    from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +135,12 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         if bus is None:
             return
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
         action = V2ActionBuilder.field_set_timed(
-            register_name, field_name, new_value, old_value,
+            register_name,
+            field_name,
+            new_value,
+            old_value,
             description=f"{register_name}.{field_name} = {new_value}",
         )
         bus.record(action)
@@ -154,11 +159,7 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         if action.action_type != "field_set":
             return
         register_name = action.register_name or ""
-        value = (
-            action.backward_patch.get("value")
-            if event_type == "undo"
-            else action.forward_patch.get("value")
-        )
+        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
         key = f"{register_name}.{action.field_name}"
         self._view.set_editor_value(key, value)
 

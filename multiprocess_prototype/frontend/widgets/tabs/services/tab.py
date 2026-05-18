@@ -18,6 +18,7 @@ Layout:
             │              │          │                      │          │
             └──────────────┘          └──────────────────────────────────┘
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from multiprocess_prototype.frontend.widgets.primitives import SideNavLayout
 from multiprocess_prototype.frontend.forms import RegisterView
+from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
 
 from .presenter import ServicesPresenter
 
@@ -99,6 +101,13 @@ class ServicesTab(QWidget):
 
         main_layout.addWidget(self._side_nav, stretch=1)
 
+    def _build_form_ctx(self) -> FormContext | None:
+        """Собрать FormContext для binding-aware RegisterView.
+
+        Возвращает None если ActionBus или RegistersManager недоступны.
+        """
+        return self._ctx.form_context()
+
     def _build_service_page(self, plugin_name: str, fields: list) -> QWidget:
         """Страница одного сервиса: RegisterView слева + кнопки справа."""
         container = QWidget()
@@ -106,8 +115,11 @@ class ServicesTab(QWidget):
         columns.setContentsMargins(0, 0, 0, 0)
         columns.setSpacing(8)
 
-        # Центральная часть: RegisterView с полями сервиса
-        view = RegisterView(fields)
+        # Центральная часть: RegisterView с полями сервиса.
+        # form_ctx передаётся для binding-aware editors (ActionBus коммиты, undo/redo).
+        # Для binding-aware полей change_signal=None → RegisterView не эмитит field_changed.
+        form_ctx = self._build_form_ctx()
+        view = RegisterView(fields, form_ctx=form_ctx)
         view.field_changed.connect(self._on_field_changed)
         self._register_views.append(view)
 
@@ -139,6 +151,7 @@ class ServicesTab(QWidget):
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
+
         _auth = self._ctx.auth
         auth_state = _auth.state if _auth is not None else None
         for btn in (start_btn, stop_btn, restart_btn):
@@ -158,15 +171,23 @@ class ServicesTab(QWidget):
         return widget
 
     def _on_field_changed(
-        self, register_name: str, field_name: str, old_value: object, new_value: object,
+        self,
+        register_name: str,
+        field_name: str,
+        old_value: object,
+        new_value: object,
     ) -> None:
         """Изменение параметра сервиса → ActionBus.execute(field_set)."""
         bus = self._ctx.action_bus()
         if bus is None:
             return
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
         action = V2ActionBuilder.field_set_timed(
-            register_name, field_name, new_value, old_value,
+            register_name,
+            field_name,
+            new_value,
+            old_value,
             description=f"{register_name}.{field_name} = {new_value}",
         )
         bus.execute(action)
@@ -185,11 +206,7 @@ class ServicesTab(QWidget):
         if action.action_type != "field_set":
             return
         register_name = action.register_name or ""
-        value = (
-            action.backward_patch.get("value")
-            if event_type == "undo"
-            else action.forward_patch.get("value")
-        )
+        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
         key = f"{register_name}.{action.field_name}"
         for view in self._register_views:
             if key in view.editors():
