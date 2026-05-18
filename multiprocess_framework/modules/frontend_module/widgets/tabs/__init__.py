@@ -6,6 +6,7 @@
 Модули: tab_widget, mvp_pattern, mvp_facade, binding_context,
 callbacks_base, placeholder_utils.
 """
+
 from .binding_context import RegisterBindingContext
 from .current_page_stack import CurrentPageStack
 from .callbacks_base import (
@@ -16,7 +17,8 @@ from .callbacks_base import (
 from .mvp_facade import MvpTabBase
 from .panel_tab_base import PanelTabBase
 from .mvp_pattern import TabPresenterBase, TabViewProtocol
-from .section_protocol import SectionProtocol
+from .section_protocol import SectionProtocol, SectionWithEvents
+from .section_spec import SectionSpec
 from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
 
@@ -27,6 +29,8 @@ __all__ = [
     "PanelTabBase",
     "RegisterBindingContext",
     "SectionProtocol",
+    "SectionSpec",
+    "SectionWithEvents",
     "TabPresenterBase",
     "TabViewProtocol",
     "TabWidget",

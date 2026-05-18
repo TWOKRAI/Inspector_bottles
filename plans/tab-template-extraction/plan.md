@@ -179,27 +179,34 @@ Phase 7: Очистка техдолгов + документация
 
 **Цель:** заменить `add_X_page()` методы на декларацию через dataclass.
 
-- [ ] **1.1** Создать `framework/.../widgets/tabs/section_spec.py`:
-      ```python
-      @dataclass(frozen=True)
-      class SectionSpec:
-          key: str
-          title: str
-          factory: Callable[[AppCtx], SectionProtocol]
-          parent_key: str | None = None  # для вложенных (admin → users)
-          lazy: bool = False             # ленивая инициализация
-      ```
-- [ ] **1.2** Расширить `SectionProtocol`:
-      - Опциональные сигналы `section_dirty_changed: Signal | None`,
-        `section_data_saved: Signal | None` для эмита наружу
-      - Опциональный метод `presenter_for_bus() -> Optional[BusChangeListener]`
-        для подписки на ActionBus
-- [ ] **1.3** Pure-Python тесты `SectionSpec`/Protocol
-- [ ] **1.4** **Acceptance:**
-      - [ ] `SectionSpec` импортируется без Qt
-      - [ ] Существующие секции (`SystemSection`, `AppearanceSection`, ...)
-            продолжают удовлетворять расширенному Protocol
-      - [ ] Тесты `test_settings_tab.py` зелёные
+- [x] **1.1** Создать `framework/.../widgets/tabs/section_spec.py`:
+      `@dataclass(frozen=True) SectionSpec[TCtx]` с полями `key`, `title`,
+      `factory`, `parent_key=None`, `lazy=False`. Generic-параметр `TCtx`
+      позволяет таблу типизировать контекст (например, `SectionSpec[AppContext]`)
+      без того, чтобы framework знал о прототипе.
+- [x] **1.2** Расширить `section_protocol.py`:
+      - Базовый `SectionProtocol` без изменений (все существующие секции
+        остаются совместимыми).
+      - Новый `SectionWithEvents(Protocol)` — опциональный mixin с
+        `section_dirty_changed: SignalInstance | None`,
+        `section_data_saved: SignalInstance | None` и
+        `bus_change_callback() -> Callable[[], None] | None`. Помечен
+        `@runtime_checkable` — `BaseTreeNavTab` проверяет через `isinstance`.
+- [x] **1.3** Pure-Python тесты `test_section_spec.py` — 14 тестов
+      (импорт без Qt, фасадные реэкспорты, frozen dataclass, иерархия по
+      `parent_key`, runtime_checkable проверка, совместимость с
+      существующими `SystemSection` / `AppearanceSection` / `HistorySection`).
+- [x] **1.4** **Acceptance:**
+      - [x] `SectionSpec` импортируется без Qt (зафиксировано тестом
+            `test_section_spec_module_imports_without_qt` и
+            `test_section_protocol_module_imports_without_qt`).
+      - [x] Существующие секции (`SystemSection`, `AppearanceSection`,
+            `HistorySection`) продолжают удовлетворять `SectionProtocol`
+            (тест `test_existing_settings_sections_satisfy_section_protocol`).
+      - [x] Тесты `test_settings_tab.py` (22) и весь `settings/` (128) зелёные.
+            Framework `frontend_module/tests/` (236 passed, 2 failed — те же
+            `test_controls_v2_hooks.py::test_*_rejected_hook` падали и на
+            baseline `0b24bd5`, не связаны с этим PR).
 
 ## Phase 2 — `TreeNavTabPresenter`
 
