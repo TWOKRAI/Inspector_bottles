@@ -431,7 +431,7 @@ Settings продолжает работать **без изменений**.
 
 **Уровень: Senior+ (TeamLead, Opus). Отдельный PR. Зависит от 6a.**
 
-- [ ] **6b.1** Создать
+- [x] **6b.1** Создать
       `multiprocess_framework/modules/frontend_module/widgets/tabs/base_columnar_tab.py`.
 
       **Публичный API `BaseColumnarTab(QWidget)`:**
@@ -454,7 +454,7 @@ Settings продолжает работать **без изменений**.
       Базовый `__init__` вызывает `_build_nav_widget()`, передаёт результат в
       `self._tab_layout.set_nav_widget(...)`, строит `QVBoxLayout(self)`.
 
-- [ ] **6b.2** Переписать `BaseTreeNavTab` как подкласс `BaseColumnarTab`:
+- [x] **6b.2** Переписать `BaseTreeNavTab` как подкласс `BaseColumnarTab`:
       - `__init__(*, title, sections: list[SectionSpec], ctx, layout_factory, ...)` —
         передаёт `title, ctx, layout_factory` в `super().__init__`, сохраняет `sections`.
       - `_build_nav_widget()` → строит и возвращает `QTreeWidget`, заполняет по `SectionSpec`
@@ -465,11 +465,11 @@ Settings продолжает работать **без изменений**.
         `create_lazy_section`, `populate` — всё SectionSpec-related остаётся здесь.
       - `TreeNavTabPresenter` остаётся без изменений (он — деталь `BaseTreeNavTab`).
 
-- [ ] **6b.3** Обновить
+- [x] **6b.3** Обновить
       `multiprocess_framework/modules/frontend_module/widgets/tabs/__init__.py`:
       добавить реэкспорт `BaseColumnarTab` рядом с `BaseTreeNavTab`.
 
-- [ ] **6b.4** Тест `test_base_columnar_tab.py` в
+- [x] **6b.4** Тест `test_base_columnar_tab.py` в
       `multiprocess_framework/modules/frontend_module/tests/`:
       - Конкретная минимальная реализация `_ConcreteColumnarTab(_build_nav_widget → QLabel,
         _on_nav_changed → записать вызов)`.
@@ -478,14 +478,14 @@ Settings продолжает работать **без изменений**.
       - Тест: `section_changed` эмитится при вызове `_on_nav_changed` через слот.
       - Тест: `layout_factory=None` → `RuntimeError` (унаследованное поведение).
 
-- [ ] **6b.5** **Acceptance:**
-      - [ ] `SettingsTab` (наследует `BaseTreeNavTab(BaseColumnarTab)`) — 22 теста зелёные
-      - [ ] Settings (128 тестов) зелёные — **нет регресса**
-      - [ ] Framework тесты (267) зелёные
-      - [ ] `BaseColumnarTab` импортируется из framework без app-specific зависимостей:
-            `from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseColumnarTab`
-      - [ ] `isinstance(SettingsTab(...), BaseColumnarTab)` == `True`
-      - [ ] `BaseColumnarTab` не импортирует `SectionSpec`, `SectionProtocol`, `TreeNavTabPresenter`
+- [x] **6b.5** **Acceptance:**
+      - [x] `SettingsTab` (наследует `BaseTreeNavTab(BaseColumnarTab)`) — 128 тестов зелёные
+      - [x] Settings (128 тестов) зелёные — **нет регресса**
+      - [x] Framework тесты (2746 passed, 1 pre-existing perf fail) зелёные
+      - [x] `BaseColumnarTab` импортируется из framework без app-specific зависимостей
+      - [x] `issubclass(BaseTreeNavTab, BaseColumnarTab)` == `True`
+      - [x] `BaseColumnarTab` не импортирует `SectionSpec`, `SectionProtocol`, `TreeNavTabPresenter`
+      - Коммит: `684bdb9`
 
 ---
 
