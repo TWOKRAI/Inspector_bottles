@@ -83,3 +83,21 @@ Probe и pytest-qt конфликтуют по порту 9142 — на втор
 1. `pytest-qt` тесты затронутой вкладки/виджета — **зелёные** (обязательно).
 2. При рефакторинге UI-структуры — `qt-mcp` baseline до миграции **сохранён** в `plans/<slug>/baseline-*.md`. После миграции — `qt_snapshot` совпадает.
 3. Хаки доступа к приватным полям (`_toggle.hide()`, `_content_scroll.setWidgetResizable()` снаружи) — устранены через публичный API.
+
+## Семантический поиск и архитектурные метрики
+
+GUI-код плотно завязан на регистры, presenter'ы, виджеты — слепой Grep легко
+теряет callers. Используй два MCP-инструмента (ортогональные):
+
+| Вопрос | Tool |
+|--------|------|
+| «Где используется `RegisterView`?» / «Кто вызывает `populate()`?» | `mcp__qex__search_code` (qex-first для рефакторинга) |
+| «Какие виджеты импортируют `tabs/`?» | `mcp__qex__search_code` (тематически) |
+| «`frontend_module` не импортирует `multiprocess_prototype`?» | `mcp__sentrux__check_rules` через `/sentrux-rules` |
+| «После переноса DiffScrollTabLayout во framework — циклов нет?» | `mcp__sentrux__dsm` через `/sentrux-dsm` |
+| «Phase 2 не ухудшил health?» | `session_start` в начале фазы → `session_end` в конце |
+| «Какие виджеты без тестов?» | `mcp__sentrux__test_gaps` через `/sentrux-gaps` |
+
+qex — «*где*», sentrux — «*насколько здорово*». Не дублируют. На GUI-задачах
+оба критичны: qex для безопасного переименования / расширения API,
+sentrux для контроля слоёв (`framework ← Services ← Plugins ← prototype`).

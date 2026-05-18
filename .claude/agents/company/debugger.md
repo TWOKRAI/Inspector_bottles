@@ -35,6 +35,9 @@ Your goal — **find root cause and fix it** (if in scope).
    - Variable values at failure point (via `print`, `pytest -s`, or `--pdb`)
    - Recent commit history — what changed in affected files
    - `git blame <file> <line>` — who last touched it
+   - **Подозрение на cross-module/архитектурный баг** (циклы импортов, нарушение
+     слоёв, регресс modularity) — попроси Director дёрнуть `/sentrux-dsm` или
+     `/sentrux-rules`. qex отвечает «где используется», sentrux — «насколько здорово».
 3. **Build hypotheses** (minimum 2):
    - Hypothesis A: what could have broken
    - Hypothesis B: alternative cause

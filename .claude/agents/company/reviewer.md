@@ -60,6 +60,16 @@ You are the Reviewer (chief code reviewer). You check code after Developer/TeamL
 - [ ] Config at boundary — dict, inside Pydantic v2
 - [ ] Logs via `ObservableMixin`, paths from env
 - [ ] If architectural change — needs entry in `DECISIONS.md` (call `tech-writer`)
+- [ ] **Слои/boundaries** — попроси Director запустить `/sentrux-rules` (или
+      `mcp__sentrux__check_rules`) против `.sentrux/rules.toml`:
+      `framework → prototype/Services/Plugins`, `Services → prototype/Plugins`,
+      `Plugins → prototype`. Любое нарушение слоёв — блокер.
+- [ ] **DSM при крупных рефакторингах** — `/sentrux-dsm` показывает циклы и
+      cross-module edges. Если PR вводит новый цикл или резко увеличивает
+      `cross_module_edges` (>50) — обоснование обязательно.
+- [ ] **Baseline delta** — если в начале фазы был зафиксирован `sentrux
+      session_start`, на ревью попроси Director дёрнуть `session_end`/`/sentrux-diff`.
+      Допустимое ухудшение `quality_signal` — обосновать.
 
 ## Specialization: IPC Routing
 
