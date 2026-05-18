@@ -161,11 +161,19 @@ Phase 7: Очистка техдолгов + документация
 - [x] **0.1** Закоммитить uncommitted полировку диф-скролла → baseline
       (коммит `0775d01` на `refactor/frontend-widgets-cleanup`)
 - [x] **0.2** Создать ветку `refactor/tab-template` из baseline
-- [ ] **0.3** Зафиксировать sentrux baseline:
-      `mcp__sentrux__session_start` (тег `tab-template-start`)
-- [ ] **0.4** ADR в `multiprocess_framework/DECISIONS.md` —
-      «FW-XXX: Шаблон вкладки с tree-навигацией (BaseTreeNavTab)»
-- [ ] **0.5** Сохранить этот план + первичный коммит `docs(plans):`
+- [x] **0.3** Зафиксировать sentrux baseline:
+      `mcp__sentrux__session_start` сохранён — `quality_signal=7183`
+      (modularity=5107, acyclicity=10000, depth=6667, equality=6223,
+      redundancy=9024). MCP-вариант sentrux не поддерживает именованные
+      теги — baseline хранится в текущей сессии sentrux и сравнится
+      через `session_end` в Phase 7.3.
+- [x] **0.4** ADR в `multiprocess_framework/DECISIONS.md` —
+      [ADR-126](../multiprocess_framework/DECISIONS.md#adr-126-шаблон-вкладки-с-tree-навигацией-sectionspec-treenavtabpresenter-basetreenavtab):
+      «Шаблон вкладки с tree-навигацией — `SectionSpec` +
+      `TreeNavTabPresenter` + `BaseTreeNavTab`». TOC обновлён через
+      `python -m scripts.sync`, `scripts/validate.py` зелёный.
+- [x] **0.5** План сохранён (`032f6a0`), ADR закоммичен отдельным
+      коммитом `docs(adr): ADR-126`.
 
 ## Phase 1 — `SectionSpec` + сигналы в `SectionProtocol`
 
