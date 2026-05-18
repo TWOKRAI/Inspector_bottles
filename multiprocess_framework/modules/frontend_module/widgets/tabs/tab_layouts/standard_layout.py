@@ -211,6 +211,24 @@ class StandardTabLayout(_AbstractColumnarTabLayout):
         return btn
 
     # ------------------------------------------------------------------
+    # _AbstractColumnarTabLayout — set_action_widget
+    # ------------------------------------------------------------------
+
+    def set_action_widget(self, widget: QWidget) -> None:
+        """Задать содержимое action-колонки (виджет в top-области).
+
+        Очищает текущее содержимое ``_top_actions_layout`` и размещает
+        переданный виджет. Используется ``BaseTreeNavTab._build_ui()``
+        для размещения action-виджета секции.
+        """
+        # Очистить старые виджеты из top-actions
+        while self._top_actions_layout.count():
+            item = self._top_actions_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        self._top_actions_layout.addWidget(widget)
+
+    # ------------------------------------------------------------------
     # Sub-nav
     # ------------------------------------------------------------------
 

@@ -23,12 +23,11 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QPushButton,
     QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.actions.bus_factory import ActionBus
+    from multiprocess_framework.modules.actions_module.bus import ActionBus
 
 _DEFAULT_ACTION_WIDTH = 120
 
@@ -38,6 +37,11 @@ class _AbstractColumnarTabLayout(QWidget):
 
     Подклассы реализуют конкретную стратегию скролла/навигации,
     но общая action-колонка и undo/redo — здесь.
+
+    Примечание: ``ABC`` mixin невозможен из-за metaclass conflict с
+    ``QWidget`` (Shiboken). ``@abstractmethod`` используется декоративно —
+    для документации обязательности переопределения; runtime enforcement
+    отсутствует.
 
     Сигналы:
         section_changed(str): эмитится при смене раздела (nav → content).
@@ -57,35 +61,6 @@ class _AbstractColumnarTabLayout(QWidget):
         self._undo_btn: QPushButton | None = None
         self._redo_btn: QPushButton | None = None
         self._action_bus: ActionBus | None = None
-
-    # ------------------------------------------------------------------
-    # Построение action-колонки (вызывается подклассами)
-    # ------------------------------------------------------------------
-
-    def _build_action_column(self) -> tuple[QWidget, QVBoxLayout, QVBoxLayout]:
-        """Создать action-колонку: top-часть + stretch + bottom-часть.
-
-        Returns:
-            (action_col_widget, top_layout, bottom_layout) — виджет колонки
-            и два layout'а для наполнения.
-        """
-        action_col = QWidget()
-        action_col.setFixedWidth(self._action_width)
-        action_layout = QVBoxLayout(action_col)
-        action_layout.setContentsMargins(4, 4, 4, 4)
-        action_layout.setSpacing(6)
-
-        top_layout = QVBoxLayout()
-        top_layout.setSpacing(6)
-        action_layout.addLayout(top_layout)
-
-        action_layout.addStretch(1)
-
-        bottom_layout = QVBoxLayout()
-        bottom_layout.setSpacing(6)
-        action_layout.addLayout(bottom_layout)
-
-        return action_col, top_layout, bottom_layout
 
     # ------------------------------------------------------------------
     # Undo / Redo
