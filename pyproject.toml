@@ -50,7 +50,7 @@ dev = [
     "pytest-cov>=6.0", # coverage-отчёты
     "ipykernel>=6.29",
     "aiosqlite>=0.20", # для тестов async SQL-адаптера
-    "mypy>=1.15", # gradual type checking
+    "pyright>=1.1.408", # gradual type checking (replaces mypy)
     "bandit>=1.9", # security scanning (OWASP basics)
     "pre-commit>=4.6.0",
     "qt-mcp",
@@ -93,16 +93,44 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=multiprocess_prototype_backup"
 qt_api = "pyside6"
 
-# ── mypy ──
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true          # gradual: включаем по мере добавления стабов
+# ── pyright ──
+# Запуск:  pyright multiprocess_framework multiprocess_prototype
+# Режимы:  basic (старт) → standard → strict — повышать по мере чистки типов.
+# Подробнее: https://microsoft.github.io/pyright/#/configuration
+#
+# Gradual-стратегия (см. pyright_report.json после первого прогона, ~700 диагностик):
+#   - "none"     — шумные правила, ловящие не баги, а особенности PySide6/динамики
+#   - "warning"  — реальные подозрения на баги, не блокируем CI пока не разгребём
+#   - "error"    — добавлять по мере чистки долга
+[tool.pyright]
+pythonVersion = "3.12"
+pythonPlatform = "All"
+include = ["multiprocess_framework", "multiprocess_prototype"]
 exclude = [
-    "multiprocess_prototype_backup",
-    "tests",
+    "**/multiprocess_prototype_backup",
+    "**/tests",
+    "**/__pycache__",
+    "**/.venv",
 ]
+typeCheckingMode = "basic"
+# ── stubs / impport ──
+reportMissingImports = "warning"       # аналог mypy.ignore_missing_imports
+reportMissingTypeStubs = "none"        # PySide6 / OpenCV / Ultralytics — без стабов
+# ── шум PySide6 / mixin / register schemas ──
+reportAttributeAccessIssue = "none"    # 388 hits: Qt signals, mixin attrs, dynamic schemas
+reportOptionalMemberAccess = "none"    # 79 hits: Optional[X] без unwrap (на границах GUI)
+reportOptionalSubscript = "none"
+reportOptionalCall = "none"
+reportUnsupportedDunderAll = "none"    # условный re-export __all__.extend(...)
+# ── подозрения на баги — warning, не падаем ──
+reportArgumentType = "warning"
+reportReturnType = "warning"
+reportCallIssue = "warning"
+reportInvalidTypeForm = "warning"
+reportIndexIssue = "warning"
+reportAssignmentType = "warning"
+reportGeneralTypeIssues = "warning"
+reportUnboundVariable = "warning"
 
 # ── bandit ──
 [tool.bandit]
