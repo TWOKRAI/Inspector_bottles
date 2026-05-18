@@ -326,15 +326,16 @@ Phase 7: Очистка техдолгов + документация
 ## Phase 5 — Разделение section-as-view и presenter
 
 **Цель:** Section не создаёт presenter в своём __init__ → их можно подменять.
+**Статус: DONE** (коммит `9c59a2a`, 2026-05-18)
 
-- [ ] **5.1** Извлечь `SystemSettingsPresenter` из `SystemSection.__init__`.
+- [x] **5.1** Извлечь `SystemSettingsPresenter` из `SystemSection.__init__`.
       Section возвращает View Protocol-методы; presenter создаётся через
       фабрику в `SectionSpec.factory` или отдельным `SectionSpec.presenter_factory`.
-- [ ] **5.2** То же для `AppearancePresenter`, `HistoryPresenter`
+- [x] **5.2** То же для `AppearancePresenter`, `HistoryPresenter`
       (опционально, для единообразия).
-- [ ] **5.3** **Acceptance:**
-      - [ ] Тестам можно подсунуть mock-presenter в Section
-      - [ ] Зелёные все тесты Settings
+- [x] **5.3** **Acceptance:**
+      - [x] Тестам можно подсунуть mock-presenter в Section
+      - [x] Зелёные все тесты Settings (128 passed)
 
 ## Phase 6 — Унификация DiffScroll/Standard + Recipes pilot
 
