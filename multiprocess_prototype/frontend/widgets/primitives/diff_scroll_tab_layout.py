@@ -28,9 +28,9 @@ Layout:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QChildEvent, QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QFrame,
@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QScrollBar,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -213,6 +214,13 @@ class DiffScrollTabLayout(QWidget):
         if event.type() == QEvent.Type.Wheel:
             self._forward_wheel(event)  # type: ignore[arg-type]
             return True
+        # ChildAdded на content-виджете: автоматически подхватить вложенные
+        # QScrollArea в новых страницах стека (например при addWidget в
+        # QStackedWidget). Защита от зацикливания через _redirected.
+        if event.type() == QEvent.Type.ChildAdded and isinstance(event, QChildEvent):
+            child = event.child()
+            if isinstance(child, QWidget) and id(child) not in self._redirected:
+                self._redirect_nested_wheels(child)
         return super().eventFilter(obj, event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -305,10 +313,17 @@ class DiffScrollTabLayout(QWidget):
         self._redirect_nested_wheels(widget)
 
     def set_content_widget(self, widget: QWidget) -> None:
-        """Задать виджет правой колонки (основной контент)."""
+        """Задать виджет правой колонки (основной контент).
+
+        Дополнительно устанавливает event filter на ChildAdded: когда в
+        content-стек добавляется новая страница (addWidget), layout
+        автоматически подключает вложенные QScrollArea к диф-скроллу.
+        """
         self._content_scroll.setWidget(widget)
         # Перехватываем wheel у вложенных scroll areas
         self._redirect_nested_wheels(widget)
+        # Автоматическая подписка на новые дочерние виджеты
+        widget.installEventFilter(self)
 
     def register_inner_scrolls(self, widget: QWidget) -> None:
         """Подключить вложенные QScrollArea/QAbstractScrollArea к диф-скроллу.
@@ -319,6 +334,49 @@ class DiffScrollTabLayout(QWidget):
         в синхронизации с мастером, остальные — только перехват wheel.
         """
         self._redirect_nested_wheels(widget)
+
+    # ------------------------------------------------------------------
+    # Публичный API — управление скроллом при смене страниц
+    # ------------------------------------------------------------------
+
+    def refresh_after_page_change(self, role: Literal["content", "action"]) -> None:
+        """Принудительно пересчитать scroll area после смены страницы стека.
+
+        Toggle widgetResizable заставляет QScrollArea пересчитать размер
+        виджета и диапазон скроллбара. Затем обновляется мастер-скроллбар.
+
+        Заменяет ручной доступ к ``_content_scroll.setWidgetResizable(...)``
+        и ``_update_master_range()`` — потребителю не нужно знать о приватных
+        атрибутах.
+
+        Args:
+            role: ``"content"`` или ``"action"`` — какую колонку обновить.
+        """
+        sa = self._content_scroll if role == "content" else self._action_scroll
+        sa.setWidgetResizable(False)
+        sa.setWidgetResizable(True)
+        self._update_master_range()
+
+    def connect_stack(
+        self,
+        stack: QStackedWidget,
+        role: Literal["content", "action"],
+    ) -> None:
+        """Автоматически подписать смену страницы стека на refresh_after_page_change.
+
+        Потребителю не нужно вручную подключать ``stack.currentChanged``
+        к внутренней логике layout — достаточно одного вызова:
+
+            layout.connect_stack(content_stack, "content")
+            layout.connect_stack(action_stack, "action")
+
+        Args:
+            stack: QStackedWidget, чьи страницы нужно обновлять.
+            role:  ``"content"`` или ``"action"`` — роль стека.
+        """
+        stack.currentChanged.connect(
+            lambda _index, r=role: self.refresh_after_page_change(r),
+        )
 
     # ------------------------------------------------------------------
     # Undo / Redo (статичная зона)

@@ -244,7 +244,7 @@ Phase 7: Очистка техдолгов + документация
 
 **Цель:** превратить `SettingsTab._setup_ui()` в переиспользуемый базовый класс.
 
-- [ ] **3.1** Сделать публичный API `DiffScrollTabLayout`:
+- [x] **3.1** Сделать публичный API `DiffScrollTabLayout`:
       - `refresh_after_page_change(stack: QStackedWidget)` (вместо
         `_content_scroll.setWidgetResizable(False/True)` снаружи)
       - `connect_stack(stack: QStackedWidget, role: 'content'|'action')` —
