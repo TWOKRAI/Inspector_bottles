@@ -418,6 +418,7 @@ Phase 7: Очистка техдолгов + документация
       - [x] Framework тесты (267) зелёные (+ 2 pre-existing fail)
       - [x] LOC в `primitives/diff_scroll_tab_layout.py` = 3 (только реэкспорт)
       - [x] LOC в `primitives/standard_tab_layout.py` = 3 (только реэкспорт)
+      - Коммит: `541009f`
 
 ---
 
