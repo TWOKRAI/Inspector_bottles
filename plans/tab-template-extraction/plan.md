@@ -326,16 +326,26 @@ Phase 7: Очистка техдолгов + документация
 ## Phase 5 — Разделение section-as-view и presenter
 
 **Цель:** Section не создаёт presenter в своём __init__ → их можно подменять.
-**Статус: DONE** (коммит `9c59a2a`, 2026-05-18)
+**Статус: DONE** (коммиты `9c59a2a` + `2cc0db7`, 2026-05-18, reviewer APPROVED)
 
 - [x] **5.1** Извлечь `SystemSettingsPresenter` из `SystemSection.__init__`.
-      Section возвращает View Protocol-методы; presenter создаётся через
-      фабрику в `SectionSpec.factory` или отдельным `SectionSpec.presenter_factory`.
-- [x] **5.2** То же для `AppearancePresenter`, `HistoryPresenter`
-      (опционально, для единообразия).
+      `SectionSpec.presenter_factory: Callable[[TCtx, "SectionProtocol"], object] | None`.
+      `BaseTreeNavTab._apply_presenter_factory` вызывается ПЕРЕД
+      `_connect_section_events` (порядок критичен для `bus_change_callback`).
+      Section получает presenter через `set_presenter()` setter.
+- [x] **5.2** То же для `AppearancePresenter`, `HistoryPresenter`. Бонус:
+      `AppearanceSection()` теперь без аргументов `theme_manager`/`presets_manager`
+      — они создаются в `_appearance_presenter_factory`.
 - [x] **5.3** **Acceptance:**
-      - [x] Тестам можно подсунуть mock-presenter в Section
-      - [x] Зелёные все тесты Settings (128 passed)
+      - [x] Тестам можно подсунуть mock-presenter в Section через
+            `SectionSpec(..., presenter_factory=lambda ctx, sec: MockPresenter(...))`.
+      - [x] Зелёные тесты Settings (128 passed), framework (267 passed,
+            2 pre-existing fail в `test_controls_v2_hooks`).
+- [x] **5.4** Post-review fixups (коммит `2cc0db7`):
+      - Двойной `_sync_editors_to_cfg` → один вызов в `set_presenter` ДО
+        подключения `editor.change_signal` (фикс dirty=True при запуске).
+      - `_sync_editors_to_cfg` → публичный `sync_editors_to_cfg` (декаплинг).
+      - `presenter_factory` типизирован `Callable[[TCtx, SectionProtocol], object]`.
 
 ## Phase 6 — Унификация DiffScroll/Standard + Recipes pilot
 
