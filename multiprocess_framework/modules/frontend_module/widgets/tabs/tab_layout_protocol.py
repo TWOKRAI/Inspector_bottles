@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
+    from PySide6.QtWidgets import QStackedWidget, QWidget
 
 
 @runtime_checkable
@@ -60,8 +60,13 @@ class TabLayoutProtocol(Protocol):
         """Подключить вложенные QScrollArea к синхронизации."""
         ...
 
-    def connect_stack(self, stack: "QWidget", role: str) -> None:
-        """Подписать смену страницы стека на refresh layout'а."""
+    def connect_stack(self, stack: "QStackedWidget", role: str) -> None:
+        """Подписать смену страницы стека на refresh layout'а.
+
+        ``stack`` обязан иметь сигнал ``currentChanged`` --- поэтому
+        требуем ``QStackedWidget`` (или совместимый подкласс), а не
+        произвольный ``QWidget``.
+        """
         ...
 
     def refresh_after_page_change(self, role: str) -> None:

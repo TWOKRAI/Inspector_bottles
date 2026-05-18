@@ -107,5 +107,7 @@ class TestAutoPickInnerScrolls:
 
         QApplication.processEvents()
 
-        # Проверяем что количество scroll areas увеличилось
-        assert len(layout._scroll_areas) >= initial_count
+        # ChildAdded handler должен был добавить inner_scroll в _scroll_areas.
+        # Строгое > initial_count — `>=` пройдёт даже если регрессия съест
+        # автоподхват, что обесценивает тест.
+        assert len(layout._scroll_areas) > initial_count

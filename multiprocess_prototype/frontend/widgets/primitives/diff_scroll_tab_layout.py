@@ -216,10 +216,11 @@ class DiffScrollTabLayout(QWidget):
             return True
         # ChildAdded на content-виджете: автоматически подхватить вложенные
         # QScrollArea в новых страницах стека (например при addWidget в
-        # QStackedWidget). Защита от зацикливания через _redirected.
+        # QStackedWidget). Защита от зацикливания — внутри
+        # _redirect_nested_wheels/_install_wheel_redirect по id(viewport).
         if event.type() == QEvent.Type.ChildAdded and isinstance(event, QChildEvent):
             child = event.child()
-            if isinstance(child, QWidget) and id(child) not in self._redirected:
+            if isinstance(child, QWidget):
                 self._redirect_nested_wheels(child)
         return super().eventFilter(obj, event)
 
