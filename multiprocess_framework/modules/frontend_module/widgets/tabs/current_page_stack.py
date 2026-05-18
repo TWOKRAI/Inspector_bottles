@@ -42,7 +42,11 @@ class CurrentPageStack(QStackedWidget):
     def minimumSizeHint(self) -> QSize:
         w = self.currentWidget()
         if w is not None:
-            return w.minimumSizeHint()
+            # Возвращаем sizeHint, а не minimumSizeHint:
+            # внешний QScrollArea(widgetResizable=True) не должен сжимать
+            # активную страницу ниже её предпочитаемой высоты — иначе
+            # контент схлопнется внутрь viewport и мастер-скролл потеряет ход.
+            return w.sizeHint()
         return super().minimumSizeHint()
 
     def _apply_size_policies(self, index: int) -> None:

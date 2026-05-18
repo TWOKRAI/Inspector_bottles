@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -157,6 +156,10 @@ class SettingsTab(QWidget):
         """Добавить виджет в content stack, вернуть индекс."""
         idx = self._content_stack.addWidget(widget)
         self._presenter.register_content_page(key, idx)
+        # Подключить вложенные QScrollArea страницы к диф-скроллу
+        # (мастер должен двигать карточки RegisterView и т.п.).
+        if isinstance(widget, QWidget):
+            self._diff_layout.register_inner_scrolls(widget)
         return idx
 
     def select_tree_key(self, key: str) -> None:
@@ -293,6 +296,8 @@ class SettingsTab(QWidget):
             action_idx = self.register_action_page(key, panel.action_buttons())
 
         content_idx = self._content_stack.addWidget(panel)
+        # Подключить вложенные QScrollArea admin-панели к диф-скроллу
+        self._diff_layout.register_inner_scrolls(panel)
         self._presenter.notify_admin_panel_created(key, panel, action_idx, content_idx)
 
     # ------------------------------------------------------------------
@@ -321,7 +326,12 @@ class SettingsTab(QWidget):
         action_layout.setContentsMargins(4, 4, 4, 4)
         action_layout.setSpacing(0)
 
-        self._action_stack = QStackedWidget()
+        # _CurrentPageStack: action_widget.sizeHint = высота только текущей
+        # страницы action-кнопок. Иначе QStackedWidget брал бы max всех
+        # страниц (Оформление с 10 кнопками задавало высоту), и на других
+        # секциях action_scroll скроллился бы — кнопки уезжали вверх.
+        self._action_stack = _CurrentPageStack()
+        self._action_stack.currentChanged.connect(self._on_action_page_changed)
         action_layout.addWidget(self._action_stack, 1)
 
         # Пустая страница (для секций без кнопок)
@@ -369,15 +379,6 @@ class SettingsTab(QWidget):
         # populate() вызывает add_system_settings_page() → создаётся SystemSection
         self._presenter.populate()
 
-        # Спрятать скроллбар у внутреннего QScrollArea в SystemSection.RegisterView —
-        # скроллом управляет мастер-скроллбар DiffScrollTabLayout
-        if self._system_section is not None:
-            cards_scroll = self._system_section.register_view._cards_widget
-            if hasattr(cards_scroll, "setVerticalScrollBarPolicy"):
-                cards_scroll.setVerticalScrollBarPolicy(
-                    Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-                )
-
         # === Подписка ActionBus ===
         if bus is not None:
             bus.add_change_callback(self._presenter.on_bus_change)
@@ -414,6 +415,19 @@ class SettingsTab(QWidget):
         размер виджета и диапазон скроллбара.
         """
         sa = self._diff_layout._content_scroll
+        sa.setWidgetResizable(False)
+        sa.setWidgetResizable(True)
+        self._diff_layout._update_master_range()
+
+    def _on_action_page_changed(self, _index: int) -> None:
+        """То же что и _on_content_page_changed, но для action-колонки.
+
+        Без этого action_scroll не пересчитывал высоту action_widget при
+        переключении страницы — на секции с 3 кнопками действовал sizeHint
+        предыдущей страницы с 10 кнопками, action_scroll.maximum > 0,
+        и кнопки уезжали вверх вместе с мастер-скроллом.
+        """
+        sa = self._diff_layout._action_scroll
         sa.setWidgetResizable(False)
         sa.setWidgetResizable(True)
         self._diff_layout._update_master_range()

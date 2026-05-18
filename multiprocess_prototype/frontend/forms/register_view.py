@@ -64,12 +64,14 @@ class RegisterView(QWidget):
         initial_mode: ViewMode = ViewMode.CARDS,
         category_titles: dict[str, str] | None = None,
         form_ctx: FormContext | None = None,
+        scrollable: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
 
         self._fields = fields
         self._category_titles = category_titles or {}
+        self._scrollable = scrollable
 
         # 1. Создать общий набор editors — ОДИН раз
         self._editors: dict[str, FieldEditor] = {}
@@ -142,11 +144,16 @@ class RegisterView(QWidget):
     # Построение структур (без размещения editor.widget)
     # ------------------------------------------------------------------
 
-    def _build_cards_structure(self) -> QScrollArea:
+    def _build_cards_structure(self) -> QWidget:
         """Создать скелет cards-представления (QGroupBox + QFormLayout).
 
         QFormLayout-строки создаются пустыми — editor.widget добавляется
         при reparenting в _place_editors_in_cards().
+
+        Если scrollable=True — оборачиваем в QScrollArea (внутренний скролл).
+        Если scrollable=False — возвращаем container напрямую, чтобы внешний
+        скролл-шаблон (DiffScrollTabLayout) видел реальный sizeHint и сам
+        крутил содержимое.
         """
         container = QWidget()
         container_layout = QVBoxLayout(container)
@@ -171,6 +178,9 @@ class RegisterView(QWidget):
             self._cards_form_layouts[cat_key] = form_layout
 
         container_layout.addStretch()
+
+        if not self._scrollable:
+            return container
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

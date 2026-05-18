@@ -73,11 +73,15 @@ class SystemSection(QWidget):
         # Поля GUI-локальные (тема, i18n, режим отображения).
         # Legacy путь: editor.change_signal → presenter.on_field_changed (dirty),
         #              RegisterView.field_changed → presenter.on_field_changed_action_bus (undo/redo).
+        # scrollable=False: SystemSection живёт внутри DiffScrollTabLayout —
+        # внешний мастер-скроллбар сам крутит содержимое, а внутренний
+        # QScrollArea ломал бы sizeHint секции и блокировал диф-скролл.
         self._register_view = RegisterView(
             field_infos,
             initial_mode=initial_mode,
             category_titles=_SECTION_TITLES,
             form_ctx=None,
+            scrollable=False,
         )
         # Скрыть встроенный тумблер RegisterView (используем внешний)
         self._register_view._toggle.hide()

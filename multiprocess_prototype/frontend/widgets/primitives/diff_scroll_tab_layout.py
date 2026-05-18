@@ -81,6 +81,11 @@ class DiffScrollTabLayout(QWidget):
         self._syncing = False
         self._scroll_areas: list[QScrollArea] = []
         self._redirected: set[int] = set()
+        # Последнее значение мастера — для расчёта delta в _on_master_changed.
+        # Дельта применяется к каждой колонке независимо, поэтому короткая
+        # колонка не «висит» на своём max, ожидая пока мастер дойдёт до её
+        # абсолютного значения сверху — она сразу пойдёт вверх вместе с мастером.
+        self._last_master_value = 0
 
         self._build_ui(title)
 
@@ -90,7 +95,9 @@ class DiffScrollTabLayout(QWidget):
 
     def _build_ui(self, title: str) -> None:
         root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        # 15px отступ сверху единый для всех трёх колонок и мастер-скроллбара —
+        # визуально отделяет верх содержимого от рамки таба.
+        root.setContentsMargins(0, 10, 0, 0)
         root.setSpacing(12)
 
         # === Левая колонка: scroll(actions) + static(undo/redo) ===
@@ -185,9 +192,22 @@ class DiffScrollTabLayout(QWidget):
         viewport.installEventFilter(self)
 
     def _redirect_nested_wheels(self, widget: QWidget) -> None:
-        """Перехват wheel у вложенных QAbstractScrollArea (QTreeWidget и т.д.)."""
+        """Перехват wheel у вложенных QAbstractScrollArea (QTreeWidget и т.д.).
+
+        Прозрачные QScrollArea (например RegisterView._cards_widget) дополнительно
+        включаются в синхронизацию с мастером, чтобы их контент тоже двигался
+        диф-скроллом и тормозил на своих границах. QTreeWidget/QTableWidget
+        и прочие самостоятельные QAbstractScrollArea только перехватывают wheel.
+        """
         for child in widget.findChildren(QAbstractScrollArea):
             self._install_wheel_redirect(child.viewport())
+            if type(child) is QScrollArea and child not in self._scroll_areas:
+                self._scroll_areas.append(child)
+                vbar = child.verticalScrollBar()
+                vbar.rangeChanged.connect(
+                    lambda _mn, _mx: self._update_master_range(),
+                )
+                self._update_master_range()
 
     def eventFilter(self, obj: object, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Wheel:
@@ -212,10 +232,25 @@ class DiffScrollTabLayout(QWidget):
     def _on_master_changed(self, value: int) -> None:
         if self._syncing:
             return
+        delta = value - self._last_master_value
+        self._last_master_value = value
         self._syncing = True
+        # Дельта-скролл: каждая колонка сдвигается на delta от текущего
+        # значения и клампится в [0, max]. Колонки, у которых maximum
+        # меньше самой длинной колонки («короткие» — action/nav), идут
+        # с половинной скоростью — иначе они доезжают до концов слишком
+        # быстро и долго стоят, пока длинный content догоняет.
+        master_max = self._master_sb.maximum()
         for sa in self._scroll_areas:
             vbar = sa.verticalScrollBar()
-            vbar.setValue(min(value, vbar.maximum()))
+            if vbar.maximum() < master_max:
+                # Половинная скорость для коротких колонок.
+                # // 2 даёт целочисленную дельту; знак сохраняется.
+                column_delta = delta // 2 if delta >= 0 else -((-delta) // 2)
+            else:
+                column_delta = delta
+            new_value = vbar.value() + column_delta
+            vbar.setValue(max(0, min(new_value, vbar.maximum())))
         self._syncing = False
 
     def _update_master_range(self) -> None:
@@ -229,7 +264,13 @@ class DiffScrollTabLayout(QWidget):
         self._master_sb.setPageStep(max(1, self.height()))
         self._master_sb.setSingleStep(20)
         self._master_sb.blockSignals(False)
-        self._master_sb.setVisible(max_range > 0)
+        # Синхронизируем baseline дельта-скролла с реальным value мастера
+        # (setRange мог склампить value), иначе следующее valueChanged
+        # выдаст ложную дельту и колонки прыгнут.
+        self._last_master_value = self._master_sb.value()
+        # Скроллбар виден всегда — при max_range == 0 handle занимает 100%
+        # высоты рельса (нечего скроллить, но место под скролл зарезервировано).
+        self._master_sb.setVisible(True)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -267,6 +308,16 @@ class DiffScrollTabLayout(QWidget):
         """Задать виджет правой колонки (основной контент)."""
         self._content_scroll.setWidget(widget)
         # Перехватываем wheel у вложенных scroll areas
+        self._redirect_nested_wheels(widget)
+
+    def register_inner_scrolls(self, widget: QWidget) -> None:
+        """Подключить вложенные QScrollArea/QAbstractScrollArea к диф-скроллу.
+
+        Вызывается потребителем после ленивого добавления страниц/виджетов
+        в content или nav (например QStackedWidget наполняется уже после
+        set_content_widget). Прозрачные QScrollArea будут участвовать
+        в синхронизации с мастером, остальные — только перехват wheel.
+        """
         self._redirect_nested_wheels(widget)
 
     # ------------------------------------------------------------------
