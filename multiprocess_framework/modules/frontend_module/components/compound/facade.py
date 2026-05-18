@@ -2,10 +2,14 @@
 """
 Составные контролы — CompoundNumericControl, CompoundControl, ControlFactory.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Union
+
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
 
 from multiprocess_framework.modules.frontend_module.components.base.config import BindingConfig
 from multiprocess_framework.modules.frontend_module.components.base.control_hooks import ControlHooks
@@ -53,12 +57,18 @@ class CompoundNumericControl:
         current_access_level: int = 0,
         legacy_context: Optional[LegacySyncContext] = None,
         hooks: Optional[ControlHooks] = None,
+        *,
+        form_ctx: "FormContext | None" = None,
     ) -> CompoundNumericControlResult:
         """
-        Создать составной контрол: 3 слайдера для индексов 0,1,2.
+        Создать составной контрол: 3 числовых поля для индексов 0,1,2.
 
         Args:
             hooks: Общий набор колбэков для всех трёх дочерних ``NumericControl`` (см. ``NumericControl.create``).
+            form_ctx: FormContext — если передан, каждый из 3 sub-controls пишет через
+                ``FormContext.write`` (coalescing, undo/redo, IPC bridge). Каждый sub-control
+                имеет ``index=i`` в BindingConfig — пишет tuple-элемент по индексу.
+                Legacy-путь (form_ctx=None): прямая запись через RegisterAdapter в каждом NumericControl.
 
         Returns:
             CompoundNumericControlResult(widget, results).
@@ -93,6 +103,7 @@ class CompoundNumericControl:
                 current_access_level=current_access_level,
                 legacy_context=legacy_context,
                 hooks=hooks,
+                form_ctx=form_ctx,
             )
             results.append(r)
             layout.addWidget(r.widget)
@@ -172,10 +183,7 @@ class CompoundControl:
                 if i < len(config.items) - 1:
                     layout.addSpacing(config.spacing)
         else:
-            raise ValueError(
-                "CompoundControlConfig: задайте либо (binding + array_children), "
-                "либо items"
-            )
+            raise ValueError("CompoundControlConfig: задайте либо (binding + array_children), либо items")
 
         return CompoundControlResult(widget=container, results=results)
 
@@ -211,9 +219,7 @@ class ControlFactory:
         """
         if isinstance(config, NumericViewConfig):
             if binding is None:
-                raise ValueError(
-                    "ControlFactory.create: binding обязателен для NumericViewConfig"
-                )
+                raise ValueError("ControlFactory.create: binding обязателен для NumericViewConfig")
             return NumericControl.create(
                 registers_manager,
                 binding,
@@ -224,9 +230,7 @@ class ControlFactory:
             )
         if isinstance(config, CheckboxViewConfig):
             if binding is None:
-                raise ValueError(
-                    "ControlFactory.create: binding обязателен для CheckboxViewConfig"
-                )
+                raise ValueError("ControlFactory.create: binding обязателен для CheckboxViewConfig")
             return CheckboxControl.create(
                 registers_manager,
                 binding,

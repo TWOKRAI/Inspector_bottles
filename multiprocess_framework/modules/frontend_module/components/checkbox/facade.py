@@ -68,9 +68,19 @@ class CheckboxControl:
             hooks: Передаётся в ``CheckboxPresenter``; при записи presenter вызывает
                 ``on_write_committed`` / ``on_write_rejected`` (ответ регистра) и
                 ``on_access_denied``, если пользователь меняет значение при ``not can_modify()``.
-            form_ctx: FormContext — если передан, presenter пишет через
-                ``form_ctx.write(...)`` (ActionBus + coalescing + undo/redo).
-                Если None — legacy путь через ``RegisterAdapter.write`` → ``rm.set_field_value``.
+            form_ctx: FormContext — управляет маршрутом записи значения.
+
+                **Production-путь (form_ctx передан):** write идёт через ``ActionBus``
+                с coalescing, undo/redo и IPC bridge (``TopologyBridge``). Обязателен
+                в plugin-формах (PluginsTab, InspectorPanel, ServicesTab) — без него
+                изменение не попадёт в undo-стек и не разойдётся по IPC-таргетам.
+
+                **Legacy-путь (form_ctx is None):** прямая запись через
+                ``RegisterAdapter.write`` → ``rm.set_field_value``. Допустим только в
+                FW unit-тестах (``_examples/``) и GUI-локальных формах без plugin binding
+                (например, SettingsSystem). При тиражировании паттерна на новые controls
+                (SpinBox, Slider, Numeric, ...) — следуй этому контракту: передавай
+                ``form_ctx`` в production и оставляй ``None`` только для legacy callers.
 
         Returns:
             Виджет и presenter с уже выполненным `attach_view`.

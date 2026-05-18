@@ -7,6 +7,7 @@ CheckboxPresenter — композиция traits для чекбокса.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Optional
 
 from multiprocess_framework.modules.frontend_module.components.base.control_hooks import (
@@ -59,9 +60,10 @@ class CheckboxPresenter:
                 над метаданными регистра).
             current_access_level: Текущий уровень доступа пользователя для `AccessTrait`.
             hooks: Колбэки для внешних менеджеров (лог / ошибки / статистика).
-            form_ctx: FormContext — если передан, write идёт через
+            form_ctx: обязателен в production. Если передан, write идёт через
                 ``form_ctx.write(...)`` (ActionBus + coalescing + undo/redo).
-                Если None — legacy путь через ``SyncTrait.write`` → ``RegisterAdapter``.
+                None допустим только в ``_examples/`` и FW unit-тестах (без ActionBus).
+                В production None вызовет ``DeprecationWarning``.
         """
         self._binding = binding
         self._hooks = hooks
@@ -139,7 +141,13 @@ class CheckboxPresenter:
             )
             err = None if ok else "write failed"
         else:
-            # Legacy путь: прямая запись через SyncTrait → RegisterAdapter → rm.
+            # LEGACY ONLY: _examples/ и FW unit-тесты. В production form_ctx обязателен.
+            warnings.warn(
+                "CheckboxPresenter._on_changed без form_ctx — legacy путь только для "
+                "_examples/ и FW unit-тестов. Передай form_ctx в production-коде.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             ok, err = self._sync.write(value)
 
         if not ok:
