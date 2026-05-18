@@ -386,7 +386,8 @@ class BaseTreeNavTab(BaseColumnarTab):
             return
         # Авто-expand/collapse: раскрыть ветку текущего, свернуть остальные
         collapse_other_branches(self._tree_nav, current)
-        # Вся логика (в т.ч. ленивое создание панелей) --- в presenter
-        self._presenter.on_tree_item_changed(key)
+        # Вся логика (в т.ч. ленивое создание панелей) --- через _on_nav_changed
+        # (единый полиморфный хук BaseColumnarTab, а не прямой вызов presenter)
+        self._on_nav_changed(key)
         # Сигнал наружу (наследован от BaseColumnarTab)
         self.section_changed.emit(key)

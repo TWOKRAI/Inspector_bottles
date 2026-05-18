@@ -1,4 +1,4 @@
-"""Тесты для RecipesTab."""
+"""Тесты для RecipesTab (Phase 6c --- BaseListNavTab pilot)."""
 
 from __future__ import annotations
 from unittest.mock import MagicMock
@@ -120,38 +120,62 @@ class TestRecipesTab:
         ctx.get = lambda key, default=None: ctx.extras.get(key, default)
         ctx.bindings.return_value = None
         ctx.action_bus.return_value = None
-        # Патчим RECIPES_DIR через presenter
         return ctx
 
     def test_create(self, qtbot, tmp_path):
         ctx = self._make_ctx(tmp_path)
         tab = RecipesTab(ctx)
-        # Подменим recipes_dir в presenter
         tab._presenter._recipes_dir = tmp_path
         tab._presenter.refresh()
-        tab._sync_slots()
+        tab._sync_nav()
         qtbot.addWidget(tab)
         assert tab is not None
+        # Nav содержит как минимум «+ Новый рецепт»
+        assert tab.nav_widget.count() >= 1
 
     def test_slot_selection_empty(self, qtbot, tmp_path):
         ctx = self._make_ctx(tmp_path)
         tab = RecipesTab(ctx)
         tab._presenter._recipes_dir = tmp_path
         tab._presenter.refresh()
+        tab._sync_nav()
         qtbot.addWidget(tab)
-        tab._on_slot_selected(0)
-        assert tab._name_edit.text() == ""
+        # Выбрать слот 0 через select_item (нет рецепта)
+        tab.add_item("0", "Slot 0")
+        tab.select_item("0")
+        form = tab._forms.get("0")
+        assert form is not None
+        assert form.name_edit.text() == ""
 
     def test_save_and_select(self, qtbot, tmp_path):
         ctx = self._make_ctx(tmp_path)
         tab = RecipesTab(ctx)
         tab._presenter._recipes_dir = tmp_path
         tab._presenter.refresh()
+        tab._sync_nav()
         qtbot.addWidget(tab)
 
-        tab._selected_slot = 0
-        tab._name_edit.setText("Test Recipe")
+        # Выбрать «+ Новый рецепт» (slot -1) → ввести имя → save
+        tab.select_item("-1")
+        form = tab._forms.get("-1")
+        assert form is not None
+        form.name_edit.setText("Test Recipe")
         tab._on_action("save")
 
-        tab._on_slot_selected(0)
-        assert tab._name_edit.text() == "Test Recipe"
+        # После save рецепт появился в presenter
+        info = tab._presenter.get_recipe_info(0)
+        assert info is not None
+        assert info.name == "Test Recipe"
+
+    def test_item_selected_signal(self, qtbot, tmp_path):
+        ctx = self._make_ctx(tmp_path)
+        tab = RecipesTab(ctx)
+        tab._presenter._recipes_dir = tmp_path
+        tab._presenter.refresh()
+        tab._sync_nav()
+        qtbot.addWidget(tab)
+
+        # Сигнал item_selected эмитится при выборе
+        with qtbot.waitSignal(tab.item_selected, timeout=1000) as blocker:
+            tab.select_item("-1")
+        assert blocker.args == ["-1"]
