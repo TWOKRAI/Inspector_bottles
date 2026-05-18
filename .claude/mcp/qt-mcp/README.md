@@ -89,6 +89,18 @@ python multiprocess_prototype\run.py
 
 См. [SETUP_GUIDE.md](SETUP_GUIDE.md) — интеграция probe в `run.py`, troubleshooting на Windows, конфликты с pytest-qt.
 
+## Гочи на стеке Inspector_bottles
+
+Из практики baseline-снимка Phase 2 (2026-05-18):
+
+* **Bash, не PowerShell** — Claude Code на Windows запускает background-задачи через bash. Используй `QT_MCP_PROBE=1 python multiprocess_prototype/run.py` (POSIX), не `$env:` форму.
+* **Probe врезан в `frontend/app.py:run_gui()`** — это код дочернего процесса `gui`. Сигнал успеха в логе: `[INFO] [gui] startup: qt-mcp probe installed on localhost:9142`.
+* **Жди ≥12 сек после запуска** — re-exec venv + загрузка фреймворка + старт `gui` процесса. Иначе `qt_list_windows` → `Failed to connect to probe`.
+* **`MainWindow ""` без title** — нормально, различай окна по `objectName`.
+* **НЕ под pytest** — probe и pytest-qt конфликтуют по порту 9142. Env-флаг ставь только для ручного/agent smoke.
+
+Подробности — секция «Project-specific quirks» в SETUP_GUIDE.md.
+
 ## Ссылки
 
 - Репо: https://github.com/0xCarbon/qt-mcp

@@ -1,14 +1,7 @@
-"""RecipesTab — таб управления рецептами.
+"""RecipesTab --- таб управления рецептами (BaseListNavTab pilot).
 
-Layout: новый шаблон ``StandardTabLayout``.
-  • Action-колонка (слева, фикс. 120px):
-      top: ViewModeToggle (Cards/Table), Загрузить, Сохранить, Удалить
-      bottom: Назад / Вперёд (Undo/Redo) — через ActionBus
-  • Sub-nav (200px): динамический список рецептов (external-content режим)
-  • Контент (в QScrollArea): QStackedWidget {Cards-форма, Table-всех}.
-
-Legacy-атрибуты ``_btn_*``, ``_nav_list``, ``_name_edit``, ``_selected_slot``,
-``_on_slot_selected``, ``_sync_slots`` сохранены для совместимости тестов.
+Action: ViewModeToggle, Загрузить/Сохранить/Удалить, Undo/Redo.
+Table-вид создаётся лениво. См. Phase 6c.
 """
 
 from __future__ import annotations
@@ -16,158 +9,145 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
-    QFormLayout,
-    QGroupBox,
     QHeaderView,
-    QLabel,
-    QLineEdit,
-    QPlainTextEdit,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
+from multiprocess_framework.modules.frontend_module.widgets.tabs import (
+    BaseListNavTab,
+    StandardTabLayout,
+)
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
-from multiprocess_prototype.frontend.widgets.primitives import StandardTabLayout
 
 from .presenter import RecipesPresenter
+from .recipe_form import RecipeFormWidget
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
 
-# Колонки таблицы
-_TABLE_COLUMNS = ["Имя", "Описание", "Создан", "Изменён"]
+_TABLE_COLS = ["Имя", "Описание", "Создан", "Изменён"]
 
 
-class RecipesTab(QWidget):
-    """Таб рецептов — на основе ``StandardTabLayout``."""
+class RecipesTab(BaseListNavTab):
+    """Таб рецептов --- pilot consumer ``BaseListNavTab``."""
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._ctx = ctx
         self._presenter = RecipesPresenter(ctx)
+        self._forms: dict[str, RecipeFormWidget] = {}
         self._selected_slot: int = -1
-
-        self._init_ui()
+        super().__init__(
+            title="Рецепты",
+            ctx=ctx,
+            layout_factory=lambda: StandardTabLayout(show_sub_nav=False),
+            parent=parent,
+        )
+        self._setup_actions()
         self._sync_nav()
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "RecipesTab":
         return cls(ctx)
 
-    # ------------------------------------------------------------------
-    # UI
-    # ------------------------------------------------------------------
+    def _create_item_widget(self, key: str) -> QWidget:
+        form = RecipeFormWidget()
+        self._forms[key] = form
+        return form
 
-    def _init_ui(self) -> None:
-        # Заголовок отдельно над шаблоном (компактнее, чем класть в action-col).
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+    def _on_nav_changed(self, key: str) -> None:
+        super()._on_nav_changed(key)
+        try:
+            slot = int(key)
+        except (TypeError, ValueError):
+            return
+        self._selected_slot = slot
+        form = self._forms.get(key)
+        if form is None:
+            return
+        if slot < 0:
+            form.clear()
+            self._btn_load.setEnabled(False)
+            self._btn_delete.setEnabled(False)
+            return
+        info = self._presenter.get_recipe_info(slot)
+        if info:
+            form.populate(info.name, info.description, info.created or "—", info.modified or "—")
+            self._btn_load.setEnabled(True)
+            self._btn_delete.setEnabled(True)
+        else:
+            form.clear()
+            self._btn_load.setEnabled(False)
+            self._btn_delete.setEnabled(False)
 
-        header = QLabel("Рецепты")
-        header.setObjectName("TabHeader")
-        layout.addWidget(header)
-
-        # Основной шаблон вкладки.
-        self._tab_layout = StandardTabLayout(show_sub_nav=True)
-
-        # ── Левая колонка действий ────────────────────────────────────
-        # Тумблер Cards / Table — добавляем как виджет в top-actions.
+    def _setup_actions(self) -> None:
+        lay = self._tab_layout
         self._toggle = ViewModeToggle(initial_mode=ViewMode.CARDS)
         self._toggle.mode_changed.connect(self._on_view_mode_changed)
-        self._tab_layout.add_top_widget(self._toggle)
-
-        self._btn_load = self._tab_layout.add_top_action("load", "Загрузить")
+        lay.add_top_widget(self._toggle)  # type: ignore[attr-defined]
+        self._btn_load = lay.add_top_action("load", "Загрузить")  # type: ignore[attr-defined]
         self._btn_load.setEnabled(False)
-        self._btn_save = self._tab_layout.add_top_action("save", "Сохранить")
-        self._btn_delete = self._tab_layout.add_top_action("delete", "Удалить")
+        self._btn_save = lay.add_top_action("save", "Сохранить")  # type: ignore[attr-defined]
+        self._btn_delete = lay.add_top_action("delete", "Удалить")  # type: ignore[attr-defined]
         self._btn_delete.setEnabled(False)
-
-        self._tab_layout.action_triggered.connect(self._on_action)
-
-        # Undo/Redo внизу.
+        lay.action_triggered.connect(self._on_action)  # type: ignore[attr-defined]
         bus = self._ctx.action_bus() if hasattr(self._ctx, "action_bus") else None
-        self._tab_layout.enable_undo_redo(bus)
+        lay.enable_undo_redo(bus)
+        from multiprocess_prototype.frontend.widgets.access import install_permission_aware_enable
 
-        # ── Sub-nav (external-content режим) ─────────────────────────
-        self._tab_layout.section_changed.connect(self._on_sub_nav_selected)
-
-        # ── Контент: QStackedWidget {Cards, Table} ────────────────────
-        self._center_stack = QStackedWidget()
-        self._cards_widget = self._build_cards_page()
-        self._center_stack.addWidget(self._cards_widget)
-        self._table_widget = self._build_table_page()
-        self._center_stack.addWidget(self._table_widget)
-        self._tab_layout.set_content_widget(self._center_stack)
-
-        layout.addWidget(self._tab_layout, stretch=1)
-
-        # PR3: permission-aware proxy на setEnabled — наслаивается прозрачно
-        # на selection-aware логику.
-        from multiprocess_prototype.frontend.widgets.access import (
-            install_permission_aware_enable,
-        )
-
-        _auth = self._ctx.auth
-        auth_state = _auth.state if _auth is not None else None
+        auth_state = getattr(getattr(self._ctx, "auth", None), "state", None)
         for btn in (self._btn_load, self._btn_save, self._btn_delete):
             install_permission_aware_enable(btn, "tabs.recipes.edit", auth_state)
 
-        # Legacy alias: тесты обращаются к _nav_list напрямую.
-        self._nav_list = self._tab_layout.sub_nav_list
+    def _on_action(self, action_id: str) -> None:
+        if action_id == "save":
+            # Читаем из текущей формы ДО переназначения slot
+            cur_key = str(self._selected_slot)
+            form = self._forms.get(cur_key)
+            slot = self._selected_slot if self._selected_slot >= 0 else self._presenter.next_free_slot()
+            self._selected_slot = slot
+            name = (form.name_edit.text().strip() if form else "") or f"Recipe {slot}"
+            desc = form.desc_edit.toPlainText().strip() if form else ""
+            self._presenter.save_to_slot(slot, name, desc)
+            self._sync_nav()
+            self.select_item(str(slot))
+        elif action_id == "load" and self._selected_slot >= 0:
+            result = self._presenter.apply_recipe(self._selected_slot)
+            if result and self._ctx.get("action_bus") is not None:
+                from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 
-    def _build_cards_page(self) -> QWidget:
-        """Карточный вид — форма одного рецепта."""
-        info_group = QGroupBox("Информация о рецепте")
-        info_layout = QFormLayout(info_group)
-
-        self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Имя рецепта")
-        info_layout.addRow("Имя:", self._name_edit)
-
-        self._desc_edit = QPlainTextEdit()
-        self._desc_edit.setPlaceholderText("Описание")
-        self._desc_edit.setMaximumHeight(80)
-        info_layout.addRow("Описание:", self._desc_edit)
-
-        self._created_label = QLabel("—")
-        info_layout.addRow("Создан:", self._created_label)
-
-        self._modified_label = QLabel("—")
-        info_layout.addRow("Изменён:", self._modified_label)
-
-        return info_group
-
-    def _build_table_page(self) -> QWidget:
-        """Табличный вид — все рецепты в таблице."""
-        self._recipes_table = QTableWidget(0, len(_TABLE_COLUMNS))
-        self._recipes_table.setHorizontalHeaderLabels(_TABLE_COLUMNS)
-        self._recipes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._recipes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        h = self._recipes_table.horizontalHeader()
-        if h:
-            h.setStretchLastSection(True)
-            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-
-        self._recipes_table.currentCellChanged.connect(self._on_table_row_changed)
-        return self._recipes_table
-
-    # ------------------------------------------------------------------
-    # View mode
-    # ------------------------------------------------------------------
+                self._ctx.get("action_bus").record(
+                    V2ActionBuilder.recipe_apply(
+                        result.get("recipe_name", ""),
+                        result["previous"],
+                        result["current"],
+                    )
+                )
+        elif action_id == "delete" and self._selected_slot >= 0:
+            self._presenter.delete_from_slot(self._selected_slot)
+            self._sync_nav()
 
     def _on_view_mode_changed(self, mode_str: str) -> None:
-        mode = ViewMode(mode_str)
-        if mode == ViewMode.CARDS:
-            self._center_stack.setCurrentIndex(0)
+        if ViewMode(mode_str) == ViewMode.CARDS:
+            key = str(self._selected_slot)
+            if key in self._key_to_index:
+                self._content_stack.setCurrentIndex(self._key_to_index[key])
         else:
-            self._refresh_table()
-            self._center_stack.setCurrentIndex(1)
+            self._show_table()
 
-    def _refresh_table(self) -> None:
+    def _show_table(self) -> None:
+        if not hasattr(self, "_recipes_table"):
+            tbl = QTableWidget(0, len(_TABLE_COLS))
+            tbl.setHorizontalHeaderLabels(_TABLE_COLS)
+            tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            h = tbl.horizontalHeader()
+            if h:
+                h.setStretchLastSection(True)
+                h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            tbl.currentCellChanged.connect(self._on_table_row_changed)
+            self._recipes_table = tbl
+            self.register_content_widget("__table__", tbl)
         recipes = self._presenter.get_all_recipes()
         self._recipes_table.setRowCount(len(recipes))
         for row, info in enumerate(recipes):
@@ -175,128 +155,31 @@ class RecipesTab(QWidget):
             self._recipes_table.setItem(row, 1, QTableWidgetItem(info.description))
             self._recipes_table.setItem(row, 2, QTableWidgetItem(info.created or "—"))
             self._recipes_table.setItem(row, 3, QTableWidgetItem(info.modified or "—"))
+        self._content_stack.setCurrentIndex(self._key_to_index["__table__"])
 
-    def _on_table_row_changed(self, row: int, _col: int, _prev_row: int, _prev_col: int) -> None:
+    def _on_table_row_changed(self, row: int, _c: int, _pr: int, _pc: int) -> None:
         recipes = self._presenter.get_all_recipes()
         if 0 <= row < len(recipes):
             self._selected_slot = recipes[row].slot
             self._btn_load.setEnabled(True)
             self._btn_delete.setEnabled(True)
 
-    # ------------------------------------------------------------------
-    # Sub-nav (список рецептов)
-    # ------------------------------------------------------------------
-
     def _sync_nav(self) -> None:
-        """Перестроить список рецептов из presenter."""
-        self._tab_layout.clear_sub_nav()
-        recipes = self._presenter.get_all_recipes()
-        for info in recipes:
-            self._tab_layout.add_sub_nav_section(
-                key=str(info.slot),
-                title=info.name,
-                widget=None,
-            )
-        # Элемент «+ Новый рецепт» — ключ "-1".
-        self._tab_layout.add_sub_nav_section(
-            key="-1",
-            title="+ Новый рецепт",
-            widget=None,
-        )
-
-    def _on_sub_nav_selected(self, key: str) -> None:
-        """Sub-nav сменилась → обновить форму."""
-        try:
-            slot = int(key)
-        except (TypeError, ValueError):
-            return
-
-        if slot == -1:
-            self._selected_slot = self._presenter.next_free_slot()
-            self._name_edit.setText("")
-            self._desc_edit.setPlainText("")
-            self._created_label.setText("—")
-            self._modified_label.setText("—")
-            self._btn_load.setEnabled(False)
-            self._btn_delete.setEnabled(False)
-        else:
-            self._selected_slot = slot
-            self._show_recipe(slot)
-
-    def _show_recipe(self, slot: int) -> None:
-        info = self._presenter.get_recipe_info(slot)
-        if info:
-            self._name_edit.setText(info.name)
-            self._desc_edit.setPlainText(info.description)
-            self._created_label.setText(info.created or "—")
-            self._modified_label.setText(info.modified or "—")
-            self._btn_load.setEnabled(True)
-            self._btn_delete.setEnabled(True)
-        else:
-            self._name_edit.setText("")
-            self._desc_edit.setPlainText("")
-            self._created_label.setText("—")
-            self._modified_label.setText("—")
-            self._btn_load.setEnabled(False)
-            self._btn_delete.setEnabled(False)
-
-    # ------------------------------------------------------------------
-    # Действия (callback от StandardTabLayout.action_triggered)
-    # ------------------------------------------------------------------
-
-    def _on_action(self, action_id: str) -> None:
-        if self._selected_slot < 0:
-            return
-
-        if action_id == "save":
-            name = self._name_edit.text().strip() or f"Recipe {self._selected_slot}"
-            desc = self._desc_edit.toPlainText().strip()
-            self._presenter.save_to_slot(self._selected_slot, name, desc)
-            self._sync_nav()
-            self._select_slot_in_nav(self._selected_slot)
-
-        elif action_id == "load":
-            result = self._presenter.apply_recipe(self._selected_slot)
-            if result:
-                recipe_name = result.get("recipe_name", "")
-                bus = self._ctx.get("action_bus")
-                if bus is not None:
-                    from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-                    action = V2ActionBuilder.recipe_apply(
-                        recipe_name,
-                        result["previous"],
-                        result["current"],
-                    )
-                    bus.record(action)
-
-        elif action_id == "delete":
-            self._presenter.delete_from_slot(self._selected_slot)
-            self._sync_nav()
-            self._clear_form()
-
-    def _select_slot_in_nav(self, slot: int) -> None:
-        """Выбрать элемент sub-nav по slot ID."""
-        self._tab_layout.set_current_section(str(slot))
-
-    def _clear_form(self) -> None:
-        self._selected_slot = -1
-        self._name_edit.setText("")
-        self._desc_edit.setPlainText("")
-        self._created_label.setText("—")
-        self._modified_label.setText("—")
-        self._btn_load.setEnabled(False)
-        self._btn_delete.setEnabled(False)
-
-    # ------------------------------------------------------------------
-    # Обратная совместимость (используется в тестах)
-    # ------------------------------------------------------------------
-
-    def _on_slot_selected(self, slot: int) -> None:
-        """Legacy API: выбрать рецепт по slot напрямую."""
-        self._selected_slot = slot
-        self._show_recipe(slot)
-
-    def _sync_slots(self) -> None:
-        """Legacy API: алиас для _sync_nav."""
-        self._sync_nav()
+        assert self._nav_widget is not None
+        self._nav_widget.blockSignals(True)
+        self._nav_widget.clear()
+        tbl = getattr(self, "_recipes_table", None)
+        while self._content_stack.count() > 0:
+            w = self._content_stack.widget(0)
+            self._content_stack.removeWidget(w)
+            if w is not None and w is not tbl:
+                w.deleteLater()
+        self._key_to_item.clear()
+        self._key_to_index.clear()
+        self._forms.clear()
+        self._nav_widget.blockSignals(False)
+        if tbl is not None:
+            self.register_content_widget("__table__", tbl)
+        for info in self._presenter.get_all_recipes():
+            self.add_item(str(info.slot), info.name)
+        self.add_item("-1", "+ Новый рецепт")

@@ -56,6 +56,20 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
+    # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
+    # Прод-поведение не меняется без env-флага.
+    import os
+
+    if os.environ.get("QT_MCP_PROBE") == "1":
+        try:
+            from qt_mcp.probe import install
+
+            install()
+            process._log_info("qt-mcp probe installed on localhost:9142", module="startup")
+        except ImportError:
+            process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
+
     # 1. Применить тему
     apply_default_theme(app)
 

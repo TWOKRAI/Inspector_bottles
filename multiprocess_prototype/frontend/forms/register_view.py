@@ -65,6 +65,7 @@ class RegisterView(QWidget):
         category_titles: dict[str, str] | None = None,
         form_ctx: FormContext | None = None,
         scrollable: bool = True,
+        show_toggle: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -99,6 +100,11 @@ class RegisterView(QWidget):
         self._toggle = ViewModeToggle(initial_mode=initial_mode)
         header_layout.addWidget(self._toggle)
         main_layout.addLayout(header_layout)
+
+        # Скрыть тумблер если не нужен (например, SystemSection с внешним
+        # переключателем). Атрибут _toggle остаётся — set_mode() работает.
+        if not show_toggle:
+            self._toggle.hide()
 
         # Stacked widget
         self._stack = QStackedWidget(self)

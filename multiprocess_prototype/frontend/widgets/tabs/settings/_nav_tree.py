@@ -1,24 +1,27 @@
 # -*- coding: utf-8 -*-
 """Хелперы для QTreeWidget в Settings таб.
 
-Вспомогательные функции:
-    build_nav_tree  — заполнить QTreeWidget по секциям
-    find_tree_item  — рекурсивный поиск элемента по ключу
-    select_tree_key — выбрать элемент дерева по ключу
+Реэкспорт из framework для обратной совместимости: существующие импорты
+``from ._nav_tree import build_nav_tree, ...`` продолжают работать.
+
+Каноническое расположение утилит:
+    ``multiprocess_framework.modules.frontend_module.widgets.tabs.nav_tree_utils``
 
 Re-export CurrentPageStack из framework для удобства импорта.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
-
 # Re-export для удобства: импортировать CurrentPageStack можно отсюда
 from multiprocess_framework.modules.frontend_module.widgets.tabs import CurrentPageStack
 
-# Высота строки в дереве навигации (px)
-_NAV_ITEM_HEIGHT = 36
+# Реэкспорт утилит nav-дерева из framework
+from multiprocess_framework.modules.frontend_module.widgets.tabs.nav_tree_utils import (
+    build_nav_tree,
+    collapse_other_branches,
+    find_tree_item,
+    select_tree_key,
+)
 
 __all__ = [
     "CurrentPageStack",
@@ -27,104 +30,3 @@ __all__ = [
     "find_tree_item",
     "select_tree_key",
 ]
-
-
-def build_nav_tree(
-    tree_widget: QTreeWidget,
-    sections: list[tuple[str, str]],
-    admin_children: list[tuple[str, str]],
-) -> None:
-    """Заполнить QTreeWidget секциями навигации.
-
-    Порядок:
-    1. Корневой узел «Администрация» с разворачиваемыми дочерними элементами
-    2. Top-level секции из ``sections`` (список (key, title))
-
-    Args:
-        tree_widget:     QTreeWidget, который нужно заполнить
-        sections:        список (key, title) для top-level секций
-        admin_children:  список (key, title) для дочерних узлов «Администрация»
-    """
-    # --- Узел «Администрация» (разворачиваемый) ---
-    admin_root = QTreeWidgetItem(tree_widget, ["Администрация"])
-    admin_root.setData(0, Qt.ItemDataRole.UserRole, "admin_dashboard")
-    admin_root.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
-    admin_root.setExpanded(False)
-
-    for key, title in admin_children:
-        child = QTreeWidgetItem(admin_root, [title])
-        child.setData(0, Qt.ItemDataRole.UserRole, key)
-        child.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
-
-    # --- Top-level секции ---
-    for key, title in sections:
-        item = QTreeWidgetItem(tree_widget, [title])
-        item.setData(0, Qt.ItemDataRole.UserRole, key)
-        item.setSizeHint(0, QSize(0, _NAV_ITEM_HEIGHT))
-
-
-def collapse_other_branches(
-    tree_widget: QTreeWidget,
-    current_item: QTreeWidgetItem,
-) -> None:
-    """Свернуть все ветки кроме той, к которой принадлежит текущий элемент.
-
-    Если выбран top-level узел с детьми — раскрыть его.
-    Если выбран дочерний узел — раскрыть его родителя.
-    Все остальные top-level узлы с детьми — свернуть.
-
-    Args:
-        tree_widget:   QTreeWidget
-        current_item:  текущий выбранный элемент
-    """
-    root = tree_widget.invisibleRootItem()
-
-    # Определить «активный» top-level узел
-    active_top = current_item
-    while active_top.parent() is not None:
-        active_top = active_top.parent()
-
-    for i in range(root.childCount()):
-        top_item = root.child(i)
-        if top_item.childCount() == 0:
-            continue
-        # Раскрыть ветку активного элемента, свернуть остальные
-        top_item.setExpanded(top_item is active_top)
-
-
-def find_tree_item(
-    parent: QTreeWidgetItem,
-    key: str,
-) -> QTreeWidgetItem | None:
-    """Рекурсивный поиск элемента дерева по значению UserRole.
-
-    Args:
-        parent: родительский элемент (начинать с invisibleRootItem())
-        key:    искомый ключ (значение Qt.ItemDataRole.UserRole)
-
-    Returns:
-        QTreeWidgetItem если найден, иначе None
-    """
-    for i in range(parent.childCount()):
-        child = parent.child(i)
-        if child.data(0, Qt.ItemDataRole.UserRole) == key:
-            return child
-        found = find_tree_item(child, key)
-        if found is not None:
-            return found
-    return None
-
-
-def select_tree_key(tree_widget: QTreeWidget, key: str) -> None:
-    """Выбрать элемент QTreeWidget по ключу UserRole.
-
-    Если элемент с данным ключом не найден — ничего не делает.
-
-    Args:
-        tree_widget: целевой QTreeWidget
-        key:         ключ для поиска
-    """
-    root = tree_widget.invisibleRootItem()
-    item = find_tree_item(root, key)
-    if item is not None:
-        tree_widget.setCurrentItem(item)

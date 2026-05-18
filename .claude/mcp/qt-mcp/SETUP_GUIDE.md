@@ -177,6 +177,72 @@ screenshot убедись, что виджет реально показывае
 итерации vs. слепое написание тестов.
 ```
 
+## Project-specific quirks (Inspector_bottles)
+
+Проверено на стеке проекта 2026-05-18 при baseline Phase 2 (`refactor/tab-template`).
+
+### Bash vs PowerShell в Claude Code
+
+Гайд выше написан под PowerShell (`$env:QT_MCP_PROBE = "1"`). Но **Claude Code на
+Windows исполняет background-задачи через bash**, не через PowerShell. Поэтому
+для запуска из агента используй POSIX-синтаксис, а пути — со слэшем:
+
+```bash
+# ✅ из агента (Bash background-задача)
+QT_MCP_PROBE=1 python multiprocess_prototype/run.py
+
+# ❌ из агента — упадёт с "command not found"
+$env:QT_MCP_PROBE = "1"; python multiprocess_prototype\run.py
+```
+
+PowerShell-синтаксис работает только в интерактивном PowerShell-терминале вне Claude Code.
+
+### Probe врезается в GUI-процесс, не в main launcher
+
+`multiprocess_prototype/run.py` — это **launcher** (re-exec в правильный venv).
+Настоящее `QApplication` создаётся в дочернем процессе `gui` в
+[`multiprocess_prototype/frontend/app.py:run_gui()`](../../../multiprocess_prototype/frontend/app.py).
+Probe врезается **там**, не в `run.py`. Логирование — `process._log_info(...)`,
+видно в логе процесса `gui`:
+
+```
+[INFO] [gui] startup: qt-mcp probe installed on localhost:9142
+```
+
+Эта строка — единственный надёжный сигнал что probe поднялся. Если её нет —
+probe не активна (qt-mcp вернёт `Failed to connect to probe at localhost:9142`).
+
+### Время старта ~10-15 секунд
+
+Прототип на холодном старте: re-exec venv → загрузка фреймворка → discovery
+плагинов → запуск `SystemLauncher` → форк `ProcessManagerProcess` → запуск
+дочерних процессов (включая `gui`) → создание `QApplication` → активация
+probe. Из агента после `run_in_background=true` подожди **минимум 12 секунд**
+(`sleep 12` в Bash), потом дёргай `qt_list_windows`. Меньше — probe ещё
+не успеет открыть порт.
+
+### MainWindow без title
+
+`qt_list_windows` возвращает `MainWindow ""` — у главного окна не выставлен
+title (это нормально, не баг qt-mcp). При нескольких окнах различай по
+`objectName` через `qt_find_widget(object_name="AppHeader")`.
+
+### Завершение через `process_lifecycle.shutdown_chain`
+
+Прототип запускает менеджеры процессов и логгеры. Просто `kill` или
+`Ctrl+C` оставляет stale `SharedMemory` сегменты на Windows
+(см. ADR-030, ADR-031). Корректный путь — закрыть MainWindow (что эмитит
+`shutdown_chain`), либо в крайнем случае убить весь process tree (вместе
+с дочерними `gui`, `pilot`, `simulator` процессами).
+
+### Совместная работа с pytest-qt
+
+Probe и pytest-qt **не пересекаются**: probe запускается в production-инстансе
+`QApplication` (через env-флаг), pytest-qt создаёт свой `QApplication` в тесте.
+Если запускать `pytest` под `QT_MCP_PROBE=1`, probe попробует встать в каждом
+qtbot-фикстуре → порт 9142 будет занят на втором тесте. Поэтому правило:
+**`QT_MCP_PROBE=1` только для ручного/agent smoke, не для pytest**.
+
 ## Ссылки
 
 - Репо: https://github.com/0xCarbon/qt-mcp

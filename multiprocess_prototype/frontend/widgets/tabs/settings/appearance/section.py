@@ -21,17 +21,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .presenter import AppearancePresenter
 from .themes_table import ThemesTable
 from .vars_editor import VarsEditor
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.frontend_module.managers.theme_manager import (
-        ThemeManager,
-    )
-    from multiprocess_prototype.frontend.managers.theme_presets_manager import (
-        ThemePresetsManager,
-    )
+    from .presenter import AppearancePresenter
 
 
 class AppearanceSection(QWidget):
@@ -39,29 +33,17 @@ class AppearanceSection(QWidget):
 
     Реализует SectionProtocol и AppearanceView -- presenter вызывает view-методы
     напрямую на объекте секции.
+
+    Presenter инжектируется через set_presenter() после создания секции,
+    что позволяет тестам подсунуть mock через SectionSpec.presenter_factory.
     """
 
-    def __init__(
-        self,
-        theme_manager: "ThemeManager",
-        presets_manager: "ThemePresetsManager",
-        parent: QWidget | None = None,
-    ) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # Presenter инжектируется позже через set_presenter() — до этого None
+        self._presenter: "AppearancePresenter | None" = None
         self._init_buttons()
         self._build_ui()
-        self._presenter = AppearancePresenter(
-            view=self,
-            theme_manager=theme_manager,
-            presets_manager=presets_manager,
-        )
-        # Подключить сигналы виджетов к presenter
-        self._themes_table.theme_selected.connect(self._presenter.on_theme_selected)
-        self._vars_editor.var_changed.connect(self._presenter.on_cell_value_changed)
-        self._vars_editor.category_changed.connect(self._on_category_changed)
-
-        # Инициализация: загрузить темы
-        self._presenter.initialize()
 
     # ------------------------------------------------------------------
     # SectionProtocol
@@ -180,14 +162,10 @@ class AppearanceSection(QWidget):
         """Создать все кнопки action-колонки."""
         self._btn_apply = QPushButton("Применить тему")
         self._btn_apply.setProperty("role", "primary")
-        self._btn_apply.setToolTip(
-            "Применить текущую тему с редактированными переменными"
-        )
+        self._btn_apply.setToolTip("Применить текущую тему с редактированными переменными")
 
         self._btn_save = QPushButton("Сохранить")
-        self._btn_save.setToolTip(
-            "Сохранить текущие переменные в выбранную custom-тему"
-        )
+        self._btn_save.setToolTip("Сохранить текущие переменные в выбранную custom-тему")
 
         self._btn_refresh = QPushButton("Обновить")
         self._btn_refresh.setToolTip("Перечитать список тем и переменные с диска")
@@ -208,9 +186,7 @@ class AppearanceSection(QWidget):
         self._btn_defaults.setToolTip("Загрузить дефолтные значения выбранной темы")
 
         self._btn_revert = QPushButton("Отменить")
-        self._btn_revert.setToolTip(
-            "Откатить изменения к последнему сохранённому состоянию"
-        )
+        self._btn_revert.setToolTip("Откатить изменения к последнему сохранённому состоянию")
 
         # Сигналы кнопок -> слоты
         self._btn_apply.clicked.connect(self._on_apply)
@@ -223,36 +199,85 @@ class AppearanceSection(QWidget):
         self._btn_defaults.clicked.connect(self._on_reset_defaults)
         self._btn_revert.clicked.connect(self._on_revert)
 
+    def set_presenter(self, presenter: "AppearancePresenter") -> None:
+        """Инжектировать presenter в секцию.
+
+        Подключает сигналы виджетов к presenter'у и вызывает initialize()
+        для загрузки таблицы тем.
+
+        ВАЖНО: вызывается из BaseTreeNavTab._apply_presenter_factory ПЕРЕД
+        _connect_section_events.
+        """
+        self._presenter = presenter
+        # Подключить сигналы виджетов к presenter через слоты-врапперы
+        self._themes_table.theme_selected.connect(self._on_theme_selected)
+        self._vars_editor.var_changed.connect(self._on_var_changed)
+        self._vars_editor.category_changed.connect(self._on_category_changed)
+        # Инициализация: загрузить темы
+        self._presenter.initialize()
+
     # ------------------------------------------------------------------
-    # Слоты кнопок -> делегация в presenter
+    # Слоты кнопок -> делегация в presenter (с guard на None)
     # ------------------------------------------------------------------
 
     def _on_apply(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.apply()
 
     def _on_save(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.save()
 
     def _on_refresh(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.refresh()
 
     def _on_add(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.add_theme()
 
     def _on_copy(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.copy_theme()
 
     def _on_rename(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.rename_theme()
 
     def _on_delete(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.delete_theme()
 
     def _on_reset_defaults(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.reset_defaults()
 
     def _on_revert(self) -> None:
+        if self._presenter is None:
+            return
         self._presenter.revert()
+
+    # ------------------------------------------------------------------
+    # Слоты-врапперы для сигналов виджетов -> presenter
+    # ------------------------------------------------------------------
+
+    def _on_theme_selected(self, name: str, is_default: bool) -> None:
+        """Враппер сигнала theme_selected → presenter.on_theme_selected."""
+        if self._presenter is not None:
+            self._presenter.on_theme_selected(name, is_default)
+
+    def _on_var_changed(self, name: str, value: str) -> None:
+        """Враппер сигнала var_changed → presenter.on_cell_value_changed."""
+        if self._presenter is not None:
+            self._presenter.on_cell_value_changed(name, value)
 
     # ------------------------------------------------------------------
     # Внутренние обработчики
@@ -260,6 +285,8 @@ class AppearanceSection(QWidget):
 
     def _on_category_changed(self, category: str, subcategory: str) -> None:
         """Маршрутизация сигнала category_changed в presenter."""
+        if self._presenter is None:
+            return
         if subcategory:
             self._presenter.on_subcategory_selected(category, subcategory)
         else:
