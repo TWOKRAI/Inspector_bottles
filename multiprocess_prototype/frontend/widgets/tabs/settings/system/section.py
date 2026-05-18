@@ -82,9 +82,8 @@ class SystemSection(QWidget):
             category_titles=_SECTION_TITLES,
             form_ctx=None,
             scrollable=False,
+            show_toggle=False,
         )
-        # Скрыть встроенный тумблер RegisterView (используем внешний)
-        self._register_view._toggle.hide()
 
         # Сохранять режим в prefs при смене
         self._register_view.mode_changed.connect(lambda mode_str: self._prefs.set("settings.view_mode", mode_str))

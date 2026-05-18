@@ -270,7 +270,7 @@ Phase 7: Очистка техдолгов + документация
 - [ ] **3.3** Сигналы наружу: `section_changed(key: str)`,
       `section_dirty_changed(key: str, dirty: bool)`,
       `section_data_saved(key: str, data: dict)`.
-- [ ] **3.4** Параметр `show_toggle: bool = True` в `RegisterView.__init__`
+- [x] **3.4** Параметр `show_toggle: bool = True` в `RegisterView.__init__`
       (замена `system/section.py:87` хака с `_toggle.hide()`).
 - [ ] **3.5** **Acceptance:**
       - [ ] `BaseTreeNavTab` не импортирует ничего app-specific
