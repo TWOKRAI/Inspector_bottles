@@ -53,6 +53,7 @@ dev = [
     "mypy>=1.15", # gradual type checking
     "bandit>=1.9", # security scanning (OWASP basics)
     "pre-commit>=4.6.0",
+    "qt-mcp",
 ]
 diagrams = [
     "pylint>=3.3",      # pyreverse для UML-диаграмм классов
@@ -72,6 +73,7 @@ diagrams = [
 # NodeGraphQt-PySide6 — fork от C3RV1, не публикуется на PyPI.
 # Sha-pin для воспроизводимости (последний коммит на master 2023-01-08).
 NodeGraphQt = { git = "https://github.com/C3RV1/NodeGraphQt-PySide6.git", rev = "7fa60017" }
+qt-mcp = { git = "https://github.com/0xCarbon/qt-mcp.git" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
