@@ -7,6 +7,7 @@
 callbacks_base, placeholder_utils.
 """
 
+from .base_tree_nav_tab import BaseTreeNavTab
 from .binding_context import RegisterBindingContext
 from .current_page_stack import CurrentPageStack
 from .callbacks_base import (
@@ -19,12 +20,14 @@ from .panel_tab_base import PanelTabBase
 from .mvp_pattern import TabPresenterBase, TabViewProtocol
 from .section_protocol import SectionProtocol, SectionWithEvents
 from .section_spec import SectionSpec
+from .tab_layout_protocol import TabLayoutProtocol
 from .tree_nav_presenter import TreeNavTabPresenter
 from .placeholder_utils import create_registers_placeholder
 from .tab_widget import BaseTab, TabWidget
 
 __all__ = [
     "BaseTab",
+    "BaseTreeNavTab",
     "CurrentPageStack",
     "MvpTabBase",
     "PanelTabBase",
@@ -32,6 +35,7 @@ __all__ = [
     "SectionProtocol",
     "SectionSpec",
     "SectionWithEvents",
+    "TabLayoutProtocol",
     "TabPresenterBase",
     "TabViewProtocol",
     "TabWidget",

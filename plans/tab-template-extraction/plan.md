@@ -252,7 +252,7 @@ Phase 7: Очистка техдолгов + документация
       - `register_inner_scrolls` остаётся, но **дополнительно** вызывается
         автоматически на `installEventFilter(ChildAdded)` корневого виджета
         контент-стека
-- [ ] **3.2** Создать `framework/.../widgets/tabs/base_tree_nav_tab.py`:
+- [x] **3.2** Создать `framework/.../widgets/tabs/base_tree_nav_tab.py`:
       `BaseTreeNavTab(QWidget)` — реализует `TreeNavTabView` Protocol.
       Принимает:
       ```python
@@ -267,14 +267,14 @@ Phase 7: Очистка техдолгов + документация
       ```
       Делает циклом по `sections` всё, что сейчас делают 5
       `add_X_page()` методов.
-- [ ] **3.3** Сигналы наружу: `section_changed(key: str)`,
+- [x] **3.3** Сигналы наружу: `section_changed(key: str)`,
       `section_dirty_changed(key: str, dirty: bool)`,
       `section_data_saved(key: str, data: dict)`.
 - [x] **3.4** Параметр `show_toggle: bool = True` в `RegisterView.__init__`
       (замена `system/section.py:87` хака с `_toggle.hide()`).
-- [ ] **3.5** **Acceptance:**
-      - [ ] `BaseTreeNavTab` не импортирует ничего app-specific
-      - [ ] Smoke-тест: создать `BaseTreeNavTab` с 2 фейковыми секциями,
+- [x] **3.5** **Acceptance:**
+      - [x] `BaseTreeNavTab` не импортирует ничего app-specific
+      - [x] Smoke-тест: создать `BaseTreeNavTab` с 2 фейковыми секциями,
             переключение работает
 
 ## Phase 4 — Миграция SettingsTab → BaseTreeNavTab
