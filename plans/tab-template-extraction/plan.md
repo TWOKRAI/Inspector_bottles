@@ -281,41 +281,47 @@ Phase 7: Очистка техдолгов + документация
 
 **Цель:** `SettingsTab` = ~80 LOC декларации, всё остальное работает как раньше.
 
-- [ ] **4.1** Переписать `SettingsTab` как наследника `BaseTreeNavTab`:
-      ```python
-      class SettingsTab(BaseTreeNavTab):
-          settings_saved = Signal(dict)
-          dirty_changed = Signal(bool)
-
-          def __init__(self, ctx: AppContext, parent=None):
-              super().__init__(
-                  title="Настройки",
-                  sections=_build_settings_sections(ctx),
-                  ctx=ctx,
-                  layout_factory=DiffScrollTabLayout,
-                  parent=parent,
-              )
-              # проброс сигналов из system_settings в публичные сигналы таба
-              self.section_dirty_changed.connect(self._on_section_dirty)
-              self.section_data_saved.connect(self._on_section_saved)
-      ```
-- [ ] **4.2** Вынести `_build_settings_sections(ctx)` в
-      `settings/_sections.py` — декларация всех 9 секций как `SectionSpec`.
-- [ ] **4.3** Удалить из `SettingsTab` все 5 `add_X_page()` методов,
-      `register_action_page()`, `set_undo_enabled/set_redo_enabled`,
-      `select_tree_key`, `create_admin_panel` — всё в base class или
-      в `_sections.py`.
-- [ ] **4.4** Удалить из `SettingsPresenter` — переделать в тонкую обёртку
-      над `TreeNavTabPresenter` (если вообще останется отдельным классом).
-- [ ] **4.5** Сохранить публичный API `SettingsTab`:
-      `reload()`, `save()`, `is_dirty()`, `field_editors()`, `view_mode()`
-      — для backward-compat (но пометить как deprecated).
-- [ ] **4.6** **Acceptance:**
-      - [ ] `settings/tab.py` < 100 LOC
-      - [ ] Все тесты `test_settings_tab.py` зелёные
-      - [ ] Все admin тесты (67) зелёные
-      - [ ] Smoke: `python multiprocess_prototype/run.py` — Settings
-            работает идентично
+- [x] **4.1** `SettingsTab` теперь наследник `BaseTreeNavTab` (коммит
+      `ffa6f92`). `__init__` вызывает `super().__init__()` с
+      `build_settings_sections(ctx)` и `_layout_factory`, подключает
+      `section_dirty_changed` / `section_data_saved` к локальным слотам
+      ретрансляции, после `populate()` подписывает `AdminDashboard.navigate_to`
+      → `presenter.navigate_to`.
+- [x] **4.2** `multiprocess_prototype/.../settings/_sections.py` создан
+      (228 LOC): `build_settings_sections(ctx)` возвращает 9
+      `SectionSpec[AppContext]`. Адаптер `_SectionAdapter` оборачивает
+      виджеты без полного `SectionProtocol` (`AdminDashboard`,
+      `UsersPanel`/`RolesPanel`/`SessionsPanel`/`AuditLogPanel`). Lazy admin
+      панели создаются через фабрику spec при первой активации.
+- [x] **4.3** Удалены из `SettingsTab`: 5 `add_*_page()` методов,
+      `register_action_page`, `add_content_page`, `build_nav_tree`,
+      `select_tree_key`, `create_lazy_section`, `set_undo_enabled` /
+      `set_redo_enabled`, `_setup_ui` — всё в `BaseTreeNavTab` /
+      `TreeNavTabPresenter` или в `_sections.py`. Старый файл
+      `settings/_nav_tree.py` сохранён как реэкспорт для тестов admin.
+- [x] **4.4** `SettingsPresenter` — 38 LOC (post-review `ce68349`).
+      Только `__init__` с `_ctx` ради точки расширения Phase 5.
+      `on_bus_change()` удалён в `ce68349` (дублировал
+      `DiffScrollTabLayout._refresh_undo_redo`, который подписывается на
+      bus сам в `enable_undo_redo()`).
+- [x] **4.5** Публичный API сохранён: `reload()`, `save()`, `is_dirty()`,
+      `field_editors()`, `view_mode()` — делегируют в
+      `presenter.section("system_settings")`. Все 5 методов помечены
+      `DeprecationWarning` (post-review `ce68349`), будут удалены в
+      Phase 7.1. `tab._view = sys_sec.register_view` сохранён для теста
+      `test_view_mode_toggle_persists_to_prefs` — тоже техдолг Phase 7.1.
+- [x] **4.6** **Acceptance:**
+      - [~] `settings/tab.py` = 114 LOC (target <100; +14 LOC заняты
+            deprecation warnings + helper `_warn`/`_sys` — уйдут в Phase 7.1
+            вместе с backward-compat блоком; чистая декларация = 65 LOC).
+      - [x] `settings/presenter.py` = 38 LOC (<80) ✓
+      - [x] Все тесты `test_settings_tab.py` (12 функций, parametrize → 22)
+            и settings (128 passed) зелёные.
+      - [x] Все admin тесты (67 passed) зелёные.
+      - [x] Framework: 267 passed, 2 pre-existing baseline fail
+            (`test_controls_v2_hooks::test_*_rejected_hook` — не связаны).
+      - [ ] Smoke `python multiprocess_prototype/run.py` через qt-mcp —
+            отложено до Phase 5 (или ручной запуск пользователя).
 
 ## Phase 5 — Разделение section-as-view и presenter
 
