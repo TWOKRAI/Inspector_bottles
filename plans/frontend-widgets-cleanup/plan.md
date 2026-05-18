@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-cleanup
 - **Дата:** 2026-05-14
-- **Статус:** IN_PROGRESS (Phase 0+1 done, Phase 2.0+2.0.5 done, Phase 2.1+ → rollout-finish.md)
+- **Статус:** DONE (2026-05-18, все треки rollout-finish.md закрыты: Track 0+1+2+3+4 → коммиты `6c2eeb1`, `f5634ec`, `206d35b`; combo-finish — `82b87d4`+`7fd6fc6`; remaining: dual-mode FW presenter cleanup — отдельный план)
 - **Ветка:** refactor/frontend-widgets-cleanup (Phase 0-2.0.5), `refactor/widgets-rollout-finish` (Phase 2.1+)
 - **Автор:** Director + User
 

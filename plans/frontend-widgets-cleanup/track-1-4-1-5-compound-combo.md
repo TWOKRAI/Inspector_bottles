@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-track-1-4-1-5
 - **Дата:** 2026-05-15
-- **Статус:** DRAFT
+- **Статус:** DONE (2026-05-18, реализация в `82b87d4` (combo align) + `6c2eeb1` + `f5634ec`: form_ctx в CompoundNumericControl, новый ComboControl, `_build_color3` + `_build_literal_binding_aware`, удалён ColorTripletWidget, `test_compound_form_ctx.py` + `test_combo_form_ctx.py`)
 - **Ветка:** refactor/frontend-widgets-cleanup
 - **Родительский план:** [`rollout-finish.md`](rollout-finish.md), секции «Track 1» (1.4, 1.5) и «Track 2» (2.3, 2.4)
 - **Верхнеуровневая карта:** [`plan.md`](plan.md)

@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-track-1-1-spinbox
 - **Дата:** 2026-05-15
-- **Статус:** DRAFT
+- **Статус:** DONE (2026-05-18, реализация в `6c2eeb1` + `f5634ec`: form_ctx kwarg в SpinBoxControl/NumericPresenter, `_build_int_binding_aware` в factory, `test_spinbox_form_ctx.py`)
 - **Ветка:** refactor/frontend-widgets-cleanup
 - **Родительский план:** [`rollout-finish.md`](rollout-finish.md), секции «Track 1» (1.1) и «Track 2» (2.1)
 - **Верхнеуровневая карта:** [`plan.md`](plan.md)

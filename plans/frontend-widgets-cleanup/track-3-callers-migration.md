@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-track-3-callers
 - **Дата:** 2026-05-16
-- **Статус:** DRAFT
+- **Статус:** DONE (2026-05-18, реализация в `f5634ec`: form_ctx прокинут через form_builder/register_view/field_editor, callers PluginsTab/ServicesTab/InspectorPanel/SystemSection/yaml_io передают form_ctx)
 - **Ветка:** refactor/frontend-widgets-cleanup
 - **Родительский план:** [`rollout-finish.md`](rollout-finish.md), секция «Track 3» (строки 179-203)
 - **Верхнеуровневая карта:** [`plan.md`](plan.md)

@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-track-2-str-path
 - **Дата:** 2026-05-16
-- **Статус:** DRAFT
+- **Статус:** DONE (2026-05-18, реализация в `f5634ec`: thin binding wrappers `_build_str_short`/`_build_str_long`/`_build_path` через `form_ctx.write`, `test_str_short_form_ctx.py` + `test_str_long_form_ctx.py` + `test_path_form_ctx.py`)
 - **Ветка:** refactor/frontend-widgets-cleanup
 - **Родительский план:** [`rollout-finish.md`](rollout-finish.md), секция «Track 2» (строки 163-175)
 - **Верхнеуровневая карта:** [`plan.md`](plan.md)

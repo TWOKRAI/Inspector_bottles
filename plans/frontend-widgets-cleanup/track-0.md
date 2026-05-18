@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-track-0
 - **Дата:** 2026-05-15
-- **Статус:** DONE (реализация готова, ожидает финального коммита пользователя)
+- **Статус:** DONE (2026-05-18, реализация в `6c2eeb1` feat(framework): form_ctx kwarg во всех FW control facades — integration tests + docstring + README)
 - **Ветка:** refactor/frontend-widgets-cleanup
 - **Родительский план:** [`rollout-finish.md`](rollout-finish.md), секция «Track 0»
 - **Верхнеуровневая карта:** [`plan.md`](plan.md)

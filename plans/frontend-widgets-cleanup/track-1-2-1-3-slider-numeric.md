@@ -2,7 +2,7 @@
 
 - **Slug:** frontend-widgets-track-1-2-1-3
 - **Дата:** 2026-05-15
-- **Статус:** DRAFT
+- **Статус:** DONE (2026-05-18, реализация в `6c2eeb1` + `f5634ec`: form_ctx в SliderControl/NumericControl, binding-aware `_build_int`/`_build_float`, `test_slider_form_ctx.py` + `test_numeric_form_ctx.py`)
 - **Ветка:** refactor/frontend-widgets-cleanup
 - **Родительский план:** [`rollout-finish.md`](rollout-finish.md), секции «Track 1» (1.2, 1.3) и «Track 2» (2.2)
 - **Верхнеуровневая карта:** [`plan.md`](plan.md)
