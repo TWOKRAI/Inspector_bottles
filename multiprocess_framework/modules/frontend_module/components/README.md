@@ -19,6 +19,13 @@ components/
 │   ├── presenter.py   # CheckboxPresenter
 │   ├── facade.py      # CheckboxControl
 │   └── defaults.py    # checkbox_left, checkbox_right
+├── combo/             # Выпадающий список — см. [combo/README.md](combo/README.md)
+│   ├── config.py      # ComboViewConfig
+│   ├── view.py        # ComboView → IControlView[str]
+│   ├── presenter.py   # ComboPresenter
+│   ├── facade.py      # ComboControl
+│   ├── defaults.py    # combo defaults
+│   └── registers.py   # комбо-регистры
 ├── numeric/           # Фасад числовых: Group(Label + Slider/SpinBox)
 ├── group/             # LabeledNumericGroupView + labeled_numeric_factory (сборка Label+value)
 ├── compound/          # Составные: BGR, mixed layouts
@@ -36,6 +43,7 @@ flowchart TB
         Slider[slider/ SliderValueView]
         Spinbox[spinbox/ SpinBoxValueView]
         Checkbox[checkbox/ CheckboxView]
+        Combo[combo/ ComboView]
     end
 
     subgraph Группы
@@ -45,6 +53,7 @@ flowchart TB
     subgraph Фасады
         Numeric[numeric/ NumericControl]
         CheckboxControl[checkbox/]
+        ComboControl[combo/ ComboControl]
         Compound[compound/ CompoundControl]
     end
 
@@ -53,8 +62,10 @@ flowchart TB
     Spinbox --> Group
     Group --> Numeric
     Checkbox --> CheckboxControl
+    Combo --> ComboControl
     Numeric --> Compound
     CheckboxControl --> Compound
+    ComboControl --> Compound
 ```
 
 ---
@@ -89,6 +100,13 @@ flowchart TB
 │   │ CheckboxView│───────────────────────────────────▶│ CompoundControl │         │
 │   │ CheckboxCtrl│                                    │ ControlFactory  │         │
 │   └─────────────┘                                    └─────────────────┘         │
+│                                                                                  │
+│   ┌──────────────┐                                                               │
+│   │  combo/      │  Выпадающий список                                            │
+│   │  ComboView   │───────────────────────────────────┐                           │
+│   │  ComboControl│                                   │                           │
+│   └──────────────┘                                   │                           │
+│                                                       ▼ (входит в Compound)      │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -195,6 +213,7 @@ flowchart TB
 | **slider/** | Слайдер | SliderConfig | SliderValueView | — |
 | **spinbox/** | Спинбокс | SpinBoxConfig | SpinBoxValueView | SpinBoxControl |
 | **checkbox/** | **Чекбокс** | CheckboxViewConfig | CheckboxView | CheckboxControl |
+| **combo/** | **Выпадающий список** | ComboViewConfig | ComboView | ComboControl |
 | **numeric/** | Числовой | NumericViewConfig | Group(Label+Value) | NumericControl |
 | **group/** | Группа | GroupConfig, LabeledNumericGroupConfig | LabeledNumericGroupView | — |
 | **compound/** | Составной | CompoundNumericConfig, CompoundControlConfig | — | CompoundControl, ControlFactory |
@@ -248,7 +267,25 @@ result = NumericControl.create(
 layout.addWidget(result.widget)
 ```
 
-### 4. BGR-слайдеры (составной)
+### 4. Выпадающий список
+
+```python
+from frontend_module.components import (
+    ComboControl,
+    BindingConfig,
+    ComboViewConfig,
+)
+
+result = ComboControl.create(
+    registers_manager,
+    BindingConfig(register_name="renderer", field_name="mode"),
+    ComboViewConfig(),
+    items=["auto", "manual", "off"],
+)
+layout.addWidget(result.widget)
+```
+
+### 5. BGR-слайдеры (составной)
 
 ```python
 from frontend_module.components import (
@@ -267,7 +304,7 @@ result = CompoundNumericControl.create(rm, cfg)
 layout.addWidget(result.widget)
 ```
 
-### 5. Дефолты и merge_config
+### 6. Дефолты и merge_config
 
 ```python
 from frontend_module.components import (
@@ -280,7 +317,7 @@ config = merge_config(bgr_slider_default, NumericViewConfig(label="Канал B"
 result = NumericControl.create(rm, binding, config)
 ```
 
-### 6. Группа с отдельными конфигами (Slider/SpinBox)
+### 7. Группа с отдельными конфигами (Slider/SpinBox)
 
 ```python
 from frontend_module.components import (
@@ -326,6 +363,6 @@ cfg = LabeledNumericGroupConfig(
 
 ## Рекомендации
 
-- **Добавить новый value-контрол** (например, ComboBox): создать папку `combobox/` с config, view, defaults; добавить в `group/` и `numeric/facade`.
+- **Добавить новый value-контрол** (например, DatePicker, TimePicker): создать папку с config, view, defaults; добавить в `group/` и `numeric/facade`. ComboBox уже реализован в `combo/`.
 - **Добавить новый тип контрола** (например, ColorPicker): папка `color_picker/` по аналогии с `checkbox/` (config, view, presenter, facade).
 - **Кастомная группа**: использовать `GroupConfig(children=[...])` с произвольным списком конфигов.

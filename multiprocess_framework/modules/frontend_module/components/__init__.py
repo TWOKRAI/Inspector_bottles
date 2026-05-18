@@ -9,6 +9,7 @@
 **Presenter** (traits + порты ``IFieldBinding`` / ``IRegisterPort``) + **Facade** (``*.create``).
 См. ``ARCHITECTURE.md`` и ``base/README.md``.
 """
+
 from multiprocess_framework.modules.frontend_module.components.base.config import (
     BaseControlConfig,
     BindingConfig,
@@ -30,6 +31,16 @@ from multiprocess_framework.modules.frontend_module.components.checkbox import (
     CheckboxViewConfig,
     checkbox_left,
     checkbox_right,
+)
+from multiprocess_framework.modules.frontend_module.components.combo import (
+    ComboControl,
+    ComboControlResult,
+    ComboPresenter,
+    ComboView,
+    ComboViewConfig,
+    ComboRegister,
+    combo_default,
+    combo_with_placeholder,
 )
 from multiprocess_framework.modules.frontend_module.components.compound import (
     CompoundControl,
@@ -101,6 +112,14 @@ __all__ = [
     "bgr_slider_default",
     "checkbox_left",
     "checkbox_right",
+    "ComboControl",
+    "ComboControlResult",
+    "ComboPresenter",
+    "ComboView",
+    "ComboViewConfig",
+    "ComboRegister",
+    "combo_default",
+    "combo_with_placeholder",
     "LabelConfig",
     "SliderConfig",
     "SliderControl",

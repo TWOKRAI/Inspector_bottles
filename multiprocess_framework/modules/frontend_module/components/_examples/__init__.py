@@ -7,6 +7,7 @@
 Паттерн адаптера: ``coerce_ui`` (3 ветки: None / экземпляр / dict) и ``BindingConfig`` из
 ``BINDING_*`` на классе регистра — без отдельного ``adapter_common``. См. README.md.
 """
+
 from multiprocess_framework.modules.frontend_module.components._examples.checkbox import (
     EXAMPLE_CHECKBOX_ROUTING,
     ExampleCheckboxUiConfig,
@@ -15,6 +16,15 @@ from multiprocess_framework.modules.frontend_module.components._examples.checkbo
     checkbox_view_config_from_ui,
     coerce_ui as checkbox_coerce_ui,
     create_example_checkbox,
+)
+from multiprocess_framework.modules.frontend_module.components._examples.combo import (
+    EXAMPLE_COMBO_ROUTING,
+    ExampleComboUiConfig,
+    ExampleComboValueRegister,
+    coerce_ui as combo_coerce_ui,
+    combo_binding,
+    combo_view_config_from_ui,
+    create_example_combo,
 )
 from multiprocess_framework.modules.frontend_module.components._examples.compound_mixed import (
     EXAMPLE_MIXED_ROUTING,
@@ -77,6 +87,7 @@ from multiprocess_framework.modules.frontend_module.components._examples.spinbox
 __all__ = [
     "EXAMPLE_BGR_ROUTING",
     "EXAMPLE_CHECKBOX_ROUTING",
+    "EXAMPLE_COMBO_ROUTING",
     "EXAMPLE_MIXED_ROUTING",
     "EXAMPLE_NUMERIC_ROUTING",
     "EXAMPLE_SLIDER_ROUTING",
@@ -84,6 +95,8 @@ __all__ = [
     "ExampleBgrTripletRegister",
     "ExampleCheckboxUiConfig",
     "ExampleCheckboxValueRegister",
+    "ExampleComboUiConfig",
+    "ExampleComboValueRegister",
     "ExampleCompoundMixedUiConfig",
     "ExampleCompoundNumericUiConfig",
     "ExampleGroupRowUiConfig",
@@ -101,24 +114,28 @@ __all__ = [
     "checkbox_binding",
     "checkbox_coerce_ui",
     "checkbox_view_config_from_ui",
+    "combo_binding",
+    "combo_coerce_ui",
+    "combo_view_config_from_ui",
     "compound_mixed_coerce_ui",
     "compound_numeric_binding",
     "compound_numeric_coerce_ui",
-    "create_example_group_row",
-    "create_example_numeric",
-    "compound_numeric_view_config_from_ui",
     "create_example_checkbox",
+    "create_example_combo",
     "create_example_compound_mixed",
     "create_example_compound_numeric",
+    "create_example_group_row",
     "create_example_label",
+    "create_example_numeric",
     "create_example_slider",
     "create_example_spinbox",
+    "compound_numeric_view_config_from_ui",
     "group_row_coerce_ui",
     "label_coerce_ui",
+    "label_config_from_ui",
     "numeric_binding",
     "numeric_coerce_ui",
     "numeric_view_config_from_ui",
-    "label_config_from_ui",
     "slider_binding",
     "slider_coerce_ui",
     "slider_view_config_from_ui",
