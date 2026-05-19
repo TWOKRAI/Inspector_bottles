@@ -1,0 +1,46 @@
+# Graphify ignore — формат как .gitignore
+# См. docs/tools/graphify.md §6.1
+
+# === Legacy snapshots (не индексировать) ===
+multiprocess_prototype_backup/
+services_backup/
+
+# === Тесты (плоская структура, граф бесполезен) ===
+**/tests/
+**/test_*.py
+**/*_test.py
+.pytest_cache/
+
+# === Кэши и сгенерированное ===
+**/__pycache__/
+**/*.pyc
+.coverage
+docs/diagrams/classes/*.puml
+docs/diagrams/classes/per-module/*.puml
+docs/diagrams/deps/*.svg
+docs/diagrams/deps/per-module/*.svg
+
+# === Виртуальные окружения ===
+.venv/
+venv/
+env/
+
+# === Сам Graphify ===
+graphify-out/
+.graphify_*
+
+# === Бинарники и медиа ===
+logs/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.mov
+*.mp3
+*.wav
+
+# === Артефакты сторонних инструментов ===
+milvus-docker/
+.sentrux/baseline.json
