@@ -77,14 +77,14 @@ re-export в прото-`__init__.py` для обратной совместим
    (импортируют из `multiprocess_prototype.frontend.bridge`, что теперь re-export).
 
 **Acceptance criteria:**
-- [ ] `python -c "from multiprocess_framework.modules.frontend_module.bridge import WireConfig, CommandSender, WireStatusMonitor"` без ошибок
-- [ ] `python -c "from multiprocess_prototype.frontend.bridge import WireConfig, CommandSender"` без ошибок (re-export работает)
-- [ ] `python -c "from multiprocess_prototype.frontend.bridge.command_sender import CommandSender"` без ошибок (прямой импорт из подмодуля работает)
-- [ ] `grep -c "^class\|^def " multiprocess_prototype/frontend/bridge/command_sender.py` возвращает `0` (только re-export, без определений)
-- [ ] То же проверить для остальных 5 shim-файлов: `wire_protocol.py`, `diff_engine.py`, `system_commands.py`, `wire_monitor.py`, `command_validator.py`
-- [ ] `python scripts/run_framework_tests.py` зелёный (все прото-тесты bridge/)
-- [ ] `mcp__sentrux__check_rules` — 0 новых нарушений boundary `framework → prototype`
-- [ ] `make check` (ruff + pyright + bandit) зелёный
+- [x] `python -c "from multiprocess_framework.modules.frontend_module.bridge import WireConfig, CommandSender, WireStatusMonitor"` без ошибок (commit `8e892ca`)
+- [x] `python -c "from multiprocess_prototype.frontend.bridge import WireConfig, CommandSender"` без ошибок (re-export работает)
+- [x] `python -c "from multiprocess_prototype.frontend.bridge.command_sender import CommandSender"` без ошибок (прямой импорт из подмодуля работает)
+- [x] `grep -c "^class\|^def " multiprocess_prototype/frontend/bridge/command_sender.py` возвращает `0` (только re-export, без определений)
+- [x] То же для остальных 5 shim-файлов: `wire_protocol.py`, `diff_engine.py`, `system_commands.py`, `wire_monitor.py`, `command_validator.py`
+- [x] `python scripts/run_framework_tests.py` зелёный (2755 passed после A1)
+- [x] `mcp__sentrux__check_rules` — 0 новых нарушений boundary `framework → prototype`
+- [x] `make check` (ruff + pyright + bandit) зелёный
 
 **Out of scope:**
 - Не переносить `command_catalog.py`, `topology_bridge.py` (зависимости от прото)
@@ -152,10 +152,10 @@ re-export в прото-`__init__.py`.
    StatusIndicator` продолжает работать.
 
 **Acceptance criteria:**
-- [ ] `python -c "from multiprocess_framework.modules.frontend_module.components.primitives import StatusIndicator, EntityCard, CrudTable, MasterDetailLayout"` без ошибок
-- [ ] `python -c "from multiprocess_prototype.frontend.widgets.primitives import StatusIndicator"` без ошибок (re-export)
-- [ ] `make check` зелёный
-- [ ] Существующие тесты `test_primitives_batch1.py`, `test_primitives_batch2.py` зелёные
+- [x] `python -c "from multiprocess_framework.modules.frontend_module.components.primitives import StatusIndicator, EntityCard, CrudTable, MasterDetailLayout"` без ошибок (commit `0d54ebf`)
+- [x] `python -c "from multiprocess_prototype.frontend.widgets.primitives import StatusIndicator"` без ошибок (re-export)
+- [x] `make check` зелёный
+- [x] Существующие тесты `test_primitives_batch1.py`, `test_primitives_batch2.py` — 61/61 зелёные
 
 **Out of scope:**
 - Не переносить ActionToolbar, SlotSelector, SectionedForm, SideNavLayout, StandardTabLayout,
@@ -267,9 +267,9 @@ re-export в прото-`__init__.py`.
 3. Не включать в README внутренние (`_*`) классы.
 
 **Acceptance criteria:**
-- [ ] Все 6 файлов созданы
-- [ ] Каждый README ≤ 30 строк
-- [ ] `make check` не ломается (ruff не проверяет .md)
+- [x] Все 6 файлов созданы (commit `cb9d9d0`: application/, widgets/, managers/, core/, schemas/, configs/)
+- [x] Каждый README ≤ 30 строк (макс. 25)
+- [x] `make check` не ломается
 
 **Out of scope:**
 - Не создавать README для `bridge/` (создан в A1) и `components/` (уже есть)
@@ -311,10 +311,10 @@ STATUS.md.
 3. Формат тестов: `pytest`, given/when/then комментарии.
 
 **Acceptance criteria:**
-- [ ] `pytest multiprocess_framework/modules/frontend_module/tests/test_frontend_manager.py -v` — все тесты зелёные
-- [ ] Coverage `application/frontend_manager.py` ≥ 60% (`pytest --cov`)
-- [ ] Нет импортов из `multiprocess_prototype` в тестовом файле
-- [ ] `make check` зелёный
+- [x] `pytest multiprocess_framework/modules/frontend_module/tests/test_frontend_manager.py -v` — 37/37 зелёные (commit `d7e7597`)
+- [x] Coverage `application/frontend_manager.py` ≥ 60% — **91%**
+- [x] Нет импортов из `multiprocess_prototype` в тестовом файле
+- [x] `make check` зелёный
 
 **Out of scope:**
 - Не тестировать `WindowManager`, `ThemeManager` здесь (это C2/C3)
@@ -358,9 +358,9 @@ fullscreen, access_level, cursor. Сейчас 0 тестов.
 3. Формат: `pytest`, given/when/then.
 
 **Acceptance criteria:**
-- [ ] `pytest multiprocess_framework/modules/frontend_module/tests/test_window_manager_unit.py -v` — зелёный
-- [ ] Coverage `application/window_manager.py` ≥ 60%
-- [ ] `make check` зелёный
+- [x] `pytest multiprocess_framework/modules/frontend_module/tests/test_window_manager_unit.py -v` — 37/37 зелёные (commit `c39c538`)
+- [x] Coverage `application/window_manager.py` ≥ 60% — **78%**
+- [x] `make check` зелёный
 
 **Out of scope:**
 - Не тестировать `WindowRegistry` — уже есть `test_window_registry.py`
@@ -405,9 +405,9 @@ fullscreen, access_level, cursor. Сейчас 0 тестов.
 3. Формат: `pytest`, given/when/then.
 
 **Acceptance criteria:**
-- [ ] `pytest multiprocess_framework/modules/frontend_module/tests/test_theme_manager.py -v` — зелёный
-- [ ] Coverage `managers/theme_manager.py` ≥ 60%
-- [ ] `make check` зелёный
+- [x] `pytest multiprocess_framework/modules/frontend_module/tests/test_theme_manager.py -v` — 30/30 зелёные (commit `b57d572`)
+- [x] Coverage `managers/theme_manager.py` ≥ 60% — **84%**
+- [x] `make check` зелёный
 
 **Out of scope:**
 - Не тестировать реальный рендеринг Qt (только применение QSS)
@@ -451,13 +451,13 @@ fullscreen, access_level, cursor. Сейчас 0 тестов.
 
 См. также общий блок в [`plan.md`](plan.md#фаза-1a).
 
-- [ ] A1: `from multiprocess_framework.modules.frontend_module.bridge import WireConfig, CommandSender, WireStatusMonitor, CommandValidator` работает
-- [ ] A1: `from multiprocess_prototype.frontend.bridge import WireConfig` работает (re-export)
-- [ ] A2: `from multiprocess_framework.modules.frontend_module.components.primitives import StatusIndicator, EntityCard, CrudTable, MasterDetailLayout` работает
-- [ ] A2: `from multiprocess_prototype.frontend.widgets.primitives import StatusIndicator` работает (re-export)
+- [x] A1: `from multiprocess_framework.modules.frontend_module.bridge import WireConfig, CommandSender, WireStatusMonitor, CommandValidator` работает (`8e892ca`)
+- [x] A1: `from multiprocess_prototype.frontend.bridge import WireConfig` работает (re-export)
+- [x] A2: `from multiprocess_framework.modules.frontend_module.components.primitives import StatusIndicator, EntityCard, CrudTable, MasterDetailLayout` работает (`0d54ebf`)
+- [x] A2: `from multiprocess_prototype.frontend.widgets.primitives import StatusIndicator` работает (re-export)
 - [x] B2: `entity_tree_widget.py` уменьшился на 25-35 строк, дублирование устранено (554 → 529) `084ab48`
-- [ ] B3: 6 README созданы, каждый ≤30 строк
-- [ ] C1+C2+C3: Coverage ≥60% по каждому из трёх менеджеров
-- [ ] Smoke-test: 6 мигрированных вкладок (recipes, processes, services, plugins, pipeline, displays) открываются без ошибок
-- [ ] `make gate` зелёный
-- [ ] `mcp__sentrux__check_rules` — 0 новых нарушений
+- [x] B3: 6 README созданы, каждый ≤30 строк (`cb9d9d0`)
+- [x] C1+C2+C3: Coverage ≥60% — FrontendManager 91% (`d7e7597`), WindowManager 78% (`c39c538`), ThemeManager 84% (`b57d572`)
+- [ ] Smoke-test: 6 мигрированных вкладок (recipes, processes, services, plugins, pipeline, displays) — **отложен до после мержа** (рек-ция reviewer)
+- [x] `make gate` зелёный (2859 passed, 8 skipped; ruff/pyright/bandit clean; sentrux: 9 правил, 0 нарушений)
+- [x] `mcp__sentrux__check_rules` — 0 новых нарушений (quality 7159, baseline 7161, дельта в пределах шума)
