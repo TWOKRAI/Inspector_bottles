@@ -206,10 +206,10 @@ re-export в прото-`__init__.py`.
    `tests/test_base_tree_nav_tab.py` или аналог).
 
 **Acceptance criteria:**
-- [ ] `entity_tree_widget.py` уменьшился на 25-35 строк
-- [ ] `_build_parent_row` и `_build_child_row` вызывают `_build_level_row` (нет дублирования)
-- [ ] `python scripts/run_framework_tests.py` зелёный
-- [ ] `make check` зелёный
+- [x] `entity_tree_widget.py` уменьшился на 25-35 строк (554 → 529, -25 строк) `084ab48`
+- [x] `_build_parent_row` и `_build_child_row` вызывают `_build_level_row` (нет дублирования) `084ab48`
+- [x] `python scripts/run_framework_tests.py` зелёный (2755 passed, 8 skipped) `084ab48`
+- [x] `make check` зелёный (ruff + ruff-format + bandit passed) `084ab48`
 
 **Out of scope:**
 - Не менять публичный API `entity_tree_widget.py`
@@ -455,7 +455,7 @@ fullscreen, access_level, cursor. Сейчас 0 тестов.
 - [ ] A1: `from multiprocess_prototype.frontend.bridge import WireConfig` работает (re-export)
 - [ ] A2: `from multiprocess_framework.modules.frontend_module.components.primitives import StatusIndicator, EntityCard, CrudTable, MasterDetailLayout` работает
 - [ ] A2: `from multiprocess_prototype.frontend.widgets.primitives import StatusIndicator` работает (re-export)
-- [ ] B2: `entity_tree_widget.py` уменьшился на 25-35 строк, дублирование устранено
+- [x] B2: `entity_tree_widget.py` уменьшился на 25-35 строк, дублирование устранено (554 → 529) `084ab48`
 - [ ] B3: 6 README созданы, каждый ≤30 строк
 - [ ] C1+C2+C3: Coverage ≥60% по каждому из трёх менеджеров
 - [ ] Smoke-test: 6 мигрированных вкладок (recipes, processes, services, plugins, pipeline, displays) открываются без ошибок
