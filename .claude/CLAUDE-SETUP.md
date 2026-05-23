@@ -1,32 +1,36 @@
 # Установка `.claude/` в новый проект
 
-Эта папка — самодостаточная конфигурация Claude Code (агенты, команды, режимы, хуки, MCP-серверы). При копировании в новый проект всё разворачивается одной командой.
+Эта папка — самодостаточная конфигурация Claude Code (агенты, команды, режимы, хуки, MCP-серверы, шаблоны). При копировании в новый проект всё разворачивается одной командой.
+
+> **Хочешь сначала понять, что в системе и кто за что отвечает?** Читай [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — 8 слоёв (memory / modes / agents / commands / skills / hooks / MCP / observability), таблица ownership, coverage matrix, tool routing, gap analysis. Это карта системы как единого организма.
 
 ---
 
 ## Быстрый путь (рекомендуется)
 
+Используй `claude-kit` CLI (поставляется как Python-пакет; bundled template
+лежит в `src/claude_kit/template/`):
+
 ```bash
-# 1. Скопировать .claude и корневой CLAUDE.md в новый проект
-cp -r /path/to/Inspector_bottles/.claude /path/to/new-project/
-cp /path/to/Inspector_bottles/CLAUDE.md /path/to/new-project/
-
-# 2. Запустить bootstrap MCP-инфраструктуры (кросс-платформа)
-cd /path/to/new-project
-python3 .claude/mcp/bootstrap.py    # macOS / Linux
-# python .claude/mcp/bootstrap.py   # Windows
-
-# 3. Если Context7 ещё не настроен на этой машине
-npx -y ctx7 setup --claude
-
-# 4. Перезапустить Claude Code
+claude-kit new ~/Project_code/my_app \
+  --name "My App" \
+  --description "Short description"
+cd ~/Project_code/my_app
+make gate                                # должен быть зелёным
 ```
 
-`bootstrap.sh` сам:
-- проверит `brew` и поставит **sentrux** если нет
-- проверит **ollama** и подскажет `ollama pull` если модель не загружена
-- проверит **node/npx** (нужен для Context7)
-- скопирует `.claude/mcp/mcp.template.json` → `./.mcp.json`
+Что делает `claude-kit new` — подробно в [`BOOTSTRAP.md`](BOOTSTRAP.md) → "Part 2".
+
+Если MCP-инфраструктура (qex/sentrux/context7) нужна:
+```bash
+# .mcp.json уже создан claude-kit new. Для добавления компонента: claude-kit add <component>
+npx -y ctx7 setup --claude              # один раз на машину, OAuth
+```
+
+Перезапусти Claude Code и проверь:
+```
+> /mcp
+```
 
 Подробности — в [`mcp/README.md`](mcp/README.md).
 
@@ -38,27 +42,23 @@ Claude Code читает в порядке:
 
 1. `~/.claude/CLAUDE.md` — глобальные настройки (на машине)
 2. `./CLAUDE.md` — настройки проекта **(основная точка)**
-3. `./.claude/CLAUDE.md` — расширения (modes, language policy)
+3. `./.claude/CLAUDE.md` — расширения (modes, layout map, language policy)
 4. `./CLAUDE.local.md` — локальные (gitignored)
 
-Корневой `CLAUDE.md` — single source of truth для проектного контекста (стек, пути, правила). `.claude/CLAUDE.md` — описывает сам KnowledgeOS workflow и должен оставаться универсальным между проектами.
+Корневой `CLAUDE.md` — single source of truth для проектного контекста (стек, пути, правила). `.claude/CLAUDE.md` — описывает workflow, plan-driven чейн, memory override; должен оставаться универсальным между проектами.
 
 ---
 
-## Проверка работы
+## Проверка работы после bootstrap
 
-После рестарта Claude Code:
-
+```bash
+make help            # доступные цели
+make gate            # lint + типы + тесты
+git log --oneline    # должен быть один commit "chore(seed): bootstrap …"
+git config core.hooksPath || ls .git/hooks/commit-msg   # commit-msg hook установлен
 ```
-> /mcp
-```
 
-Должны быть зелёные:
-- `qex` — семантический поиск
-- `sentrux` — архитектурный анализ
-- `context7` — документация библиотек
-
-Если красное — см. troubleshooting в [`mcp/README.md`](mcp/README.md).
+Все зелёные → ready to develop.
 
 ---
 
@@ -66,96 +66,88 @@ Claude Code читает в порядке:
 
 ```
 .claude/
-├── CLAUDE.md              # Workflow обеих команд + language policy
+├── CLAUDE.md              # Project layout map + memory override + commands index
 ├── CLAUDE-SETUP.md        # Этот файл
+├── BOOTSTRAP.md           # Полный гайд установки (зависимости + per-project + optional)
 ├── README.md              # Навигация по папке
+├── STACK.md               # Toolchain с обоснованиями
+├── COMMIT_GUIDE.md        # Полный гайд по commit-формату (canonical)
 ├── settings.json          # Tools allowlist + хуки + statusLine
 ├── settings.local.json    # Локальный override (gitignored)
+├── commit-layers.txt      # Whitelist для Layer trailer (пустой = Layer optional)
 │
 ├── agents/                # Sub-агенты
 │   ├── _template.md       # Шаблон для /hire
-│   └── company/           # IT-Команда (developer, reviewer, manager, ...)
+│   └── company/           # IT-Команда (manager, developer, reviewer, …)
 │
-├── commands/              # Slash-команды (/plan, /implement, /test, ...)
-├── modes/                 # Режимы (dev.md, spec.md)
-├── hooks/                 # Pre/Post-tool хуки
-├── skills/                # Skills для агентов
-├── platforms/             # Legacy platform-specific конфиги
+├── commands/              # Slash-команды (/plan, /implement, /memory:*, …)
+│   ├── dev/               # /plan, /implement, /test, /ship, /pipeline, …
+│   ├── infra/             # /cold-start, /clean-cache, /diagrams, /run-proto
+│   ├── memory/            # /memory:init, /memory:status, /memory:search
+│   ├── quality/           # /qex-*, /sentrux-*, /code-stats, /test-ratio, …
+│   ├── spec/              # /spec, /spec-sync
+│   └── team/              # /team, /hire, /handoff, /docs, /wrap-up
 │
-└── mcp/                   # MCP-инфраструктура (кросс-платформа)
-    ├── README.md          # Документация по MCP
-    ├── mcp.template.json  # Эталон проектного .mcp.json
-    ├── qex-launcher.py    # Кросс-платформенный launcher для qex (macOS/Linux/Windows)
-    └── bootstrap.py       # Автоустановка для нового проекта (Python = везде работает)
+├── memory/                # Долговременная память (MEMORY.md + per-memory .md)
+├── modes/                 # Режимы (dev.md, spec.md, _stack.md)
+├── hooks/                 # Pre/Post-tool хуки (core/ + python/)
+├── skills/                # Skills для агентов (пустая по дизайну)
+├── platforms/             # Платформо-зависимые конфиги (если нужны)
+├── templates/             # То, что разворачивается `claude-kit new`:
+│   ├── pyproject.template.toml, Makefile.template, …
+│   ├── claude-md.template.md (root CLAUDE.md)
+│   ├── PLAN.template.md (для Manager)
+│   ├── commit-layers.template.txt
+│   ├── scripts/{validate_commit,code_stats,test_ratio,clean_cache}/ (→ scripts/)
+│   └── plans-readme.template.md, docs-sessions-readme.template.md
+│
+├── mcp/                   # MCP-инфраструктура (кросс-платформа)
+│   ├── README.md          # Документация по MCP
+│   ├── qex-launcher.py    # Кросс-платформенный launcher для qex
+│   ├── qex/               # Core: семантический поиск
+│   ├── sentrux/           # Core: архитектурный health-gate
+│   ├── context7/          # Core: документация библиотек
+│   ├── qt-mcp/            # Opt-in: PyQt/PySide runtime inspection
+│   ├── graphify/          # Opt-in: knowledge graph + HTML viz
+│   ├── serena/            # Opt-in: LSP-symbol операции
+│   ├── codegraph/         # Opt-in: function call graph + impact
+│   ├── github/            # Opt-in: official GitHub MCP (Issues/PR/Actions)
+│   └── ast-grep/          # Opt-in: structural search + rewrite (codemods)
+│
+└── observability/         # Opt-in: OTel-telemetry, ccusage, замер MCP-маржи
+    ├── README.md
+    └── SETUP_GUIDE.md
+```
+
+Полное описание ответственности каждого инструмента — в [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md).
+
+---
+
+## Ручная установка (без `claude-kit new`)
+
+Минимум — в [`BOOTSTRAP.md`](BOOTSTRAP.md) → "Part 3. Per-project setup (the manual path)".
+
+Локальные настройки (опционально):
+```bash
+echo "CLAUDE.local.md" >> .gitignore
+echo ".claude/settings.local.json" >> .gitignore
+echo ".claude/CLAUDE.local.md" >> .gitignore
 ```
 
 ---
 
-## Ручная установка (если bootstrap не подходит)
+## Обновление seed → проект (sync-back)
 
-### 1. CLAUDE.md в корне
+По мере работы в проекте улучшаешь `.claude/` (правишь команды, агентов, шаблоны). Чтобы вернуть улучшения в канонический seed:
+
 ```bash
-cp /path/to/source/CLAUDE.md /path/to/new-project/CLAUDE.md
+claude-kit sync-back .                   # из cwd проекта
+claude-kit sync-back /path/to/project --dry-run --verbose
 ```
 
-Адаптируй под новый проект — пути, стек, специфические правила.
-
-### 2. .claude/ целиком
-```bash
-cp -r /path/to/source/.claude /path/to/new-project/
-chmod +x /path/to/new-project/.claude/hooks/*.sh
-chmod +x /path/to/new-project/.claude/mcp/bootstrap.py
-```
-
-(На Windows `chmod` не нужен — Python запускается явно через `python`.)
-
-### 3. .mcp.json в корне
-```bash
-cp /path/to/new-project/.claude/mcp/mcp.template.json /path/to/new-project/.mcp.json
-```
-
-### 4. Зависимости MCP-серверов
-
-**sentrux** (архитектурный анализ):
-```bash
-brew install sentrux/tap/sentrux                                    # macOS
-curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh   # Linux
-# Windows: https://github.com/sentrux/sentrux/releases
-```
-
-**ollama** (для qex):
-```bash
-brew install ollama                                # macOS
-curl -fsSL https://ollama.com/install.sh | sh      # Linux
-# Windows: https://ollama.com/download
-ollama pull qwen3-embedding:8b                     # macOS / Linux
-# ollama pull qwen3-embedding:4b                   # Windows
-```
-
-**Context7** (актуальные доки, user-level один раз на машину):
-```bash
-npx -y ctx7 setup --claude   # OAuth, free tier
-```
-
-### 5. Локальные настройки (опционально)
-```bash
-echo "CLAUDE.local.md" >> /path/to/new-project/.gitignore
-echo ".claude/settings.local.json" >> /path/to/new-project/.gitignore
-echo ".claude/CLAUDE.local.md" >> /path/to/new-project/.gitignore
-```
-
----
-
-## Обновление
-
-По мере работы:
-
-1. Если Claude делает ошибку → «Обнови CLAUDE.md, чтобы это не повторилось»
-2. Регулярно сокращай `CLAUDE.md` — идеал 60–100 строк
-3. Убирай то, что Claude уже делает правильно без подсказок
-4. Новый агент → `/hire <роль>` (создаст по `agents/_template.md`)
-5. Новая slash-команда → файл в `commands/`
-6. Новый MCP-сервер → блок в `mcp.template.json` + строка проверки в `bootstrap.sh`
+`claude-kit sync-back` исключает project-specific вещи (`.DS_Store`,
+`__pycache__`, `memory/`, `settings.local.json`). Делает tar.gz backup
+перед записью в canonical (`--apply` для реального применения).
 
 ---
 

@@ -1,4 +1,5 @@
 {
+  "_comment": "Конфигурация для standalone dev-проектов (Python). База + sentrux/qex/serena MCP, dev-toolchain.",
   "permissions": {
     "allow": [
       "Read",
@@ -7,72 +8,125 @@
       "Glob",
       "Grep",
       "Agent",
-
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(which *)",
+      "Bash(cat *.md)",
+      "Bash(cat *.toml)",
+      "Bash(cat *.json)",
+      "Bash(echo *)",
+      "Bash(mkdir -p *)",
       "Bash(ruff *)",
       "Bash(pytest *)",
-      "Bash(mypy *)",
+      "Bash(pyright *)",
       "Bash(python *)",
       "Bash(python3 *)",
       "Bash(uv run *)",
       "Bash(uv sync*)",
-
+      "Bash(uv lock*)",
+      "Bash(pip list*)",
+      "Bash(pip show *)",
+      "Bash(cd * && python -m pytest*)",
+      "Bash(make *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
       "Bash(git show*)",
+      "Bash(git blame*)",
       "Bash(git add *)",
-      "Bash(git commit *)",
+      "Bash(git commit -m *)",
+      "Bash(git commit -am *)",
       "Bash(git branch*)",
-      "Bash(git checkout *)",
-      "Bash(git stash*)",
-      "Bash(git merge *)",
-
+      "Bash(git checkout -b *)",
+      "Bash(git checkout *.md)",
+      "Bash(git stash list*)",
+      "Bash(git fetch*)",
       "Bash(ollama *)",
       "Bash(curl http://localhost:11434*)",
       "Bash(curl -s http://localhost:11434*)",
       "Bash(curl -s --max-time * http://localhost:11434*)",
-
       "Bash(sentrux *)",
-      "Bash(qex *)",
-
-      "Bash(mkdir -p *)",
-      "Bash(ls *)",
-      "Bash(find *)",
-      "Bash(cat *.toml)",
-      "Bash(cat *.md)",
-      "Bash(cat *.json)",
-      "Bash(which *)",
-      "Bash(wc *)",
-      "Bash(grep *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(cp *)",
-      "Bash(echo *)",
-      "Bash(chmod +x*)",
-
-      "Bash(cd * && python -m pytest *)",
-      "Bash(cd * && python -m pytest*)",
-      "Bash(pip install *)",
-      "Bash(pip list*)",
-      "Bash(pip show *)",
-      "Bash(uv add *)",
-      "Bash(uv pip install *)"
+      "Bash(qex *)"
     ],
     "ask": [
       "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git reset *)",
+      "Bash(git revert *)",
+      "Bash(git stash *)",
+      "Bash(git tag *)",
+      "Bash(git remote *)",
       "Bash(rm *)",
       "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(chmod *)",
       "Bash(curl *)",
-      "Bash(wget *)"
+      "Bash(wget *)",
+      "Bash(uv add *)",
+      "Bash(uv remove *)",
+      "Bash(uv pip install *)",
+      "Bash(pip install *)",
+      "Bash(pip uninstall *)",
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(npx *)",
+      "Bash(pnpm *)",
+      "Bash(yarn *)",
+      "Bash(brew install *)",
+      "Bash(apt *)",
+      "Bash(winget *)",
+      "Bash(docker *)"
     ],
     "deny": [
       "Bash(sudo *)",
       "Bash(chmod 777 *)",
+      "Bash(chmod -R 777 *)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git push --no-verify *)",
+      "Bash(git commit --no-verify *)",
+      "Bash(git commit -n *)",
       "Bash(git reset --hard *)",
-      "Bash(git clean -fd *)",
-      "Bash(git clean -f *)"
+      "Bash(git checkout -- *)",
+      "Bash(git restore --source*)",
+      "Bash(git clean -fd*)",
+      "Bash(git clean -f*)",
+      "Bash(git clean -x*)",
+      "Bash(git update-ref -d *)",
+      "Bash(git filter-branch *)",
+      "Bash(git filter-repo *)",
+      "Bash(mkfs*)",
+      "Bash(mkfs.* *)",
+      "Bash(dd if=*)",
+      "Bash(dd of=/dev/*)",
+      "Bash(:() { :|: & };:*)",
+      "Bash(curl * | sh*)",
+      "Bash(curl * | bash*)",
+      "Bash(wget * | sh*)",
+      "Bash(wget * | bash*)",
+      "Write(**/.env)",
+      "Write(**/.env.local)",
+      "Write(**/.env.*.local)",
+      "Write(**/*.pem)",
+      "Write(**/*.key)",
+      "Write(**/id_rsa)",
+      "Write(**/id_ed25519)",
+      "Edit(**/.env)",
+      "Edit(**/.env.local)",
+      "Edit(**/.env.*.local)",
+      "Edit(**/*.pem)",
+      "Edit(**/*.key)",
+      "Edit(**/id_rsa)",
+      "Edit(**/id_ed25519)"
     ]
   },
   "hooks": {
@@ -81,7 +135,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-health-check.sh",
+            "command": ".claude/hooks/core/session-health-check.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/core/session-plan-status.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/quality/mcp-health-check.sh",
             "timeout": 10
           }
         ]
@@ -93,8 +157,28 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/validate-safe-command.sh",
+            "command": ".claude/hooks/core/validate-safe-command.sh",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/core/protect-branch.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/quality/sentrux-precheck.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/core/protect-readonly.sh",
+            "timeout": 5
           }
         ]
       }
@@ -105,13 +189,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/autoformat-python.sh",
+            "command": ".claude/hooks/python/autoformat-python.sh",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": ".claude/hooks/check-imports.sh",
+            "command": ".claude/hooks/python/check-imports.sh",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/python/typecheck-changed.sh",
+            "timeout": 35
           }
         ]
       },
@@ -120,7 +209,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/filter-test-output.sh",
+            "command": ".claude/hooks/core/filter-test-output.sh",
             "timeout": 10
           }
         ]
@@ -131,8 +220,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/restore-context.sh",
+            "command": ".claude/hooks/core/restore-context.sh",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/core/session-end-daily-log.sh",
+            "timeout": 10
           }
         ]
       }

@@ -2,55 +2,43 @@
 description: Показать текущий состав команды разработки — агенты, модели, роли
 ---
 
-Покажи полный состав обеих команд KnowledgeOS.
+Покажи текущий состав агентов проекта (автообнаружение).
 
-1. Прочитай агентов Dev Company из `.claude/agents/company/`
-2. Прочитай агентов University из `.claude/agents/university/`
-3. Для каждого агента извлеки: name, model, description из frontmatter
-4. Выведи две таблицы:
+## Шаги
+
+1. Прочитай содержимое `.claude/agents/` (и всех подпапок, если есть, например `company/`, `university/`, `domain/`).
+2. Для каждого `*.md` файла извлеки frontmatter: `name`, `model`, `description`.
+3. Сгруппируй по подпапке (или по флаг-полю в frontmatter, если есть).
+4. Выведи таблицу:
 
 ```
-## IT-Компания по разработке (Dev Company)
-Агенты: .claude/agents/company/
+## Agents
 
-| # | Роль | Агент | Модель | Когда вызывать |
-|---|------|-------|--------|----------------|
-| 1 | Manager | manager | Sonnet | Декомпозиция, ТЗ (Task X.Y) |
-| 2 | TeamLead | teamlead | Opus | Senior+ implementation + express review + эскалация |
-| 3 | Developer | developer | Sonnet | Middle/Middle+ реализация |
-| 4 | Debugger | debugger | Sonnet | Диагностика FAIL, регрессий, root cause |
-| 5 | Tester | tester | Sonnet | pytest по acceptance criteria |
-| 6 | Reviewer | reviewer | Opus | Full review (10+ файлов), только читает, макс 2 итерации |
-| 7 | Docs Writer | docs-writer | Haiku | Простая документация (docstrings, README, STATUS) |
-| 8 | Tech Writer | tech-writer | Sonnet | Сложная документация (ADR, ARCHITECTURE, migrations) |
-| 9 | Spec Writer | spec-writer | Sonnet | Живое ТЗ docs/direction/ |
-
-Workflow: /plan → /implement → /test → [FAIL → /debug] → /review → /docs → /ship
-Полный автомат: /pipeline | Нанять нового: /hire
-
----
-
-## Исследовательский Университет (Science Company)
-Агенты: .claude/agents/university/
-
-| # | Роль | Агент | Модель | Когда вызывать |
-|---|------|-------|--------|----------------|
-| 1 | Transcriber | sci-transcriber | Sonnet | URL/файл → raw/videos/ |
-| 2 | Curator | sci-curator | Sonnet | 1 источник → draft wiki-статья |
-| 3 | Synthesizer | sci-synthesizer | Opus | 2+ источников → draft→reviewed |
-| 4 | Researcher | sci-researcher | Opus | Глубокий Q&A по wiki |
-| 5 | Librarian | sci-librarian | Sonnet | Единственный owner index.md, дедупликация, битые ссылки |
-| 6 | Translator | sci-translator | Sonnet/Haiku | EN→RU (роутинг по длине + содержимому) |
-| 7 | Compressor | sci-compressor | Haiku | Phase 3: wiki → wiki-llm (авто) |
-| 8 | Digest | sci-digest | Haiku | Phase 3: еженедельный дайджест по cron |
-| 9 | Searcher | sci-searcher | Sonnet | Phase 3: семантический поиск через qex MCP (per-zone индексы) |
-
-Workflow: /transcribe → /curate → /synthesize → /research → /library
-Перевод: /translate | Дайджест: /digest | Поиск: /search
+| Категория | Агент | Модель | Когда вызывать (description) |
+|-----------|-------|--------|------------------------------|
+| company   | manager     | opus   | Декомпозиция задачи, написание ТЗ |
+| company   | developer   | sonnet | Реализация по ТЗ |
+| company   | reviewer    | opus   | Код-ревью PR |
+| company   | tester      | sonnet | Тесты по acceptance criteria |
+| ...       | ...         | ...    | ... |
 ```
+
+5. В конце — общая сводка:
+   ```
+   Всего: N агентов (по категориям: company=K, university=M, ...)
+   ```
 
 ## Правила вывода
 
-- Если агент помечен `Phase 3` — укажи рядом статус готовности (`[создан]` / `[файл есть, не активирован]`)
-- В конце покажи общую сводку: `Dev: N агентов | Science: M агентов | Всего: N+M`
-- Если какого-то агента нет в папке — пометь `[отсутствует]` красным
+- Если frontmatter сломан — пометь агент `[malformed]` и продолжай.
+- Если в подпапке только `_template.md` или `README.md` — пропусти, не считай агентом.
+- Не выдумывай агентов, которых нет на диске.
+
+## Workflow подсказки
+
+Если есть стандартные `manager`, `developer`, `tester`, `reviewer` — подскажи стандартный pipeline:
+```
+/plan → /implement → /test → [FAIL → /debug] → /review → /docs → /ship
+```
+
+Нанять нового агента: `/hire <role>` (создаст по шаблону `.claude/agents/_template.md`).

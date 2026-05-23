@@ -14,7 +14,7 @@
 | «Где циклы между модулями?» | `dsm` строит Dependency Structure Matrix и подсвечивает циклы |
 | «Рефакторинг не сделал хуже?» | `session_start` фиксирует baseline → правки → `session_end` показывает дельту качества |
 | «Какие модули без тестов?» | `test_gaps` находит непокрытые узлы графа — приоритезируя те, у кого много зависимостей |
-| «`process_module` не должен импортировать `frontend_module` — как заставить CI это ловить?» | `.sentrux/rules.toml` + `sentrux check` (exit 0/1, CI-friendly) |
+| «`domain/*` не должен импортировать `adapters/*` — как заставить CI это ловить?» | `.sentrux/rules.toml` + `sentrux check` (exit 0/1, CI-friendly) |
 | «Куда мы движемся по качеству — вверх или вниз?» | `evolution` показывает тренды по времени |
 
 **sentrux ортогонален qex:**
@@ -63,13 +63,15 @@ Grammars (51 языковой парсер) скачаются при перво
 2. Переименовать в `sentrux.exe`
 3. Положить в любую директорию из PATH (например `%USERPROFILE%\.cargo\bin\` или `%USERPROFILE%\bin\`)
 
-**Вариант 3 — bootstrap (автоматическая проверка):**
+**Вариант 3 — через claude-kit:**
 
 ```bash
-python .claude/mcp/bootstrap.py
+claude-kit new        # создаёт проект и генерирует .mcp.json из manifest.yaml
+# или, для существующего проекта:
+claude-kit add sentrux
 ```
 
-Bootstrap проверит наличие sentrux и подскажет команду установки для текущей ОС.
+`claude-kit` автоматически включит sentrux в `.mcp.json` при выборе соответствующего компонента.
 
 ### Проверка установки
 
@@ -179,20 +181,23 @@ max_cycles = 0
 no_god_files = true
 
 [[layers]]
-name = "framework"
-paths = ["multiprocess_framework/*"]
+name = "domain"
+paths = ["src/*/domain/*", "src/*/core/*"]
 order = 0
 
 [[layers]]
-name = "prototype"
-paths = ["multiprocess_prototype/*"]
+name = "adapters"
+paths = ["src/*/adapters/*", "src/*/io/*"]
 order = 1
 
 [[boundaries]]
-from = "multiprocess_framework/modules/process_module/*"
-to = "multiprocess_framework/modules/frontend_module/*"
-reason = "process не зависит от frontend (см. ROUTING_GLOSSARY.md)"
+from = "src/*/domain/*"
+to = "src/*/adapters/*"
+forbidden = true
+reason = "domain не зависит от adapters (DIP)"
 ```
+
+> Это generic-пример (hexagonal/DDD). Подгони под реальные слои твоего проекта.
 
 Дальше:
 

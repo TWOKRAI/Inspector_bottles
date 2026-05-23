@@ -1,62 +1,62 @@
-# .ignore — шаблон фильтра для qex-mcp-v2
+# .ignore — фильтр для qex (read by Rust `ignore` crate, same as ripgrep).
 #
-# Этот файл читает crate `ignore` (стандарт ripgrep/qex). НЕ путать с .gitignore:
-# - .gitignore управляет тем, что коммитится в git.
-# - .ignore управляет тем, что попадает в семантический индекс qex.
-# Оба файла читаются независимо, могут пересекаться — это нормально.
-#
-# ============================================================================
-# КАК АДАПТИРОВАТЬ ПОД НОВЫЙ ПРОЕКТ
-# ============================================================================
-# 1. Скопируй этот файл в корень проекта под именем `.ignore` (с точкой).
-# 2. Отредактируй блок WHITELIST ниже: оставь только те директории, в которых
-#    ведётся АКТИВНАЯ разработка. Всё остальное автоматически исключается.
-# 3. После правок — переиндексируй:
-#      mcp__qex__clear_index(path=<проект>)
-#      mcp__qex__index_codebase(path=<проект>, force=true)
-#    Без clear_index старые файлы останутся в индексе.
+# Important: NOT the same as .gitignore.
+# - .gitignore — what gets committed to git.
+# - .ignore     — what gets into the qex semantic index.
+# Both files are read independently and may overlap — that's fine.
 #
 # ============================================================================
-# ПОЧЕМУ WHITELIST, А НЕ BLACKLIST
+# HOW TO ADAPT TO YOUR PROJECT
 # ============================================================================
-# Меньше шума в индексе → чище ранжирование BM25 → меньше ложных срабатываний
-# в топ-5. Также: если завтра появится новая папка-набросок, она автоматически
-# попадёт в исключение, тебе не нужно ничего допиливать.
+# 1. Copy this file to the project root as `.ignore` (with the leading dot).
+# 2. Edit the WHITELIST block below to keep only directories where active
+#    development happens. Everything else is excluded automatically.
+# 3. After edits — reindex:
+#      mcp__qex__clear_index(path=<project-root>)
+#      mcp__qex__index_codebase(path=<project-root>, force=true)
+#    Without clear_index, stale files remain indexed.
 #
 # ============================================================================
-# ПРИМЕР ДЛЯ ПРОЕКТА С ОДНОЙ ГЛАВНОЙ ПАПКОЙ `src/`
+# WHY WHITELIST, NOT BLACKLIST
 # ============================================================================
-# /*
-# !/src/
-# !/tests/
-# !/docs/
-
+# Less noise in the index → cleaner BM25 ranking → fewer false hits in top-5.
+# Bonus: a new scratch folder added tomorrow is auto-excluded; you don't have
+# to keep editing this file.
+#
 # ============================================================================
-# ПРИМЕР ДЛЯ ПРОЕКТА С НЕСКОЛЬКИМИ ПРОТОТИПАМИ (как Inspector_bottles)
+# DEFAULT EXAMPLE — standard src-layout Python project
 # ============================================================================
 
-# === Корень репо: исключить всё... ===
+# Root: exclude everything…
 /*
 
-# ... кроме активных директорий (ОТРЕДАКТИРУЙ под свой проект).
+# …except active development directories (EDIT for your project)
 !/src/
-# !/Inspector_prototype/
+!/tests/
+!/scripts/
+!/docs/
+!/plans/
+!/.claude/
 
-# === Внутри активной директории: ещё один уровень whitelist (опционально) ===
-# Используй, если внутри есть подпапки, которые не нужны в индексе
-# (например, legacy прототипы, наброски, архив).
+# ============================================================================
+# Alternative example — project with multiple prototypes / vendored deps
+# ============================================================================
+# /*
+# !/main_app/
+# !/legacy_prototype/
+# !/shared_lib/
 #
-# Inspector_prototype/*
-# !Inspector_prototype/multiprocess_framework/
-# !Inspector_prototype/multiprocess_prototype_v3/
-# !Inspector_prototype/scripts/
-# !Inspector_prototype/Services/
-# !Inspector_prototype/hikvision_camera_module/
+# Inside an active directory you can do a second-level whitelist:
+# main_app/*
+# !main_app/core/
+# !main_app/api/
+# !main_app/tests/
 
 # ============================================================================
-# ВНИМАНИЕ: hidden-директории (.claude/, .cursor/, и т.п.)
+# Hidden directories (.claude/, .cursor/, ...)
 # ============================================================================
-# Rust-crate `ignore` по умолчанию фильтрует скрытые файлы (как ripgrep без --hidden).
-# Даже если напишешь `!/.claude/` — это может не сработать, потому что hidden-фильтр
-# отдельный слой от gitignore-правил. Если нужно проиндексировать скрытую папку —
-# возможно, придётся переносить её содержимое в не-hidden путь.
+# Rust `ignore` crate filters hidden files by default (like ripgrep without
+# --hidden). Even `!/.claude/` may not work because the hidden-file filter is
+# a separate layer from gitignore rules. If you need to index a hidden folder
+# and it's not picked up — consider moving content under a non-hidden path,
+# or run qex with an explicit include override.

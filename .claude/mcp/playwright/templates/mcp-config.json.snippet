@@ -1,0 +1,13 @@
+{
+  "_note": "Append this block to project .mcp.json under 'mcpServers'. Choose ONE of the two snippets below. Default: Microsoft official (stable, headless Chromium). Alternative: community fork with multi-browser support out of the box. After paste — restart Claude Code window.",
+
+  "playwright_microsoft_official": {
+    "command": "npx",
+    "args": ["-y", "@playwright/mcp@latest"]
+  },
+
+  "playwright_community_fork": {
+    "command": "npx",
+    "args": ["-y", "@executeautomation/playwright-mcp-server"]
+  }
+}

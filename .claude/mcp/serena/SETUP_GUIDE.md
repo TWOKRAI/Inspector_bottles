@@ -1,158 +1,222 @@
-# Serena — полный гайд установки
+# Serena — Setup Guide
 
-## Архитектура
+Cross-platform install + per-language LSP setup. Plan for 20-30 minutes the first time.
 
-```
-Claude Code  ──MCP──▶  serena (stdio)  ──LSP──▶  pyright / python-lsp-server
-                              │
-                              └──▶  ripgrep / file ops
-```
+> Source: <https://github.com/oraios/serena>. **Status: experimental** in this seed — see "Known Issues" in [README.md](README.md) before adopting for production refactoring.
 
-Serena делает то, что обычный текстовый поиск не умеет:
-- **Точные references** — не «где встречается строка `to_dict`», а где именно вызывается метод `SchemaBase.to_dict`.
-- **Символ-level edit** — `replace_symbol_body` не сломает соседнюю функцию.
-- **Семантика типов** — учитывает scope, импорты, MRO.
+---
 
-## Зависимости
+## Prerequisites
 
-| Компонент | Зачем | Установка (Windows) |
-|-----------|-------|---------------------|
-| `uv` ≥ 0.5 | Установщик Python-инструментов | `winget install astral-sh.uv` или `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
-| Python 3.13 | runtime Serena (uv подтянет сам) | автоматически через `uv tool install -p 3.13` |
-| Node.js (опц.) | pyright LSP-сервер | `winget install OpenJS.NodeJS.LTS` (если pyright не подтянулся) |
+- Python **3.10+** on PATH.
+- `uv` installed.
+- Project has a recognizable manifest: `pyproject.toml` (Python), `tsconfig.json` (TS/JS), `Cargo.toml` (Rust), `go.mod` (Go), etc. **Without one, Serena cannot resolve imports** and references will be incomplete.
+- The Language Server for your project's primary language. See "Step 2" below.
 
-> Проект на Python 3.12, но Serena работает на собственном Python 3.13 — конфликта нет, это изолированная установка `uv tool`.
+---
 
-## Установка
+## 1. Install Serena
 
-```powershell
-# Проверь uv
-uv --version
-# Если нет — installer:
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+### macOS / Linux
 
-# Поставить Serena
-uv tool install -p 3.13 serena-agent@latest --prerelease=allow
-
-# Проверь установку
+```bash
+uv tool install serena-agent
 serena --version
-serena --help
 ```
 
-Бинарь окажется в `%USERPROFILE%\.local\bin\serena.exe` (uv добавит в PATH сам).
-
-## Активация проекта
-
-Активация **автоматическая**: при первом старте MCP-сервера Serena (`uvx ... --project .` из `.mcp.json`) она создаёт `.serena/project.yml` и `.serena/memories/` в корне проекта. Никаких ручных команд не нужно.
-
-Если хочется создать конфиг вручную до старта MCP:
+### Windows (PowerShell, Git Bash, or CMD)
 
 ```powershell
-serena project create .
-# Опционально с указанием языков и сразу индексацией:
-serena project create . --language python --index
+uv tool install serena-agent
+serena --version
 ```
 
-Папку `.serena/` нужно добавить в `.gitignore` — там кэш LSP и project-конфиг:
+> **Known issue on Windows:** if your project path contains spaces or Cyrillic characters, Serena may fail to start. Move the project to an ASCII-only path (e.g. `D:\projects\my_app`).
 
+---
+
+## 2. Install the Language Server for your project
+
+Serena does not bundle LSPs. Install the one(s) for languages you use.
+
+### Python — Pyright (recommended)
+
+```bash
+# Cross-platform via npm (Pyright is Node-based)
+npm install -g pyright
+pyright --version
 ```
-# .gitignore
-.serena/
+
+If you don't have Node, install via uv:
+```bash
+uv tool install pyright
 ```
 
-Полезные команды:
+### TypeScript / JavaScript — typescript-language-server
 
-```powershell
-serena project index .          # обновить LSP-индекс
-serena project health-check .   # диагностика проекта
-serena project --help           # все subcommands
+```bash
+npm install -g typescript typescript-language-server
 ```
 
-> ⚠️ В версии 1.3.0 нет команды `serena project activate` — конфиг создаётся через `create`, а активным проект становится при подключении MCP-сервера с флагом `--project .`.
+### Rust — rust-analyzer
 
-## Конфигурация MCP
+```bash
+# macOS / Linux
+rustup component add rust-analyzer
 
-В `.mcp.json` (или `mcp.template.json` для bootstrap-распространения) добавляется блок:
+# Windows (PowerShell)
+rustup component add rust-analyzer
+```
+
+### Go — gopls
+
+```bash
+go install golang.org/x/tools/gopls@latest
+```
+
+### Java — JDT Language Server (jdtls)
+
+Heavyweight install — see Eclipse JDT.LS docs. Consider whether Serena's value matches the setup cost.
+
+### C / C++ — clangd
+
+```bash
+# macOS
+brew install llvm
+
+# Linux (Debian/Ubuntu)
+sudo apt install clangd
+
+# Windows
+winget install LLVM.LLVM
+```
+
+---
+
+## 3. Register Serena in `.mcp.json`
+
+Copy the snippet from [templates/mcp-config.json.snippet](templates/mcp-config.json.snippet) into your project's `.mcp.json`:
 
 ```json
-"serena": {
-  "command": "uvx",
-  "args": [
-    "--from", "serena-agent",
-    "serena", "start-mcp-server",
-    "--context", "ide-assistant",
-    "--project", "."
-  ]
+{
+  "mcpServers": {
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from", "serena-agent",
+        "serena-mcp-server",
+        "--context", "claude-code",
+        "--project", "."
+      ]
+    }
+  }
 }
 ```
 
-**Параметры:**
-- `--context ide-assistant` — режим помощника IDE (минимум лишних tools).
-- `--project .` — путь проекта (резолвится относительно cwd Claude Code).
+Portable across Windows / macOS / Linux. `--project "."` resolves to the directory Claude Code was launched from.
 
-После правки `.mcp.json` — **перезапуск Claude Code** обязателен.
+---
 
-## Проверка после установки
+## 4. Smoke test (do this before relying on Serena)
 
-1. `/mcp` — Serena должна быть `connected`.
-2. В чате: «Покажи мне все references на `SchemaBase.to_dict`» — должен дёрнуть `mcp__serena__find_references`.
-3. Если LSP отвалился — `serena` падает в текстовый fallback (видно в логах).
+Restart Claude Code, then in conversation:
+
+```
+> /mcp
+```
+
+`serena` should be green. If red, see Troubleshooting.
+
+Then test on a known function in your codebase:
+
+```
+> Using Serena, find all references to the function `<pick a function you know is called from 2+ places>`.
+> Now show me the definition.
+```
+
+Expected: Serena lists exact file:line for each reference. If results are incomplete or wrong, your LSP is misconfigured — go back to step 2.
+
+---
+
+## 5. Activate in agent routing
+
+Once smoke test passes, add this to your project's `CLAUDE.md`:
+
+```markdown
+## Tool routing (this project)
+
+- Exact symbol queries (refs / definition / rename / move) → **Serena**
+- Semantic queries / fuzzy intent → **qex**
+- Architecture overview → **graphify**
+- Fallback (Serena down / language unsupported) → qex + Grep
+```
+
+---
 
 ## Troubleshooting
 
-### `uvx` не найден
+### `serena: command not found`
 
-```powershell
-where.exe uvx
-# Если пусто — uv не в PATH. Перезапусти терминал или:
-$env:Path += ";$env:USERPROFILE\.local\bin"
+- `uv tool install` puts binaries in `~/.local/bin`. Ensure it's on PATH:
+
+  ```bash
+  # macOS / Linux
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+
+  # Windows (PowerShell, persistent)
+  [Environment]::SetEnvironmentVariable("Path", "$env:Path;$env:USERPROFILE\.local\bin", "User")
+  ```
+
+### `Serena starts but returns no references`
+
+- LSP didn't resolve imports — your project is missing a manifest. Verify:
+  ```bash
+  # Python
+  ls pyproject.toml
+
+  # TS/JS
+  ls tsconfig.json package.json
+  ```
+- LSP version mismatch — update: `npm update -g pyright` (or equivalent).
+
+### `First query takes 60+ seconds`
+
+- Pyright is warming up (parsing the venv + all deps). Subsequent queries are fast. Pre-warm with a no-op query at session start.
+
+### `Crashes on Windows with "path contains invalid characters"`
+
+- Known issue. Workaround: move project to an ASCII-only path. Example:
+  ```powershell
+  Move-Item "C:\Users\<user>\Документы\my_app" "D:\projects\my_app"
+  ```
+
+### `Crashes / hangs on rust-analyzer`
+
+- rust-analyzer is RAM-hungry (1-2 GB on medium projects). Check `Get-Process rust-analyzer` (Windows) or `ps aux | grep rust-analyzer` (Unix). If swapping, exclude rust from Serena and use Cargo's built-in refs.
+
+### Want to disable temporarily
+
+Comment out the `serena` block in `.mcp.json` and restart Claude Code. Easier than `uv tool uninstall`.
+
+---
+
+## Uninstall
+
+```bash
+uv tool uninstall serena-agent
 ```
 
-### LSP не стартует для Python
+Optionally uninstall LSPs:
+- `npm uninstall -g pyright typescript-language-server`
+- `rustup component remove rust-analyzer`
+- `go clean -i golang.org/x/tools/gopls`
 
-Serena сама подтягивает `pyright` через npm/npx. Если Node нет:
+Remove the `serena` block from `.mcp.json` and restart Claude Code.
 
-```powershell
-# Поставить Node
-winget install OpenJS.NodeJS.LTS
-# Перезапустить терминал, проверить
-node --version
-npx --version
-```
+---
 
-Альтернатива — `python-lsp-server` через pip:
+## Security notes
 
-```powershell
-uv pip install --system python-lsp-server[all]
-```
-
-И в `.serena/project.yml` указать:
-
-```yaml
-language_servers:
-  python: pylsp
-```
-
-### Конфликт с qex
-
-Не возникает — это разные слои. qex отвечает на «где похоже» (BM25 + dense), Serena — на «где именно по символу» (LSP). Оба слота в `.mcp.json` нужны.
-
-### Долгий первый запуск
-
-LSP-сервер прогревается 30-60 сек на больших codebase (Inspector_bottles ~20 модулей). После прогрева — мгновенный отклик.
-
-## Использование в агентах
-
-Добавь в промпт агента (Developer / TeamLead / Reviewer) после правил про qex/sentrux:
-
-```
-**Serena-first для рефакторинга:** при rename, extract, поиске точных
-references — звать `mcp__serena__find_references` или
-`mcp__serena__replace_symbol_body` вместо Edit+Grep.
-```
-
-## Ссылки
-
-- Репо: https://github.com/oraios/serena
-- LSP-протокол: https://microsoft.github.io/language-server-protocol/
-- pyright (Python LSP): https://github.com/microsoft/pyright
+- Serena reads source files only via LSP — no execution of project code.
+- The LSP itself parses your code. Trust your LSP vendor (Pyright is from Microsoft; rust-analyzer is part of Rust project — both trustworthy).
+- Refactoring tools (rename, move) **modify files**. Verify proposed changes before accepting — Serena will edit across many files in one operation.

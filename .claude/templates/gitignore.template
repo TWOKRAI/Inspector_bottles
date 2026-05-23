@@ -1,62 +1,88 @@
-# .gitignore — шаблон для Python-проекта
-# Адаптировать: добавить специфичные для проекта правила
-
-# ── Python ──
+# ─── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 *.egg-info/
-
-# ── Virtual environments ──
-.venv/
-.env
-env/
-venv/
-ENV/
-
-# ── IDE ──
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# ── OS ──
-.DS_Store
-**/.DS_Store
-*.lnk
-
-# ── Testing ──
-.pytest_cache/
-.coverage
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-
-# ── Build ──
 build/
 dist/
-*.egg-info/
 
-# ── Logs ──
+# ─── Virtual environments / package managers ─────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ─── Secrets / config ─────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── Editors / IDE ────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+.zed/
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Test / coverage / type-check caches ──────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.pyright_cache/
+.mypy_cache/
+coverage.xml
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
-**/logs/
 
-# ── Claude Code (локальные настройки) ──
+# ─── Project data (uncomment what applies) ────────────────────────────────────
+# data/*.db
+# data/*.db-journal
+# data/*.db-wal
+# data/*.db-shm
+# data/cache/
+# data/chroma/
+# data/backups/
+
+# ─── ML / large binaries (uncomment what applies) ─────────────────────────────
+# *.pt
+# *.onnx
+# *.bin
+# *.safetensors
+# models/
+
+# ─── Claude Code local-only ───────────────────────────────────────────────────
 CLAUDE.local.md
-.claude/CLAUDE.local.md
 .claude/settings.local.json
 .claude/worktrees/
 .mcp.json
 
-# ── Сгенерированные диаграммы (регенерируются: make diagrams) ──
+# ─── MCP servers — local state / caches (per-project, never share) ────────────
+# serena LSP indexer — keeps its memory + cache here
+.serena/
+# qex semantic search — local index (also lives in ~/.qex/, but project-local
+# launches may drop a folder here)
+.qex/
+.claude/.qex/
+# sentrux — only the binary cache; rules.toml IS tracked
+.sentrux/cache/
+
+# ─── Generated artifacts (regenerate via make) ────────────────────────────────
 docs/diagrams/classes/*.puml
 docs/diagrams/deps/*.svg
-# Ручные диаграммы (.mmd, .drawio) НЕ игнорируются — они в git
-
-# ── ML / большие бинарники (если применимо) ──
-# *.pt
-# *.onnx
-# *.bin
-# **/Models/
+# Manual diagrams (.mmd, .drawio) are tracked — they're source files

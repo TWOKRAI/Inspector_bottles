@@ -1,0 +1,11 @@
+// Append this block to your project's .mcp.json under "mcpServers".
+// Portable across Windows / macOS / Linux — uses `uvx` (ships with uv).
+//
+// Prerequisite: run `graphify .` first to create `graphify-out/graph.json`.
+// Strip the comments before merging (JSON doesn't allow comments).
+{
+  "graphify": {
+    "command": "uvx",
+    "args": ["graphify-mcp", "serve", "graphify-out/graph.json"]
+  }
+}

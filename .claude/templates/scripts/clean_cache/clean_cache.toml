@@ -1,0 +1,63 @@
+# Configuration for scripts/clean_cache/clean_cache.py
+#
+# Safety: by default the script runs in dry-run mode (only shows what *would*
+# be deleted). To actually delete — pass --apply.
+#
+# Deletes:
+#   - directories whose names match delete.dirs (recursively, with contents);
+#   - files whose names match delete.files;
+# Name matching uses fnmatch (glob: *, ?, [seq]).
+
+[scan]
+root = "."
+follow_symlinks = false
+
+[delete]
+# Python and tool cache directories
+dirs = [
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    "htmlcov",
+    "*.egg-info",
+]
+# Compiled artifacts and coverage files
+files = [
+    "*.pyc",
+    "*.pyo",
+    "*.pyd",
+    ".coverage",
+    ".coverage.*",
+    "coverage.xml",
+]
+
+[exclude]
+# Directories we never descend into.
+dirs = [
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    ".qex",
+    ".sentrux",
+    "data",
+]
+# Glob patterns for relative paths (from --root) excluded from deletion.
+# Example: "vendor/**" — leave cache inside vendored deps alone.
+path_patterns = []
+
+[output]
+format = "table"   # table | json
+sort_by = "size"   # path | size | files
+sort_order = "desc"
+limit = 0
+min_size = 0
+
+[safety]
+# Slow-rails: even with --apply, refuse if root == / or root == $HOME.
+forbid_dangerous_roots = true
+# Overall timeout in seconds (safety fuse).
+timeout_sec = 120

@@ -1,250 +1,152 @@
-# qt-mcp — полный гайд установки
+# qt-mcp — Setup Guide
 
-## Архитектура
+Cross-platform install + activation. ~10 minutes end-to-end.
 
+> Source: <https://github.com/0xCarbon/qt-mcp>. If upstream instructions diverge from this guide, upstream wins.
+
+---
+
+## Prerequisites
+
+- Python 3.10+ already in your project (`uv` venv recommended).
+- Your project depends on **PyQt5** or **PySide6** (`uv add PyQt5` or `uv add PySide6`).
+- TCP port `9142` free on `localhost` (qt-mcp probe listens here).
+
+---
+
+## 1. Install qt-mcp
+
+### macOS / Linux
+
+```bash
+# Inside the project's venv (recommended):
+uv add --group dev qt-mcp
+
+# Or as a global tool:
+uv tool install qt-mcp
 ```
-Claude Code ──MCP(stdio)──▶ qt-mcp server ──TCP:9142──▶ probe inside PySide6 app
-                                                              │
-                                                              ▼
-                                                 QApplication, QWidget tree
-```
 
-Probe — это маленькая Python-библиотека, которая встраивается в **уже запущенное** PySide6-приложение и слушает JSON-RPC на `localhost:9142`. MCP-сервер (отдельный процесс, который запускает Claude Code) подключается к этому порту и транслирует команды.
-
-**Следствия:**
-- Если приложение не запущено или probe не активирован — все MCP-tools возвращают «no connection».
-- Probe **внутри** процесса, видит реальные QObject-ы и thread affinity. Это сильнее, чем внешний UI-automation.
-- Для headless-окружения (CI) нужен qt-pilot (Linux/Xvfb), не qt-mcp.
-
-## Установка пакета
-
-⚠️ **`qt-mcp` пока не опубликован на PyPI** (v0.1.0, ранний проект 0xCarbon).
-Установка идёт **из git** напрямую — uv это поддерживает:
+### Windows (Git Bash, PowerShell, or CMD)
 
 ```powershell
-cd D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles
-uv add --dev "qt-mcp @ git+https://github.com/0xCarbon/qt-mcp.git"
+# Project-scoped (recommended):
+uv add --group dev qt-mcp
+
+# Or global:
+uv tool install qt-mcp
 ```
 
-> `--dev`: probe нужен только для разработки/отладки. uv запишет git-зависимость в `pyproject.toml` с пином commit-hash в `uv.lock`.
+> If `qt-mcp` is not yet published to PyPI when you read this, fall back to:
+> `uv add --group dev "qt-mcp @ git+https://github.com/0xCarbon/qt-mcp"`
 
-Проверить:
+---
 
-```powershell
-python -c "import qt_mcp; print(qt_mcp.__version__)"
-# 0.1.0
-ls .venv/Scripts/qt-mcp.exe
-# должен существовать
-```
+## 2. Wire the probe into your app
 
-> Когда qt-mcp появится на PyPI — заменишь git-зависимость на обычную: `uv add qt-mcp`.
-
-## Интеграция probe — где врезать
-
-В проекте `run.py` — это только **launcher** (re-exec в правильный venv). Настоящая инициализация `QApplication` находится в:
-
-📍 [`multiprocess_prototype/frontend/app.py:57`](../../../multiprocess_prototype/frontend/app.py)
+Add this line **once, early** in your app's startup (before `app.exec()`):
 
 ```python
-def run_gui(process: "GuiProcess") -> None:
-    """Создать QApplication и запустить Qt event loop."""
-    app = QApplication.instance() or QApplication(sys.argv)
-    # ← вот сюда вставлять probe
+# main.py
+import qt_mcp.probe  # noqa: F401  — starts the JSON-RPC probe on :9142
 ```
 
-Минимально-инвазивный вариант — env-флаг, чтобы prod-поведение не менялось:
+The probe is a no-op if `QT_MCP_DISABLE=1` is set (use this in production builds).
 
-```python
-def run_gui(process: "GuiProcess") -> None:
-    """Создать QApplication и запустить Qt event loop."""
-    app = QApplication.instance() or QApplication(sys.argv)
+---
 
-    # qt-mcp probe — активируется только при QT_MCP_PROBE=1
-    import os
-    if os.environ.get("QT_MCP_PROBE") == "1":
-        try:
-            from qt_mcp.probe import install
-            install()  # слушает localhost:9142
-            process._log_info("qt-mcp probe installed on localhost:9142", module="startup")
-        except ImportError:
-            process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
+## 3. Register the MCP server in `.mcp.json`
 
-    # 1. Применить тему
-    apply_default_theme(app)
-    # ... остальная инициализация
-```
+Copy the snippet from [templates/mcp-config.json.snippet](templates/mcp-config.json.snippet) into your project's `.mcp.json` (created by `claude-kit new` / `claude-kit add qt-mcp`).
 
-**Куда:** строки 56-58 в `app.py`, **после** создания `QApplication`, **до** `apply_default_theme(app)`. Логирование — через `process._log_info` / `process._log_warning` (это паттерн модуля, не `print`).
-
-## Запуск с probe
-
-```powershell
-$env:QT_MCP_PROBE = "1"
-python multiprocess_prototype\run.py
-```
-
-В логе должно появиться `[qt-mcp] probe installed, listening on localhost:9142`. Это сигнал — приложение готово к интроспекции через MCP.
-
-## Конфигурация MCP
-
-В `.mcp.json`:
+The snippet uses **portable invocation** — no absolute paths to your machine:
 
 ```json
-"qt-mcp": {
-  "command": "uv",
-  "args": ["run", "qt-mcp"]
-}
-```
-
-`uv run` запускает бинарь `qt-mcp.exe` из проектного `.venv/Scripts/` (куда `uv add` положил его при установке). Без глобальной установки, без uvx-кэша — версия пакета связана с `uv.lock` проекта. После правки `.mcp.json` — перезапуск Claude Code.
-
-## Цикл работы
-
-1. В одном терминале запускаешь приложение с probe:
-   ```powershell
-   $env:QT_MCP_PROBE = "1"
-   python multiprocess_prototype\run.py
-   ```
-2. В Claude Code — `/mcp` показывает qt-mcp `connected`.
-3. Просишь агента: «Сделай screenshot главного окна и опиши widget tree». Агент дёргает `mcp__qt_mcp__screenshot` и `mcp__qt_mcp__widget_tree`.
-4. После работы — закрываешь приложение. Probe умирает вместе с процессом.
-
-## Windows-специфика
-
-| Аспект | Статус | Комментарий |
-|--------|--------|-------------|
-| Probe (intercept Qt events) | ✅ работает | Не зависит от display server |
-| Widget tree / properties | ✅ работает | Чистый Qt API |
-| Screenshot | ⚠️ зависит от Qt-настроек | На Win10 — через `QPixmap::grabWindow`. Если падает — обновить PySide6 до последней 6.10+ |
-| Multi-monitor | ⚠️ может выдавать только активный | Указать `--window-id` явно при `screenshot` |
-
-Docs репозитория явно упоминают X11/Wayland для скриншотов. На Windows это путь через Qt-абстракцию — обычно работает, но если будут артефакты, fallback — использовать `screen-view-mcp` (внешний скриншотер).
-
-## Конфликт с многопроцессным фреймворком
-
-Important: в проекте — **multiprocess архитектура** (`SystemLauncher → ProcessManagerProcess → дочерние процессы`). PySide6 GUI обычно живёт в одном из дочерних процессов (`frontend_module`).
-
-Probe слушает порт `9142` — если по какой-то причине порт занят (например, два запуска параллельно), probe упадёт. Можно переопределить порт:
-
-```python
-from qt_mcp.probe import install
-install(port=9143)
-```
-
-И в `.mcp.json` пробросить env qt-mcp серверу:
-
-```json
-"qt-mcp": {
-  "command": "uvx",
-  "args": ["qt-mcp"],
-  "env": {
-    "QT_MCP_PORT": "9143"
+{
+  "mcpServers": {
+    "qt-mcp": {
+      "command": "uv",
+      "args": ["run", "--", "python", "-m", "qt_mcp.server"],
+      "env": {
+        "QT_MCP_PROBE_HOST": "127.0.0.1",
+        "QT_MCP_PROBE_PORT": "9142"
+      }
+    }
   }
 }
 ```
 
-## Troubleshooting
+Works the same on Windows, macOS, Linux — `uv run` resolves the project venv automatically.
 
-### MCP «connected», но все tools возвращают «no probe»
+---
 
-Probe не активирован в приложении. Проверь:
-1. `$env:QT_MCP_PROBE` — должно быть `1`.
-2. Лог приложения — есть ли `[qt-mcp] probe installed`?
-3. Порт 9142 не занят: `netstat -ano | findstr :9142`.
-
-### `uv add qt-mcp` падает с conflict
-
-Версия PySide6 в `pyproject.toml` может конфликтовать с зависимостями qt-mcp. Поставь через `--no-sync`:
-
-```powershell
-uv add --dev --no-sync qt-mcp
-```
-
-И вручную проверь pyproject.toml на ограничения.
-
-### Probe ломает запуск приложения
-
-Если probe ломает что-то в твоём event loop — выключи через env (`$env:QT_MCP_PROBE = ""`) и удали import. Probe должен быть **opt-in**.
-
-## Использование в агентах
-
-Добавь в промпт Tester / Debugger:
+## 4. Restart Claude Code and verify
 
 ```
-**qt-mcp для GUI smoke:** перед написанием pytest-qt теста — запусти
-приложение с QT_MCP_PROBE=1 и через mcp__qt_mcp__widget_tree /
-screenshot убедись, что виджет реально показывается. Это экономит
-итерации vs. слепое написание тестов.
+> /mcp
 ```
 
-## Project-specific quirks (Inspector_bottles)
+Expected: `qt-mcp` is listed and green. If red, see Troubleshooting below.
 
-Проверено на стеке проекта 2026-05-18 при baseline Phase 2 (`refactor/tab-template`).
+---
 
-### Bash vs PowerShell в Claude Code
-
-Гайд выше написан под PowerShell (`$env:QT_MCP_PROBE = "1"`). Но **Claude Code на
-Windows исполняет background-задачи через bash**, не через PowerShell. Поэтому
-для запуска из агента используй POSIX-синтаксис, а пути — со слэшем:
+## 5. Run your app + use qt-mcp
 
 ```bash
-# ✅ из агента (Bash background-задача)
-QT_MCP_PROBE=1 python multiprocess_prototype/run.py
+# Start the app:
+uv run python -m your_package
 
-# ❌ из агента — упадёт с "command not found"
-$env:QT_MCP_PROBE = "1"; python multiprocess_prototype\run.py
+# In Claude Code, ask:
+# "Take a screenshot of the main window"
+# "Walk the widget tree and list all QPushButton names"
+# "Click the button with text 'Save'"
 ```
 
-PowerShell-синтаксис работает только в интерактивном PowerShell-терминале вне Claude Code.
+---
 
-### Probe врезается в GUI-процесс, не в main launcher
+## Troubleshooting
 
-`multiprocess_prototype/run.py` — это **launcher** (re-exec в правильный venv).
-Настоящее `QApplication` создаётся в дочернем процессе `gui` в
-[`multiprocess_prototype/frontend/app.py:run_gui()`](../../../multiprocess_prototype/frontend/app.py).
-Probe врезается **там**, не в `run.py`. Логирование — `process._log_info(...)`,
-видно в логе процесса `gui`:
+### `Connection refused on :9142`
 
+- App not running, or `import qt_mcp.probe` not added to startup. Verify with:
+  ```bash
+  # macOS / Linux
+  lsof -iTCP:9142 -sTCP:LISTEN
+  # Windows
+  netstat -ano | findstr :9142
+  ```
+
+### `qt-mcp tool calls hang`
+
+- Probe is blocked by Qt's event loop. Make sure `import qt_mcp.probe` happens **before** `app.exec()` and **after** `QApplication` is created.
+- Heavy synchronous work in event handlers will block the probe — same as any Qt code.
+
+### `Cannot find PyQt5 / PySide6 at runtime`
+
+- qt-mcp's probe auto-detects which binding your app uses. If you have **both** installed, set `QT_API=pyside6` or `QT_API=pyqt5` in the `env` block of `.mcp.json`.
+
+### Windows: probe fails to bind to `127.0.0.1:9142`
+
+- Antivirus / firewall sometimes blocks localhost TCP for ad-hoc Python processes. Allow `python.exe` in the firewall rule, or change port via `QT_MCP_PROBE_PORT=9143`.
+
+### Want to disable in production builds
+
+```bash
+QT_MCP_DISABLE=1 python -m your_package
 ```
-[INFO] [gui] startup: qt-mcp probe installed on localhost:9142
-```
 
-Эта строка — единственный надёжный сигнал что probe поднялся. Если её нет —
-probe не активна (qt-mcp вернёт `Failed to connect to probe at localhost:9142`).
+---
 
-### Время старта ~10-15 секунд
+## Uninstall / disable per project
 
-Прототип на холодном старте: re-exec venv → загрузка фреймворка → discovery
-плагинов → запуск `SystemLauncher` → форк `ProcessManagerProcess` → запуск
-дочерних процессов (включая `gui`) → создание `QApplication` → активация
-probe. Из агента после `run_in_background=true` подожди **минимум 12 секунд**
-(`sleep 12` в Bash), потом дёргай `qt_list_windows`. Меньше — probe ещё
-не успеет открыть порт.
+1. Remove `import qt_mcp.probe` from your app startup.
+2. Remove the `qt-mcp` block from `.mcp.json`.
+3. `uv remove qt-mcp` (project-scoped) or `uv tool uninstall qt-mcp` (global).
+4. Restart Claude Code.
 
-### MainWindow без title
+---
 
-`qt_list_windows` возвращает `MainWindow ""` — у главного окна не выставлен
-title (это нормально, не баг qt-mcp). При нескольких окнах различай по
-`objectName` через `qt_find_widget(object_name="AppHeader")`.
+## Security notes
 
-### Завершение через `process_lifecycle.shutdown_chain`
-
-Прототип запускает менеджеры процессов и логгеры. Просто `kill` или
-`Ctrl+C` оставляет stale `SharedMemory` сегменты на Windows
-(см. ADR-030, ADR-031). Корректный путь — закрыть MainWindow (что эмитит
-`shutdown_chain`), либо в крайнем случае убить весь process tree (вместе
-с дочерними `gui`, `pilot`, `simulator` процессами).
-
-### Совместная работа с pytest-qt
-
-Probe и pytest-qt **не пересекаются**: probe запускается в production-инстансе
-`QApplication` (через env-флаг), pytest-qt создаёт свой `QApplication` в тесте.
-Если запускать `pytest` под `QT_MCP_PROBE=1`, probe попробует встать в каждом
-qtbot-фикстуре → порт 9142 будет занят на втором тесте. Поэтому правило:
-**`QT_MCP_PROBE=1` только для ручного/agent smoke, не для pytest**.
-
-## Ссылки
-
-- Репо: https://github.com/0xCarbon/qt-mcp
-- Альтернатива для CI: https://github.com/neatobandit0/qt-pilot (Linux/Xvfb)
-- pytest-qt: https://pytest-qt.readthedocs.io/
+- The probe binds to `127.0.0.1` only by default — not reachable from network.
+- Property writes / event injection means the agent can **modify app state** at runtime. Don't enable in a production binary that handles user data.
+- Consider `readonly: true` mode if upstream offers it (check release notes).

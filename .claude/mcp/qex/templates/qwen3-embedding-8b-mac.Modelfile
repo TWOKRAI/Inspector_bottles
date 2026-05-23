@@ -1,0 +1,10 @@
+# GPU-оптимизированный variant qwen3-embedding:8b для macOS / Apple Silicon
+# (unified memory >= 16 GB). Применяется через setup-embedding-model.sh.
+#
+# num_ctx 4096 — unified memory тянет больший контекст без VRAM-сегрегации;
+#                4k достаточно для embedding кодовых чанков с запасом.
+# num_gpu  999 — идиома ollama: "выгрузи все слои модели на GPU" (на Apple
+#                Silicon GPU = Metal). См. *-win.Modelfile для подробностей.
+FROM qwen3-embedding:8b
+PARAMETER num_ctx 4096
+PARAMETER num_gpu 999

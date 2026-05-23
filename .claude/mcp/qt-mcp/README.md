@@ -1,108 +1,64 @@
-# qt-mcp — MCP для инспекции PySide6-приложений
+# qt-mcp — runtime inspection for PyQt/PySide GUI apps
 
-[qt-mcp](https://github.com/0xCarbon/qt-mcp) — MCP-сервер от 0xCarbon, позволяющий LLM-агенту «видеть и тыкать» запущенное PySide6-приложение: widget tree, properties, скриншоты, клики, изменение свойств, инспекция QGraphicsScene/VTK. Аналог Playwright, но для desktop Qt.
+Optional MCP module. Activate only in projects that build a PyQt5/PySide6 desktop application.
 
-## Когда звать
+> Upstream: <https://github.com/0xCarbon/qt-mcp>
 
-| Задача | Инструмент |
-|--------|-----------|
-| Юнит-тест виджета через QTest | `pytest-qt` (как было) |
-| «Покажи мне widget tree запущенного приложения» | **qt-mcp** |
-| «Сделай screenshot главного окна» | **qt-mcp** |
-| Smoke-проверка: видно ли поле, кликабельна ли кнопка | **qt-mcp** |
-| Воспроизведение пользовательского сценария | **qt-mcp** |
-| Дебаг «почему виджет не виден» (свойства, геометрия) | **qt-mcp** |
+## When to enable
 
-Цель — закрыть слепую зону между unit-тестом (pytest-qt) и ручным smoke. Агент может зайти в живой `multiprocess_prototype/run.py`, посмотреть `frontend_module` глазами, отчитаться о состоянии.
+✅ **Enable if your project:**
+- Builds a desktop GUI on PyQt5 or PySide6
+- Needs the agent to inspect a running app: widget tree, properties, QGraphicsScene, VTK/PyVista canvases
+- Wants automated UI smoke-tests via Claude (click button, type text, take screenshot)
 
-## ⚠️ Важно: требует модификации приложения
+❌ **Skip if your project:**
+- Is backend/CLI only (no Qt)
+- Uses Tkinter / Kivy / wxPython / web UI — qt-mcp won't help
+- Uses Qt but you already have a mature pytest-qt suite and don't need agent-level inspection
 
-В отличие от Serena/qex, qt-mcp работает **через probe внутри процесса PySide6**. Без активации probe — сервер не получит доступ к Qt-объектам. Два способа:
+## Architecture
 
-**Способ A — env (рекомендую):**
+Two-process design:
 
-```powershell
-$env:QT_MCP_PROBE = "1"
-python multiprocess_prototype\run.py
+```
+Your PyQt/PySide app
+        │
+        ▼ (in-process probe — qt_mcp.probe)
+  qt-mcp probe    ←──── JSON-RPC over TCP (localhost:9142) ────→  qt-mcp MCP server
+  QObject walk                                                    (separate process)
+  property R/W                                                         │
+  event injection                                                      ▼
+                                                              Claude Code (MCP client)
 ```
 
-Probe автоактивируется при старте приложения.
+- **Probe** (`qt_mcp.probe`) — imported by your app, runs in-process. Walks the QObject tree, reads/writes properties, captures widget screenshots, injects events.
+- **MCP server** — separate process. Translates MCP tool calls (`take_screenshot`, `click_widget`, `get_property`) into JSON-RPC requests on `:9142`.
+- **MCP client** — Claude Code, connected via `.mcp.json`.
 
-**Способ B — явный вызов в коде:**
+## How it differs from related tools
 
-```python
-# multiprocess_prototype/run.py (после QApplication)
-from PySide6.QtWidgets import QApplication
-app = QApplication(sys.argv)
+- **vs `pytest-qt`**: pytest-qt drives Qt from a test script; qt-mcp gives Claude **runtime, interactive** access to a long-running app.
+- **vs `qt-pilot`** (<https://github.com/neatobandit0/qt-pilot>): qt-pilot focuses on **headless** Qt testing for CI; qt-mcp is for **inspection of a running app** during development. Pick qt-pilot if you want Claude to drive a Qt test runner; pick qt-mcp if you want Claude to "look at" what your app is doing right now.
+- **vs Playwright MCP**: same idea (browser automation) but for desktop Qt instead of web.
 
-if os.environ.get("QT_MCP_PROBE"):  # включается только по env
-    from qt_mcp.probe import install
-    install()
-```
+## Status
 
-Probe слушает `localhost:9142` (JSON-RPC) — MCP-сервер коннектится к этому порту.
+- Maintained, active development as of 2026.
+- Reported to work on Windows, macOS, Linux.
+- PySide6 is primary target; PyQt5 support — verify with upstream before adopting on a PyQt5-only codebase.
 
-## Быстрый старт (Windows)
+## Setup
 
-```powershell
-# 1. Установка из git (на PyPI пока не опубликован, v0.1.0)
-uv add --dev "qt-mcp @ git+https://github.com/0xCarbon/qt-mcp.git"
+See [SETUP_GUIDE.md](SETUP_GUIDE.md) for the platform-specific install steps. Then copy the snippet from [templates/mcp-config.json.snippet](templates/mcp-config.json.snippet) into your project's `.mcp.json`.
 
-# 2. Врезать probe в frontend/app.py (см. SETUP_GUIDE.md)
+## Tool routing
 
-# 3. Запустить прототип с probe
-$env:QT_MCP_PROBE = "1"
-python multiprocess_prototype\run.py
+When qt-mcp is active in a project, prefer it over hand-written Qt introspection:
 
-# 4. В Claude Code — теперь qt-mcp видит запущенное приложение
-```
-
-## Подключение к Claude Code
-
-Уже добавлено в `.mcp.json`:
-
-```json
-"qt-mcp": {
-  "command": "uv",
-  "args": ["run", "qt-mcp"]
-}
-```
-
-`uv run` запускает бинарь `qt-mcp.exe` из проектного `.venv/Scripts/` — без глобальной установки. После правки кода + запуска приложения — перезапусти Claude Code и проверь `/mcp`.
-
-## Ключевые tools (11 шт)
-
-| Tool | Что делает |
-|------|-----------|
-| `widget_tree` | snapshot всего дерева виджетов |
-| `inspect_widget` | свойства одного виджета по id |
-| `set_property` | изменить свойство (text, geometry, etc.) |
-| `invoke_slot` | дёрнуть slot/method |
-| `click` / `type` / `key` | имитация ввода |
-| `screenshot` | PNG главного окна или виджета |
-| `list_windows` | все top-level окна |
-| `qgraphics_scene` | инспекция QGraphicsScene |
-| `vtk_scene` | поддержка VTK/PyVista |
-| `object_tree` | QObject-дерево (не только виджеты) |
-
-## Полный гайд
-
-См. [SETUP_GUIDE.md](SETUP_GUIDE.md) — интеграция probe в `run.py`, troubleshooting на Windows, конфликты с pytest-qt.
-
-## Гочи на стеке Inspector_bottles
-
-Из практики baseline-снимка Phase 2 (2026-05-18):
-
-* **Bash, не PowerShell** — Claude Code на Windows запускает background-задачи через bash. Используй `QT_MCP_PROBE=1 python multiprocess_prototype/run.py` (POSIX), не `$env:` форму.
-* **Probe врезан в `frontend/app.py:run_gui()`** — это код дочернего процесса `gui`. Сигнал успеха в логе: `[INFO] [gui] startup: qt-mcp probe installed on localhost:9142`.
-* **Жди ≥12 сек после запуска** — re-exec venv + загрузка фреймворка + старт `gui` процесса. Иначе `qt_list_windows` → `Failed to connect to probe`.
-* **`MainWindow ""` без title** — нормально, различай окна по `objectName`.
-* **НЕ под pytest** — probe и pytest-qt конфликтуют по порту 9142. Env-флаг ставь только для ручного/agent smoke.
-
-Подробности — секция «Project-specific quirks» в SETUP_GUIDE.md.
-
-## Ссылки
-
-- Репо: https://github.com/0xCarbon/qt-mcp
-- Альтернатива (Linux/CI): https://github.com/neatobandit0/qt-pilot
-- Pro-вариант от Qt Group: [Squish MCP](https://www.qt.io/blog/enhance-squish-gui-testing-with-ai-assistants-using-the-new-mcp-sample)
+| Task | Tool |
+|------|------|
+| "Find the button labelled 'Save' and click it" | qt-mcp |
+| "What's the current `enabled` state of the OK button?" | qt-mcp |
+| "Take a screenshot of the main window" | qt-mcp |
+| "Walk the widget tree and find all `QLabel` instances" | qt-mcp |
+| Refactoring widget code (rename method, move class) | qex / Serena / Grep (qt-mcp only sees runtime, not source) |

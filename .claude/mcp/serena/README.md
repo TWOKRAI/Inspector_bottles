@@ -1,70 +1,61 @@
-# Serena — LSP-based семантический MCP
+# Serena — LSP-backed symbol-level code retrieval
 
-[Serena](https://github.com/oraios/serena) — open-source MCP-сервер от Oraios, который превращает LLM в IDE-уровневого ассистента: точная навигация по символам, references, rename, безопасный refactor. Работает поверх **LSP** (Language Server Protocol).
+Optional MCP module. Adds IDE-like code intelligence to the agent: precise references, cross-file renames, symbol moves — backed by language servers, not by embeddings.
 
-## Когда звать (vs qex / sentrux)
+> Upstream: <https://github.com/oraios/serena>
+> **Status:** Experimental in this seed (see Known Issues below).
 
-| Задача | Инструмент |
-|--------|-----------|
-| «Где упоминается похожая логика?» (семантика) | `qex` |
-| «Найди **все references** на `SchemaBase.to_dict`» (точно, по символу) | **Serena** |
-| Rename / extract method через LSP | **Serena** |
-| Цикличность модулей, метрики архитектуры | `sentrux` |
-| Документация PySide6/Pydantic | `Context7` |
+## When to enable
 
-**qex отвечает «где похоже», Serena — «где именно».** Не дублируют друг друга — дополняют. Эти три плюс sentrux/Context7 закрывают разные слои анализа кода.
+✅ **Enable when:**
+- Codebase ≥ 10k LOC with many cross-file references
+- Frequent refactoring: renames, moves, "find all callers"
+- A Language Server exists and is stable for your language (Python via Pyright, TS/JS, Rust via rust-analyzer, Go via gopls)
+- You're frustrated with qex returning "similar but not exact" results when you want exact symbol references
 
-## Быстрый старт (Windows)
+❌ **Skip when:**
+- Project is < 5k LOC — overkill
+- Your language has weak LSP support (some Lua / DSL / niche stack)
+- You're already happy with qex semantic search + Grep for symbols
+- Project has no `pyproject.toml` / `tsconfig.json` / `Cargo.toml` — LSP can't resolve imports correctly
 
-```powershell
-# 1. uv должен быть установлен (см. SETUP_GUIDE.md)
-uv --version
+## How it differs from qex
 
-# 2. Поставить Serena
-uv tool install -p 3.13 serena-agent@latest --prerelease=allow
+| Question | Pick |
+|----------|------|
+| "Where is `validate_user` **defined**?" | **Serena** (LSP definition) |
+| "All callers of `HttpClient.fetch`" | **Serena** (LSP references — 100% accurate) |
+| "Rename `_normalize_id` → `normalize_user_id` everywhere" | **Serena** (atomic cross-file rename) |
+| "Find code that **does something like** error retry with backoff" | **qex** (semantic, fuzzy) |
+| "Where do we **handle** auth failures?" (no exact symbol in mind) | **qex** |
+| Architectural "what's connected to what" overview | **graphify** |
 
-# 3. Проверить
-serena --version
-```
+**Bottom line:** Serena and qex answer **different** questions. Either keep both (different commands), or A/B-test on your codebase and pick the primary.
 
-> При первом запуске MCP-сервер Serena сам создаёт `.serena/project.yml` в корне проекта (через `--project .` в `.mcp.json`). Ничего активировать вручную не нужно.
+## Known Issues (Status: experimental)
 
-## Подключение к Claude Code
+As of this seed version:
 
-Уже добавлено в `.mcp.json` (см. `mcp.template.json`):
+- **First-time LSP startup can take 30–60 seconds** (Pyright warming up). Subsequent queries are fast.
+- **Per-language LSP must be installed** — not bundled. Pyright is auto-fetched by uv tool; rust-analyzer / gopls need separate install.
+- **Reports from this team's pilot:** Serena sometimes fails to start on Windows when the project venv path contains spaces or Cyrillic characters. Workaround: place project at an ASCII-only path.
+- **No fallback** if LSP crashes — Claude won't silently degrade to qex. Be explicit in prompts which tool you want.
 
-```json
-"serena": {
-  "command": "uvx",
-  "args": [
-    "--from", "serena-agent",
-    "serena", "start-mcp-server",
-    "--context", "ide-assistant",
-    "--project", "."
-  ]
-}
-```
+The MCP module is included so a project can opt in and try it. **Run [SETUP_GUIDE.md](SETUP_GUIDE.md) end-to-end before relying on Serena for production refactoring** — verify the smoke test passes for your specific stack.
 
-После установки — перезапусти Claude Code и проверь `/mcp`. Serena должна быть зелёной.
+## Supported languages
 
-## Что внутри (ключевые tools)
+30+ via LSP. Best-tested: Python (Pyright), TypeScript / JavaScript, Rust (rust-analyzer), Go (gopls), Java (jdtls), C++ (clangd). Less mature: Kotlin, Scala, Ruby.
 
-- `find_symbol` — точный поиск символа по имени/типу
-- `find_references` — все места использования символа
-- `replace_symbol_body` — переписать тело функции/класса без regex
-- `insert_after_symbol` / `insert_before_symbol` — структурная вставка
-- `get_symbols_overview` — обзор символов файла/модуля
-- `read_file` / `list_dir` / `search_for_pattern` — навигация
-- `execute_shell_command` — обёртка над shell (с ограничениями)
+## Setup
 
-LSP-бэкенд для Python — `pyright` или `python-lsp-server` (выбирает Serena автоматически).
+See [SETUP_GUIDE.md](SETUP_GUIDE.md) for install + per-language LSP setup + smoke test.
 
-## Полный гайд
+## Tool routing (when Serena works on your project)
 
-См. [SETUP_GUIDE.md](SETUP_GUIDE.md) — установка uv, конфигурация LSP, troubleshooting на Windows.
+Add this to your project's `CLAUDE.md` if Serena passes the smoke test:
 
-## Ссылки
-
-- Репо: https://github.com/oraios/serena
-- Доки: https://github.com/oraios/serena/blob/main/README.md
-- Список clients: Claude Code, Claude Desktop, Cursor, Cline, Windsurf
+> - Запросы по точному символу (refs / definition / rename / move) → **Serena**
+> - Семантические запросы по описанию поведения → **qex**
+> - Архитектурный обзор → **graphify**
+> - При падении Serena (язык без LSP, проект без manifest) → fallback к qex + Grep

@@ -1,87 +1,86 @@
-# Makefile — шаблон для нового проекта
-# Адаптировать: переменная PACKAGE (главный пакет)
+# Makefile — single entry point for development tasks
+# Toolchain: uv + ruff + pyright + pytest
 
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-# ── Пути ──
-PYTHON := python
-PYTEST := $(PYTHON) -m pytest
-RUFF := ruff
-MYPY := mypy
-BANDIT := bandit
+PACKAGE := {{PACKAGE}}
+UV := uv
+RUN := $(UV) run
 
-PACKAGE := PROJECT_NAME                         # ← замени
-DIAGRAMS_DIR := docs/diagrams
+# ── Setup ─────────────────────────────────────────────────────────────────────
 
-# ── Быстрые проверки ──
+.PHONY: install
+install: ## Install project + dev deps + pre-commit hooks
+	$(UV) sync --group dev
+	$(RUN) pre-commit install
+	$(RUN) pre-commit install --hook-type pre-push
+
+.PHONY: update
+update: ## Update all deps to latest compatible versions
+	$(UV) sync --upgrade --group dev
+
+# ── Quality gates ─────────────────────────────────────────────────────────────
 
 .PHONY: lint
-lint: ## Ruff lint
-	$(RUFF) check .
+lint: ## Ruff lint (no fixes)
+	$(RUN) ruff check .
 
-.PHONY: lint-fix
-lint-fix: ## Ruff lint + автофикс
-	$(RUFF) check --fix .
-	$(RUFF) format .
+.PHONY: format
+format: ## Ruff format + lint fixes
+	$(RUN) ruff check --fix .
+	$(RUN) ruff format .
 
 .PHONY: typecheck
-typecheck: ## mypy (gradual)
-	$(MYPY) $(PACKAGE) --ignore-missing-imports
-
-.PHONY: security
-security: ## bandit
-	$(BANDIT) -r $(PACKAGE) -c pyproject.toml -q
+typecheck: ## Pyright type check
+	$(RUN) pyright src
 
 .PHONY: check
-check: lint typecheck security ## ruff + mypy + bandit
+check: lint typecheck ## Full static check (lint + types)
 
-# ── Тесты ──
+# ── Tests ─────────────────────────────────────────────────────────────────────
 
 .PHONY: test
-test: ## pytest с coverage
-	$(PYTEST) --cov=$(PACKAGE) --cov-report=term-missing --cov-config=pyproject.toml
+test: ## Run pytest with coverage
+	$(RUN) pytest --cov=$(PACKAGE) --cov-report=term-missing
 
 .PHONY: test-fast
-test-fast: ## pytest без coverage
-	$(PYTEST)
+test-fast: ## Run pytest without coverage
+	$(RUN) pytest
 
-# ── Quality gate ──
+.PHONY: test-xml
+test-xml: ## Run pytest with coverage.xml (Codecov / IDE / CI artifacts)
+	$(RUN) pytest --cov=$(PACKAGE) --cov-report=xml --cov-report=term
+
+.PHONY: test-watch
+test-watch: ## Re-run tests on file changes (needs pytest-watch)
+	$(RUN) ptw -- --tb=short
+
+# ── Gate ──────────────────────────────────────────────────────────────────────
 
 .PHONY: gate
-gate: check test ## Полный gate: lint + types + security + tests
+gate: check test ## Full gate: lint + types + tests (run before push)
 
-# ── Диаграммы ──
+.PHONY: pre-commit
+pre-commit: ## Run all pre-commit hooks on all files
+	$(RUN) pre-commit run --all-files
 
-.PHONY: diagrams
-diagrams: diagrams-classes diagrams-deps ## Регенерация всех диаграмм
-
-.PHONY: diagrams-classes
-diagrams-classes: ## UML классов через pyreverse
-	@mkdir -p $(DIAGRAMS_DIR)/classes
-	pyreverse -o puml -p Project $(PACKAGE) -d $(DIAGRAMS_DIR)/classes/ 2>/dev/null || \
-		echo "[SKIP] pyreverse не установлен — uv sync --group diagrams"
-
-.PHONY: diagrams-deps
-diagrams-deps: ## Граф зависимостей через pydeps
-	@mkdir -p $(DIAGRAMS_DIR)/deps
-	pydeps $(PACKAGE) -o $(DIAGRAMS_DIR)/deps/$(PACKAGE).svg --cluster --max-bacon 2 --no-show 2>/dev/null || \
-		echo "[SKIP] pydeps не установлен или Graphviz не в PATH"
-
-# ── Очистка ──
+# ── Cleanup ───────────────────────────────────────────────────────────────────
 
 .PHONY: clean
-clean: ## Удалить Python-кэши
+clean: ## Remove caches and build artifacts
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pyright_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
 	find . -name ".coverage" -delete 2>/dev/null || true
-	@echo "Кэши очищены"
+	rm -rf build/ dist/ *.egg-info htmlcov/
+	@echo "Caches cleaned"
 
-# ── Справка ──
+# ── Help ──────────────────────────────────────────────────────────────────────
 
 .PHONY: help
-help: ## Показать эту справку
+help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'

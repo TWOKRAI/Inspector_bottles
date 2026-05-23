@@ -1,0 +1,12 @@
+# GPU-оптимизированный variant qwen3-embedding:4b для Windows + 4 GB VRAM
+# (например RTX 3050 Laptop). Применяется через setup-embedding-model.sh.
+#
+# num_ctx 2048 — embedding-чанки кода почти всегда меньше 2k токенов;
+#                урезание контекста экономит ~500 MB KV cache и даёт месту в VRAM.
+# num_gpu  999 — идиома ollama: "выгрузи все слои модели на GPU".
+#                999 — магическое infinity (число слоёв любой реальной модели меньше);
+#                ollama clamp'нет до фактического (например, 28). Без этого
+#                ollama применит auto-detection и может оставить часть слоёв на CPU.
+FROM qwen3-embedding:4b
+PARAMETER num_ctx 2048
+PARAMETER num_gpu 999

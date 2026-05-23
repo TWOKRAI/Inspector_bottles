@@ -1,0 +1,67 @@
+# .github/workflows/ci.yml — CI for Python projects
+# Toolchain: uv + ruff + pyright + pytest
+# Matrix: Ubuntu × Python 3.11/3.12/3.13 (adjust as needed)
+#
+# Concurrency: cancels in-progress runs on the same branch when a new commit lands.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  typecheck:
+    name: typecheck (pyright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --frozen
+      - run: uv run pyright src
+
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --group dev --frozen
+      - run: uv run pytest --cov={{PACKAGE}} --cov-report=xml --cov-report=term
+      # Uncomment to upload coverage to Codecov:
+      # - uses: codecov/codecov-action@v4
+      #   with:
+      #     files: ./coverage.xml
+      #     fail_ci_if_error: false

@@ -1,0 +1,20 @@
+// Append this block to your project's .mcp.json under "mcpServers".
+// Two variants — pick one, strip the comments before merging.
+//
+// Prerequisite: install the ast-grep CLI (see SETUP_GUIDE.md § 1).
+
+// Variant A: zero-install via npx (slower first run)
+{
+  "ast-grep": {
+    "command": "npx",
+    "args": ["-y", "@ast-grep/mcp", "--root", "."]
+  }
+}
+
+// Variant B: global install (npm install -g @ast-grep/mcp)
+{
+  "ast-grep": {
+    "command": "ast-grep-mcp",
+    "args": ["--root", "."]
+  }
+}

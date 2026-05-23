@@ -1,15 +1,34 @@
 ---
-description: Прогон тестов фреймворка (scripts/run_framework_tests.py)
+description: Прогон тестов проекта (pytest или make test)
 ---
 
-Запусти тесты фреймворка из корня проекта:
+Запусти тесты проекта.
 
-```bash
-python scripts/run_framework_tests.py
-```
+## Приоритет
 
-Покажи результат пользователю. Если тесты падают — покажи список упавших, предложи запустить `/debug` для диагностики.
+1. **Если есть `Makefile` с целью `test`:**
+   ```bash
+   make test
+   ```
 
-На Windows: `python` указывает на Python 3.x (не Python 2). Если нужно явно — используй `python3` или `py -3` (Windows-launcher).
+2. **Иначе если есть `pyproject.toml` / `pytest.ini` / `tests/`:**
+   ```bash
+   uv run pytest -q
+   ```
+
+3. **Если у проекта свой test runner** (указано в `.claude/modes/_stack.md` → "Test runner"):
+   следуй той инструкции.
+
+## После прогона
+
+Покажи итог:
+- Сколько прошло / упало / skipped.
+- Если есть FAIL — выведи короткий список (имена тестов + первая строка ошибки).
+- Предложи `/debug` для диагностики падающих тестов.
+
+## Подсказки
+
+- Windows: используй `py -3` или `python3` если `python` указывает на 2.x.
+- Если pytest не установлен — `uv add --group dev pytest pytest-cov`.
 
 $ARGUMENTS
