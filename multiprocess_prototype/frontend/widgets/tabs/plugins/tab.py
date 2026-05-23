@@ -1,17 +1,28 @@
 # -*- coding: utf-8 -*-
 """PluginsTab — таб настройки плагинов.
 
-Шаблон визуально и архитектурно идентичен Recipes/Processes/Settings:
+Шаблон визуально и архитектурно идентичен Settings/Services:
 3 колонки (actions / nav / content) + мастер-скролл + QGroupBox-заголовок
-через ``DiffScrollTabLayout``; динамический список плагинов во второй колонке
-через ``BaseListNavTab``. Над списком плагинов — поле поиска (фильтрация
-по подстроке в display-тексте). Категория плагина включена в display-текст
-(``"name (Категория)"``). Action-колонка пуста — плагины редактируются
-через RegisterView в content-колонке, без отдельных команд.
+через ``DiffScrollTabLayout``; дерево плагинов во второй колонке через
+``BaseTreeNavTab``. Над деревом — поле поиска (фильтрация по подстроке).
+В первой колонке — тогглер режима отображения (Карточки / Таблица):
 
-Каждому nav-ключу соответствует свой detail-виджет:
-- ``RegisterView`` — если у плагина есть register fields;
-- ``PluginInfoCard`` — иначе (просто информационная карточка).
+- ``Cards``  — стандартное поведение BaseTreeNavTab: выбран плагин → справа
+  его detail-виджет (``RegisterView`` или ``PluginInfoCard``).
+- ``Table``  — общая таблица всех плагинов (имя / категория / есть registers
+  / описание); навигация по дереву игнорируется до возврата в Cards.
+
+Структура nav:
+    ▾ Источники
+        capture
+        ...
+    ▾ Обработка
+        color_mask
+        grayscale
+        ...
+
+Все скроллы — глобальный master-scrollbar из ``DiffScrollTabLayout``;
+внутренние скроллбары дерева и таблицы скрыты (``ScrollBarAlwaysOff``).
 """
 
 from __future__ import annotations
@@ -20,67 +31,91 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QHeaderView,
     QLineEdit,
-    QListWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
-from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
-from multiprocess_prototype.frontend.forms import RegisterView
+from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTreeNavTab
+from multiprocess_framework.modules.frontend_module.widgets.tabs.nav_tree_utils import (
+    build_nav_tree_from_specs,
+)
+from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
 
-from .detail_panels import PluginInfoCard
+from ._sections import build_plugin_sections
 from .presenter import PluginsPresenter
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
 
 
+# Размеры колонок: nav шире в 1.5× по сравнению с Recipes/Processes/Services
+# (230 × 1.5 = 345) — дерево с категориями требует больше места.
+_NAV_WIDTH = 345
+
+
 def _layout_factory() -> DiffScrollTabLayout:
-    # Размеры колонок согласованы с Settings/Recipes/Processes/Services.
-    return DiffScrollTabLayout(title="Плагины", action_width=160, nav_width=230)
+    return DiffScrollTabLayout(title="Плагины", action_width=160, nav_width=_NAV_WIDTH)
 
 
-class PluginsTab(BaseListNavTab):
-    """Таб «Плагины» — BaseListNavTab + DiffScrollTabLayout.
+_TABLE_COLUMNS = ["Имя", "Категория", "Registers", "Описание"]
 
-    Структурно идентичен Recipes/Processes: tree-/list-nav слева, search над
-    списком плагинов, content-виджет — справа. Каждый плагин получает свой
-    detail-виджет (``RegisterView`` для плагинов с registers,
-    ``PluginInfoCard`` иначе) — создаётся лениво в ``_create_item_widget``.
+
+class PluginsTab(BaseTreeNavTab):
+    """Таб «Плагины» — BaseTreeNavTab + DiffScrollTabLayout с тогглером Cards/Table.
+
+    Расширения над BaseTreeNavTab:
+    - ``_build_nav_widget`` обёрнут в контейнер с QLineEdit (поиск) над QTreeWidget;
+    - content-колонка — два уровня stack: внешний ``_root_stack`` переключает
+      между Cards (внутренний content_stack базы) и Table (общая таблица);
+    - action-колонка — ``ViewModeToggle`` поверх стандартного ``_action_stack``.
     """
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        self._presenter = PluginsPresenter(ctx)
-        # Кэш detail-виджетов (key → QWidget) для исторической совместимости тестов.
-        self._detail_cache: dict[str, QWidget] = {}
-        # Поле поиска (создаётся в _build_nav_widget).
+        self._presenter_local = PluginsPresenter(ctx)
+        # Поле поиска создаётся в _build_nav_widget (вызывается из super().__init__).
         self._search: QLineEdit | None = None
+        self._tree_nav: QTreeWidget | None = None  # type: ignore[assignment]
+        # Текущий режим отображения (Cards/Table).
+        self._view_mode: ViewMode = ViewMode.CARDS
 
+        bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
         super().__init__(
             title="Плагины",
+            sections=build_plugin_sections(ctx),
             ctx=ctx,
             layout_factory=_layout_factory,
+            bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
             parent=parent,
         )
 
-        # Авто-refresh content scroll при смене активной страницы.
-        self._tab_layout.connect_stack(self._content_stack, "content")
+        # Table view добавляем как ещё одну страницу в content_stack базы.
+        # В Table-режиме форсируем переключение на эту страницу; tree-навигация
+        # в Table-режиме блокируется через override set_content_index().
+        self._table_widget = self._build_table_widget()
+        self._table_idx = self._content_stack.addWidget(self._table_widget)
 
-        # Undo/Redo в статичной зоне (как Recipes).
-        bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
-        self._tab_layout.enable_undo_redo(bus)
+        # Заменить action_widget: добавить ViewModeToggle сверху над action_stack базы.
+        self._toggle = ViewModeToggle(initial_mode=ViewMode.CARDS)
+        self._toggle.mode_changed.connect(self._on_view_mode_changed)
+        new_action_widget = QWidget()
+        action_layout = QVBoxLayout(new_action_widget)
+        action_layout.setContentsMargins(4, 4, 4, 4)
+        action_layout.setSpacing(6)
+        action_layout.addWidget(self._toggle)
+        action_layout.addWidget(self._action_stack, 1)
+        self._tab_layout.set_action_widget(new_action_widget)
 
-        # Подписка на ActionBus для обновления виджетов при undo/redo.
-        if bus is not None:
-            bus.add_change_callback(self._on_bus_changed)
-
-        # Заполнить список и выбрать первый плагин.
-        self._sync_nav()
+        self.enable_undo_redo(bus)
+        self.populate()
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "PluginsTab":
@@ -88,15 +123,17 @@ class PluginsTab(BaseListNavTab):
         return cls(ctx)
 
     # ------------------------------------------------------------------ #
-    #  BaseListNavTab hooks                                                #
+    #  Hooks BaseTreeNavTab                                                #
     # ------------------------------------------------------------------ #
 
-    def _build_nav_widget(self) -> QWidget:
-        """Контейнер: QLineEdit (поиск) над QListWidget (список плагинов).
+    def _tree_object_name(self) -> str:
+        return "PluginsTreeNav"
 
-        ``self._nav_widget`` указывает на QListWidget — базовый класс
-        BaseListNavTab работает с ним напрямую (add_item / remove_item /
-        currentItemChanged → _on_list_selection_changed).
+    def _build_nav_widget(self) -> QWidget:
+        """Контейнер: QLineEdit (поиск) над QTreeWidget с категориями плагинов.
+
+        ``self._tree_nav`` указывает на QTreeWidget — базовый класс
+        BaseTreeNavTab работает с ним напрямую (currentItemChanged → presenter).
         """
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -108,137 +145,120 @@ class PluginsTab(BaseListNavTab):
         self._search.textChanged.connect(self._on_search_changed)
         layout.addWidget(self._search)
 
-        nav = QListWidget()
-        nav.setObjectName("PluginsNavList")
-        nav.currentItemChanged.connect(self._on_list_selection_changed)
-        self._nav_widget = nav
-        layout.addWidget(nav, 1)
+        tree = QTreeWidget()
+        tree.setObjectName(self._tree_object_name())
+        tree.setHeaderHidden(True)
+        tree.setRootIsDecorated(True)
+        tree.setIndentation(16)
+        # Глобальный скролл — внутренние скроллбары дерева скрыты,
+        # колесо перехватывает DiffScrollTabLayout через event filter.
+        tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        tree.currentItemChanged.connect(self._on_tree_item_changed)
 
+        build_nav_tree_from_specs(tree, self._sections_specs)
+        # Раскрыть все категории по умолчанию — короткие списки плагинов.
+        tree.expandAll()
+
+        self._tree_nav = tree
+        layout.addWidget(tree, 1)
         return container
-
-    def _create_item_widget(self, key: str) -> QWidget:
-        """Лениво построить detail-виджет для плагина с данным ключом."""
-        info = self._presenter.get_plugin_info(key)
-
-        if info.get("has_registers"):
-            fields = self._presenter.get_register_fields(key)
-            if fields:
-                form_ctx = self._build_form_ctx(key)
-                detail: QWidget = RegisterView(fields, form_ctx=form_ctx)
-                # field_changed → ActionBus (для legacy-полей без form_ctx).
-                detail.field_changed.connect(self._on_field_changed)
-
-                # PR3: весь RegisterView — read-only без tabs.plugins.edit.
-                from multiprocess_prototype.frontend.widgets.access import (
-                    bind_edit_permission,
-                )
-
-                _auth = getattr(self._ctx, "auth", None)
-                bind_edit_permission(
-                    detail,
-                    "tabs.plugins.edit",
-                    _auth.state if _auth is not None else None,
-                )
-            else:
-                detail = PluginInfoCard(info)
-        else:
-            detail = PluginInfoCard(info)
-
-        self._detail_cache[key] = detail
-        return detail
 
     # ------------------------------------------------------------------ #
     #  Search filter                                                       #
     # ------------------------------------------------------------------ #
 
     def _on_search_changed(self, text: str) -> None:
-        """Скрыть/показать элементы списка по подстроке в display-тексте."""
-        assert self._nav_widget is not None
+        """Скрыть листы по подстроке; категорию скрыть, если все её дети скрыты."""
+        assert self._tree_nav is not None
         needle = text.strip().lower()
-        for i in range(self._nav_widget.count()):
-            item = self._nav_widget.item(i)
-            if item is None:
+        for i in range(self._tree_nav.topLevelItemCount()):
+            cat_item = self._tree_nav.topLevelItem(i)
+            if cat_item is None:
                 continue
-            label = item.text().lower()
-            item.setHidden(bool(needle) and needle not in label)
+            visible_children = 0
+            for j in range(cat_item.childCount()):
+                child = cat_item.child(j)
+                if child is None:
+                    continue
+                label = child.text(0).lower()
+                hidden = bool(needle) and needle not in label
+                child.setHidden(hidden)
+                if not hidden:
+                    visible_children += 1
+            # Категория видима, если есть хоть один видимый ребёнок или поиск пуст.
+            cat_item.setHidden(bool(needle) and visible_children == 0)
 
     # ------------------------------------------------------------------ #
-    #  Nav populate                                                        #
+    #  View mode (Cards / Table)                                           #
     # ------------------------------------------------------------------ #
 
-    def _sync_nav(self) -> None:
-        """Заполнить навигацию плагинами из реестра."""
-        assert self._nav_widget is not None
-        self._nav_widget.blockSignals(True)
-        self._nav_widget.clear()
-        while self._content_stack.count() > 0:
-            w = self._content_stack.widget(0)
-            self._content_stack.removeWidget(w)
-            if w is not None:
-                w.deleteLater()
-        self._key_to_item.clear()
-        self._key_to_index.clear()
-        self._detail_cache.clear()
-        self._nav_widget.blockSignals(False)
+    def _on_view_mode_changed(self, mode_str: str) -> None:
+        mode = ViewMode(mode_str)
+        self._view_mode = mode
+        if mode == ViewMode.TABLE:
+            self._refresh_table()
+            self._content_stack.setCurrentIndex(self._table_idx)
+        else:
+            # Восстановить страницу текущего выбранного плагина (если есть).
+            assert self._tree_nav is not None
+            cur = self._tree_nav.currentItem()
+            if cur is not None:
+                key = cur.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(key, str) and key in self.presenter._page_index:
+                    self._content_stack.setCurrentIndex(self.presenter._page_index[key])
 
-        for name, display, _category in self._presenter.list_plugins():
-            self.add_item(name, display)
+    def set_content_index(self, index: int) -> None:  # type: ignore[override]
+        """Override: в Table-режиме игнорировать переключения от tree-навигации.
 
-        # Авто-выбор первого плагина (если есть).
-        if self._nav_widget.count() > 0:
-            first = self._nav_widget.item(0)
-            if first is not None:
-                key = first.data(Qt.ItemDataRole.UserRole)
-                if isinstance(key, str):
-                    self.select_item(key)
+        Tree-клик на плагине вызывает presenter → set_content_index, но
+        в Table-режиме контент должен оставаться на таблице.
+        """
+        if self._view_mode == ViewMode.TABLE:
+            return
+        super().set_content_index(index)
 
     # ------------------------------------------------------------------ #
-    #  ActionBus integration                                               #
+    #  Table view                                                          #
     # ------------------------------------------------------------------ #
 
-    def _build_form_ctx(self, plugin_name: str) -> FormContext | None:  # noqa: ARG002
-        """Собрать FormContext для binding-aware RegisterView."""
-        return self._ctx.form_context()
+    def _build_table_widget(self) -> QTableWidget:
+        tbl = QTableWidget(0, len(_TABLE_COLUMNS))
+        tbl.setHorizontalHeaderLabels(_TABLE_COLUMNS)
+        tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        tbl.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        h = tbl.horizontalHeader()
+        if h:
+            h.setStretchLastSection(True)
+            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        return tbl
 
-    def _on_field_changed(
+    def _refresh_table(self) -> None:
+        """Перезаполнить таблицу актуальным состоянием реестра плагинов."""
+        plugins = self._presenter_local.list_plugins()
+        self._table_widget.setRowCount(len(plugins))
+        for row, (name, _display, category) in enumerate(plugins):
+            info = self._presenter_local.get_plugin_info(name)
+            cat_title = PluginsPresenter.CATEGORY_TITLES.get(category, category)
+            self._table_widget.setItem(row, 0, QTableWidgetItem(name))
+            self._table_widget.setItem(row, 1, QTableWidgetItem(cat_title))
+            self._table_widget.setItem(row, 2, QTableWidgetItem("✓" if info.get("has_registers") else "—"))
+            self._table_widget.setItem(row, 3, QTableWidgetItem(info.get("description", "")))
+        # Подогнать высоту строк под содержимое.
+        self._table_widget.resizeRowsToContents()
+
+    # ------------------------------------------------------------------ #
+    #  Совместимость со старым _on_tree_item_changed                       #
+    # ------------------------------------------------------------------ #
+
+    def _on_tree_item_changed(  # type: ignore[override]
         self,
-        register_name: str,
-        field_name: str,
-        old_value: object,
-        new_value: object,
+        current: QTreeWidgetItem | None,
+        previous: QTreeWidgetItem | None,
     ) -> None:
-        """Изменение параметра плагина → ActionBus.execute(field_set)."""
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-        action = V2ActionBuilder.field_set_timed(
-            register_name,
-            field_name,
-            new_value,
-            old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.execute(action)
-
-    def _on_bus_changed(self) -> None:
-        """Callback от ActionBus — обновить виджеты при undo/redo."""
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        event = bus.last_event
-        if event is None:
-            return
-        event_type, action = event
-        if event_type not in ("undo", "redo"):
-            return
-        if action.action_type != "field_set":
-            return
-        register_name = action.register_name or ""
-        detail = self._detail_cache.get(register_name)
-        if detail is None or not isinstance(detail, RegisterView):
-            return
-        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
-        key = f"{register_name}.{action.field_name}"
-        detail.set_editor_value(key, value)
+        """Override для использования self._tree_nav (а не self._tree_nav из базы)."""
+        # Делегируем в реализацию базы, она уже использует self._tree_nav.
+        super()._on_tree_item_changed(current, previous)

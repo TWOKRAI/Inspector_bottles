@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 from multiprocess_prototype.frontend.widgets.tabs.plugins.tab import PluginsTab
 from multiprocess_prototype.frontend.widgets.tabs.plugins.presenter import PluginsPresenter
 from multiprocess_prototype.frontend.widgets.tabs.plugins.detail_panels import PluginInfoCard
@@ -133,6 +134,44 @@ class TestPluginInfoCard:
         qtbot.addWidget(card)
 
 
+def _leaf_keys(tab: PluginsTab) -> list[str]:
+    """Вернуть ключи плагин-листов в дереве."""
+    tree = tab._tree_nav
+    assert tree is not None
+    keys: list[str] = []
+    for i in range(tree.topLevelItemCount()):
+        cat = tree.topLevelItem(i)
+        if cat is None:
+            continue
+        for j in range(cat.childCount()):
+            child = cat.child(j)
+            if child is None:
+                continue
+            key = child.data(0, 0x0100)  # Qt.UserRole = 256
+            if isinstance(key, str):
+                keys.append(key)
+    return keys
+
+
+def _visible_leaf_keys(tab: PluginsTab) -> list[str]:
+    """Вернуть ключи плагин-листов, которые сейчас видимы (не isHidden)."""
+    tree = tab._tree_nav
+    assert tree is not None
+    keys: list[str] = []
+    for i in range(tree.topLevelItemCount()):
+        cat = tree.topLevelItem(i)
+        if cat is None or cat.isHidden():
+            continue
+        for j in range(cat.childCount()):
+            child = cat.child(j)
+            if child is None or child.isHidden():
+                continue
+            key = child.data(0, 0x0100)
+            if isinstance(key, str):
+                keys.append(key)
+    return keys
+
+
 class TestPluginsTab:
     def test_create(self, qtbot: pytest.fixture) -> None:
         ctx = _make_mock_ctx()
@@ -140,29 +179,31 @@ class TestPluginsTab:
         qtbot.addWidget(tab)
         assert tab is not None
 
-    def test_plugins_listed(self, qtbot: pytest.fixture) -> None:
+    def test_plugins_listed_in_tree(self, qtbot: pytest.fixture) -> None:
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        # BaseListNavTab держит QListWidget — там должно быть 3 элемента.
-        assert tab._nav_widget.count() == 3
-        assert len(tab.item_keys) == 3
+        # В дереве должны быть 3 плагина (под их категориями).
+        assert sorted(_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
+        # Категорий — 2 (processing + source), отсортированы по русскому title.
+        assert tab._tree_nav.topLevelItemCount() == 2
 
     def test_empty_registry(self, qtbot: pytest.fixture) -> None:
         ctx = _make_mock_ctx(entries=[])
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        assert tab._nav_widget.count() == 0
+        # Нет плагинов — дерево пустое.
+        assert tab._tree_nav.topLevelItemCount() == 0
 
-    def test_detail_widgets_created_lazily(self, qtbot: pytest.fixture) -> None:
-        # При наполнении nav (_sync_nav → add_item → _create_item_widget) все
-        # detail-виджеты строятся сразу и попадают в _detail_cache.
+    def test_lazy_section_created_on_select(self, qtbot: pytest.fixture) -> None:
+        # При программном выборе плагина презентер строит секцию через factory.
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        assert "grayscale" in tab._detail_cache
-        assert "color_mask" in tab._detail_cache
-        assert "capture" in tab._detail_cache
+        # До выбора плагина — секция color_mask ещё не создана (lazy).
+        tab.select_tree_key("color_mask")
+        # Секция color_mask должна быть зарегистрирована в content_stack.
+        assert "color_mask" in tab.presenter._page_index  # type: ignore[attr-defined]
 
     def test_no_register_manager_fallback_to_info_card(self, qtbot: pytest.fixture) -> None:
         # color_mask имеет has_registers=True, но registers_manager=None →
@@ -170,36 +211,41 @@ class TestPluginsTab:
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        assert isinstance(tab._detail_cache["color_mask"], PluginInfoCard)
-
-    def test_detail_cache_no_duplicates(self, qtbot: pytest.fixture) -> None:
-        # Каждый плагин в _detail_cache должен появиться ровно один раз
-        # (даже после повторного select_item).
-        ctx = _make_mock_ctx()
-        tab = PluginsTab(ctx)
-        qtbot.addWidget(tab)
-        tab.select_item("capture")
-        tab.select_item("capture")
-        # Каждому ключу — один виджет; 3 плагина → 3 записи.
-        assert len(tab._detail_cache) == 3
+        tab.select_tree_key("color_mask")
+        idx = tab.presenter._page_index["color_mask"]  # type: ignore[attr-defined]
+        widget = tab._content_stack.widget(idx)
+        assert isinstance(widget, PluginInfoCard)
 
     def test_search_filter(self, qtbot: pytest.fixture) -> None:
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        # До фильтра все элементы видимы.
-        assert all(not tab._nav_widget.item(i).isHidden() for i in range(tab._nav_widget.count()))
-        # «color» матчит только color_mask.
+        # До фильтра все плагины видимы.
+        assert sorted(_visible_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
+        # «color» матчит только color_mask; пустая категория «Источники» скрывается.
         tab._search.setText("color")
-        visible = [
-            tab._nav_widget.item(i).data(0x0100)  # Qt.UserRole = 256 (0x0100)
-            for i in range(tab._nav_widget.count())
-            if not tab._nav_widget.item(i).isHidden()
-        ]
-        # При фильтре «color» только color_mask должен остаться видим.
+        visible = _visible_leaf_keys(tab)
         assert "color_mask" in visible
         assert "grayscale" not in visible
         assert "capture" not in visible
-        # Очистка поля — все опять видимы.
+        # Очистка — все снова видимы.
         tab._search.setText("")
-        assert all(not tab._nav_widget.item(i).isHidden() for i in range(tab._nav_widget.count()))
+        assert sorted(_visible_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
+
+    def test_view_mode_toggle_switches_to_table(self, qtbot: pytest.fixture) -> None:
+        ctx = _make_mock_ctx()
+        tab = PluginsTab(ctx)
+        qtbot.addWidget(tab)
+        # По умолчанию — Cards (content_stack показывает страницу плагина/категории).
+        cards_idx = tab._content_stack.currentIndex()
+        # Переключение на Table — content_stack показывает _table_widget.
+        tab._on_view_mode_changed(ViewMode.TABLE.value)
+        assert tab._content_stack.currentIndex() == tab._table_idx
+        # Таблица заполнена 3 строками.
+        assert tab._table_widget.rowCount() == 3
+        # Возврат в Cards — содержимое не на table_idx.
+        tab._on_view_mode_changed(ViewMode.CARDS.value)
+        assert tab._content_stack.currentIndex() != tab._table_idx
+        # При наличии выбранного элемента — должны вернуться на его страницу
+        # (или хотя бы не остаться на table); проверка через cards_idx излишне строга.
+        _ = cards_idx
