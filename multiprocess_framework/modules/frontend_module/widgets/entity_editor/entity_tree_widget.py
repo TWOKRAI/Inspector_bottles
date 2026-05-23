@@ -215,92 +215,67 @@ class EntityTreeWidget(BaseEditorTreeView):
     # Построители строк
     # ------------------------------------------------------------------
 
-    def _build_parent_row(self, key: str, data: dict) -> list[QStandardItem]:
-        """Создать строку-заголовок родительского элемента.
+    def _build_level_row(
+        self,
+        level,
+        display_key: str,
+        role_type: str,
+        data: dict,
+        *,
+        user_role_value: str,
+        role_parent: str,
+        role_child: str | None = None,
+    ) -> list[QStandardItem]:
+        """Построить строку дерева для parent- или child-уровня (общая логика).
 
-        Args:
-            key:  Ключ родителя.
-            data: Данные родителя (dict).
-
-        Returns:
-            Список из N QStandardItem (одна строка дерева).
+        role_child=None означает parent-строку; ROLE_CHILD не устанавливается.
         """
-        level = self._config.parent_level
-        display_name = f"{level.icon} {key}"
+        # Сводка через опциональный builder
+        try:
+            summary = level.summary_builder(data) if level.summary_builder else ""
+        except Exception:
+            summary = ""
 
-        # Сводка
-        summary = ""
-        if level.summary_builder is not None:
-            try:
-                summary = level.summary_builder(data)
-            except Exception:
-                summary = ""
-
-        name_item = QStandardItem(display_name)
-        font = QFont()
-        if level.bold:
-            font.setBold(True)
-        name_item.setFont(font)
-        name_item.setData(key, Qt.ItemDataRole.UserRole)
-        name_item.setData("parent", ROLE_TYPE)
-        name_item.setData(key, ROLE_PARENT)
-        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-        val_item = QStandardItem("")
-        val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-        comment_item = QStandardItem("")
-        comment_item.setFlags(comment_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-        summary_item = QStandardItem(summary)
-        summary_item.setFlags(summary_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-        return self._pad_row([name_item, val_item, comment_item, summary_item])
-
-    def _build_child_row(self, parent_key: str, child_key: str, data: dict) -> list[QStandardItem]:
-        """Создать строку-заголовок дочернего элемента.
-
-        Args:
-            parent_key: Ключ родителя.
-            child_key:  Ключ дочернего элемента.
-            data:       Данные дочернего элемента (dict).
-
-        Returns:
-            Список из N QStandardItem.
-        """
-        level = self._config.child_level
-
-        display_name = f"{level.icon} {child_key}"
-
-        # Сводка
-        summary = ""
-        if level.summary_builder is not None:
-            try:
-                summary = level.summary_builder(data)
-            except Exception:
-                summary = ""
-
-        name_item = QStandardItem(display_name)
+        name_item = QStandardItem(f"{level.icon} {display_key}")
         if level.bold:
             font = QFont()
             font.setBold(True)
             name_item.setFont(font)
-        name_item.setData(f"{parent_key}/{child_key}", Qt.ItemDataRole.UserRole)
-        name_item.setData("child", ROLE_TYPE)
-        name_item.setData(parent_key, ROLE_PARENT)
-        name_item.setData(child_key, ROLE_CHILD)
+        name_item.setData(user_role_value, Qt.ItemDataRole.UserRole)
+        name_item.setData(role_type, ROLE_TYPE)
+        name_item.setData(role_parent, ROLE_PARENT)
+        if role_child is not None:  # ROLE_CHILD — только для дочерних строк
+            name_item.setData(role_child, ROLE_CHILD)
         name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
 
-        val_item = QStandardItem("")
-        val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        # Вспомогательная функция — создать non-editable item
+        def _ro(text: str = "") -> QStandardItem:
+            it = QStandardItem(text)
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            return it
 
-        comment_item = QStandardItem("")
-        comment_item.setFlags(comment_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return self._pad_row([name_item, _ro(), _ro(), _ro(summary)])
 
-        summary_item = QStandardItem(summary)
-        summary_item.setFlags(summary_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    def _build_parent_row(self, key: str, data: dict) -> list[QStandardItem]:  # noqa: D102
+        return self._build_level_row(
+            self._config.parent_level,
+            key,
+            "parent",
+            data,
+            user_role_value=key,
+            role_parent=key,
+        )
 
-        return self._pad_row([name_item, val_item, comment_item, summary_item])
+    def _build_child_row(self, parent_key: str, child_key: str, data: dict) -> list[QStandardItem]:  # noqa: D102
+        return self._build_level_row(
+            self._config.child_level,
+            child_key,
+            "child",
+            data,
+            user_role_value=f"{parent_key}/{child_key}",
+            role_parent=parent_key,
+            role_child=child_key,
+        )
 
     def _build_param_rows(
         self,
