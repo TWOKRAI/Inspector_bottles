@@ -1,0 +1,18 @@
+{
+  "//": "Recommended extensions for this workspace. VS Code prompts to install on first open.",
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "tamasfe.even-better-toml",
+    "redhat.vscode-yaml",
+    "EditorConfig.EditorConfig",
+    "anthropic.claude-code"
+  ],
+  "unwantedRecommendations": [
+    "ms-python.black-formatter",
+    "ms-python.flake8",
+    "ms-python.isort",
+    "ms-python.mypy-type-checker"
+  ]
+}

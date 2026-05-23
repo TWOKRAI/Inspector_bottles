@@ -2,9 +2,9 @@ Create a session handoff document for cross-machine context transfer.
 
 ## What to do
 
-Write a structured handoff file to `workspace/handoffs/` with today's date and topic.
+Write a structured handoff file to `docs/handoffs/` with today's date and topic.
 
-**Filename:** `workspace/handoffs/YYYY-MM-DD_{topic-slug}.md`
+**Filename:** `docs/handoffs/YYYY-MM-DD_{topic-slug}.md`
 
 **Template:**
 
@@ -42,7 +42,7 @@ branch: {current git branch}
 1. Run `git status` and `git diff --stat` to see what changed
 2. Review the conversation history — summarize goal, achievements, dead ends
 3. Detect current machine (check for `/Users/` = macOS, `C:\Users\` = Windows)
-4. Create `workspace/handoffs/` directory if it doesn't exist
+4. Create `docs/handoffs/` directory if it doesn't exist
 5. Write the handoff file
 6. Tell the user: "Handoff saved. On the other machine, run: `git pull` then start a new session."
 

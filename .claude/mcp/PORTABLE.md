@@ -24,7 +24,7 @@
 
 | Файл | Причина |
 |------|---------|
-| `.mcp.json` | Генерируется `bootstrap.py` из `mcp.template.json` |
+| `.mcp.json` | Генерируется claude-kit из `manifest.yaml` (`claude-kit new` / `claude-kit add`) |
 | `.sentrux/rules.toml` | Адаптировать из шаблона `sentrux/rules.template.toml` |
 | `.sentrux/baseline.json` | Генерируется `sentrux` при первом сканировании |
 | `.ignore` | Адаптировать из шаблона `qex/templates/ignore.template` |
@@ -44,13 +44,9 @@
    Copy-Item -Recurse C:\path\to\source-project\.claude C:\path\to\new-project\
    ```
 
-2. **Запустить `bootstrap.py`** — проверит зависимости, создаст `.mcp.json`,
-   инициализирует `.sentrux/rules.toml`:
-
-   ```bash
-   cd /path/to/new-project
-   python .claude/mcp/bootstrap.py
-   ```
+2. **Создать проект через `claude-kit new`** — сгенерирует `.mcp.json` из `mcp_servers:` блоков
+   выбранных компонентов в `manifest.yaml`, а также инициализирует `.sentrux/rules.toml`.
+   Чтобы добавить отдельный компонент в существующий проект — `claude-kit add <component>`.
 
 3. **Адаптировать `.ignore`** под whitelist своего проекта (какие пути qex должен
    индексировать, а какие игнорировать):

@@ -1,22 +1,41 @@
 ---
-description: Запуск активного прототипа (multiprocess_prototype/run.py)
+description: Запуск точки входа проекта — по pyproject [project.scripts], make run, или python -m <package>
 ---
 
-Запусти активный прототип Inspector_bottles из корня проекта:
+Запусти основную точку входа проекта. Определи её по приоритету:
 
-```bash
-python multiprocess_prototype/run.py
-```
+## Шаги
 
-Это PySide6 GUI-приложение системы инспекции дефектов. Приложение откроется в отдельном окне.
+1. **Если есть `pyproject.toml` с `[project.scripts]`** — выбери первую запись и запусти через uv:
+   ```bash
+   uv run <script-name> $ARGUMENTS
+   ```
 
-Если PySide6 не установлен — предложи запустить:
-```bash
-pip install -e ".[ml]"
-```
+2. **Иначе если есть `Makefile` с целью `run`**:
+   ```bash
+   make run ARGS="$ARGUMENTS"
+   ```
 
-Если процесс падает — спроси, нужно ли запустить `/debug` для диагностики.
+3. **Иначе если есть `src/<package>/__main__.py`** (или `<package>/__main__.py`):
+   ```bash
+   uv run python -m <package> $ARGUMENTS
+   ```
 
-**Кросс-платформа:** команда работает идентично на macOS и Windows (PySide6 6.10 поддерживает обе ОС).
+4. **Иначе если есть `src/<package>/cli.py` или `app.py` или `main.py`**:
+   ```bash
+   uv run python -m <package>.<module> $ARGUMENTS
+   ```
+
+5. **Если ничего не найдено** — спроси у пользователя путь к точке входа и предложи добавить `[project.scripts]` в `pyproject.toml`.
+
+## Подсказки
+
+- Если падает с `ModuleNotFoundError` — выполни `uv sync` (или `make install`).
+- Если падает с UI/GUI ошибкой — проверь что соответствующая optional-группа установлена: `uv sync --group <ui-group>` (см. `pyproject.toml` → `[dependency-groups]`).
+- Если процесс крашится — спроси, нужно ли запустить `/debug` для диагностики.
+
+## Project-specific override
+
+Если в `.claude/modes/_stack.md` есть секция "Entry point" — следуй ей вместо алгоритма выше.
 
 $ARGUMENTS

@@ -1,37 +1,45 @@
-# Templates — Готовые шаблоны для нового проекта
+# Templates — File templates for new projects
 
-Минимальные стартовые версии всех конфигов. Скопировать в корень нового проекта, адаптировать
-под свой стек, удалить ненужное.
+These are **source templates** used by `claude-kit new` when bootstrapping a new project. You normally don't copy them by hand — the CLI does it for you.
 
-## Файлы
+## How `claude-kit new` uses templates
 
-| Шаблон | Куда копировать | Адаптировать |
-|--------|-----------------|--------------|
-| [`pyproject.template.toml`](pyproject.template.toml) | `pyproject.toml` в корень | name, dependencies, testpaths |
-| [`pre-commit-config.template.yaml`](pre-commit-config.template.yaml) | `.pre-commit-config.yaml` в корень | `entry: mypy <package>` |
-| [`Makefile.template`](Makefile.template) | `Makefile` в корень | переменные FRAMEWORK/PROTOTYPE |
-| [`gitignore.template`](gitignore.template) | `.gitignore` в корень | под свой стек |
-| [`sentrux-rules.template.toml`](sentrux-rules.template.toml) | `.sentrux/rules.toml` | `[[layers]]`, `[[boundaries]]` |
-| [`claude-md.template.md`](claude-md.template.md) | `CLAUDE.md` в корень | секции Проект, Архитектура, Стек |
-
-## Workflow
+When you run:
 
 ```bash
-# 1. Скопировать всё разом
-cd /path/to/new-project
-cp .claude/templates/pyproject.template.toml ./pyproject.toml
-cp .claude/templates/pre-commit-config.template.yaml ./.pre-commit-config.yaml
-cp .claude/templates/Makefile.template ./Makefile
-cp .claude/templates/gitignore.template ./.gitignore
-cp .claude/templates/claude-md.template.md ./CLAUDE.md
-mkdir -p .sentrux && cp .claude/templates/sentrux-rules.template.toml ./.sentrux/rules.toml
-
-# 2. Адаптировать под проект (см. секции "Адаптировать" в каждом файле)
-
-# 3. Установить
-uv sync --group dev --group diagrams
-uv run pre-commit install
-uv run pre-commit install --hook-type pre-push
+claude-kit new ~/Project_code/my_new_app --name "My New App"
 ```
 
-См. [`../BOOTSTRAP.md`](../BOOTSTRAP.md) для полного гайда.
+the script copies the seed and instantiates these templates with placeholder substitution:
+
+| Template | Generated file | Placeholders substituted |
+|----------|----------------|---------------------------|
+| `pyproject.template.toml` | `pyproject.toml` | `{{PACKAGE}}`, `{{DESCRIPTION}}`, `{{AUTHOR}}` |
+| `pre-commit-config.template.yaml` | `.pre-commit-config.yaml` | — |
+| `Makefile.template` | `Makefile` | `{{PACKAGE}}` |
+| `gitignore.template` | `.gitignore` | — |
+| `gitattributes.template` | `.gitattributes` | — |
+| `editorconfig.template` | `.editorconfig` | — |
+| `env.example.template` | `.env.example` | — |
+| `claude-md.template.md` | `CLAUDE.md` (root) | `{{PROJECT_NAME}}`, `{{PACKAGE}}`, `{{DESCRIPTION}}` |
+| `vscode-settings.json.template` | `.vscode/settings.json` | — |
+| `vscode-extensions.json.template` | `.vscode/extensions.json` | — |
+| `github-workflows-ci.yml.template` | `.github/workflows/ci.yml` | `{{PACKAGE}}` |
+
+## Toolchain assumed
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) — package + venv manager
+- [ruff](https://docs.astral.sh/ruff/) — lint + format
+- [pyright](https://microsoft.github.io/pyright/) — static type checker
+- [pytest](https://docs.pytest.org/) — testing
+- [pre-commit](https://pre-commit.com/) — git hooks orchestration
+
+## Manual override
+
+If you want to customize before instantiating (e.g. add `httpx` to default deps), edit the `.template` file in this directory — `claude-kit new` will pick it up on next run.
+
+## What is NOT here
+
+- `sentrux-rules.template.toml` lives in [`../mcp/sentrux/`](../mcp/sentrux/) — single source of truth for sentrux config
+- `claude-md.template.md` is the **root** `CLAUDE.md` template, not `.claude/CLAUDE.md` (the latter is fixed seed content)

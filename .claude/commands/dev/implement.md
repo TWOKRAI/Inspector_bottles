@@ -16,11 +16,14 @@ description: Запустить Developer-агента (Sonnet) — реализ
 - Если задача зависит от предыдущей — убедись что та выполнена
 
 **Refs-трассировка (plan-driven workflow):**
-- Определи путь к файлу плана: из $ARGUMENTS или по текущей ветке (`git branch --show-current` → извлеки slug → проверь `plans/<slug>.md` или `plans/<slug>/plan.md`)
-- Передай Developer/TeamLead инструкцию: в коммите **обязательно** указать `Refs: <путь-к-файлу-плана>` (например, `Refs: plans/auth-rbac.md`)
-- Для multi-phase планов: ссылка на конкретный phase-файл (`Refs: plans/auth-rbac/phase-2.md`)
-- После завершения Task X.Y — обновить статус в плане: `[PENDING]` → `[DONE]` (допустимо в том же коммите с кодом)
-- Если план не найден (legacy ветка, hotfix) — предупредить пользователя, но не блокировать работу
+- Определи путь к файлу плана: из $ARGUMENTS или по текущей ветке (`git branch --show-current` → извлеки slug → найди в `plans/`):
+  - Single plan: `plans/YYYY-MM-DD_<slug>.md` (ищи через `ls plans/*_<slug>.md`)
+  - Multi-phase: `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md` (ищи через `ls -d plans/*_<slug>`)
+- Передай Developer/TeamLead инструкцию: в коммите **обязательно** указать `Refs: <путь-к-файлу-плана>` (точный путь, с датой).
+  Примеры: `Refs: plans/2026-05-22_auth-rbac.md` или `Refs: plans/2026-05-22_auth-rbac/phase-2.md`.
+- Для multi-phase планов: ссылка на конкретный phase-файл (не на `plan.md` метаплан, не на папку).
+- После завершения Task X.Y — обновить статус в плане: `[PENDING]` → `[DONE]` (допустимо в том же коммите с кодом).
+- Если план не найден (legacy ветка, hotfix, плановый файл без даты в старой конвенции) — предупредить пользователя, но не блокировать работу.
 
 После выполнения:
 - Проверь что Developer сделал коммит с `Refs:` trailer

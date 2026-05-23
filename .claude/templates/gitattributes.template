@@ -1,0 +1,31 @@
+# .gitattributes — normalize line endings and mark generated files
+
+# Auto-detect text files and normalize to LF on commit
+* text=auto eol=lf
+
+# Force LF for shell/Python/text (avoid CRLF on Windows checkouts)
+*.sh   text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf
+
+# Binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.db    binary
+*.sqlite binary
+*.pt    binary
+*.onnx  binary
+*.safetensors binary
+
+# Mark lock files as generated (cleaner PR diffs on GitHub)
+uv.lock        linguist-generated=true
+package-lock.json linguist-generated=true
+poetry.lock    linguist-generated=true

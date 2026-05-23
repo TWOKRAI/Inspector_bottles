@@ -2,12 +2,7 @@
 
 Заготовки для machine-specific overrides — отдельно для **macOS** и **Windows**.
 
-> **MCP-сервера НЕ нужно копировать руками под платформу** — кросс-платформенность решает [`../mcp/qex-launcher.py`](../mcp/qex-launcher.py) (auto-detect ОС → правильная модель Ollama). Для bootstrap нового проекта:
->
-> ```bash
-> python3 .claude/mcp/bootstrap.py    # macOS / Linux
-> python .claude/mcp/bootstrap.py     # Windows
-> ```
+> **MCP-сервера НЕ нужно копировать руками под платформу** — кросс-платформенность решает [`../mcp/qex-launcher.py`](../mcp/qex-launcher.py) (auto-detect ОС → правильная модель Ollama). Для создания нового проекта используй `claude-kit new`; `.mcp.json` генерируется автоматически из `manifest.yaml`.
 
 ---
 
@@ -20,6 +15,20 @@
 | [`README.md`](README.md) | — | Этот файл |
 
 `settings.local.json` — gitignored, поэтому на каждой машине должен создаваться отдельно. Заготовки в этой папке — стартовая точка.
+
+## Что внутри заготовок
+
+Permissions для всех **четырёх стандартных MCP-серверов** (qex, sentrux, context7, serena) — разделены на три зоны:
+
+| Зона | Что туда попало | Принцип |
+|---|---|---|
+| **allow** | read-only / search ops: `mcp__qex__search_code`, `mcp__sentrux__scan/health/dsm`, `mcp__context7__*`, `mcp__serena__find_*`, `read_memory`, `list_memories` | Чтение и анализ — без вопросов, иначе агент будет дёргать пользователя на каждый поиск |
+| **ask** | мутации: `mcp__qex__clear_index`, `mcp__serena__rename_symbol/replace_*/insert_*/safe_delete_symbol/delete_memory`, `write/edit/rename_memory`, `onboarding` | Меняют код или накопленный контекст — пользователь должен подтвердить |
+| **deny** | (пусто) | По умолчанию deny не используется — все мутации в ask, пользователь решает в моменте. Добавь сюда что-то, только если есть конкретная причина блокировать наглухо. |
+
+Принцип такой же как в корневом `settings.json` для Bash: «функциональность не теряем, slop-векторы перекрываем».
+
+Если ты добавляешь свой MCP-сервер (`graphify`, `qt-mcp` и т.д.) — расширь allow/ask по тому же принципу.
 
 ---
 
@@ -67,4 +76,4 @@ copy .claude\platforms\settings.local.windows.json .claude\settings.local.json
 
 Каждая зона = отдельный блок `mcpServers.*` с собственным `WORKSPACE_PATH`.
 
-Это будет разворачиваться в `mcp.template.json` (и автоматически работать на обеих платформах через `qex-launcher.py`).
+Это будет разворачиваться через компоненты в `manifest.yaml` (и автоматически работать на обеих платформах через `qex-launcher.py`).

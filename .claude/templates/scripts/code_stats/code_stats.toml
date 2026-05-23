@@ -1,0 +1,70 @@
+# Configuration for scripts/code_stats/code_stats.py
+#
+# Run:
+#   python scripts/code_stats/code_stats.py
+#   python scripts/code_stats/code_stats.py --root src/<package> --format json
+#
+# CLI args override values from this file.
+
+[scan]
+# Walk root. Relative path → from current working directory.
+root = "."
+# Recursive descent into subdirectories.
+recursive = true
+# Follow symlinks (false is safer: won't loop).
+follow_symlinks = false
+
+[formats]
+# Extensions to count. Case insensitive. Empty list = all files.
+include = [".py", ".md", ".toml", ".yaml", ".yml", ".json", ".sh"]
+
+[exclude]
+# Directory names to skip entirely (fast pruning).
+dirs = [
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    ".qex",
+    ".sentrux",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "*.egg-info",
+    "data",
+    "htmlcov",
+]
+# Glob patterns for file names to skip.
+file_patterns = ["*.pyc", "*.pyo", "*.so", "*.dylib", "*.dll", ".DS_Store"]
+# Glob patterns for paths (full path relative to root) — for precise exclusions.
+path_patterns = []
+
+[count]
+# Count blank lines.
+blank_lines = false
+# Count comments (per-language rules for .py / .md / .sh below).
+comments = true
+# Count docstring blocks in .py (triple-quoted at module/function top level).
+docstrings = true
+# Count characters (besides lines). Minor overhead.
+chars = true
+# Read encoding. errors='replace' so binary-like files don't crash the script.
+encoding = "utf-8"
+
+[output]
+# Output format: table | json | csv
+format = "table"
+# Report row grouping: extension | directory | none
+group_by = "extension"
+# Sort: lines | chars | files | name
+sort_by = "lines"
+# Sort order: desc | asc
+sort_order = "desc"
+# Show TOTAL summary row.
+show_total = true
+# Max rows in output (0 = unlimited). Useful with group_by = "directory".
+limit = 0

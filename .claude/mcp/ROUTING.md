@@ -1,0 +1,205 @@
+# MCP Routing — Canonical Map
+
+> **Назначение этого файла:** для авторов агентов (при правке `.md`), для verify-скрипта
+> (`scripts/verify-mcp-orchestration.sh`), для человека-ревьюера системы. **Агенты этот
+> файл runtime НЕ читают** (this file is not for runtime — agents do not load it) —
+> у каждого свой самодостаточный routing-блок в собственной `.md`. Эта карта — единый канон,
+> на который опираются авторы при правке агентов и при ревью изменений.
+>
+> Если правишь routing-блок в каком-то агенте — сверяйся с этим файлом. Если добавляешь
+> новый MCP — сначала описываешь здесь, потом в агентах.
+
+---
+
+## TL;DR — таблица всех серверов
+
+| Тип запроса | Primary MCP | Сервер подключён? | Fallback |
+|-------------|-------------|-------------------|----------|
+| Семантический / fuzzy поиск по коду | `qex:search_code` | **core** (всегда в seed) | `Grep` (дешевле для exact strings) |
+| Архитектурные метрики, DSM, циклы | `sentrux:dsm` / `sentrux:health` | **core** | руками через `pydeps` |
+| Проверка архитектурных правил | `sentrux:check_rules` | **core** | руками + чек-лист |
+| Документация библиотек (актуальная) | `context7:query-docs` | **core** (user-level) | `WebFetch` для официальных docs |
+| Callers / callees функции | `codegraph:callers` / `codegraph:callees` | optional | `Grep` + чтение |
+| Blast radius изменения | `codegraph:impact` | optional | руками через git diff + Grep |
+| Структура файлов / модулей | `codegraph:files` / `codegraph:context` | optional | `Glob` + `Read` |
+| Symbol-level refs / rename across files | `serena:find_referencing_symbols` / `serena:rename_symbol` | optional (experimental) | `ast-grep` или ручной Grep+Edit |
+| Structural codemod на N файлов | `ast-grep:scan` / `ast-grep:rewrite` | optional | `Grep` + ручные Edits (опасно) |
+| Architectural overview / hubs | `graphify:query_graph` | optional | `sentrux:dsm` + руками |
+| GitHub PR / Issues / Actions state | `github:*` | optional | `gh` CLI |
+| PyQt/PySide widget tree, screenshot | `qt-mcp:get_widget_tree` / `take_screenshot` | optional (GUI only) | руками через `pytest-qt` |
+| Browser / web UI verify (navigate, screenshot) | `playwright:browser_navigate` / `screenshot` | optional (web only) | `curl` + проверка HTML |
+| Multi-step reasoning (сложная гипотеза) | `sequential-thinking:sequentialthinking` | optional | внутренний chain-of-thought |
+| Точная строка / regex | `Grep` | always | — |
+
+---
+
+## Per-server details
+
+### qex — семантический поиск (core)
+
+**Когда вызывать:** "где код, который X", fuzzy intent, рефакторинг с разведкой.
+
+**Ключевые tools:**
+- `mcp__qex__search_code` — гибридный BM25 + dense поиск.
+- `mcp__qex__get_indexing_status` — состояние индекса.
+- `mcp__qex__index_codebase` — переиндексация (force/incremental).
+
+**Не дублируй:** если qex дал релевантный список — не Grep'ай те же файлы.
+
+### sentrux — архитектурный health-gate (core)
+
+**Когда вызывать:** перед `/ship`, перед рефакторингом, для review §Architecture, для investigator при cross-module расследовании.
+
+**Ключевые tools:**
+- `mcp__sentrux__check_rules` — валидация `.sentrux/rules.toml` (cycles, layer violations).
+- `mcp__sentrux__dsm` — Dependency Structure Matrix.
+- `mcp__sentrux__health` — quality_signal + bottleneck snapshot.
+- `mcp__sentrux__test_gaps` — модули без покрытия.
+- `mcp__sentrux__git_stats` — churn, hotspots, bus factor.
+- `mcp__sentrux__scan` / `rescan` — расчёт графа.
+- `mcp__sentrux__session_start` / `session_end` — baseline и diff.
+
+**Не дублируй:** если sentrux:check_rules дал список нарушений — не пересматривай руками.
+
+### context7 — документация библиотек (core, user-level)
+
+**Когда вызывать:** работа с любой внешней библиотекой — особенно при unfamiliar API, version-specific migration, exact method signature.
+
+**Ключевые tools:**
+- `mcp__context7__resolve-library-id` — найти ID библиотеки (`/org/project`).
+- `mcp__context7__query-docs` — задать вопрос по докам.
+
+**Не для:** stdlib, well-known patterns core-стека проекта (если уверен в API), refactoring внутренней бизнес-логики.
+
+### codegraph — function-level call graph (optional)
+
+**Когда подключён:** проекты ≥5k LOC с веб-фреймворком (FastAPI/Django/Express/Rails) или активным рефакторингом.
+
+**Ключевые tools:**
+- `codegraph_callers` — кто вызывает символ.
+- `codegraph_callees` — кого вызывает символ.
+- `codegraph_impact` — blast radius изменения.
+- `codegraph_context` — task-aware bundle.
+- `codegraph_files` — file/module иерархия.
+- `codegraph_search` — exact + FTS5 symbol lookup.
+- `codegraph_node` — полная инфа об одном символе.
+- `codegraph_status` — здоровье индекса.
+
+**Не дублируй:** codegraph дал callers → не Grep'ай те же символы.
+
+### serena — LSP symbol retrieval (optional, experimental)
+
+**Когда подключён:** проекты ≥10k LOC с активным cross-file refactoring + стабильным LSP для языка.
+
+**Ключевые tools:**
+- `mcp__serena__find_symbol`, `find_referencing_symbols`, `find_implementations`, `find_declaration`.
+- `mcp__serena__rename_symbol` — атомарный refactor по LSP.
+- `mcp__serena__replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol`, `safe_delete_symbol`.
+- `mcp__serena__get_symbols_overview`, `get_diagnostics_for_file`.
+
+**Конфликт с codegraph/ast-grep:** serena делает scope-aware (LSP) операции; ast-grep — pattern-based; codegraph — pre-indexed graph. Выбирай по задаче.
+
+### ast-grep — structural codemods (optional)
+
+**Когда подключён:** проекты с активным codemod-refactoring, polyglot, или строгие code-rules в CI.
+
+**Ключевые tools:**
+- `ast-grep:scan` — найти паттерн.
+- `ast-grep:rewrite` (через rules) — AST-safe замена.
+
+**Не дублируй с serena:** serena для одного символа (scope-aware), ast-grep для bulk patterns.
+
+### graphify — knowledge graph (optional)
+
+**Когда подключён:** периодический architectural review, onboarding в кодбейз, поиск god-nodes и hubs.
+
+**Ключевые tools:**
+- `graphify:query_graph` — natural language запросы к графу.
+- `graphify:get_node`, `shortest_path`.
+
+**Не для:** обычная навигация по коду — это `qex`/`codegraph`.
+
+### github-mcp — GitHub state (optional)
+
+**Когда подключён:** проект на GitHub, активная работа с PR/Issues/Actions.
+
+**Категории tools:** Issues, Pulls, Actions, Repo, Projects (всего 80+).
+
+**Не для:** локальный `git` (status, log, diff, commit) — это shell `git`, всегда дешевле.
+
+### qt-mcp — PyQt/PySide runtime (optional, GUI-only)
+
+**Когда подключён:** проект использует PyQt5/PySide6.
+
+**Ключевые tools:** `take_screenshot`, `click_widget`, `get_widget_tree`, `get_property`, `set_property`, `type_text`.
+
+### playwright — browser automation (optional, web-only)
+
+**Когда подключён:** проект — веб-приложение, нужно verify UI в браузере (`verify-done` для веб).
+
+**Ключевые tools:** `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_fill`, `browser_press_key`, `browser_evaluate`, `browser_console_logs`, `browser_network_requests`.
+
+**Используется:** verify-done skill (golden-path screenshot), tester при e2e debugging.
+
+### sequential-thinking — externalized reasoning (optional)
+
+**Когда подключён:** investigator на 3-й гипотезе, teamlead на эскалации, ADR с 3+ альтернативами.
+
+**Один tool:** `sequentialthinking` — chain-of-thought scratchpad с поддержкой revision и branching.
+
+**Используется:** investigator (Workflow §1 при сложных cross-module bugs), teamlead (Escalation mode).
+
+### playwright — browser automation (optional, web-only)
+
+**Когда подключён:** проект — веб-приложение, нужно verify UI в браузере (`verify-done` для веб).
+
+**Ключевые tools:** `browser_navigate`, `screenshot`, `click`, `fill`, `evaluate`.
+
+### sequential-thinking — multi-step reasoning (optional)
+
+**Когда подключён:** для investigator на 3-й гипотезе, teamlead на эскалации, сложные debugging-цепочки.
+
+**Один tool:** `sequentialthinking` — chain-of-thought scratchpad.
+
+---
+
+## Heuristics — общие правила
+
+1. **Не дублируй.** Если MCP A дал ответ — не перепроверяй MCP B на тех же данных. Цель — минимум tool calls.
+2. **Grep — последний или первый.** Для точной строки `Grep` дешевле любого MCP. Для fuzzy intent — `qex` первым.
+3. **Fallback всегда explicit.** Если в routing-блоке агента упомянут optional MCP — там же должен быть fallback ("если codegraph не подключён → Grep").
+4. **Conditional guards обязательны.** Каждое упоминание optional MCP в routing — с условием "если `<server>` подключён".
+5. **MCP молчит → не зацикливайся.** Если MCP вернул ошибку или таймаут — fallback на стандартные tools, не повторяй тот же вызов трижды.
+
+---
+
+## Health-fallback — что делать если MCP упал
+
+| Симптом | Действие |
+|---------|----------|
+| qex отвечает ошибкой / пустотой | Проверить Ollama (`curl localhost:11434`) → если down, fallback на `Grep` |
+| sentrux команда не находится | Проверить `command -v sentrux` → если нет, skip architectural-блок ревью, отметить в output |
+| context7 timeout | Fallback на `WebFetch` к официальным docs либо память LLM (с оговоркой) |
+| codegraph index устарел | Подсказать пользователю `codegraph reindex` → пока fallback на `Grep` |
+| serena LSP не стартует | Skip serena, fallback на `qex` + `Grep` |
+
+Health-check выводится при `SessionStart` хуком `hooks/quality/mcp-health-check.sh` — оркестратор знает что доступно в текущей сессии.
+
+---
+
+## Per-project filtering — apply-seed time
+
+В seed-шаблоне ROUTING.md описывает **все** возможные MCP. В конкретном проекте после `apply-seed`:
+- `.mcp.json` содержит только активированные сервера.
+- `_stack.md` помечает чекбоксами какие optional MCP включены.
+- Агенты вызывают MCP **только если подключены** (conditional guard в routing-блоке).
+
+Это значит: routing-блок в `reviewer.md` всегда говорит "если sentrux подключён → sentrux:check_rules". В проекте без sentrux агент пойдёт на fallback (Grep) без ошибок.
+
+---
+
+## Maintenance
+
+- При добавлении нового MCP — сначала описать здесь (новая секция + строка в TL;DR), потом править агентов.
+- При удалении MCP — убрать отсюда, прогнать verify-скрипт (найдёт orphan-упоминания в агентах).
+- verify-скрипт (`scripts/verify-mcp-orchestration.sh`) проверяет consistency: все `mcp:server:tool` упомянутые в агентах присутствуют здесь.

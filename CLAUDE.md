@@ -137,16 +137,17 @@ Co-Authored-By: ...
 
 ## Slash-команды
 
-37 команд в 6 категориях. Полный список с описаниями: [`.claude/README.md`](.claude/README.md#команды-commands).
+46 команд в 7 категориях. Список (упорядочено по namespace):
 
 | Категория | Ключевые команды |
 |-----------|------------------|
-| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline` |
-| **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review` |
+| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/adr`, `/plan-status` |
+| **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review`, `/doctor`, `/lint-agents`, `/lint-settings` |
 | **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory` |
+| **memory/** | `/memory:init`, `/memory:search`, `/memory:status` |
 | **spec/** | `/spec`, `/spec-sync` |
 | **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams` |
-| **team/** | `/team`, `/hire`, `/handoff`, `/docs` |
+| **team/** | `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up` |
 
 Гайд по sentrux: [`.claude/mcp/sentrux/README.md`](.claude/mcp/sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
 
@@ -156,7 +157,7 @@ Co-Authored-By: ...
 
 | Target | Что делает |
 |--------|-----------|
-| `make check` | ruff + mypy + bandit (быстрая проверка) |
+| `make check` | ruff + pyright + bandit (быстрая проверка) |
 | `make test` | pytest с coverage |
 | `make gate` | check + test (полный gate) |
 | `make diagrams` | pyreverse + pydeps → `docs/diagrams/` |

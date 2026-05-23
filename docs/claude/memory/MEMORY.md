@@ -21,3 +21,4 @@
 - [Constructor modularity](feedback_constructor_modularity.md) — everything must be modular constructor: pluggable, testable, composable blocks
 - [Component Design System](project_component_scoped_styles.md) — React-style design system, DEFERRED until custom components replace raw Qt widgets
 - [Plan-Driven Development](project_plan_driven_dev.md) — slug naming, Refs trailer, plan→branch→commits traceability
+- [Sentrux baseline 2026-05](project_sentrux_baseline_2026_05.md) — Quality 7161/10000 после seed 0.2.0, точка отсчёта для рефакторингов

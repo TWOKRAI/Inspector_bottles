@@ -29,14 +29,14 @@ description: Синхронизировать живое ТЗ (docs/direction/) 
 
 5. **Вызови manager для декомпозиции**
    ```
-   Agent(subagent_type: "manager", prompt: "Пользователь отредактировал docs/direction/ для $ARGUMENTS. Расхождения:\n\n<результат spec-writer>\n\nДекомпозируй на Task X.Y и сохрани план в workspace/plans/spec-sync-YYYY-MM-DD.md")
+   Agent(subagent_type: "manager", prompt: "Пользователь отредактировал docs/direction/ для $ARGUMENTS. Расхождения:\n\n<результат spec-writer>\n\nДекомпозируй на Task X.Y и сохрани план в plans/spec-sync.md")
    ```
 
 6. **Отчёт**
    ```
    ✓ Spec проанализирован: $ARGUMENTS/docs/direction/
    ✓ Расхождений найдено: N
-   ✓ План создан: workspace/plans/spec-sync-YYYY-MM-DD.md
+   ✓ План создан: plans/spec-sync.md
    → Запусти /pipeline или /implement <task> для реализации
    ```
 

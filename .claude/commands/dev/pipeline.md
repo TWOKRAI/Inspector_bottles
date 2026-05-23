@@ -55,7 +55,7 @@ disable-model-invocation: true
 - Покажи итоговый diff
 - Предложи commit message в формате Conventional Commits + trailers
   (`Why:`, `Layer:`, `Refs:` — **обязательно** если есть файл плана для текущей ветки, + опц. `Risk:` / `Reversible:` / `Tested:` / `Rejected:`).
-  Полный гайд: `docs/claude/COMMIT_GUIDE.md`. Валидация: `scripts/validate_commit/validate_commit.py`.
+  Полный гайд: `.claude/COMMIT_GUIDE.md`. Валидация: `scripts/validate_commit/validate_commit.py`.
 - Если все Task в плане = [DONE] → предложи закрыть план (Status: DONE, отдельный коммит `docs(plans): закрыть <slug>`)
 - Спроси разрешение на push
 

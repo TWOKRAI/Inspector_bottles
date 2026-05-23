@@ -12,13 +12,19 @@ description: Запустить Manager-агента (Opus) — декомпоз
 **Slug-конвенция (обязательна для Manager):**
 - Формат: `kebab-case`, `<домен>-<суть>`, max 40 символов
 - Примеры: `auth-rbac`, `graph-port-validation`, `phase7-plugin-config`
-- **Не использовать:** голые счётчики (PLAN-001), даты
+- **Не использовать:** голые счётчики (PLAN-001)
 - Phase-номер допустим как смысловое имя (`phase7-plugin-config`)
 
-**Хранение:**
+**Хранение (дата ISO всегда в имени — для хронологического поиска):**
 - Дефолтный корень: `plans/` (корень проекта). Всегда сохранять сюда, если пользователь не указал другой путь явно.
-- По умолчанию — один файл: `plans/<slug>.md`
-- Папка — по усмотрению Manager (независимые фазы, большой план): `plans/<slug>/plan.md` + `phase-N.md`
+- **Single plan (один файл, без фаз):** `plans/YYYY-MM-DD_<slug>.md` — для простых задач (< 50 строк ТЗ).
+- **Multi-phase plan (с фазами):** `plans/YYYY-MM-DD_<slug>/` (папка), внутри:
+  - `plan.md` — метаплан / overview / index фаз.
+  - `phase-1.md`, `phase-2.md`, ... — фазовые планы.
+- **Дата** — день создания плана (когда вызван `/plan`), ISO формат.
+- **Выбор формата:** Manager решает по сложности (single для атомарных, multi-phase когда 2+ независимых этапов).
+
+**Шаблон плана:** [`.claude/templates/PLAN.template.md`](../.claude/templates/PLAN.template.md) — используй его структуру (frontmatter + Phase/Task с `[PENDING]`/`[DONE]` + Open questions + Decisions log) как отправную точку. Удали ненужные секции, но не frontmatter.
 
 **Обязательный frontmatter:**
 ```markdown
@@ -33,23 +39,34 @@ description: Запустить Manager-агента (Opus) — декомпоз
 После получения плана:
 1. Прочитай созданный файл
 2. Оцени качество декомпозиции
-3. Сделай коммит плана:
-   ```bash
-   git add plans/<slug>*
-   git commit -m "docs(plans): создать план <slug>
-
-   Why: зафиксировать план перед реализацией
-   Layer: docs"
-   ```
-4. Определи тип ветки по Conventional Commits type:
+3. Определи тип ветки по Conventional Commits type:
    - Новая фича → `feat/<slug>`
    - Рефакторинг → `refactor/<slug>`
    - Баг → `fix/<slug>`
    - Документация → `docs/<slug>`
-5. Создай ветку: `git checkout -b <type>/<slug>`
-6. Обнови поле `Ветка:` в плане и amend коммит:
+4. **Сначала создай ветку, потом коммить план** (важен порядок: commit-msg hook требует `Refs:` если на ветке `<type>/<slug>` уже есть `plans/<slug>.md`):
    ```bash
-   git add plans/<slug>*
-   git commit --amend --no-edit
+   git checkout -b <type>/<slug>
    ```
-7. Покажи пользователю: краткое резюме плана + имя ветки
+5. Обнови поле `Ветка:` в плане → значение `<type>/<slug>`.
+6. Сделай коммит плана с self-Refs (укажи точный путь):
+   ```bash
+   # Single plan:
+   git add plans/YYYY-MM-DD_<slug>.md
+   git commit -m "docs(plans): создать план <slug>
+
+   Why: зафиксировать план перед реализацией
+   Layer: docs
+   Refs: plans/YYYY-MM-DD_<slug>.md"
+
+   # Multi-phase plan:
+   git add plans/YYYY-MM-DD_<slug>/
+   git commit -m "docs(plans): создать план <slug> (multi-phase)
+
+   Why: зафиксировать план перед реализацией
+   Layer: docs
+   Refs: plans/YYYY-MM-DD_<slug>/plan.md"
+   ```
+   (если в проекте `.claude/commit-layers.txt` пуст — строку `Layer:` пропусти).
+   `Refs:` всегда указывает на конкретный файл (`plan.md` или `phase-N.md`), не на папку.
+7. Покажи пользователю: краткое резюме плана + имя ветки + первая Task для `/implement`

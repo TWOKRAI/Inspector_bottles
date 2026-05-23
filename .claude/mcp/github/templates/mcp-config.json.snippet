@@ -1,0 +1,25 @@
+// Append this block to your project's .mcp.json under "mcpServers".
+// Two variants — pick one, strip the comments before merging.
+
+// Variant A: Remote (OAuth, recommended for personal/team use)
+// On first call, Claude Code opens a browser for OAuth authorization.
+// Token never touches your config files.
+{
+  "github": {
+    "type": "http",
+    "url": "https://mcp.github.com/mcp"
+  }
+}
+
+// Variant B: Local binary + PAT (for GHE, self-hosted, or fine-grained scoping)
+// Requires: `go install github.com/github/github-mcp-server@latest`
+// + a fine-grained PAT in env var GH_MCP_TOKEN (do NOT commit).
+{
+  "github": {
+    "command": "github-mcp-server",
+    "args": ["stdio"],
+    "env": {
+      "GITHUB_PERSONAL_ACCESS_TOKEN": "${GH_MCP_TOKEN}"
+    }
+  }
+}

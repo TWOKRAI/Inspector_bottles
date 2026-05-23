@@ -282,7 +282,7 @@ ollama serve &
       "args": [],
       "env": {
         "RUST_LOG": "info",
-        "WORKSPACE_PATH": "/Users/twokrai/Project_code/Inspector_bottles",
+        "WORKSPACE_PATH": "/absolute/path/to/your-project",
         "QEX_EMBEDDING_PROVIDER": "openai",
         "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
         "QEX_OPENAI_API_KEY": "ollama",
@@ -300,11 +300,11 @@ ollama serve &
 {
   "mcpServers": {
     "qex": {
-      "command": "C:\\Users\\INNOTECH\\.cargo\\bin\\qex.exe",
+      "command": "C:\\Users\\<USER>\\.cargo\\bin\\qex.exe",
       "args": [],
       "env": {
         "RUST_LOG": "info",
-        "WORKSPACE_PATH": "d:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles",
+        "WORKSPACE_PATH": "C:\\path\\to\\your-project",
         "QEX_EMBEDDING_PROVIDER": "openai",
         "QEX_OPENAI_BASE_URL": "http://localhost:11434/v1",
         "QEX_OPENAI_API_KEY": "ollama",
@@ -345,7 +345,7 @@ Claude Code загружает и мержит MCP-конфиги из двух 
 Проверить наличие глобального конфига:
 
 ```powershell
-python -c "import json; d=json.load(open(r'C:\Users\INNOTECH\.claude.json')); print(json.dumps(d.get('mcpServers',{}), indent=2))"
+python -c "import json, os; d=json.load(open(os.path.expanduser(r'~\.claude.json'))); print(json.dumps(d.get('mcpServers',{}), indent=2))"
 ```
 
 ---
@@ -357,13 +357,13 @@ python -c "import json; d=json.load(open(r'C:\Users\INNOTECH\.claude.json')); pr
 ```
 # Корень: исключить всё
 /*
-# Кроме активных директорий
-!/multiprocess_framework/
-!/multiprocess_prototype/
+# Кроме активных директорий (адаптируй под свой проект)
+!/src/
+!/tests/
 !/scripts/
 !/docs/
-!/hikvision_camera_module/
-!/Services/
+!/plans/
+!/.claude/
 
 # Исключить мусор внутри разрешённых директорий
 **/*.log

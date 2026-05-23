@@ -1,12 +1,25 @@
-# pre-commit-config.yaml — шаблон quality gates
-# Адаптировать: entry в mypy hook (заменить на свой главный пакет)
+# .pre-commit-config.yaml — quality gates
+# Default toolchain (active):
+#   pre-commit stage:  hygiene · gitleaks (secrets) · ruff · bandit (security)
+#   pre-push stage:    pyright (types) · sentrux (arch) · pip-audit (CVE)
 #
-# Установка:
-#   uv run pre-commit install
-#   uv run pre-commit install --hook-type pre-push
+# Opt-in (commented out below — uncomment if your project needs them):
+#   hypothesis (property-based testing), interrogate (docstring coverage),
+#   vulture (dead code), radon (complexity), mutmut (mutation testing)
+#
+# Install:
+#   uv run pre-commit install                       # pre-commit stage
+#   uv run pre-commit install --hook-type pre-push  # pre-push stage
+#
+# Manual run:
+#   uv run pre-commit run --all-files
+
+# Global exclude: never touch seed/tooling, even for hygiene hooks. The seed
+# carries non-ASCII content (Russian) that confuses linters; treat it as opaque.
+exclude: '^\.claude/'
 
 repos:
-  # ── Общие проверки ──
+  # ─── Hygiene (whitespace, line endings, YAML/TOML syntax) ──────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -15,37 +28,114 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml
+      - id: check-json
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
       - id: debug-statements
 
-  # ── Ruff (lint + format) ──
+  # ─── Gitleaks: secret scanning (pre-commit, blocks committed secrets) ──────
+  # Scans staged files for API keys, tokens, private keys. Pinned version for
+  # reproducibility. To allowlist a false positive, add a comment with
+  # `gitleaks:allow` on the same line, or extend .gitleaks.toml.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # ─── Ruff: lint + format (fast, runs on every commit) ──────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.12
+    rev: v0.8.4
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  # ── mypy (gradual, на pre-push) ──
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  # ─── Pyright: static type check (slower, runs on pre-push) ─────────────────
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.390
     hooks:
-      - id: mypy
-        args: [--ignore-missing-imports, --no-error-summary]
-        additional_dependencies: [pydantic>=2.13]
-        pass_filenames: false
-        entry: mypy PROJECT_NAME                # ← замени на свой пакет
-        language: python
-        types: [python]
+      - id: pyright
         stages: [pre-push]
+        pass_filenames: false
+        args: [src]
 
-  # ── bandit (security scanning) ──
+  # ─── Bandit: Python security linter (pre-commit) ───────────────────────────
+  # Catches subprocess(shell=True), hardcoded passwords, eval(), weak crypto,
+  # insecure deserialization, etc. Excludes tests/ since intentional unsafe
+  # patterns are common there. Config via [tool.bandit] in pyproject.toml.
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.0
+    rev: 1.8.0
     hooks:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
         exclude: ^tests/
+
+  # ─── Sentrux: architectural rule check (pre-push, after pyright) ───────────
+  # Runs `sentrux check` against .sentrux/rules.toml. If sentrux binary is
+  # missing, the hook degrades gracefully (warns + exits 0) — not a hard
+  # dependency for projects that haven't adopted architectural rules yet.
+  - repo: local
+    hooks:
+      - id: sentrux-check
+        name: sentrux check (architectural rules)
+        entry: "bash -c 'command -v sentrux >/dev/null 2>&1 && sentrux check || echo skip-sentrux-not-installed'"
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+  # ─── pip-audit: scan installed dependencies for known CVEs (pre-push) ──────
+  # Official PyPA tool. Uses the project's lockfile if present. Pre-push stage
+  # (not pre-commit) because remote DB lookup adds latency — don't slow down
+  # every commit. CI should also run this independently.
+  - repo: https://github.com/pypa/pip-audit
+    rev: v2.7.3
+    hooks:
+      - id: pip-audit
+        stages: [pre-push]
+        pass_filenames: false   # audit the current project, not staged files
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # OPT-IN HOOKS (uncomment per project as needed)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ─── interrogate: docstring coverage (libraries with public API) ───────────
+  # Fails if docstring coverage drops below the threshold. Sensible for
+  # publicly-consumed packages; noise for private apps.
+  # - repo: https://github.com/econchick/interrogate
+  #   rev: 1.7.0
+  #   hooks:
+  #     - id: interrogate
+  #       args: [--fail-under=80, --quiet]
+  #       pass_filenames: false
+
+  # ─── vulture: dead code detection (high false-positive rate) ───────────────
+  # Use as a periodic audit, not on every commit. Tune allowlist via
+  # .vulture-whitelist or pyproject.toml [tool.vulture] before enabling.
+  # - repo: https://github.com/jendrikseipp/vulture
+  #   rev: v2.13
+  #   hooks:
+  #     - id: vulture
+
+  # ─── radon: cyclomatic complexity threshold ────────────────────────────────
+  # Blocks merge if any function exceeds rank C (complexity > 10). Useful for
+  # refactor candidates but can be annoying on algorithmic code.
+  # - repo: https://github.com/rubik/radon
+  #   rev: v6.0.1
+  #   hooks:
+  #     - id: radon
+  #       args: [cc, --min, C, --no-assert, --show-complexity]
+
+  # ─── hypothesis: property-based testing — installed as a dependency ────────
+  # Not a pre-commit hook — it's a library: `uv add --group dev hypothesis`.
+  # Then use @given(...) decorators in tests/ for math/parsing logic.
+  # See https://hypothesis.readthedocs.io/
+
+  # ─── mutmut: mutation testing — periodic, not a hook ───────────────────────
+  # `uv add --group dev mutmut`; run as `mutmut run` periodically on critical
+  # modules. Slow (mutates each line, reruns tests) — not a per-commit gate.

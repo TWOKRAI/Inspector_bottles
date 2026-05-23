@@ -1,0 +1,25 @@
+// Append this block to your project's .mcp.json under "mcpServers".
+// Cross-platform: requires Node 18+ on PATH.
+//
+// Prerequisites:
+//   1. `codegraph init`   — creates .codegraph/ in project root
+//   2. `codegraph index .` — first full index
+//   3. Add `.codegraph/` to .gitignore
+//
+// Two variants — pick one and strip the comments before merging.
+
+// Variant A: global install (npm install -g @colbymchenry/codegraph)
+{
+  "codegraph": {
+    "command": "codegraph",
+    "args": ["serve", "--mcp"]
+  }
+}
+
+// Variant B: zero-install via npx (slower first run, no system-wide footprint)
+{
+  "codegraph": {
+    "command": "npx",
+    "args": ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+  }
+}

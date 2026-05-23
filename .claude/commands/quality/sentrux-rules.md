@@ -4,7 +4,7 @@ description: Проверка архитектурных инвариантов 
 
 Запусти проверку правил `.sentrux/rules.toml`:
 
-1. Проверь, существует ли `.sentrux/rules.toml` в корне проекта. Если нет — сообщи пользователю, что файл нужно создать (см. https://github.com/sentrux/sentrux), и покажи минимальный шаблон:
+1. Проверь, существует ли `.sentrux/rules.toml` в корне проекта. Если нет — сообщи пользователю, что файл нужно создать (см. https://github.com/sentrux/sentrux и [`.claude/mcp/sentrux/rules.template.toml`](../../.claude/mcp/sentrux/rules.template.toml) если есть), и покажи минимальный generic-шаблон:
 
 ```toml
 [constraints]
@@ -12,20 +12,23 @@ max_cycles = 0
 no_god_files = true
 
 [[layers]]
-name = "framework"
-paths = ["multiprocess_framework/*"]
+name = "domain"
+paths = ["src/*/domain/*", "src/*/core/*"]
 order = 0
 
 [[layers]]
-name = "prototype"
-paths = ["multiprocess_prototype/*"]
+name = "adapters"
+paths = ["src/*/adapters/*", "src/*/io/*"]
 order = 1
 
 [[boundaries]]
-from = "multiprocess_framework/modules/process_module/*"
-to = "multiprocess_framework/modules/frontend_module/*"
-reason = "process не зависит от frontend"
+from = "src/*/domain/*"
+to = "src/*/adapters/*"
+forbidden = true
+reason = "domain не должен зависеть от adapters (DIP)"
 ```
+
+> Это generic-пример (hexagonal/DDD). Подгони под реальную архитектуру проекта (см. `.claude/modes/_stack.md` → "Layers").
 
 2. Если файл есть — вызови `mcp__sentrux__check_rules` с `path` = абсолютный путь к корню проекта.
 

@@ -34,10 +34,10 @@ If Director mistakenly gave you ADR/ARCHITECTURE — **STOP**, ask to redirect t
 ### Docstrings (Python)
 
 ```python
-def process_message(self, msg: dict) -> None:
-    """Process incoming message from RouterManager.
+def process_request(self, payload: dict) -> dict:
+    """Validate payload and return a response dict.
 
-    msg: dict with keys 'channel', 'payload', 'targets'.
+    payload: dict with keys 'op', 'args'; returns {'status', 'result'}.
     """
 ```
 
@@ -96,7 +96,7 @@ Date: YYYY-MM-DD
 - Readability over detail — keep it short
 - Don't invent — if something's not in the code, don't describe it
 - Don't touch good existing docstrings
-- Language — follow `CLAUDE.md` (in KnowledgeOS docs are Russian, tech terms in English)
+- Language — follow `CLAUDE.md` / `.claude/modes/_stack.md` → "Language policy"
 
 ## What NOT to do
 

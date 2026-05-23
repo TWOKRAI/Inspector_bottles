@@ -1,0 +1,36 @@
+# Layer values allowed in commit `Layer:` trailer.
+# Validator: scripts/validate_commit/validate_commit.py
+# One layer per line; '#' for comments; blanks ignored.
+#
+# Default state: file present but contains only comments → Layer: trailer is OPTIONAL.
+# To enforce Layer: enable in `.claude/modes/_stack.md` ("Commit format" section)
+# and add one layer per line below.
+#
+# When the project grows architecture worth gating, add layers below.
+# Example for a layered Python project:
+#   app
+#   lib
+#   tests
+#   docs
+#   scripts
+#   infra
+#   build
+#   ci
+#   mixed
+#
+# Example for an NLP/ML pipeline:
+#   data
+#   nlp
+#   cli
+#   tests
+#   docs
+#   infra
+#   mixed
+#
+# Example for hexagonal architecture:
+#   domain
+#   application
+#   adapters
+#   ports
+#   infrastructure
+#   tests

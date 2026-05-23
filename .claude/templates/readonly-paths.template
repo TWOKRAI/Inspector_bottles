@@ -1,0 +1,31 @@
+# .claude/readonly-paths — paths protected from Edit/Write by Claude.
+#
+# How it works:
+#   - Hook .claude/hooks/core/protect-readonly.sh reads this file on every
+#     Edit/Write attempt
+#   - One pattern per line, literal substring match against the file path
+#   - Empty lines and # comments ignored
+#   - If this file is empty or absent → hook is a no-op
+#
+# To activate: copy this template to .claude/readonly-paths and uncomment
+# what applies to your project.
+#
+# Examples (uncomment as needed):
+
+# Raw / unprocessed data — never edit after creation
+# data/raw/
+
+# SQLite databases (use migrations or schema scripts, not direct edits)
+# data/corpus.db
+# data/corpus.db-journal
+
+# Applied DB migrations — once applied, never modify
+# migrations/applied/
+
+# Generated artifacts (regenerate via make, don't hand-edit)
+# docs/diagrams/classes/
+# docs/diagrams/deps/
+
+# Vendored / third-party code
+# vendor/
+# third_party/

@@ -1,11 +1,50 @@
 {
+  "_comment": "Per-machine MCP permissions for macOS. Copy to .claude/settings.local.json (gitignored). Read-only ops auto-allowed; mutations require confirmation; destructive ops blocked.",
   "permissions": {
     "allow": [
       "mcp__qex__index_codebase",
       "mcp__qex__search_code",
       "mcp__qex__get_indexing_status",
+      "mcp__qex__download_model",
+
+      "mcp__sentrux__scan",
+      "mcp__sentrux__rescan",
+      "mcp__sentrux__health",
+      "mcp__sentrux__dsm",
+      "mcp__sentrux__check_rules",
+      "mcp__sentrux__test_gaps",
+      "mcp__sentrux__git_stats",
+      "mcp__sentrux__session_start",
+      "mcp__sentrux__session_end",
+
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+
+      "mcp__serena__find_symbol",
+      "mcp__serena__find_referencing_symbols",
+      "mcp__serena__find_implementations",
+      "mcp__serena__find_declaration",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__get_diagnostics_for_file",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__initial_instructions",
+      "mcp__serena__list_memories",
+      "mcp__serena__read_memory"
+    ],
+    "ask": [
       "mcp__qex__clear_index",
-      "mcp__qex__download_model"
+
+      "mcp__serena__write_memory",
+      "mcp__serena__edit_memory",
+      "mcp__serena__rename_memory",
+      "mcp__serena__rename_symbol",
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__replace_content",
+      "mcp__serena__insert_after_symbol",
+      "mcp__serena__insert_before_symbol",
+      "mcp__serena__safe_delete_symbol",
+      "mcp__serena__onboarding",
+      "mcp__serena__delete_memory"
     ]
   }
 }

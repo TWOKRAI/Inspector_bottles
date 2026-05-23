@@ -1,7 +1,6 @@
-# STACK — Полный стек инструментов разработки
+# STACK — TL;DR
 
-Описание всех инструментов в проекте: что делает, зачем нужен, как использовать.
-Структурировано по слоям — от агента до системных утилит.
+Карта инструментов seed-а. Один экран. Полный референс с конфигами и запуском: **[`STACK_REFERENCE.md`](STACK_REFERENCE.md)**.
 
 ---
 
@@ -10,383 +9,130 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  AGENT LAYER (Claude Code)                  │
-│  Агенты + slash-команды + хуки + skills                     │
+│  agents/ + commands/ + hooks/ + skills/                     │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│                    MCP SERVERS (3 шт.)                      │
-│  qex — поиск кода │ sentrux — архитектура │ context7 — доки │
+│                       MCP SERVERS                           │
+│  qex • sentrux • context7 • serena • (graphify, qt-mcp)     │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
 │                     QUALITY GATES                           │
-│  ruff │ mypy │ bandit │ pytest-cov │ pre-commit             │
+│  ruff • pyright • pytest-cov • pre-commit • (bandit opt.)   │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│                    VISUALIZATION                            │
-│  Mermaid │ PlantUML (pyreverse) │ pydeps │ Draw.io          │
+│                  VISUALIZATION (opt.)                       │
+│  Mermaid • PlantUML (pyreverse) • pydeps • Draw.io          │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
 │                     AUTOMATION                              │
-│  Makefile │ scripts/ │ pre-commit hooks                     │
+│  Makefile • scripts/ • pre-commit framework                 │
 └─────────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│                    BASE LAYER                               │
-│  Python 3.12 │ uv │ git │ VS Code │ Ollama │ Node           │
+│                       BASE LAYER                            │
+│  Python 3.11+ • uv • git • VS Code • Ollama • Node          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 1. Agent Layer — Claude Code
+## Инструменты — одной таблицей
 
-### Что это
-**Claude Code** — CLI и IDE-расширение для AI-агента Anthropic. Понимает кодовую базу,
-выполняет multi-step задачи, использует MCP-серверы и встроенные инструменты.
+| Инструмент | Слой | Назначение | Детали |
+|---|---|---|---|
+| **Claude Code** | Agent | CLI/IDE-агент: код, тесты, ревью | [REFERENCE §1](STACK_REFERENCE.md#1-agent-layer--claude-code) |
+| **qex** | MCP | Семантический поиск по коду (BM25 + dense) | [REFERENCE §2.1](STACK_REFERENCE.md#qex--семантический-поиск-кода) |
+| **sentrux** | MCP | Архитектурные метрики, DSM, blast radius | [REFERENCE §2.2](STACK_REFERENCE.md#sentrux--архитектурный-анализ) |
+| **context7** | MCP | Актуальная документация библиотек | [REFERENCE §2.3](STACK_REFERENCE.md#context7--документация-библиотек) |
+| **serena** | MCP | LSP-точные symbol-операции (refs, rename) | `mcp/serena/README.md` |
+| **ruff** | Quality | Линтер + форматтер (Rust, заменяет flake8+black+isort) | [REFERENCE §3.1](STACK_REFERENCE.md#ruff--линтер--форматтер) |
+| **pyright** | Quality | Статический type-checker (Microsoft) | [REFERENCE §3.2](STACK_REFERENCE.md#pyright--статический-типчекинг) |
+| **pytest-cov** | Quality | Test runner + coverage | [REFERENCE §3.4](STACK_REFERENCE.md#pytest-cov--coverage-отчёты) |
+| **pre-commit** | Quality | Фреймворк хуков для quality gates | [REFERENCE §3.5](STACK_REFERENCE.md#pre-commit--фреймворк-хуков) |
+| **bandit** | Quality (opt) | Python security scanner (OWASP-like) | [REFERENCE §3.3](STACK_REFERENCE.md#bandit--security-scanning-опционально) |
+| **Mermaid** | Visual | Текстовые диаграммы (C4, sequence) | [REFERENCE §4.1](STACK_REFERENCE.md#mermaid--текстовые-диаграммы) |
+| **pyreverse** | Visual | UML классов из Python-кода → PlantUML | [REFERENCE §4.2](STACK_REFERENCE.md#plantuml--uml-классов) |
+| **pydeps** | Visual | Граф импортов модулей (требует Graphviz) | [REFERENCE §4.3](STACK_REFERENCE.md#pydeps--граф-зависимостей) |
+| **Makefile** | Automation | Единая точка входа: `make gate` / `test` / `check` | [REFERENCE §5](STACK_REFERENCE.md#5-automation--makefile) |
+| **uv** | Base | Пакетный менеджер (замена pip + venv, 10-100×) | [REFERENCE §6.2](STACK_REFERENCE.md#uv--пакетный-менеджер) |
+| **Ollama** | Base | Локальный LLM-runtime (embedding для qex) | [REFERENCE §6.3](STACK_REFERENCE.md#ollama--локальный-llm-runtime) |
 
-### Конфигурация — папка `.claude/`
+---
 
-| Подпапка | Что внутри |
-|----------|------------|
-| `agents/company/` | 10 ролей: developer, reviewer, manager, debugger, tester, teamlead, tech-writer, spec-writer, docs-writer, investigator |
-| `commands/` | 37 slash-команд (dev, quality, analysis, spec, infra, team) |
-| `modes/` | dev.md, spec.md — режимы работы |
-| `hooks/` | SessionStart, PreToolUse, PostToolUse, PostCompact |
-| `mcp/` | bootstrap.py, конфиги qex/sentrux/context7 |
-| `templates/` | Шаблоны pyproject, pre-commit, Makefile, sentrux rules |
+## Cheatsheet — что когда использовать
 
-### Использование
+| Задача | Инструмент |
+|---|---|
+| Найти где используется функция/класс | **qex** (`mcp__qex__search_code`) |
+| Refs / definition / rename точного символа | **serena** (LSP) |
+| Узнать API библиотеки / migration guide | **context7** |
+| Архитектурное здоровье / DSM / циклы | **sentrux** (`/sentrux-health`, `/sentrux-dsm`) |
+| Модули без тестов | **sentrux** (`/sentrux-gaps`) |
+| Линт + автоформат | **ruff** (`uv run ruff check . --fix` + `ruff format .`) |
+| Проверить типы | **pyright** (`uv run pyright src`) |
+| Security scan | **bandit** (опц.) |
+| Coverage отчёт | **pytest-cov** (`uv run pytest --cov=<package>`) |
+| Запустить всё сразу | `make gate` |
+| Декомпозировать задачу | `/plan <task>` (Manager) |
+| Реализовать задачу | `/implement Task X.Y` (Developer) |
+| Финальная проверка перед push | `/ship` |
+| Полный цикл одной командой | `/pipeline <task>` |
+| Точная regex/string-проверка | **Grep** (всегда дешевле других) |
+
+**Эвристика выбора:** «найди / опиши / что делает» → **qex**. Имя символа + действие (refs/callers/rename) → **serena**. «Что с чем связано / hubs / shortest path» → **graphify** (опц.). Точная строка / regex → **Grep**.
+
+---
+
+## Ключевые команды Claude Code
 
 | Команда | Что делает |
-|---------|-----------|
-| `/plan <task>` | Декомпозиция задачи в ТЗ (Manager) |
-| `/implement` | Реализация (Developer) |
-| `/test` | Написание тестов |
-| `/review` | Код-ревью |
-| `/ship` | Финальная проверка перед merge |
-| `/pipeline` | Полный цикл plan→implement→test→review→ship |
-
----
-
-## 2. MCP Servers — три внешних сервера
-
-### qex — семантический поиск кода
-
-**Что делает:** индексирует кодовую базу, выполняет гибридный поиск (BM25 + dense vectors).
-Позволяет агенту находить код по смыслу, а не только по тексту.
-
-**Когда использовать:** «где используется X», «где код, который делает Y», поиск перед рефакторингом.
-
-**Технология:** Ollama (`qwen3-embedding:4b` Win / `:8b` macOS) + Tantivy BM25 + brute-force dense vectors.
-Индекс в `~/.qex/`.
-
-**Команды:**
-- `/qex-status` — статус индекса
-- `/qex-reindex` — инкрементальная переиндексация
-- `/qex-rebuild` — полная переиндексация с нуля
-
-**Документация:** [`mcp/qex/SETUP_GUIDE.md`](mcp/qex/SETUP_GUIDE.md)
-
----
-
-### sentrux — архитектурный анализ
-
-**Что делает:** статический анализ структуры проекта. 14 метрик качества (modularity, acyclicity,
-depth, equality), дерево зависимостей, blast radius, проверка архитектурных правил.
-
-**Когда использовать:** перед/после рефакторинга, перед `/ship`, при подозрении на архитектурный долг.
-
-**Технология:** бинарь `sentrux` (Go), читает `.sentrux/rules.toml`, генерирует health-отчёты.
-
-**Команды:**
-- `/sentrux-health` — снимок здоровья (scan + metrics)
-- `/sentrux-dsm` — Dependency Structure Matrix, циклы
-- `/sentrux-gaps` — модули без тестов
-- `/sentrux-baseline` — зафиксировать состояние
-- `/sentrux-diff` — дельта с baseline
-- `/sentrux-check` — CI-friendly проверка правил
-- `/arch-review` — комплексный отчёт (health + DSM + gaps)
-
-**Документация:** [`mcp/sentrux/README.md`](mcp/sentrux/README.md)
-
----
-
-### context7 — документация библиотек
-
-**Что делает:** актуальная документация по любой публичной библиотеке/фреймворку. Заменяет
-устаревшие знания агента или Google-поиск.
-
-**Когда использовать:** PySide6.10 API, новая версия Pydantic, миграция, незнакомая библиотека.
-
-**Технология:** SaaS, OAuth, free tier. Установка глобально на машину (`~/.claude.json`).
-
-**Установка:**
-```bash
-npx -y ctx7 setup --claude
-```
-
-**Документация:** [`mcp/context7/README.md`](mcp/context7/README.md)
-
----
-
-## 3. Quality Gates — проверки качества
-
-### ruff — линтер + форматтер
-
-**Что делает:** заменяет flake8 + isort + black + многие плагины. Очень быстрый (Rust).
-
-**Конфиг:** `[tool.ruff]` в `pyproject.toml` — `target-version = "py312"`, `line-length = 120`.
-
-**Запуск:**
-```bash
-uv run ruff check .                # lint
-uv run ruff check --fix .          # с автофиксом
-uv run ruff format .               # формат
-```
-
-**В pre-commit:** запускается на каждый commit.
-
----
-
-### mypy — статический типчекинг
-
-**Что делает:** проверяет аннотации типов в Python-коде. Ловит баги до запуска.
-
-**Стратегия:** **gradual typing** — `ignore_missing_imports = true`, типы добавляются постепенно.
-
-**Конфиг:** `[tool.mypy]` в `pyproject.toml`.
-
-**Запуск:**
-```bash
-uv run mypy <package> --ignore-missing-imports
-```
-
-**В pre-commit:** на **pre-push** (не блокирует каждый commit, но блокирует push).
-
----
-
-### bandit — security scanning
-
-**Что делает:** статический анализ безопасности. Ловит OWASP-уязвимости: hardcoded passwords,
-SQL injection, eval(), небезопасный random, и т.д.
-
-**Конфиг:** `[tool.bandit]` в `pyproject.toml` — исключения для тестов.
-
-**Запуск:**
-```bash
-uv run bandit -r <package> -c pyproject.toml -q
-```
-
-**В pre-commit:** на каждый commit.
-
----
-
-### pytest-cov — coverage-отчёты
-
-**Что делает:** интеграция pytest + coverage.py. Показывает покрытие тестами.
-
-**Конфиг:** `[tool.coverage]` в `pyproject.toml`.
-
-**Запуск:**
-```bash
-uv run pytest --cov=<package> --cov-report=term-missing
-```
-
-**Опция:** включить `fail_under = 60` в `[tool.coverage.report]` чтобы CI падал при низком покрытии.
-
----
-
-### pre-commit — фреймворк хуков
-
-**Что делает:** запускает все quality gates автоматически перед commit/push.
-
-**Конфиг:** `.pre-commit-config.yaml`.
-
-**Текущие хуки:**
-- **pre-commit:** ruff, ruff-format, bandit, trailing-whitespace, end-of-file-fixer, check-yaml, check-toml, check-merge-conflict, check-added-large-files (500KB), debug-statements
-- **pre-push:** mypy (gradual)
-
-**Установка:**
-```bash
-uv run pre-commit install                       # pre-commit hooks
-uv run pre-commit install --hook-type pre-push  # pre-push hooks
-```
-
-**Ручной запуск:**
-```bash
-uv run pre-commit run --all-files
-```
-
----
-
-## 4. Visualization — диаграммы из кода
-
-### Mermaid — текстовые диаграммы
-
-**Что делает:** диаграммы из markdown-текста. Рендерится в VS Code, GitHub, GitLab.
-
-**Использование:** ручные диаграммы — C4 архитектура, sequence-диаграммы flows.
-
-**Файлы:** `docs/diagrams/architecture.mmd`, `docs/diagrams/flows/*.mmd`.
-
-**VS Code extension:** `bierner.markdown-mermaid`.
-
----
-
-### PlantUML — UML классов
-
-**Что делает:** генерирует UML-диаграммы классов из текстового описания.
-
-**Источник:** `pyreverse` (часть pylint) автоматически генерирует `.puml` из Python-кода.
-
-**Запуск:**
-```bash
-uv run pyreverse -o puml -p MyApp <package> -d docs/diagrams/classes/
-```
-
-**Импорт в Draw.io:** File → Import → PlantUML — можно редактировать визуально.
-
-**VS Code extension:** `jebbs.plantuml` (предпросмотр).
-
----
-
-### pydeps — граф зависимостей
-
-**Что делает:** строит граф импортов между модулями. Помогает увидеть циклы и сильно связанные кластеры.
-
-**Требует:** Graphviz (`dot` в PATH).
-
-**Запуск:**
-```bash
-uv run pydeps <package> -o docs/diagrams/deps/graph.svg --cluster --max-bacon 2 --no-show
-```
-
----
-
-### Draw.io — визуальный редактор
-
-**Что делает:** редактирование `.drawio.svg` прямо в VS Code. Импортирует PlantUML.
-
-**Использование:** когда нужно докрутить автогенерированную диаграмму или нарисовать схему руками.
-
-**VS Code extension:** `hediet.vscode-drawio`.
-
----
-
-## 5. Automation — Makefile
-
-**Что делает:** единая точка входа для всех операций.
-
-**Файл:** `Makefile` в корне проекта.
-
-**Targets:**
-
-| Target | Что делает |
-|--------|-----------|
-| `make check` | ruff + mypy + bandit |
-| `make test` | pytest с coverage |
-| `make gate` | check + test (полный gate) |
-| `make diagrams` | pyreverse + pydeps |
-| `make clean` | удалить Python-кэши |
-| `make validate` | scripts/validate.py |
-| `make stats` | статистика кода |
-| `make help` | справка |
-
-**Зачем нужен:** заменяет 10+ ручных команд одной `make gate`.
-
----
-
-## 6. Base Layer — фундамент
-
-### Python 3.12
-
-Текущая стабильная версия. Все инструменты совместимы.
-В `pyproject.toml`: `requires-python = ">=3.12,<3.13"`.
-
-### uv — пакетный менеджер
-
-**Что делает:** замена pip + virtualenv + pip-tools. В 10-100x быстрее.
-
-**Команды:**
-```bash
-uv sync --group dev --group diagrams   # установить зависимости
-uv add --group dev <package>           # добавить пакет
-uv run <command>                       # запустить в venv
-uv lock                                # обновить lock-файл
-```
-
-**Конфиг:** `pyproject.toml` (стандарт PEP 621) + `uv.lock`.
-
-### Ollama — локальный LLM-runtime
-
-**Что делает:** запускает embedding-модели для qex локально (без OpenAI API).
-
-**Модели:**
-- macOS: `qwen3-embedding:8b` (4096-dim, мощнее)
-- Windows: `qwen3-embedding:4b` (2560-dim, легче)
-
-**Запуск:** `ollama serve` (фоном). qex стучится на `http://localhost:11434`.
-
-### Node.js — для Context7
-
-**Что делает:** требуется для запуска `npx ctx7`.
-
-**Установка:** один раз на машину, не нужен в проекте.
-
-### Git — VCS
-
-**Конфиг проекта:**
-- `.gitmessage` — шаблон commit-сообщений
-- `.git/hooks/commit-msg` — валидация trailers
-- `.git/hooks/pre-commit` — запуск pre-commit framework
-- `.git/hooks/pre-push` — mypy + sentrux
+|---|---|
+| `/plan <task>` | Manager → план в `plans/<slug>.md` + ветка `<type>/<slug>` |
+| `/implement Task X.Y` | Developer → код + commit с `Refs:` trailer |
+| `/test` | Tester → pytest по acceptance criteria |
+| `/review` | Reviewer → проверка diff'а (max 2 итерации → teamlead) |
+| `/debug` | Debugger → reproduce → root cause |
+| `/ship` | Quality gate + проверка Refs-цепочки + push |
+| `/pipeline <task>` | Полный цикл: plan → implement → test → review → ship |
+| `/team` | Состав команды (агенты + модели) |
+| `/wrap-up` | Семантическое закрытие сессии → `docs/sessions/` |
+| `/memory:search <q>` | Поиск по проектной памяти |
+
+Полный список — `commands/*/` (37 команд по namespace'ам: dev, quality, spec, team, infra, analysis, memory).
 
 ---
 
 ## Зависимости между слоями
 
 ```
-Agent Layer
+Agent Layer (.claude/)
    ↓ использует
-MCP Servers (qex, sentrux, context7)
+MCP Servers (qex, sentrux, context7, serena)
    ↓ зависят от
-Ollama + Node + sentrux бинарь
+Ollama + Node + sentrux-бинарь
    ↓ работают над
-Кодом, который проверяется
-   ↓ через
-Quality Gates (ruff, mypy, bandit) + pre-commit
+Кодом проекта
+   ↓ проверяется через
+Quality Gates (ruff, pyright, pytest-cov, опц. bandit)
    ↓ запускаются через
-Makefile / git hooks
+Makefile + git hooks (pre-commit framework)
    ↓ работают в
 uv venv с зависимостями из pyproject.toml
 ```
 
 ---
 
-## Что когда использовать — cheatsheet
+## Где читать дальше
 
-| Задача | Инструмент |
-|--------|------------|
-| Найти где используется функция/класс | qex (`/qex-status`, `mcp__qex__search_code`) |
-| Узнать API библиотеки | context7 |
-| Проверить архитектуру | sentrux (`/sentrux-health`) |
-| Найти циклы импортов | sentrux DSM (`/sentrux-dsm`) или pydeps |
-| Увидеть UML классов | pyreverse → PlantUML |
-| Линт + формат | ruff |
-| Проверить типы | mypy |
-| Security scan | bandit |
-| Coverage отчёт | pytest-cov |
-| Запустить всё сразу | `make gate` |
-| Реализовать задачу | `/plan` → `/implement` → `/review` |
-
----
-
-## Связанные документы
-
-- [`BOOTSTRAP.md`](BOOTSTRAP.md) — установка с нуля
-- [`VSCODE_EXTENSIONS.md`](VSCODE_EXTENSIONS.md) — VS Code расширения
-- [`README.md`](README.md) — навигация по `.claude/`
-- [`CLAUDE.md`](CLAUDE.md) — конфигурация Claude Code
+| Документ | Зачем |
+|---|---|
+| [`STACK_REFERENCE.md`](STACK_REFERENCE.md) | Полные детали: конфиги, запуск, опции, future options |
+| [`BOOTSTRAP.md`](BOOTSTRAP.md) | Установка с нуля + per-machine prerequisites |
+| [`CLAUDE.md`](CLAUDE.md) | Canonical instructions для агентов |
+| [`modes/_stack.md`](modes/_stack.md) | **Per-project** настройка стека (READ FIRST на задаче) |
+| [`COMMIT_GUIDE.md`](COMMIT_GUIDE.md) | TL;DR commit-format |
+| [`VSCODE_EXTENSIONS.md`](VSCODE_EXTENSIONS.md) | VS Code расширения |

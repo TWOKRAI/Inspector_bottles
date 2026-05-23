@@ -1,0 +1,29 @@
+# .claude/protected-branches — branches where `git commit` is BLOCKED.
+#
+# Read by hooks/core/protect-branch.sh on every Bash(git commit ...) invocation.
+# Format: one branch name or regex per line. Empty lines / '#' comments ignored.
+# Anchors ^ and $ are added automatically — write the bare name or pattern.
+#
+# To activate: copy this template to .claude/protected-branches and edit.
+# If the file is absent, the hook falls back to the standard protected set
+# (main, master, develop, dev, release/.*, prod, production).
+
+# Mainline branches
+main
+master
+
+# Integration branches
+develop
+dev
+
+# Release / production
+release/.*
+production
+prod
+
+# Long-lived staging (uncomment if your project uses it)
+# staging
+
+# Hotfix branches (uncomment to also block — usually allowed because hotfixes
+# are explicit, short-lived branches where commits ARE the point)
+# hotfix/.*

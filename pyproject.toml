@@ -51,6 +51,7 @@ dev = [
     "ipykernel>=6.29",
     "aiosqlite>=0.20", # для тестов async SQL-адаптера
     "pyright>=1.1.408", # gradual type checking (replaces mypy)
+    "ruff>=0.15", # linter + formatter (pre-commit ставит свой, дублируем для make lint без активной venv)
     "bandit>=1.9", # security scanning (OWASP basics)
     "pre-commit>=4.6.0",
     "qt-mcp",

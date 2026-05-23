@@ -82,6 +82,14 @@ milvus-docker/volumes/
 .pytest_cache/
 .coverage
 
+# Type checker caches (mypy исторический, перешли на pyright; pyright_cache на всякий)
+.mypy_cache/
+.pyright_cache/
+
+# Временные артефакты devseed / claude-kit
+.backup_tmp/
+.claude/_backups/
+
 # Сгенерированные диаграммы (регенерируются: make diagrams)
 docs/diagrams/classes/*.puml
 docs/diagrams/classes/per-module/*.puml
