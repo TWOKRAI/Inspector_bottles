@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -184,15 +185,24 @@ class ProcessesTab(BaseListNavTab):
 
     def _on_button_action(self, action_id: str) -> None:
         if action_id == "create":
-            # TODO: диалог создания процесса
+            # TODO: диалог создания процесса. Пока — visible-stub, чтобы клик не был немым.
+            QMessageBox.information(
+                self,
+                "Создать процесс",
+                "Диалог создания процесса будет добавлен позже.",
+            )
             return
         if self._selected_process is None:
             return
         if action_id in ("start", "stop"):
             self._presenter.on_process_action(self._selected_process, action_id)
         elif action_id == "delete":
-            # TODO: удаление процесса с подтверждением
-            pass
+            # TODO: подтверждение + удаление через presenter/topology bridge.
+            QMessageBox.information(
+                self,
+                "Удалить процесс",
+                f"Удаление процесса «{self._selected_process}» будет добавлено позже.",
+            )
 
     def _update_buttons_state(self) -> None:
         has_selection = self._selected_process is not None
@@ -248,7 +258,7 @@ class ProcessesTab(BaseListNavTab):
         """Пробросить атрибуты AllProcessesPanel как алиасы на уровень tab.
 
         Существующие тесты обращаются к ``tab._cards``, ``tab._health_panel``,
-        ``tab._lbl_*``, ``tab._all_table``, ``tab._all_scroll`` напрямую.
+        ``tab._lbl_*``, ``tab._all_table`` напрямую.
         """
         panel = self._all_panel
         if panel is None:
@@ -259,7 +269,6 @@ class ProcessesTab(BaseListNavTab):
             self._lbl_wires = None
             self._lbl_avg_fps = None
             self._all_table = None
-            self._all_scroll = None
             return
         self._cards = panel._cards
         self._health_panel = panel._health_panel
@@ -268,7 +277,6 @@ class ProcessesTab(BaseListNavTab):
         self._lbl_wires = panel._lbl_wires
         self._lbl_avg_fps = panel._lbl_avg_fps
         self._all_table = panel._all_table
-        self._all_scroll = panel._all_scroll
 
     # ------------------------------------------------------------------ #
     #  Card actions / legacy                                               #

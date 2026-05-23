@@ -83,7 +83,7 @@ class EntityCard(QFrame):
         for act in actions or []:
             btn = QPushButton(act.label)
             btn.setEnabled(act.enabled)
-            btn.setFixedWidth(80)
+            btn.setFixedWidth(104)  # +30% от прежних 80px по запросу UX
             btn.clicked.connect(lambda checked=False, aid=act.action_id: self.action_clicked.emit(self._entity_id, aid))
             actions_layout.addWidget(btn)
             self._action_buttons[act.action_id] = btn

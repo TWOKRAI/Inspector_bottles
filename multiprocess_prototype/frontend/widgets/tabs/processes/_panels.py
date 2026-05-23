@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QScrollArea,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -117,19 +116,19 @@ class AllProcessesPanel(QWidget):
         parent_layout.addWidget(self._health_panel)
 
     def _build_cards_page(self) -> QWidget:
-        """Cards-страница: scroll area с группами EntityCard по категориям."""
-        self._all_scroll = QScrollArea()
-        self._all_scroll.setWidgetResizable(True)
-        self._all_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        """Cards-страница: контейнер с группами EntityCard по категориям.
 
-        self._all_scroll_content = QWidget()
-        self._all_scroll_layout = QVBoxLayout(self._all_scroll_content)
+        Без собственного QScrollArea — вертикальный overflow обрабатывает
+        мастер-скролл ``DiffScrollTabLayout``. Иначе появлялся бы второй
+        скроллбар внутри content-колонки.
+        """
+        self._cards_container = QWidget()
+        self._all_scroll_layout = QVBoxLayout(self._cards_container)
         self._all_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self._all_scroll_layout.addStretch()
-        self._all_scroll.setWidget(self._all_scroll_content)
 
         self._populate_cards()
-        return self._all_scroll
+        return self._cards_container
 
     def _build_table_page(self) -> QWidget:
         """Table-страница: QTableWidget со всеми процессами."""
