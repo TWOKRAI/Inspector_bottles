@@ -226,17 +226,7 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/core/session-end-daily-log.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
+    "Stop": []
   },
   "alwaysThinkingEnabled": true,
   "preferredLanguage": "ru",

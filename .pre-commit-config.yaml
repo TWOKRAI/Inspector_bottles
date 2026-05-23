@@ -51,3 +51,16 @@ repos:
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
         exclude: ^(tests/|multiprocess_prototype_backup/|\.claude/)
+
+  # ── Журнал коммитов в docs/sessions/YYYY-MM-DD.md ──
+  # Заменяет старый Stop-хук Claude — теперь запись попадает в сам коммит,
+  # а не висит как unstaged-изменение после него.
+  - repo: local
+    hooks:
+      - id: session-log
+        name: append session log to docs/sessions/
+        entry: bash .claude/hooks/git/pre-commit-session-log.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
