@@ -1,80 +1,83 @@
+# -*- coding: utf-8 -*-
 """ProcessesTab — таб управления процессами.
 
-3-колоночный layout по образцу RecipesTab:
-  Левая панель (QListWidget): «Все процессы» + список по имени
-  Центр (QStackedWidget): Cards / Table для сводки и для одного процесса
-  Правая панель: ViewModeToggle + кнопки управления
+Шаблон визуально и архитектурно идентичен Settings/Recipes: 3 колонки
+(actions / nav / content) + мастер-скролл + QGroupBox с заголовком через
+``DiffScrollTabLayout``; динамический список процессов во второй колонке
+через ``BaseListNavTab``. Каждому nav-ключу соответствует свой композитный
+content-виджет (``AllProcessesPanel`` / ``SingleProcessPanel``) с внутренним
+переключателем Cards/Table — toggle меняет только визуализацию.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QGroupBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QListWidget,
     QListWidgetItem,
     QPushButton,
-    QScrollArea,
-    QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
-from multiprocess_prototype.frontend.widgets.primitives import (
-    CardAction,
-    EntityCard,
-)
+from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
+from ._panels import AllProcessesPanel, SingleProcessPanel
 from .data import ALL_PROCESSES_KEY
 from .presenter import ProcessesPresenter
 
 if TYPE_CHECKING:
+    from PySide6.QtGui import QIcon
+
     from multiprocess_prototype.frontend.app_context import AppContext
 
-# Константы layout
-_NAV_WIDTH = 200
-_ITEM_HEIGHT = 40
-_ITEM_SPACING = 4
-_BTN_WIDTH = 120
 
-# Страницы QStackedWidget
-_PAGE_ALL_CARDS = 0
-_PAGE_ALL_TABLE = 1
-_PAGE_SINGLE_CARDS = 2
-_PAGE_SINGLE_TABLE = 3
-
-# Колонки таблицы «Все процессы»
-_ALL_TABLE_COLUMNS = ["Имя", "Категория", "Статус", "FPS", "Плагины"]
-
-# Колонки key-value таблицы одного процесса
-_DETAIL_TABLE_COLUMNS = ["Параметр", "Значение"]
+def _layout_factory() -> DiffScrollTabLayout:
+    # Размеры колонок согласованы с Settings/Recipes — визуальная унификация.
+    return DiffScrollTabLayout(title="Процессы", action_width=160, nav_width=230)
 
 
-class ProcessesTab(QWidget):
-    """Таб управления процессами.
+class ProcessesTab(BaseListNavTab):
+    """Таб управления процессами на шаблоне ``DiffScrollTabLayout`` (как Settings/Recipes).
 
-    3-колоночный layout: навигация + контент (Cards/Table) + кнопки.
+    Каждый процесс (и сводный ключ ``ALL_PROCESSES_KEY``) получает свой
+    композитный content-виджет с внутренним Cards/Table стеком. Toggle в
+    первой колонке переключает режим во всех созданных панелях разом —
+    режим сохраняется при смене выбора в nav.
     """
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._ctx = ctx
         self._presenter = ProcessesPresenter(ctx)
-        self._cards: dict[str, EntityCard] = {}
-        self._selected_process: str | None = None  # None = «Все процессы»
-        self._detail_card: EntityCard | None = None
+        self._all_panel: AllProcessesPanel | None = None
+        self._single_panels: dict[str, SingleProcessPanel] = {}
+        self._selected_process: str | None = None  # None при ALL_PROCESSES_KEY
+        self._current_mode: ViewMode = ViewMode.CARDS
 
-        self._init_ui()
+        # Динамические алиасы (обновляются в _on_nav_changed) — для совместимости тестов.
+        self._detail_card = None
+        self._detail_table = None
+
+        super().__init__(
+            title="Процессы",
+            ctx=ctx,
+            layout_factory=_layout_factory,
+            parent=parent,
+        )
+
+        # Backward-compat alias на nav-список (исторически тесты ходят через _nav_list).
+        self._nav_list = self._nav_widget
+
+        self._setup_actions()
+        # Авто-refresh scroll area при смене активной content-страницы (nav-ключ).
+        self._tab_layout.connect_stack(self._content_stack, "content")
+
         self._sync_nav()
-        self._populate_all_cards()
-        self._connect_bindings()
+
+        # После _sync_nav AllProcessesPanel создан — пробрасываем его атрибуты
+        # как алиасы на уровень tab, чтобы существующие тесты продолжали работать.
+        self._publish_all_panel_aliases()
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "ProcessesTab":
@@ -82,373 +85,104 @@ class ProcessesTab(QWidget):
         return cls(ctx)
 
     # ------------------------------------------------------------------ #
-    #  UI                                                                  #
+    #  BaseListNavTab hooks                                                #
     # ------------------------------------------------------------------ #
 
-    def _init_ui(self) -> None:
-        """Построить 3-колоночный layout."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+    def _create_item_widget(self, key: str) -> QWidget:
+        if key == ALL_PROCESSES_KEY:
+            panel = AllProcessesPanel(self._presenter, self._ctx)
+            panel.card_action_requested.connect(self._on_card_action)
+            self._all_panel = panel
+            return panel
+        panel = SingleProcessPanel(self._presenter, self._ctx, key)
+        panel.card_action_requested.connect(self._on_card_action)
+        self._single_panels[key] = panel
+        return panel
 
-        # Заголовок
-        header = QLabel("Процессы")
-        header.setObjectName("TabHeader")
-        layout.addWidget(header)
+    def _make_nav_item(
+        self,
+        key: str,
+        label: str,
+        icon: "QIcon | None" = None,
+    ) -> QListWidgetItem:
+        item = super()._make_nav_item(key, label, icon)
+        if key == ALL_PROCESSES_KEY:
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+        return item
 
-        # 3-колоночный layout
-        columns = QHBoxLayout()
-        columns.setSpacing(8)
-
-        # --- Левая панель: навигация ---
-        self._nav_list = QListWidget()
-        self._nav_list.setObjectName("ProcessNavList")
-        self._nav_list.setFixedWidth(_NAV_WIDTH)
-        self._nav_list.setSpacing(_ITEM_SPACING)
-        self._nav_list.currentRowChanged.connect(self._on_nav_row_changed)
-        columns.addWidget(self._nav_list)
-
-        # --- Центр: QStackedWidget с 4 страницами ---
-        self._center_stack = QStackedWidget()
-
-        # Page 0: все процессы — карточки
-        self._all_cards_page = self._build_all_cards_page()
-        self._center_stack.addWidget(self._all_cards_page)
-
-        # Page 1: все процессы — таблица
-        self._all_table_page = self._build_all_table_page()
-        self._center_stack.addWidget(self._all_table_page)
-
-        # Page 2: один процесс — карточка
-        self._single_cards_page = self._build_single_cards_page()
-        self._center_stack.addWidget(self._single_cards_page)
-
-        # Page 3: один процесс — таблица
-        self._single_table_page = self._build_single_table_page()
-        self._center_stack.addWidget(self._single_table_page)
-
-        columns.addWidget(self._center_stack, stretch=1)
-
-        # --- Правая панель: toggle + кнопки ---
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(8)
-
-        # Тумблер Cards/Table
-        self._toggle = ViewModeToggle(initial_mode=ViewMode.CARDS)
-        self._toggle.mode_changed.connect(self._on_view_mode_changed)
-        btn_layout.addWidget(self._toggle)
-
-        # Кнопки управления
-        self._btn_create = QPushButton("Создать")
-        self._btn_create.setFixedWidth(_BTN_WIDTH)
-        self._btn_create.clicked.connect(lambda: self._on_button_action("create"))
-        btn_layout.addWidget(self._btn_create)
-
-        self._btn_delete = QPushButton("Удалить")
-        self._btn_delete.setFixedWidth(_BTN_WIDTH)
-        self._btn_delete.setEnabled(False)
-        self._btn_delete.clicked.connect(lambda: self._on_button_action("delete"))
-        btn_layout.addWidget(self._btn_delete)
-
-        self._btn_start = QPushButton("Запустить")
-        self._btn_start.setFixedWidth(_BTN_WIDTH)
-        self._btn_start.setEnabled(False)
-        self._btn_start.clicked.connect(lambda: self._on_button_action("start"))
-        btn_layout.addWidget(self._btn_start)
-
-        self._btn_stop = QPushButton("Остановить")
-        self._btn_stop.setFixedWidth(_BTN_WIDTH)
-        self._btn_stop.setEnabled(False)
-        self._btn_stop.clicked.connect(lambda: self._on_button_action("stop"))
-        btn_layout.addWidget(self._btn_stop)
-
-        # PR3: tabs.processes.edit gating через permission-aware proxy.
-        from multiprocess_prototype.frontend.widgets.access import (
-            install_permission_aware_enable,
-        )
-        _auth = self._ctx.auth
-        auth_state = _auth.state if _auth is not None else None
-        for btn in (self._btn_create, self._btn_delete, self._btn_start, self._btn_stop):
-            install_permission_aware_enable(btn, "tabs.processes.edit", auth_state)
-
-        btn_layout.addStretch()
-        columns.addLayout(btn_layout)
-
-        layout.addLayout(columns, stretch=1)
-
-    # ------------------------------------------------------------------ #
-    #  Страницы центра                                                     #
-    # ------------------------------------------------------------------ #
-
-    def _build_all_cards_page(self) -> QWidget:
-        """Page 0: health panel + scroll area с EntityCard для всех процессов."""
-        page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(4)
-
-        # Health панель
-        self._health_panel = QGroupBox("Здоровье системы")
-        health_layout = QHBoxLayout(self._health_panel)
-        health_layout.setContentsMargins(8, 4, 8, 4)
-
-        summary = self._presenter.get_health_summary()
-
-        self._lbl_total = QLabel(f"Всего: {summary['total']}")
-        self._lbl_active = QLabel("Активно: 0")
-        self._lbl_wires = QLabel("Обрывы связей: 0")
-        self._lbl_wires.setTextFormat(Qt.TextFormat.RichText)
-        self._lbl_avg_fps = QLabel("Средний FPS: —")
-
-        health_layout.addWidget(self._lbl_total)
-        health_layout.addWidget(self._lbl_active)
-        health_layout.addWidget(self._lbl_wires)
-        health_layout.addWidget(self._lbl_avg_fps)
-        health_layout.addStretch()
-
-        page_layout.addWidget(self._health_panel)
-
-        # Scroll area с карточками
-        self._all_scroll = QScrollArea()
-        self._all_scroll.setWidgetResizable(True)
-        self._all_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-
-        self._all_scroll_content = QWidget()
-        self._all_scroll_layout = QVBoxLayout(self._all_scroll_content)
-        self._all_scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self._all_scroll_layout.addStretch()
-        self._all_scroll.setWidget(self._all_scroll_content)
-
-        page_layout.addWidget(self._all_scroll, stretch=1)
-        return page
-
-    def _build_all_table_page(self) -> QWidget:
-        """Page 1: QTableWidget со всеми процессами."""
-        self._all_table = QTableWidget(0, len(_ALL_TABLE_COLUMNS))
-        self._all_table.setHorizontalHeaderLabels(_ALL_TABLE_COLUMNS)
-        self._all_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self._all_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
-        h = self._all_table.horizontalHeader()
-        if h:
-            h.setStretchLastSection(True)
-            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        return self._all_table
-
-    def _build_single_cards_page(self) -> QWidget:
-        """Page 2: контейнер для детальной карточки одного процесса."""
-        page = QWidget()
-        self._detail_container_layout = QVBoxLayout(page)
-        self._detail_container_layout.setContentsMargins(0, 0, 0, 0)
-        self._detail_container_layout.addStretch()
-        return page
-
-    def _build_single_table_page(self) -> QWidget:
-        """Page 3: key-value таблица одного процесса."""
-        self._detail_table = QTableWidget(0, len(_DETAIL_TABLE_COLUMNS))
-        self._detail_table.setHorizontalHeaderLabels(_DETAIL_TABLE_COLUMNS)
-        self._detail_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self._detail_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
-        h = self._detail_table.horizontalHeader()
-        if h:
-            h.setStretchLastSection(True)
-            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        return self._detail_table
-
-    # ------------------------------------------------------------------ #
-    #  Навигация                                                           #
-    # ------------------------------------------------------------------ #
-
-    def _sync_nav(self) -> None:
-        """Перестроить список навигации: «Все процессы» + имена."""
-        self._nav_list.blockSignals(True)
-        self._nav_list.clear()
-
-        # Первый элемент — «Все процессы»
-        all_item = QListWidgetItem("Все процессы")
-        all_item.setSizeHint(QSize(0, _ITEM_HEIGHT))
-        all_item.setData(Qt.ItemDataRole.UserRole, ALL_PROCESSES_KEY)
-        font = all_item.font()
-        font.setBold(True)
-        all_item.setFont(font)
-        self._nav_list.addItem(all_item)
-
-        # Отдельные процессы
-        for name in self._presenter.get_process_names():
-            item = QListWidgetItem(name)
-            item.setSizeHint(QSize(0, _ITEM_HEIGHT))
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            self._nav_list.addItem(item)
-
-        self._nav_list.blockSignals(False)
-        self._nav_list.setCurrentRow(0)
-
-    def _on_nav_row_changed(self, row: int) -> None:
-        """Обработать выбор элемента в навигации."""
-        if row < 0:
-            return
-        item = self._nav_list.item(row)
-        if item is None:
-            return
-
-        key = item.data(Qt.ItemDataRole.UserRole)
+    def _on_nav_changed(self, key: str) -> None:
+        super()._on_nav_changed(key)  # переключает content_stack
         if key == ALL_PROCESSES_KEY:
             self._selected_process = None
         else:
             self._selected_process = key
-            self._show_single_process(key)
+
+        # Применить текущий режим к показанной панели.
+        panel = self._all_panel if key == ALL_PROCESSES_KEY else self._single_panels.get(key)
+        if panel is not None:
+            panel.set_view_mode(self._current_mode)
+
+        # Динамические алиасы под активный single-panel.
+        single = self._single_panels.get(self._selected_process) if self._selected_process else None
+        self._detail_card = getattr(single, "_card", None) if single else None
+        self._detail_table = getattr(single, "_detail_table", None) if single else None
 
         self._update_buttons_state()
-        self._update_center_page()
 
     # ------------------------------------------------------------------ #
-    #  Переключение вида                                                   #
+    #  Actions / Buttons                                                   #
     # ------------------------------------------------------------------ #
 
-    def _on_view_mode_changed(self, _mode_str: str) -> None:
-        """Переключить Cards / Table."""
-        self._update_center_page()
+    def _setup_actions(self) -> None:
+        lay = self._tab_layout
 
-    def _update_center_page(self) -> None:
-        """Выбрать правильную страницу стека по (selection × view_mode)."""
-        mode = self._toggle.mode()
-        if self._selected_process is None:
-            # Все процессы
-            if mode == ViewMode.CARDS:
-                self._center_stack.setCurrentIndex(_PAGE_ALL_CARDS)
-            else:
-                self._refresh_all_table()
-                self._center_stack.setCurrentIndex(_PAGE_ALL_TABLE)
-        else:
-            # Один процесс
-            if mode == ViewMode.CARDS:
-                self._center_stack.setCurrentIndex(_PAGE_SINGLE_CARDS)
-            else:
-                self._refresh_detail_table()
-                self._center_stack.setCurrentIndex(_PAGE_SINGLE_TABLE)
+        action_widget = QWidget()
+        action_layout = QVBoxLayout(action_widget)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
 
-    # ------------------------------------------------------------------ #
-    #  Заполнение данных                                                   #
-    # ------------------------------------------------------------------ #
+        # Тумблер Cards/Table.
+        self._toggle = ViewModeToggle(initial_mode=ViewMode.CARDS)
+        self._toggle.mode_changed.connect(self._on_view_mode_changed)
+        action_layout.addWidget(self._toggle)
 
-    def _populate_all_cards(self) -> None:
-        """Создать компактные EntityCard для всех процессов."""
-        processes = self._presenter.get_processes()
-        groups = self._presenter.group_by_category(processes)
+        # 4 кнопки управления.
+        self._btn_create = self._make_action_button("create", "Создать")
+        action_layout.addWidget(self._btn_create)
 
-        category_order = [
-            "source", "processing", "rendering", "output",
-            "control", "service", "utility",
-        ]
+        self._btn_delete = self._make_action_button("delete", "Удалить")
+        self._btn_delete.setEnabled(False)
+        action_layout.addWidget(self._btn_delete)
 
-        for cat in category_order:
-            procs = groups.get(cat, [])
-            if not procs:
-                continue
+        self._btn_start = self._make_action_button("start", "Запустить")
+        self._btn_start.setEnabled(False)
+        action_layout.addWidget(self._btn_start)
 
-            group_box = QGroupBox(self._presenter.category_title(cat))
-            group_layout = QVBoxLayout(group_box)
-            group_layout.setContentsMargins(4, 4, 4, 4)
+        self._btn_stop = self._make_action_button("stop", "Остановить")
+        self._btn_stop.setEnabled(False)
+        action_layout.addWidget(self._btn_stop)
 
-            for proc in procs:
-                actions = [
-                    CardAction("start", "Start"),
-                    CardAction("stop", "Stop"),
-                    CardAction("restart", "Restart"),
-                ]
-                card = EntityCard(
-                    entity_id=proc.name,
-                    title=proc.name,
-                    actions=actions,
-                )
-                card.set_metrics({
-                    "Плагины": ", ".join(proc.plugins) or "—",
-                })
-                card.set_status(proc.status)
-                card.action_clicked.connect(self._on_card_action)
+        action_layout.addStretch(1)
+        lay.set_action_widget(action_widget)
 
-                group_layout.addWidget(card)
-                self._cards[proc.name] = card
-
-            idx = self._all_scroll_layout.count() - 1
-            self._all_scroll_layout.insertWidget(idx, group_box)
-
-    def _show_single_process(self, name: str) -> None:
-        """Показать детальную карточку одного процесса."""
-        # Удалить предыдущую карточку
-        if self._detail_card is not None:
-            self._detail_card.setParent(None)
-            self._detail_card.deleteLater()
-            self._detail_card = None
-
-        proc = self._presenter.get_process_by_name(name)
-        if proc is None:
-            return
-
-        actions = [
-            CardAction("start", "Запустить"),
-            CardAction("stop", "Остановить"),
-            CardAction("restart", "Перезапустить"),
-        ]
-        self._detail_card = EntityCard(
-            entity_id=proc.name,
-            title=proc.name,
-            actions=actions,
+        # Permission gating: tabs.processes.edit.
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
         )
-        self._detail_card.set_metrics(
-            self._presenter.get_detail_metrics(name)
-        )
-        self._detail_card.set_status(proc.status)
-        self._detail_card.action_clicked.connect(self._on_card_action)
 
-        self._detail_container_layout.insertWidget(0, self._detail_card)
+        _auth = getattr(self._ctx, "auth", None)
+        auth_state = getattr(_auth, "state", None) if _auth is not None else None
+        for btn in (self._btn_create, self._btn_delete, self._btn_start, self._btn_stop):
+            install_permission_aware_enable(btn, "tabs.processes.edit", auth_state)
 
-        # Привязать live-данные к detail card
-        self._bind_detail_card(name)
-
-    def _refresh_all_table(self) -> None:
-        """Перестроить таблицу всех процессов."""
-        rows = self._presenter.get_table_rows()
-        self._all_table.setRowCount(len(rows))
-        for row_idx, row_data in enumerate(rows):
-            for col_idx, col_name in enumerate(_ALL_TABLE_COLUMNS):
-                self._all_table.setItem(
-                    row_idx, col_idx,
-                    QTableWidgetItem(row_data.get(col_name, "")),
-                )
-
-    def _refresh_detail_table(self) -> None:
-        """Перестроить key-value таблицу одного процесса."""
-        if self._selected_process is None:
-            return
-        metrics = self._presenter.get_detail_metrics(self._selected_process)
-        self._detail_table.setRowCount(len(metrics))
-        for row, (key, value) in enumerate(metrics.items()):
-            self._detail_table.setItem(row, 0, QTableWidgetItem(key))
-            self._detail_table.setItem(row, 1, QTableWidgetItem(value))
-
-    # ------------------------------------------------------------------ #
-    #  Кнопки и состояние                                                  #
-    # ------------------------------------------------------------------ #
-
-    def _update_buttons_state(self) -> None:
-        """Обновить enabled/disabled кнопок по текущему выбору."""
-        has_selection = self._selected_process is not None
-        self._btn_delete.setEnabled(has_selection)
-        self._btn_start.setEnabled(has_selection)
-        self._btn_stop.setEnabled(has_selection)
+    def _make_action_button(self, action_id: str, label: str) -> QPushButton:
+        btn = QPushButton(label)
+        btn.clicked.connect(lambda _checked=False, aid=action_id: self._on_button_action(aid))
+        return btn
 
     def _on_button_action(self, action_id: str) -> None:
-        """Обработать нажатие кнопки управления."""
         if action_id == "create":
             # TODO: диалог создания процесса
             return
@@ -460,12 +194,88 @@ class ProcessesTab(QWidget):
             # TODO: удаление процесса с подтверждением
             pass
 
+    def _update_buttons_state(self) -> None:
+        has_selection = self._selected_process is not None
+        self._btn_delete.setEnabled(has_selection)
+        self._btn_start.setEnabled(has_selection)
+        self._btn_stop.setEnabled(has_selection)
+
     # ------------------------------------------------------------------ #
-    #  Обработчики карточек                                                #
+    #  View mode                                                           #
+    # ------------------------------------------------------------------ #
+
+    def _on_view_mode_changed(self, mode_str: str) -> None:
+        mode = ViewMode(mode_str)
+        self._current_mode = mode
+        if self._all_panel is not None:
+            self._all_panel.set_view_mode(mode)
+        for panel in self._single_panels.values():
+            panel.set_view_mode(mode)
+
+    # ------------------------------------------------------------------ #
+    #  Nav populate                                                        #
+    # ------------------------------------------------------------------ #
+
+    def _sync_nav(self) -> None:
+        """Заполнить навигацию: «Все процессы» (жирно) + имена процессов."""
+        assert self._nav_widget is not None
+        self._nav_widget.blockSignals(True)
+        self._nav_widget.clear()
+        # Сбросить content-стек.
+        while self._content_stack.count() > 0:
+            w = self._content_stack.widget(0)
+            self._content_stack.removeWidget(w)
+            if w is not None:
+                w.deleteLater()
+        self._key_to_item.clear()
+        self._key_to_index.clear()
+        self._all_panel = None
+        self._single_panels.clear()
+        self._nav_widget.blockSignals(False)
+
+        self.add_item(ALL_PROCESSES_KEY, "Все процессы")
+        for name in self._presenter.get_process_names():
+            self.add_item(name, name)
+
+        # Дефолтная выборка — «Все процессы».
+        self.select_item(ALL_PROCESSES_KEY)
+
+    # ------------------------------------------------------------------ #
+    #  Backward-compat aliases                                             #
+    # ------------------------------------------------------------------ #
+
+    def _publish_all_panel_aliases(self) -> None:
+        """Пробросить атрибуты AllProcessesPanel как алиасы на уровень tab.
+
+        Существующие тесты обращаются к ``tab._cards``, ``tab._health_panel``,
+        ``tab._lbl_*``, ``tab._all_table``, ``tab._all_scroll`` напрямую.
+        """
+        panel = self._all_panel
+        if panel is None:
+            self._cards = {}
+            self._health_panel = None
+            self._lbl_total = None
+            self._lbl_active = None
+            self._lbl_wires = None
+            self._lbl_avg_fps = None
+            self._all_table = None
+            self._all_scroll = None
+            return
+        self._cards = panel._cards
+        self._health_panel = panel._health_panel
+        self._lbl_total = panel._lbl_total
+        self._lbl_active = panel._lbl_active
+        self._lbl_wires = panel._lbl_wires
+        self._lbl_avg_fps = panel._lbl_avg_fps
+        self._all_table = panel._all_table
+        self._all_scroll = panel._all_scroll
+
+    # ------------------------------------------------------------------ #
+    #  Card actions / legacy                                               #
     # ------------------------------------------------------------------ #
 
     def _on_card_action(self, entity_id: str, action_id: str) -> None:
-        """Обработать действие на карточке процесса."""
+        """Обработать действие на карточке (всплывает из любой панели)."""
         self._presenter.on_process_action(entity_id, action_id)
 
     def _on_toolbar_action(self, action_id: str) -> None:
@@ -475,103 +285,3 @@ class ProcessesTab(QWidget):
                 self._presenter.on_process_action(name, "start")
             elif action_id == "stop_all":
                 self._presenter.on_process_action(name, "stop")
-
-    # ------------------------------------------------------------------ #
-    #  Reactive bindings                                                   #
-    # ------------------------------------------------------------------ #
-
-    def _connect_bindings(self) -> None:
-        """Подключить реактивные обновления из StateStore."""
-        bindings = self._ctx.bindings()
-        if bindings is None:
-            return
-
-        # Bindings для карточек в all-view
-        for name, card in self._cards.items():
-            card.set_metrics({"FPS": "—", "Latency": "—"})
-
-            # Статус → StatusIndicator
-            bindings.bind(
-                f"processes.{name}.state.status",
-                card._indicator,
-                "set_state",
-            )
-
-            # FPS → metric label
-            fps_label = card._metric_labels.get("FPS")
-            if fps_label is not None:
-                bindings.bind(
-                    f"processes.{name}.state.fps",
-                    fps_label,
-                    "text",
-                    formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
-                )
-
-            # Latency → metric label
-            latency_label = card._metric_labels.get("Latency")
-            if latency_label is not None:
-                bindings.bind(
-                    f"processes.{name}.state.latency_ms",
-                    latency_label,
-                    "text",
-                    formatter=lambda v: f"{v:.0f} ms" if isinstance(v, (int, float)) else "—",
-                )
-
-        # Health panel bindings
-        bindings.bind(
-            "system.health.active",
-            self._lbl_active,
-            "text",
-            formatter=lambda v: f"Активно: {v}" if isinstance(v, (int, float)) else "Активно: 0",
-        )
-        bindings.bind(
-            "system.health.broken_wires",
-            self._lbl_wires,
-            "text",
-            formatter=lambda v: (
-                f"<span style='color: #dc2626;'>Обрывы связей: {v}</span>"
-                if isinstance(v, (int, float)) and v > 0
-                else "Обрывы связей: 0"
-            ),
-        )
-        bindings.bind(
-            "system.health.avg_fps",
-            self._lbl_avg_fps,
-            "text",
-            formatter=lambda v: f"Средний FPS: {v:.1f}" if isinstance(v, (int, float)) else "Средний FPS: —",
-        )
-
-    def _bind_detail_card(self, name: str) -> None:
-        """Привязать live-данные к детальной карточке процесса."""
-        bindings = self._ctx.bindings()
-        if bindings is None or self._detail_card is None:
-            return
-
-        card = self._detail_card
-
-        # Статус
-        bindings.bind(
-            f"processes.{name}.state.status",
-            card._indicator,
-            "set_state",
-        )
-
-        # FPS
-        fps_label = card._metric_labels.get("FPS")
-        if fps_label is not None:
-            bindings.bind(
-                f"processes.{name}.state.fps",
-                fps_label,
-                "text",
-                formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
-            )
-
-        # Latency (если есть)
-        latency_label = card._metric_labels.get("Latency")
-        if latency_label is not None:
-            bindings.bind(
-                f"processes.{name}.state.latency_ms",
-                latency_label,
-                "text",
-                formatter=lambda v: f"{v:.0f} ms" if isinstance(v, (int, float)) else "—",
-            )
