@@ -6,11 +6,14 @@
 SHELL := /bin/bash
 
 # ── Пути ──
-PYTHON := python
-PYTEST := $(PYTHON) -m pytest
-RUFF := ruff
-PYRIGHT := pyright
-BANDIT := bandit
+# `uv run` префикс — чтобы targets работали без активированной venv
+# (на Windows venv часто не активирована в Git Bash / VSCode terminal).
+UV_RUN := uv run
+PYTHON := $(UV_RUN) python
+PYTEST := $(UV_RUN) pytest
+RUFF := $(UV_RUN) ruff
+PYRIGHT := $(UV_RUN) pyright
+BANDIT := $(UV_RUN) bandit
 
 FRAMEWORK := multiprocess_framework
 PROTOTYPE := multiprocess_prototype
@@ -101,10 +104,11 @@ stats: ## Статистика кода
 # ── Очистка ──
 
 .PHONY: clean
-clean: ## Удалить Python-кэши
+clean: ## Удалить Python-кэши (pyright/ruff caches тоже)
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pyright_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
 	find . -name ".coverage" -delete 2>/dev/null || true
 	@echo "Кэши очищены"
