@@ -1,7 +1,11 @@
-"""RecipesTab --- таб управления рецептами (BaseListNavTab pilot).
+# -*- coding: utf-8 -*-
+"""RecipesTab --- таб управления рецептами.
 
-Action: ViewModeToggle, Загрузить/Сохранить/Удалить, Undo/Redo.
-Table-вид создаётся лениво. См. Phase 6c.
+Шаблон визуально идентичен Settings: 3 колонки (actions / nav / content) +
+мастер-скролл + QGroupBox с заголовком, через ``DiffScrollTabLayout``.
+Вторая колонка (nav) — динамический список рецептов через ``BaseListNavTab``.
+
+Pilot перехода Recipes на единый columnar-шаблон; см. ``plans/columnar-tab-unify/plan.md``.
 """
 
 from __future__ import annotations
@@ -10,16 +14,16 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QHeaderView,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
-from multiprocess_framework.modules.frontend_module.widgets.tabs import (
-    BaseListNavTab,
-    StandardTabLayout,
-)
+from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
+from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
 from .presenter import RecipesPresenter
 from .recipe_form import RecipeFormWidget
@@ -30,8 +34,13 @@ if TYPE_CHECKING:
 _TABLE_COLS = ["Имя", "Описание", "Создан", "Изменён"]
 
 
+def _layout_factory() -> DiffScrollTabLayout:
+    # Размеры колонок согласованы с SettingsTab — визуальная унификация.
+    return DiffScrollTabLayout(title="Рецепты", action_width=160, nav_width=230)
+
+
 class RecipesTab(BaseListNavTab):
-    """Таб рецептов --- pilot consumer ``BaseListNavTab``."""
+    """Таб рецептов на шаблоне ``DiffScrollTabLayout`` (как Settings)."""
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         self._presenter = RecipesPresenter(ctx)
@@ -40,10 +49,12 @@ class RecipesTab(BaseListNavTab):
         super().__init__(
             title="Рецепты",
             ctx=ctx,
-            layout_factory=lambda: StandardTabLayout(show_sub_nav=False),
+            layout_factory=_layout_factory,
             parent=parent,
         )
         self._setup_actions()
+        # Авто-refresh scroll area при смене активного рецепта в стеке.
+        self._tab_layout.connect_stack(self._content_stack, "content")
         self._sync_nav()
 
     @classmethod
@@ -82,22 +93,46 @@ class RecipesTab(BaseListNavTab):
 
     def _setup_actions(self) -> None:
         lay = self._tab_layout
+
+        # Единый action-виджет в первой колонке: toggle + кнопки.
+        # DiffScrollTabLayout принимает один виджет на колонку через set_action_widget.
+        action_widget = QWidget()
+        action_layout = QVBoxLayout(action_widget)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
+
         self._toggle = ViewModeToggle(initial_mode=ViewMode.CARDS)
         self._toggle.mode_changed.connect(self._on_view_mode_changed)
-        lay.add_top_widget(self._toggle)  # type: ignore[attr-defined]
-        self._btn_load = lay.add_top_action("load", "Загрузить")  # type: ignore[attr-defined]
+        action_layout.addWidget(self._toggle)
+
+        self._btn_load = self._make_action_button("load", "Загрузить")
         self._btn_load.setEnabled(False)
-        self._btn_save = lay.add_top_action("save", "Сохранить")  # type: ignore[attr-defined]
-        self._btn_delete = lay.add_top_action("delete", "Удалить")  # type: ignore[attr-defined]
+        action_layout.addWidget(self._btn_load)
+
+        self._btn_save = self._make_action_button("save", "Сохранить")
+        action_layout.addWidget(self._btn_save)
+
+        self._btn_delete = self._make_action_button("delete", "Удалить")
         self._btn_delete.setEnabled(False)
-        lay.action_triggered.connect(self._on_action)  # type: ignore[attr-defined]
+        action_layout.addWidget(self._btn_delete)
+
+        action_layout.addStretch(1)
+        lay.set_action_widget(action_widget)
+
+        # Undo/Redo живут в статичной зоне DiffScrollTabLayout (не скроллятся).
         bus = self._ctx.action_bus() if hasattr(self._ctx, "action_bus") else None
         lay.enable_undo_redo(bus)
+
         from multiprocess_prototype.frontend.widgets.access import install_permission_aware_enable
 
         auth_state = getattr(getattr(self._ctx, "auth", None), "state", None)
         for btn in (self._btn_load, self._btn_save, self._btn_delete):
             install_permission_aware_enable(btn, "tabs.recipes.edit", auth_state)
+
+    def _make_action_button(self, action_id: str, label: str) -> QPushButton:
+        btn = QPushButton(label)
+        btn.clicked.connect(lambda _checked=False, aid=action_id: self._on_action(aid))
+        return btn
 
     def _on_action(self, action_id: str) -> None:
         if action_id == "save":
