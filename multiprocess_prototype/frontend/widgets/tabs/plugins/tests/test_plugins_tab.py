@@ -1,4 +1,5 @@
 """Тесты для PluginsTab."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -64,6 +65,10 @@ def _make_mock_ctx(entries: list[_MockEntry] | None = None) -> MagicMock:
     ctx.config = {}
     ctx.extras = {}
     ctx.bindings.return_value = None
+    # action_bus()/form_context() возвращают None → отключают undo/redo wiring
+    # и binding-aware builders (тогда RegisterView идёт по legacy-пути).
+    ctx.action_bus.return_value = None
+    ctx.form_context.return_value = None
     return ctx
 
 
@@ -139,34 +144,62 @@ class TestPluginsTab:
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        # MasterDetailLayout должен содержать 3 item'а
-        assert tab._master_detail._item_list.count() == 3
+        # BaseListNavTab держит QListWidget — там должно быть 3 элемента.
+        assert tab._nav_widget.count() == 3
+        assert len(tab.item_keys) == 3
 
     def test_empty_registry(self, qtbot: pytest.fixture) -> None:
         ctx = _make_mock_ctx(entries=[])
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
+        assert tab._nav_widget.count() == 0
 
-    def test_on_plugin_selected_no_registers(self, qtbot: pytest.fixture) -> None:
+    def test_detail_widgets_created_lazily(self, qtbot: pytest.fixture) -> None:
+        # При наполнении nav (_sync_nav → add_item → _create_item_widget) все
+        # detail-виджеты строятся сразу и попадают в _detail_cache.
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        tab._on_plugin_selected("grayscale")
         assert "grayscale" in tab._detail_cache
+        assert "color_mask" in tab._detail_cache
+        assert "capture" in tab._detail_cache
 
-    def test_on_plugin_selected_with_registers_no_manager(self, qtbot: pytest.fixture) -> None:
+    def test_no_register_manager_fallback_to_info_card(self, qtbot: pytest.fixture) -> None:
+        # color_mask имеет has_registers=True, но registers_manager=None →
+        # fields пусты, должен сработать fallback на PluginInfoCard.
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        tab._on_plugin_selected("color_mask")
-        # Без RegistersManager — fallback на PluginInfoCard
-        assert "color_mask" in tab._detail_cache
         assert isinstance(tab._detail_cache["color_mask"], PluginInfoCard)
 
-    def test_detail_cache(self, qtbot: pytest.fixture) -> None:
+    def test_detail_cache_no_duplicates(self, qtbot: pytest.fixture) -> None:
+        # Каждый плагин в _detail_cache должен появиться ровно один раз
+        # (даже после повторного select_item).
         ctx = _make_mock_ctx()
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        tab._on_plugin_selected("capture")
-        tab._on_plugin_selected("capture")  # второй раз не должен пересоздавать
-        assert len(tab._detail_cache) == 1
+        tab.select_item("capture")
+        tab.select_item("capture")
+        # Каждому ключу — один виджет; 3 плагина → 3 записи.
+        assert len(tab._detail_cache) == 3
+
+    def test_search_filter(self, qtbot: pytest.fixture) -> None:
+        ctx = _make_mock_ctx()
+        tab = PluginsTab(ctx)
+        qtbot.addWidget(tab)
+        # До фильтра все элементы видимы.
+        assert all(not tab._nav_widget.item(i).isHidden() for i in range(tab._nav_widget.count()))
+        # «color» матчит только color_mask.
+        tab._search.setText("color")
+        visible = [
+            tab._nav_widget.item(i).data(0x0100)  # Qt.UserRole = 256 (0x0100)
+            for i in range(tab._nav_widget.count())
+            if not tab._nav_widget.item(i).isHidden()
+        ]
+        # При фильтре «color» только color_mask должен остаться видим.
+        assert "color_mask" in visible
+        assert "grayscale" not in visible
+        assert "capture" not in visible
+        # Очистка поля — все опять видимы.
+        tab._search.setText("")
+        assert all(not tab._nav_widget.item(i).isHidden() for i in range(tab._nav_widget.count()))
