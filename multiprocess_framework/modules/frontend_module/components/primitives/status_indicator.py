@@ -8,9 +8,13 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QColor,
+    QPainter,
+    QSize,
+    QWidget,
+    Qt,
+)
 
 
 __all__ = ["StatusIndicator"]

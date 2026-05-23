@@ -25,17 +25,18 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QListWidget,
     QListWidgetItem,
     QWidget,
+    Qt,
+    Signal,
 )
 
 from .base_columnar_tab import BaseColumnarTab
 
 if TYPE_CHECKING:
-    from PySide6.QtGui import QIcon
+    from multiprocess_framework.modules.frontend_module.core.qt_imports import QIcon
 
     from .tab_layout_protocol import TabLayoutProtocol
 

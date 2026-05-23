@@ -19,11 +19,11 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QPushButton,
     QStackedWidget,
     QWidget,
+    Signal,
 )
 
 if TYPE_CHECKING:

@@ -32,11 +32,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    Signal,
 )
 
 if TYPE_CHECKING:

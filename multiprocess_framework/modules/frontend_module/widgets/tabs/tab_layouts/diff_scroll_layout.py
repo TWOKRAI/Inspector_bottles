@@ -32,9 +32,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from PySide6.QtCore import QChildEvent, QEvent, Qt
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QAbstractScrollArea,
+    QChildEvent,
+    QEvent,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -44,12 +45,13 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    Qt,
 )
 
 from ._abstract_columnar import _AbstractColumnarTabLayout
 
 if TYPE_CHECKING:
-    from PySide6.QtGui import QWheelEvent
+    from multiprocess_framework.modules.frontend_module.core.qt_imports import QWheelEvent
 
 
 _DEFAULT_ACTION_WIDTH = 120

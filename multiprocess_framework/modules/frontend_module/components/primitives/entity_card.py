@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QWidget,
+    Signal,
 )
 
 from .status_indicator import StatusIndicator

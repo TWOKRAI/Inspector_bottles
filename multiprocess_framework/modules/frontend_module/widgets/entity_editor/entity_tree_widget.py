@@ -23,8 +23,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QStandardItem
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QColor,
+    QFont,
+    QStandardItem,
+    Qt,
+)
 
 from .base_editor_tree import BaseEditorTreeView
 from .entity_tree_config import (

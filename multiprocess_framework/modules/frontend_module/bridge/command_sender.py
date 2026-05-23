@@ -117,7 +117,7 @@ class CommandSender:
     def _ensure_timer(self, debounce_ms: int) -> None:
         """Создать/перезапустить QTimer для debounce."""
         try:
-            from PySide6.QtCore import QTimer
+            from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
         except ImportError:
             # Без Qt — отправляем немедленно (тесты без GUI)
             self._flush_pending()

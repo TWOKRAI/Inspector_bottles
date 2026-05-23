@@ -19,8 +19,7 @@ import typing
 from copy import deepcopy
 from typing import Any, get_args, get_origin
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -30,6 +29,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QSpinBox,
     QWidget,
+    Signal,
 )
 
 logger = logging.getLogger(__name__)

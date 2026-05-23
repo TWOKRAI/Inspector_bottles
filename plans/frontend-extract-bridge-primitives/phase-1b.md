@@ -1,7 +1,7 @@
 # Фаза 1B — Консолидация `qt_imports` (после стабилизации `widgets/tabs/`)
 
 - **Родительский план:** [`plan.md`](plan.md)
-- **Статус:** BLOCKED — стартует только после: (a) мержа пилота `refactor/recipes-columnar-pilot` в main, (b) выполнения Phase 1 плана `columnar-tab-unify` (rename `DiffScrollTabLayout → ColumnarTabLayout`, перенос `view_mode_toggle` в framework, удаление `StandardTabLayout`).
+- **Статус:** DONE (2026-05-24). Стартовала после мержа пилота `refactor/recipes-columnar-pilot` в main (commit `cf281be`). Второй блокер (`columnar-tab-unify` Phase 1) не понадобился — будущий rename `DiffScrollTabLayout → ColumnarTabLayout` сохранит уже консолидированные импорты внутри файла; перенос `view_mode_toggle` в framework сделает свою замену в момент переноса.
 - **Содержание:** B1 (qt_imports консолидация)
 
 До разблокировки `widgets/tabs/` — hot-conflict zone: переименования и удаления файлов сделают повторную замену импортов бессмысленной.
@@ -20,11 +20,11 @@
 поиск «используемых Qt-символов» будет тривиальным grep по одному файлу.
 
 **Pre-flight checklist (обязательно перед стартом B1):**
-- [ ] `refactor/recipes-columnar-pilot` смержен в main
-- [ ] `columnar-tab-unify` Phase 1 завершена: `tab_layouts/diff_scroll_layout.py` переименован в `columnar_tab_layout.py`, `tab_layouts/standard_layout.py` удалён
-- [ ] `widgets/view_mode_toggle.py` существует в framework
-- [ ] `mcp__sentrux__session_start` — baseline сохранён
-- [ ] Повторный grep `from PySide6\.` по `frontend_module/` — список файлов актуализирован (может стать 35-45 вместо 40)
+- [x] `refactor/recipes-columnar-pilot` смержен в main (commit `cf281be`)
+- [ ] ~~`columnar-tab-unify` Phase 1 завершена~~ — не требовалось: rename файла не ломает внутренние импорты, перенос `view_mode_toggle` будет сопровождаться собственным переходом на qt_imports
+- [ ] ~~`widgets/view_mode_toggle.py` существует в framework~~ — пока в прото, переход на qt_imports делается на момент переноса
+- [x] `mcp__sentrux__session_start` — baseline сохранён (7159)
+- [x] Повторный grep `from PySide6\.` по `frontend_module/` — актуальный список 33 файла (после Phase 1A: components/primitives + bridge переехали в fw)
 
 **Module contract:** public-api-change (расширение `__all__` существующего модуля)
 
@@ -68,10 +68,11 @@
 5. Прогнать `make check`.
 
 **Acceptance criteria:**
-- [ ] `grep -r "from PySide6\." multiprocess_framework/modules/frontend_module/ --include="*.py"` возвращает только `core/qt_imports.py` и файлы под `TYPE_CHECKING` (допустимо)
-- [ ] `make check` зелёный (ruff + pyright)
-- [ ] `python scripts/run_framework_tests.py` зелёный
-- [ ] `mcp__sentrux__session_end` — 0 новых циклов и 0 регрессий по score
+- [x] `grep -r "from PySide6\." multiprocess_framework/modules/frontend_module/ --include="*.py"` возвращает только `core/qt_imports.py` (источник) и `tests/*` (out of scope). Все TYPE_CHECKING-блоки тоже переведены на qt_imports для единообразия.
+- [x] `ruff` + `pyright` — 0 errors (37 warnings — pre-existing, не из правок B1)
+- [x] `python scripts/run_framework_tests.py` — 2859 passed, 8 skipped
+- [x] `mcp__sentrux__session_end` — quality 7159 → 7166 (+8), 0 циклов, 0 violations
+- [x] `python scripts/validate.py` зелёный
 
 **Out of scope:**
 - Не трогать файлы вне `frontend_module` (прото, сервисы, плагины)

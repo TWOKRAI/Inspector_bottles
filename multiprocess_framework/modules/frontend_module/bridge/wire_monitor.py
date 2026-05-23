@@ -185,7 +185,7 @@ class WireStatusMonitor:
         (например, функция запроса метрик у процессов).
         """
         try:
-            from PySide6.QtCore import QTimer  # type: ignore[import]
+            from multiprocess_framework.modules.frontend_module.core.qt_imports import QTimer
         except ImportError:
             return  # Qt не доступен — работаем без polling
 

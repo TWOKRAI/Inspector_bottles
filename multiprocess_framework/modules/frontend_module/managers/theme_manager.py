@@ -20,7 +20,7 @@ from typing import Callable
 
 import yaml
 
-from PySide6.QtWidgets import QApplication
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QApplication
 from ...logger_module.utils import FallbackLogger
 
 _THEMES_SUBDIR = "themes"
@@ -143,21 +143,15 @@ class ThemeManager:
                 try:
                     parts.append(file_path.read_text(encoding="utf-8"))
                 except OSError as exc:
-                    _logger.warning(
-                        "[ThemeManager] не удалось прочитать %s: %s", file_path, exc
-                    )
+                    _logger.warning("[ThemeManager] не удалось прочитать %s: %s", file_path, exc)
             else:
-                _logger.warning(
-                    "[ThemeManager] файл из manifest не найден: %s", file_path
-                )
+                _logger.warning("[ThemeManager] файл из manifest не найден: %s", file_path)
 
         if not parts:
             return None
         return "\n\n".join(parts)
 
-    def apply_theme_by_manifest(
-        self, name: str, manifest: list[str], variables: dict[str, str]
-    ) -> bool:
+    def apply_theme_by_manifest(self, name: str, manifest: list[str], variables: dict[str, str]) -> bool:
         """Применить тему по манифесту к QApplication.
 
         Args:
@@ -206,6 +200,7 @@ class ThemeManager:
         Плейсхолдеры вида @имя_переменной заменяются на соответствующее значение.
         Неизвестные плейсхолдеры остаются как есть (безопасный fallback).
         """
+
         def _replacer(m: re.Match) -> str:
             var_name = m.group(1)
             return variables.get(var_name, m.group(0))
@@ -233,17 +228,13 @@ class ThemeManager:
                     loaded = yaml.safe_load(f)
                 if isinstance(loaded, dict):
                     # Обновляем дефолты значениями из файла
-                    defaults.update(
-                        {k: str(v) for k, v in loaded.items() if k in defaults}
-                    )
+                    defaults.update({k: str(v) for k, v in loaded.items() if k in defaults})
             except Exception as exc:
                 _logger.error("[ThemeManager] ошибка чтения %s: %s", yaml_path, exc)
 
         return defaults
 
-    def apply_theme_with_variables(
-        self, name: str, variables: dict[str, str]
-    ) -> bool:
+    def apply_theme_with_variables(self, name: str, variables: dict[str, str]) -> bool:
         """Применить тему с кастомными переменными к QApplication."""
         template = self.read_theme(name)
         if template is None:

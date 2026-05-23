@@ -6,8 +6,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QComboBox,
     QLineEdit,
     QListWidget,
@@ -16,6 +15,8 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    Qt,
+    Signal,
 )
 
 
