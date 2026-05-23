@@ -1,14 +1,21 @@
 """Примитивные виджеты — универсальные компоненты без зависимости от AppContext.
 
 Каждый виджет принимает чистые данные и выдаёт Qt Signal.
-Помечены [FW] если могут переехать в multiprocess_framework.
+Символы [FW] перенесены в multiprocess_framework и реэкспортируются отсюда.
 """
-from .status_indicator import StatusIndicator
-from .entity_card import CardAction, EntityCard
+
+# [FW] Перенесены в framework (Phase 1A/A2) — re-export для обратной совместимости
+from multiprocess_framework.modules.frontend_module.components.primitives import (
+    StatusIndicator,
+    EntityCard,
+    CardAction,
+    CrudTable,
+    MasterDetailLayout,
+)
+
+# Локальные виджеты (в активной разработке или зависимы от прото)
 from .action_toolbar import ActionToolbar
-from .master_detail import MasterDetailLayout
 from .slot_selector import SlotSelector
-from .crud_table import CrudTable
 from .sectioned_form import SectionedForm
 from .side_nav_layout import SideNavLayout
 from .standard_tab_layout import StandardTabLayout
