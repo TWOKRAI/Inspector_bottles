@@ -270,30 +270,35 @@ class TestProcessesTab:
         tab = ProcessesTab(ctx)
         qtbot.addWidget(tab)
         assert tab._selected_process is None
-        assert tab._center_stack.currentIndex() == 0  # _PAGE_ALL_CARDS
+        # Активная content-страница — AllProcessesPanel в Cards-режиме.
+        assert tab._content_stack.currentWidget() is tab._all_panel
+        assert tab._all_panel._inner_stack.currentIndex() == 0  # Cards
 
     def test_view_toggle_switches_page(self, qtbot):
-        """Переключение Cards→Table меняет страницу стека."""
+        """Переключение Cards→Table меняет inner_stack текущей панели."""
         ctx = _make_mock_ctx()
         tab = ProcessesTab(ctx)
         qtbot.addWidget(tab)
-        # Начинаем с Cards (page 0)
-        assert tab._center_stack.currentIndex() == 0
-        # Переключаем на Table
+        # Начинаем с Cards (inner page 0).
+        assert tab._all_panel._inner_stack.currentIndex() == 0
+        # Переключаем на Table.
         from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 
         tab._toggle.set_mode(ViewMode.TABLE)
-        assert tab._center_stack.currentIndex() == 1  # _PAGE_ALL_TABLE
+        assert tab._all_panel._inner_stack.currentIndex() == 1  # Table
 
     def test_select_process_shows_detail(self, qtbot):
         """Выбор процесса показывает детальную карточку."""
         ctx = _make_mock_ctx()
         tab = ProcessesTab(ctx)
         qtbot.addWidget(tab)
-        # Выбрать второй элемент (первый процесс)
+        # Выбрать второй элемент (первый процесс).
         tab._nav_list.setCurrentRow(1)
         assert tab._selected_process is not None
-        assert tab._center_stack.currentIndex() == 2  # _PAGE_SINGLE_CARDS
+        # Активная content-страница — SingleProcessPanel выбранного процесса в Cards.
+        single = tab._single_panels[tab._selected_process]
+        assert tab._content_stack.currentWidget() is single
+        assert single._inner_stack.currentIndex() == 0  # Cards
         assert tab._detail_card is not None
 
     def test_select_all_returns_to_summary(self, qtbot):
@@ -301,11 +306,12 @@ class TestProcessesTab:
         ctx = _make_mock_ctx()
         tab = ProcessesTab(ctx)
         qtbot.addWidget(tab)
-        # Выбрать процесс, потом вернуться
+        # Выбрать процесс, потом вернуться.
         tab._nav_list.setCurrentRow(1)
         tab._nav_list.setCurrentRow(0)
         assert tab._selected_process is None
-        assert tab._center_stack.currentIndex() == 0  # _PAGE_ALL_CARDS
+        assert tab._content_stack.currentWidget() is tab._all_panel
+        assert tab._all_panel._inner_stack.currentIndex() == 0  # Cards
 
     def test_buttons_disabled_on_all(self, qtbot):
         """Кнопки управления неактивны при выборе «Все процессы»."""
@@ -335,7 +341,8 @@ class TestProcessesTab:
         from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 
         tab._toggle.set_mode(ViewMode.TABLE)
-        assert tab._center_stack.currentIndex() == 3  # _PAGE_SINGLE_TABLE
+        single = tab._single_panels[tab._selected_process]
+        assert single._inner_stack.currentIndex() == 1  # Table
         assert tab._detail_table.rowCount() > 0
 
     def test_empty_topology_nav(self, qtbot):

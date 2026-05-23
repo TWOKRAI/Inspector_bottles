@@ -124,8 +124,9 @@ class TestServicesTab:
         ctx = _make_mock_ctx()
         tab = ServicesTab(ctx)
         qtbot.addWidget(tab)
-        # Секция "Нейронные сети" всегда есть (+2 сервисных = 3 итого)
-        assert tab._side_nav.section_count() >= 1  # минимум placeholder
+        # Секция "Нейронные сети" всегда есть среди specs.
+        keys = [s.key for s in tab._sections_specs]
+        assert "neural_networks" in keys
 
     def test_empty_services(self, qtbot):
         ctx = MagicMock()
@@ -134,14 +135,22 @@ class TestServicesTab:
         ctx.config = {}
         ctx.extras = {}
         ctx.bindings.return_value = None
+        ctx.action_bus.return_value = None
+        ctx.form_context.return_value = None
         tab = ServicesTab(ctx)
         qtbot.addWidget(tab)
-        # Только placeholder нейронок
-        assert tab._side_nav.section_count() == 1
+        # Нет сервисов → только placeholder «Нейронные сети» (services_root скрыт).
+        assert len(tab._sections_specs) == 1
+        assert tab._sections_specs[0].key == "neural_networks"
 
     def test_sections_with_fields(self, qtbot):
         ctx = _make_mock_ctx()
         tab = ServicesTab(ctx)
         qtbot.addWidget(tab)
-        # 2 сервисных секции + 1 нейронки
-        assert tab._side_nav.section_count() == 3
+        # services_root + 2 сервисных секции + neural_networks = 4 specs.
+        assert len(tab._sections_specs) == 4
+        keys = [s.key for s in tab._sections_specs]
+        assert keys[0] == "services_root"
+        assert "database" in keys
+        assert "robot_control" in keys
+        assert keys[-1] == "neural_networks"

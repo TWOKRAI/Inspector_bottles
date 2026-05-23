@@ -1,44 +1,119 @@
-"""PipelineTab -- визуальный конструктор pipeline.
+# -*- coding: utf-8 -*-
+"""PipelineTab — визуальный конструктор pipeline на едином columnar-шаблоне.
 
-3-panel layout: PluginPalette + GraphView + NodeInspectorPanel.
-D&D, selection, undo/redo, auto-layout, validate, shortcuts.
+3 колонки + мастер-скролл через ``DiffScrollTabLayout``:
+
+- **action-колонка (1-я)**: все кнопки управления (Delete / Layout / Validate /
+  Fit / Zoom+ / Zoom-); Undo/Redo — в статичной зоне снизу через
+  ``enable_undo_redo``;
+- **nav-колонка (2-я)**: ``PluginPalette`` — дерево плагинов по категориям +
+  поиск + D&D на canvas;
+- **content-колонка (3-я)**: вертикальный QSplitter с canvas (``GraphView``)
+  сверху и ``NodeInspectorPanel`` (параметры выбранной ноды) снизу.
+
+Внутренний скролл canvas НЕ передаётся в master-scrollbar — wheel на канве
+выполняет zoom (нативное поведение ``GraphView``).
 """
+
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
-from multiprocess_prototype.frontend.widgets.primitives import ActionToolbar
+from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
+    DiffScrollTabLayout,
+)
 
 from .graph.graph_scene import GraphScene
 from .graph.graph_view import GraphView
 from .inspector import NodeInspectorPanel
-from .palette import PluginPalette, PipelineDropTarget
+from .palette import PipelineDropTarget, PluginPalette
 from .presenter import PipelinePresenter
 
 if TYPE_CHECKING:
     from PySide6.QtCore import QPointF
+
     from multiprocess_prototype.frontend.app_context import AppContext
 
 logger = logging.getLogger(__name__)
 
 
-class PipelineTab(QWidget):
-    """Таб визуального конструктора pipeline.
+# Размеры колонок:
+# - action_width: 180 — нужно место под 6 кнопок управления (Delete..Zoom);
+# - nav_width:   345 — как в Plugins (русские имена категорий + tooltip).
+_ACTION_WIDTH = 180
+_NAV_WIDTH = 345
 
-    3-panel: палитра плагинов + canvas (граф) + инспектор параметров.
-    Поддерживает: D&D из палитры, wire creation, undo/redo, auto-layout, validate.
+
+class PipelineTab(QWidget):
+    """Таб визуального конструктора pipeline на ``DiffScrollTabLayout``.
+
+    3 колонки (actions / palette / canvas+inspector) + мастер-скролл +
+    QGroupBox-заголовок. Тулбар разнесён по action-колонке; Undo/Redo —
+    в статичной зоне. Палитра плагинов — во 2-й колонке (дерево + поиск).
+    Canvas + Inspector — в 3-й колонке через вертикальный сплиттер.
     """
+
+    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo"})
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctx = ctx
         self._presenter = PipelinePresenter(ctx)
 
-        self._init_ui()
+        self._tab_layout = DiffScrollTabLayout(
+            title="Pipeline",
+            action_width=_ACTION_WIDTH,
+            nav_width=_NAV_WIDTH,
+        )
+
+        # --- Action column: 6 кнопок (undo/redo — в статичной зоне) ---
+        self._tab_layout.set_action_widget(self._build_action_widget())
+
+        # --- Nav column: PluginPalette (дерево + поиск + D&D) ---
+        self._palette = PluginPalette()
+        self._tab_layout.set_nav_widget(self._palette)
+
+        # --- Content column: canvas + inspector через QSplitter ---
+        self._scene = GraphScene()
+        self._view = GraphView(self._scene)
+        self._inspector = NodeInspectorPanel()
+        self._content_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._content_splitter.addWidget(self._view)
+        self._content_splitter.addWidget(self._inspector)
+        self._content_splitter.setStretchFactor(0, 3)  # canvas — 3/4
+        self._content_splitter.setStretchFactor(1, 1)  # inspector — 1/4
+        self._tab_layout.set_content_widget(self._content_splitter)
+
+        # ВАЖНО: на canvas viewport DiffScrollTabLayout автоматически
+        # устанавливает event filter и перехватывает wheel в master-scrollbar.
+        # Это ломает zoom в GraphView. Снимаем filter — wheel на канве уйдёт
+        # в её собственный wheelEvent (zoom).
+        self._view.viewport().removeEventFilter(self._tab_layout)
+
+        # Undo/Redo в статичной зоне.
+        bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
+        self._tab_layout.enable_undo_redo(bus)
+
+        # Передать scene в presenter.
+        self._presenter.set_scene(self._scene)
+
+        # Drop target для D&D из палитры на canvas.
+        self._drop_target = PipelineDropTarget(self._view, self._on_plugin_dropped)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
+        main_layout.addWidget(self._tab_layout)
+
         self._connect_signals()
         self._load_topology()
         self._load_palette()
@@ -47,76 +122,63 @@ class PipelineTab(QWidget):
     def create(cls, ctx: "AppContext") -> "PipelineTab":
         return cls(ctx)
 
-    def _init_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+    # ------------------------------------------------------------------ #
+    #  Build helpers                                                       #
+    # ------------------------------------------------------------------ #
 
-        # Заголовок
-        header = QLabel("Pipeline")
-        header.setObjectName("TabHeader")
-        layout.addWidget(header)
-
-        # Тулбар: расширенный
-        self._toolbar = ActionToolbar(actions=[
-            ("undo", "Undo"),
-            ("redo", "Redo"),
-            ("delete", "Delete"),
-            ("auto_layout", "Layout"),
-            ("validate", "Validate"),
-            ("fit", "Fit"),
-            ("zoom_in", "Zoom +"),
-            ("zoom_out", "Zoom -"),
-        ])
-        self._toolbar.action_triggered.connect(self._on_toolbar_action)
-        layout.addWidget(self._toolbar)
-
-        # QSplitter: 3 панели
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Левая панель: палитра плагинов
-        self._palette = PluginPalette()
-        self._palette.setMinimumWidth(200)
-        self._palette.setMaximumWidth(350)
-        self._splitter.addWidget(self._palette)
-
-        # Центральная панель: canvas
-        self._scene = GraphScene()
-        self._view = GraphView(self._scene)
-        self._presenter.set_scene(self._scene)
-        self._splitter.addWidget(self._view)
-
-        # Правая панель: инспектор
-        self._inspector = NodeInspectorPanel()
-        self._inspector.setMinimumWidth(200)
-        self._inspector.setMaximumWidth(400)
-        self._splitter.addWidget(self._inspector)
-
-        # Начальные размеры splitter
-        self._splitter.setSizes([250, 600, 280])
-
-        layout.addWidget(self._splitter, stretch=1)
-
-        # Drop target для D&D из палитры
-        self._drop_target = PipelineDropTarget(
-            self._view, self._on_plugin_dropped
+    def _build_action_widget(self) -> QWidget:
+        """6 кнопок управления в action-колонке."""
+        from multiprocess_prototype.frontend.widgets.access import (
+            install_permission_aware_enable,
         )
 
+        action_widget = QWidget()
+        action_layout = QVBoxLayout(action_widget)
+        action_layout.setContentsMargins(4, 4, 4, 4)
+        action_layout.setSpacing(6)
+
+        self._action_buttons: dict[str, QPushButton] = {}
+        for action_id, label in [
+            ("delete", "Удалить"),
+            ("auto_layout", "Раскладка"),
+            ("validate", "Валидация"),
+            ("fit", "По размеру"),
+            ("zoom_in", "Zoom +"),
+            ("zoom_out", "Zoom −"),
+        ]:
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda _checked=False, aid=action_id: self._on_toolbar_action(aid))
+            action_layout.addWidget(btn)
+            self._action_buttons[action_id] = btn
+
+        action_layout.addStretch(1)
+
+        # Permission gating: только mutating actions (delete/auto_layout).
+        _auth = getattr(self._ctx, "auth", None)
+        auth_state = getattr(_auth, "state", None) if _auth is not None else None
+        for aid in ("delete", "auto_layout"):
+            install_permission_aware_enable(
+                self._action_buttons[aid],
+                "tabs.pipeline.edit",
+                auth_state,
+            )
+
+        return action_widget
+
+    # ------------------------------------------------------------------ #
+    #  Signals / topology / palette                                        #
+    # ------------------------------------------------------------------ #
+
     def _connect_signals(self) -> None:
-        """Подключить сигналы."""
-        # Wire creation
+        """Подключить сигналы виджетов."""
         self._view.wire_created.connect(self._on_wire_created)
-
-        # Selection → inspector
         self._scene.selectionChanged.connect(self._on_selection_changed)
-
-        # Inspector field changes
         self._inspector.field_changed.connect(self._on_inspector_field_changed)
 
     def _load_topology(self) -> None:
         """Загрузить topology из AppContext и отобразить."""
         nodes, edges = self._presenter.load_topology_from_config()
         self._scene.load_from_data(nodes, edges)
-
         if nodes:
             self._view.fit_to_view()
 
@@ -127,21 +189,24 @@ class PipelineTab(QWidget):
             return
 
         plugins = []
-        # registry может быть dict или объект с методом list/items
         if hasattr(registry, "items"):
             for name, entry in registry.items():
-                plugins.append({
-                    "name": name,
-                    "category": getattr(entry, "category", "utility"),
-                    "description": getattr(entry, "description", ""),
-                })
+                plugins.append(
+                    {
+                        "name": name,
+                        "category": getattr(entry, "category", "utility"),
+                        "description": getattr(entry, "description", ""),
+                    }
+                )
         elif hasattr(registry, "list_plugins"):
             for entry in registry.list_plugins():
-                plugins.append({
-                    "name": getattr(entry, "name", ""),
-                    "category": getattr(entry, "category", "utility"),
-                    "description": getattr(entry, "description", ""),
-                })
+                plugins.append(
+                    {
+                        "name": getattr(entry, "name", ""),
+                        "category": getattr(entry, "category", "utility"),
+                        "description": getattr(entry, "description", ""),
+                    }
+                )
 
         if plugins:
             self._palette.load_plugins(plugins)
@@ -159,12 +224,8 @@ class PipelineTab(QWidget):
         return auth_state.access_context.has_permission("tabs.pipeline.edit")
 
     # ------------------------------------------------------------------ #
-    #  Обработчики                                                         #
+    #  Action handlers                                                     #
     # ------------------------------------------------------------------ #
-
-    _MUTATING_ACTIONS = frozenset(
-        {"delete", "auto_layout", "undo", "redo"}
-    )
 
     def _on_toolbar_action(self, action_id: str) -> None:
         if action_id in self._MUTATING_ACTIONS and not self._can_edit():
@@ -177,19 +238,16 @@ class PipelineTab(QWidget):
             self._view.fit_to_view()
         elif action_id == "validate":
             errors = self._presenter.validate()
+            from PySide6.QtWidgets import QMessageBox
+
             if errors:
-                from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Валидация", "\n".join(errors))
             else:
-                from PySide6.QtWidgets import QMessageBox
                 QMessageBox.information(self, "Валидация", "Topology валидна")
         elif action_id == "auto_layout":
             self._presenter.auto_layout_scene()
         elif action_id == "delete":
-            selected = [
-                item.node_id for item in self._scene.selectedItems()
-                if hasattr(item, "node_id")
-            ]
+            selected = [item.node_id for item in self._scene.selectedItems() if hasattr(item, "node_id")]
             if selected:
                 self._presenter.remove_selected(selected)
                 self._inspector.clear()
@@ -206,9 +264,7 @@ class PipelineTab(QWidget):
         """D&D из палитры → создать процесс на canvas."""
         if not self._can_edit():
             return
-        self._presenter.add_process_from_plugin(
-            plugin_name, scene_pos.x(), scene_pos.y()
-        )
+        self._presenter.add_process_from_plugin(plugin_name, scene_pos.x(), scene_pos.y())
 
     def _on_wire_created(self, source_endpoint: str, target_endpoint: str) -> None:
         """Wire creation через GraphView."""
@@ -223,7 +279,6 @@ class PipelineTab(QWidget):
 
         if len(node_items) == 1:
             node = node_items[0]
-            # Получить данные процесса из topology
             topo = self._presenter.model.to_topology_dict()
             process_data = None
             for proc in topo.get("processes", []):

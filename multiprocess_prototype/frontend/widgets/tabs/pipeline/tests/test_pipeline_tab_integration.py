@@ -51,43 +51,44 @@ class TestPipelineTabCreate:
 
 
 class TestPipelineTabLayout:
-    def test_has_three_panels(self, qtbot):
-        """Splitter содержит ровно 3 виджета."""
-        ctx = _make_full_ctx()
-        tab = PipelineTab.create(ctx)
-        qtbot.addWidget(tab)
-        assert tab._splitter.count() == 3
-
     def test_palette_exists(self, qtbot):
-        """Левая панель — PluginPalette."""
+        """Палитра присутствует во 2-й колонке DiffScrollTabLayout."""
         ctx = _make_full_ctx()
         tab = PipelineTab.create(ctx)
         qtbot.addWidget(tab)
         assert isinstance(tab._palette, PluginPalette)
 
     def test_graphview_exists(self, qtbot):
-        """Центральная панель — GraphView."""
+        """Canvas присутствует в content-колонке."""
         ctx = _make_full_ctx()
         tab = PipelineTab.create(ctx)
         qtbot.addWidget(tab)
         assert isinstance(tab._view, GraphView)
 
     def test_inspector_exists(self, qtbot):
-        """Правая панель — NodeInspectorPanel."""
+        """Inspector присутствует в content-колонке (под canvas)."""
         ctx = _make_full_ctx()
         tab = PipelineTab.create(ctx)
         qtbot.addWidget(tab)
         assert isinstance(tab._inspector, NodeInspectorPanel)
 
-    def test_splitter_initial_sizes(self, qtbot):
-        """Splitter имеет начальные размеры для всех 3 панелей."""
+    def test_content_splitter_has_two_panels(self, qtbot):
+        """Content-колонка — вертикальный splitter с canvas (0) и inspector (1)."""
         ctx = _make_full_ctx()
         tab = PipelineTab.create(ctx)
         qtbot.addWidget(tab)
-        sizes = tab._splitter.sizes()
-        assert len(sizes) == 3
-        # Все размеры >= 0 (может быть 0 в headless Qt)
+        assert tab._content_splitter.count() == 2
+        sizes = tab._content_splitter.sizes()
+        assert len(sizes) == 2
         assert all(s >= 0 for s in sizes)
+
+    def test_action_buttons_present(self, qtbot):
+        """В action-колонке — 6 кнопок управления."""
+        ctx = _make_full_ctx()
+        tab = PipelineTab.create(ctx)
+        qtbot.addWidget(tab)
+        for aid in ("delete", "auto_layout", "validate", "fit", "zoom_in", "zoom_out"):
+            assert aid in tab._action_buttons
 
 
 class TestPipelineTabScene:
