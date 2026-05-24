@@ -62,7 +62,7 @@
 
 | Phase | Файл | Slug ветки | Дней | Зависимости |
 |-------|------|------------|------|-------------|
-| **0** | [phase-0-foundation.md](phase-0-foundation.md) | `chore/foundation-from-backup-and-state-schema` | 2-3 | — |
+| **0** ✓ | [phase-0-foundation.md](phase-0-foundation.md) | `chore/foundation-from-backup-and-state-schema` | 2-3 | — | <!-- DONE bea4c72 -->
 | **1** | [phase-1-processes-protection.md](phase-1-processes-protection.md) | `feat/processes-protection` | 1 | Phase 0 |
 | **2** | [phase-2-discovery-config-paths.md](phase-2-discovery-config-paths.md) | `feat/discovery-config-paths` | 2-3 | Phase 0 |
 | **3** | [phase-3-service-registry.md](phase-3-service-registry.md) | `feat/service-registry` | 3-4 | Phase 0 |
