@@ -194,6 +194,9 @@ class ProcessesTab(BaseListNavTab):
             return
         if self._selected_process is None:
             return
+        # Guard: защищённый процесс нельзя удалить или остановить через GUI.
+        if action_id in ("delete", "stop") and self._presenter.is_protected(self._selected_process):
+            return
         if action_id in ("start", "stop"):
             self._presenter.on_process_action(self._selected_process, action_id)
         elif action_id == "delete":
@@ -206,9 +209,17 @@ class ProcessesTab(BaseListNavTab):
 
     def _update_buttons_state(self) -> None:
         has_selection = self._selected_process is not None
-        self._btn_delete.setEnabled(has_selection)
+        # Явная проверка на None позволяет pyright сузить тип до str.
+        is_protected = (
+            self._presenter.is_protected(self._selected_process) if self._selected_process is not None else False
+        )
+        self._btn_delete.setEnabled(has_selection and not is_protected)
         self._btn_start.setEnabled(has_selection)
-        self._btn_stop.setEnabled(has_selection)
+        self._btn_stop.setEnabled(has_selection and not is_protected)
+        # Тултип для disabled-кнопок: подсказка, почему заблокировано.
+        _protected_tip = "Системный процесс защищён от изменений"
+        self._btn_delete.setToolTip(_protected_tip if is_protected else "")
+        self._btn_stop.setToolTip(_protected_tip if is_protected else "")
 
     # ------------------------------------------------------------------ #
     #  View mode                                                           #
