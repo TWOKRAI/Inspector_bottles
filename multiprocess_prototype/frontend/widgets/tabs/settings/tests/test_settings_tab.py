@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import yaml
 import pytest
 
-from multiprocess_prototype.config.schemas import SystemConfig
+from multiprocess_prototype.backend.config.schemas import SystemConfig
 from multiprocess_prototype.frontend.app_context import AppContext
 from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
 

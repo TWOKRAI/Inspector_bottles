@@ -1,4 +1,5 @@
 """Модели данных для ProcessesTab."""
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 
@@ -17,3 +18,4 @@ class ProcessInfo:
     pid: int | None = None
     fps: float = 0.0
     frame_count: int = 0
+    protected: bool = False

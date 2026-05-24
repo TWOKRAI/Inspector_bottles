@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from multiprocess_prototype.config.schemas import SystemConfig
+from multiprocess_prototype.backend.config.schemas import SystemConfig
 from multiprocess_prototype.frontend.widgets.tabs.settings.yaml_io import (
     load_settings,
     save_settings,

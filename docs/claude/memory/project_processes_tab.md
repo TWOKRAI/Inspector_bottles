@@ -13,6 +13,13 @@ originSessionId: 892f4f9e-8065-4888-926c-7cfdb4ab3dca
 - Phase 3: CreateProcessDialog + кнопки "Создать"/"Удалить", process.command wrapper format
 - Bug fixes: command routing через "process.command" wrapper (не прямой command_id), handlers принимают data=dict|**kwargs, crash isolation (не роняет систему), "created" status для нестартованных процессов
 
+**Phase 1 prototype-skeleton-2026-05 (2026-05-24, ветка feat/processes-protection):**
+- ProcessInfo.protected: bool = False, Presenter.is_protected(name)
+- 6 topology YAML: gui помечен protected: true (orchestrator вне blueprint)
+- Defense in depth — 7 точек: UI (3 не рендерит Stop) + handlers (4 early-return guard): _on_button_action, _on_card_action, _on_toolbar_action(stop_all), AllProcessesPanel, SingleProcessPanel, toolbar buttons
+- 9 unit-тестов в TestProtectedProcesses (presenter + tab + panel + toolbar)
+- Plan: plans/prototype-skeleton-2026-05/phase-1-processes-protection.md (master plan.md)
+
 **Ключевые файлы:**
 - `multiprocess_prototype/frontend/widgets/tabs_setting/processes_tab/` — 8 файлов (widget, tree, model, bridge, control_panel, create_dialog, constants, schemas)
 - `multiprocess_prototype/registers/commands/routing.py` — process.command + process.* targets

@@ -2,6 +2,7 @@
 
 Pure Python (без Qt импортов кроме TYPE_CHECKING).
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
@@ -68,11 +69,14 @@ class ProcessesPresenter:
                             if entry and hasattr(entry, "category"):
                                 category = entry.category
 
-                processes.append(ProcessInfo(
-                    name=name,
-                    category=category,
-                    plugins=plugin_names,
-                ))
+                processes.append(
+                    ProcessInfo(
+                        name=name,
+                        category=category,
+                        plugins=plugin_names,
+                        protected=proc_dict.get("protected", False),
+                    )
+                )
             else:
                 # Если proc_dict — это Pydantic модель (ProcessConfig)
                 name = getattr(proc_dict, "process_name", "unnamed")
@@ -81,10 +85,7 @@ class ProcessesPresenter:
                 category = "utility"
 
                 for p in plugins:
-                    pname = (
-                        p.get("plugin_name", "") if isinstance(p, dict)
-                        else getattr(p, "plugin_name", "")
-                    )
+                    pname = p.get("plugin_name", "") if isinstance(p, dict) else getattr(p, "plugin_name", "")
                     if pname:
                         plugin_names.append(pname)
                         if category == "utility" and registry:
@@ -92,11 +93,14 @@ class ProcessesPresenter:
                             if entry and hasattr(entry, "category"):
                                 category = entry.category
 
-                processes.append(ProcessInfo(
-                    name=name,
-                    category=category,
-                    plugins=plugin_names,
-                ))
+                processes.append(
+                    ProcessInfo(
+                        name=name,
+                        category=category,
+                        plugins=plugin_names,
+                        protected=getattr(proc_dict, "protected", False),
+                    )
+                )
 
         return processes
 
@@ -141,9 +145,9 @@ class ProcessesPresenter:
         # Начальные значения — будут обновляться через bindings
         return {
             "total": total,
-            "active": 0,        # обновляется через state_delta
+            "active": 0,  # обновляется через state_delta
             "broken_wires": 0,  # обновляется через WireStatusMonitor
-            "avg_fps": 0.0,     # обновляется через state_delta
+            "avg_fps": 0.0,  # обновляется через state_delta
         }
 
     def group_by_category(self, processes: list[ProcessInfo]) -> dict[str, list[ProcessInfo]]:
@@ -164,6 +168,11 @@ class ProcessesPresenter:
                 return proc
         return None
 
+    def is_protected(self, name: str) -> bool:
+        """Проверить, является ли процесс защищённым."""
+        proc = self.get_process_by_name(name)
+        return bool(proc.protected) if proc else False
+
     def get_process_names(self) -> list[str]:
         """Упорядоченный список имён процессов для навигации."""
         return [p.name for p in self.get_processes()]
@@ -172,13 +181,15 @@ class ProcessesPresenter:
         """Плоские данные всех процессов для таблицы."""
         rows: list[dict[str, str]] = []
         for proc in self.get_processes():
-            rows.append({
-                "Имя": proc.name,
-                "Категория": self.category_title(proc.category),
-                "Статус": proc.status,
-                "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
-                "Плагины": ", ".join(proc.plugins) or "—",
-            })
+            rows.append(
+                {
+                    "Имя": proc.name,
+                    "Категория": self.category_title(proc.category),
+                    "Статус": proc.status,
+                    "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
+                    "Плагины": ", ".join(proc.plugins) or "—",
+                }
+            )
         return rows
 
     def get_detail_metrics(self, name: str) -> dict[str, str]:

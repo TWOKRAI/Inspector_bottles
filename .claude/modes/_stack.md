@@ -72,15 +72,20 @@ plans/             — Task-based plans (see plans/README.md)
 
 ## MCP — core (documented in `.claude/mcp/`)
 
-- [ ] **qex** — semantic code search (Qdrant + Ollama). Enable for codebases ≥ 5k LOC.
-- [ ] **sentrux** — architectural DSM / metrics. Enable when ≥ 10 modules.
+- [x] **qex** — semantic code search (Ollama + BM25). Always-on в этом проекте.
+- [x] **sentrux** — architectural DSM / metrics. Always-on (20+ модулей фреймворка).
 - [x] **context7** — library docs (user-level, usually enabled globally).
 
 ## MCP — optional (activate per project via `.claude/mcp/<name>/SETUP_GUIDE.md`)
 
-- [ ] **qt-mcp** — runtime inspection for PyQt5/PySide6 GUI apps.
-- [ ] **graphify** — knowledge graph of the codebase (HTML + JSON + report).
-- [ ] **serena** — LSP-backed symbol-level retrieval (experimental — see SETUP_GUIDE caveats).
+- [x] **qt-mcp** — runtime inspection for PyQt5/PySide6 GUI apps. Активен (проект — PySide6).
+- [x] **graphify** — knowledge graph of the codebase (HTML + JSON + report).
+- [x] **serena** — LSP-backed symbol-level retrieval (experimental — см. known issues).
+- [x] **ast-grep** — structural AST search + rewrite (codemods на 20+ языках).
+- [ ] **codegraph** — function-level call graph (callers/callees/impact). Conditional guard в агентах сохранён на случай активации.
+- [ ] **playwright** — browser automation (web-only, проект не веб).
+- [ ] **sequential-thinking** — externalized chain-of-thought scratchpad (для investigator/teamlead на 3-й гипотезе).
+- [ ] **github** — GitHub MCP (Issues/PR/Actions). Локально используется `gh` CLI.
 
 ## Architecture notes
 

@@ -110,7 +110,7 @@ self._cap = cv2.VideoCapture(self._device_id, cv2.CAP_DSHOW)
 processes:
   - process_name: camera_0
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.capture.plugin.CapturePlugin
+      - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
         plugin_name: capture
         camera_id: 0
         device_id: 0

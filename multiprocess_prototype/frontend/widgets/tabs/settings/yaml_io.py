@@ -11,13 +11,13 @@ from pathlib import Path
 
 import yaml
 
-from multiprocess_prototype.config.schemas import SystemConfig, load_system_config
+from multiprocess_prototype.backend.config.schemas import SystemConfig, load_system_config
 from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo, extract_fields
 
-# config/system.yaml относительно multiprocess_prototype/
+# backend/config/system.yaml относительно multiprocess_prototype/
 # parents[4] от tabs/settings/yaml_io.py:
 #   [0]=settings/, [1]=tabs/, [2]=widgets/, [3]=frontend/, [4]=multiprocess_prototype/
-SETTINGS_PATH: Path = Path(__file__).resolve().parents[4] / "config" / "system.yaml"
+SETTINGS_PATH: Path = Path(__file__).resolve().parents[4] / "backend" / "config" / "system.yaml"
 
 # Секции SystemConfig в порядке отображения
 _SECTIONS = ["system", "camera", "processing", "display", "storage"]

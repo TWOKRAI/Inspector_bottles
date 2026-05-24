@@ -193,9 +193,7 @@ class TestTopologyParses:
             SystemBlueprint,
         )
 
-        topology_path = (
-            Path(__file__).parent.parent.parent / "topology" / "hello_world.yaml"
-        )
+        topology_path = Path(__file__).parent.parent.parent / "backend" / "topology" / "hello_world.yaml"
         assert topology_path.exists(), f"Файл не найден: {topology_path}"
 
         with topology_path.open(encoding="utf-8") as f:
@@ -217,9 +215,7 @@ class TestTopologyParses:
             SystemBlueprint,
         )
 
-        topology_path = (
-            Path(__file__).parent.parent.parent / "topology" / "hello_world.yaml"
-        )
+        topology_path = Path(__file__).parent.parent.parent / "backend" / "topology" / "hello_world.yaml"
         with topology_path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
@@ -272,10 +268,7 @@ class TestProcessClassField:
         )
         generic = cfg.as_generic_config()
 
-        assert (
-            generic.process_class
-            == "multiprocess_prototype.frontend.process.GuiProcess"
-        )
+        assert generic.process_class == "multiprocess_prototype.frontend.process.GuiProcess"
 
     def test_as_generic_config_default_class_when_empty(self):
         """as_generic_config() с пустым process_class сохраняет дефолтный GenericProcess путь."""
@@ -381,11 +374,7 @@ class TestDataReceiverErrorRecovery:
             process._data_receiver_loop(stop_event, pause_event)
 
         # _log_info должен быть вызван с сообщением о восстановлении
-        recovery_calls = [
-            call
-            for call in process._log_info.call_args_list
-            if "восстановление" in str(call)
-        ]
+        recovery_calls = [call for call in process._log_info.call_args_list if "восстановление" in str(call)]
         assert len(recovery_calls) == 1
 
     def test_critical_after_threshold(self):

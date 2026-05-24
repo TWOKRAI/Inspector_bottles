@@ -37,11 +37,12 @@ Not unit tests of pieces — the user-visible flow.
 - **Library:** import in a clean Python process, call the public API.
 - **Web:** hit the route in a browser or curl. Check status + body, not
   just that the server didn't crash.
-- **UI:** click through the actual change in the running app.
+- **UI:** click through the actual change in the running app. **Для PyQt/PySide + qt-mcp** — `qt_batch` (click → wait_for → snapshot) или `qt_screenshot` вместо ручного клика.
 
 If you cannot run the entry point in this environment, say so explicitly:
 "I cannot verify the UI runs because there is no display server here.
 Tests pass, but a human must run the app before this is truly done."
+Для desktop GUI: попробуй сначала qt-mcp (если подключён) — он работает даже без human-in-the-loop.
 
 ### 3. Edge cases the change should NOT break
 
@@ -62,6 +63,13 @@ Pick 2–3 concrete ones, not "various edge cases".
 - **Если sentrux подключён** → `sentrux:check_rules` на свежие правки. Цель: нет новых нарушений архитектурных правил (cycles, layer violations). Если ругается — verdict не "done".
 - **Если codegraph подключён** → `codegraph:impact` на изменённые символы. Цель: blast radius не пропущен (нет ли неучтённых callers).
 - **Если playwright подключён И проект веб** → `browser_navigate` к golden-path URL + `screenshot`. Проверка визуально, не только HTTP-status.
+- **Если qt-mcp подключён И проект PyQt/PySide** → поднять приложение (`/run-proto` или эквивалент), затем:
+  - `qt_snapshot` — структура дерева валидна, новый/изменённый виджет на месте.
+  - `qt_thread_check` — нет cross-thread UI violations.
+  - `qt_messages` — нет новых Qt warnings/errors после прогона golden-path сценария.
+  - `qt_screenshot` — visual evidence для UI-изменений.
+  - `qt_batch` — если нужен полный click-through scenario (click → wait → snapshot → assert).
+  - Закрывает дыру «не могу проверить UI вручную в этой среде» для desktop-проектов.
 - Если MCP не подключены → пропусти эту секцию (не блокируй verdict).
 
 ## Output format
@@ -74,7 +82,7 @@ Pick 2–3 concrete ones, not "various edge cases".
 **Affected entry point exercised:** <command + result>
 **Edge cases checked:** <list>
 **Side effects:** <git status summary + any artefacts>
-**Architectural sanity:** sentrux=ok|fail|n/a, codegraph impact=<list|none|n/a>, playwright=<screenshot path|n/a>
+**Architectural sanity:** sentrux=ok|fail|n/a, codegraph impact=<list|none|n/a>, playwright=<screenshot path|n/a>, qt-mcp=<snapshot ok / thread ok / messages clean | n/a>
 
 **Verdict:** ✅ done | ⚠️ done with caveats <list> | ❌ not done — <blocker>
 ```

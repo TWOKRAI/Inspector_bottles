@@ -14,7 +14,7 @@ uv sync
 ### 2. Запуск минимального примера
 
 ```bash
-python multiprocess_prototype/run.py multiprocess_prototype/topology/hello_world.yaml
+python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/hello_world.yaml
 ```
 
 Увидишь окно с трансляцией камеры-симулятора.
@@ -22,7 +22,7 @@ python multiprocess_prototype/run.py multiprocess_prototype/topology/hello_world
 ### 3. Запуск с полной обработкой
 
 ```bash
-python multiprocess_prototype/run.py multiprocess_prototype/topology/inspection_basic.yaml
+python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/inspection_basic.yaml
 ```
 
 Pipeline: камера → HSV-фильтрация → детекция контуров → наложение маски → GUI.
@@ -31,8 +31,10 @@ Pipeline: камера → HSV-фильтрация → детекция кон�
 
 | Директория | Назначение |
 |-----------|------------|
-| `topology/` | YAML-чертежи системы (hello_world, inspection_basic, multi_camera, ...) |
-| `plugins/` | 19 плагинов (source, processing, rendering, output, utility, control) |
+| `backend/topology/` | YAML-чертежи системы (hello_world, inspection_basic, multi_camera, ...) |
+| `backend/config/` | system.yaml + Pydantic-схемы дефолтов |
+| `backend/state/` | bootstrap StateStoreManager (build_initial_state, throttle_rules) |
+| `../Plugins/` | 19 плагинов (source, processing, rendering, output, utility, control) — корневая папка репо |
 | `registers/` | Pydantic-схемы конфигурации плагинов + build_rm_from_topology |
 | `frontend/` | PySide6 GUI: MainWindow, 7 табов, bridge, state bindings |
 | `frontend/windows/` | MainWindow (AppHeader, ImagePanel, TabWidget) |
@@ -176,7 +178,7 @@ processes:
   - process_name: processor
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.my_plugin.plugin.MyPlugin
+      - plugin_class: Plugins.processing.my_plugin.plugin.MyPlugin
         plugin_name: my_plugin
         category: processing
         threshold: 120

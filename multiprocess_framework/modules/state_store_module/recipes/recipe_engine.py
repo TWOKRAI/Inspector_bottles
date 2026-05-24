@@ -13,6 +13,7 @@
     - вызывается migration_fn для преобразования данных,
     - основной файл перезаписывается с meta.version = recipe_version.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,9 +31,9 @@ logger = logging.getLogger(__name__)
 # Ветви, которые snapshot'ятся по умолчанию (при save без paths).
 # Список доменно-нейтральный — приложение может передать свой набор путей в save(paths=...).
 DEFAULT_CONFIG_PATHS: list[str] = [
-    "cameras",   # cameras.*.config + cameras.*.regions
+    "cameras",  # cameras.*.config + cameras.*.regions
     "renderer",  # renderer.config
-    "robot",     # robot.config
+    "robot",  # robot.config
     "database",  # database.config
 ]
 
@@ -68,7 +69,7 @@ def _remap_path(path: str, remap: dict[str, str]) -> str:
         if path == old_prefix:
             return new_prefix
         if path.startswith(old_prefix + "."):
-            return new_prefix + path[len(old_prefix):]
+            return new_prefix + path[len(old_prefix) :]
     return path
 
 
@@ -213,10 +214,7 @@ class RecipeEngine:
         version = meta.get("version", 1)  # отсутствие поля = считаем legacy
 
         version_outdated = version < self._recipe_version
-        domain_check = (
-            self._migration_check_fn is not None
-            and self._migration_check_fn(data)
-        )
+        domain_check = self._migration_check_fn is not None and self._migration_check_fn(data)
 
         if (version_outdated or domain_check) and self._migration_fn is not None:
             bak_path = file_path.with_suffix(".yaml.bak")
@@ -270,9 +268,7 @@ class RecipeEngine:
             if self._store.has(p):
                 self._loaded_snapshot[p] = self._store.get(p)
 
-        logger.info(
-            "Рецепт '%s' загружен, %d дельт", name, len(deltas)
-        )
+        logger.info("Рецепт '%s' загружен, %d дельт", name, len(deltas))
         return deltas
 
     # ------------------------------------------------------------------
@@ -281,9 +277,7 @@ class RecipeEngine:
 
     def list(self) -> list[str]:
         """Список имён рецептов (файлов без .yaml)."""
-        return sorted(
-            p.stem for p in self._recipes_dir.glob("*.yaml")
-        )
+        return sorted(p.stem for p in self._recipes_dir.glob("*.yaml"))
 
     def delete(self, name: str) -> bool:
         """Удалить рецепт. True если удалён."""
@@ -298,6 +292,11 @@ class RecipeEngine:
                 self._loaded_paths = None
             return True
         return False
+
+    @property
+    def recipes_dir(self) -> Path:
+        """Public accessor — каталог хранения рецептов."""
+        return self._recipes_dir
 
     def get_active(self) -> str | None:
         """Имя последнего загруженного рецепта (или None)."""

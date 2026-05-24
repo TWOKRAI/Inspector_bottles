@@ -1,0 +1,37 @@
+# pilot_widgets — изолированный стенд для проверки form-фабрики
+#
+# Назначение:
+#   Smoke-проверка Phase 2.0+ rollout без зависимости от камеры/runtime.
+#   pilot_widgets плагин содержит регистр с полями всех целевых типов
+#   (Phase 2.0: bool через CheckboxControl; Phase 2.1+: int/float/literal).
+#   Worker LOOP логирует tick и публикует счётчик в state_proxy.
+#
+# Pipeline:
+#   pilot     — PilotWidgetsPlugin (worker LOOP, без data flow)
+#   gui       — Plugins-tab → pilot_widgets → toggle Enabled → IPC → log
+#
+# Запуск:
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/pilot_widgets.yaml
+
+name: pilot_widgets
+description: "Тестовый стенд form-фабрики: pilot_widgets + GUI"
+
+processes:
+  - process_name: pilot
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.utility.pilot_widgets.plugin.PilotWidgetsPlugin
+        plugin_name: pilot_widgets
+        category: utility
+        # Без YAML-overrides: начальные значения берутся из PilotWidgetsRegisters
+        # class-defaults (enabled=False, info=True, time_value=1).
+        # Это критично — GUI строит RM через RegistersManager.from_registry,
+        # которая НЕ применяет YAML overrides. Если задать здесь enabled: true,
+        # плагин стартует с enabled=True, а GUI рисует чекбокс по class-default
+        # → визуальный десинхрон.
+
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.process.GuiProcess
+    plugins: []

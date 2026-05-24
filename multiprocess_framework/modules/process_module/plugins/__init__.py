@@ -23,6 +23,7 @@ from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...registers_module import RegistersManager
 from ...worker_module import ExecutionMode, ThreadConfig
 from .base import PluginContext, PluginState, ProcessModulePlugin, SubPluginContext, for_each
+from .manager import PluginDiscoveryResult, PluginManager
 from .metrics import PluginMetrics
 from .port import Port, are_ports_compatible, validate_chain
 from .registry import PluginRegistry, register_plugin
@@ -40,6 +41,8 @@ __all__ = [
     "validate_chain",
     "PluginRegistry",
     "register_plugin",
+    "PluginManager",
+    "PluginDiscoveryResult",
     "for_each",
     # Реэкспорт схем/конфига (фасад для плагинов)
     "SchemaBase",
