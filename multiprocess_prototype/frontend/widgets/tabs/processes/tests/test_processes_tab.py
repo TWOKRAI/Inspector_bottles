@@ -424,6 +424,18 @@ class TestProtectedProcesses:
         assert tab._btn_stop.isEnabled() is False
         assert tab._btn_start.isEnabled() is True
 
+    def test_protected_buttons_have_explanatory_tooltip(self, qtbot):
+        """Disabled-кнопки protected процесса несут тултип «Системный процесс …»."""
+        ctx = _make_protected_ctx()
+        tab = ProcessesTab(ctx)
+        qtbot.addWidget(tab)
+
+        gui_row = next(i for i in range(tab._nav_list.count()) if tab._nav_list.item(i).text() == "gui")
+        tab._nav_list.setCurrentRow(gui_row)
+
+        assert "Системный процесс" in tab._btn_delete.toolTip()
+        assert "Системный процесс" in tab._btn_stop.toolTip()
+
     def test_buttons_enabled_for_unprotected(self, qtbot):
         """После выбора camera_0: _btn_delete и _btn_stop enabled."""
         ctx = _make_protected_ctx()
