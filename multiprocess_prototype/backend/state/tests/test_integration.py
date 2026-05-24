@@ -59,7 +59,7 @@ def initial_state():
 @pytest.fixture
 def throttle_rules():
     """Throttle-правила для тестов."""
-    from multiprocess_prototype.state.manager_setup import build_throttle_rules
+    from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
     return build_throttle_rules()
 
@@ -354,7 +354,7 @@ class TestManagerSetup:
 
     def test_build_throttle_rules_returns_dict(self):
         """build_throttle_rules возвращает непустой dict."""
-        from multiprocess_prototype.state.manager_setup import build_throttle_rules
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
         rules = build_throttle_rules()
         assert isinstance(rules, dict)
@@ -362,7 +362,7 @@ class TestManagerSetup:
 
     def test_throttle_rules_have_expected_keys(self):
         """Правила содержат паттерны для fps, frame_count, drops."""
-        from multiprocess_prototype.state.manager_setup import build_throttle_rules
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
         rules = build_throttle_rules()
         keys = list(rules.keys())

@@ -7,7 +7,7 @@
 #   gui         — отображение результата
 #
 # Запуск:
-#   python multiprocess_prototype/run.py multiprocess_prototype/topology/inspection_basic.yaml
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/inspection_basic.yaml
 
 name: inspection_basic
 description: "Базовая инспекция: камера → HSV-маска → детекция → overlay → GUI"

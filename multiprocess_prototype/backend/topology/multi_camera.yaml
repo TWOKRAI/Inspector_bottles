@@ -12,7 +12,7 @@
 # RendererCompositorPlugin работает в batch-режиме и объединяет все входящие кадры.
 #
 # Запуск:
-#   python multiprocess_prototype/run.py multiprocess_prototype/topology/multi_camera.yaml
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/multi_camera.yaml
 
 name: multi_camera
 description: "Мульти-камера: 2 камеры → 2 процессора → compositor → GUI"

@@ -24,7 +24,7 @@ from ..yaml_io import load_settings, save_settings, schema_to_field_infos
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
-    from multiprocess_prototype.config.schemas import SystemConfig
+    from multiprocess_prototype.backend.config.schemas import SystemConfig
     from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
             True при успешном сохранении, False при ошибке валидации.
         """
         import pydantic
-        from multiprocess_prototype.config.schemas import SystemConfig
+        from multiprocess_prototype.backend.config.schemas import SystemConfig
 
         # Собрать значения из view
         editor_values = self._view.get_editor_values()

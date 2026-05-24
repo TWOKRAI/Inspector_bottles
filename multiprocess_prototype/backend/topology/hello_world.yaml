@@ -5,7 +5,7 @@
 #   gui       — отображение кадров
 #
 # Запуск:
-#   python multiprocess_prototype/run.py multiprocess_prototype/topology/hello_world.yaml
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/hello_world.yaml
 
 name: hello_world
 description: "Минимальный пример: камера-симулятор → GUI"

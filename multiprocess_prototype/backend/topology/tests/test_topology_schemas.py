@@ -1,4 +1,5 @@
 """Тесты валидации topology YAML файлов."""
+
 import pytest
 from pathlib import Path
 import yaml
@@ -53,10 +54,7 @@ class TestTopologySchema:
         names = {p["process_name"] for p in topology["processes"]}
         for proc in topology["processes"]:
             for target in proc.get("chain_targets", []):
-                assert target in names, (
-                    f"Процесс {proc['process_name']}: "
-                    f"chain_target '{target}' не найден в topology"
-                )
+                assert target in names, f"Процесс {proc['process_name']}: chain_target '{target}' не найден в topology"
 
 
 class TestTemplateYaml:

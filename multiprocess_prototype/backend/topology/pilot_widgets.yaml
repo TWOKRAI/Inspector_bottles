@@ -11,7 +11,7 @@
 #   gui       — Plugins-tab → pilot_widgets → toggle Enabled → IPC → log
 #
 # Запуск:
-#   python multiprocess_prototype/run.py multiprocess_prototype/topology/pilot_widgets.yaml
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/pilot_widgets.yaml
 
 name: pilot_widgets
 description: "Тестовый стенд form-фабрики: pilot_widgets + GUI"

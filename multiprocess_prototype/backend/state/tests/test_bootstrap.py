@@ -2,7 +2,7 @@
 
 import pytest
 
-from multiprocess_prototype.state.bootstrap import (
+from multiprocess_prototype.backend.state.bootstrap import (
     _build_process_entry,
     _build_system_section,
     _build_wires_section,
@@ -316,14 +316,12 @@ def test_build_system_section_partial():
 
     assert section["stop_timeout"] == 15.0
     assert section["shm_budget_mb"] == 512  # default
-    assert section["log_dir"] == ""         # default
+    assert section["log_dir"] == ""  # default
 
 
 def test_build_wires_section_key_format():
     """_build_wires_section формирует ключ source->target."""
-    wires = _build_wires_section(
-        [{"source": "a.b.c", "target": "d.e.f"}]
-    )
+    wires = _build_wires_section([{"source": "a.b.c", "target": "d.e.f"}])
 
     assert "a.b.c->d.e.f" in wires
     assert wires["a.b.c->d.e.f"]["status"] == "pending"

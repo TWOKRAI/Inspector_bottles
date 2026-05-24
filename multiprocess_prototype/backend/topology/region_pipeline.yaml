@@ -13,7 +13,7 @@
 # chain_targets на уровне процесса — куда GenericProcess отправляет результат.
 # item["target"] (region_split) — per-item override для fan-out.
 #
-# Запуск: python multiprocess_prototype/run.py multiprocess_prototype/topology/region_pipeline.yaml
+# Запуск: python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/region_pipeline.yaml
 
 name: region_pipeline
 description: "Camera → Resize → Split → Negative/Grayscale/Flip → Stitch → GUI"

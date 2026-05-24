@@ -24,6 +24,7 @@
   `python -m scripts.reset_dev_password <новый_пароль>`
   (см. ниже инструкцию).
 """
+
 from __future__ import annotations
 
 # Автоматически логиниться при старте приложения под пользователем DEV_USERNAME.

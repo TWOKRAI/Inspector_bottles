@@ -9,7 +9,7 @@
 #   gui        — отображение результата
 #
 # Запуск:
-#   python multiprocess_prototype/run.py multiprocess_prototype/topology/inspection_full.yaml
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/inspection_full.yaml
 
 name: inspection_full
 description: "Полная инспекция: камера → маска → детекция → overlay → отбраковка → БД → GUI"

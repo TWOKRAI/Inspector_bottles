@@ -484,7 +484,7 @@ config = {
 ```python
 from multiprocess_prototype.main import bootstrap
 
-launcher = bootstrap("multiprocess_prototype/topology/region_pipeline.yaml")
+launcher = bootstrap("multiprocess_prototype/backend/topology/region_pipeline.yaml")
 launcher.run()
 ```
 
