@@ -224,16 +224,17 @@
 4. Экспортировать из `__init__.py`.
 
 **Acceptance criteria:**
-- [ ] Импорт каждого адаптера без ошибок
-- [ ] `isinstance(CameraStateAdapter(...), StateAdapterBase)` — True
-- [ ] `isinstance(RegistersStateAdapter(...), StateAdapterBase)` — True
-- [ ] `RecipeAdapter` не наследует StateAdapterBase (он не StateProxy-адаптер)
-- [ ] Нет `logging.getLogger` в перенесённых файлах
-- [ ] `pytest` зелёный (существующие тесты не сломаны)
+- [x] Импорт каждого адаптера без ошибок
+- [x] `isinstance(CameraStateAdapter(...), StateAdapterBase)` — True
+- [x] `isinstance(RegistersStateAdapter(...), StateAdapterBase)` — True
+- [x] `RecipeAdapter` не наследует StateAdapterBase (он не StateProxy-адаптер)
+- [x] Нет `logging.getLogger` в перенесённых файлах
+- [x] `pytest` зелёный (существующие тесты не сломаны) — 9 smoke passed, 0 регрессий
 
-**Out of scope:** конкретные `service_adapter.py` и `display_adapter.py` — создаются в Phases 3 и 4. Тестирование через реальный StateProxy — отложено до Phase 3 bootstrap.
+**Out of scope:** конкретные `service_adapter.py` и `display_adapter.py` — создаются в Phases 3 и 4. Тестирование через реальным StateProxy — отложено до Phase 3 bootstrap.
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
 **Module contract:** new-lite
+**Status:** done — коммит `08cb2e3` (CameraStateAdapter, RegistersStateAdapter, RecipeAdapter, 9 smoke-тестов).
 
 ---
 
