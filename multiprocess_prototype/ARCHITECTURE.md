@@ -80,7 +80,7 @@ ProcessModule
 class MyWorker:
     def __init__(self, logger=None):
         self._logger = logger  # LoggerManager
-    
+
     def run(self):
         # Внутри worker'а вызываешь методы через DI-логгер
         if self._logger:
@@ -128,12 +128,12 @@ def run(self):
         if self.pause_event.is_set():
             time.sleep(0.01)
             continue
-        
+
         # Получить сообщение frame_ready от upstream процесса
         msg = self.router.receive(channel_types=['data'])
         if msg:
             owner, slot, seq_id = msg["owner"], msg["slot"], msg["seq_id"]
-            
+
             # SHM middleware: read frame → dict
             frame = self.mm.read_images(owner, shm_name, shm_index)
             item = {
@@ -141,10 +141,10 @@ def run(self):
                 "timestamp": msg.get("timestamp"),
                 "seq_id": seq_id,
             }
-            
+
             # InspectorManager буферизирует по seq_id (для fan-in)
             self.inspector_mgr.add_item(item)
-            
+
             # Когда полная коллекция готова
             items = self.inspector_mgr.get_ready_items()
             if items:
@@ -160,23 +160,23 @@ def run(self):
         if self.pause_event.is_set():
             time.sleep(0.01)
             continue
-        
+
         # Получить готовые items из data_queue
         try:
             items = self.data_queue.get(timeout=0.1)
         except queue.Empty:
             continue
-        
+
         # Выполнить плагины (цепочка)
         for plugin in self.plugins:
             items = plugin.process(items)
-        
+
         # SHM write: items → frame
         for item in items:
             frame = item["frame"]
             slot = self.mm.alloc_slot(owner, shm_name)
             self.mm.write_images(owner, slot, [frame], 0)
-            
+
             # IPC send to chain_targets
             for target in self.chain_targets:
                 self.router.send({
@@ -227,14 +227,14 @@ def run(self):
 class PluginsPresenter:
     def __init__(self):
         self.plugins = []
-    
+
     def load_plugins(self, plugin_list):
         self.plugins = plugin_list
         return [
             {"name": p.name, "category": p.category, "state": p.state}
             for p in plugin_list
         ]
-    
+
     def set_plugin_param(self, plugin_name: str, param: str, value):
         # Pure logic, no Qt
         plugin = next((p for p in self.plugins if p.name == plugin_name), None)
@@ -249,16 +249,16 @@ class PluginsTab(QWidget):
         super().__init__(parent)
         self._presenter = PluginsPresenter()
         self._ctx = ctx
-        
+
         self._table = QTableWidget()
         self._param_spinbox = QSpinBox()
         self._param_spinbox.valueChanged.connect(self._on_param_changed)
-    
+
     def _on_param_changed(self, value):
         # Qt event → Presenter → commands → IPC
         plugin_name = self._get_current_plugin()
         param_name = self._param_spinbox.objectName()
-        
+
         if self._presenter.set_plugin_param(plugin_name, param_name, value):
             # Send IPC command
             self._ctx.command_sender.send_field_set(
@@ -293,14 +293,14 @@ class MyTab(QWidget):
 class SettingsTab(QWidget):
     def __init__(self, ctx):
         self._bus = ctx.action_bus
-    
+
     def _on_yaml_edit(self, new_yaml):
         # Создать действие
         action = EditTopologyAction(old=self.current_yaml, new=new_yaml)
-        
+
         # Выполнить и добавить в очередь Undo
         self._bus.execute(action)
-        
+
         # Пользователь нажал Ctrl+Z
         # → action.undo() → revert YAML
         # Пользователь нажал Ctrl+Y
@@ -372,7 +372,7 @@ self._log_error("ошибка", module="worker_1")   # → $LOG_DIR/errors.log
 class MyWorker:
     def __init__(self, logger=None):
         self._logger = logger
-    
+
     def run(self):
         if self._logger:
             self._logger.info("работаю", module="my_worker")
@@ -468,10 +468,10 @@ processes:
     priority: normal  # normal / high / low
     chain_targets: [gui]  # куда отправляет результаты
     source_target_fps: 10  # целевое FPS для source плагина
-    
+
     # Плагины (отрезко выполняются в Chain Worker)
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.camera_service.plugin.CameraServicePlugin
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
         plugin_name: camera_service
         category: source
         # Параметры (dict → cfg.configure(params))
@@ -480,7 +480,7 @@ processes:
         resolution_width: 640
         resolution_height: 480
         auto_start: true
-  
+
   # GUI процесс (всегда последний)
   - process_name: gui
     process_class: multiprocess_prototype.frontend.process.GuiProcess
@@ -508,7 +508,7 @@ launcher.run()  # Блокирующий вызов до shutdown
 def test_process_increases_brightness():
     plugin = MyPlugin()
     plugin.configure({"brightness": 50})
-    
+
     # Мок-items
     items = [
         {
@@ -517,7 +517,7 @@ def test_process_increases_brightness():
             "seq_id": 0,
         }
     ]
-    
+
     result = plugin.process(items)
     assert len(result) == 1
     assert result[0]["frame"].mean() > 100  # Светлее
@@ -529,19 +529,19 @@ def test_process_increases_brightness():
 # tests/test_topology.py
 def test_hello_world_topology():
     topology = yaml.safe_load(Path("topology/hello_world.yaml").read_text())
-    
+
     launcher = SystemLauncher(topology)
     launcher.start()
-    
+
     # Дождаться запуска (check processes alive)
     time.sleep(1.0)
-    
+
     # Отправить команду
     launcher.send_command("camera_0", {"command": "pause"})
-    
+
     # Проверить, что обработка остановилась
     assert launcher.get_process_state("camera_0").paused
-    
+
     launcher.shutdown()
 ```
 

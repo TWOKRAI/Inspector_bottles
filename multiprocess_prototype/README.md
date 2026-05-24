@@ -176,7 +176,7 @@ processes:
   - process_name: processor
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
     plugins:
-      - plugin_class: multiprocess_prototype.plugins.my_plugin.plugin.MyPlugin
+      - plugin_class: Plugins.processing.my_plugin.plugin.MyPlugin
         plugin_name: my_plugin
         category: processing
         threshold: 120
