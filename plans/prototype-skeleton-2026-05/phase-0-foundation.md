@@ -295,11 +295,13 @@
 4. Использовать простые строки + функции (не классы, не dataclass). Файл должен быть читаем как документация.
 
 **Acceptance criteria:**
-- [ ] `from multiprocess_prototype.backend.state.schema import process_state_path` работает
-- [ ] `process_state_path("camera_0", "status")` → `"processes.camera_0.state.status"`
-- [ ] Все ветки Phase 0-5 задекларированы константами или helpers
-- [ ] Нет импортов кроме `__future__` и stdlib (файл должен быть importable без зависимостей)
-- [ ] `pytest` зелёный
+- [x] `from multiprocess_prototype.backend.state.schema import process_state_path` работает
+- [x] `process_state_path("camera_0", "status")` → `"processes.camera_0.state.status"`
+- [x] Все ветки Phase 0-5 задекларированы константами или helpers
+- [x] Нет импортов кроме `__future__` и stdlib (файл должен быть importable без зависимостей)
+- [x] `pytest` зелёный
+
+**Status:** done — коммит `4de8f55`
 
 **Out of scope:** реальное наполнение ветвей данными — это задача каждой фазы. Валидация схемы — не в scope.
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
