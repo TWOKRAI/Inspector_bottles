@@ -128,10 +128,12 @@
    - `test_toolbar_stop_skips_protected` — `_on_toolbar_action("stop_all")` не шлёт команду для protected процесса
 
 **Acceptance criteria:**
-- [ ] `pytest multiprocess_prototype/frontend/widgets/tabs/processes/tests/` — все тесты зелёные (включая существующие)
-- [ ] `TestProtectedProcesses` содержит ≥5 тестов, все проходят
-- [ ] `SingleProcessPanel` для `gui` не отображает кнопку «Остановить» (карточка строится без `stop` action)
-- [ ] Нет импортов `multiprocess_prototype.*` из framework-модулей (слоевое правило не нарушено)
+- [x] `pytest multiprocess_prototype/frontend/widgets/tabs/processes/tests/` — все тесты зелёные (включая существующие)
+- [x] `TestProtectedProcesses` содержит ≥5 тестов, все проходят
+- [x] `SingleProcessPanel` для `gui` не отображает кнопку «Остановить» (карточка строится без `stop` action)
+- [x] Нет импортов `multiprocess_prototype.*` из framework-модулей (слоевое правило не нарушено)
+
+**Status:** ✅ Done (commits: f6c9b40, 6a2741c, <fix-reviewer>)
 
 **Out of scope:** `_on_toolbar_action` уже в tab.py — если legacy stop_all итерирует `self._cards`, добавить guard `if not self._presenter.is_protected(name)` там же. Интеграционные тесты с реальным запуском процессов не нужны.
 

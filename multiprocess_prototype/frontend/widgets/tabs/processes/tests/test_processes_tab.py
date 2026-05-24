@@ -466,3 +466,15 @@ class TestProtectedProcesses:
         card = getattr(panel, "_card", None)
         assert card is not None, "_card должна быть создана для существующего процесса"
         assert "stop" not in card._action_buttons, "Кнопка 'stop' не должна присутствовать для protected процесса"
+
+    def test_toolbar_stop_skips_protected(self, qtbot):
+        """toolbar stop_all не шлёт stop для protected процессов."""
+        ctx = _make_protected_ctx()
+        tab = ProcessesTab(ctx)
+        qtbot.addWidget(tab)
+        tab._on_toolbar_action("stop_all")
+        calls = ctx.command_sender.send_command.call_args_list
+        # Собираем имена процессов, которым была отправлена команда process.stop
+        stopped = [c[0][0] for c in calls if c[0][1] == "process.stop"]
+        assert "gui" not in stopped
+        assert "camera_0" in stopped

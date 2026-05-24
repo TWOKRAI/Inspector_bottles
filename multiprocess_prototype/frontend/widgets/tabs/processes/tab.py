@@ -295,6 +295,8 @@ class ProcessesTab(BaseListNavTab):
 
     def _on_card_action(self, entity_id: str, action_id: str) -> None:
         """Обработать действие на карточке (всплывает из любой панели)."""
+        if action_id in ("stop", "delete") and self._presenter.is_protected(entity_id):
+            return
         self._presenter.on_process_action(entity_id, action_id)
 
     def _on_toolbar_action(self, action_id: str) -> None:
@@ -303,4 +305,5 @@ class ProcessesTab(BaseListNavTab):
             if action_id == "start_all":
                 self._presenter.on_process_action(name, "start")
             elif action_id == "stop_all":
-                self._presenter.on_process_action(name, "stop")
+                if not self._presenter.is_protected(name):
+                    self._presenter.on_process_action(name, "stop")
