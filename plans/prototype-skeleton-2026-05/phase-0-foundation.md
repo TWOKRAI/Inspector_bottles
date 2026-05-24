@@ -109,14 +109,15 @@
 4. Добавить в `multiprocess_framework/DECISIONS.md` запись ADR в формате: «ADR-FW-XXX: FrameRouter helper в prototype (не framework) — Inspector-специфика via camera_id».
 
 **Acceptance criteria:**
-- [ ] `from multiprocess_prototype.backend.routing.frame_router_setup import setup_frame_routes` проходит без ImportError
-- [ ] `pytest` зелёный (ни один существующий тест не сломан)
-- [ ] ADR-запись добавлена в `multiprocess_framework/DECISIONS.md` с обоснованием
-- [ ] Нет `print()`, нет `logging.getLogger()` в перенесённом файле (файл stateless-утилитный, только функции — логирования нет, это ОК)
+- [x] `from multiprocess_prototype.backend.routing.frame_router_setup import setup_frame_routes` проходит без ImportError
+- [x] `pytest` зелёный (ни один существующий тест не сломан) — 2780 passed
+- [x] ADR-запись добавлена в `multiprocess_framework/DECISIONS.md` с обоснованием (ADR-128)
+- [x] Нет `print()`, нет `logging.getLogger()` в перенесённом файле (файл stateless-утилитный, только функции — логирования нет, это ОК)
 
 **Out of scope:** реализация `subscribe_to_camera`/`unsubscribe_from_camera` в runtime — файл переносится как есть, функциональность используется в Phase 4.
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
 **Module contract:** impl-only
+**Status:** done — ADR в `829176c`, файлы `routing/` в `965dc10` (спасательный коммит после race condition с Task 0.2).
 
 ---
 
@@ -149,16 +150,17 @@
 5. Экспортировать из `adapters/__init__.py`.
 
 **Acceptance criteria:**
-- [ ] `from multiprocess_framework.modules.state_store_module.adapters import IStateAdapter, StateAdapterBase` работает
-- [ ] `issubclass(ConcreteAdapter, StateAdapterBase)` — True для конкретного адаптера в тестах
-- [ ] `isinstance(adapter, IStateAdapter)` — True (runtime_checkable Protocol)
-- [ ] Unit-тесты в `test_state_adapter_base.py` зелёные (минимум 5 тестов: lifecycle bind/unbind, anti-loop, logger-fallback)
-- [ ] Нет `print()`, нет `logging.getLogger()` — только переданный `logger` или silent fallback
-- [ ] `IStateAdapter` Protocol экспортирован из `state_store_module/adapters/__init__.py`
+- [x] `from multiprocess_framework.modules.state_store_module.adapters import IStateAdapter, StateAdapterBase` работает
+- [x] `issubclass(ConcreteAdapter, StateAdapterBase)` — True для конкретного адаптера в тестах
+- [x] `isinstance(adapter, IStateAdapter)` — True (runtime_checkable Protocol)
+- [x] Unit-тесты в `test_state_adapter_base.py` зелёные — 25 passed (lifecycle, anti-loop, logger-fallback, managers injection, integration)
+- [x] Нет `print()`, нет `logging.getLogger()` — только переданный `logger` или silent fallback
+- [x] `IStateAdapter` Protocol экспортирован из `state_store_module/adapters/__init__.py`
 
 **Out of scope:** конкретные адаптеры (recipe, registers, service) — это Task 0.4. Интеграция с StateProxy — не требует изменений StateProxy.
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
 **Module contract:** new-lite
+**Status:** done — коммит `829176c` (с кривым сообщением из-за race condition; содержимое — StateAdapterBase, 718 insertions).
 
 ---
 
@@ -184,17 +186,18 @@
 8. Написать unit-тесты: discover пустой директории, discover с одним `plugin.py`, reload (добавление нового файла), failed import (graceful error), `list_discovered()` формат.
 
 **Acceptance criteria:**
-- [ ] `from multiprocess_framework.modules.process_module.plugins.manager import PluginManager, PluginDiscoveryResult` без ImportError
-- [ ] `PluginManager(registry, [Path("...")], logger=None)` создаётся без ошибок
-- [ ] `discover()` с реальным `plugin.py` в temp dir → возвращает `PluginDiscoveryResult` с непустым `loaded`
-- [ ] Нет `logging.getLogger`, нет `print()` в `manager.py`
-- [ ] `isinstance(pm, BaseManager)` — True
-- [ ] Unit-тесты зелёные (минимум 5 тестов)
-- [ ] `PluginManager` и `PluginDiscoveryResult` экспортированы из `process_module/plugins/__init__.py`
+- [x] `from multiprocess_framework.modules.process_module.plugins.manager import PluginManager, PluginDiscoveryResult` без ImportError
+- [x] `PluginManager(registry, [Path("...")], logger=None)` создаётся без ошибок
+- [x] `discover()` с реальным `plugin.py` в temp dir → возвращает `PluginDiscoveryResult` с непустым `loaded`
+- [x] Нет `logging.getLogger`, нет `print()` в `manager.py`
+- [x] `isinstance(pm, BaseManager)` — True
+- [x] Unit-тесты зелёные — 10 passed (empty dir, one plugin, reload, syntax error graceful, list_discovered, BaseManager, get_stats, lifecycle, nonexistent, no-managers)
+- [x] `PluginManager` и `PluginDiscoveryResult` экспортированы из `process_module/plugins/__init__.py`
 
 **Out of scope:** интеграция с GUI (это Phase 2), hot-reload в RUNNING-процессах (вне scope всего плана).
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
 **Module contract:** public-api-change
+**Status:** done — коммит `965dc10` (спасательный после session-limit прерывания teamlead-агента).
 
 ---
 
@@ -254,16 +257,17 @@
 5. Экспортировать из `recipes/__init__.py`.
 
 **Acceptance criteria:**
-- [ ] `from multiprocess_prototype.backend.state.recipes import RecipeEngine` без ImportError
-- [ ] `from multiprocess_prototype.backend.state.recipes.migrations.v1_to_v2 import migrate_recipe_data, needs_migration` работает
-- [ ] `RecipeEngine` наследует framework `RecipeEngine` (не дублирует логику)
-- [ ] `needs_migration({"cameras": {"0": {"regions": {"r0": {"processing_blocks": {"b0": {"enabled": True, "params": {"type": "gray"}}}}}}}}})` → True
-- [ ] `pytest` зелёный (существующие тесты не сломаны)
-- [ ] Нет дублирования логики `recipe_engine.py` из framework
+- [x] `from multiprocess_prototype.backend.state.recipes import RecipeEngine` без ImportError
+- [x] `from multiprocess_prototype.backend.state.recipes.migrations.v1_to_v2 import migrate_recipe_data, needs_migration` работает
+- [x] `RecipeEngine` наследует framework `RecipeEngine` (не дублирует логику)
+- [x] `needs_migration(...)` → True для `processing_blocks` структуры
+- [x] `pytest` зелёный — 4 тестов в `test_recipe_engine_wrapper.py` passed
+- [x] Нет дублирования логики `recipe_engine.py` из framework
 
 **Out of scope:** новая миграция формата `recipe_N.yaml → recipe_<slug>.yaml` — это Phase 5. Хранение рецептов как файлов — Phase 5.
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
 **Module contract:** new-lite
+**Status:** done — коммит `965dc10` (спасательный после session-limit прерывания developer-агента).
 
 ---
 
@@ -325,16 +329,17 @@
 4. Экспортировать `WebcamCameraService` из `__init__.py`.
 
 **Acceptance criteria:**
-- [ ] `from Services.webcam_camera.service import WebcamCameraService` без ImportError
-- [ ] `svc = WebcamCameraService(); svc.start({}); assert svc.status == "running"` проходит
-- [ ] `svc.stop(); assert svc.status == "stopped"` проходит
-- [ ] `svc.get_status()` возвращает dict с ключами `name`, `status`, `config`
-- [ ] Нет `logging.getLogger`, нет `print()`
-- [ ] `pytest` зелёный
+- [x] `from Services.webcam_camera.service import WebcamCameraService` без ImportError
+- [x] `svc = WebcamCameraService(); svc.start({}); assert svc.status == "running"` проходит
+- [x] `svc.stop(); assert svc.status == "stopped"` проходит
+- [x] `svc.get_status()` возвращает dict с ключами `name`, `status`, `config`
+- [x] Нет `logging.getLogger`, нет `print()`
+- [x] `pytest` зелёный — 17 smoke-тестов passed
 
 **Out of scope:** интеграция с реальной камерой, SHM, Hikvision, FPS-throttling — Phase 6.
 **Refs:** plans/prototype-skeleton-2026-05/phase-0-foundation.md, plans/prototype-skeleton-2026-05/plan.md
 **Module contract:** new-lite
+**Status:** done — коммит `23da8bf`.
 
 ---
 

@@ -23,3 +23,4 @@
 - [Plan-Driven Development](project_plan_driven_dev.md) — slug naming, Refs trailer, plan→branch→commits traceability
 - [Sentrux baseline 2026-05](project_sentrux_baseline_2026_05.md) — Quality 7161/10000 после seed 0.2.0, точка отсчёта для рефакторингов
 - [Logger/Error/Stats managers](feedback_logger_error_stats_managers.md) — логирование через logger_manager, ошибки через error_manager, статистика через statistics_manager (ObservableMixin в base_manager)
+- [Parallel agents commit race](feedback_parallel_agents_commit_race.md) — 5 параллельных агентов без worktree склеивают коммиты, теряют файлы; макс 2 без worktree
