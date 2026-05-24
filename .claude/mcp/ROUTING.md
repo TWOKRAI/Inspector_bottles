@@ -26,7 +26,7 @@
 | Structural codemod на N файлов | `ast-grep:scan` / `ast-grep:rewrite` | optional | `Grep` + ручные Edits (опасно) |
 | Architectural overview / hubs | `graphify:query_graph` | optional | `sentrux:dsm` + руками |
 | GitHub PR / Issues / Actions state | `github:*` | optional | `gh` CLI |
-| PyQt/PySide widget tree, screenshot | `qt-mcp:get_widget_tree` / `take_screenshot` | optional (GUI only) | руками через `pytest-qt` |
+| PyQt/PySide widget tree, screenshot, click | `qt-mcp:qt_find_widget` / `qt_snapshot` / `qt_screenshot` / `qt_batch` | optional (GUI only) | руками через `pytest-qt` |
 | Browser / web UI verify (navigate, screenshot) | `playwright:browser_navigate` / `screenshot` | optional (web only) | `curl` + проверка HTML |
 | Multi-step reasoning (сложная гипотеза) | `sequential-thinking:sequentialthinking` | optional | внутренний chain-of-thought |
 | Точная строка / regex | `Grep` | always | — |
@@ -131,7 +131,31 @@
 
 **Когда подключён:** проект использует PyQt5/PySide6.
 
-**Ключевые tools:** `take_screenshot`, `click_widget`, `get_widget_tree`, `get_property`, `set_property`, `type_text`.
+**Когда вызывать:**
+- **tester** — GUI smoke / интеграционные тесты (snapshot, find, click, batch action+verify) вместо самописного `pytest-qt` бойлерплейта.
+- **reviewer** (Specialization: UI Thread-safety) — `qt_thread_check` / `qt_signals` / `qt_messages` для runtime-проверки thread-safety и signal/slot leaks.
+- **debugger** — диагностика зависаний UI и непонятных visual-багов (`qt_messages` warnings/errors, `qt_widget_details`, `qt_active_popup`, `qt_screenshot`).
+- **investigator** — cross-module GUI bugs (state propagation в widget tree, `qt_object_tree` + `qt_snapshot`).
+- **spec-writer** — снять реальную UI-структуру для living spec (`qt_list_windows`, `qt_menu_items`, `qt_snapshot`).
+- **verify-done skill** — золотой путь проверяется `qt_screenshot` + `qt_snapshot` для GUI-проектов вместо «нельзя проверить вручную».
+
+**Ключевые tools:**
+- `qt_find_widget` — быстрый поиск по class/name/text (предпочтительнее `qt_snapshot` если известно что ищем).
+- `qt_snapshot` — полное дерево виджетов (overall structure, discovery).
+- `qt_batch` — цепочка операций (click, type, key_press, wait, snapshot, find_widget) в одном round-trip.
+- `qt_screenshot` — ТОЛЬКО для visual-контента (рендеренные plots/images/custom drawing). Состояние виджета — через `qt_snapshot`/`qt_get_text` (дешевле).
+- `qt_click` / `qt_type` / `qt_key_press` / `qt_trigger_action` / `qt_invoke_slot` — input/action.
+- `qt_get_text` / `qt_widget_details` / `qt_set_property` — чтение/правка состояния.
+- `qt_messages` — Qt log messages (warnings, debug output).
+- `qt_thread_check` — runtime thread-safety check (UI updates вне main thread).
+- `qt_signals` — список signal/slot connections (поиск утечек).
+- `qt_object_tree` — иерархия QObject (parent/children).
+- `qt_layout_check` — overlap/cutoff детекция в layout.
+- `qt_active_popup` / `qt_list_windows` / `qt_menu_items` — диагностика модалок и навигации.
+- `qt_wait_for` — синхронное ожидание условия (для интеграционных тестов).
+- `qt_vtk_screenshot` / `qt_vtk_scene_info` — VTK-сцены (если используются).
+
+**`qt_type` с `use_clipboard=True`** — для многострочного текста (иначе newline сабмитит каждую строку в console-виджетах).
 
 ### playwright — browser automation (optional, web-only)
 
