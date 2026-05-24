@@ -133,7 +133,7 @@
 - [x] `SingleProcessPanel` для `gui` не отображает кнопку «Остановить» (карточка строится без `stop` action)
 - [x] Нет импортов `multiprocess_prototype.*` из framework-модулей (слоевое правило не нарушено)
 
-**Status:** ✅ Done (commits: f6c9b40, 6a2741c, <fix-reviewer>)
+**Status:** ✅ Done (commits: f6c9b40, 6a2741c, c6b9862)
 
 **Out of scope:** `_on_toolbar_action` уже в tab.py — если legacy stop_all итерирует `self._cards`, добавить guard `if not self._presenter.is_protected(name)` там же. Интеграционные тесты с реальным запуском процессов не нужны.
 
