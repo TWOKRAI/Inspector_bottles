@@ -18,7 +18,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QStackedWidget, QWidget
+    from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+        QStackedWidget,
+        QWidget,
+    )
 
 
 @runtime_checkable

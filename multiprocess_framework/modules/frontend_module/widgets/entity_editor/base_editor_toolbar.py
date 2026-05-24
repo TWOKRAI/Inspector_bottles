@@ -3,23 +3,22 @@
 Поддерживает произвольный набор кнопок слева и опциональную кнопку
 «Применить» справа с визуальной dirty-индикацией.
 """
+
 from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QHBoxLayout,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
     QWidget,
+    Signal,
 )
 
 # Стиль кнопки Apply в «грязном» состоянии (несохранённые изменения)
-_DIRTY_STYLE = (
-    "QPushButton { background-color: #e8a838; color: white; font-weight: bold; }"
-)
+_DIRTY_STYLE = "QPushButton { background-color: #e8a838; color: white; font-weight: bold; }"
 
 
 class BaseEditorToolbar(QWidget):
@@ -54,7 +53,7 @@ class BaseEditorToolbar(QWidget):
         layout.setSpacing(6)
 
         # Добавить кастомные кнопки слева
-        for label, tooltip, callback in (buttons or []):
+        for label, tooltip, callback in buttons or []:
             btn = QPushButton(label)
             btn.setToolTip(tooltip)
             btn.clicked.connect(callback)
@@ -63,7 +62,8 @@ class BaseEditorToolbar(QWidget):
 
         # Растяжимый разделитель между левыми кнопками и Apply
         spacer = QSpacerItem(
-            0, 0,
+            0,
+            0,
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Minimum,
         )

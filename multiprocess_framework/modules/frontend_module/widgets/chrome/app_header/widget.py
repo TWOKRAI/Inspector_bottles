@@ -16,16 +16,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QColor,
     QFont,
     QHBoxLayout,
+    QPainter,
+    QPainterPath,
+    QPen,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    Qt,
     Signal,
 )
 from multiprocess_framework.modules.frontend_module.widgets.header.header_buttons_widget import (

@@ -16,8 +16,12 @@ minimumSize. Активной странице возвращаем Preferred.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QSizePolicy, QStackedWidget, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QSize,
+    QSizePolicy,
+    QStackedWidget,
+    QWidget,
+)
 
 
 class CurrentPageStack(QStackedWidget):

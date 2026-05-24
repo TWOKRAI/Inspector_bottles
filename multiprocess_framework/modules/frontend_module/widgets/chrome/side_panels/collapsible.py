@@ -18,12 +18,12 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPropertyAnimation,
     QPushButton,
     QVBoxLayout,
     QWidget,
     Signal,
 )
-from PySide6.QtCore import QPropertyAnimation
 
 _COLLAPSED_WIDTH = 24
 _DEFAULT_EXPANDED_WIDTH = 220

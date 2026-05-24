@@ -74,8 +74,10 @@ class FormContext:
         # Thread-guard: subscriber-callbacks из RM._notify_observers идут
         # синхронно в текущем потоке. Контракт: всё пишем из GUI thread.
         try:
-            from PySide6.QtCore import QThread
-            from PySide6.QtWidgets import QApplication
+            from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+                QApplication,
+                QThread,
+            )
 
             app = QApplication.instance()
             if app is not None and QThread.currentThread() != app.thread():

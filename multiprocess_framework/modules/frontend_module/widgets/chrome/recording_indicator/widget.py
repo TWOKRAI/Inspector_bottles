@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import QTimer, Signal
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTimer,
+    QWidget,
+    Signal,
+)
 
 
 class RecordingIndicator(QWidget):

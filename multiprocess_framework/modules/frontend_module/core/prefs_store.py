@@ -7,8 +7,7 @@ view_mode — user preference (не свойство рецепта/алгори
 
 from __future__ import annotations
 
-# QSettings нет в qt_imports (редко используется) — импорт напрямую
-from PySide6.QtCore import QSettings
+from multiprocess_framework.modules.frontend_module.core.qt_imports import QSettings
 
 _ORG = "Inspector"
 _APP = "ui_preferences"

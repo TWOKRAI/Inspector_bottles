@@ -27,16 +27,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtWidgets import (
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
     QPushButton,
     QScrollArea,
+    QSize,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    Qt,
+    Signal,
 )
 
 from ._abstract_columnar import _AbstractColumnarTabLayout

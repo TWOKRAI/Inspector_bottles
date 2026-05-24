@@ -6,13 +6,18 @@
 Принимает item_key + schema_dict + schema_class, делегирует отрисовку
 ParamsForm и транслирует её сигнал params_changed в field_changed(item_key, "__all__", dict).
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+)
 
 from .params_form import ParamsForm
 
@@ -144,15 +149,11 @@ class SchemaInspectorPanel(QWidget):
 
         if self._item_key is None:
             # Форма изменилась, но ключ элемента уже сброшен — игнорируем
-            logger.warning(
-                "SchemaInspectorPanel: params_changed без item_key, пропускаем"
-            )
+            logger.warning("SchemaInspectorPanel: params_changed без item_key, пропускаем")
             return
 
         self.field_changed.emit(self._item_key, "__all__", new_params)
-        logger.debug(
-            "SchemaInspectorPanel: field_changed emitted для '%s'", self._item_key
-        )
+        logger.debug("SchemaInspectorPanel: field_changed emitted для '%s'", self._item_key)
 
 
 __all__ = ["SchemaInspectorPanel"]

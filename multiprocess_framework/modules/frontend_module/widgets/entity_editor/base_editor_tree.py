@@ -14,9 +14,15 @@ from abc import abstractmethod
 from contextlib import contextmanager
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import QTreeView, QVBoxLayout, QWidget
+from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+    QStandardItem,
+    QStandardItemModel,
+    QTreeView,
+    QVBoxLayout,
+    QWidget,
+    Qt,
+    Signal,
+)
 
 logger = logging.getLogger(__name__)
 

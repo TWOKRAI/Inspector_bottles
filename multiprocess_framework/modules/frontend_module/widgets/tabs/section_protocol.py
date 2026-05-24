@@ -39,8 +39,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from PySide6.QtCore import SignalInstance
-    from PySide6.QtWidgets import QWidget
+    from multiprocess_framework.modules.frontend_module.core.qt_imports import (
+        SignalInstance,
+        QWidget,
+    )
 
 
 @runtime_checkable
