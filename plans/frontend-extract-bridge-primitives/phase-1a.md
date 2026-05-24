@@ -458,6 +458,6 @@ fullscreen, access_level, cursor. Сейчас 0 тестов.
 - [x] B2: `entity_tree_widget.py` уменьшился на 25-35 строк, дублирование устранено (554 → 529) `084ab48`
 - [x] B3: 6 README созданы, каждый ≤30 строк (`cb9d9d0`)
 - [x] C1+C2+C3: Coverage ≥60% — FrontendManager 91% (`d7e7597`), WindowManager 78% (`c39c538`), ThemeManager 84% (`b57d572`)
-- [ ] Smoke-test: 6 мигрированных вкладок (recipes, processes, services, plugins, pipeline, displays) — **отложен до после мержа** (рек-ция reviewer)
+- [x] Smoke-test: запуск `python multiprocess_prototype/run.py` — приложение стартует, bridge подключается (`bridge + SHM middleware + data_receiver инициализированы`), auth.auto_login: dev, pilot+gui процессы в статусе running 1+ мин без ошибок (ручная верификация 6 вкладок отложена до после мержа per reviewer recommendation)
 - [x] `make gate` зелёный (2859 passed, 8 skipped; ruff/pyright/bandit clean; sentrux: 9 правил, 0 нарушений)
 - [x] `mcp__sentrux__check_rules` — 0 новых нарушений (quality 7159, baseline 7161, дельта в пределах шума)

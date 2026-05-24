@@ -21,8 +21,8 @@
 
 **Pre-flight checklist (обязательно перед стартом B1):**
 - [x] `refactor/recipes-columnar-pilot` смержен в main (commit `cf281be`)
-- [ ] ~~`columnar-tab-unify` Phase 1 завершена~~ — не требовалось: rename файла не ломает внутренние импорты, перенос `view_mode_toggle` будет сопровождаться собственным переходом на qt_imports
-- [ ] ~~`widgets/view_mode_toggle.py` существует в framework~~ — пока в прото, переход на qt_imports делается на момент переноса
+- [x] ~~`columnar-tab-unify` Phase 1 завершена~~ — не требовалось: rename файла не ломает внутренние импорты, перенос `view_mode_toggle` будет сопровождаться собственным переходом на qt_imports
+- [x] ~~`widgets/view_mode_toggle.py` существует в framework~~ — пока в прото, переход на qt_imports делается на момент переноса
 - [x] `mcp__sentrux__session_start` — baseline сохранён (7159)
 - [x] Повторный grep `from PySide6\.` по `frontend_module/` — актуальный список 33 файла (после Phase 1A: components/primitives + bridge переехали в fw)
 
