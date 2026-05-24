@@ -20,6 +20,34 @@
 
 from __future__ import annotations
 
+__all__ = [
+    # Корневые ветви
+    "STATE_PROCESSES",
+    "STATE_SYSTEM",
+    "STATE_WIRES",
+    "STATE_PLUGINS",
+    "STATE_SERVICES",
+    "STATE_DISPLAYS",
+    "STATE_RECIPES",
+    # Path-константы system
+    "STATE_SYSTEM_STOP_TIMEOUT",
+    "STATE_SYSTEM_SHM_BUDGET_MB",
+    "STATE_SYSTEM_LOG_DIR",
+    # Path-константы recipes/plugins
+    "STATE_RECIPES_ACTIVE",
+    "STATE_RECIPES_AVAILABLE",
+    "STATE_PLUGINS_CATALOG",
+    "STATE_PLUGINS_PATHS",
+    # Helpers
+    "process_state_path",
+    "process_config_path",
+    "service_status_path",
+    "service_config_path",
+    "display_status_path",
+    "display_config_path",
+    "wire_path",
+]
+
 # ---------------------------------------------------------------------------
 # Корневые ветви — Phase 0 (processes, system, wires)
 # ---------------------------------------------------------------------------

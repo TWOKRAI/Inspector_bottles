@@ -83,7 +83,7 @@ class RecipeAdapter:
         Returns:
             dict с данными рецепта, или None если не найден.
         """
-        file_path = self._engine._recipes_dir / f"{name}.yaml"
+        file_path = self._engine.recipes_dir / f"{name}.yaml"
         if not file_path.exists():
             return None
         try:
@@ -122,7 +122,7 @@ class RecipeAdapter:
             },
             "data": copy.deepcopy(data),
         }
-        file_path = self._engine._recipes_dir / f"{name}.yaml"
+        file_path = self._engine.recipes_dir / f"{name}.yaml"
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
