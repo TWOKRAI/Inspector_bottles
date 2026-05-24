@@ -304,11 +304,10 @@ class SingleProcessPanel(QWidget):
         if proc is None:
             return page
 
-        actions = [
-            CardAction("start", "Запустить"),
-            CardAction("stop", "Остановить"),
-            CardAction("restart", "Перезапустить"),
-        ]
+        actions = [CardAction("start", "Запустить")]
+        if not proc.protected:
+            actions.append(CardAction("stop", "Остановить"))
+        actions.append(CardAction("restart", "Перезапустить"))
         self._card = EntityCard(
             entity_id=proc.name,
             title=proc.name,
