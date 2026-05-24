@@ -352,3 +352,129 @@ class TestProcessesTab:
         qtbot.addWidget(tab)
         assert tab._nav_list.count() == 1
         assert tab._nav_list.item(0).text() == "Все процессы"
+
+
+# ------------------------------------------------------------------ #
+#  Protected processes                                                 #
+# ------------------------------------------------------------------ #
+
+
+def _make_protected_ctx():
+    """Mock-контекст с gui (protected=True) и camera_0 (обычный)."""
+    return _make_mock_ctx(
+        topology_processes=[
+            {
+                "process_name": "gui",
+                "protected": True,
+                "plugins": [{"plugin_name": "renderer", "category": "rendering"}],
+            },
+            {
+                "process_name": "camera_0",
+                "plugins": [{"plugin_name": "capture", "category": "source"}],
+            },
+        ]
+    )
+
+
+class TestProtectedProcesses:
+    def test_is_protected_true(self):
+        """presenter.is_protected('gui') == True при protected: true в topology."""
+        ctx = _make_protected_ctx()
+        p = ProcessesPresenter(ctx)
+        assert p.is_protected("gui") is True
+
+    def test_is_protected_false_for_regular(self):
+        """camera_0 без protected → False."""
+        ctx = _make_protected_ctx()
+        p = ProcessesPresenter(ctx)
+        assert p.is_protected("camera_0") is False
+
+    def test_is_protected_missing_key(self):
+        """Topology без поля protected вообще → False (backward-compat)."""
+        ctx = _make_mock_ctx(
+            topology_processes=[
+                {"process_name": "proc_no_flag", "plugins": []},
+            ]
+        )
+        p = ProcessesPresenter(ctx)
+        assert p.is_protected("proc_no_flag") is False
+
+    def test_is_protected_none_selected(self):
+        """is_protected('nonexistent') → False без исключений."""
+        ctx = _make_protected_ctx()
+        p = ProcessesPresenter(ctx)
+        assert p.is_protected("nonexistent") is False
+
+    def test_buttons_disabled_for_protected(self, qtbot):
+        """После выбора gui: _btn_delete и _btn_stop disabled, _btn_start enabled."""
+        ctx = _make_protected_ctx()
+        tab = ProcessesTab(ctx)
+        qtbot.addWidget(tab)
+
+        # Найти nav-строку для gui (индекс 1, т.к. 0 = «Все процессы»)
+        gui_row = None
+        for i in range(tab._nav_list.count()):
+            if tab._nav_list.item(i).text() == "gui":
+                gui_row = i
+                break
+        assert gui_row is not None, "Процесс gui должен быть в навигации"
+
+        tab._nav_list.setCurrentRow(gui_row)
+        assert tab._btn_delete.isEnabled() is False
+        assert tab._btn_stop.isEnabled() is False
+        assert tab._btn_start.isEnabled() is True
+
+    def test_protected_buttons_have_explanatory_tooltip(self, qtbot):
+        """Disabled-кнопки protected процесса несут тултип «Системный процесс …»."""
+        ctx = _make_protected_ctx()
+        tab = ProcessesTab(ctx)
+        qtbot.addWidget(tab)
+
+        gui_row = next(i for i in range(tab._nav_list.count()) if tab._nav_list.item(i).text() == "gui")
+        tab._nav_list.setCurrentRow(gui_row)
+
+        assert "Системный процесс" in tab._btn_delete.toolTip()
+        assert "Системный процесс" in tab._btn_stop.toolTip()
+
+    def test_buttons_enabled_for_unprotected(self, qtbot):
+        """После выбора camera_0: _btn_delete и _btn_stop enabled."""
+        ctx = _make_protected_ctx()
+        tab = ProcessesTab(ctx)
+        qtbot.addWidget(tab)
+
+        cam_row = None
+        for i in range(tab._nav_list.count()):
+            if tab._nav_list.item(i).text() == "camera_0":
+                cam_row = i
+                break
+        assert cam_row is not None
+
+        tab._nav_list.setCurrentRow(cam_row)
+        assert tab._btn_delete.isEnabled() is True
+        assert tab._btn_stop.isEnabled() is True
+
+    def test_single_panel_no_stop_for_protected(self, qtbot):
+        """SingleProcessPanel для gui не содержит CardAction('stop')."""
+        from multiprocess_prototype.frontend.widgets.tabs.processes._panels import SingleProcessPanel
+
+        ctx = _make_protected_ctx()
+        presenter = ProcessesPresenter(ctx)
+        panel = SingleProcessPanel(presenter, ctx, "gui")
+        qtbot.addWidget(panel)
+
+        # _action_buttons — dict[action_id → QPushButton]
+        card = getattr(panel, "_card", None)
+        assert card is not None, "_card должна быть создана для существующего процесса"
+        assert "stop" not in card._action_buttons, "Кнопка 'stop' не должна присутствовать для protected процесса"
+
+    def test_toolbar_stop_skips_protected(self, qtbot):
+        """toolbar stop_all не шлёт stop для protected процессов."""
+        ctx = _make_protected_ctx()
+        tab = ProcessesTab(ctx)
+        qtbot.addWidget(tab)
+        tab._on_toolbar_action("stop_all")
+        calls = ctx.command_sender.send_command.call_args_list
+        # Собираем имена процессов, которым была отправлена команда process.stop
+        stopped = [c[0][0] for c in calls if c[0][1] == "process.stop"]
+        assert "gui" not in stopped
+        assert "camera_0" in stopped

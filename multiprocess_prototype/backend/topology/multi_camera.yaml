@@ -1,0 +1,106 @@
+# multi_camera — Мульти-камерная инспекция
+#
+# Pipeline:
+#   camera_0    — CameraServicePlugin (camera_id=0) → processor_0
+#   camera_1    — CameraServicePlugin (camera_id=1) → processor_1
+#   processor_0 — ColorMaskPlugin (HSV-маска, камера 0)
+#   processor_1 — BlobDetectorPlugin (детекция контуров, камера 1)
+#   compositor  — RendererCompositorPlugin (grid 2×1 → один составной кадр)
+#   gui         — отображение составного кадра
+#
+# Оба процессора отправляют результат в compositor (fan-in через chain_targets).
+# RendererCompositorPlugin работает в batch-режиме и объединяет все входящие кадры.
+#
+# Запуск:
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/multi_camera.yaml
+
+name: multi_camera
+description: "Мульти-камера: 2 камеры → 2 процессора → compositor → GUI"
+
+processes:
+  # --- Камера 0: первая камера (simulator, camera_id=0) ---
+  - process_name: camera_0
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: high
+    chain_targets:
+      - processor_0
+    source_target_fps: 25
+    plugins:
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
+        plugin_name: camera_service
+        category: source
+        camera_type: simulator
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        auto_start: true
+
+  # --- Камера 1: вторая камера (simulator, camera_id=1) ---
+  - process_name: camera_1
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: high
+    chain_targets:
+      - processor_1
+    source_target_fps: 25
+    plugins:
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
+        plugin_name: camera_service
+        category: source
+        camera_type: simulator
+        camera_id: 1
+        resolution_width: 640
+        resolution_height: 480
+        auto_start: true
+
+  # --- Процессор 0: HSV-маска для камеры 0 ---
+  - process_name: processor_0
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    chain_targets:
+      - compositor
+    plugins:
+      - plugin_class: Plugins.processing.color_mask.plugin.ColorMaskPlugin
+        plugin_name: color_mask
+        category: processing
+        h_min: 0
+        h_max: 180
+        s_min: 50
+        s_max: 255
+        v_min: 50
+        v_max: 255
+
+  # --- Процессор 1: детекция контуров для камеры 1 ---
+  - process_name: processor_1
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    chain_targets:
+      - compositor
+    plugins:
+      - plugin_class: Plugins.processing.blob_detector.plugin.BlobDetectorPlugin
+        plugin_name: blob_detector
+        category: processing
+        min_area: 100
+        max_area: 0
+        draw_contours: true
+
+  # --- Compositor: grid 2x1 из двух потоков (1280x480) ---
+  - process_name: compositor
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    chain_targets:
+      - gui
+    plugins:
+      - plugin_class: Plugins.render.renderer_compositor.plugin.RendererCompositorPlugin
+        plugin_name: renderer_compositor
+        category: processing
+        layout_mode: grid
+        grid_cols: 2
+        grid_rows: 1
+        output_width: 1280
+        output_height: 480
+
+  # --- GUI: отображение составного кадра ---
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.process.GuiProcess
+    plugins: []

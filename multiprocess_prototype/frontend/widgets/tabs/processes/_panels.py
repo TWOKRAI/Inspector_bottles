@@ -157,11 +157,10 @@ class AllProcessesPanel(QWidget):
             group_layout.setContentsMargins(4, 4, 4, 4)
 
             for proc in procs:
-                actions = [
-                    CardAction("start", "Start"),
-                    CardAction("stop", "Stop"),
-                    CardAction("restart", "Restart"),
-                ]
+                actions = [CardAction("start", "Запустить")]
+                if not proc.protected:
+                    actions.append(CardAction("stop", "Остановить"))
+                actions.append(CardAction("restart", "Перезапустить"))
                 card = EntityCard(
                     entity_id=proc.name,
                     title=proc.name,
@@ -304,11 +303,10 @@ class SingleProcessPanel(QWidget):
         if proc is None:
             return page
 
-        actions = [
-            CardAction("start", "Запустить"),
-            CardAction("stop", "Остановить"),
-            CardAction("restart", "Перезапустить"),
-        ]
+        actions = [CardAction("start", "Запустить")]
+        if not proc.protected:
+            actions.append(CardAction("stop", "Остановить"))
+        actions.append(CardAction("restart", "Перезапустить"))
         self._card = EntityCard(
             entity_id=proc.name,
             title=proc.name,

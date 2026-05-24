@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
         SystemLauncher,
     )
-    from multiprocess_prototype.config.schemas import SystemConfig
+    from multiprocess_prototype.backend.config.schemas import SystemConfig
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
@@ -31,11 +31,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 PLUGINS_DIR = PROJECT_ROOT / "Plugins"
-CONFIG_PATH = HERE / "config" / "system.yaml"
+CONFIG_PATH = HERE / "backend" / "config" / "system.yaml"
 # Phase 2.0 pilot rollout: дефолтная топология — pilot_widgets стенд.
 # После завершения rollout вернуть на region_pipeline.yaml или сделать выбор
 # через env-переменную / system.yaml.
-DEFAULT_BLUEPRINT = HERE / "topology" / "pilot_widgets.yaml"
+DEFAULT_BLUEPRINT = HERE / "backend" / "topology" / "pilot_widgets.yaml"
 
 
 def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
@@ -76,7 +76,7 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
         SystemLauncher,
     )
-    from multiprocess_prototype.config.schemas import load_system_config
+    from multiprocess_prototype.backend.config.schemas import load_system_config
 
     # 1. Загрузка defaults
     sys_config = load_system_config(CONFIG_PATH)
@@ -102,8 +102,8 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     bp_dict = _merge_defaults(bp_dict, sys_config)
 
     # 4.5. State bootstrap — построение начального дерева состояния
-    from multiprocess_prototype.state.bootstrap import build_initial_state
-    from multiprocess_prototype.state.manager_setup import build_throttle_rules
+    from multiprocess_prototype.backend.state.bootstrap import build_initial_state
+    from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
     initial_state = build_initial_state(bp_dict, sys_config.model_dump())
     throttle_rules = build_throttle_rules()

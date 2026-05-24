@@ -194,6 +194,9 @@ class ProcessesTab(BaseListNavTab):
             return
         if self._selected_process is None:
             return
+        # Guard: защищённый процесс нельзя удалить или остановить через GUI.
+        if action_id in ("delete", "stop") and self._presenter.is_protected(self._selected_process):
+            return
         if action_id in ("start", "stop"):
             self._presenter.on_process_action(self._selected_process, action_id)
         elif action_id == "delete":
@@ -206,9 +209,17 @@ class ProcessesTab(BaseListNavTab):
 
     def _update_buttons_state(self) -> None:
         has_selection = self._selected_process is not None
-        self._btn_delete.setEnabled(has_selection)
+        # Явная проверка на None позволяет pyright сузить тип до str.
+        is_protected = (
+            self._presenter.is_protected(self._selected_process) if self._selected_process is not None else False
+        )
+        self._btn_delete.setEnabled(has_selection and not is_protected)
         self._btn_start.setEnabled(has_selection)
-        self._btn_stop.setEnabled(has_selection)
+        self._btn_stop.setEnabled(has_selection and not is_protected)
+        # Тултип для disabled-кнопок: подсказка, почему заблокировано.
+        _protected_tip = "Системный процесс защищён от изменений"
+        self._btn_delete.setToolTip(_protected_tip if is_protected else "")
+        self._btn_stop.setToolTip(_protected_tip if is_protected else "")
 
     # ------------------------------------------------------------------ #
     #  View mode                                                           #
@@ -284,6 +295,8 @@ class ProcessesTab(BaseListNavTab):
 
     def _on_card_action(self, entity_id: str, action_id: str) -> None:
         """Обработать действие на карточке (всплывает из любой панели)."""
+        if action_id in ("stop", "delete") and self._presenter.is_protected(entity_id):
+            return
         self._presenter.on_process_action(entity_id, action_id)
 
     def _on_toolbar_action(self, action_id: str) -> None:
@@ -292,4 +305,5 @@ class ProcessesTab(BaseListNavTab):
             if action_id == "start_all":
                 self._presenter.on_process_action(name, "start")
             elif action_id == "stop_all":
-                self._presenter.on_process_action(name, "stop")
+                if not self._presenter.is_protected(name):
+                    self._presenter.on_process_action(name, "stop")

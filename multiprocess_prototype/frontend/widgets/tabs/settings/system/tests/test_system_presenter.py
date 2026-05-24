@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 from multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter import (
     SystemSettingsPresenter,
 )
-from multiprocess_prototype.config.schemas import SystemConfig
+from multiprocess_prototype.backend.config.schemas import SystemConfig
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +96,7 @@ def _make_presenter(
     ctx = _make_mock_ctx()
 
     # Патчим yaml_io в контексте модуля presenter
-    target_module = (
-        "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-    )
+    target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
     with (
         patch(f"{target_module}.load_settings", return_value=cfg),
         patch(f"{target_module}.save_settings"),
@@ -127,9 +125,7 @@ class TestSave:
         }
         presenter = _make_presenter(view=view)
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with patch(f"{target_module}.save_settings") as mock_save:
             result = presenter.save()
 
@@ -148,9 +144,7 @@ class TestSave:
         }
         presenter = _make_presenter(view=view)
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with patch(f"{target_module}.save_settings") as mock_save:
             result = presenter.save()
 
@@ -171,9 +165,7 @@ class TestSave:
         presenter._set_dirty(True)
         assert presenter.is_dirty() is True
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with patch(f"{target_module}.save_settings"):
             presenter.save()
 
@@ -189,9 +181,7 @@ class TestSave:
         saved_payloads: list[dict] = []
         presenter.on_settings_saved = lambda d: saved_payloads.append(d)
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with patch(f"{target_module}.save_settings"):
             presenter.save()
 
@@ -205,9 +195,7 @@ class TestSave:
         view.editor_values = {"camera.fps": 25}
         presenter = _make_presenter(view=view)
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with patch(f"{target_module}.save_settings"):
             presenter.save()
 
@@ -226,9 +214,7 @@ class TestReload:
         # Создаём фиктивный FieldInfo с известными значениями
         fi = SimpleNamespace(plugin_name="camera", field_name="fps")
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         fresh_cfg = SystemConfig()
         # camera.fps по умолчанию = 25
         with (
@@ -249,9 +235,7 @@ class TestReload:
         view = MockSystemView()
         presenter = _make_presenter(view=view)
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with (
             patch(f"{target_module}.load_settings", return_value=SystemConfig()),
             patch(f"{target_module}.schema_to_field_infos", return_value=[]),
@@ -270,9 +254,7 @@ class TestReload:
         presenter._set_dirty(True)
         assert presenter.is_dirty() is True
 
-        target_module = (
-            "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
-        )
+        target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
         with (
             patch(f"{target_module}.load_settings", return_value=SystemConfig()),
             patch(f"{target_module}.schema_to_field_infos", return_value=[]),
