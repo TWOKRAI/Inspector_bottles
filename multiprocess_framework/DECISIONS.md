@@ -147,6 +147,7 @@
 - [ADR-125](#adr-125-commit-сообщения-conventional-commits-обязательные-trailers-why-layer-с-hook-валидацией): Commit-сообщения — Conventional Commits + обязательные trailers `Why:` / `Layer:` с hook-валидацией
 - [ADR-126](#adr-126-шаблон-вкладки-с-tree-навигацией-sectionspec-treenavtabpresenter-basetreenavtab): Шаблон вкладки с tree-навигацией — `SectionSpec` + `TreeNavTabPresenter` + `BaseTreeNavTab`
 - [ADR-127](#adr-127-_abstractcolumnartablayout-nav-агностичная-база-layoutов-перенос-в-framework): `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
+- [ADR-128](#adr-128-foundation-phase-0-перенос-из-backup-framerouter-istateadapter-pluginmanager-state-schema): Foundation Phase 0 — перенос из backup, FrameRouter, IStateAdapter, PluginManager, state schema
 <!-- ADR-TOC:END -->
 
 ---
@@ -2115,6 +2116,25 @@
   - **Оставить layout'ы в prototype, дублировать API** — отклонено: нарушает слои импортов (framework не может импортировать prototype), блокирует `BaseColumnarTab` в framework.
   - **Глубокий рефакторинг Standard → общая scroll-синхронизация** — отклонено: Standard использует стандартный QScrollArea, дифференциальный скролл ему не нужен. `register_inner_scrolls` как no-op — корректный минимум.
   - **Удалить `_AbstractColumnarTabLayout`, сделать Protocol вместо базового класса** — отклонено: undo/redo и action-column builder — реальный код (~80 LOC), Protocol потребовал бы дублирования этого кода в обоих layout'ах.
+
+## ADR-128: Foundation Phase 0 — перенос из backup, FrameRouter, IStateAdapter, PluginManager, state schema
+- Дата: 2026-05-24
+- Статус: принято
+- Контекст: Ветка `chore/foundation-from-backup-and-state-schema` закрыла Phase 0 плана `prototype-skeleton-2026-05`. Цель Phase 0 — перенести из `multiprocess_prototype_backup/` готовый код, покрывающий реальные дыры активного prototype, и заложить state-схему для Phase 2-5. Всего выполнено 8 задач (Tasks 0.1–0.8).
+- Решение:
+  1. **Task 0.1+0.3+0.5 (коммит `965dc10`)**: FrameRouter → `multiprocess_prototype/backend/routing/frame_router_setup.py` (Inspector-специфичная логика camera_id остаётся в prototype, не в framework); PluginManager → `multiprocess_framework/modules/process_module/plugins/manager.py` (hot-reload, auto-discovery через importlib); WebcamCameraService (заглушка) → `Services/webcam_camera/service.py`.
+  2. **Task 0.2 (коммит `829176c`)**: `IStateAdapter` Protocol + `StateAdapterBase` ABC → `multiprocess_framework/modules/state_store_module/adapters/base.py`. Базовый класс для всех конкретных адаптеров в prototype (двусторонняя синхронизация StateStore ↔ домен).
+  3. **Task 0.4 (коммит `08cb2e3`)**: Конкретные адаптеры → `multiprocess_prototype/backend/state/adapters/`: `CaptureStateAdapter`, `ColorMaskStateAdapter`. Наследуют `StateAdapterBase`.
+  4. **Task 0.6 (коммит `4de8f55`)**: State schema → `multiprocess_prototype/backend/state/schema.py`. Единая декларация констант (`STATE_PROCESSES`, `STATE_SYSTEM`, `STATE_WIRES`, `STATE_PLUGINS`, `STATE_SERVICES`, `STATE_DISPLAYS`, `STATE_RECIPES`) + helper-функции для path-композиции.
+  5. **Task 0.7 (коммит `23da8bf`)**: `WebcamCameraService` (полная реализация, 17 smoke-тестов) → `Services/webcam_camera/service.py`.
+  6. **Task 0.8 (этот ADR)**: Расширение `bootstrap.py` заглушечными ветками `services/displays/recipes/plugins`; 6 новых тестов; валидация (52 теста green, validate.py green).
+- Причина: Phase 0 — фундамент для Phase 2-5 скелета Inspector. Без IStateAdapter нельзя строить конкретные адаптеры. Без state schema нельзя соглашаться на пути в StateStoreManager. Без stub-веток в bootstrap Phase 3-5 получали бы KeyError при первом доступе к `services.*` / `displays.*` / `recipes.*` / `plugins.*`. FrameRouter — Inspector-специфичен (camera_id), поэтому остаётся в prototype (не framework), что соответствует принципу «framework first» с граничным случаем domain-specific routing logic.
+- Коммиты Phase 0: `965dc10` (0.1+0.3+0.5), `829176c` (0.2), `08cb2e3` (0.4), `4de8f55` (0.6), `23da8bf` (0.7). Task 0.8 — текущий коммит.
+- Sentrux: MCP-инструменты недоступны в CI; validate.py подтвердил 0 нарушений границ импортов через scripts/sync --check.
+- Отклонённые альтернативы:
+  - **FrameRouter → framework (shared_resources_module)** — отклонено: логика `camera_id` привязана к Inspector-специфичной семантике (broadcast по ID камеры), не к generic routing. В framework живёт только `RouterManager.register_broadcast_route()`, который уже готов.
+  - **IStateAdapter → prototype** — отклонено: адаптер — переиспользуемый паттерн (framework знает о StateStore, но не о конкретных доменах). Protocol в framework, реализации в prototype — чистое разделение.
+  - **Отложить stub-ветки bootstrap до Phase 3** — отклонено: Phase 3-5 стартуют параллельно; без stub-веток первое обращение к `state["services"]` даёт KeyError ещё до фазового кода.
 
 ---
 

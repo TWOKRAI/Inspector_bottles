@@ -5,6 +5,13 @@
 
 from __future__ import annotations
 
+from multiprocess_prototype.backend.state.schema import (
+    STATE_DISPLAYS,
+    STATE_PLUGINS,
+    STATE_RECIPES,
+    STATE_SERVICES,
+)
+
 
 # ---------------------------------------------------------------------------
 # Хелперы
@@ -145,6 +152,10 @@ def build_initial_state(topology_dict: dict, sys_config_dict: dict) -> dict:
                 },
                 ...
             },
+            "services": {},                               # Phase 3 — реестр внешних сервисов
+            "displays": {},                               # Phase 4 — дисплеи/окна вывода
+            "recipes": {"active": None, "available": []}, # Phase 5 — рецепты инспекции
+            "plugins": {"catalog": [], "paths": []},      # Phase 2 — каталог плагинов
         }
     """
     # Список процессов из topology (может быть None или пустым)
@@ -170,4 +181,9 @@ def build_initial_state(topology_dict: dict, sys_config_dict: dict) -> dict:
         "processes": processes,
         "system": system,
         "wires": wires,
+        # Phase 3+ — заглушечные ветки; наполняются данными в соответствующих фазах
+        STATE_SERVICES: {},
+        STATE_DISPLAYS: {},
+        STATE_RECIPES: {"active": None, "available": []},
+        STATE_PLUGINS: {"catalog": [], "paths": []},
     }

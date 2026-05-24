@@ -287,12 +287,17 @@ def test_sys_config_custom_values(empty_topology, custom_sys_config):
 
 
 def test_result_has_required_top_level_keys(topology_one_process, custom_sys_config):
-    """Результат всегда содержит processes, system, wires."""
+    """Результат всегда содержит все 7 корневых ключей Phase 0 + Phase 2-5 стабы."""
     result = build_initial_state(topology_one_process, custom_sys_config)
 
     assert "processes" in result
     assert "system" in result
     assert "wires" in result
+    # Phase 2-5 заглушечные ветки
+    assert "services" in result
+    assert "displays" in result
+    assert "recipes" in result
+    assert "plugins" in result
 
 
 # ---------------------------------------------------------------------------
@@ -325,3 +330,60 @@ def test_build_wires_section_key_format():
 
     assert "a.b.c->d.e.f" in wires
     assert wires["a.b.c->d.e.f"]["status"] == "pending"
+
+
+# ---------------------------------------------------------------------------
+# Тесты Task 0.8 — заглушечные ветки Phase 2-5
+# ---------------------------------------------------------------------------
+
+
+def test_services_branch_is_empty_dict(empty_topology, default_sys_config):
+    """services — пустой dict при старте (Phase 3 наполнит)."""
+    result = build_initial_state(empty_topology, default_sys_config)
+
+    assert result["services"] == {}
+
+
+def test_displays_branch_is_empty_dict(empty_topology, default_sys_config):
+    """displays — пустой dict при старте (Phase 4 наполнит)."""
+    result = build_initial_state(empty_topology, default_sys_config)
+
+    assert result["displays"] == {}
+
+
+def test_recipes_branch_has_correct_structure(empty_topology, default_sys_config):
+    """recipes — active=None, available=[] при старте (Phase 5 наполнит)."""
+    result = build_initial_state(empty_topology, default_sys_config)
+
+    assert result["recipes"] == {"active": None, "available": []}
+    assert result["recipes"]["active"] is None
+    assert result["recipes"]["available"] == []
+
+
+def test_plugins_branch_has_correct_structure(empty_topology, default_sys_config):
+    """plugins — catalog=[], paths=[] при старте (Phase 2 наполнит)."""
+    result = build_initial_state(empty_topology, default_sys_config)
+
+    assert result["plugins"] == {"catalog": [], "paths": []}
+    assert result["plugins"]["catalog"] == []
+    assert result["plugins"]["paths"] == []
+
+
+def test_all_seven_top_level_keys_present(topology_with_wires, custom_sys_config):
+    """build_initial_state возвращает ровно 7 корневых ключей (Task 0.8 acceptance)."""
+    result = build_initial_state(topology_with_wires, custom_sys_config)
+
+    expected_keys = {"processes", "system", "wires", "services", "displays", "recipes", "plugins"}
+    assert set(result.keys()) == expected_keys
+
+
+def test_stub_branches_independent_of_topology(topology_with_wires, empty_topology, default_sys_config):
+    """Заглушечные ветки не зависят от topology — всегда одинаковые при старте."""
+    result_full = build_initial_state(topology_with_wires, default_sys_config)
+    result_empty = build_initial_state(empty_topology, default_sys_config)
+
+    # Заглушки идентичны независимо от topology
+    assert result_full["services"] == result_empty["services"]
+    assert result_full["displays"] == result_empty["displays"]
+    assert result_full["recipes"] == result_empty["recipes"]
+    assert result_full["plugins"] == result_empty["plugins"]
