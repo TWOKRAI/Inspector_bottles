@@ -1,62 +1,111 @@
 # -*- coding: utf-8 -*-
-"""DisplaysTab — таб управления дисплеями.
+"""DisplaysTab v2 — CRUD-таб управления дисплеями (MVP pattern).
 
-Шаблон визуально и архитектурно идентичен Recipes:
-``BaseListNavTab`` + ``DiffScrollTabLayout``. 3 колонки + мастер-скролл.
+Реализует IDisplaysView через structural subtyping (без явного наследования).
+Использует BaseListNavTab: QListWidget слева + content-форма справа.
 
-- **Колонка 1 (action_width=160):** кнопки управления слотами выбранного
-  пресета — «Добавить слот», «Удалить»; Undo/Redo в статичной зоне.
-- **Колонка 2 (nav_width=230):** список пресетов раскладки
-  (none / 1×1 / 1+1 / 2×2) — выбор переключает таблицу.
-- **Колонка 3 (content):** ``CrudTable`` со слотами активного пресета +
-  combo-box для привязки source-процесса к каждому слоту.
+Форма (правая панель):
+    - id (QLineEdit, read-only при выборе существующего)
+    - name (QLineEdit)
+    - width / height (QSpinBox, 1..7680)
+    - format (QComboBox: BGR/RGB/GRAY/RGBA)
+    - fps_limit (QDoubleSpinBox, 0.0..240.0)
+    - ring_buffer_blocks (QSpinBox, 1..32)
 
-Пресеты — это не «глобальные» actions, а единицы навигации (как рецепты),
-поэтому остаются в nav-колонке, не в action.
+Кнопки (action-колонка):
+    - «Создать» — всегда активна (при наличии permission)
+    - «Удалить» — disabled без выбора
+    - «Дублировать» — disabled без выбора
+    - «Открыть превью» — disabled без выбора
+
+Архитектурная заметка:
+    BaseListNavTab управляет content_stack через add_item/remove_item.
+    DisplaysTab использует одну общую форму (_form_widget) как content для
+    всех записей: _create_item_widget возвращает QWidget-заглушку, а
+    refresh_list вставляет форму в content_scroll напрямую через
+    _tab_layout.set_content_widget — но только один раз (форма singleton).
+    Повторная перезапись не нужна, форма остаётся в content_scroll.
 """
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from multiprocess_framework.modules.display_module import DisplayEntry, DisplayRegistry
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
-from multiprocess_prototype.frontend.widgets.primitives import CrudTable
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
 
-from .presenter import DISPLAY_PRESETS, DisplaysPresenter
+from .presenter import DisplaysPresenter
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
 
+logger = logging.getLogger(__name__)
+
+# Допустимые форматы пикселей
+_PIXEL_FORMATS = ["BGR", "RGB", "GRAY", "RGBA"]
+
+# Путь-фолбэк если ctx.config_paths.displays недоступен
+_DEFAULT_YAML_PATH = Path("multiprocess_prototype/backend/config/displays.yaml")
+
 
 def _layout_factory() -> DiffScrollTabLayout:
-    # Размеры колонок согласованы с Recipes/Processes/Services/Plugins.
+    """Фабрика layout для DisplaysTab.
+
+    Размеры колонок согласованы с Recipes/Processes/Services.
+    """
     return DiffScrollTabLayout(title="Дисплеи", action_width=160, nav_width=230)
 
 
 class DisplaysTab(BaseListNavTab):
-    """Таб «Дисплеи» — BaseListNavTab + DiffScrollTabLayout (как Recipes).
+    """Таб «Дисплеи» v2 — BaseListNavTab + MVP (DisplaysPresenter + IDisplaysView).
 
-    Пресеты в nav-колонке, действия в action-колонке, таблица слотов в content.
+    Реализует IDisplaysView через structural subtyping:
+    ``isinstance(tab, IDisplaysView)`` → True без явного наследования.
+
+    Левая панель: QListWidget с именами дисплеев из DisplayRegistry.
+    Правая панель: форма редактирования полей DisplayEntry.
+    Action-колонка: кнопки Создать / Удалить / Дублировать / Открыть превью.
     """
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        self._presenter = DisplaysPresenter(ctx)
-        self._source_combos: list[QComboBox] = []
-        # Текущий выбранный пресет (ключ из DISPLAY_PRESETS).
-        self._selected_preset: str = ""
+    def __init__(
+        self,
+        registry: DisplayRegistry,
+        yaml_path: Path,
+        ctx: object,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Инициализировать таб дисплеев.
 
-        # Таблица создаётся один раз и переиспользуется для всех пресетов.
-        self._table: CrudTable | None = None
+        Args:
+            registry: реестр дисплеев (DisplayRegistry singleton).
+            yaml_path: путь к YAML для персистентности.
+            ctx: контекст приложения (AppContext, используется для auth).
+            parent: родительский виджет.
+        """
+        self._ctx = ctx
+        self._registry = registry
+        self._yaml_path = yaml_path
+        self._selected_id: str | None = None
+        # Индекс формы в content_stack (устанавливается после super().__init__)
+        self._form_stack_index: int = 0
 
         super().__init__(
             title="Дисплеи",
@@ -65,177 +114,344 @@ class DisplaysTab(BaseListNavTab):
             parent=parent,
         )
 
-        # Авто-refresh content scroll при смене активного пресета.
-        self._tab_layout.connect_stack(self._content_stack, "content")
+        # Форма создаётся после super().__init__ (Qt-виджеты готовы)
+        self._build_form()
+        # Добавляем форму в content_stack как страницу с индексом 0
+        # Это обеспечивает правильный parent и Qt lifecycle
+        self._form_stack_index = self._content_stack.addWidget(self._form_widget)
+        self._content_stack.setCurrentIndex(self._form_stack_index)
 
         self._setup_actions()
-        self._sync_nav()
+
+        # Presenter создаётся после setup (view уже готов)
+        self._presenter = DisplaysPresenter(
+            registry=registry,
+            view=self,
+            yaml_path=yaml_path,
+        )
+        self._presenter.load()
+
+    # ------------------------------------------------------------------ #
+    #  Фабричный метод                                                     #
+    # ------------------------------------------------------------------ #
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "DisplaysTab":
-        """Фабричный метод для TabFactory."""
-        return cls(ctx)
+        """Фабричный метод для TabFactory.
+
+        Читает DisplayRegistry и yaml_path из ctx.
+        Если ctx не предоставляет нужные атрибуты — использует фолбэки.
+
+        Args:
+            ctx: контекст приложения (AppContext).
+
+        Returns:
+            Полностью инициализированный DisplaysTab с загруженными данными.
+        """
+        # DisplayRegistry из ctx или singleton-фолбэк
+        registry = getattr(ctx, "display_registry", None)
+        if registry is None:
+            logger.warning("DisplaysTab.create: ctx.display_registry недоступен, используется пустой DisplayRegistry()")
+            registry = DisplayRegistry()
+
+        # yaml_path из ctx.config_paths.displays или фолбэк
+        yaml_path: Path = _DEFAULT_YAML_PATH
+        config_paths = getattr(ctx, "config_paths", None)
+        if config_paths is not None:
+            displays_path = getattr(config_paths, "displays", None)
+            if displays_path is not None:
+                yaml_path = Path(displays_path)
+            else:
+                logger.warning(
+                    "DisplaysTab.create: ctx.config_paths.displays недоступен, используется фолбэк '%s'",
+                    yaml_path,
+                )
+        else:
+            logger.warning(
+                "DisplaysTab.create: ctx.config_paths недоступен, используется фолбэк '%s'",
+                yaml_path,
+            )
+
+        tab = cls(registry=registry, yaml_path=yaml_path, ctx=ctx)
+        return tab
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #
     # ------------------------------------------------------------------ #
 
     def _create_item_widget(self, key: str) -> QWidget:
-        """Все пресеты используют одну общую CrudTable.
+        """Создать content-виджет для записи дисплея.
 
-        BaseListNavTab требует уникальный виджет на ключ — но логически
-        таблица одна. Решение: на первый вызов создаём таблицу-singleton,
-        на остальные — возвращаем пустые QWidget-страницы, а при смене
-        пресета программно переключаем стек на страницу с таблицей.
+        Все записи используют одну общую форму (_form_widget), которая
+        размещена в content_scroll напрямую. Заглушки здесь не отображаются.
         """
-        if self._table is None:
-            self._table = CrudTable(columns=["Слот", "Источник", "Метка"])
-            self._table.selection_changed.connect(self._on_table_selection)
-            return self._table
-        # Для последующих пресетов — пустая страница (на ней мы НЕ переключаемся).
         return QWidget()
 
     def _on_nav_changed(self, key: str) -> None:
-        """Смена пресета в nav: применить пресет и обновить таблицу."""
-        # ВАЖНО: не вызываем super()._on_nav_changed — мы сами управляем стеком,
-        # таблица одна на все пресеты, переключения страниц не нужно.
-        self._selected_preset = key
+        """Реагировать на смену выбора в nav-списке.
+
+        Всегда показывает форму (_form_widget) в content_stack.
+
+        Args:
+            key: id выбранного дисплея.
+        """
+        self._selected_id = key
+        # Всегда переключаемся на страницу с формой
+        self._content_stack.setCurrentIndex(self._form_stack_index)
         self.item_selected.emit(key)
         self.section_changed.emit(key)
-        if not self._can_edit():
-            return
-        self._presenter.apply_preset(key)
-        self._sync_table()
+        self._presenter.on_select(key)
 
     # ------------------------------------------------------------------ #
-    #  Action column                                                       #
+    #  IDisplaysView implementation                                        #
     # ------------------------------------------------------------------ #
+
+    def refresh_list(self, entries: list[DisplayEntry]) -> None:
+        """Перестроить nav-список по текущему состоянию реестра.
+
+        Очищает nav-список и заглушки в content_stack (не форму!),
+        добавляет каждый entry через add_item.
+
+        Args:
+            entries: список DisplayEntry из реестра.
+        """
+        assert self._nav_widget is not None
+
+        # Блокируем сигналы nav-виджета на время перестройки
+        self._nav_widget.blockSignals(True)
+        self._nav_widget.clear()
+        self._key_to_item.clear()
+
+        # Удаляем только заглушки (QWidget()) из content_stack, форму сохраняем.
+        # Форма (_form_widget) имеет parent = content_stack и НЕ удаляется.
+        for key in list(self._key_to_index.keys()):
+            idx = self._key_to_index.pop(key, None)
+            if idx is None:
+                continue
+            w = self._content_stack.widget(idx)
+            if w is not None and w is not self._form_widget:
+                self._content_stack.removeWidget(w)
+                w.deleteLater()
+
+        # Восстанавливаем форму как текущую страницу
+        self._form_stack_index = self._content_stack.indexOf(self._form_widget)
+        if self._form_stack_index < 0:
+            # Форма была удалена — добавляем обратно (защитная логика)
+            self._form_stack_index = self._content_stack.addWidget(self._form_widget)
+        self._content_stack.setCurrentIndex(self._form_stack_index)
+
+        self._nav_widget.blockSignals(False)
+
+        for entry in entries:
+            self.add_item(entry.id, entry.name)
+
+        # Сброс выбора после перестройки
+        self._selected_id = None
+
+    def show_entry(self, entry: DisplayEntry | None) -> None:
+        """Заполнить форму данными записи или очистить при None.
+
+        При entry=None — поля очищаются, id становится редактируемым
+        (режим создания нового дисплея).
+        При entry!=None — поля заполняются, id становится read-only
+        (режим просмотра/редактирования существующего).
+
+        Args:
+            entry: запись дисплея или None.
+        """
+        if entry is None:
+            self._id_edit.setReadOnly(False)
+            self._id_edit.clear()
+            self._name_edit.clear()
+            self._width_spin.setValue(1280)
+            self._height_spin.setValue(720)
+            self._format_combo.setCurrentText("BGR")
+            self._fps_spin.setValue(30.0)
+            self._ring_spin.setValue(3)
+        else:
+            self._id_edit.setReadOnly(True)
+            self._id_edit.setText(entry.id)
+            self._name_edit.setText(entry.name)
+            self._width_spin.setValue(entry.width)
+            self._height_spin.setValue(entry.height)
+            fmt = entry.format if entry.format in _PIXEL_FORMATS else "BGR"
+            self._format_combo.setCurrentText(fmt)
+            self._fps_spin.setValue(entry.fps_limit)
+            self._ring_spin.setValue(entry.ring_buffer_blocks)
+
+    def set_buttons_state(self, has_selection: bool) -> None:
+        """Включить/выключить кнопки мутации.
+
+        Args:
+            has_selection: True — запись выбрана, кнопки активны.
+        """
+        self._delete_btn.setEnabled(has_selection)
+        self._duplicate_btn.setEnabled(has_selection)
+        self._preview_btn.setEnabled(has_selection)
+
+    def get_form_data(self) -> dict:
+        """Собрать текущие данные формы в словарь.
+
+        Returns:
+            dict: {id, name, width, height, format, fps_limit, ring_buffer_blocks}
+        """
+        return {
+            "id": self._id_edit.text().strip(),
+            "name": self._name_edit.text().strip(),
+            "width": self._width_spin.value(),
+            "height": self._height_spin.value(),
+            "format": self._format_combo.currentText(),
+            "fps_limit": self._fps_spin.value(),
+            "ring_buffer_blocks": self._ring_spin.value(),
+        }
+
+    def show_error(self, message: str) -> None:
+        """Показать диалог с сообщением об ошибке.
+
+        Args:
+            message: текст ошибки для отображения пользователю.
+        """
+        QMessageBox.warning(self, "Ошибка", message)
+
+    # ------------------------------------------------------------------ #
+    #  Построение UI                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _build_form(self) -> None:
+        """Создать singleton-форму редактирования полей DisplayEntry.
+
+        Форма размещается в content_scroll через set_content_widget.
+        Не привязана к content_stack — один виджет для всех записей.
+        """
+        self._form_widget = QWidget()
+        form_vbox = QVBoxLayout(self._form_widget)
+        form_vbox.setContentsMargins(12, 12, 12, 12)
+        form_vbox.setSpacing(6)
+
+        form_vbox.addWidget(QLabel("<b>Параметры дисплея</b>"))
+
+        form_layout = QFormLayout()
+        form_layout.setContentsMargins(0, 4, 0, 0)
+        form_layout.setSpacing(8)
+
+        # ID — read-only при выборе существующего
+        self._id_edit = QLineEdit()
+        self._id_edit.setPlaceholderText("Уникальный идентификатор")
+        form_layout.addRow("ID:", self._id_edit)
+
+        # Название
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("Имя дисплея")
+        form_layout.addRow("Название:", self._name_edit)
+
+        # Ширина
+        self._width_spin = QSpinBox()
+        self._width_spin.setRange(1, 7680)
+        self._width_spin.setValue(1280)
+        self._width_spin.setSuffix(" px")
+        form_layout.addRow("Ширина:", self._width_spin)
+
+        # Высота
+        self._height_spin = QSpinBox()
+        self._height_spin.setRange(1, 7680)
+        self._height_spin.setValue(720)
+        self._height_spin.setSuffix(" px")
+        form_layout.addRow("Высота:", self._height_spin)
+
+        # Формат пикселей
+        self._format_combo = QComboBox()
+        self._format_combo.addItems(_PIXEL_FORMATS)
+        form_layout.addRow("Формат:", self._format_combo)
+
+        # FPS limit
+        self._fps_spin = QDoubleSpinBox()
+        self._fps_spin.setRange(0.0, 240.0)
+        self._fps_spin.setSingleStep(0.5)
+        self._fps_spin.setDecimals(1)
+        self._fps_spin.setValue(30.0)
+        self._fps_spin.setSpecialValueText("Без ограничений")
+        form_layout.addRow("FPS limit:", self._fps_spin)
+
+        # Ring buffer blocks
+        self._ring_spin = QSpinBox()
+        self._ring_spin.setRange(1, 32)
+        self._ring_spin.setValue(3)
+        self._ring_spin.setToolTip("Количество блоков ring-buffer SHM-канала")
+        form_layout.addRow("Ring buffer:", self._ring_spin)
+
+        form_vbox.addLayout(form_layout)
+        form_vbox.addStretch(1)
 
     def _setup_actions(self) -> None:
+        """Создать action-кнопки в левой колонке layout'а.
+
+        Подключает permission gating через install_permission_aware_enable.
+        """
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
 
-        lay = self._tab_layout
         action_widget = QWidget()
         action_layout = QVBoxLayout(action_widget)
         action_layout.setContentsMargins(4, 4, 4, 4)
         action_layout.setSpacing(6)
 
-        self._btn_add = QPushButton("Добавить слот")
-        self._btn_add.clicked.connect(lambda: self._on_toolbar_action("add_slot"))
-        action_layout.addWidget(self._btn_add)
+        # Создать — всегда активна (при наличии permission)
+        self._create_btn = QPushButton("Создать")
+        self._create_btn.setToolTip("Создать новый дисплей из данных формы")
+        self._create_btn.clicked.connect(self._on_create_clicked)
+        action_layout.addWidget(self._create_btn)
 
-        self._btn_remove = QPushButton("Удалить")
-        self._btn_remove.setEnabled(False)
-        self._btn_remove.clicked.connect(lambda: self._on_toolbar_action("remove_slot"))
-        action_layout.addWidget(self._btn_remove)
+        # Удалить — disabled без выбора
+        self._delete_btn = QPushButton("Удалить")
+        self._delete_btn.setToolTip("Удалить выбранный дисплей")
+        self._delete_btn.setEnabled(False)
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        action_layout.addWidget(self._delete_btn)
+
+        # Дублировать — disabled без выбора
+        self._duplicate_btn = QPushButton("Дублировать")
+        self._duplicate_btn.setToolTip("Создать копию выбранного дисплея")
+        self._duplicate_btn.setEnabled(False)
+        self._duplicate_btn.clicked.connect(self._on_duplicate_clicked)
+        action_layout.addWidget(self._duplicate_btn)
+
+        # Открыть превью — disabled без выбора
+        self._preview_btn = QPushButton("Открыть превью")
+        self._preview_btn.setToolTip("Открыть окно превью SHM-канала (Task 4.7)")
+        self._preview_btn.setEnabled(False)
+        self._preview_btn.clicked.connect(self._on_preview_clicked)
+        action_layout.addWidget(self._preview_btn)
 
         action_layout.addStretch(1)
-        lay.set_action_widget(action_widget)
+        self._tab_layout.set_action_widget(action_widget)
 
-        # Undo/Redo в статичной зоне.
-        bus = self._ctx.action_bus() if hasattr(self._ctx, "action_bus") else None
-        lay.enable_undo_redo(bus)
-
-        # Permission gating.
+        # Permission gating
         _auth = getattr(self._ctx, "auth", None)
         auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        for btn in (self._btn_add, self._btn_remove):
-            install_permission_aware_enable(btn, "tabs.displays.edit", auth_state)
+        install_permission_aware_enable(self._create_btn, "tabs.displays.edit", auth_state)
+        install_permission_aware_enable(self._delete_btn, "tabs.displays.edit", auth_state)
+        install_permission_aware_enable(self._duplicate_btn, "tabs.displays.edit", auth_state)
 
     # ------------------------------------------------------------------ #
-    #  Nav populate                                                        #
+    #  Button handlers                                                     #
     # ------------------------------------------------------------------ #
 
-    def _sync_nav(self) -> None:
-        """Заполнить навигацию списком пресетов."""
-        assert self._nav_widget is not None
-        self._nav_widget.blockSignals(True)
-        self._nav_widget.clear()
-        while self._content_stack.count() > 0:
-            w = self._content_stack.widget(0)
-            self._content_stack.removeWidget(w)
-            if w is not None and w is not self._table:
-                w.deleteLater()
-        self._key_to_item.clear()
-        self._key_to_index.clear()
-        self._nav_widget.blockSignals(False)
+    def _on_create_clicked(self) -> None:
+        """Обработать нажатие «Создать»."""
+        self._presenter.on_create()
 
-        for preset_name in DISPLAY_PRESETS.keys():
-            self.add_item(preset_name, preset_name)
+    def _on_delete_clicked(self) -> None:
+        """Обработать нажатие «Удалить»."""
+        if self._selected_id is not None:
+            self._presenter.on_delete(self._selected_id)
 
-        # Дефолтная выборка — первый пресет (none → пустая таблица).
-        first = next(iter(DISPLAY_PRESETS.keys()), None)
-        if first is not None:
-            self.select_item(first)
+    def _on_duplicate_clicked(self) -> None:
+        """Обработать нажатие «Дублировать»."""
+        if self._selected_id is not None:
+            self._presenter.on_duplicate(self._selected_id)
 
-    # ------------------------------------------------------------------ #
-    #  Permissions                                                         #
-    # ------------------------------------------------------------------ #
-
-    def _can_edit(self) -> bool:
-        """Имеет ли текущий пользователь право мутаций в displays."""
-        _auth = getattr(self._ctx, "auth", None)
-        auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        if auth_state is None:
-            return True
-        return auth_state.access_context.has_permission("tabs.displays.edit")
-
-    # ------------------------------------------------------------------ #
-    #  Action handlers                                                     #
-    # ------------------------------------------------------------------ #
-
-    def _on_toolbar_action(self, action_id: str) -> None:
-        if not self._can_edit():
-            return
-        if action_id == "add_slot":
-            self._presenter.add_slot()
-            self._sync_table()
-        elif action_id == "remove_slot":
-            if self._table is None:
-                return
-            row = self._table.selected_row()
-            if row >= 0:
-                self._presenter.remove_slot(row)
-                self._sync_table()
-
-    # Сохранён для backward-compat (тесты использовали _on_preset_selected(index)).
-    def _on_preset_selected(self, index: int) -> None:
-        """Применить пресет по индексу (legacy API для тестов)."""
-        preset_names = list(DISPLAY_PRESETS.keys())
-        if 0 <= index < len(preset_names):
-            self.select_item(preset_names[index])
-
-    def _on_table_selection(self, row: int) -> None:
-        self._btn_remove.setEnabled(row >= 0)
-
-    def _sync_table(self) -> None:
-        """Синхронизировать таблицу с presenter."""
-        if self._table is None:
-            return
-        slots = self._presenter.slots
-        rows = [[s["slot_id"], s["source"], s["label"]] for s in slots]
-        self._table.set_data(rows)
-
-        # Combo для выбора source в каждой строке.
-        sources = self._presenter.get_available_sources()
-        self._source_combos.clear()
-        for i, slot in enumerate(slots):
-            combo = QComboBox()
-            combo.addItem("—")
-            combo.addItems(sources)
-            current_source = slot.get("source", "")
-            if current_source and current_source in sources:
-                combo.setCurrentText(current_source)
-            combo.currentTextChanged.connect(
-                lambda text, idx=i: self._on_source_changed(idx, text),
-            )
-            self._table.set_cell_widget(i, 1, combo)
-            self._source_combos.append(combo)
-
-    def _on_source_changed(self, index: int, source: str) -> None:
-        """Обработать изменение привязки source."""
-        if source == "—":
-            source = ""
-        self._presenter.set_slot_source(index, source)
+    def _on_preview_clicked(self) -> None:
+        """Обработать нажатие «Открыть превью»."""
+        if self._selected_id is not None:
+            self._presenter.on_open_preview(self._selected_id)
