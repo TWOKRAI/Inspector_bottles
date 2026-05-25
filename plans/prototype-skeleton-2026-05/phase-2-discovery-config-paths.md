@@ -490,3 +490,43 @@ Task 2.2 ──────────────────────┘  
 **Dependencies:** Все Tasks 2.1–2.6 должны быть завершены
 
 **Module contract:** n/a (только тесты)
+
+---
+
+## Закрытие фазы
+
+**Статус: ✅ DONE** (2026-05-25)
+
+**Сводка:** Discovery теперь полностью config-driven (`system.yaml` + опциональный `user_overrides.yaml` с deep-merge), хардкод `PLUGINS_DIR`/`_PLUGINS_DIR` удалён. `PluginManager` доступен как singleton через `AppContext.plugin_manager()`. В `PluginsTab` добавлена подвкладка «Пути» с CRUD путей и кнопкой «Рескан», каталог обновляется по сигналу `catalog_updated` без перезапуска.
+
+**Коммиты фазы (11):**
+
+| Хеш | Тип | Что |
+|-----|-----|-----|
+| d91d753 | docs | Декомпозиция Phase 2 на 7 Task X.Y |
+| 6eb7212 | feat (Task 2.1) | `DiscoverySection` + секция в `system.yaml` |
+| 0ac9a0f | feat (Task 2.2) | `_deep_merge` + автозагрузка `user_overrides.yaml` |
+| e32c57d | feat (Task 2.3) | Убрать хардкод `PLUGINS_DIR` из `main.py`/`app.py` |
+| 3212350 | feat (Task 2.4) | `AppContext.plugin_manager()` + singleton в `run_gui` |
+| b02ab48 | docs | Tasks 2.1–2.4 [x] |
+| 9de9f34 | feat (Task 2.5) | Подвкладка «Пути» (`PathsSubtabWidget`) |
+| bcee165 | feat (Task 2.6) | `catalog_updated` → `refresh_catalog` |
+| 92cad02 | test (Task 2.7) | 7 тестов (3 config + 4 GUI) |
+| dbf2a28 | test | Регрессия в `test_plugins_tab.py` под новую секцию «Пути» |
+| d405e1e | fix | Singleton `_PathsSection` через модульный кэш по `id(ctx)` |
+
+**Тесты:** 22 PASSED (`pytest backend/config/tests + frontend/widgets/tabs/plugins/tests`).
+
+**Ревью:** Reviewer (Opus) — 2 итерации, APPROVE на 2-й.
+
+**Technical debt (follow-up, не блокирует merge):**
+
+1. **Прямой доступ к `PluginManager._plugin_paths`** в `presenter.add_plugin_path/remove_plugin_path` (`presenter.py:155,174`). Допустимо для MVP. В следующей фазе — добавить публичный `PluginManager.set_paths(paths)` в framework.
+2. **Дублирование list comprehension** для резолюции путей в `main.py` и `app.py`. Кандидат на утилитную функцию `resolve_plugin_paths(config, root)` в `schemas.py`.
+3. **`refresh_catalog` не очищает `_content_stack`** — старые lazy-секции плагинов остаются в QStackedWidget после rescan. При частом rescan'е возможен рост виджетов. Для MVP допустимо.
+4. **Type hint `qtbot: pytest.fixture`** — некорректная аннотация в существующем `test_plugins_tab.py` и новом `test_paths_subtab.py`. Исправить разом в follow-up рефакторинге.
+
+**Acceptance Phase 2 в master plan:**
+- [x] Добавление пути через GUI → плагины из новой папки видны в каталоге без рестарта (Task 2.5 + 2.6)
+- [x] Настройки персистятся в `user_overrides.yaml` (Task 2.2 + 2.5)
+- [x] 5-7 unit-тестов (фактически 7) + регрессия на caталог (Task 2.7 + dbf2a28)

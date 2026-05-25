@@ -64,7 +64,7 @@
 |-------|------|------------|------|-------------|
 | **0** ✓ | [phase-0-foundation.md](phase-0-foundation.md) | `chore/foundation-from-backup-and-state-schema` | 2-3 | — | <!-- DONE bea4c72 -->
 | **1** | [phase-1-processes-protection.md](phase-1-processes-protection.md) | `feat/processes-protection` | 1 | Phase 0 |
-| **2** | [phase-2-discovery-config-paths.md](phase-2-discovery-config-paths.md) | `feat/discovery-config-paths` | 2-3 | Phase 0 |
+| **2** ✓ | [phase-2-discovery-config-paths.md](phase-2-discovery-config-paths.md) | `feat/discovery-config-paths` | 2-3 | Phase 0 | <!-- DONE d405e1e -->
 | **3** | [phase-3-service-registry.md](phase-3-service-registry.md) | `feat/service-registry` | 3-4 | Phase 0 |
 | **4** | [phase-4-displays-tab.md](phase-4-displays-tab.md) | `feat/displays-tab` | 5-7 | Phase 0 |
 | **5** | [phase-5-recipes-manager-v2.md](phase-5-recipes-manager-v2.md) | `feat/recipes-manager-v2` | 7-10 | 2, 3, 4 |
