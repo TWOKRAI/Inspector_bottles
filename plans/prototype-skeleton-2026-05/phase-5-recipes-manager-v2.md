@@ -268,7 +268,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.3 — State bootstrap + RegistersManager двухслойный
 
-- [ ] Task 5.3
+- [x] Task 5.3 (01e110f7)
 
 **Level:** Middle (Sonnet, normal thinking)
 **Assignee:** developer
