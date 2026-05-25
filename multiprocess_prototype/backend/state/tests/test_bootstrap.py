@@ -8,6 +8,7 @@ from multiprocess_prototype.backend.state.bootstrap import (
     _build_wires_section,
     build_initial_state,
 )
+from multiprocess_prototype.backend.config.schemas import DisplayEntrySchema, DisplaysConfig
 
 
 # ---------------------------------------------------------------------------
@@ -387,3 +388,50 @@ def test_stub_branches_independent_of_topology(topology_with_wires, empty_topolo
     assert result_full["displays"] == result_empty["displays"]
     assert result_full["recipes"] == result_empty["recipes"]
     assert result_full["plugins"] == result_empty["plugins"]
+
+
+# ---------------------------------------------------------------------------
+# Тесты Task 4.8 — displays_config (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def _make_displays_config(*ids: str) -> DisplaysConfig:
+    """Создать DisplaysConfig с записями для заданных id."""
+    return DisplaysConfig(
+        displays=[
+            DisplayEntrySchema(
+                id=did,
+                name=f"Дисплей {did}",
+                width=1280,
+                height=720,
+                format="BGR",
+                fps_limit=30.0,
+                ring_buffer_blocks=3,
+            )
+            for did in ids
+        ]
+    )
+
+
+def test_bootstrap_with_displays_config(empty_topology, default_sys_config):
+    """build_initial_state с 2 дисплеями → state['displays'] содержит 2 ключа со структурой."""
+    displays_cfg = _make_displays_config("main", "debug")
+    result = build_initial_state(empty_topology, default_sys_config, displays_config=displays_cfg)
+
+    displays = result["displays"]
+    assert len(displays) == 2
+    assert "main" in displays
+    assert "debug" in displays
+
+    for did in ("main", "debug"):
+        entry = displays[did]
+        assert entry["status"] == "registered"
+        assert "config" in entry
+        assert isinstance(entry["config"], dict)
+
+
+def test_bootstrap_displays_config_none_backward_compat(empty_topology, default_sys_config):
+    """build_initial_state(..., displays_config=None) — обратная совместимость, displays пуст."""
+    result = build_initial_state(empty_topology, default_sys_config, displays_config=None)
+
+    assert result["displays"] == {}

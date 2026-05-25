@@ -149,6 +149,7 @@
 - [ADR-127](#adr-127-_abstractcolumnartablayout-nav-агностичная-база-layoutов-перенос-в-framework): `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
 - [ADR-128](#adr-128-foundation-phase-0-перенос-из-backup-framerouter-istateadapter-pluginmanager-state-schema): Foundation Phase 0 — перенос из backup, FrameRouter, IStateAdapter, PluginManager, state schema
 - [ADR-129](#adr-129-serviceregistry-отдельный-реестр-long-running-сервисов): ServiceRegistry — отдельный реестр long-running сервисов
+- [ADR-130](#adr-130-displayregistry-декларативный-реестр-shm-каналов): DisplayRegistry — декларативный реестр SHM-каналов
 <!-- ADR-TOC:END -->
 
 ---
@@ -2166,6 +2167,31 @@
 
 ---
 
+## ADR-130: DisplayRegistry — декларативный реестр SHM-каналов
+- Дата: 2026-05-25
+- Статус: принято
+- Контекст: Phase 4 плана `prototype-skeleton-2026-05` ввела дисплеи как именованные SHM-каналы, к которым подписываются preview-окна и узлы pipeline. В процессе проектирования рассматривались альтернативы: дисплей как плагин (исполняемый код) и дисплей как отдельный процесс (владелец SHM). Обе альтернативы создали бы ненужную сложность: дисплей — это конфигурация, а не исполняемая единица. Требование: framework-уровень должен оставаться generic (без vision-семантики); prototype-слой добавляет numpy-shape при bind.
+- Решение:
+  1. **`multiprocess_framework/modules/display_module/interfaces.py`**: `DisplayEntry` dataclass — generic-параметры (`id`, `name`, `width`, `height`, `format`, `fps_limit`, `ring_buffer_blocks`); без vision-полей (`element_shape`, `dtype`) — ADR-DM-001; `@runtime_checkable class IDisplayRegistry(Protocol)` — контракт реестра; `@runtime_checkable class IDisplayChannel(Protocol)` — контракт SHM-канала (без конкретной реализации в framework — Phase 7).
+  2. **`multiprocess_framework/modules/display_module/registry.py`**: `DisplayRegistry` singleton через double-checked locking (паттерн из `ServiceRegistry`, ADR-129); CRUD под `threading.Lock`; `persist(path: Path)` — явный аргумент (ADR-DM-002); `load(path: Path)` — десериализация без Pydantic (dict → dataclass); `_cleanup_shm_channel` — только лог-предупреждение (ADR-DM-003).
+  3. **Prototype-слой** (`multiprocess_prototype/backend/displays/blueprint_binding.py`): функция `bind_displays_to_blueprint(entries, blueprint)` вычисляет `element_shape` и `dtype` из `format` через `_format_to_channels`; записывает в `ui_process.memory["display_<id>"]` (ADR-025, config-driven memory).
+  4. **Фактическое создание SHM**: `ProcessManagerProcess` → `SharedResourcesManager` читает blueprint при старте и создаёт SHM-сегменты (ADR-025). До старта процессов дисплей существует только декларативно в `DisplayRegistry` и `displays.yaml`.
+- Причина: дисплей — не плагин (у него нет execute-логики) и не процесс (процесс ничего не делает с дисплеем, кроме создания SHM). «Display as declaration» — декларативный entry в реестре + секция в blueprint + узел в PipelineTab (Phase 7) — чище всего соответствует принципу «config-driven memory» (ADR-025). Singleton-паттерн идентичен `ServiceRegistry` (ADR-129), что обеспечивает единообразие framework-реестров. Decoupling от `shared_resources_module` (ADR-DM-003) сохраняет независимость модулей на одном layer.
+- Отклонённые альтернативы:
+  - **Дисплей как плагин** — отклонено: плагин — это исполняемый код (процессинг кадра), дисплей — конфигурация именованного SHM-слота; смешивание этих ролей нарушает ADR-120 (Plugins = vocabulary обработчиков).
+  - **Дисплей как отдельный процесс** — отклонено: процесс создаётся только ради SHM-сегмента и ничего не делает в рантайме; накладные расходы process-overhead неоправданны; `SharedResourcesManager` уже умеет создавать SHM по конфигурации.
+  - **Vision-поля в `DisplayEntry`** — отклонено: см. ADR-DM-001; framework не должен зависеть от numpy-семантики; `element_shape` — производное от `(height, width, channels)`, хранить в источнике истины избыточно.
+  - **Путь YAML внутри `DisplayRegistry`** — отклонено: singleton не может знать о prototype-путях (ADR-DM-002); это нарушает слои импортов.
+- Связанные ADR:
+  - Локальные `ADR-DM-001` (generic без vision-полей), `ADR-DM-002` (persist path как аргумент), `ADR-DM-003` (SHM cleanup — только warning) в [`display_module/DECISIONS.md`](modules/display_module/DECISIONS.md).
+  - ADR-025 (config-driven memory) — SHM-сегменты создаются по blueprint при старте `ProcessManagerProcess`.
+  - ADR-129 (ServiceRegistry) — образец паттерна singleton+YAML-реестр в framework.
+  - ADR-120 (Plugins vocabulary), ADR-121/122 (Services carve-out) — границы слоёв, объясняющие, почему дисплей — не плагин.
+- Коммиты Phase 4 (display_module): Task 4.1 interfaces, Task 4.2 registry, Task 4.3 blueprint_binding, Task 4.9 docs+ADR.
+- Refs: [plans/prototype-skeleton-2026-05/phase-4-displays-tab.md](../../plans/prototype-skeleton-2026-05/phase-4-displays-tab.md), [plans/prototype-skeleton-2026-05/plan.md](../../plans/prototype-skeleton-2026-05/plan.md)
+
+---
+
 ## Модульные решения
 
 **Принцип локальности:** Каждый модуль может иметь свой `modules/<module>/DECISIONS.md` для решений, касающихся только его архитектуры.
@@ -2194,6 +2220,7 @@
 | `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…008 (Protocol-based decoupling от доменных типов, ..., Публичный IChainLogger Protocol для исполнителей) |
 | `actions_module` | [`modules/actions_module/DECISIONS.md`](modules/actions_module/DECISIONS.md) | Command & Work |  |
 | `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…003 (Singleton ServiceRegistry через `__new__` + Lock, ..., `ServiceRegistry` хранит классы, не экземпляры) |
+| `display_module` | [`modules/display_module/DECISIONS.md`](modules/display_module/DECISIONS.md) | Services & Lifecycle | ADR-DM-001…003 (DisplayEntry generic: без vision-полей, ..., SHM cleanup при unregister — только warning) |
 <!-- ADR-INDEX:END -->
 
 ---

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
+from pydantic import BaseModel, Field
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 
@@ -206,3 +207,47 @@ def load_system_config(path: Path | str | None = None) -> SystemConfig:
             print(f"[config] user_overrides.yaml: ошибка разбора: {e}")
 
     return SystemConfig.model_validate(raw)
+
+
+# ---------------------------------------------------------------------------
+# Схемы для displays.yaml (Task 4.4)
+# ---------------------------------------------------------------------------
+
+
+class DisplayEntrySchema(BaseModel):
+    """Pydantic-схема одной записи дисплея — валидирует displays.yaml.
+
+    Соответствует полям ``DisplayEntry`` из display_module.
+    Намеренно НЕ импортирует ``DisplayEntry`` — схема работает на dict-уровне
+    (Dict at Boundary). Конвертация в ``DisplayEntry`` — в ``displays_loader.py``.
+
+    Attributes:
+        id:                 Уникальный идентификатор дисплея (ключ в реестре).
+        name:               Человекочитаемое имя дисплея.
+        width:              Ширина кадра в пикселях (1..7680).
+        height:             Высота кадра в пикселях (1..7680).
+        format:             Формат пикселей кадра.
+        fps_limit:          Ограничение частоты кадров (0..240).
+        ring_buffer_blocks: Количество SHM-блоков в ring-buffer (1..32).
+    """
+
+    id: str
+    name: str
+    width: Annotated[int, Field(gt=0, le=7680)]
+    height: Annotated[int, Field(gt=0, le=7680)]
+    format: Literal["BGR", "RGB", "GRAY", "RGBA"]
+    fps_limit: Annotated[float, Field(ge=0.0, le=240.0)]
+    ring_buffer_blocks: Annotated[int, Field(ge=1, le=32)]
+
+
+class DisplaysConfig(BaseModel):
+    """Pydantic-схема файла displays.yaml — список записей дисплеев.
+
+    Корневой объект при валидации через ``model_validate(raw_dict)``.
+    Пустой список ``displays`` — допустимое состояние (нет зарегистрированных дисплеев).
+
+    Attributes:
+        displays: Список записей дисплеев.
+    """
+
+    displays: list[DisplayEntrySchema] = []
