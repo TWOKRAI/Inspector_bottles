@@ -115,7 +115,9 @@ def run_tokei(tokei: str, cfg: Config) -> dict:
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"error: tokei exited {e.returncode}\nstderr:\n{e.stderr}", file=sys.stderr)
+        print(
+            f"error: tokei exited {e.returncode}\nstderr:\n{e.stderr}", file=sys.stderr
+        )
         raise SystemExit(e.returncode) from e
     return json.loads(proc.stdout)
 

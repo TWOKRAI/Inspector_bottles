@@ -158,7 +158,9 @@ def scan(cfg: Config) -> list[Target]:
     # Используем os.walk с topdown=True, чтобы фильтровать обход и не входить
     # в exclude_dirs и в delete-каталоги (их мы сразу регистрируем целиком,
     # внутрь не лезем — экономит вызовы lstat).
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=cfg.follow_symlinks):
+    for dirpath, dirnames, filenames in os.walk(
+        root, topdown=True, followlinks=cfg.follow_symlinks
+    ):
         current = Path(dirpath)
         # 1) каталоги — отфильтровать to-delete и to-exclude
         keep: list[str] = []
@@ -302,7 +304,9 @@ def render_table(
         total_size = sum(s for _, s, _ in groups.values())
         total_files = sum(f for _, _, f in groups.values())
         out.write(f"{'-' * width}  -----  -----  -------\n")
-        out.write(f"{'TOTAL'.ljust(width)}  {total_count:5d}  {total_files:5d}  {_human(total_size):>7}\n")
+        out.write(
+            f"{'TOTAL'.ljust(width)}  {total_count:5d}  {total_files:5d}  {_human(total_size):>7}\n"
+        )
         out.write("\n")
     else:
         out.write("nothing to clean — already tidy.\n")
@@ -349,7 +353,9 @@ def render_json(
     }
     if result:
         payload["removed_count"] = len(result.removed)
-        payload["errors"] = [{"path": rel, "message": msg} for rel, msg in result.errors]
+        payload["errors"] = [
+            {"path": rel, "message": msg} for rel, msg in result.errors
+        ]
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -361,7 +367,8 @@ def render_json(
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="clean_cache",
-        description="Чистка Python-кэшей и артефактов инструментов (__pycache__, .pytest_cache, *.pyc и т.п.).",
+        description="Чистка Python-кэшей и артефактов инструментов "
+        "(__pycache__, .pytest_cache, *.pyc и т.п.).",
         epilog="По умолчанию работает в dry-run. Реальное удаление — флаг --apply.",
     )
     p.add_argument(

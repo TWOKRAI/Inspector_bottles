@@ -212,7 +212,9 @@ def render_table(rows: list[ModuleRow], cfg: Config) -> str:
     widths = [len(h) for h in headers]
     for row in data:
         for i, cell in enumerate(row):
-            widths[i] = max(widths[i], len(f"{cell:,}" if isinstance(cell, int) else str(cell)))
+            widths[i] = max(
+                widths[i], len(f"{cell:,}" if isinstance(cell, int) else str(cell))
+            )
 
     out = io.StringIO()
     sep = "  "
@@ -269,7 +271,9 @@ def render_csv(rows: list[ModuleRow]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="test_ratio", description="Отношение объёма тестов к коду на модуль.")
+    p = argparse.ArgumentParser(
+        prog="test_ratio", description="Отношение объёма тестов к коду на модуль."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument(
         "--base",
@@ -278,7 +282,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="База, к которой относятся module_roots (default: текущая директория).",
     )
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
-    p.add_argument("--sort-by", choices=["ratio", "code", "tests", "name"], default=None)
+    p.add_argument(
+        "--sort-by", choices=["ratio", "code", "tests", "name"], default=None
+    )
     p.add_argument("--sort-order", choices=["asc", "desc"], default=None)
     p.add_argument("--limit", type=int, default=None)
     return p

@@ -64,12 +64,16 @@ LAYERS_CONFIG_REL = ".claude/commit-layers.txt"
 # Branches matching `<conv-type>/<slug>` are treated as plan-driven; if a plan
 # exists at plans/<slug>.md (or plans/<slug>/plan.md), the commit MUST include
 # `Refs: plans/<slug>...`. See .claude/commands/dev/plan.md for the workflow.
-BRANCH_SLUG_RE = re.compile(r"^(?:feat|fix|refactor|docs|test|chore|perf|build|ci|style|revert)/(?P<slug>.+)$")
+BRANCH_SLUG_RE = re.compile(
+    r"^(?:feat|fix|refactor|docs|test|chore|perf|build|ci|style|revert)/(?P<slug>.+)$"
+)
 
 ALLOWED_RISK = {"low", "medium", "high"}
 ALLOWED_REVERSIBLE = {"yes", "no", "migration-needed"}
 
-SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$")
+SUBJECT_RE = re.compile(
+    r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$"
+)
 TRAILER_RE = re.compile(r"^([A-Z][A-Za-z\-]*): (.+)$")
 
 REQUIRED_BASE_TRAILERS = {"Why"}
@@ -157,7 +161,11 @@ def load_allowed_layers() -> set[str] | None:
             config = parent / LAYERS_CONFIG_REL
             if config.exists():
                 lines = config.read_text(encoding="utf-8").splitlines()
-                layers = {line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
+                layers = {
+                    line.strip()
+                    for line in lines
+                    if line.strip() and not line.strip().startswith("#")
+                }
                 return layers  # may be empty → Layer trailer optional
             break
     return set(DEFAULT_LAYERS)
@@ -284,7 +292,8 @@ def validate(
         if "Layer" in missing:
             hint += f"\n    Layer: {' | '.join(sorted(layers))}"
         result.errors.append(
-            f"Missing required trailers: {sorted(missing)}.\n  Add at end of message (after blank line):\n{hint}"
+            f"Missing required trailers: {sorted(missing)}.\n"
+            f"  Add at end of message (after blank line):\n{hint}"
         )
 
     # 4. Trailer value validation
@@ -302,23 +311,31 @@ def validate(
         for val in trailers["Risk"]:
             level = val.split("—")[0].split("-")[0].strip().lower()
             if level not in ALLOWED_RISK:
-                result.warnings.append(f"Risk: '{val}'. Expected to start with low/medium/high")
+                result.warnings.append(
+                    f"Risk: '{val}'. Expected to start with low/medium/high"
+                )
 
     if "Reversible" in trailers:
         for val in trailers["Reversible"]:
             level = val.split("—")[0].strip().lower()
             if level not in ALLOWED_REVERSIBLE:
-                result.warnings.append(f"Reversible: '{val}'. Expected: yes | no | migration-needed")
+                result.warnings.append(
+                    f"Reversible: '{val}'. Expected: yes | no | migration-needed"
+                )
 
     # 5. Unknown trailers — warning (don't block, extensible)
     for key in trailers:
         if key not in KNOWN_TRAILERS:
-            result.warnings.append(f"Unknown trailer '{key}:'. Known: {sorted(KNOWN_TRAILERS)}")
+            result.warnings.append(
+                f"Unknown trailer '{key}:'. Known: {sorted(KNOWN_TRAILERS)}"
+            )
 
     if "Why" in trailers:
         for val in trailers["Why"]:
             if len(val) < 5:
-                result.warnings.append(f"Why: too brief ('{val}'). Describe motivation in at least one phrase")
+                result.warnings.append(
+                    f"Why: too brief ('{val}'). Describe motivation in at least one phrase"
+                )
 
     # 6. Plan-driven workflow: if branch has a plan, require matching Refs trailer.
     if plan_path:
@@ -342,7 +359,9 @@ def validate(
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        sys.stderr.write("Usage: validate_commit.py <file>\n       echo '...' | validate_commit.py -\n")
+        sys.stderr.write(
+            "Usage: validate_commit.py <file>\n       echo '...' | validate_commit.py -\n"
+        )
         return 2
 
     src = argv[1]
@@ -359,7 +378,9 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("\nERROR: Commit message is invalid:\n")
         for e in result.errors:
             sys.stderr.write(f"  - {e}\n")
-        sys.stderr.write("\nGuide: .claude/COMMIT_GUIDE.md\nBypass (merge/rebase only): git commit --no-verify\n")
+        sys.stderr.write(
+            "\nGuide: .claude/COMMIT_GUIDE.md\nBypass (merge/rebase only): git commit --no-verify\n"
+        )
         return 1
 
     return 0

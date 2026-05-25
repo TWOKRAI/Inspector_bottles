@@ -157,11 +157,17 @@ def _audit_frontmatter(
         fm = _parse_frontmatter(text)
         rel = _rel(f, base)
         if fm is None:
-            out.append(Issue(rel, f"{kind_prefix}_missing_frontmatter", "нет блока --- ... ---"))
+            out.append(
+                Issue(
+                    rel, f"{kind_prefix}_missing_frontmatter", "нет блока --- ... ---"
+                )
+            )
             continue
         for field in required:
             if not fm.get(field):
-                out.append(Issue(rel, f"{kind_prefix}_missing_field", f"нет поля {field!r}"))
+                out.append(
+                    Issue(rel, f"{kind_prefix}_missing_field", f"нет поля {field!r}")
+                )
     return out
 
 
@@ -174,9 +180,13 @@ def audit_agents(cfg: Config) -> list[Issue]:
     files = [
         p
         for p in agents_dir.rglob("*.md")
-        if p.is_file() and p.name != "README.md" and not _is_ignored_name(p.name, cfg.ignore_patterns)
+        if p.is_file()
+        and p.name != "README.md"
+        and not _is_ignored_name(p.name, cfg.ignore_patterns)
     ]
-    return _audit_frontmatter(files, cfg.required_agent_fields, "agent", cfg.project_root)
+    return _audit_frontmatter(
+        files, cfg.required_agent_fields, "agent", cfg.project_root
+    )
 
 
 def audit_commands(cfg: Config) -> list[Issue]:
@@ -188,9 +198,13 @@ def audit_commands(cfg: Config) -> list[Issue]:
     files = [
         p
         for p in cmd_dir.rglob("*.md")
-        if p.is_file() and p.name != "README.md" and not _is_ignored_name(p.name, cfg.ignore_patterns)
+        if p.is_file()
+        and p.name != "README.md"
+        and not _is_ignored_name(p.name, cfg.ignore_patterns)
     ]
-    return _audit_frontmatter(files, cfg.required_command_fields, "command", cfg.project_root)
+    return _audit_frontmatter(
+        files, cfg.required_command_fields, "command", cfg.project_root
+    )
 
 
 def audit_skills(cfg: Config) -> list[Issue]:
@@ -302,7 +316,9 @@ def audit_hooks_settings(cfg: Config) -> list[Issue]:
     try:
         data = json.loads(settings.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
-        return [Issue(_rel(settings, cfg.project_root), "settings_invalid_json", str(e))]
+        return [
+            Issue(_rel(settings, cfg.project_root), "settings_invalid_json", str(e))
+        ]
 
     hooks = data.get("hooks", {})
     if not isinstance(hooks, dict):
@@ -322,7 +338,9 @@ def audit_hooks_settings(cfg: Config) -> list[Issue]:
                     if not token:
                         continue
                     candidate = token.strip("\"'")
-                    if candidate.startswith(".claude/") and (candidate.endswith(".sh") or candidate.endswith(".py")):
+                    if candidate.startswith(".claude/") and (
+                        candidate.endswith(".sh") or candidate.endswith(".py")
+                    ):
                         target = cfg.project_root / candidate
                         if not target.is_file():
                             out.append(
@@ -399,7 +417,9 @@ def render_csv(issues: list[Issue]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="claude_md_audit", description="Meta-аудит .claude/.")
+    p = argparse.ArgumentParser(
+        prog="claude_md_audit", description="Meta-аудит .claude/."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--claude-dir", type=Path, default=None)
     p.add_argument("--project-root", type=Path, default=None)

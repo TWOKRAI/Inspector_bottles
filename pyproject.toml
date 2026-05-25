@@ -157,6 +157,10 @@ skip_empty = true
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# .claude/ — bundled seed-канон (приходит из devseed upgrade), не наш код.
+# Без exclude ruff format расходится с upstream-форматом template'а →
+# devseed upgrade --dry-run постоянно показывает шумовой diff.
+extend-exclude = [".claude/"]
 
 [tool.ruff.lint]
 select = ["E", "F"]
