@@ -299,7 +299,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** public-api-change
 
-**Status:** ✅ Done (commit TBD)
+**Status:** ✅ Done (commit 5dd5aa2)
 
 ---
 
