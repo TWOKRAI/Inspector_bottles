@@ -62,3 +62,17 @@ When qt-mcp is active in a project, prefer it over hand-written Qt introspection
 | "Take a screenshot of the main window" | qt-mcp |
 | "Walk the widget tree and find all `QLabel` instances" | qt-mcp |
 | Refactoring widget code (rename method, move class) | qex / Serena / Grep (qt-mcp only sees runtime, not source) |
+## Launcher options
+
+**Default** (used automatically by `claude-kit add qt-mcp`): see `manifest.yaml` → `mcp_servers.qt-mcp`.
+
+```
+command: uvx
+args: ["qt-mcp"]
+```
+
+Zero-install via uvx. Requires a Python with PyQt/PySide installed in your target project's environment.
+
+**Alternative** (pip-installed): see `templates/mcp-config.json.snippet`.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

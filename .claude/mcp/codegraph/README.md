@@ -80,3 +80,17 @@ Run the smoke test in `SETUP_GUIDE.md` § 5 before committing to it — measure 
 ## Setup
 
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) for install, MCP wire-up, first index, and a 5-question smoke test.
+## Launcher options
+
+**Default** (used automatically by `claude-kit add codegraph`): see `manifest.yaml` → `mcp_servers.codegraph`.
+
+```
+command: npx
+args: ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+```
+
+⚠ Requires `codegraph index` per-project before first use (see "Setup").
+
+**Alternative** (`npm i -g @colbymchenry/codegraph`): see `templates/mcp-config.json.snippet`.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

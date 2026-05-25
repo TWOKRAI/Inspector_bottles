@@ -4,11 +4,22 @@
 
 > **Перед стартом** прочитай `.claude/modes/_stack.md` — там стек, слои, конвенции конкретного проекта.
 
-## Pipeline
+## Pipeline (Contract-first TDD)
 
 ```
-spec-writer → manager → developer/teamlead → tester → (debugger on FAIL) → reviewer → ship
+spec-writer → manager → developer(INTERFACE, only if new-*/public-api-change) → tester(RED, failing-test against interface) → developer/teamlead(GREEN, min impl) → [refactor] → tester(regression) → (debugger on FAIL) → reviewer → ship
 ```
+
+**Порядок строгий и обоснован двумя приёмами:**
+
+1. **Contract-first** — для нового модуля/изменения публичного API сначала пишется формальный контракт в коде (`interface.py` с Protocol + DbC `Pre:`/`Post:`), потом тест от контракта, потом impl. Без этого тест опирается на пересказ ТЗ — реализация и тест расходятся.
+2. **RED-первым** — failing-тест **раньше** implementation. Без этого агент-implementer подгоняет тесты под сломанный код (Pocock: «алгоритмическая оптимизация — модель пишет код с ошибкой, потом тест, подтверждающий это неверное поведение»). RED — структурный анти-cheat.
+
+Развилка по полю `Module contract:` в Task (см. `manager.md`):
+- `new-full` / `new-lite` / `public-api-change` → этап INTERFACE присутствует
+- `impl-only` / `n/a` → INTERFACE skip, контракт уже есть в репо или его не было (bug fix без формального контракта — допустимо, tester фиксит это в report)
+
+Подробности модов tester'а — см. [`agents/company/tester.md`](../agents/company/tester.md) → "Two modes". Подробности INTERFACE-этапа — `module-contract` skill.
 
 Скилл `/pipeline` прогоняет цепочку целиком с failure-recovery через debugger.
 

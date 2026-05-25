@@ -1,15 +1,11 @@
 // Append this block to your project's .mcp.json under "mcpServers".
-// Portable across Windows / macOS / Linux — uses `uv tool run` to invoke
-// python from the `graphifyy` tool environment (no global install needed).
+// Portable across Windows / macOS / Linux — uses `uvx` (ships with uv).
 //
-// Prerequisites:
-//   1. `uv tool install graphifyy` (PyPI package, note the double-y)
-//   2. Run the /graphify skill first to create `graphify-out/graph.json`
-//      (MCP server only SERVES the graph; it does not build it).
+// Prerequisite: run `graphify .` first to create `graphify-out/graph.json`.
 // Strip the comments before merging (JSON doesn't allow comments).
 {
   "graphify": {
-    "command": "uv",
-    "args": ["tool", "run", "--from", "graphifyy", "python", "-m", "graphify.serve", "graphify-out/graph.json"]
+    "command": "uvx",
+    "args": ["graphify-mcp", "serve", "graphify-out/graph.json"]
   }
 }

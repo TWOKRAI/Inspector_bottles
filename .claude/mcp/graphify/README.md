@@ -66,3 +66,15 @@ When graphify is active:
 | "Show me modules with no incoming dependencies" (entry points) | graphify MCP |
 | "How are `auth` and `database` connected?" | graphify MCP — `shortest_path` |
 | "Find the function that parses XML responses" | qex (semantic search) — graphify is structure, not semantics |
+## Launcher options
+
+**Default** (used automatically by `claude-kit add graphify`): see `manifest.yaml` → `mcp_servers.graphify`.
+
+```
+command: uvx
+args: ["graphify-mcp", "serve", "graphify-out/graph.json"]
+```
+
+`uvx` is the single canonical launcher upstream supports. Run `graphify build` first to produce `graphify-out/graph.json`.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

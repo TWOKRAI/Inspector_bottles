@@ -57,3 +57,17 @@ See [SETUP_GUIDE.md](SETUP_GUIDE.md) for both remote (OAuth) and local (PAT) wir
 - **Replaces ad-hoc `gh` usage** in `/ship`, `/handoff`, `/review`. Worth updating those commands' prompts after enabling.
 - **Does NOT replace** `git` local ops — those stay shell-based for speed.
 - No overlap with qex / sentrux / graphify / serena / codegraph (different domain — GitHub state vs local code).
+## Launcher options
+
+**Default** (used automatically by `claude-kit add github`): see `manifest.yaml` → `mcp_servers.github`.
+
+```
+type: http
+url: https://mcp.github.com/mcp
+```
+
+Zero-config OAuth — browser-based auth flow on first connection. No PAT, no local binary.
+
+**Alternative** (local binary with GitHub PAT): see `templates/mcp-config.json.snippet`. The binary name upstream is `github-mcp-server` (Go). Use when you need fine-grained PAT scopes or offline-friendly auth.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

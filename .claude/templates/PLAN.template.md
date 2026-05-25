@@ -23,11 +23,14 @@
 
 **Цель фазы:** одна фраза.
 
-### Task 1.1: <короткое название>
+### Task 1.1: <короткое название> **[VERTICAL SLICE]**
 - **Статус:** [PENDING]
 - **Файлы:** `path/to/file.py`, `path/to/other.py`
-- **Acceptance:** что должно работать после Task
+- **Acceptance:** end-to-end сценарий — что можно продемонстрировать после Task (CLI invocation / HTTP request / UI click → видимый результат)
+- **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a
 - **Refs:** опц. — ADR-XXX, issue#NN
+
+> **[VERTICAL SLICE] обязателен для multi-layer фич** — Task 1.1 должен пройти через ВСЕ затрагиваемые слои в минимальной форме (одно поле в схеме + один method + один endpoint/UI элемент). Это даёт feedback loop в первом же Task, а не в конце Phase. Если фича в одном слое (bug fix, single-layer feature) — пометку убрать. См. `agents/company/manager.md` → "Vertical slice — правило декомпозиции".
 
 Описание задачи: что именно сделать. Если нужны заметки по реализации — здесь.
 
@@ -35,6 +38,7 @@
 - **Статус:** [PENDING]
 - **Файлы:** `...`
 - **Acceptance:** `...`
+- **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a
 
 ## Phase 2: <название фазы>
 

@@ -1,0 +1,29 @@
+# Конфигурация для scripts/claude_md_audit/claude_md_audit.py
+
+[scan]
+# Корень .claude/ относительно запуска
+claude_dir = ".claude"
+# Корень проекта (для разрешения путей в slash-командах: scripts/x.py)
+project_root = "."
+
+[required_fields]
+# Frontmatter поля, обязательные для агентов в .claude/agents/**/*.md
+agents = ["description"]
+# Frontmatter поля, обязательные для команд в .claude/commands/**/*.md
+commands = ["description"]
+
+[checks]
+# Все проверки включены по умолчанию. Отключай ненужные.
+agents = true              # frontmatter агентов
+commands = true            # frontmatter slash-команд
+skills = true              # .claude/skills/<name>/ имеет SKILL.md
+slash_scripts = true       # /xxx ссылается на python scripts/<x>.py — файл существует
+memory_links = true        # MEMORY.md ссылается на существующие *.md в той же папке
+hooks_settings = true      # .claude/settings.json hooks → command-пути существуют
+
+[output]
+format = "table"   # table | json | csv
+group_by = "kind"  # kind | file | none
+sort_by = "file"   # file | kind
+limit = 0
+strict = true      # exit 1 при находках

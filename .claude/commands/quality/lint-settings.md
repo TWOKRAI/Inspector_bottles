@@ -13,7 +13,7 @@ python scripts/lint_settings.py
 1. **`deny` содержит критичные паттерны:** `--no-verify`, `git push --force`, `git reset --hard`, `git clean -f`, `sudo`, `chmod 777`, `mkfs`, `dd if=`
 2. **Secrets защищены:** `Write/Edit(**/.env)`, `**/*.pem`, `**/*.key`, `**/id_rsa`, `**/id_ed25519`
 3. **`allow` не содержит slop-векторов:** `uv add *`, `pip install *`, `npx *`, `cp *`, `chmod *`, `git merge *`, `git rebase *`, `sudo *`, и др.
-4. **Хуки подключены:** `validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check`, `session-end-daily-log`
+4. **Хуки подключены:** `validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check` (Stop-хук `session-end-daily-log` убран с v0.4.0 — журналирование переведено на pre-commit)
 
 Exit codes:
 - `0` — всё ок

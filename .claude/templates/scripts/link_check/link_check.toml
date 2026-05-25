@@ -1,0 +1,48 @@
+# Конфигурация для scripts/link_check/link_check.py
+
+[scan]
+root = "."
+recursive = true
+follow_symlinks = false
+
+[formats]
+include = [".md"]
+
+[exclude]
+dirs = [
+    "__pycache__", ".git", ".venv", "venv", "env",
+    "node_modules", ".qex", ".sentrux",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "build", "dist", "*.egg-info",
+    "site",  # mkdocs build output
+    "_archive",
+]
+file_patterns = []
+path_patterns = []
+
+[check]
+# Проверять относительные пути (файлы существуют от родителя .md).
+relative = true
+# Проверять #anchor (slug заголовка в целевом .md).
+anchor = true
+# HEAD-запросы для http(s). Дефолт OFF — может быть медленно/flaky.
+# Включить разово: --external. Включить навсегда: external = true.
+external = false
+timeout_sec = 5
+user_agent = "link_check/1.0 (+https://github.com)"
+allowed_schemes = ["http", "https"]
+# Regex'ы URL, которые не проверять (даже при --external).
+exclude_url_patterns = [
+    "^https?://localhost",
+    "^https?://127\\.0\\.0\\.1",
+    "^https?://example\\.(com|org|net)",
+]
+
+[output]
+format = "table"        # table | json | csv
+group_by = "kind"       # kind | file | none
+sort_by = "file"        # file | kind | url
+limit = 0
+max_text = 80
+# strict = true → exit 1 при находках (для CI).
+strict = true

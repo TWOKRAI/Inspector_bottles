@@ -107,3 +107,15 @@ ollama serve &
 - [templates/ignore.template](./templates/ignore.template) — шаблон .ignore
 - [templates/mcp-config.json.snippet](./templates/mcp-config.json.snippet) — MCP-конфиг
 - [templates/post-commit.hook.sh](./templates/post-commit.hook.sh) — git hook
+## Launcher options
+
+**Default** (used automatically by `claude-kit add qex`): see `manifest.yaml` → `mcp_servers.qex`.
+
+```
+command: python
+args: [".claude/mcp/qex-launcher.py"]
+```
+
+Only one launcher — qex bootstraps itself via the local Python interpreter.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

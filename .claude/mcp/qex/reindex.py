@@ -20,9 +20,9 @@ import sys
 from pathlib import Path
 
 # ── Пути (аналогично qex-launcher.py) ──────────────────────────────────────
-SCRIPT_DIR = Path(__file__).resolve().parent           # .claude/mcp/qex
-MCP_DIR = SCRIPT_DIR.parent                            # .claude/mcp
-PROJECT_ROOT = MCP_DIR.parent.parent                   # корень проекта
+SCRIPT_DIR = Path(__file__).resolve().parent  # .claude/mcp/qex
+MCP_DIR = SCRIPT_DIR.parent  # .claude/mcp
+PROJECT_ROOT = MCP_DIR.parent.parent  # корень проекта
 
 IS_WIN = platform.system() == "Windows"
 
@@ -51,15 +51,17 @@ env = {
 
 def jsonrpc_request(method: str, params: dict, req_id: int = 1) -> str:
     """Формирует JSON-RPC 2.0 запрос."""
-    return json.dumps({
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "method": f"tools/call",
-        "params": {
-            "name": method,
-            "arguments": params,
-        },
-    })
+    return json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": "tools/call",
+            "params": {
+                "name": method,
+                "arguments": params,
+            },
+        }
+    )
 
 
 def run_qex_rpc(method: str, params: dict) -> dict | None:
@@ -70,20 +72,24 @@ def run_qex_rpc(method: str, params: dict) -> dict | None:
     """
     import threading
 
-    init_request = json.dumps({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "qex-reindex-script", "version": "1.0.0"},
-        },
-    })
-    init_notification = json.dumps({
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-    })
+    init_request = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "qex-reindex-script", "version": "1.0.0"},
+            },
+        }
+    )
+    init_notification = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+        }
+    )
     tool_call = jsonrpc_request(method, params, req_id=1)
 
     print(f"Запуск: {qex_bin}")
@@ -154,6 +160,7 @@ def check_ollama() -> bool:
     """Проверяет что Ollama работает."""
     try:
         import urllib.request
+
         resp = urllib.request.urlopen("http://localhost:11434/", timeout=3)
         return b"running" in resp.read().lower() or resp.status == 200
     except Exception:
@@ -171,9 +178,9 @@ def main():
         print("Запусти: ollama serve")
         sys.exit(1)
 
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"qex reindex — {'полная' if force else 'инкрементальная'}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # Очистка индекса
     if clear:
@@ -192,7 +199,7 @@ def main():
     result = run_qex_rpc("index_codebase", params)
 
     if result:
-        print(f"\nГотово!")
+        print("\nГотово!")
         # Попробуем вытащить текст результата
         content = result.get("content", [])
         for item in content:
