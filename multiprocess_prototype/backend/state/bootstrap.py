@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from multiprocess_prototype.backend.config.schemas import DisplaysConfig
 from multiprocess_prototype.backend.state.schema import (
     STATE_DISPLAYS,
@@ -114,6 +116,7 @@ def build_initial_state(
     topology_dict: dict,
     sys_config_dict: dict,
     displays_config: DisplaysConfig | None = None,
+    recipes_dir: Path | None = None,
 ) -> dict:
     """Построить начальное дерево состояния из topology и system config.
 
@@ -126,6 +129,10 @@ def build_initial_state(
         displays_config: опциональный DisplaysConfig из displays.yaml (Phase 4).
             Если передан -- ветка ``displays`` наполняется записями из реестра.
             Если None -- ``displays`` остаётся пустым dict (обратная совместимость).
+        recipes_dir: опциональный Path до директории с рецептами (Phase 5).
+            Если передан и существует -- ветка ``recipes.available`` наполняется
+            отсортированным списком slug'ов (stem *.yaml файлов).
+            Если None или не существует -- ``available`` остаётся пустым списком.
 
     Returns:
         dict вида:
@@ -196,6 +203,12 @@ def build_initial_state(
     else:
         displays_state = {}
 
+    # Phase 5 — ветка recipes.available: slug'и из recipes_dir если передан и существует
+    if recipes_dir is not None and recipes_dir.exists():
+        available = sorted(p.stem for p in recipes_dir.glob("*.yaml"))
+    else:
+        available: list[str] = []
+
     return {
         "processes": processes,
         "system": system,
@@ -203,6 +216,6 @@ def build_initial_state(
         # Phase 3+ — заглушечные ветки; наполняются данными в соответствующих фазах
         STATE_SERVICES: {},
         STATE_DISPLAYS: displays_state,
-        STATE_RECIPES: {"active": None, "available": []},
+        STATE_RECIPES: {"active": None, "available": available},
         STATE_PLUGINS: {"catalog": [], "paths": []},
     }
