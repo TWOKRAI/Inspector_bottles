@@ -125,7 +125,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** new-full
 
-**Status:** ⏳ Todo
+**Status:** ✅ Done
 
 ---
 
