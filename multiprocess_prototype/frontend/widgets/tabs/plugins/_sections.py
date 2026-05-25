@@ -280,19 +280,27 @@ def _make_plugin_factory(plugin_name: str, title: str) -> Callable[["AppContext"
 # ---------------------------------------------------------------------------
 
 
+# Модульный кэш singleton-секций «Пути» по id(ctx).
+# Замыкание в _make_paths_factory не работает между вызовами
+# build_plugin_sections() — каждый refresh_catalog() создавал бы новую секцию
+# с новым PathsSubtabWidget, что ломало бы подписку catalog_updated.
+_PATHS_SECTION_CACHE: "dict[int, _PathsSection]" = {}
+
+
 def _make_paths_factory(ctx: "AppContext") -> "Callable[[AppContext], _PathsSection]":
     """Фабрика singleton-секции «Пути».
 
-    Создаёт _PathsSection один раз и возвращает его при каждом вызове,
-    чтобы сохранить подписку catalog_updated даже после refresh_catalog().
+    Кэш по id(ctx) переживает повторные вызовы build_plugin_sections(),
+    что гарантирует сохранение подписки catalog_updated после refresh_catalog().
     """
-    # Singleton секции хранится в замыкании
-    _instance: list[_PathsSection] = []
+    cache_key = id(ctx)
 
     def factory(_ctx: "AppContext") -> _PathsSection:
-        if not _instance:
-            _instance.append(_PathsSection(ctx))
-        return _instance[0]
+        section = _PATHS_SECTION_CACHE.get(cache_key)
+        if section is None:
+            section = _PathsSection(ctx)
+            _PATHS_SECTION_CACHE[cache_key] = section
+        return section
 
     return factory
 
