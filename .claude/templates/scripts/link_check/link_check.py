@@ -173,11 +173,15 @@ def iter_files(cfg: Config):
                 yield entry, rel
 
 
-def _check_external(url: str, cfg: Config, cache: dict[str, tuple[int, str]]) -> tuple[bool, str]:
+def _check_external(
+    url: str, cfg: Config, cache: dict[str, tuple[int, str]]
+) -> tuple[bool, str]:
     if url in cache:
         ok, detail = cache[url]
         return bool(ok), detail
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": cfg.user_agent})
+    req = urllib.request.Request(
+        url, method="HEAD", headers={"User-Agent": cfg.user_agent}
+    )
     try:
         with urllib.request.urlopen(req, timeout=cfg.timeout_sec) as resp:
             ok = 200 <= resp.status < 400
@@ -186,7 +190,9 @@ def _check_external(url: str, cfg: Config, cache: dict[str, tuple[int, str]]) ->
         # Many sites reject HEAD — retry GET
         if e.code in (403, 405):
             try:
-                req2 = urllib.request.Request(url, headers={"User-Agent": cfg.user_agent})
+                req2 = urllib.request.Request(
+                    url, headers={"User-Agent": cfg.user_agent}
+                )
                 with urllib.request.urlopen(req2, timeout=cfg.timeout_sec) as resp:
                     ok = 200 <= resp.status < 400
                     detail = f"HTTP {resp.status}"
@@ -262,7 +268,9 @@ def _check_one(
         if file not in headings_cache:
             headings_cache[file] = _headings_in(file)
         if slug and slug not in headings_cache[file]:
-            return Issue(rel, lineno, url, "missing_anchor", f"anchor #{slug} not in {rel}")
+            return Issue(
+                rel, lineno, url, "missing_anchor", f"anchor #{slug} not in {rel}"
+            )
         return None
 
     parsed = urlparse(url)
@@ -272,13 +280,17 @@ def _check_one(
         if not cfg.check_external:
             return None
         if parsed.scheme not in cfg.allowed_schemes:
-            return Issue(rel, lineno, url, "bad_scheme", f"scheme {parsed.scheme!r} not allowed")
+            return Issue(
+                rel, lineno, url, "bad_scheme", f"scheme {parsed.scheme!r} not allowed"
+            )
         ok, detail = _check_external(url, cfg, http_cache)
         if not ok:
             return Issue(rel, lineno, url, "http_error", detail)
         return None
     if parsed.scheme and parsed.scheme not in cfg.allowed_schemes:
-        return Issue(rel, lineno, url, "bad_scheme", f"scheme {parsed.scheme!r} not allowed")
+        return Issue(
+            rel, lineno, url, "bad_scheme", f"scheme {parsed.scheme!r} not allowed"
+        )
 
     # relative path (no scheme, no host)
     if not cfg.check_relative:
@@ -369,25 +381,44 @@ def render_csv(issues: list[Issue]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="link_check", description="Проверка Markdown-ссылок.")
+    p = argparse.ArgumentParser(
+        prog="link_check", description="Проверка Markdown-ссылок."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
     p.add_argument("--group-by", choices=["kind", "file", "none"], default=None)
     p.add_argument("--sort-by", choices=["file", "kind", "url"], default=None)
     p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--external", action="store_true", help="Включить HEAD-проверку HTTP-ссылок.")
+    p.add_argument(
+        "--external", action="store_true", help="Включить HEAD-проверку HTTP-ссылок."
+    )
     p.add_argument(
         "--no-external",
         action="store_true",
         help="Не проверять HTTP (перекрывает --external и конфиг).",
     )
     p.add_argument("--no-anchor", action="store_true", help="Не проверять anchor'ы.")
-    p.add_argument("--no-strict", action="store_true", help="Не падать с exit 1 при находках.")
+    p.add_argument(
+        "--no-strict", action="store_true", help="Не падать с exit 1 при находках."
+    )
     return p
 
 
+def _force_utf8_stdout() -> None:
+    """Зафиксировать UTF-8 для stdout/stderr (Windows cp1251 fix)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdout()
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(args.config)
@@ -440,7 +471,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(render_summary(issues, cfg))
         sys.stdout.write(render_table(issues))
         if cfg.check_external:
-            sys.stdout.write(f"\nElapsed: {elapsed:.1f}s, HTTP-checks: {len(http_cache)}\n")
+            sys.stdout.write(
+                f"\nElapsed: {elapsed:.1f}s, HTTP-checks: {len(http_cache)}\n"
+            )
 
     if issues and cfg.strict:
         return 1

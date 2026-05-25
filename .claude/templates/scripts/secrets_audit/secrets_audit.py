@@ -229,7 +229,10 @@ def render_table(findings: list[Finding]) -> str:
     if not findings:
         return "OK: утечек не найдено.\n"
     headers = ["pattern", "entropy", "file:line", "match", "text"]
-    data = [[f.pattern, f"{f.entropy:.2f}", f"{f.file}:{f.line}", f.match, f.text] for f in findings]
+    data = [
+        [f.pattern, f"{f.entropy:.2f}", f"{f.file}:{f.line}", f.match, f.text]
+        for f in findings
+    ]
     widths = [len(c) for c in headers]
     for row in data:
         for i, cell in enumerate(row):
@@ -239,7 +242,9 @@ def render_table(findings: list[Finding]) -> str:
     out.write(sep.join(h.ljust(widths[i]) for i, h in enumerate(headers)) + "\n")
     out.write(sep.join("-" * w for w in widths) + "\n")
     for row in data:
-        out.write(sep.join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)) + "\n")
+        out.write(
+            sep.join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)) + "\n"
+        )
     return out.getvalue()
 
 
@@ -295,7 +300,9 @@ def render_csv(findings: list[Finding]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="secrets_audit", description="Аудит утечек secrets по regex.")
+    p = argparse.ArgumentParser(
+        prog="secrets_audit", description="Аудит утечек secrets по regex."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--format", choices=["table", "json", "csv"], default=None)
@@ -310,7 +317,20 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_stdout() -> None:
+    """Зафиксировать UTF-8 для stdout/stderr (Windows cp1251 fix)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdout()
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(args.config)

@@ -75,6 +75,20 @@ Output appears in `./graphify-out/`:
 >
 > The skill-based path covers most workflows: Claude reads `graphify-out/graph.json` directly via the file system and uses the BFS/DFS query tools the skill exposes. No MCP server needed for that.
 
+### Why `--with mcp` (when it ships)
+
+The PyPI package is **`graphifyy`** (double-y, not `graphify-mcp`). The CLI binary it installs is just `graphify`. When the upstream MCP module ships, the launcher will need an explicit `--with mcp` because **graphifyy does NOT pull the `mcp` package into its dependencies** — running `python -m graphify.serve graph.json` straight from a `graphifyy` install fails with `ModuleNotFoundError: No module named 'mcp'`.
+
+Workaround (already baked into the snippet):
+
+```bash
+uv tool run --from graphifyy --with mcp python -m graphify.serve graphify-out/graph.json
+```
+
+`--with mcp` tells `uv` to inject `mcp` into the temporary tool environment alongside `graphifyy`. Until upstream adds `mcp` to its dependencies (or to a `[serve]` extra), this is the working invocation.
+
+> If you see `MCP server graphify failed to start: ModuleNotFoundError` in `/mcp` output after enabling the block, the `--with mcp` flag was lost during merge into `.mcp.json` — check `args` and reapply from the snippet.
+
 ---
 
 ## 4. Restart Claude Code and verify

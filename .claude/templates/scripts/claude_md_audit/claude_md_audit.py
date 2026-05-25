@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import io
 import json
 import re
@@ -36,6 +37,25 @@ _SCRIPT_REF = re.compile(
 )
 _MEM_LINK = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<href>[^)#]+\.md)(?:#[^)]*)?\)")
 
+# Code-fence (```...```), inline-code (`...`) и frontmatter (--- ... ---).
+# Содержимое не должно парситься как ссылки/пути.
+_FENCED_BLOCK = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE = re.compile(r"`[^`\n]+`")
+_LEADING_FRONTMATTER = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
+
+
+def _strip_code_and_frontmatter(text: str) -> str:
+    """Убрать содержимое markdown-блоков, которое не должно парситься как prose.
+
+    Удаляет: leading frontmatter (--- ... ---), fenced code blocks (```...```),
+    inline code (`...`). Возвращает текст-prose, по которому безопасно искать
+    реальные ссылки на скрипты.
+    """
+    out = _LEADING_FRONTMATTER.sub("", text, count=1)
+    out = _FENCED_BLOCK.sub("", out)
+    out = _INLINE_CODE.sub("", out)
+    return out
+
 
 @dataclass(frozen=True)
 class Config:
@@ -43,6 +63,7 @@ class Config:
     project_root: Path
     required_agent_fields: tuple[str, ...]
     required_command_fields: tuple[str, ...]
+    ignore_patterns: tuple[str, ...]
     check_agents: bool
     check_commands: bool
     check_skills: bool
@@ -68,6 +89,7 @@ def load_config(path: Path) -> Config:
         project_root=Path(scan.get("project_root", ".")).expanduser(),
         required_agent_fields=tuple(req.get("agents", ["description"])),
         required_command_fields=tuple(req.get("commands", ["description"])),
+        ignore_patterns=tuple(scan.get("ignore_patterns", ["_*"])),
         check_agents=bool(chk.get("agents", True)),
         check_commands=bool(chk.get("commands", True)),
         check_skills=bool(chk.get("skills", True)),
@@ -80,6 +102,11 @@ def load_config(path: Path) -> Config:
         limit=int(out.get("limit", 0)),
         strict=bool(out.get("strict", True)),
     )
+
+
+def _is_ignored_name(name: str, patterns: tuple[str, ...]) -> bool:
+    """Имя файла соответствует одному из glob-паттернов игнора."""
+    return any(fnmatch.fnmatch(name, pat) for pat in patterns)
 
 
 @dataclass
@@ -130,11 +157,17 @@ def _audit_frontmatter(
         fm = _parse_frontmatter(text)
         rel = _rel(f, base)
         if fm is None:
-            out.append(Issue(rel, f"{kind_prefix}_missing_frontmatter", "нет блока --- ... ---"))
+            out.append(
+                Issue(
+                    rel, f"{kind_prefix}_missing_frontmatter", "нет блока --- ... ---"
+                )
+            )
             continue
         for field in required:
             if not fm.get(field):
-                out.append(Issue(rel, f"{kind_prefix}_missing_field", f"нет поля {field!r}"))
+                out.append(
+                    Issue(rel, f"{kind_prefix}_missing_field", f"нет поля {field!r}")
+                )
     return out
 
 
@@ -144,8 +177,16 @@ def audit_agents(cfg: Config) -> list[Issue]:
     agents_dir = cfg.claude_dir / "agents"
     if not agents_dir.is_dir():
         return []
-    files = [p for p in agents_dir.rglob("*.md") if p.is_file() and p.name != "README.md"]
-    return _audit_frontmatter(files, cfg.required_agent_fields, "agent", cfg.project_root)
+    files = [
+        p
+        for p in agents_dir.rglob("*.md")
+        if p.is_file()
+        and p.name != "README.md"
+        and not _is_ignored_name(p.name, cfg.ignore_patterns)
+    ]
+    return _audit_frontmatter(
+        files, cfg.required_agent_fields, "agent", cfg.project_root
+    )
 
 
 def audit_commands(cfg: Config) -> list[Issue]:
@@ -154,8 +195,16 @@ def audit_commands(cfg: Config) -> list[Issue]:
     cmd_dir = cfg.claude_dir / "commands"
     if not cmd_dir.is_dir():
         return []
-    files = [p for p in cmd_dir.rglob("*.md") if p.is_file() and p.name != "README.md"]
-    return _audit_frontmatter(files, cfg.required_command_fields, "command", cfg.project_root)
+    files = [
+        p
+        for p in cmd_dir.rglob("*.md")
+        if p.is_file()
+        and p.name != "README.md"
+        and not _is_ignored_name(p.name, cfg.ignore_patterns)
+    ]
+    return _audit_frontmatter(
+        files, cfg.required_command_fields, "command", cfg.project_root
+    )
 
 
 def audit_skills(cfg: Config) -> list[Issue]:
@@ -180,7 +229,12 @@ def audit_skills(cfg: Config) -> list[Issue]:
 
 
 def audit_slash_scripts(cfg: Config) -> list[Issue]:
-    """Slash-команда ссылается на `python scripts/<x>` — проверить, что файл есть."""
+    """Slash-команда ссылается на `python scripts/<x>` — проверить, что файл есть.
+
+    Игнорирует ссылки внутри code-fence / inline-code (`<example>` блоки в
+    docs самого claude-md-audit.md). Принимает fallback на `.claude/scripts/`
+    для скриптов вроде `lint_agents.py`, которые живут в seed, а не в проекте.
+    """
     if not cfg.check_slash_scripts:
         return []
     cmd_dir = cfg.claude_dir / "commands"
@@ -190,10 +244,13 @@ def audit_slash_scripts(cfg: Config) -> list[Issue]:
     for f in cmd_dir.rglob("*.md"):
         if f.name == "README.md":
             continue
+        if _is_ignored_name(f.name, cfg.ignore_patterns):
+            continue
         try:
-            text = f.read_text(encoding="utf-8", errors="replace")
+            raw_text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        text = _strip_code_and_frontmatter(raw_text)
         rel_cmd = _rel(f, cfg.project_root)
         seen: set[str] = set()
         for m in _SCRIPT_REF.finditer(text):
@@ -201,15 +258,21 @@ def audit_slash_scripts(cfg: Config) -> list[Issue]:
             if script_path in seen:
                 continue
             seen.add(script_path)
-            target = cfg.project_root / script_path
-            if not target.is_file():
-                out.append(
-                    Issue(
-                        rel_cmd,
-                        "command_orphan_script",
-                        f"ссылается на отсутствующий {script_path}",
-                    )
+            primary = cfg.project_root / script_path
+            if primary.is_file():
+                continue
+            # Fallback: .claude/scripts/<basename> — скрипты, живущие в seed
+            # (например `scripts/lint_agents.py` → `.claude/scripts/lint_agents.py`).
+            seed_fallback = cfg.claude_dir / "scripts" / Path(script_path).name
+            if seed_fallback.is_file():
+                continue
+            out.append(
+                Issue(
+                    rel_cmd,
+                    "command_orphan_script",
+                    f"ссылается на отсутствующий {script_path}",
                 )
+            )
     return out
 
 
@@ -253,7 +316,9 @@ def audit_hooks_settings(cfg: Config) -> list[Issue]:
     try:
         data = json.loads(settings.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
-        return [Issue(_rel(settings, cfg.project_root), "settings_invalid_json", str(e))]
+        return [
+            Issue(_rel(settings, cfg.project_root), "settings_invalid_json", str(e))
+        ]
 
     hooks = data.get("hooks", {})
     if not isinstance(hooks, dict):
@@ -273,7 +338,9 @@ def audit_hooks_settings(cfg: Config) -> list[Issue]:
                     if not token:
                         continue
                     candidate = token.strip("\"'")
-                    if candidate.startswith(".claude/") and (candidate.endswith(".sh") or candidate.endswith(".py")):
+                    if candidate.startswith(".claude/") and (
+                        candidate.endswith(".sh") or candidate.endswith(".py")
+                    ):
                         target = cfg.project_root / candidate
                         if not target.is_file():
                             out.append(
@@ -350,7 +417,9 @@ def render_csv(issues: list[Issue]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="claude_md_audit", description="Meta-аудит .claude/.")
+    p = argparse.ArgumentParser(
+        prog="claude_md_audit", description="Meta-аудит .claude/."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--claude-dir", type=Path, default=None)
     p.add_argument("--project-root", type=Path, default=None)
@@ -362,7 +431,25 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_stdout() -> None:
+    """Зафиксировать UTF-8 для stdout/stderr.
+
+    На Windows-консоли (cp1251 codepage) русские строки в выводе превращаются
+    в '?????'. Python 3.11+ умеет переключить io-streams в UTF-8 на лету.
+    Safe для не-TTY и redirected потоков (no-op если reconfigure недоступен).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdout()
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(args.config)

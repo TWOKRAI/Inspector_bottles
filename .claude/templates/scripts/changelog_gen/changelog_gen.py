@@ -36,7 +36,9 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("changelog_gen.toml")
 
 # type(scope)?!?: subject
-_CC_HEADER = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]+)\))?(?P<bang>!)?:\s+(?P<subject>.+)$")
+_CC_HEADER = re.compile(
+    r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]+)\))?(?P<bang>!)?:\s+(?P<subject>.+)$"
+)
 _BREAKING_FOOTER = re.compile(r"^BREAKING[ -]CHANGE:\s*(.+)$", re.MULTILINE)
 # git log --format separator
 _REC_SEP = "\x1e"
@@ -115,7 +117,9 @@ def _git_log(range_spec: str, cwd: Path) -> list[str]:
     cmd = ["git", "log", "--no-merges", f"--format={fmt}"]
     if range_spec:
         cmd.append(range_spec)
-    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8")
+    proc = subprocess.run(
+        cmd, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8"
+    )
     if proc.returncode != 0:
         raise RuntimeError(f"git log failed: {proc.stderr.strip()}")
     return [r for r in proc.stdout.split(_REC_SEP) if r.strip()]
@@ -275,7 +279,10 @@ def render_json(log: Changelog, cfg: Config) -> str:
         {
             "release_name": log.release_name,
             "release_date": log.release_date,
-            "groups": {label: [c2d(c) for c in log.groups.get(label, [])] for label, _ in cfg.groups},
+            "groups": {
+                label: [c2d(c) for c in log.groups.get(label, [])]
+                for label, _ in cfg.groups
+            },
             "breaking": [c2d(c) for c in log.breaking] if cfg.include_breaking else [],
             "unknown": [c2d(c) for c in log.unknown] if cfg.include_unknown else [],
         },
@@ -285,7 +292,9 @@ def render_json(log: Changelog, cfg: Config) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="changelog_gen", description="Changelog из Conventional Commits.")
+    p = argparse.ArgumentParser(
+        prog="changelog_gen", description="Changelog из Conventional Commits."
+    )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     p.add_argument("--cwd", type=Path, default=Path("."), help="Корень git-репо.")
     p.add_argument(
@@ -302,7 +311,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--style", choices=["markdown", "plain", "json"], default=None)
     p.add_argument("--release-name", default=None)
-    p.add_argument("--release-date", default=None, help="ISO date, по умолчанию сегодня.")
+    p.add_argument(
+        "--release-date", default=None, help="ISO date, по умолчанию сегодня."
+    )
     p.add_argument("--no-hashes", action="store_true")
     p.add_argument("--no-breaking", action="store_true")
     p.add_argument("--authors", action="store_true")
@@ -314,7 +325,20 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_stdout() -> None:
+    """Зафиксировать UTF-8 для stdout/stderr (Windows cp1251 fix)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdout()
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(args.config)

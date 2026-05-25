@@ -142,7 +142,9 @@ def _file_excluded(name: str, rel_path: str, cfg: ExcludeCfg) -> bool:
     return any(fnmatch.fnmatch(rel_path, pat) for pat in cfg.path_patterns)
 
 
-def iter_files(scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg) -> Iterator[Path]:
+def iter_files(
+    scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg
+) -> Iterator[Path]:
     """Итеративный обход с pruning исключённых директорий."""
     root = scan.root.resolve()
     if not root.exists():
@@ -176,7 +178,9 @@ def iter_files(scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg) -> Itera
                     yield entry
 
 
-def _accept_file(path: Path, root: Path, include: frozenset[str], exclude: ExcludeCfg) -> bool:
+def _accept_file(
+    path: Path, root: Path, include: frozenset[str], exclude: ExcludeCfg
+) -> bool:
     if include and path.suffix.lower() not in include:
         return False
     try:
@@ -499,7 +503,9 @@ def render_table(rows: list[GroupRow], total: GroupRow | None) -> str:
     widths = [len(h) for h in _HEADERS]
     for row in data:
         for i, cell in enumerate(row):
-            widths[i] = max(widths[i], len(f"{cell:,}" if isinstance(cell, int) else str(cell)))
+            widths[i] = max(
+                widths[i], len(f"{cell:,}" if isinstance(cell, int) else str(cell))
+            )
 
     out = io.StringIO()
     sep = "  "
@@ -641,7 +647,9 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
             show_total=out.show_total,
             limit=args.limit,
         )
-    return Config(scan=scan, formats=cfg.formats, exclude=cfg.exclude, count=cfg.count, output=out)
+    return Config(
+        scan=scan, formats=cfg.formats, exclude=cfg.exclude, count=cfg.count, output=out
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

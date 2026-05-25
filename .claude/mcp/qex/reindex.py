@@ -55,7 +55,7 @@ def jsonrpc_request(method: str, params: dict, req_id: int = 1) -> str:
         {
             "jsonrpc": "2.0",
             "id": req_id,
-            "method": "tools/call",
+            "method": f"tools/call",
             "params": {
                 "name": method,
                 "arguments": params,
@@ -199,7 +199,7 @@ def main():
     result = run_qex_rpc("index_codebase", params)
 
     if result:
-        print("\nГотово!")
+        print(f"\nГотово!")
         # Попробуем вытащить текст результата
         content = result.get("content", [])
         for item in content:

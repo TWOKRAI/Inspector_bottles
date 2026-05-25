@@ -97,7 +97,9 @@ def lint_file(path: Path) -> tuple[list[str], list[str]]:
 
     model = fm.get("model", "")
     if model and model not in KNOWN_MODELS:
-        warnings.append(f"model {model!r} not in KNOWN_MODELS — typo, or update the linter?")
+        warnings.append(
+            f"model {model!r} not in KNOWN_MODELS — typo, or update the linter?"
+        )
 
     tools = fm.get("tools", "")
     if tools:
@@ -140,7 +142,9 @@ def cross_check_claude_md(claude_md: Path, agent_files: dict[str, Path]) -> list
     mentioned = candidates & known_roles
     missing = mentioned - set(agent_files.keys())
     for name in sorted(missing):
-        warnings.append(f"CLAUDE.md mentions agent {name!r} but no agents/company/{name}.md found")
+        warnings.append(
+            f"CLAUDE.md mentions agent {name!r} but no agents/company/{name}.md found"
+        )
     return warnings
 
 

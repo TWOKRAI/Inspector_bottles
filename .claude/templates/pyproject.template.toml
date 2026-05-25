@@ -136,12 +136,19 @@ reportUnnecessaryTypeIgnoreComment = "warning"
 # ─── bandit (security) ───────────────────────────────────────────────────────
 # Pre-commit hook reads this section. Skips known false-positives for the
 # project skeleton (subprocess calls with constant `git` / `bash` args).
+#
+# `scripts/` is excluded because it holds bundled dev-utilities (changelog_gen,
+# link_check, claude_md_audit, secrets_audit, ...) which by design call
+# `git log` via subprocess and HEAD requests via urllib. These patterns are
+# safe-but-noisy for bandit; auditing them is the job of code review, not the
+# pre-commit gate. (See plans/sync-script-bundle-propagation.md / ADR 0002.)
 [tool.bandit]
-exclude_dirs = ["tests", ".venv", "build", "dist", ".claude"]
+exclude_dirs = ["tests", ".venv", "build", "dist", ".claude", "scripts"]
 skips = [
     "B404",   # subprocess import — we *are* using subprocess legitimately
     "B603",   # subprocess without shell=True — that's the safe form
     "B607",   # partial executable path — resolved via PATH, expected
+    "B310",   # urllib.request — used by link_check for HEAD requests, intentional
 ]
 
 # ─── coverage ─────────────────────────────────────────────────────────────────

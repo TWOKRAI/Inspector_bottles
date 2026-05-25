@@ -70,15 +70,17 @@ repos:
   #
   # NB: hook-level `exclude` REPLACES the global `exclude:` at the top of this
   # file — pre-commit does not concatenate them. So we must include `\.claude/`
-  # explicitly here, otherwise bandit will scan seed scripts (which use
-  # subprocess + shell-y patterns intentionally) and break the first commit.
+  # AND `scripts/` explicitly here. `scripts/` holds bundled dev-utilities
+  # (changelog_gen, link_check, secrets_audit, claude_md_audit) which by design
+  # use subprocess (`git log`) and urllib (HEAD checks) — safe-but-noisy for
+  # bandit. The [tool.bandit] section in pyproject.toml mirrors this exclude.
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.0
     hooks:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^(tests/|\.claude/)
+        exclude: ^(tests/|\.claude/|scripts/)
 
   # ─── Sentrux: architectural rule check (pre-push, after pyright) ───────────
   # Runs `sentrux check` against .sentrux/rules.toml. If sentrux binary is
