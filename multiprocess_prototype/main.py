@@ -30,7 +30,6 @@ PROJECT_ROOT = HERE.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-PLUGINS_DIR = PROJECT_ROOT / "Plugins"
 CONFIG_PATH = HERE / "backend" / "config" / "system.yaml"
 # Phase 2.0 pilot rollout: дефолтная топология — pilot_widgets стенд.
 # После завершения rollout вернуть на region_pipeline.yaml или сделать выбор
@@ -82,8 +81,12 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     sys_config = load_system_config(CONFIG_PATH)
     print(f"[bootstrap] config: {CONFIG_PATH.name} загружен")
 
-    # 2. Автообнаружение плагинов
-    discovered = PluginRegistry.discover(str(PLUGINS_DIR))
+    # 2. Автообнаружение плагинов: пути из sys_config.discovery.plugin_paths
+    _plugin_paths = [
+        str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p
+        for p in (sys_config.discovery.plugin_paths if sys_config.discovery.auto_discover else [])
+    ]
+    discovered = PluginRegistry.discover(*_plugin_paths)
     print(f"[bootstrap] обнаружено плагинов: {discovered}")
 
     # 3. Загрузка topology из YAML/JSON
