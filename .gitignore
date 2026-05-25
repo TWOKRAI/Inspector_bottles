@@ -72,6 +72,9 @@ Inspector_backup_worker/
 # Legacy user prefs
 multiprocess_prototype/.inspector_prefs.json
 
+# Пользовательские переопределения конфига (персональные пути, не для репо)
+multiprocess_prototype/backend/config/user_overrides.yaml
+
 # Local Milvus standalone (docker compose)
 milvus-docker/volumes/
 

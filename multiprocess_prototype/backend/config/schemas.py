@@ -145,8 +145,37 @@ class SystemConfig(SchemaBase):
         return section.model_dump()
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Рекурсивно слить override поверх base.
+
+    Правила:
+    - Если оба значения — dict, рекурсивно мержить
+    - Иначе значение из override заменяет base
+    - Функция чистая: аргументы не мутируются
+
+    Args:
+        base:     Базовый словарь (нижний приоритет).
+        override: Словарь переопределений (верхний приоритет).
+
+    Returns:
+        Новый dict — результат глубокого слияния.
+    """
+    result = dict(base)
+    for key, override_value in override.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(override_value, dict):
+            result[key] = _deep_merge(base_value, override_value)
+        else:
+            result[key] = override_value
+    return result
+
+
 def load_system_config(path: Path | str | None = None) -> SystemConfig:
-    """Загрузить и валидировать system.yaml.
+    """Загрузить и валидировать system.yaml, автоматически подхватывая user_overrides.yaml.
+
+    Если рядом с system.yaml существует user_overrides.yaml — его содержимое
+    deep-merge'ится поверх базового конфига (override имеет приоритет).
+    Пустой или невалидный user_overrides.yaml игнорируется с предупреждением.
 
     Args:
         path: путь к system.yaml (None = config/system.yaml рядом с этим файлом)
@@ -165,5 +194,15 @@ def load_system_config(path: Path | str | None = None) -> SystemConfig:
 
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+
+    # Автоматически подхватить user_overrides.yaml рядом с system.yaml
+    override_path = path.parent / "user_overrides.yaml"
+    if override_path.exists():
+        try:
+            with open(override_path, encoding="utf-8") as f:
+                override_raw = yaml.safe_load(f) or {}
+            raw = _deep_merge(raw, override_raw)
+        except yaml.YAMLError as e:
+            print(f"[config] user_overrides.yaml: ошибка разбора: {e}")
 
     return SystemConfig.model_validate(raw)
