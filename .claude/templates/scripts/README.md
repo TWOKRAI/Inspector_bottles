@@ -1,5 +1,12 @@
 # `scripts/` — каталог утилит проекта
 
+> **BUNDLE README — НЕ project copy.** Этот README лежит в seed-bundle
+> `.claude/templates/scripts/`. При `claude-kit new` / `claude-kit sync`
+> весь bundle (включая этот файл) auto-копируется в проектный `scripts/`.
+> Project-local правки выигрывают: существующие `scripts/<X>/` НЕ
+> перезаписываются. Детали и trade-off — `docs/decisions/0002-script-bundle-delivery.md`
+> и [BOOTSTRAP.md](../../BOOTSTRAP.md#scripts-bundle-два-уровня).
+
 Учётный индекс того, что лежит в `scripts/`. Один источник истины: какие скрипты есть, для чего и как запускать.
 
 Все скрипты запускать **из корня проекта**, иначе относительные пути в конфигах могут не сработать. Зависимости — stdlib Python 3.12+ (см. оговорки у конкретных подпакетов).

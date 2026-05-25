@@ -77,6 +77,41 @@ For projects bootstrapped before v0.2 (no `.seed-answers.yml`): run
 `claude-kit upgrade --reseed-answers --apply` once to regenerate the
 answers file from a heuristic.
 
+### Scripts bundle: два уровня (`.claude/templates/scripts/` vs `scripts/`)
+
+Bundled dev-утилиты (`changelog_gen`, `claude_md_audit`, `clean_cache`,
+`code_stats`, `link_check`, `secrets_audit`, `test_ratio`,
+`todo_inventory`) живут в **двух местах**:
+
+| Где | Назначение | Кто пишет | Можно править |
+|-----|-----------|-----------|---------------|
+| `.claude/templates/scripts/<X>/` | **Canonical bundle** — версия из seed'а. Обновляется при каждом `claude-kit sync`. | seed (`claude-kit`) | ❌ нет — перезапишется на следующем sync |
+| `scripts/<X>/` | **Project copy** — то, что реально запускают slash-команды (`python scripts/<X>/<X>.py`). | `claude-kit new` (skeleton) + `claude-kit sync` (auto-copy для новых) | ✅ да — sync не трогает существующие |
+
+**Auto-copy на sync** (по ADR-0002):
+- При `claude-kit sync --apply`: для каждой `templates/scripts/<X>/`,
+  если **нет** проектной `scripts/<X>/` → копируется целиком.
+  Существующие — НЕ трогаются (project-local правки выигрывают).
+- `sync --dry-run` показывает `Scripts bundle: would copy N new`.
+- `sync --no-copy-scripts` отключает шаг (юзер копирует вручную).
+- Backup перед sync покрывает `.claude/`, но не проектный `scripts/`;
+  auto-copy безопасен (только новые директории), но рекомендуется
+  `git status` перед `--apply`.
+
+**Я правил `scripts/<X>/` под себя и теперь хочу свежий bundle.**
+Конфликт намеренный: project-local выигрывает. Если нужно обновить:
+1. `git status` / commit ваши правки.
+2. `rm -r scripts/<X>/` (или `git rm`).
+3. `claude-kit sync --apply` — auto-copy положит свежий bundle.
+4. Перенакатите ваши правки сверху.
+
+**Я хочу запустить bundled-версию без перезаписи моей.**
+`python .claude/templates/scripts/<X>/<X>.py` — bundle-копия работает
+напрямую, обходя проектный `scripts/`.
+
+Полное обоснование решения и сравнение с альтернативами:
+[docs/decisions/0002-script-bundle-delivery.md](../docs/decisions/0002-script-bundle-delivery.md).
+
 ---
 
 ## Part 2. Per-project setup (the easy path)
