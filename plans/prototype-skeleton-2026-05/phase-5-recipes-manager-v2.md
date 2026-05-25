@@ -89,7 +89,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.1 — [VERTICAL SLICE] Миграция формата v1→v2 + RecipeManager CRUD
 
-- [ ] Task 5.1
+- [x] Task 5.1 (798e3ab5)
 
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
