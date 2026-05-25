@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from multiprocess_prototype.backend.config.schemas import DisplaysConfig
 from multiprocess_prototype.backend.state.schema import (
     STATE_DISPLAYS,
     STATE_PLUGINS,
@@ -109,7 +110,11 @@ def _build_wires_section(wires: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def build_initial_state(topology_dict: dict, sys_config_dict: dict) -> dict:
+def build_initial_state(
+    topology_dict: dict,
+    sys_config_dict: dict,
+    displays_config: DisplaysConfig | None = None,
+) -> dict:
     """Построить начальное дерево состояния из topology и system config.
 
     Args:
@@ -118,6 +123,9 @@ def build_initial_state(topology_dict: dict, sys_config_dict: dict) -> dict:
             chain_targets: [...], priority}, ...], wires: [...]}
         sys_config_dict: результат SystemConfig().model_dump().
             Структура: {system: {stop_timeout, shm_budget_mb, log_dir}, camera: {...}, ...}
+        displays_config: опциональный DisplaysConfig из displays.yaml (Phase 4).
+            Если передан -- ветка ``displays`` наполняется записями из реестра.
+            Если None -- ``displays`` остаётся пустым dict (обратная совместимость).
 
     Returns:
         dict вида:
@@ -177,13 +185,24 @@ def build_initial_state(topology_dict: dict, sys_config_dict: dict) -> dict:
     wires_raw: list[dict] = list(topology_dict.get("wires") or [])
     wires = _build_wires_section(wires_raw)
 
+    # Phase 4 — ветка displays: наполняем из DisplaysConfig если передан
+    if displays_config is not None:
+        displays_state: dict[str, dict] = {}
+        for entry in displays_config.displays:
+            displays_state[entry.id] = {
+                "status": "registered",
+                "config": entry.model_dump(),
+            }
+    else:
+        displays_state = {}
+
     return {
         "processes": processes,
         "system": system,
         "wires": wires,
         # Phase 3+ — заглушечные ветки; наполняются данными в соответствующих фазах
         STATE_SERVICES: {},
-        STATE_DISPLAYS: {},
+        STATE_DISPLAYS: displays_state,
         STATE_RECIPES: {"active": None, "available": []},
         STATE_PLUGINS: {"catalog": [], "paths": []},
     }
