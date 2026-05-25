@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from multiprocess_framework.modules.service_module import register_service
 
+
+@register_service(name="webcam_camera")
 class WebcamCameraService:
     """Shell-сервис веб-камеры.
 

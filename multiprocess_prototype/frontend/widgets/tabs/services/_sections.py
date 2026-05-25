@@ -4,16 +4,15 @@
 Структура (Settings-стиль, ветвящееся дерево):
 
     ▾ Сервисы               (services_root — placeholder «выберите сервис»)
-        Камеры              (camera_service)
-        База данных         (database)
-        Управление роботом  (robot_control)
-        Сохранение кадров   (frame_saver)
+        <name>              (динамически из ServiceRegistry.list())
+        ...
     Нейронные сети          (placeholder для Phase 14+)
+    Пути                    (__service_paths__)
 
-Каждый сервисный узел — ``_ServiceSection`` с ``RegisterView`` в качестве
-``widget()`` и тремя кнопками управления в ``action_buttons()`` (Запустить /
-Остановить / Перезапуск). Кнопки отдают визуальный QMessageBox-фидбек до
-реализации реальной интеграции с бэкендом.
+Каждый сервисный узел — ``_ServiceSection`` с информационной карточкой
+(имя, lifecycle) и тремя кнопками управления в ``action_buttons()``
+(Запустить / Остановить / Перезапуск). Task 3.7: кнопки подключены к
+реальным вызовам presenter.start_service/stop_service/restart_service.
 
 Узлы-плейсхолдеры (root + neural_networks) реализованы через
 ``_PlaceholderSection`` — текстовая метка по центру.
@@ -26,14 +25,13 @@ from typing import TYPE_CHECKING, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
-from multiprocess_prototype.frontend.forms import RegisterView
+from multiprocess_framework.modules.service_module import ServiceLifecycle
 
 from .presenter import ServicesPresenter
 
@@ -42,27 +40,74 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# _ServiceSection — реальная сервисная секция с RegisterView и кнопками
+# _ServiceInfoCard — карточка сервиса с именем и реактивным lifecycle-статусом
+# ---------------------------------------------------------------------------
+
+
+class _ServiceInfoCard(QWidget):
+    """Карточка с именем сервиса и обновляемым статус-лейблом."""
+
+    def __init__(self, name: str, lifecycle: ServiceLifecycle, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        name_label = QLabel(f"<b>Сервис:</b> {name}")
+        name_label.setWordWrap(True)
+        layout.addWidget(name_label)
+
+        # Статус-лейбл обновляется при изменении lifecycle
+        self._status_label = QLabel(f"<b>Статус:</b> {lifecycle.value}")
+        self._status_label.setObjectName(f"service_status_{name}")
+        self._status_label.setWordWrap(True)
+        layout.addWidget(self._status_label)
+
+        layout.addStretch()
+
+    def update_status(self, lifecycle: ServiceLifecycle) -> None:
+        """Обновить отображаемый статус сервиса.
+
+        Args:
+            lifecycle: Новое состояние жизненного цикла.
+        """
+        self._status_label.setText(f"<b>Статус:</b> {lifecycle.value}")
+
+
+# ---------------------------------------------------------------------------
+# _ServiceSection — реальная сервисная секция с карточкой и кнопками
 # ---------------------------------------------------------------------------
 
 
 class _ServiceSection:
-    """Секция одного сервиса: RegisterView в content + 3 кнопки в action-колонке."""
+    """Секция одного сервиса: _ServiceInfoCard в content + 3 кнопки в action-колонке.
+
+    Task 3.7: кнопки «Запустить / Остановить / Перезапуск» подключены к
+    реальным вызовам presenter. Статус-лейбл обновляется после каждого клика
+    напрямую через _refresh_view() — без Qt-сигналов между секциями.
+
+    Lifecycle читается из ServiceRegistry (не из StateProxy) — StateProxy
+    недоступен в GUI-процессе. Это MVP; IPC-sync — Phase 4+.
+    """
 
     def __init__(
         self,
         ctx: "AppContext",
-        plugin_name: str,
+        name: str,
         title: str,
-        fields: list,
+        lifecycle: ServiceLifecycle,
+        presenter: ServicesPresenter,
     ) -> None:
         self._ctx = ctx
-        self._key = plugin_name
+        self._key = name
         self._title = title
-        self._fields = fields
+        self._initial_lifecycle = lifecycle
+        self._presenter = presenter
+        self._card: _ServiceInfoCard | None = None
         self._widget: QWidget | None = None
-        self._buttons: list[QPushButton] = []
-        self._register_view: RegisterView | None = None
+        self._btn_start: QPushButton | None = None
+        self._btn_stop: QPushButton | None = None
+        self._btn_restart: QPushButton | None = None
 
     # -------- SectionProtocol --------
 
@@ -80,93 +125,94 @@ class _ServiceSection:
         return self._widget  # type: ignore[return-value]
 
     def action_buttons(self) -> list[QWidget]:
-        if not self._buttons:
+        if self._btn_start is None:
             self._build_buttons()
-        return list(self._buttons)
+        buttons: list[QWidget] = []
+        for btn in (self._btn_start, self._btn_stop, self._btn_restart):
+            if btn is not None:
+                buttons.append(btn)
+        return buttons
 
     def on_activated(self) -> None: ...
     def on_deactivated(self) -> None: ...
 
-    # -------- SectionWithEvents (bus подписка через BaseTreeNavTab) --------
-
-    def bus_change_callback(self) -> Callable[[], None] | None:
-        """Callback для подписки на ActionBus — обновлять editor при undo/redo."""
-        return self._on_bus_changed
-
     # -------- Internal --------
 
     def _build_widget(self) -> None:
-        form_ctx = self._ctx.form_context()
-        view = RegisterView(self._fields, form_ctx=form_ctx)
-        view.field_changed.connect(self._on_field_changed)
-        self._register_view = view
-        self._widget = view
+        """Построить виджет-карточку с реактивным статус-лейблом."""
+        self._card = _ServiceInfoCard(self._key, self._initial_lifecycle)
+        self._widget = self._card
 
     def _build_buttons(self) -> None:
+        """Построить три кнопки действий и подключить обработчики."""
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
 
-        for label in ("Запустить", "Остановить", "Перезапуск"):
-            btn = QPushButton(label)
-            btn.setToolTip(f"{label} сервис {self._title}")
-            btn.clicked.connect(lambda _checked=False, lbl=label: self._on_button_click(lbl))
-            self._buttons.append(btn)
+        self._btn_start = QPushButton("Запустить")
+        self._btn_start.setToolTip(f"Запустить сервис {self._title}")
+        self._btn_start.clicked.connect(self._on_start_click)
 
+        self._btn_stop = QPushButton("Остановить")
+        self._btn_stop.setToolTip(f"Остановить сервис {self._title}")
+        self._btn_stop.clicked.connect(self._on_stop_click)
+
+        self._btn_restart = QPushButton("Перезапуск")
+        self._btn_restart.setToolTip(f"Перезапустить сервис {self._title}")
+        self._btn_restart.clicked.connect(self._on_restart_click)
+
+        # Установить начальное состояние disabled/enabled по lifecycle
+        self._refresh_button_state()
+
+        # Привязать к permission system (если auth доступен)
         _auth = getattr(self._ctx, "auth", None)
         auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        for btn in self._buttons:
+        for btn in (self._btn_start, self._btn_stop, self._btn_restart):
             install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
 
-    def _on_button_click(self, label: str) -> None:
-        # TODO: реальная интеграция с backend (start/stop/restart через presenter).
-        # Пока — visible-stub, чтобы клик не был немым.
-        QMessageBox.information(
-            self._widget,
-            f"Сервис: {self._title}",
-            f"Действие «{label}» для сервиса «{self._title}» будет добавлено позже.",
-        )
+    def _on_start_click(self) -> None:
+        """Запустить сервис и обновить отображение."""
+        self._presenter.start_service(self._key)
+        self._refresh_view()
 
-    def _on_field_changed(
-        self,
-        register_name: str,
-        field_name: str,
-        old_value: object,
-        new_value: object,
-    ) -> None:
-        """Изменение параметра сервиса → ActionBus.execute(field_set)."""
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+    def _on_stop_click(self) -> None:
+        """Остановить сервис и обновить отображение."""
+        self._presenter.stop_service(self._key)
+        self._refresh_view()
 
-        action = V2ActionBuilder.field_set_timed(
-            register_name,
-            field_name,
-            new_value,
-            old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.execute(action)
+    def _on_restart_click(self) -> None:
+        """Перезапустить сервис и обновить отображение."""
+        self._presenter.restart_service(self._key)
+        self._refresh_view()
 
-    def _on_bus_changed(self) -> None:
-        """Callback от ActionBus — обновить RegisterView при undo/redo."""
-        bus = self._ctx.action_bus()
-        if bus is None or self._register_view is None:
+    def _refresh_view(self) -> None:
+        """Прочитать актуальный lifecycle из registry и обновить UI."""
+        lifecycle = self._presenter.get_lifecycle(self._key)
+        if lifecycle is None:
             return
-        event = bus.last_event
-        if event is None:
-            return
-        event_type, action = event
-        if event_type not in ("undo", "redo"):
-            return
-        if action.action_type != "field_set":
-            return
-        register_name = action.register_name or ""
-        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
-        key = f"{register_name}.{action.field_name}"
-        if key in self._register_view.editors():
-            self._register_view.set_editor_value(key, value)
+        if self._card is not None:
+            self._card.update_status(lifecycle)
+        self._refresh_button_state(lifecycle)
+
+    def _refresh_button_state(self, lifecycle: ServiceLifecycle | None = None) -> None:
+        """Установить disabled/enabled для кнопок по текущему lifecycle.
+
+        Args:
+            lifecycle: Явный lifecycle (передаётся из _refresh_view чтобы
+                       не читать из registry повторно). Если None — читает сам.
+        """
+        if lifecycle is None:
+            lifecycle = self._presenter.get_lifecycle(self._key) or self._initial_lifecycle
+
+        is_running = lifecycle == ServiceLifecycle.RUNNING
+        is_error = lifecycle == ServiceLifecycle.ERROR
+
+        if self._btn_start is not None:
+            self._btn_start.setEnabled(not is_running)
+        if self._btn_stop is not None:
+            self._btn_stop.setEnabled(is_running)
+        if self._btn_restart is not None:
+            self._btn_restart.setEnabled(is_running or is_error)
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +259,41 @@ class _PlaceholderSection:
 
 
 # ---------------------------------------------------------------------------
+# _ServicePathsSection — секция управления директориями сервисов
+# ---------------------------------------------------------------------------
+
+
+class _ServicePathsSection:
+    """Секция «Пути» — ServicePathsSubtabWidget."""
+
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+        self._widget: QWidget | None = None
+
+    @property
+    def key(self) -> str:
+        return "__service_paths__"
+
+    @property
+    def title(self) -> str:
+        return "Пути"
+
+    def widget(self) -> QWidget:
+        if self._widget is None:
+            from .paths_subtab import ServicePathsSubtabWidget
+
+            presenter = ServicesPresenter(self._ctx)
+            self._widget = ServicePathsSubtabWidget(presenter)
+        return self._widget
+
+    def action_buttons(self) -> list[QWidget]:
+        return []
+
+    def on_activated(self) -> None: ...
+    def on_deactivated(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
 # Фабрики для SectionSpec
 # ---------------------------------------------------------------------------
 
@@ -233,13 +314,20 @@ def _nn_placeholder_factory(_ctx: "AppContext") -> _PlaceholderSection:
     )
 
 
+def _service_paths_factory(ctx: "AppContext") -> _ServicePathsSection:
+    return _ServicePathsSection(ctx)
+
+
 def _make_service_factory(
-    plugin_name: str,
+    name: str,
     title: str,
-    fields: list,
-) -> Callable[["AppContext"], _ServiceSection]:
+    lifecycle: ServiceLifecycle,
+) -> "Callable[[AppContext], _ServiceSection]":
     def factory(ctx: "AppContext") -> _ServiceSection:
-        return _ServiceSection(ctx, plugin_name, title, fields)
+        # Presenter создаётся один раз на секцию и передаётся в _ServiceSection.
+        # Он владеет кэшем _instances для данного сервиса.
+        presenter = ServicesPresenter(ctx)
+        return _ServiceSection(ctx, name, title, lifecycle, presenter)
 
     return factory
 
@@ -254,14 +342,16 @@ def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
 
     Структура:
         - «Сервисы» (services_root, родитель) — только если есть хотя бы один
-          сервис в реестре с полями. Иначе родительский узел не создаётся.
-        - Под ним — N сервисных секций (lazy).
+          сервис в ServiceRegistry. Иначе родительский узел не создаётся.
+        - Под ним — N сервисных секций (lazy) из ServiceRegistry.list().
         - Top-level «Нейронные сети» — всегда присутствует как placeholder.
+        - Top-level «Пути» (__service_paths__) — управление директориями.
     """
     presenter = ServicesPresenter(ctx)
-    service_data = presenter.get_service_sections()  # [(title, plugin_name, fields), ...]
+    service_data = presenter.list_services()  # [(name, title, lifecycle), ...]
 
     sections: list[SectionSpec[AppContext]] = []
+
     if service_data:
         sections.append(
             SectionSpec(
@@ -270,21 +360,29 @@ def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
                 factory=_services_root_factory,
             )
         )
-        for title, plugin_name, fields in service_data:
+        for name, title, lifecycle in service_data:
             sections.append(
                 SectionSpec(
-                    key=plugin_name,
+                    key=name,
                     title=title,
-                    factory=_make_service_factory(plugin_name, title, fields),
+                    factory=_make_service_factory(name, title, lifecycle),
                     parent_key="services_root",
                     lazy=True,
                 )
             )
+
     sections.append(
         SectionSpec(
             key="neural_networks",
             title="Нейронные сети",
             factory=_nn_placeholder_factory,
+        )
+    )
+    sections.append(
+        SectionSpec(
+            key="__service_paths__",
+            title="Пути",
+            factory=_service_paths_factory,
         )
     )
     return sections

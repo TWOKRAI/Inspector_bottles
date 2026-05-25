@@ -106,6 +106,33 @@ def run_gui(process: "GuiProcess") -> None:
     )
     ctx.extras["plugin_manager"] = _plugin_manager
 
+    # 3b-pre. Bootstrap ServiceRegistry + ServiceStateAdapter (Task 3.6 / Phase 3)
+    #
+    # Порядок критичен (Reviewer zone of concern):
+    #   ServiceRegistry + discover() → AppContext.extras["service_registry"]
+    #   → ServiceStateAdapter.bind(state_proxy) → connect() → sync_domain_to_state()
+    #
+    # state_proxy создаётся позже (GuiStateBindings в шаге 3b), поэтому
+    # здесь только registry + discover; adapter подключается после bindings.
+    from multiprocess_framework.modules.service_module import ServiceRegistry, discover
+
+    _service_registry = ServiceRegistry()
+    _app_service_paths = [
+        str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p
+        for p in (_app_sys_config.discovery.service_paths if _app_sys_config.discovery.auto_discover else [])
+    ]
+
+    try:
+        _discovery_result = discover(*[Path(p) for p in _app_service_paths])
+        process._log_info(
+            f"service discovery: loaded={_discovery_result.loaded}, failed={_discovery_result.failed}",
+            module="startup",
+        )
+    except Exception as e:
+        process._log_warning(f"Не удалось выполнить service discovery: {e}", module="startup")
+
+    ctx.extras["service_registry"] = _service_registry
+
     # 3a. Загрузить topology для GUI и создать TopologyHolder
     import yaml as _yaml
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
@@ -183,6 +210,30 @@ def run_gui(process: "GuiProcess") -> None:
                 topology_bridge.on_state_delta(path, value)
 
     process._bridge.set_state_callback(_state_multiplexer)
+
+    # 3f. ServiceStateAdapter — подключить ПОСЛЕ bindings (proxy-aware step)
+    # В GUI-процессе нет StateProxy (он живёт только в ProcessModule-процессах),
+    # поэтому adapter создаётся с state_proxy=None → sync_domain_to_state() — no-op.
+    # Это штатное поведение: ServiceStateAdapter.bind() будет вызван из
+    # ProcessManagerProcess когда/если GUI получит proxy-доступ (Phase 6+).
+    try:
+        from multiprocess_prototype.backend.state.adapters.service_state_adapter import (
+            ServiceStateAdapter,
+        )
+
+        _service_adapter = ServiceStateAdapter(
+            registry=_service_registry,
+            state_proxy=None,  # GUI-процесс не имеет StateProxy
+        )
+        # Попытка sync: не-op если proxy=None (adapter логирует warning)
+        _service_adapter.sync_domain_to_state()
+        ctx.extras["service_state_adapter"] = _service_adapter
+        process._log_info(
+            "service_state_adapter: создан (proxy=None, sync no-op в GUI-процессе)",
+            module="startup",
+        )
+    except Exception as e:
+        process._log_warning(f"ServiceStateAdapter: не удалось создать: {e}", module="startup")
 
     # 3e. Auth: инициализация AuthManager + AuthState (PR2 auth-rbac)
     import os
