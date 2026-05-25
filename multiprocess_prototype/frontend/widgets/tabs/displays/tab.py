@@ -123,11 +123,15 @@ class DisplaysTab(BaseListNavTab):
 
         self._setup_actions()
 
+        # Список открытых окон превью (PreviewWindow) — предотвращаем GC
+        self._preview_windows: list = []
+
         # Presenter создаётся после setup (view уже готов)
         self._presenter = DisplaysPresenter(
             registry=registry,
             view=self,
             yaml_path=yaml_path,
+            preview_callback=self._open_preview_window,
         )
         self._presenter.load()
 
@@ -455,3 +459,27 @@ class DisplaysTab(BaseListNavTab):
         """Обработать нажатие «Открыть превью»."""
         if self._selected_id is not None:
             self._presenter.on_open_preview(self._selected_id)
+
+    # ------------------------------------------------------------------ #
+    #  Preview callback (Task 4.7)                                         #
+    # ------------------------------------------------------------------ #
+
+    def _open_preview_window(self, entry: DisplayEntry) -> None:
+        """Открыть окно превью SHM-канала для дисплея.
+
+        Вызывается из presenter через preview_callback.
+        Router_manager берётся из ctx если доступен.
+        Ссылка на окно сохраняется в ``_preview_windows`` для предотвращения GC.
+
+        Args:
+            entry: конфигурация дисплея для превью.
+        """
+        from multiprocess_prototype.frontend.widgets.displays import open_for_display
+
+        rm = getattr(self._ctx, "router_manager", None)
+        window = open_for_display(entry, router_manager=rm, parent=None)
+        # Сохраняем ссылку — без неё Qt удалит окно при GC
+        self._preview_windows.append(window)
+        # Подчищаем закрытые окна из списка
+        self._preview_windows = [w for w in self._preview_windows if w.isVisible()]
+        logger.info("DisplaysTab: открыто превью '%s'", entry.id)
