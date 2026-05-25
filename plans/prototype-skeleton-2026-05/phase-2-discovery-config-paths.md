@@ -477,10 +477,10 @@ Task 2.2 ──────────────────────┘  
    - Assert: сигнал был emit'нут
 
 **Acceptance criteria:**
-- [ ] `pytest multiprocess_prototype/backend/config/tests/` — 3 теста PASSED
-- [ ] `pytest multiprocess_prototype/frontend/widgets/tabs/plugins/tests/test_paths_subtab.py` — 4 теста PASSED
-- [ ] Все тесты из Task 2.7 проходят вместе с существующими тестами в `test_plugins_tab.py` без конфликтов
-- [ ] Нет новых `import` ошибок при запуске всего suite
+- [x] `pytest multiprocess_prototype/backend/config/tests/` — 3 теста PASSED (92cad02)
+- [x] `pytest multiprocess_prototype/frontend/widgets/tabs/plugins/tests/test_paths_subtab.py` — 4 теста PASSED (92cad02)
+- [x] Все тесты из Task 2.7 проходят вместе с существующими тестами в `test_plugins_tab.py` без конфликтов (92cad02)
+- [x] Нет новых `import` ошибок при запуске всего suite (92cad02)
 
 **Out of scope:** Не писать E2E тест с реальным запуском GUI-процесса. Не тестировать `_save_paths_to_overrides` через реальную файловую систему — используй `tmp_path` или мокировать.
 
