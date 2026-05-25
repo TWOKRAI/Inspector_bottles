@@ -5,6 +5,20 @@
 > **Дней**: 3-4
 > **Зависимости**: Phase 0 (для StateAdapterBase + регистрации сервисов)
 > **Refs trailer**: `Refs: plans/prototype-skeleton-2026-05/phase-3-service-registry.md, plans/prototype-skeleton-2026-05/plan.md`
+> **Status**: ✅ DONE (2026-05-25, последний коммит `3ed4ec4`)
+
+## Итоги фазы
+
+| Метрика | Значение |
+|---------|----------|
+| Коммитов | 8 (1a3b1eb → 3ed4ec4) |
+| Тестов | 91 зелёных (66 framework + 25 prototype) |
+| Новых модулей framework | 1 — `multiprocess_framework/modules/service_module/` |
+| ADR | ADR-129 (глобальный) + ADR-SVC-001/002/003 (локальные) |
+| Сервисов в реестре | 4 — sql, hikvision_camera, auth, webcam_camera |
+| Ревью | APPROVED iter 1 (framework 3.1-3.5) + APPROVED final (prototype 3.6-3.8) |
+
+Технический долг для Phase 4+: (1) IPC-sync lifecycle worker↔GUI (сейчас в GUI proxy=None, читаем напрямую из registry); (2) `_instances` кэш вынести из per-section presenter в `AppContext`/`ServiceRegistry`.
 
 ## Цель
 
