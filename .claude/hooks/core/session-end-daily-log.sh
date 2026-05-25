@@ -1,12 +1,23 @@
 #!/bin/bash
 # Stop hook: append a per-session git summary to docs/sessions/YYYY-MM-DD.md.
 #
-# Opt-in. Enable by adding to .claude/settings.json:
+# ⚠️ FALLBACK SINCE seed v0.4.0. The primary mechanism is now a pre-commit
+# hook: .claude/hooks/git/pre-commit-session-log.sh. That hook writes the
+# journal entry INTO the commit (instead of leaving it as an untracked
+# file after `git commit`, which was the old behaviour).
+#
+# Use this Stop-hook only if:
+#   - your project doesn't run pre-commit (no .pre-commit-config.yaml), or
+#   - you want a per-session entry in addition to per-commit ones.
+#
+# To enable: add to .claude/settings.json under "hooks":
 #   "Stop": [
 #     { "hooks": [{ "type": "command",
 #                   "command": ".claude/hooks/core/session-end-daily-log.sh",
 #                   "timeout": 10 }] }
 #   ]
+# The default seed settings.json does not register this — pre-commit hook
+# is the primary path.
 #
 # Pairs with /wrap-up command:
 #   - this hook writes the mechanical part (git status, diff stat)

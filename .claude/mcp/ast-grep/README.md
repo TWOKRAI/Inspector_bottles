@@ -74,3 +74,15 @@ Then `ast-grep scan` runs all rules over the codebase. The MCP server exposes th
 ## Setup
 
 See [SETUP_GUIDE.md](SETUP_GUIDE.md) — installs the CLI (`brew` / `cargo` / `winget`), wires the MCP server, includes a smoke test (find + dry-run rewrite).
+## Launcher options
+
+**Default** (used automatically by `claude-kit add ast-grep`): see `manifest.yaml` → `mcp_servers.ast-grep`.
+
+```
+command: npx
+args: ["-y", "@ast-grep/mcp", "--root", "."]
+```
+
+**Alternative** (faster startup, requires `npm i -g @ast-grep/mcp`): see `templates/mcp-config.json.snippet`.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

@@ -75,3 +75,10 @@ Get-Content ~\.claude.json | Select-String -Pattern "context7" -Context 0,5
 
 **Free tier — есть ли лимиты?**
 - Да, но для обычной разработки хватает. Rate limit мягкий.
+## Launcher options
+
+**Default**: context7 is configured at **user level**, not project level. Setup via `npx -y ctx7 setup --claude` (one-time, per machine). The `.mcp.json` in your project does **not** include context7 — that's intentional.
+
+There is no per-project alternative — context7 is shared across all your Claude Code projects on a machine.
+
+Re-run `npx -y ctx7 setup --claude` to refresh the user-level config.

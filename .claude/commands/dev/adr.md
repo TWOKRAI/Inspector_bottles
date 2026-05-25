@@ -7,15 +7,30 @@ description: Создать новый ADR (Architectural Decision Record) в do
 Запускает tech-writer-агента для создания структурированного ADR
 (Architectural Decision Record) на основе текущей задачи или контекста сессии.
 
-## Когда использовать
+## Когда использовать `/adr` (этот командой создаётся глобальный, cross-module ADR)
 
 - Принято **архитектурное решение** (выбор фреймворка, паттерна, инструмента, схемы хранения)
 - Решение **влияет на код в нескольких местах** или на будущие решения
 - Хочется зафиксировать **why** + **alternatives considered** + **consequences**, чтобы через год не возвращаться к тому же спору
+- Затрагивает **2+ модуля** или общий стек (cross-module)
 
 НЕ нужно ADR для:
 - Тривиальных правок (rename, format, bugfix без обсуждения альтернатив)
 - Решений уровня одного файла, очевидных из кода
+
+## Глобальный (`/adr`) vs per-module (`DECISIONS.md`) — куда писать
+
+| Решение | Уровень | Где живёт | Формат |
+|---------|---------|-----------|--------|
+| Затрагивает 2+ модуля или общий стек | Global | `docs/claude/DECISIONS/NNNN-<slug>.md` (создаёт `/adr`) | `ADR-NNNN` |
+| Внутри одного модуля (выбор паттерна, threading-модели, API shape) | Per-module | `<module>/DECISIONS.md` (создаёт агент из `.claude/templates/DECISIONS.template.md`) | `ADR-{CODE}-NNN` |
+
+Per-module ADR агрегируются в `docs/PROJECT_CONTEXT.md` через
+`scripts/aggregate_context` (slash-command `/sync-context`). Глобальные ADR
+живут отдельно и не индексируются этим скриптом — у них своя нумерация.
+
+Если сомневаешься — начни с **per-module DECISIONS.md**. Поднять на глобальный
+уровень всегда можно ссылкой из global ADR на module ADR.
 
 ## Как работает
 

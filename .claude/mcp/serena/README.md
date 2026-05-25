@@ -59,3 +59,15 @@ Add this to your project's `CLAUDE.md` if Serena passes the smoke test:
 > - Семантические запросы по описанию поведения → **qex**
 > - Архитектурный обзор → **graphify**
 > - При падении Serena (язык без LSP, проект без manifest) → fallback к qex + Grep
+## Launcher options
+
+**Default** (used automatically by `claude-kit add serena`): see `manifest.yaml` → `mcp_servers.serena`.
+
+```
+command: serena
+args: ["start-mcp-server", "--context", "claude-code", "--project", "."]
+```
+
+**Alternative** (use only if the bare `serena` binary fails in your environment): see `templates/mcp-config.json.snippet` — uvx-based launcher for project-local installs.
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

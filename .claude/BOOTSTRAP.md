@@ -251,11 +251,15 @@ Example use cases: protect `data/raw/`, `data/corpus.db`, applied DB migrations,
 
 After saving, any Claude `Edit`/`Write` whose path matches a pattern is blocked with exit 2.
 
-### B. Daily session log (active by default)
+### B. Daily session log (active by default via pre-commit)
 
-Stop-hook `session-end-daily-log.sh` writes `git status` + diff stat into `docs/sessions/YYYY-MM-DD.md` when a session ends. Pairs with the `/wrap-up` command (semantic summary). **Active by default** since the permissions-hardening release — the mechanical git-state capture is cheap (one `git status` + one `git diff --shortstat`) and ensures every session leaves a paper trail even if `/wrap-up` is skipped.
+Pre-commit hook `.claude/hooks/git/pre-commit-session-log.sh` appends a `[HH:MM] pre-commit | branch=…` block to `docs/sessions/YYYY-MM-DD.md` and **stages it into the same commit**, so the journal never sits as an untracked file after `git commit`. Registered in `.pre-commit-config.yaml` (see "Журнал коммитов" block). Pairs with the `/wrap-up` command (semantic summary).
 
-To **disable**, remove the `Stop` block from `.claude/settings.json` (or point `SESSIONS_DIR` env var to a throwaway path).
+**Active by default** since seed v0.4.0. Quiet: hook always exits 0, never blocks the commit even on edge cases (disk full, permissions).
+
+To **disable**, remove the `session-log` `repo: local` hook from `.pre-commit-config.yaml` (or point `SESSIONS_DIR` env var to a throwaway path).
+
+**Fallback for projects without pre-commit:** the older Stop-hook `.claude/hooks/core/session-end-daily-log.sh` still exists and can be wired into `.claude/settings.json` under `"Stop"` (see docstring inside the file). Default seed does NOT register it — the pre-commit path is preferred because it captures changes per-commit, not per-session.
 
 Customization via env vars:
 
@@ -361,7 +365,7 @@ Script `scripts/lint_settings.py` + slash-command `/lint-settings` validate that
 - Required `deny` patterns (`--no-verify`, `git push --force`, `git reset --hard`, `sudo`, `chmod 777`, `mkfs`, `dd if=`, ...) — exit 1 if missing.
 - Required `Write`/`Edit` secrets protection (`**/.env`, `**/*.pem`, `**/*.key`, `**/id_rsa`, `**/id_ed25519`) — exit 1 if missing.
 - Forbidden patterns NOT in `allow` (`uv add *`, `pip install *`, `npx *`, `cp *`, `chmod *`, `git merge *`, ...) — exit 1 if present.
-- Required hooks wired in (`validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check`, `session-end-daily-log`) — warning if missing.
+- Required hooks wired in (`validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check`) — warning if missing. (Stop-hook `session-end-daily-log` removed from required since v0.4.0 — journaling moved to pre-commit.)
 
 **Manual:** `python scripts/lint_settings.py` or `/lint-settings` from inside Claude Code.
 

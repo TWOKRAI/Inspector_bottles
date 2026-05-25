@@ -64,21 +64,33 @@ REQUIRED_SECRET_DENY: list[str] = [
 FORBIDDEN_ALLOW: list[tuple[str, str]] = [
     (r"^Bash\(uv add\b", "uv add * must require confirmation (slopsquatting risk)"),
     (r"^Bash\(uv pip install\b", "uv pip install * must require confirmation"),
-    (r"^Bash\(pip install\b", "pip install * must require confirmation (slopsquatting)"),
+    (
+        r"^Bash\(pip install\b",
+        "pip install * must require confirmation (slopsquatting)",
+    ),
     (r"^Bash\(npm install\b", "npm install * must require confirmation"),
     (r"^Bash\(npm i\b", "npm i * must require confirmation"),
     (r"^Bash\(npx\b", "npx * must require confirmation (arbitrary package execution)"),
     (r"^Bash\(pnpm\b", "pnpm * must require confirmation"),
     (r"^Bash\(yarn\b", "yarn * must require confirmation"),
-    (r"^Bash\(cp \*\)$", "bare 'cp *' must require confirmation (can overwrite anything)"),
+    (
+        r"^Bash\(cp \*\)$",
+        "bare 'cp *' must require confirmation (can overwrite anything)",
+    ),
     (r"^Bash\(chmod \+x\*\)$", "bare 'chmod +x*' must require confirmation"),
     (r"^Bash\(chmod \*\)$", "bare 'chmod *' must require confirmation"),
     (r"^Bash\(rm \*\)$", "bare 'rm *' must require confirmation or be denied"),
     (r"^Bash\(git merge \*", "git merge * must require confirmation"),
     (r"^Bash\(git rebase ", "git rebase * must require confirmation"),
     (r"^Bash\(git cherry-pick ", "git cherry-pick * must require confirmation"),
-    (r"^Bash\(git reset \*", "git reset * (non-deny variants) must require confirmation"),
-    (r"^Bash\(git checkout \*\)$", "bare 'git checkout *' must require confirmation (can wipe local state)"),
+    (
+        r"^Bash\(git reset \*",
+        "git reset * (non-deny variants) must require confirmation",
+    ),
+    (
+        r"^Bash\(git checkout \*\)$",
+        "bare 'git checkout *' must require confirmation (can wipe local state)",
+    ),
     (r"^Bash\(curl \*\)$", "bare 'curl *' must require confirmation"),
     (r"^Bash\(wget \*\)$", "bare 'wget *' must require confirmation"),
     (r"^Bash\(docker\b", "docker * must require confirmation"),
@@ -86,6 +98,10 @@ FORBIDDEN_ALLOW: list[tuple[str, str]] = [
 ]
 
 # Required hooks — (lifecycle event, substring match on command field).
+# NOTE: Stop-хук session-end-daily-log.sh убран как required с seed v0.4.0 —
+# журналирование переведено на pre-commit (hooks/git/pre-commit-session-log.sh),
+# чтобы запись попадала в коммит, а не висела как untracked. Stop-вариант
+# остался как fallback для проектов без pre-commit (см. docstring файла).
 REQUIRED_HOOKS: list[tuple[str, str]] = [
     ("PreToolUse", "validate-safe-command.sh"),
     ("PreToolUse", "protect-readonly.sh"),
@@ -94,7 +110,6 @@ REQUIRED_HOOKS: list[tuple[str, str]] = [
     ("PostToolUse", "check-imports.sh"),
     ("PostCompact", "restore-context.sh"),
     ("SessionStart", "session-health-check.sh"),
-    ("Stop", "session-end-daily-log.sh"),
 ]
 
 # ─── Linter ───────────────────────────────────────────────────────────────────
@@ -197,7 +212,10 @@ def main(argv: list[str]) -> int:
         candidates = [Path(".claude/settings.json"), Path("settings.json")]
         path = next((c for c in candidates if c.exists()), None)
         if path is None:
-            print("error: no .claude/settings.json found — pass path explicitly", file=sys.stderr)
+            print(
+                "error: no .claude/settings.json found — pass path explicitly",
+                file=sys.stderr,
+            )
             return 1
 
     errors, warnings = lint(path)

@@ -12,6 +12,13 @@
 *.yml  text eol=lf
 *.json text eol=lf
 
+# claude-kit bundled assets (snippet + template files copied verbatim into
+# bootstrapped projects) — force LF so Windows checkouts don't churn the
+# diff on first `git add` and confuse linters that re-format on CRLF.
+*.snippet      text eol=lf
+*.template     text eol=lf
+*.snippet.json text eol=lf
+
 # Binary
 *.png   binary
 *.jpg   binary

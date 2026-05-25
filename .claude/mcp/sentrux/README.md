@@ -282,3 +282,15 @@ sentrux mcp --help
 - Pro-версия (продвинутые root-cause диагностики): <https://github.com/sentrux/sentrux> → Upgrade
 
 Полный список slash-команд проекта — в корневом [`CLAUDE.md`](../../../CLAUDE.md), раздел «Проектные команды».
+## Launcher options
+
+**Default** (used automatically by `claude-kit add sentrux`): see `manifest.yaml` → `mcp_servers.sentrux`.
+
+```
+command: sentrux
+args: ["mcp"]
+```
+
+Requires the `sentrux` binary in PATH (see "Setup" above).
+
+Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).

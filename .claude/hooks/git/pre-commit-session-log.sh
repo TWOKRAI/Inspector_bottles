@@ -2,19 +2,25 @@
 # pre-commit hook: append a per-commit summary to docs/sessions/YYYY-MM-DD.md
 # and stage the daily log so it becomes part of the commit being made.
 #
-# Pairs with /wrap-up command and replaces the old Claude `Stop` hook
-# (.claude/hooks/core/session-end-daily-log.sh) — moved here so the
-# journal entry is included in the commit instead of dangling after it.
+# Pairs with /wrap-up command. **Replaces** the older Claude `Stop` hook
+# (.claude/hooks/core/session-end-daily-log.sh, kept as fallback for
+# projects without pre-commit) — moved here so the journal entry is
+# included in the commit instead of dangling after it as untracked.
 #
-# Registered as a `repo: local` hook in .pre-commit-config.yaml.
+# Registered as a `repo: local` hook in .pre-commit-config.yaml
+# (see templates/pre-commit-config.template.yaml → "Журнал коммитов").
 #
 # Customization (via env vars):
 #   SESSIONS_DIR — where to write daily logs (default: docs/sessions)
-#   PATH_FILTER  — limit to specific path prefix. Empty = all changes.
+#   PATH_FILTER  — limit summary to specific path prefix. Empty = all changes.
 #
 # Quiet: always exits 0, never blocks the commit.
 
 set -e
+# Honour the "never block" contract even if a step (mkdir, cat heredoc, append)
+# fails unexpectedly — we don't want a permission/disk-full edge case to
+# break the user's commit because of a journal-writing helper.
+trap 'exit 0' ERR
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 SESSIONS_DIR="${SESSIONS_DIR:-$REPO_ROOT/docs/sessions}"
