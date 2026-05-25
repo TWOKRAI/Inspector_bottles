@@ -1,0 +1,18 @@
+# Реестр дисплеев Inspector
+# Файл редактируется через GUI (вкладка Дисплеи) — DisplayRegistry.persist() перезаписывает его при CRUD.
+# Редактирование вручную допустимо, но требует перезапуска приложения.
+displays:
+  - id: main
+    name: Основной дисплей
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+  - id: debug
+    name: Debug дисплей
+    width: 640
+    height: 480
+    format: BGR
+    fps_limit: 15.0
+    ring_buffer_blocks: 2
