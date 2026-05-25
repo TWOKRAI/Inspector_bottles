@@ -87,6 +87,15 @@ def run_gui(process: "GuiProcess") -> None:
     except Exception as e:
         process._log_warning(f"Не удалось обнаружить плагины: {e}", module="startup")
 
+    # 2a. Создать PluginManager singleton (Phase 2.4)
+    from multiprocess_framework.modules.process_module.plugins.manager import PluginManager
+
+    _plugin_manager = PluginManager(
+        registry=PluginRegistry,
+        paths=_app_plugin_paths,
+    )
+    _plugin_manager.initialize()
+
     registers_manager = RegistersManager.from_registry(PluginRegistry)
 
     # 3. Создать AppContext
@@ -95,6 +104,7 @@ def run_gui(process: "GuiProcess") -> None:
         plugin_registry=PluginRegistry,
         registers_manager=registers_manager,
     )
+    ctx.extras["plugin_manager"] = _plugin_manager
 
     # 3a. Загрузить topology для GUI и создать TopologyHolder
     import yaml as _yaml

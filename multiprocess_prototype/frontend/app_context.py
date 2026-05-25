@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_framework.modules.actions_module.bus import ActionBus
     from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
+    from multiprocess_framework.modules.process_module.plugins.manager import PluginManager
     from Services.auth.interfaces import IAuthManager
     from Services.auth.storage.audit_storage import SqliteAuditStorage
 
@@ -112,6 +113,14 @@ class AppContext:
         Каталог IPC-команд, собранный из PluginRegistry + ConnectionMap.
         """
         return self.extras.get("command_catalog")
+
+    def plugin_manager(self) -> "PluginManager | None":
+        """Singleton PluginManager — автообнаружение и hot-reload плагинов.
+
+        Инициализируется в run_gui() из путей sys_config.discovery.plugin_paths.
+        None если GUI-процесс не инициализировал (например, в тестах).
+        """
+        return self.extras.get("plugin_manager")
 
     def form_context(self) -> "FormContext | None":
         """Собрать FormContext из доступных в AppContext компонентов.
