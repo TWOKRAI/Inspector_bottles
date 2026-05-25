@@ -161,7 +161,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.2 — replace_blueprint в ProcessManagerProcess (framework)
 
-- [ ] Task 5.2
+- [x] Task 5.2 (498d323f)
 
 **Level:** Senior+ (Opus, extended thinking)
 **Assignee:** teamlead
