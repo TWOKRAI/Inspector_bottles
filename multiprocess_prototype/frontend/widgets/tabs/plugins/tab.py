@@ -117,10 +117,44 @@ class PluginsTab(BaseTreeNavTab):
         self.enable_undo_redo(bus)
         self.populate()
 
+        # Task 2.6 — подписать каталог на сигнал catalog_updated от секции «Пути».
+        # Секция __paths__ не lazy, значит виджет уже создан к этому моменту.
+        paths_section = self._presenter.section("__paths__")
+        if paths_section is not None:
+            paths_widget = paths_section.widget()
+            catalog_updated = getattr(paths_widget, "catalog_updated", None)
+            if catalog_updated is not None:
+                catalog_updated.connect(self.refresh_catalog)
+
     @classmethod
     def create(cls, ctx: "AppContext") -> "PluginsTab":
         """Фабричный метод для TabFactory."""
         return cls(ctx)
+
+    # ------------------------------------------------------------------ #
+    #  Task 2.6 — обновление каталога после rescan                        #
+    # ------------------------------------------------------------------ #
+
+    def refresh_catalog(self) -> None:
+        """Перестроить дерево навигации и таблицу после rescan плагинов.
+
+        Вызывается по сигналу catalog_updated от PathsSubtabWidget.
+        Полная перестройка (diff-алгоритм не нужен для MVP).
+        """
+        if self._tree_nav is None:
+            return
+
+        # Пересобрать список секций с актуальным каталогом плагинов
+        self._sections_specs = build_plugin_sections(self._ctx)
+
+        # Очистить дерево и перестроить заново
+        self._tree_nav.clear()
+        build_nav_tree_from_specs(self._tree_nav, self._sections_specs)
+        self._tree_nav.expandAll()
+
+        # Если активен режим Table — обновить таблицу тоже
+        if self._view_mode == ViewMode.TABLE:
+            self._refresh_table()
 
     # ------------------------------------------------------------------ #
     #  Hooks BaseTreeNavTab                                                #

@@ -18,9 +18,6 @@ from .styles.theme_loader import apply_default_theme
 if TYPE_CHECKING:
     from .process import GuiProcess
 
-# Vocabulary плагинов на уровне проекта: Plugins/ (перенесено в Phase 5)
-_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "Plugins"
-
 
 def _resolve_dev_login_settings() -> tuple[bool, str, str]:
     """Получить (auto_login_enabled, username, password) из env и dev_settings.py.
@@ -76,11 +73,28 @@ def run_gui(process: "GuiProcess") -> None:
     # 2. Сканировать плагины и построить RegistersManager
     from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
     from multiprocess_framework.modules.registers_module import RegistersManager
+    from multiprocess_prototype.backend.config.schemas import load_system_config
+    from multiprocess_prototype.main import CONFIG_PATH, PROJECT_ROOT
+
+    _app_sys_config = load_system_config(CONFIG_PATH)
+    _app_plugin_paths = [
+        str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p
+        for p in (_app_sys_config.discovery.plugin_paths if _app_sys_config.discovery.auto_discover else [])
+    ]
 
     try:
-        PluginRegistry.discover(str(_PLUGINS_DIR))
+        PluginRegistry.discover(*_app_plugin_paths)
     except Exception as e:
         process._log_warning(f"Не удалось обнаружить плагины: {e}", module="startup")
+
+    # 2a. Создать PluginManager singleton (Phase 2.4)
+    from multiprocess_framework.modules.process_module.plugins.manager import PluginManager
+
+    _plugin_manager = PluginManager(
+        registry=PluginRegistry,
+        paths=_app_plugin_paths,
+    )
+    _plugin_manager.initialize()
 
     registers_manager = RegistersManager.from_registry(PluginRegistry)
 
@@ -90,6 +104,7 @@ def run_gui(process: "GuiProcess") -> None:
         plugin_registry=PluginRegistry,
         registers_manager=registers_manager,
     )
+    ctx.extras["plugin_manager"] = _plugin_manager
 
     # 3a. Загрузить topology для GUI и создать TopologyHolder
     import yaml as _yaml

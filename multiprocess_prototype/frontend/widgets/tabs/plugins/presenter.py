@@ -5,7 +5,10 @@ Pure Python (без Qt импортов).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
@@ -116,3 +119,102 @@ class PluginsPresenter:
             return rm.get_fields(plugin_name)
         except Exception:
             return []
+
+    # ------------------------------------------------------------------ #
+    #  Task 2.5 — управление путями плагинов                              #
+    # ------------------------------------------------------------------ #
+
+    def get_plugin_paths(self) -> list[str]:
+        """Текущий список директорий поиска плагинов.
+
+        Returns:
+            Список строк-путей или [] если PluginManager не инициализирован.
+        """
+        pm = self._ctx.plugin_manager()
+        if pm is None:
+            return []
+        return [str(p) for p in pm.plugin_paths]
+
+    def add_plugin_path(self, path: str) -> None:
+        """Добавить новый путь к директориям поиска плагинов.
+
+        Добавляет путь (если его нет в списке), сохраняет в user_overrides.yaml,
+        и обновляет _plugin_paths в PluginManager для следующего rescan().
+
+        Args:
+            path: строковый путь к директории (абсолютный или относительный).
+        """
+        current = self.get_plugin_paths()
+        if path in current:
+            return
+        new_list = current + [path]
+        self._save_paths_to_overrides(new_list)
+        # Обновить пути в PluginManager без его пересоздания
+        pm = self._ctx.plugin_manager()
+        if pm is not None:
+            pm._plugin_paths = [Path(p).resolve() for p in new_list]
+
+    def remove_plugin_path(self, path: str) -> None:
+        """Удалить путь из директорий поиска плагинов.
+
+        Если пути нет в списке — ничего не делает.
+        Сохраняет обновлённый список в user_overrides.yaml и обновляет PluginManager.
+
+        Args:
+            path: строковый путь для удаления.
+        """
+        current = self.get_plugin_paths()
+        if path not in current:
+            return
+        new_list = [p for p in current if p != path]
+        self._save_paths_to_overrides(new_list)
+        # Обновить пути в PluginManager без его пересоздания
+        pm = self._ctx.plugin_manager()
+        if pm is not None:
+            pm._plugin_paths = [Path(p).resolve() for p in new_list]
+
+    def rescan(self) -> str:
+        """Запустить горячее переобнаружение плагинов через PluginManager.
+
+        Returns:
+            Строка-сводка результата в формате «Загружено: N, ошибок: M, новых: K».
+            При отсутствии PluginManager возвращает «PluginManager не инициализирован».
+        """
+        pm = self._ctx.plugin_manager()
+        if pm is None:
+            return "PluginManager не инициализирован"
+        result = pm.rescan()
+        return f"Загружено: {len(result.loaded)}, ошибок: {len(result.failed)}, новых: {len(result.new_plugins)}"
+
+    def _save_paths_to_overrides(self, paths: list[str]) -> None:
+        """Сохранить список путей плагинов в user_overrides.yaml.
+
+        Читает существующий файл (или {} если нет), deep-merge'ит только ключ
+        discovery.plugin_paths, записывает обратно. Остальные ключи не трогает.
+
+        Args:
+            paths: новый список строковых путей для сохранения.
+        """
+        from multiprocess_prototype.main import CONFIG_PATH
+
+        override_path = CONFIG_PATH.parent / "user_overrides.yaml"
+
+        # Читаем существующее содержимое
+        existing: dict = {}
+        if override_path.exists():
+            try:
+                with open(override_path, encoding="utf-8") as f:
+                    existing = yaml.safe_load(f) or {}
+            except yaml.YAMLError:
+                existing = {}
+
+        # Обновляем только discovery.plugin_paths
+        discovery = existing.get("discovery", {})
+        if not isinstance(discovery, dict):
+            discovery = {}
+        discovery["plugin_paths"] = paths
+        existing["discovery"] = discovery
+
+        # Записываем обратно
+        with open(override_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, allow_unicode=True, default_flow_style=False)

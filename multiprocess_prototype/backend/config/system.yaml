@@ -29,3 +29,11 @@ display:
 storage:
   db_path: data/inspector.db
   batch_size: 100
+
+# --- Автообнаружение плагинов и сервисов ---
+discovery:
+  plugin_paths:
+    - "Plugins"
+  service_paths:
+    - "Services"
+  auto_discover: true

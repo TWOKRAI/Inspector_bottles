@@ -37,9 +37,54 @@ from .presenter import PluginsPresenter
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
+    from .paths_subtab import PathsSubtabWidget
 
 
 _CATEGORY_PREFIX = "__cat__"
+
+# Ключ секции «Пути» (корневой, без parent_key)
+_PATHS_KEY = "__paths__"
+
+
+# ---------------------------------------------------------------------------
+# _PathsSection — секция управления директориями поиска плагинов
+# ---------------------------------------------------------------------------
+
+
+class _PathsSection:
+    """Секция «Пути» — управление директориями поиска плагинов.
+
+    Singleton виджет (lazy): создаётся один раз при первом вызове widget().
+    Это важно для сохранения подписки catalog_updated (Task 2.6).
+    """
+
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+        self._widget: "PathsSubtabWidget | None" = None
+
+    # -------- SectionProtocol --------
+
+    @property
+    def key(self) -> str:
+        return _PATHS_KEY
+
+    @property
+    def title(self) -> str:
+        return "Пути"
+
+    def widget(self) -> QWidget:
+        """Лениво создать PathsSubtabWidget (singleton — один и тот же экземпляр)."""
+        if self._widget is None:
+            from .paths_subtab import PathsSubtabWidget
+
+            self._widget = PathsSubtabWidget(PluginsPresenter(self._ctx))
+        return self._widget
+
+    def action_buttons(self) -> list[QWidget]:
+        return []
+
+    def on_activated(self) -> None: ...
+    def on_deactivated(self) -> None: ...
 
 
 def _cat_key(category: str) -> str:
@@ -235,17 +280,55 @@ def _make_plugin_factory(plugin_name: str, title: str) -> Callable[["AppContext"
 # ---------------------------------------------------------------------------
 
 
+# Модульный кэш singleton-секций «Пути» по id(ctx).
+# Замыкание в _make_paths_factory не работает между вызовами
+# build_plugin_sections() — каждый refresh_catalog() создавал бы новую секцию
+# с новым PathsSubtabWidget, что ломало бы подписку catalog_updated.
+_PATHS_SECTION_CACHE: "dict[int, _PathsSection]" = {}
+
+
+def _make_paths_factory(ctx: "AppContext") -> "Callable[[AppContext], _PathsSection]":
+    """Фабрика singleton-секции «Пути».
+
+    Кэш по id(ctx) переживает повторные вызовы build_plugin_sections(),
+    что гарантирует сохранение подписки catalog_updated после refresh_catalog().
+    """
+    cache_key = id(ctx)
+
+    def factory(_ctx: "AppContext") -> _PathsSection:
+        section = _PATHS_SECTION_CACHE.get(cache_key)
+        if section is None:
+            section = _PathsSection(ctx)
+            _PATHS_SECTION_CACHE[cache_key] = section
+        return section
+
+    return factory
+
+
 def build_plugin_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]":
     """Сформировать декларацию секций PluginsTab.
 
-    Структура: для каждой уникальной категории — родительский SectionSpec
-    (placeholder); под ней — lazy-секции плагинов этой категории.
+    Структура:
+    1. Корневая секция «Пути» (__paths__) — управление директориями плагинов.
+    2. Для каждой уникальной категории — родительский SectionSpec (placeholder).
+    3. Под каждой категорией — lazy-секции плагинов.
+
     Порядок категорий — по сортированному списку из реестра.
     """
     presenter = PluginsPresenter(ctx)
     plugins = presenter.list_plugins()  # [(name, display, category), ...]
 
     sections: list[SectionSpec[AppContext]] = []
+
+    # Первым добавляем секцию «Пути» (корневой элемент, без parent_key)
+    sections.append(
+        SectionSpec(
+            key=_PATHS_KEY,
+            title="Пути",
+            factory=_make_paths_factory(ctx),
+        )
+    )
+
     seen_categories: set[str] = set()
 
     # Группируем по категории, сохраняя порядок появления.
