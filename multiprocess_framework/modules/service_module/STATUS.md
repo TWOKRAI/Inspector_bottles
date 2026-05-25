@@ -19,9 +19,9 @@
 | register_service | registry.py | Готов | Декоратор регистрации класса в singleton при импорте |
 | DiscoveryResult | scanner.py | Готов | dataclass: loaded, failed, total |
 | discover | scanner.py | Готов | Рекурсивный поиск service.py через importlib |
-| ServiceStateAdapter | — | Запланирован (Task 3.5) | Двусторонняя sync Registry ↔ state.services.* |
+| ServiceStateAdapter | service_state_adapter.py | Готов (Task 3.5, c3b6c89) | Двусторонняя sync Registry ↔ state.services.* |
 
-**Тестов:** 41 (26 test_registry.py + 15 test_scanner.py)
+**Тестов:** 53 (26 test_registry.py + 15 test_scanner.py + 12 test_service_state_adapter.py)
 
 ---
 
@@ -37,19 +37,11 @@
 | **Services/sql/service.py** | @register_service | Готов |
 | **Services/hikvision_camera/service.py** | @register_service | Готов |
 | **Services/auth/service.py** | @register_service | Готов |
-| **ServiceStateAdapter** | sync Registry ↔ state.services.* | Запланирован (Task 3.5) |
+| **ServiceStateAdapter** | sync Registry ↔ state.services.* | Готов (Task 3.5, c3b6c89) |
 
 ---
 
 ## TODO
-
-### Task 3.5 -- ServiceStateAdapter (двусторонняя sync ServiceRegistry ↔ state.services.*)
-
-Адаптер синхронизации `ServiceRegistry` ↔ `state.services.*`, наследующий `StateAdapterBase`. Живёт в `multiprocess_prototype/backend/state/adapters/`.
-
-### Task 3.6 -- ServicesTab: переключение на ServiceRegistry + подвкладка «Пути»
-
-Переключить `ServicesPresenter` с хардкода `SERVICE_PLUGINS` на `ServiceRegistry.list()`. Добавить подвкладку «Пути» по образцу PluginsTab.
 
 ### Task 3.7 -- Action-кнопки start/stop/restart + биндинг статуса из state
 
@@ -77,3 +69,5 @@
 | 2026-05-25 | Task 3.2: registry.py — ServiceRegistry singleton, ServiceEntry, @register_service, 26 тестов | Готово |
 | 2026-05-25 | Task 3.3: scanner.py — discover + DiscoveryResult, 15 тестов, integration smoke 4 сервиса | Готово |
 | 2026-05-25 | Task 3.4: README.md + DECISIONS.md (ADR-SM-001/002/003) + STATUS.md → IN_PROGRESS | Готово |
+| 2026-05-25 | Task 3.5: ServiceStateAdapter — двусторонняя sync Registry ↔ state.services.*, 12 тестов (c3b6c89) | Готово |
+| 2026-05-25 | Task 3.6: ServicesTab → ServiceRegistry, ServicePathsSubtabWidget, AppContext.service_registry(), bootstrap в app.py | Готово |

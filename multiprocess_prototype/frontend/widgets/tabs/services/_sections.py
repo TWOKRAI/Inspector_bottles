@@ -4,16 +4,14 @@
 Структура (Settings-стиль, ветвящееся дерево):
 
     ▾ Сервисы               (services_root — placeholder «выберите сервис»)
-        Камеры              (camera_service)
-        База данных         (database)
-        Управление роботом  (robot_control)
-        Сохранение кадров   (frame_saver)
+        <name>              (динамически из ServiceRegistry.list())
+        ...
     Нейронные сети          (placeholder для Phase 14+)
+    Пути                    (__service_paths__)
 
-Каждый сервисный узел — ``_ServiceSection`` с ``RegisterView`` в качестве
-``widget()`` и тремя кнопками управления в ``action_buttons()`` (Запустить /
-Остановить / Перезапуск). Кнопки отдают визуальный QMessageBox-фидбек до
-реализации реальной интеграции с бэкендом.
+Каждый сервисный узел — ``_ServiceSection`` с информационной карточкой
+(имя, lifecycle) и тремя кнопками управления в ``action_buttons()``
+(Запустить / Остановить / Перезапуск). Кнопки — заглушка до Task 3.7.
 
 Узлы-плейсхолдеры (root + neural_networks) реализованы через
 ``_PlaceholderSection`` — текстовая метка по центру.
@@ -33,36 +31,60 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
-from multiprocess_prototype.frontend.forms import RegisterView
 
 from .presenter import ServicesPresenter
 
 if TYPE_CHECKING:
+    from multiprocess_framework.modules.service_module import ServiceLifecycle
     from multiprocess_prototype.frontend.app_context import AppContext
 
 
 # ---------------------------------------------------------------------------
-# _ServiceSection — реальная сервисная секция с RegisterView и кнопками
+# _ServiceInfoCard — карточка сервиса с именем и lifecycle-статусом
+# ---------------------------------------------------------------------------
+
+
+class _ServiceInfoCard(QWidget):
+    """Простая карточка с информацией о сервисе."""
+
+    def __init__(self, name: str, lifecycle: "ServiceLifecycle", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        name_label = QLabel(f"<b>Сервис:</b> {name}")
+        name_label.setWordWrap(True)
+        layout.addWidget(name_label)
+
+        status_label = QLabel(f"<b>Статус:</b> {lifecycle.value}")
+        status_label.setWordWrap(True)
+        layout.addWidget(status_label)
+
+        layout.addStretch()
+
+
+# ---------------------------------------------------------------------------
+# _ServiceSection — реальная сервисная секция с карточкой и кнопками
 # ---------------------------------------------------------------------------
 
 
 class _ServiceSection:
-    """Секция одного сервиса: RegisterView в content + 3 кнопки в action-колонке."""
+    """Секция одного сервиса: _ServiceInfoCard в content + 3 кнопки в action-колонке."""
 
     def __init__(
         self,
         ctx: "AppContext",
-        plugin_name: str,
+        name: str,
         title: str,
-        fields: list,
+        lifecycle: "ServiceLifecycle",
     ) -> None:
         self._ctx = ctx
-        self._key = plugin_name
+        self._key = name
         self._title = title
-        self._fields = fields
+        self._lifecycle = lifecycle
         self._widget: QWidget | None = None
         self._buttons: list[QPushButton] = []
-        self._register_view: RegisterView | None = None
 
     # -------- SectionProtocol --------
 
@@ -87,20 +109,10 @@ class _ServiceSection:
     def on_activated(self) -> None: ...
     def on_deactivated(self) -> None: ...
 
-    # -------- SectionWithEvents (bus подписка через BaseTreeNavTab) --------
-
-    def bus_change_callback(self) -> Callable[[], None] | None:
-        """Callback для подписки на ActionBus — обновлять editor при undo/redo."""
-        return self._on_bus_changed
-
     # -------- Internal --------
 
     def _build_widget(self) -> None:
-        form_ctx = self._ctx.form_context()
-        view = RegisterView(self._fields, form_ctx=form_ctx)
-        view.field_changed.connect(self._on_field_changed)
-        self._register_view = view
-        self._widget = view
+        self._widget = _ServiceInfoCard(self._key, self._lifecycle)
 
     def _build_buttons(self) -> None:
         from multiprocess_prototype.frontend.widgets.access import (
@@ -119,54 +131,12 @@ class _ServiceSection:
             install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
 
     def _on_button_click(self, label: str) -> None:
-        # TODO: реальная интеграция с backend (start/stop/restart через presenter).
-        # Пока — visible-stub, чтобы клик не был немым.
+        # TODO (Task 3.7): реальная интеграция с backend (start/stop/restart через presenter).
         QMessageBox.information(
             self._widget,
             f"Сервис: {self._title}",
-            f"Действие «{label}» для сервиса «{self._title}» будет добавлено позже.",
+            f"Действие «{label}» для сервиса «{self._title}» будет добавлено в Task 3.7.",
         )
-
-    def _on_field_changed(
-        self,
-        register_name: str,
-        field_name: str,
-        old_value: object,
-        new_value: object,
-    ) -> None:
-        """Изменение параметра сервиса → ActionBus.execute(field_set)."""
-        bus = self._ctx.action_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-        action = V2ActionBuilder.field_set_timed(
-            register_name,
-            field_name,
-            new_value,
-            old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.execute(action)
-
-    def _on_bus_changed(self) -> None:
-        """Callback от ActionBus — обновить RegisterView при undo/redo."""
-        bus = self._ctx.action_bus()
-        if bus is None or self._register_view is None:
-            return
-        event = bus.last_event
-        if event is None:
-            return
-        event_type, action = event
-        if event_type not in ("undo", "redo"):
-            return
-        if action.action_type != "field_set":
-            return
-        register_name = action.register_name or ""
-        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
-        key = f"{register_name}.{action.field_name}"
-        if key in self._register_view.editors():
-            self._register_view.set_editor_value(key, value)
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +183,41 @@ class _PlaceholderSection:
 
 
 # ---------------------------------------------------------------------------
+# _ServicePathsSection — секция управления директориями сервисов
+# ---------------------------------------------------------------------------
+
+
+class _ServicePathsSection:
+    """Секция «Пути» — ServicePathsSubtabWidget."""
+
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+        self._widget: QWidget | None = None
+
+    @property
+    def key(self) -> str:
+        return "__service_paths__"
+
+    @property
+    def title(self) -> str:
+        return "Пути"
+
+    def widget(self) -> QWidget:
+        if self._widget is None:
+            from .paths_subtab import ServicePathsSubtabWidget
+
+            presenter = ServicesPresenter(self._ctx)
+            self._widget = ServicePathsSubtabWidget(presenter)
+        return self._widget
+
+    def action_buttons(self) -> list[QWidget]:
+        return []
+
+    def on_activated(self) -> None: ...
+    def on_deactivated(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
 # Фабрики для SectionSpec
 # ---------------------------------------------------------------------------
 
@@ -233,13 +238,17 @@ def _nn_placeholder_factory(_ctx: "AppContext") -> _PlaceholderSection:
     )
 
 
+def _service_paths_factory(ctx: "AppContext") -> _ServicePathsSection:
+    return _ServicePathsSection(ctx)
+
+
 def _make_service_factory(
-    plugin_name: str,
+    name: str,
     title: str,
-    fields: list,
-) -> Callable[["AppContext"], _ServiceSection]:
+    lifecycle: "ServiceLifecycle",
+) -> "Callable[[AppContext], _ServiceSection]":
     def factory(ctx: "AppContext") -> _ServiceSection:
-        return _ServiceSection(ctx, plugin_name, title, fields)
+        return _ServiceSection(ctx, name, title, lifecycle)
 
     return factory
 
@@ -254,14 +263,16 @@ def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
 
     Структура:
         - «Сервисы» (services_root, родитель) — только если есть хотя бы один
-          сервис в реестре с полями. Иначе родительский узел не создаётся.
-        - Под ним — N сервисных секций (lazy).
+          сервис в ServiceRegistry. Иначе родительский узел не создаётся.
+        - Под ним — N сервисных секций (lazy) из ServiceRegistry.list().
         - Top-level «Нейронные сети» — всегда присутствует как placeholder.
+        - Top-level «Пути» (__service_paths__) — управление директориями.
     """
     presenter = ServicesPresenter(ctx)
-    service_data = presenter.get_service_sections()  # [(title, plugin_name, fields), ...]
+    service_data = presenter.list_services()  # [(name, title, lifecycle), ...]
 
     sections: list[SectionSpec[AppContext]] = []
+
     if service_data:
         sections.append(
             SectionSpec(
@@ -270,21 +281,29 @@ def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
                 factory=_services_root_factory,
             )
         )
-        for title, plugin_name, fields in service_data:
+        for name, title, lifecycle in service_data:
             sections.append(
                 SectionSpec(
-                    key=plugin_name,
+                    key=name,
                     title=title,
-                    factory=_make_service_factory(plugin_name, title, fields),
+                    factory=_make_service_factory(name, title, lifecycle),
                     parent_key="services_root",
                     lazy=True,
                 )
             )
+
     sections.append(
         SectionSpec(
             key="neural_networks",
             title="Нейронные сети",
             factory=_nn_placeholder_factory,
+        )
+    )
+    sections.append(
+        SectionSpec(
+            key="__service_paths__",
+            title="Пути",
+            factory=_service_paths_factory,
         )
     )
     return sections

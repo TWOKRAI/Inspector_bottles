@@ -253,7 +253,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** impl-only
 
-**Status:** ✅ Done
+**Status:** ✅ Done (commit c3b6c89)
 
 ---
 
@@ -299,7 +299,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** public-api-change
 
-**Status:** ⏳ Todo
+**Status:** ✅ Done (commit TBD)
 
 ---
 
