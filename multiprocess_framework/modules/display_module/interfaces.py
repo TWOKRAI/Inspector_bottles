@@ -20,6 +20,7 @@ ADR-решение по семантике полей:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 
@@ -152,7 +153,7 @@ class IDisplayRegistry(Protocol):
             def unregister(self, display_id: str) -> bool: ...
             def get(self, display_id: str) -> DisplayEntry | None: ...
             def list(self) -> list[DisplayEntry]: ...
-            def persist(self) -> None: ...
+            def persist(self, path: Path) -> None: ...
 
         assert isinstance(MyRegistry(), IDisplayRegistry)  # True
     """
@@ -199,10 +200,15 @@ class IDisplayRegistry(Protocol):
         """
         ...
 
-    def persist(self) -> None:
-        """Сохранить текущее состояние реестра.
+    def persist(self, path: Path) -> None:
+        """Сохранить текущее состояние реестра в файл.
 
-        Конкретный путь к файлу определяется реализацией
-        (ADR-DM-002: prototype-слой решает, где хранить конфиг).
+        Путь передаётся вызывающим кодом — prototype-слой решает,
+        где хранить конфиг (ADR-DM-002). Framework-реестр сам путь
+        не запоминает: это разделение ответственности позволяет
+        реестру оставаться чистым singleton-ом без application-state.
+
+        Args:
+            path: Абсолютный или относительный путь к файлу для записи.
         """
         ...

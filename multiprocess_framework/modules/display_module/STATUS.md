@@ -17,7 +17,7 @@
 | IDisplayChannel | interfaces.py | Готов | Protocol (runtime_checkable): channel_key, subscribe, unsubscribe, is_active |
 | DisplayRegistry | registry.py | Готов | Singleton-реестр с double-checked locking + YAML persist/load |
 
-**Тестов:** ≥8 (Task 4.8, `tests/test_registry.py` — запланировано)
+**Тестов:** 12 (Task 4.8, `tests/test_registry.py` — готово, коммит `8c41ea1b`)
 
 ---
 

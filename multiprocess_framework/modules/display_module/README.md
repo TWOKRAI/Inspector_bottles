@@ -107,7 +107,7 @@ from pathlib import Path
 
 reg = DisplayRegistry()
 reg.load(Path("backend/config/displays.yaml"))
-bind_displays_to_blueprint(reg.list(), blueprint)
+blueprint = bind_displays_to_blueprint(reg, blueprint)
 ```
 
 Фактическое создание SHM-сегмента происходит при следующем запуске `ProcessManagerProcess` через `SharedResourcesManager` (ADR-025). До старта процессов SHM-сегмент не существует — дисплей зарегистрирован декларативно.
