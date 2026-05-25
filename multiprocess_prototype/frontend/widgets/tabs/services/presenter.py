@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+from loguru import logger
+
+from multiprocess_framework.modules.service_module import IService, ServiceLifecycle
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.service_module import ServiceLifecycle
     from multiprocess_prototype.frontend.app_context import AppContext
 
 
@@ -20,10 +22,19 @@ class ServicesPresenter:
 
     Читает сервисы из ServiceRegistry через AppContext.
     Управляет путями директорий сервисов (аналогично PluginsPresenter).
+    Кэширует запущенные экземпляры (_instances) для корректного stop/restart.
+
+    Примечание (MVP): статус читается напрямую из ServiceRegistry.get(name).lifecycle —
+    StateProxy недоступен в GUI-процессе (он живёт только в ProcessModule-воркерах).
+    IPC-синхронизация с воркерами — Phase 4+.
     """
 
     def __init__(self, ctx: "AppContext") -> None:
         self._ctx = ctx
+        # Кэш запущенных экземпляров: name → экземпляр IService.
+        # TODO (Phase 4+): инстанцирование через entry.cls() без параметров — MVP.
+        # Webcam-сервис в продакшне должен получать device_index через config dict.
+        self._instances: dict[str, IService] = {}
 
     def list_services(self) -> "list[tuple[str, str, ServiceLifecycle]]":
         """Список зарегистрированных сервисов из ServiceRegistry.
@@ -42,6 +53,115 @@ class ServicesPresenter:
             title = entry.meta.get("title") or entry.name.replace("_", " ").title()
             result.append((entry.name, title, entry.lifecycle))
         return result
+
+    # ------------------------------------------------------------------ #
+    #  Управление lifecycle сервисов                                       #
+    # ------------------------------------------------------------------ #
+
+    def start_service(self, name: str) -> bool:
+        """Запустить сервис с указанным именем.
+
+        Инстанцирует класс сервиса (если ещё не создан), вызывает start({}).
+        Обновляет entry.lifecycle в ServiceRegistry напрямую.
+
+        Args:
+            name: Имя сервиса из ServiceRegistry.
+
+        Returns:
+            True при успешном запуске, False при ошибке или отсутствии сервиса.
+        """
+        registry = self._ctx.service_registry()
+        if registry is None:
+            return False
+
+        entry = registry.get(name)
+        if entry is None:
+            return False
+
+        # Инстанцируем если ещё нет в кэше
+        instance = self._instances.get(name)
+        if instance is None:
+            try:
+                instance = entry.cls()
+            except Exception as exc:
+                logger.error(f"ServicesPresenter: не удалось создать экземпляр {name}: {exc}")
+                entry.lifecycle = ServiceLifecycle.ERROR
+                return False
+            self._instances[name] = instance
+
+        try:
+            ok = bool(instance.start({}))
+        except Exception as exc:
+            logger.error(f"ServicesPresenter: start({name}) выбросил исключение: {exc}")
+            entry.lifecycle = ServiceLifecycle.ERROR
+            return False
+
+        entry.lifecycle = ServiceLifecycle.RUNNING if ok else ServiceLifecycle.ERROR
+        return ok
+
+    def stop_service(self, name: str) -> bool:
+        """Остановить сервис с указанным именем.
+
+        Если экземпляра нет в кэше — синхронизирует lifecycle → STOPPED без вызова stop().
+
+        Args:
+            name: Имя сервиса из ServiceRegistry.
+
+        Returns:
+            True при успешной остановке, False при ошибке.
+        """
+        registry = self._ctx.service_registry()
+        if registry is None:
+            return False
+
+        entry = registry.get(name)
+        if entry is None:
+            return False
+
+        instance = self._instances.get(name)
+        if instance is None:
+            # Нечего останавливать — синхронизируем lifecycle
+            entry.lifecycle = ServiceLifecycle.STOPPED
+            return True
+
+        try:
+            ok = bool(instance.stop())
+        except Exception as exc:
+            logger.error(f"ServicesPresenter: stop({name}) выбросил исключение: {exc}")
+            entry.lifecycle = ServiceLifecycle.ERROR
+            return False
+
+        entry.lifecycle = ServiceLifecycle.STOPPED if ok else ServiceLifecycle.ERROR
+        return ok
+
+    def restart_service(self, name: str) -> bool:
+        """Перезапустить сервис: stop() → start().
+
+        Args:
+            name: Имя сервиса из ServiceRegistry.
+
+        Returns:
+            True если оба шага (stop и start) завершились успешно.
+        """
+        return self.stop_service(name) and self.start_service(name)
+
+    def get_lifecycle(self, name: str) -> "ServiceLifecycle | None":
+        """Прочитать текущий lifecycle сервиса напрямую из ServiceRegistry.
+
+        Примечание: StateProxy не используется — он недоступен в GUI-процессе.
+        Прямое чтение из registry — MVP для Phase 3.
+
+        Args:
+            name: Имя сервиса.
+
+        Returns:
+            ServiceLifecycle или None если registry не инициализирован / сервис не найден.
+        """
+        registry = self._ctx.service_registry()
+        if registry is None:
+            return None
+        entry = registry.get(name)
+        return entry.lifecycle if entry is not None else None
 
     # ------------------------------------------------------------------ #
     #  Управление путями директорий сервисов                               #

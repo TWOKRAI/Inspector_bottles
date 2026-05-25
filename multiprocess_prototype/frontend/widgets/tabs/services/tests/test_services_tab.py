@@ -1,4 +1,4 @@
-"""Тесты для ServicesTab (Task 3.6 — ServiceRegistry-based)."""
+"""Тесты для ServicesTab (Task 3.6 — ServiceRegistry-based; Task 3.7 — lifecycle actions)."""
 
 from __future__ import annotations
 
@@ -17,12 +17,14 @@ from multiprocess_prototype.frontend.widgets.tabs.services.tab import ServicesTa
 class _MockServiceEntry:
     """Минимальный mock для ServiceEntry."""
 
-    def __init__(self, name: str, title: str | None = None):
+    def __init__(self, name: str, title: str | None = None, cls: type | None = None):
         from multiprocess_framework.modules.service_module import ServiceLifecycle
 
         self.name = name
         self.lifecycle = ServiceLifecycle.READY
         self.meta = {"title": title} if title else {}
+        # cls используется presenter'ом для инстанцирования
+        self.cls = cls
 
 
 class _MockServiceRegistry:
@@ -214,3 +216,297 @@ class TestServicesTab:
         assert after_count >= 1
         keys = [s.key for s in tab._sections_specs]
         assert "__service_paths__" in keys
+
+
+# ---------------------------------------------------------------------------
+# Тесты ServicesPresenter — lifecycle actions (Task 3.7)
+# ---------------------------------------------------------------------------
+
+
+class _FakeService:
+    """Простой сервис для unit-тестов presenter (не реальный IService)."""
+
+    name: str = "fake_service"
+
+    def __init__(self):
+        self.started_with: list[dict] = []
+        self.stop_called: int = 0
+        self._start_result = True
+        self._stop_result = True
+        self._should_raise_on_start = False
+        self._should_raise_on_stop = False
+
+    def start(self, config: dict) -> bool:
+        if self._should_raise_on_start:
+            raise RuntimeError("Тестовое исключение в start()")
+        self.started_with.append(config)
+        return self._start_result
+
+    def stop(self) -> bool:
+        if self._should_raise_on_stop:
+            raise RuntimeError("Тестовое исключение в stop()")
+        self.stop_called += 1
+        return self._stop_result
+
+    def get_status(self) -> dict:
+        return {"name": self.name}
+
+
+def _make_entry_with_cls(name: str, cls: type) -> "_MockServiceEntry":
+    """Создать mock-запись с реальным cls для инстанцирования."""
+    from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+    entry = _MockServiceEntry(name)
+    entry.cls = cls
+    entry.lifecycle = ServiceLifecycle.READY
+    return entry
+
+
+class TestServicesPresenterLifecycle:
+    """Тесты методов start/stop/restart/get_lifecycle (Task 3.7)."""
+
+    def test_start_service_calls_start_and_sets_running(self):
+        """start_service("foo") → instance.start({}) вызван → lifecycle == RUNNING → True."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        fake_cls = _FakeService
+        entry = _make_entry_with_cls("foo", fake_cls)
+        registry = _MockServiceRegistry([entry])
+        ctx = MagicMock()
+        ctx.service_registry.return_value = registry
+
+        presenter = ServicesPresenter(ctx)
+        result = presenter.start_service("foo")
+
+        assert result is True
+        assert entry.lifecycle == ServiceLifecycle.RUNNING
+        # Экземпляр закешировался
+        assert "foo" in presenter._instances
+        instance = presenter._instances["foo"]
+        assert len(instance.started_with) == 1
+        assert instance.started_with[0] == {}
+
+    def test_stop_service_calls_stop_and_sets_stopped(self):
+        """После start → stop_service() → instance.stop() вызван → lifecycle == STOPPED."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        entry = _make_entry_with_cls("bar", _FakeService)
+        registry = _MockServiceRegistry([entry])
+        ctx = MagicMock()
+        ctx.service_registry.return_value = registry
+
+        presenter = ServicesPresenter(ctx)
+        presenter.start_service("bar")
+        result = presenter.stop_service("bar")
+
+        assert result is True
+        assert entry.lifecycle == ServiceLifecycle.STOPPED
+        assert presenter._instances["bar"].stop_called == 1
+
+    def test_restart_service_calls_stop_then_start(self):
+        """restart_service() → stop() + start() подряд, lifecycle == RUNNING."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        entry = _make_entry_with_cls("baz", _FakeService)
+        registry = _MockServiceRegistry([entry])
+        ctx = MagicMock()
+        ctx.service_registry.return_value = registry
+
+        presenter = ServicesPresenter(ctx)
+        presenter.start_service("baz")  # первый запуск
+
+        result = presenter.restart_service("baz")
+
+        assert result is True
+        assert entry.lifecycle == ServiceLifecycle.RUNNING
+        instance = presenter._instances["baz"]
+        # stop() вызван один раз (при restart), start() вызван дважды (init + restart)
+        assert instance.stop_called == 1
+        assert len(instance.started_with) == 2
+
+    def test_start_unknown_service_returns_false(self):
+        """start_service("nonexistent") → False, без исключений."""
+        registry = _MockServiceRegistry([])
+        ctx = MagicMock()
+        ctx.service_registry.return_value = registry
+
+        presenter = ServicesPresenter(ctx)
+        result = presenter.start_service("nonexistent")
+
+        assert result is False
+
+    def test_start_exception_marks_error_lifecycle(self):
+        """Если instance.start() поднимает исключение → lifecycle == ERROR, return False."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        class _RaisingService(_FakeService):
+            name: str = "bad_service"
+
+            def start(self, config: dict) -> bool:
+                raise RuntimeError("Ошибка инициализации")
+
+        entry = _make_entry_with_cls("bad_service", _RaisingService)
+        registry = _MockServiceRegistry([entry])
+        ctx = MagicMock()
+        ctx.service_registry.return_value = registry
+
+        presenter = ServicesPresenter(ctx)
+        result = presenter.start_service("bad_service")
+
+        assert result is False
+        assert entry.lifecycle == ServiceLifecycle.ERROR
+
+    def test_start_with_none_registry_returns_false(self):
+        """start_service при registry=None → False, нет краша."""
+        ctx = MagicMock()
+        ctx.service_registry.return_value = None
+
+        presenter = ServicesPresenter(ctx)
+        result = presenter.start_service("anything")
+
+        assert result is False
+
+    def test_get_lifecycle_returns_current_value(self):
+        """get_lifecycle() читает lifecycle прямо из registry entry."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        entry = _make_entry_with_cls("svc", _FakeService)
+        entry.lifecycle = ServiceLifecycle.RUNNING
+        registry = _MockServiceRegistry([entry])
+        ctx = MagicMock()
+        ctx.service_registry.return_value = registry
+
+        presenter = ServicesPresenter(ctx)
+        lc = presenter.get_lifecycle("svc")
+
+        assert lc == ServiceLifecycle.RUNNING
+
+    def test_get_lifecycle_none_registry_returns_none(self):
+        """get_lifecycle() при registry=None → None."""
+        ctx = MagicMock()
+        ctx.service_registry.return_value = None
+
+        presenter = ServicesPresenter(ctx)
+        assert presenter.get_lifecycle("anything") is None
+
+
+# ---------------------------------------------------------------------------
+# Тесты _ServiceSection — кнопки и статус-лейбл (Task 3.7)
+# ---------------------------------------------------------------------------
+
+
+class TestServiceSection:
+    """Тесты UI-секции сервиса: кнопки enabled/disabled + статус-лейбл."""
+
+    def _make_section(self, qtbot, lifecycle=None, start_result: bool = True):
+        """Вспомогательный метод: создать _ServiceSection с mock-presenter."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+        from multiprocess_prototype.frontend.widgets.tabs.services._sections import _ServiceSection
+
+        if lifecycle is None:
+            lifecycle = ServiceLifecycle.READY
+
+        ctx = MagicMock()
+        ctx.auth = None
+
+        mock_presenter = MagicMock(spec=ServicesPresenter)
+        mock_presenter.get_lifecycle.return_value = lifecycle
+        mock_presenter.start_service.return_value = start_result
+        mock_presenter.stop_service.return_value = True
+        mock_presenter.restart_service.return_value = start_result
+
+        section = _ServiceSection(ctx, "test_svc", "Test Service", lifecycle, mock_presenter)
+        # Инициализируем widget и buttons
+        widget = section.widget()
+        qtbot.addWidget(widget)
+        _ = section.action_buttons()
+
+        return section, mock_presenter
+
+    def test_button_start_enabled_when_ready(self, qtbot):
+        """Кнопка «Запустить» enabled при lifecycle=READY, «Остановить» disabled."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        section, _ = self._make_section(qtbot, ServiceLifecycle.READY)
+
+        assert section._btn_start is not None
+        assert section._btn_stop is not None
+        assert section._btn_start.isEnabled() is True
+        assert section._btn_stop.isEnabled() is False
+
+    def test_button_start_disabled_when_running(self, qtbot):
+        """После start: «Запустить» disabled, «Остановить» enabled."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        section, mock_presenter = self._make_section(qtbot, ServiceLifecycle.READY)
+
+        # Симулируем переход в RUNNING после клика start
+        mock_presenter.get_lifecycle.return_value = ServiceLifecycle.RUNNING
+        section._on_start_click()
+
+        assert section._btn_start is not None
+        assert section._btn_stop is not None
+        assert section._btn_start.isEnabled() is False
+        assert section._btn_stop.isEnabled() is True
+
+    def test_button_restart_enabled_when_error(self, qtbot):
+        """«Перезапуск» enabled при lifecycle=ERROR."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+
+        section, mock_presenter = self._make_section(qtbot, ServiceLifecycle.ERROR)
+        # get_lifecycle должен вернуть ERROR при проверке
+        mock_presenter.get_lifecycle.return_value = ServiceLifecycle.ERROR
+        section._refresh_button_state(ServiceLifecycle.ERROR)
+
+        assert section._btn_restart is not None
+        assert section._btn_restart.isEnabled() is True
+
+    def test_status_label_updates_after_start_click(self, qtbot):
+        """Клик «Запустить» → статус-лейбл обновляется на 'running'."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+        from multiprocess_prototype.frontend.widgets.tabs.services._sections import _ServiceSection
+
+        ctx = MagicMock()
+        ctx.auth = None
+
+        mock_presenter = MagicMock(spec=ServicesPresenter)
+        mock_presenter.get_lifecycle.return_value = ServiceLifecycle.READY
+        mock_presenter.start_service.return_value = True
+
+        section = _ServiceSection(ctx, "test_svc", "Test", ServiceLifecycle.READY, mock_presenter)
+        widget = section.widget()
+        qtbot.addWidget(widget)
+        _ = section.action_buttons()
+
+        # Переключаем lifecycle на RUNNING перед refresh
+        mock_presenter.get_lifecycle.return_value = ServiceLifecycle.RUNNING
+        section._on_start_click()
+
+        # Проверяем статус-лейбл через objectName
+        from PySide6.QtWidgets import QLabel
+
+        status_label = widget.findChild(QLabel, "service_status_test_svc")
+        assert status_label is not None
+        assert "running" in status_label.text()
+
+    def test_section_no_crash_when_registry_none(self, qtbot):
+        """Клик на кнопку при registry=None → нет краша, lifecycle не обновляется."""
+        from multiprocess_framework.modules.service_module import ServiceLifecycle
+        from multiprocess_prototype.frontend.widgets.tabs.services._sections import _ServiceSection
+
+        ctx = MagicMock()
+        ctx.auth = None
+
+        mock_presenter = MagicMock(spec=ServicesPresenter)
+        mock_presenter.get_lifecycle.return_value = None  # registry=None
+        mock_presenter.start_service.return_value = False
+
+        section = _ServiceSection(ctx, "test_svc", "Test", ServiceLifecycle.READY, mock_presenter)
+        widget = section.widget()
+        qtbot.addWidget(widget)
+        _ = section.action_buttons()
+
+        # Не должно быть исключений
+        section._on_start_click()
+        section._on_stop_click()
+        section._on_restart_click()

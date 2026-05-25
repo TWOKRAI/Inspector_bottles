@@ -339,7 +339,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** impl-only
 
-**Status:** ⏳ Todo
+**Status:** ✅ Done (commit TBD)
 
 ---
 

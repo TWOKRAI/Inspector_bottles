@@ -11,7 +11,8 @@
 
 Каждый сервисный узел — ``_ServiceSection`` с информационной карточкой
 (имя, lifecycle) и тремя кнопками управления в ``action_buttons()``
-(Запустить / Остановить / Перезапуск). Кнопки — заглушка до Task 3.7.
+(Запустить / Остановить / Перезапуск). Task 3.7: кнопки подключены к
+реальным вызовам presenter.start_service/stop_service/restart_service.
 
 Узлы-плейсхолдеры (root + neural_networks) реализованы через
 ``_PlaceholderSection`` — текстовая метка по центру.
@@ -24,30 +25,29 @@ from typing import TYPE_CHECKING, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
+from multiprocess_framework.modules.service_module import ServiceLifecycle
 
 from .presenter import ServicesPresenter
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.service_module import ServiceLifecycle
     from multiprocess_prototype.frontend.app_context import AppContext
 
 
 # ---------------------------------------------------------------------------
-# _ServiceInfoCard — карточка сервиса с именем и lifecycle-статусом
+# _ServiceInfoCard — карточка сервиса с именем и реактивным lifecycle-статусом
 # ---------------------------------------------------------------------------
 
 
 class _ServiceInfoCard(QWidget):
-    """Простая карточка с информацией о сервисе."""
+    """Карточка с именем сервиса и обновляемым статус-лейблом."""
 
-    def __init__(self, name: str, lifecycle: "ServiceLifecycle", parent: QWidget | None = None) -> None:
+    def __init__(self, name: str, lifecycle: ServiceLifecycle, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -57,11 +57,21 @@ class _ServiceInfoCard(QWidget):
         name_label.setWordWrap(True)
         layout.addWidget(name_label)
 
-        status_label = QLabel(f"<b>Статус:</b> {lifecycle.value}")
-        status_label.setWordWrap(True)
-        layout.addWidget(status_label)
+        # Статус-лейбл обновляется при изменении lifecycle
+        self._status_label = QLabel(f"<b>Статус:</b> {lifecycle.value}")
+        self._status_label.setObjectName(f"service_status_{name}")
+        self._status_label.setWordWrap(True)
+        layout.addWidget(self._status_label)
 
         layout.addStretch()
+
+    def update_status(self, lifecycle: ServiceLifecycle) -> None:
+        """Обновить отображаемый статус сервиса.
+
+        Args:
+            lifecycle: Новое состояние жизненного цикла.
+        """
+        self._status_label.setText(f"<b>Статус:</b> {lifecycle.value}")
 
 
 # ---------------------------------------------------------------------------
@@ -70,21 +80,34 @@ class _ServiceInfoCard(QWidget):
 
 
 class _ServiceSection:
-    """Секция одного сервиса: _ServiceInfoCard в content + 3 кнопки в action-колонке."""
+    """Секция одного сервиса: _ServiceInfoCard в content + 3 кнопки в action-колонке.
+
+    Task 3.7: кнопки «Запустить / Остановить / Перезапуск» подключены к
+    реальным вызовам presenter. Статус-лейбл обновляется после каждого клика
+    напрямую через _refresh_view() — без Qt-сигналов между секциями.
+
+    Lifecycle читается из ServiceRegistry (не из StateProxy) — StateProxy
+    недоступен в GUI-процессе. Это MVP; IPC-sync — Phase 4+.
+    """
 
     def __init__(
         self,
         ctx: "AppContext",
         name: str,
         title: str,
-        lifecycle: "ServiceLifecycle",
+        lifecycle: ServiceLifecycle,
+        presenter: ServicesPresenter,
     ) -> None:
         self._ctx = ctx
         self._key = name
         self._title = title
-        self._lifecycle = lifecycle
+        self._initial_lifecycle = lifecycle
+        self._presenter = presenter
+        self._card: _ServiceInfoCard | None = None
         self._widget: QWidget | None = None
-        self._buttons: list[QPushButton] = []
+        self._btn_start: QPushButton | None = None
+        self._btn_stop: QPushButton | None = None
+        self._btn_restart: QPushButton | None = None
 
     # -------- SectionProtocol --------
 
@@ -102,9 +125,13 @@ class _ServiceSection:
         return self._widget  # type: ignore[return-value]
 
     def action_buttons(self) -> list[QWidget]:
-        if not self._buttons:
+        if self._btn_start is None:
             self._build_buttons()
-        return list(self._buttons)
+        buttons: list[QWidget] = []
+        for btn in (self._btn_start, self._btn_stop, self._btn_restart):
+            if btn is not None:
+                buttons.append(btn)
+        return buttons
 
     def on_activated(self) -> None: ...
     def on_deactivated(self) -> None: ...
@@ -112,31 +139,80 @@ class _ServiceSection:
     # -------- Internal --------
 
     def _build_widget(self) -> None:
-        self._widget = _ServiceInfoCard(self._key, self._lifecycle)
+        """Построить виджет-карточку с реактивным статус-лейблом."""
+        self._card = _ServiceInfoCard(self._key, self._initial_lifecycle)
+        self._widget = self._card
 
     def _build_buttons(self) -> None:
+        """Построить три кнопки действий и подключить обработчики."""
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
 
-        for label in ("Запустить", "Остановить", "Перезапуск"):
-            btn = QPushButton(label)
-            btn.setToolTip(f"{label} сервис {self._title}")
-            btn.clicked.connect(lambda _checked=False, lbl=label: self._on_button_click(lbl))
-            self._buttons.append(btn)
+        self._btn_start = QPushButton("Запустить")
+        self._btn_start.setToolTip(f"Запустить сервис {self._title}")
+        self._btn_start.clicked.connect(self._on_start_click)
 
+        self._btn_stop = QPushButton("Остановить")
+        self._btn_stop.setToolTip(f"Остановить сервис {self._title}")
+        self._btn_stop.clicked.connect(self._on_stop_click)
+
+        self._btn_restart = QPushButton("Перезапуск")
+        self._btn_restart.setToolTip(f"Перезапустить сервис {self._title}")
+        self._btn_restart.clicked.connect(self._on_restart_click)
+
+        # Установить начальное состояние disabled/enabled по lifecycle
+        self._refresh_button_state()
+
+        # Привязать к permission system (если auth доступен)
         _auth = getattr(self._ctx, "auth", None)
         auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        for btn in self._buttons:
+        for btn in (self._btn_start, self._btn_stop, self._btn_restart):
             install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
 
-    def _on_button_click(self, label: str) -> None:
-        # TODO (Task 3.7): реальная интеграция с backend (start/stop/restart через presenter).
-        QMessageBox.information(
-            self._widget,
-            f"Сервис: {self._title}",
-            f"Действие «{label}» для сервиса «{self._title}» будет добавлено в Task 3.7.",
-        )
+    def _on_start_click(self) -> None:
+        """Запустить сервис и обновить отображение."""
+        self._presenter.start_service(self._key)
+        self._refresh_view()
+
+    def _on_stop_click(self) -> None:
+        """Остановить сервис и обновить отображение."""
+        self._presenter.stop_service(self._key)
+        self._refresh_view()
+
+    def _on_restart_click(self) -> None:
+        """Перезапустить сервис и обновить отображение."""
+        self._presenter.restart_service(self._key)
+        self._refresh_view()
+
+    def _refresh_view(self) -> None:
+        """Прочитать актуальный lifecycle из registry и обновить UI."""
+        lifecycle = self._presenter.get_lifecycle(self._key)
+        if lifecycle is None:
+            return
+        if self._card is not None:
+            self._card.update_status(lifecycle)
+        self._refresh_button_state(lifecycle)
+
+    def _refresh_button_state(self, lifecycle: ServiceLifecycle | None = None) -> None:
+        """Установить disabled/enabled для кнопок по текущему lifecycle.
+
+        Args:
+            lifecycle: Явный lifecycle (передаётся из _refresh_view чтобы
+                       не читать из registry повторно). Если None — читает сам.
+        """
+        if lifecycle is None:
+            lifecycle = self._presenter.get_lifecycle(self._key) or self._initial_lifecycle
+
+        is_running = lifecycle == ServiceLifecycle.RUNNING
+        is_error = lifecycle == ServiceLifecycle.ERROR
+
+        if self._btn_start is not None:
+            self._btn_start.setEnabled(not is_running)
+        if self._btn_stop is not None:
+            self._btn_stop.setEnabled(is_running)
+        if self._btn_restart is not None:
+            self._btn_restart.setEnabled(is_running or is_error)
 
 
 # ---------------------------------------------------------------------------
@@ -245,10 +321,13 @@ def _service_paths_factory(ctx: "AppContext") -> _ServicePathsSection:
 def _make_service_factory(
     name: str,
     title: str,
-    lifecycle: "ServiceLifecycle",
+    lifecycle: ServiceLifecycle,
 ) -> "Callable[[AppContext], _ServiceSection]":
     def factory(ctx: "AppContext") -> _ServiceSection:
-        return _ServiceSection(ctx, name, title, lifecycle)
+        # Presenter создаётся один раз на секцию и передаётся в _ServiceSection.
+        # Он владеет кэшем _instances для данного сервиса.
+        presenter = ServicesPresenter(ctx)
+        return _ServiceSection(ctx, name, title, lifecycle, presenter)
 
     return factory
 
