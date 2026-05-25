@@ -5,7 +5,7 @@
 
 ---
 
-## ADR-SM-001: Singleton ServiceRegistry через `__new__` + Lock
+## ADR-SVC-001: Singleton ServiceRegistry через `__new__` + Lock
 
 **Дата:** 2026-05-25
 **Статус:** Принято
@@ -42,7 +42,7 @@
 
 ---
 
-## ADR-SM-002: `IService` через Protocol + `@runtime_checkable` (не ABC)
+## ADR-SVC-002: `IService` через Protocol + `@runtime_checkable` (не ABC)
 
 **Дата:** 2026-05-25
 **Статус:** Принято
@@ -78,7 +78,7 @@
 
 ---
 
-## ADR-SM-003: `ServiceRegistry` хранит классы, не экземпляры
+## ADR-SVC-003: `ServiceRegistry` хранит классы, не экземпляры
 
 **Дата:** 2026-05-25
 **Статус:** Принято
@@ -118,6 +118,6 @@
 
 | ID | Название | Статус | Task |
 |----|----------|--------|------|
-| ADR-SM-001 | Singleton через `__new__` + Lock | Принято | 3.2 |
-| ADR-SM-002 | `IService` Protocol vs ABC | Принято | 3.1 |
-| ADR-SM-003 | Хранение классов, не экземпляров | Принято | 3.2 / 3.3 |
+| ADR-SVC-001 | Singleton через `__new__` + Lock | Принято | 3.2 |
+| ADR-SVC-002 | `IService` Protocol vs ABC | Принято | 3.1 |
+| ADR-SVC-003 | Хранение классов, не экземпляров | Принято | 3.2 / 3.3 |

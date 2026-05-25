@@ -377,7 +377,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** n/a
 
-**Status:** ⏳ Todo
+**Status:** ✅ Done (commit TBD — Task 3.8)
 
 ---
 

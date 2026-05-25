@@ -148,6 +148,7 @@
 - [ADR-126](#adr-126-шаблон-вкладки-с-tree-навигацией-sectionspec-treenavtabpresenter-basetreenavtab): Шаблон вкладки с tree-навигацией — `SectionSpec` + `TreeNavTabPresenter` + `BaseTreeNavTab`
 - [ADR-127](#adr-127-_abstractcolumnartablayout-nav-агностичная-база-layoutов-перенос-в-framework): `_AbstractColumnarTabLayout` — nav-агностичная база layout'ов, перенос в framework
 - [ADR-128](#adr-128-foundation-phase-0-перенос-из-backup-framerouter-istateadapter-pluginmanager-state-schema): Foundation Phase 0 — перенос из backup, FrameRouter, IStateAdapter, PluginManager, state schema
+- [ADR-129](#adr-129-serviceregistry-отдельный-реестр-long-running-сервисов): ServiceRegistry — отдельный реестр long-running сервисов
 <!-- ADR-TOC:END -->
 
 ---
@@ -2138,6 +2139,33 @@
 
 ---
 
+## ADR-129: ServiceRegistry — отдельный реестр long-running сервисов
+- Дата: 2026-05-25
+- Статус: принято
+- Контекст: Phase 3 плана `prototype-skeleton-2026-05` ввела реестр long-running объектов (камеры, БД-соединения, auth-сессии) с явным lifecycle. Попытка повторно использовать `PluginManager` (из `multiprocess_framework/modules/process_module/plugins/manager.py`) для этой роли выявила фундаментальное расхождение семантик: плагины — stateless обработчики, загружаемые в pipeline-цепочки; сервисы — stateful ресурсы с UNREGISTERED → READY → RUNNING → STOPPED → ERROR-автоматом. Кроме того, `PluginManager` поддерживает `importlib.reload` для hot-reload плагинов во время работы — применение этого к сервисам (открытая камера, активное DB-соединение) означало бы потерю ресурса без явного `stop()`. Ещё одно расхождение: сервисы запускаются по требованию из GUI или при старте приложения (`bootstrap.py`), тогда как плагины конфигурируются исключительно в blueprint-цепочках и не имеют «режима запуска». Всё это обосновало создание нового framework-модуля `service_module` с собственным API.
+- Решение:
+  1. **`multiprocess_framework/modules/service_module/interfaces.py`**: `ServiceLifecycle(str, Enum)` — пять состояний (`UNREGISTERED`, `READY`, `RUNNING`, `STOPPED`, `ERROR`); `@runtime_checkable class IService(Protocol)` — контракт `start(config: dict) -> bool`, `stop() -> bool`, `get_status() -> dict`, свойство `name: str`. Файл импортирует только stdlib (нет зависимостей на Services/, Plugins/, prototype/).
+  2. **`multiprocess_framework/modules/service_module/registry.py`**: `ServiceEntry` dataclass (`name`, `cls`, `lifecycle`, `meta`); `ServiceRegistry` singleton через double-checked locking (`__new__` + `_init_lock`); методы `register/get/list/filter/unregister/clear`; декоратор `@register_service(name=..., meta=...)` — точка регистрации при import-time. Паттерн singleton идентичен `PluginManager`, но без BaseManager-наследования и без hot-reload.
+  3. **`multiprocess_framework/modules/service_module/scanner.py`**: `discover(*dirs: Path) -> DiscoveryResult` — рекурсивный `glob("**/service.py")` + `importlib.import_module`; ошибки в отдельном `service.py` пишутся в `DiscoveryResult.failed` и не прерывают обход.
+  4. **`Services/*/service.py`**: четыре реализации — `WebcamCameraService` (Phase 0, доработан), `SqlService`, `HikvisionCameraService`, `AuthService` — добавлен `@register_service`. Сервисы в слое `Services/` (application); `service_module` (framework) о них не знает.
+  5. **`multiprocess_prototype/backend/state/adapters/service_state_adapter.py`**: `ServiceStateAdapter(StateAdapterBase)` синхронизирует `ServiceRegistry ↔ state.services.<name>.status` с anti-loop через `_pending_paths`. **MVP-ограничение Phase 3**: в GUI-процессе `StateProxy` недоступен (живёт только в worker-процессах), поэтому `ServiceStateAdapter` подключается с `proxy=None`, а `sync_domain_to_state()` работает no-op'ом. Lifecycle-статус в `_ServiceSection` читается напрямую из `ServiceRegistry.get(name).lifecycle`, а не через `state.services.*`. Полноценная IPC-синхронизация статусов между worker'ами и GUI запланирована в Phase 4+.
+  6. **ServicesTab** (`multiprocess_prototype/frontend/widgets/tabs/services/`): presenter переключён с хардкода `SERVICE_PLUGINS` на динамическое `ServiceRegistry.list()`; добавлена подвкладка «Пути» (ServicePathsSubtabWidget); action-кнопки start/stop/restart делегируют в `ServicesPresenter._instances` (кэш запущенных экземпляров).
+- Причина: `ServiceRegistry` отдельно от `PluginManager` обеспечивает чистую границу ответственности — разные lifecycle-модели не путаются; framework-first слой соблюдён (модуль не знает о конкретных `Services/sql`, `Services/auth`); structural subtyping через `@runtime_checkable Protocol` позволяет подключить существующий `WebcamCameraService` (Phase 0) без правок его определения; singleton+decorator — проверенный паттерн из `PluginManager`, адаптированный без hot-reload и без BaseManager; anti-loop в adapter подтверждён тестом эхо-сценария.
+- Отклонённые альтернативы:
+  - **Использовать `PluginManager` для сервисов** — несовместимая семантика lifecycle; hot-reload опасен с открытыми ресурсами (камера, DB-соединение); плагин не имеет состояния «RUNNING», а сервис — обязан.
+  - **Module-level global dict вместо singleton** — нет thread-safety при конкурентном импорте; тест не может сбросить состояние без патчинга модуля.
+  - **ABC (`IService` с `@abstractmethod`) вместо Protocol** — все существующие сервисы (`WebcamCameraService` и будущие в `Services/`) пришлось бы переписать с явным `class X(IService):`; нарушает принцип «фреймворк не диктует структуру application-слою»; Protocol единообразен с `IRouter` из `state_store_module` (ADR-SS-001).
+  - **Хранить экземпляры в `ServiceEntry` (eager instantiation)** — I/O при import-time; нельзя передать параметры конструктора; ошибка подключения к ресурсу возникала бы при импорте, не при явном вызове `start()`.
+  - **IPC-синхронизация статусов сервисов через RouterManager в Phase 3** — выходит за scope, добавит существенную сложность; принято отложить в Phase 4+ (MVP-ограничение зафиксировано явно).
+- Связанные ADR:
+  - Локальные `ADR-SVC-001` (singleton-паттерн), `ADR-SVC-002` (Protocol vs ABC), `ADR-SVC-003` (хранение классов) в `multiprocess_framework/modules/service_module/DECISIONS.md`.
+  - ADR-120 (`Plugins/` — vocabulary плагинов), ADR-121 (Services/sql carve-out), ADR-122 (Services/hikvision_camera carve-out) — границы слоёв Services/Plugins.
+  - ADR-128 (Foundation Phase 0) — `IStateAdapter`/`StateAdapterBase` наследуется `ServiceStateAdapter`.
+- Коммиты Phase 3: `1a3b1eb` (3.1 interfaces), `6be49c3` (3.2 registry, 26 тестов), `d4eeb15` (3.3 scanner, 15 тестов, 4 сервиса), `6c40dd9` (3.4 README+DECISIONS+STATUS), `c3b6c89` (3.5 ServiceStateAdapter, 12 тестов), `5dd5aa2` (3.6 ServicesTab + bootstrap), `6df6385` (3.7 start/stop, 13 тестов). Итого 66 тестов Phase 3.
+- Refs: [plans/prototype-skeleton-2026-05/phase-3-service-registry.md](../../plans/prototype-skeleton-2026-05/phase-3-service-registry.md), [plans/prototype-skeleton-2026-05/plan.md](../../plans/prototype-skeleton-2026-05/plan.md)
+
+---
+
 ## Модульные решения
 
 **Принцип локальности:** Каждый модуль может иметь свой `modules/<module>/DECISIONS.md` для решений, касающихся только его архитектуры.
@@ -2165,6 +2193,7 @@
 | `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…013 (IRouter Protocol для инкапсуляции router-зависимости, ..., SubscriptionManager — публичные snapshot-методы для shutdown / DevTools) |
 | `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…008 (Protocol-based decoupling от доменных типов, ..., Публичный IChainLogger Protocol для исполнителей) |
 | `actions_module` | [`modules/actions_module/DECISIONS.md`](modules/actions_module/DECISIONS.md) | Command & Work |  |
+| `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…003 (Singleton ServiceRegistry через `__new__` + Lock, ..., `ServiceRegistry` хранит классы, не экземпляры) |
 <!-- ADR-INDEX:END -->
 
 ---

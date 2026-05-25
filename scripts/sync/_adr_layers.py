@@ -34,6 +34,7 @@ MODULE_LAYERS: list[tuple[str, str]] = [
     ("state_store_module", "Resources & Config"),
     ("chain_module", "Command & Work"),
     ("actions_module", "Command & Work"),
+    ("service_module", "Services & Lifecycle"),
 ]
 
 # Модули, у которых есть DECISIONS.md, но нет локального ADR-кода
