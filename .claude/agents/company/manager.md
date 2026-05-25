@@ -118,18 +118,54 @@ Examples: `auth-rbac`, `graph-port-validation`, `sql-module-carveout`.
 ## Обзор
 Что делаем и зачем (2-3 предложения).
 
+## Vertical slice (tracer bullet)
+
+**Task 1.1 — обязательный vertical slice через все слои, если фича multi-layer.**
+
+Что это: первый Task должен пройти через ВСЕ слои, которые затрагивает фича
+(schema/storage + service/business-logic + API/UI), даже если каждый слой
+сделан в минимальной форме (один endpoint, одно поле, одна кнопка).
+
+Зачем: даёт **feedback loop в первом же Task**, а не в конце Phase 3. Pocock:
+«Если стреляешь обычными пулями, не видишь куда летишь. Tracer bullet светится —
+видишь feedback по прицелу.» Без vertical slice агент пишет всю DB → весь
+backend → весь frontend, и когда впервые нажмёт кнопку — всё сломается, причину
+в монолите найти невозможно.
+
 ## Порядок выполнения
 
 ### Phase 1: <name>
-- Task 1.1: ... [PENDING]
-- Task 1.2: ... [PENDING]
+- Task 1.1: **[VERTICAL SLICE]** <минимальный E2E срез через все слои> [PENDING]
+  - **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a
+- Task 1.2: <углубление одного из слоёв> [PENDING]
+  - **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a
 
 ### Phase 2: <name>
 - Task 2.1: ... [PENDING] (зависит от 1.1, 1.2)
+  - **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a
 
 ## Риски и ограничения
 - ...
 ```
+
+## Vertical slice — правило декомпозиции
+
+**Когда фича затрагивает 2+ слоя** (DB+API, service+UI, parser+writer и т.п.):
+
+- ✅ **Правильно:** Task 1.1 = тонкий tracer bullet через все слои (одно поле в схеме → один method в service → один endpoint/UI элемент, прокидывающий это поле). Task 1.2+ = углубление каждого слоя.
+- ❌ **Неправильно:** Task 1.1 = вся schema, Task 1.2 = весь service, Task 1.3 = весь UI. Это horizontal slicing — feedback loop появляется только в конце Phase 1, отлаживать монолит невозможно.
+
+**Когда vertical slice НЕ нужен:**
+- Bug fix в одном слое (Task = один файл / одна функция)
+- Refactor без изменения contract (impl-only)
+- Документация / dependency bump
+- Фича помещается в один слой целиком (например, новый CLI flag без backend изменений)
+
+В таких случаях Task 1.1 не нужно помечать `[VERTICAL SLICE]` — просто атомарная задача.
+
+**Как проверить, что Task 1.1 — vertical slice:**
+1. После его реализации можно ли продемонстрировать end-to-end сценарий пользователю? (CLI invocation / HTTP request / UI click → видимый результат)
+2. Если да — это slice. Если нет (например, «создать схему таблицы») — это horizontal layer, переделай декомпозицию.
 
 ## What NOT to do
 

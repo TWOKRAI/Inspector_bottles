@@ -72,6 +72,13 @@ CLAUDE.local.md
 .claude/worktrees/
 .mcp.json
 
+# ─── claude-kit backup / temp artifacts ───────────────────────────────────────
+# Manual unpacks of `claude-kit upgrade` backups (tar.gz) and the optional
+# `--backup-dir <path>` target. Never commit — these contain prior-state
+# snapshots of .claude/ that are noisy and large.
+.backup_tmp/
+.claude/_backups/
+
 # ─── MCP servers — local state / caches (per-project, never share) ────────────
 # serena LSP indexer — keeps its memory + cache here
 .serena/

@@ -29,6 +29,58 @@
 
 **Принцип:** одна папка — одна ответственность. Plan-driven workflow связывает их через `Refs: plans/<slug>.md` trailer в каждом коммите задачи. См. [`.claude/COMMIT_GUIDE.md`](.claude/COMMIT_GUIDE.md), [`plans/README.md`](plans/README.md), [`.claude/CLAUDE.md`](.claude/CLAUDE.md) → "Memory (OVERRIDE)".
 
+## `.claude/` lifecycle — `claude-kit`
+
+> `.claude/` инфраструктура (agents, commands, hooks, MCP, skills, templates)
+> сгенерирована **claude-kit** и обновляется через него, а **не** правкой файлов
+> вручную. Тулза установлена глобально (`uv tool install --from <seed-repo> claude-kit`)
+> и доступна как команда `claude-kit` в PATH.
+>
+> Если `claude-kit` не найдена — переустанови из canonical clone:
+> `python <seed-clone>/scripts/install-global.py`.
+
+### Команды (для агента)
+
+| Задача | Команда |
+|--------|---------|
+| Диагностика окружения и `.claude/` | `claude-kit doctor` (+`--verbose`, `--fix`) |
+| Превью обновления seed (без изменений) | `claude-kit upgrade . --dry-run` |
+| Применить обновление seed | `claude-kit upgrade . --apply` |
+| Список доступных компонентов | `claude-kit list-components` |
+| Добавить MCP / skill / integration | `claude-kit add <name>` |
+| Удалить компонент | `claude-kit remove <name>` |
+| Отправить локальные правки `.claude/` в canonical seed | `claude-kit sync-back <seed-repo> --apply` |
+| Версия пакета и bundled template | `claude-kit version` |
+| Реконструировать SETUP-отчёт | `claude-kit show --regenerate` |
+| Интерактивное меню (TUI) | `claude-kit` (без аргументов) |
+
+### Что НЕ редактировать руками (перетрётся при `upgrade`)
+
+- `.claude/agents/`, `.claude/commands/`, `.claude/hooks/`, `.claude/skills/`
+- `.claude/templates/`, `.claude/scripts/`, `.claude/mcp/`
+- `.claude/COMMIT_GUIDE.md`, `.claude/BOOTSTRAP.md`, `.claude/STACK.md`, `.claude/SYSTEM_OVERVIEW.md`, `.claude/CLAUDE.md`
+
+**Workflow для правки seed-контента:** правишь в canonical seed → `claude-kit upgrade . --apply` в этом проекте. Если правка началась здесь — сначала `claude-kit sync-back <seed-repo> --apply`, потом upgrade обратно.
+
+### Per-project артефакты (preserved при `upgrade`)
+
+Эти файлы — твои, upgrade их **не трогает**:
+
+- `.claude/memory/` — долговременная память агента
+- `.claude/modes/_stack.md` — кастомизация под стек проекта
+- `.claude/commit-layers.txt` — Layer-enum для validate_commit
+- `.claude/settings.local.json` — локальные настройки CC
+- `.claude/readonly-paths`, `.claude/protected-branches`
+- `.claude/.seed-answers.yml` — машинно-читаемые ответы bootstrap'а (`schema_version=1`, используется `upgrade`/`add`/`remove`)
+- корневой `CLAUDE.md` (этот файл) — содержит проектные плейсхолдеры
+
+### Что делать при поломке
+
+1. `claude-kit doctor --verbose` — первая команда. Секции: System / Project / Components / Services.
+2. `claude-kit doctor --fix` — попытка авто-install отсутствующего (uv tools, MCP servers).
+3. `claude-kit upgrade . --dry-run` — если расхождение с seed.
+4. `claude-kit version` — сверить версию пакета и bundled template (могут разойтись после `git pull` в seed без `install-global.py`).
+
 ## Стек
 
 - **Python:** 3.11+
@@ -48,16 +100,35 @@
 
 ## Команды
 
+### Makefile
+
 | Команда | Что делает |
 |---------|-----------|
 | `make install` | Установить deps + pre-commit hooks |
-| `make check` | Lint + typecheck |
+| `make check` | Lint (ruff) + typecheck (pyright) |
 | `make test` | pytest с coverage |
 | `make gate` | Полный gate (check + test) перед push |
 | `make format` | Автофикс ruff |
-| `/plan <task>` | Декомпозиция задачи (Manager-агент) |
-| `/implement` | Реализация (Developer-агент) |
-| `/ship` | Финальная проверка перед merge |
+
+### Slash-команды (через Claude Code)
+
+Команды живут в `.claude/commands/<namespace>/<name>.md`. Полный список —
+`/help` в Claude Code или `ls .claude/commands/`. Ключевые namespace'ы:
+
+| Namespace | Назначение | Ключевые команды |
+|-----------|-----------|------------------|
+| `dev/` | Plan-Driven Dev цикл | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/plan-status`, `/adr` |
+| `spec/` | Living spec (`docs/direction/`) | `/spec`, `/spec-sync` |
+| `team/` | Команда агентов | `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up` |
+| `memory/` | Долговременная память агента | `/memory:status`, `/memory:search <query>`, `/memory:init` |
+| `quality/` | Качество кода + архитектура | `/quality:doctor`, `/quality:arch-review`, `/quality:lint-agents`, `/quality:lint-settings`, `/quality:sentrux-*`, `/quality:qex-*`, `/quality:code-stats*`, `/quality:test-ratio` |
+| `infra/` | Инфраструктурные операции | `/infra:clean-cache`, `/infra:cold-start`, `/infra:diagrams`, `/infra:fw-test`, `/infra:run-proto` |
+| `analysis/` | Анализ кодовой базы | `/analysis:todo-inventory` |
+| `knowledge/` | Knowledge pipeline (если установлен university team) | `/transcribe`, `/curate`, `/synthesize`, `/research`, `/library`, `/translate`, `/digest`, `/compress`, `/search` |
+
+Subagent'ы: `claude-kit` поставляет dev-команду (developer, reviewer, manager,
+teamlead, debugger, tester, docs-writer, tech-writer) и опционально university
+(curator, synthesizer, researcher, librarian, translator). Список — `/team`.
 
 ## Tool routing (MCP)
 

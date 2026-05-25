@@ -129,7 +129,8 @@ Modes — это статичный контекст. Они не выполня
 | `core/protect-readonly.sh` | PreToolUse Edit/Write | Блокирует правки в read-only путях |
 | `core/restore-context.sh` | PostCompact | Восстанавливает навигацию + commit format |
 | `core/precompact-context-save.sh` | PreCompact | Заставляет дамп решений в memory ДО компактификации |
-| `core/session-end-daily-log.sh` | SessionEnd | Пишет journal в `docs/sessions/` |
+| `git/pre-commit-session-log.sh` | pre-commit (git) | Пишет journal в `docs/sessions/YYYY-MM-DD.md` и сам `git add`'ит — попадает в текущий коммит |
+| `core/session-end-daily-log.sh` | Stop (CC) | **Fallback** для проектов без pre-commit (по умолчанию выключен) |
 | `core/session-health-check.sh` | SessionStart | Проверка чистоты репо, актуальности модели |
 | `core/session-plan-status.sh` | SessionStart | Показывает open-plans |
 | `core/filter-test-output.sh` | PostToolUse pytest | Чистит шумные pytest-output |
@@ -210,7 +211,8 @@ Hooks — **не агенты**. Это shell-скрипты, которые CC 
 | **PreCompact hook** | Заставляет дамп решений в memory ДО компактификации | Не сохраняет сам (это делает агент) |
 | **PostCompact hook** | Восстанавливает навигацию ПОСЛЕ компактификации | Не повторяет всё содержимое |
 | **validate-safe-command hook** | Блокирует опасный bash (regex) | Не AST-валидация (будущая работа) |
-| **session-end-daily-log hook** | Journal в `docs/sessions/` | Не суммаризация (это `/wrap-up`) |
+| **pre-commit-session-log hook** | Per-commit запись в `docs/sessions/YYYY-MM-DD.md` (primary с v0.4.0) | Не суммаризация (это `/wrap-up`) |
+| **session-end-daily-log hook** | Stop-фоллбэк для проектов без pre-commit | Не суммаризация |
 | **qex MCP** | Семантический поиск по коду (intent-based) | Не call graph, не метрики |
 | **sentrux MCP** | Архитектурный health, циклы, layer rules | Не поиск, не семантика |
 | **graphify MCP** | Knowledge graph + HTML viz | Не call graph функций (это codegraph) |

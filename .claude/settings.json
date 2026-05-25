@@ -50,7 +50,9 @@
       "Bash(curl -s http://localhost:11434*)",
       "Bash(curl -s --max-time * http://localhost:11434*)",
       "Bash(sentrux *)",
-      "Bash(qex *)"
+      "Bash(qex *)",
+      "Bash(claude-kit *)",
+      "Bash(claude-kit)"
     ],
     "ask": [
       "Bash(git push *)",
@@ -225,8 +227,7 @@
           }
         ]
       }
-    ],
-    "Stop": []
+    ]
   },
   "alwaysThinkingEnabled": true,
   "preferredLanguage": "ru",

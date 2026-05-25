@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Sentrux structural quality gate.
+#
+# Запускается перед `git push`. Блокирует push если:
+#   1) sentrux check       — нарушено архитектурное правило из .sentrux/rules.toml
+#   2) sentrux gate        — структурная регрессия относительно baseline
+#
+# Обновить baseline после намеренного улучшения:
+#   sentrux gate --save
+#
+# Обход (только в крайних случаях, нежелательно):
+#   git push --no-verify
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if ! command -v sentrux >/dev/null 2>&1; then
+    echo "warn: sentrux не установлен — пропускаю structural-gate" >&2
+    exit 0
+fi
+
+echo "[sentrux] check (architectural rules)…"
+if ! sentrux check >/tmp/sentrux-check.log 2>&1; then
+    echo "❌ sentrux check FAILED — нарушены правила из .sentrux/rules.toml:" >&2
+    cat /tmp/sentrux-check.log >&2
+    echo "" >&2
+    echo "Push отменён. Поправь правила или код. Обход: git push --no-verify (нежелательно)." >&2
+    exit 1
+fi
+
+echo "[sentrux] gate (regression vs baseline)…"
+if ! sentrux gate >/tmp/sentrux-gate.log 2>&1; then
+    echo "❌ sentrux gate FAILED — структурная регрессия относительно baseline:" >&2
+    cat /tmp/sentrux-gate.log >&2
+    echo "" >&2
+    echo "Push отменён. Варианты:" >&2
+    echo "  • поправь код, чтобы метрики не падали" >&2
+    echo "  • осознанно обновить baseline: sentrux gate --save" >&2
+    exit 1
+fi
+
+echo "[sentrux] ✓ check + gate passed"
+exit 0

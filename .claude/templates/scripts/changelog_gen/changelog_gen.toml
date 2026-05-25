@@ -1,0 +1,38 @@
+# Конфигурация для scripts/changelog_gen/changelog_gen.py
+
+[git]
+# Диапазон: from..to. Пусто `from` = последний tag (git describe --tags --abbrev=0).
+# Пустой `from` И отсутствие тегов = весь git log.
+from = ""
+to = "HEAD"
+
+[groups]
+# label = [types]   — порядок секций сохраняется.
+# Эмодзи можно добавить (например "✨ Features") — но в дефолте plain-ASCII
+# для совместимости с Windows-консолями cp1251 и CI-логами.
+"Features" = ["feat"]
+"Bug Fixes" = ["fix"]
+"Documentation" = ["docs"]
+"Performance" = ["perf"]
+"Refactoring" = ["refactor"]
+"Tests" = ["test"]
+"Build/CI" = ["build", "ci"]
+"Chore" = ["chore", "style"]
+
+[format]
+# markdown | plain | json
+style = "markdown"
+# Секция BREAKING CHANGES (агрегирует все breaking коммиты в общую сводку)
+include_breaking = true
+# Включать commits с неизвестными type'ами в секцию "Other"
+include_unknown = false
+# Автор в каждой строке
+include_authors = false
+# Короткий sha + ссылка на коммит (если repo_url задан)
+include_hashes = true
+hash_length = 7
+# Если задан — каждая sha обернётся в ссылку на GitHub/GitLab
+repo_url = ""
+# Имя и дата релиза (для заголовка). Пустая дата = сегодня.
+release_name = "Unreleased"
+release_date = ""

@@ -1,0 +1,36 @@
+# Конфигурация для scripts/todo_inventory/todo_inventory.py
+
+[scan]
+root = "."
+recursive = true
+follow_symlinks = false
+
+[formats]
+# Расширения, которые сканируем. Пустой = все.
+include = [".py", ".md", ".toml", ".yaml", ".yml", ".sh", ".js", ".ts"]
+
+[exclude]
+dirs = [
+    "__pycache__", ".git", ".venv", "venv", "env",
+    "node_modules", ".qex", ".sentrux",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "build", "dist", "*.egg-info",
+]
+file_patterns = []
+path_patterns = []
+
+[detect]
+# Теги, которые ищем. Регистр учитывается (TODO != todo).
+tags = ["TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"]
+# Привязать ли автора и дату через git blame. Существенно медленнее, но даёт возраст.
+git_blame = true
+
+[output]
+format = "table"        # table | json | csv
+# group_by: tag | file | author | none
+group_by = "tag"
+sort_by = "age"         # age | tag | file | author
+sort_order = "desc"     # desc = старые сверху
+limit = 0
+# Колонка text — обрезать до N символов
+max_text = 80

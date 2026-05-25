@@ -205,6 +205,28 @@ This skill assumes **src-layout** (`src/<package>/...`). If the project
 uses flat layout or another structure, adapt paths accordingly. If unsure,
 read `.claude/modes/_stack.md` → "Layout" section, or ask the user.
 
+## CONTEXT.md per-module — recommendation
+
+When creating a non-trivial module (full or lite), also recommend creating
+`<module>/CONTEXT.md` from `.claude/templates/CONTEXT.template.md` if **any**
+of the following hold:
+
+- Module has ≥1 non-obvious **Gotcha** (footgun, threading constraint,
+  ordering requirement) that's not visible from `interface.py`
+- Module has ≥2 **design decisions** worth recording (without going to
+  full `DECISIONS.md` ADR yet)
+- Module introduces **local glossary terms** (words meaning something
+  different from project-wide usage)
+
+CONTEXT.md is opt-in (you don't auto-create it for every module). When
+you decide it's warranted, mention this in your "files created" report
+so the human can review. After creating, suggest running `/sync-context`
+to update `docs/PROJECT_CONTEXT.md`.
+
+For tracking formal ADR with numbered history → `<module>/DECISIONS.md`
+(see `.claude/templates/DECISIONS.template.md`). For one-off global
+architectural decisions → use `/adr` (creates in `docs/claude/DECISIONS/`).
+
 ## Output format (when agent reports)
 
 ```
