@@ -185,15 +185,16 @@ class TestPluginsTab:
         qtbot.addWidget(tab)
         # В дереве должны быть 3 плагина (под их категориями).
         assert sorted(_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
-        # Категорий — 2 (processing + source), отсортированы по русскому title.
-        assert tab._tree_nav.topLevelItemCount() == 2
+        # Корневых элементов: 1 секция «Пути» (Phase 2) + 2 категории плагинов
+        # (processing + source).
+        assert tab._tree_nav.topLevelItemCount() == 3
 
     def test_empty_registry(self, qtbot: pytest.fixture) -> None:
         ctx = _make_mock_ctx(entries=[])
         tab = PluginsTab(ctx)
         qtbot.addWidget(tab)
-        # Нет плагинов — дерево пустое.
-        assert tab._tree_nav.topLevelItemCount() == 0
+        # Нет плагинов — остаётся только секция «Пути» (корневая, Phase 2).
+        assert tab._tree_nav.topLevelItemCount() == 1
 
     def test_lazy_section_created_on_select(self, qtbot: pytest.fixture) -> None:
         # При программном выборе плагина презентер строит секцию через factory.
