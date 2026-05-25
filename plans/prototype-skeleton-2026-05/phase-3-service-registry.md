@@ -211,7 +211,7 @@ ServiceRegistry для long-running объектов (камеры, БД, auth) 
 
 **Module contract:** n/a (docs-only)
 
-**Status:** ✅ Done (commit TBD — Task 3.4)
+**Status:** ✅ Done (commit 6c40dd9)
 
 ---
 
