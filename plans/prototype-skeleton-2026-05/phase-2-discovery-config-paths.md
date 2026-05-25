@@ -94,10 +94,10 @@ Task 2.2 ──────────────────────┘  
    ```
 
 **Acceptance criteria:**
-- [ ] `load_system_config(CONFIG_PATH).discovery.plugin_paths == ["Plugins"]` — проверяется в тестах Task 2.7
-- [ ] `DiscoverySection()` (без аргументов) не бросает исключений
-- [ ] `SystemConfig.model_validate({"discovery": {"plugin_paths": ["/abs/path", "rel/path"]}})` валидируется без ошибок
-- [ ] `SystemConfig.model_validate({})` (пустой dict) даёт `discovery.plugin_paths == ["Plugins"]`
+- [x] `load_system_config(CONFIG_PATH).discovery.plugin_paths == ["Plugins"]` — проверяется в тестах Task 2.7 (6eb7212)
+- [x] `DiscoverySection()` (без аргументов) не бросает исключений (6eb7212)
+- [x] `SystemConfig.model_validate({"discovery": {"plugin_paths": ["/abs/path", "rel/path"]}})` валидируется без ошибок (6eb7212)
+- [x] `SystemConfig.model_validate({})` (пустой dict) даёт `discovery.plugin_paths == ["Plugins"]` (6eb7212)
 
 **Out of scope:** Не подключать `service_paths` к логике discovery (это Phase 3). Не трогать `main.py` / `app.py` / AppContext — это Task 2.3 и 2.4.
 
@@ -153,11 +153,11 @@ Task 2.2 ──────────────────────┘  
    ```
 
 **Acceptance criteria:**
-- [ ] `_deep_merge({"a": {"x": 1}}, {"a": {"y": 2}}) == {"a": {"x": 1, "y": 2}}`
-- [ ] `_deep_merge({"a": 1}, {"a": 2}) == {"a": 2}` (override wins)
-- [ ] При наличии `user_overrides.yaml` с `discovery.plugin_paths: ["/tmp/extra"]` — `load_system_config()` возвращает `discovery.plugin_paths == ["/tmp/extra"]`
-- [ ] При отсутствии `user_overrides.yaml` — `load_system_config()` работает как прежде
-- [ ] `user_overrides.yaml` в корне проекта `.gitignore` (проверить `git check-ignore`)
+- [x] `_deep_merge({"a": {"x": 1}}, {"a": {"y": 2}}) == {"a": {"x": 1, "y": 2}}` (0ac9a0f)
+- [x] `_deep_merge({"a": 1}, {"a": 2}) == {"a": 2}` (override wins) (0ac9a0f)
+- [x] При наличии `user_overrides.yaml` с `discovery.plugin_paths: ["/tmp/extra"]` — `load_system_config()` возвращает `discovery.plugin_paths == ["/tmp/extra"]` (0ac9a0f)
+- [x] При отсутствии `user_overrides.yaml` — `load_system_config()` работает как прежде (0ac9a0f)
+- [x] `user_overrides.yaml` в корне проекта `.gitignore` (проверить `git check-ignore`) (0ac9a0f)
 
 **Out of scope:** Не реализовывать запись в `user_overrides.yaml` — это делает Task 2.5 (GUI). Не трогать AppContext, main.py, app.py.
 
@@ -213,11 +213,11 @@ Task 2.2 ──────────────────────┘  
 3. Убедиться, что если `_plugin_paths` пуст (пустой список из конфига или `auto_discover: false`), `PluginRegistry.discover()` вызывается без аргументов и не падает.
 
 **Acceptance criteria:**
-- [ ] Строка `PLUGINS_DIR = PROJECT_ROOT / "Plugins"` отсутствует в `main.py`
-- [ ] Строка `_PLUGINS_DIR = ...` отсутствует в `app.py`
-- [ ] `bootstrap()` вызывает `PluginRegistry.discover("...абсолютный путь...")` с путями из `sys_config`
-- [ ] При `discovery.plugin_paths: []` — `PluginRegistry.discover()` вызывается без аргументов, приложение стартует без ошибок
-- [ ] При `auto_discover: false` — discovery не вызывается
+- [x] Строка `PLUGINS_DIR = PROJECT_ROOT / "Plugins"` отсутствует в `main.py` (e32c57d)
+- [x] Строка `_PLUGINS_DIR = ...` отсутствует в `app.py` (e32c57d)
+- [x] `bootstrap()` вызывает `PluginRegistry.discover("...абсолютный путь...")` с путями из `sys_config` (e32c57d)
+- [x] При `discovery.plugin_paths: []` — `PluginRegistry.discover()` вызывается без аргументов, приложение стартует без ошибок (e32c57d)
+- [x] При `auto_discover: false` — discovery не вызывается (e32c57d)
 
 **Out of scope:** Не создавать `PluginManager` singleton здесь — это Task 2.4. Не трогать AppContext. Не менять логику вызова в bootstrap после строки discover.
 
@@ -278,10 +278,10 @@ Task 2.2 ──────────────────────┘  
 4. Убедиться, что `_app_plugin_paths` из Task 2.3 доступна в нужном месте (определяется до блока `# 2.`).
 
 **Acceptance criteria:**
-- [ ] `ctx.plugin_manager()` возвращает объект `PluginManager`, не `None`, при нормальном запуске GUI
-- [ ] `ctx.plugin_manager() is ctx.plugin_manager()` — один и тот же объект (singleton через extras)
-- [ ] `ctx.plugin_manager().is_discovered` — `True` после `initialize()` (или после первого `discover()` если автодискавери вызван)
-- [ ] В тестах `ctx = MagicMock()` → `ctx.plugin_manager.return_value = None` — не ломает виджеты, использующие getter
+- [x] `ctx.plugin_manager()` возвращает объект `PluginManager`, не `None`, при нормальном запуске GUI (3212350)
+- [x] `ctx.plugin_manager() is ctx.plugin_manager()` — один и тот же объект (singleton через extras) (3212350)
+- [x] `ctx.plugin_manager().is_discovered` — `True` после `initialize()` (или после первого `discover()` если автодискавери вызван) (3212350)
+- [x] В тестах `ctx = MagicMock()` → `ctx.plugin_manager.return_value = None` — не ломает виджеты, использующие getter (3212350)
 
 **Out of scope:** Не вызывать `plugin_manager.discover()` повторно если `PluginRegistry.discover()` уже был вызван выше в `run_gui()`. PluginManager.initialize() не вызывает discover автоматически. Не реализовывать GUI подвкладку — это Task 2.5.
 
