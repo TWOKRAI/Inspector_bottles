@@ -90,6 +90,33 @@ class StorageDefaults(SchemaBase):
     ] = 100
 
 
+class DiscoverySection(SchemaBase):
+    """Настройки автообнаружения плагинов и сервисов при старте."""
+
+    plugin_paths: Annotated[
+        list[str],
+        FieldMeta(
+            "Директории плагинов",
+            info="Директории для поиска плагинов. Относительные пути — от корня проекта.",
+        ),
+    ] = ["Plugins"]
+
+    service_paths: Annotated[
+        list[str],
+        FieldMeta(
+            "Директории сервисов", info="Директории для поиска сервисов. Задел для Phase 3, сейчас не используется."
+        ),
+    ] = ["Services"]
+
+    auto_discover: Annotated[
+        bool,
+        FieldMeta(
+            "Автообнаружение при старте",
+            info="Если True — plugin_paths сканируются автоматически при старте приложения.",
+        ),
+    ] = True
+
+
 class SystemConfig(SchemaBase):
     """Корневая схема system.yaml."""
 
@@ -98,6 +125,7 @@ class SystemConfig(SchemaBase):
     processing: ProcessingDefaults = ProcessingDefaults()
     display: DisplayDefaults = DisplayDefaults()
     storage: StorageDefaults = StorageDefaults()
+    discovery: DiscoverySection = DiscoverySection()
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.
