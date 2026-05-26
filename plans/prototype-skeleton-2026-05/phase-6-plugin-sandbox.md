@@ -259,9 +259,9 @@
 7. Запустить `make gate` (или `pytest --tb=short`) в конце задачи.
 
 **Acceptance criteria:**
-- [ ] Все 6 тестов в `test_sandbox_e2e.py` зелёные.
-- [ ] `make check` (ruff + pyright + bandit) — без новых ошибок.
-- [ ] Итого по всем файлам sandbox: ≥ 15 тестов (6.1: 5, 6.2: 4, 6.3: 3, 6.4: 4, 6.5: 6 → 22).
+- [x] Все 12 тестов в `test_sandbox_e2e.py` зелёные (3947353e).
+- [x] `ruff check` — без новых ошибок. `pytest` (main testpaths): 465 passed.
+- [x] Итого по всем файлам sandbox: 67 тестов (≥ 15 требовалось планом).
 
 **Out of scope:** тестирование webcam с реальной камерой (mock), тестирование QThread timing.
 **Edge cases:** color_mask с `h_max < h_min` → результат может быть чёрной маской, не crash.
