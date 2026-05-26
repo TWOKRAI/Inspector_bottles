@@ -3,6 +3,7 @@
 Чистый Python (+ dag_utils). Тестируется без Qt.
 Адаптация v1 GraphEditorModel для topology dict формата.
 """
+
 from __future__ import annotations
 
 import copy
@@ -40,7 +41,7 @@ class PipelineModel:
     """
 
     def __init__(self, topology: dict | None = None) -> None:
-        self._topology: dict = topology or {"processes": [], "wires": []}
+        self._topology: dict = topology or {"processes": [], "wires": [], "displays": []}
 
     def from_topology_dict(self, topo: dict) -> None:
         """Загрузить topology из dict."""
@@ -55,9 +56,7 @@ class PipelineModel:
     def get_process_names(self) -> list[str]:
         """Список имён процессов."""
         return [
-            p.get("process_name", "")
-            if isinstance(p, dict)
-            else getattr(p, "process_name", "")
+            p.get("process_name", "") if isinstance(p, dict) else getattr(p, "process_name", "")
             for p in self._topology.get("processes", [])
         ]
 
@@ -65,12 +64,23 @@ class PipelineModel:
         """Список wire'ов (копии)."""
         return copy.deepcopy(self._topology.get("wires", []))
 
+    def get_displays(self) -> list[dict]:
+        """Список display-узлов (deep copy для read-only доступа)."""
+        return copy.deepcopy(self._topology.get("displays", []))
+
     def get_edges_as_tuples(self) -> list[tuple[str, str]]:
-        """Wire'ы как list[(source_process, target_process)] для dag_utils."""
+        """Wire'ы как list[(source_process, target_process)] для dag_utils.
+
+        Wire'ы, где source или target начинаются с «display.», пропускаются —
+        display-узлы не являются процессами и не должны попадать в DAG-граф.
+        """
         result: list[tuple[str, str]] = []
         for w in self._topology.get("wires", []):
             src = w.get("source", "") if isinstance(w, dict) else ""
             tgt = w.get("target", "") if isinstance(w, dict) else ""
+            # Пропустить wire'ы с display-endpoint'ами
+            if src.startswith("display.") or tgt.startswith("display."):
+                continue
             src_proc = src.split(".")[0] if "." in src else src
             tgt_proc = tgt.split(".")[0] if "." in tgt else tgt
             if src_proc and tgt_proc:
@@ -106,18 +116,60 @@ class PipelineModel:
         self._topology["processes"] = [
             p
             for p in processes
-            if (
-                p.get("process_name")
-                if isinstance(p, dict)
-                else getattr(p, "process_name", "")
-            )
-            != name
+            if (p.get("process_name") if isinstance(p, dict) else getattr(p, "process_name", "")) != name
         ]
 
         # Каскадное удаление wire'ов
         wires = self._topology.get("wires", [])
+        self._topology["wires"] = [w for w in wires if not self._wire_involves_process(w, name)]
+
+        return old, self.to_topology_dict()
+
+    def add_display(
+        self,
+        node_id: str,
+        display_id: str,
+        display_name: str = "",
+    ) -> tuple[dict, dict]:
+        """Добавить display-узел. Возвращает (old_topo, new_topo).
+
+        Args:
+            node_id: уникальный идентификатор узла в topology (ключ для wire'ов).
+            display_id: ID SHM-канала из DisplayRegistry.
+            display_name: отображаемое имя (опционально).
+
+        Raises:
+            ValueError: если display с таким node_id уже существует.
+        """
+        existing_ids = [d.get("node_id") for d in self._topology.get("displays", [])]
+        if node_id in existing_ids:
+            raise ValueError(f"Display '{node_id}' уже существует")
+
+        old = self.to_topology_dict()
+        display_entry: dict[str, Any] = {
+            "node_id": node_id,
+            "display_id": display_id,
+            "display_name": display_name,
+        }
+        self._topology.setdefault("displays", []).append(display_entry)
+        return old, self.to_topology_dict()
+
+    def remove_display(self, node_id: str) -> tuple[dict, dict]:
+        """Удалить display-узел и каскадно wire'ы к нему. Возвращает (old_topo, new_topo).
+
+        Если display с таким node_id не найден — возвращает (old, new) без изменений.
+        """
+        old = self.to_topology_dict()
+
+        # Удалить display-узел
+        displays = self._topology.get("displays", [])
+        self._topology["displays"] = [d for d in displays if d.get("node_id") != node_id]
+
+        # Каскадное удаление wire'ов к этому display (target начинается с «display.<node_id>.»)
+        display_prefix = f"display.{node_id}."
+        wires = self._topology.get("wires", [])
         self._topology["wires"] = [
-            w for w in wires if not self._wire_involves_process(w, name)
+            w for w in wires if not (isinstance(w, dict) and w.get("target", "").startswith(display_prefix))
         ]
 
         return old, self.to_topology_dict()
@@ -147,30 +199,36 @@ class PipelineModel:
 
         # Проверка совместимости типов
         if not dag_utils.validate_port_compatibility(src_dtype, tgt_dtype):
-            raise ValueError(
-                f"Несовместимые типы портов: {src_dtype} -> {tgt_dtype}"
-            )
+            raise ValueError(f"Несовместимые типы портов: {src_dtype} -> {tgt_dtype}")
 
         # Проверка дубликатов
         for w in self._topology.get("wires", []):
-            if (
-                isinstance(w, dict)
-                and w.get("source") == source
-                and w.get("target") == target
-            ):
+            if isinstance(w, dict) and w.get("source") == source and w.get("target") == target:
                 raise ValueError(f"Wire {source} -> {target} уже существует")
 
-        # Cycle detection через dag_utils
-        src_proc = source.split(".")[0] if "." in source else source
-        tgt_proc = target.split(".")[0] if "." in target else target
+        # Display-endpoint: target начинается с «display.»
+        is_display_target = target.startswith("display.")
+        if is_display_target:
+            # Извлечь node_id из «display.<node_id>.frame»
+            parts = target.split(".")
+            display_node_id = parts[1] if len(parts) >= 2 else ""
+            existing_node_ids = [d.get("node_id") for d in self._topology.get("displays", [])]
+            if display_node_id not in existing_node_ids:
+                raise ValueError(f"Display '{display_node_id}' не найден")
+            # Для display-endpoint: пропустить self-loop и cycle detection
+            # (display — terminal node, не участвует в DAG процессов)
+        else:
+            # Cycle detection через dag_utils (только для process→process wire'ов)
+            src_proc = source.split(".")[0] if "." in source else source
+            tgt_proc = target.split(".")[0] if "." in target else target
 
-        # Self-loop check
-        if src_proc == tgt_proc:
-            raise ValueError(f"Self-loop запрещён: {src_proc}")
+            # Self-loop check
+            if src_proc == tgt_proc:
+                raise ValueError(f"Self-loop запрещён: {src_proc}")
 
-        existing_edges = self.get_edges_as_tuples()
-        if dag_utils.has_cycle(existing_edges, (src_proc, tgt_proc)):
-            raise ValueError(f"Wire {source} -> {target} создаёт цикл")
+            existing_edges = self.get_edges_as_tuples()
+            if dag_utils.has_cycle(existing_edges, (src_proc, tgt_proc)):
+                raise ValueError(f"Wire {source} -> {target} создаёт цикл")
 
         # Сохранить wire с dtype-информацией
         wire_entry: dict[str, Any] = {
@@ -190,13 +248,7 @@ class PipelineModel:
         old = self.to_topology_dict()
         wires = self._topology.get("wires", [])
         self._topology["wires"] = [
-            w
-            for w in wires
-            if not (
-                isinstance(w, dict)
-                and w.get("source") == source
-                and w.get("target") == target
-            )
+            w for w in wires if not (isinstance(w, dict) and w.get("source") == source and w.get("target") == target)
         ]
         return old, self.to_topology_dict()
 
@@ -215,17 +267,13 @@ class PipelineModel:
                 errors.append(f"Дублирующееся имя процесса: {name}")
             seen.add(name)
 
-        # Проверка wire'ов
+        # Проверка wire'ов (только process→process)
         edges = self.get_edges_as_tuples()
         for src_proc, tgt_proc in edges:
             if src_proc not in seen:
-                errors.append(
-                    f"Wire ссылается на несуществующий процесс: {src_proc}"
-                )
+                errors.append(f"Wire ссылается на несуществующий процесс: {src_proc}")
             if tgt_proc not in seen:
-                errors.append(
-                    f"Wire ссылается на несуществующий процесс: {tgt_proc}"
-                )
+                errors.append(f"Wire ссылается на несуществующий процесс: {tgt_proc}")
 
         # Циклы
         if dag_utils.has_cycle(edges):
@@ -239,6 +287,30 @@ class PipelineModel:
         orphans = [n for n in process_names if n and n not in connected]
         for o in orphans:
             errors.append(f"Изолированный процесс: {o}")
+
+        # ---- Проверки display-узлов ---- #
+        display_node_ids = {d.get("node_id") for d in self._topology.get("displays", [])}
+
+        # Wire к display ссылается на несуществующий display-узел
+        for w in self._topology.get("wires", []):
+            tgt = w.get("target", "") if isinstance(w, dict) else ""
+            if tgt.startswith("display."):
+                parts = tgt.split(".")
+                node_id = parts[1] if len(parts) >= 2 else ""
+                if node_id not in display_node_ids:
+                    errors.append(f"Wire ссылается на несуществующий display: {node_id}")
+
+        # Orphan-display: display-узлы без входящих wire'ов
+        display_with_sources: set[str] = set()
+        for w in self._topology.get("wires", []):
+            tgt = w.get("target", "") if isinstance(w, dict) else ""
+            if tgt.startswith("display."):
+                parts = tgt.split(".")
+                node_id = parts[1] if len(parts) >= 2 else ""
+                display_with_sources.add(node_id)
+        for node_id in display_node_ids:
+            if node_id and node_id not in display_with_sources:
+                errors.append(f"Изолированный display: {node_id}")
 
         return errors
 
