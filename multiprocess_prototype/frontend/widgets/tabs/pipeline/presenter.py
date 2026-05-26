@@ -18,6 +18,8 @@ from .model import PipelineModel
 from .layout import auto_layout
 
 if TYPE_CHECKING:
+    from PySide6.QtWidgets import QWidget
+
     from multiprocess_prototype.frontend.app_context import AppContext
     from .graph.graph_scene import GraphScene
     from .inspector.inspector_panel import NodeInspectorPanel
@@ -536,6 +538,81 @@ class PipelinePresenter:
         """Конвертировать SystemBlueprint в граф-данные."""
         data = bp.model_dump() if hasattr(bp, "model_dump") else {}
         return self._topology_to_graph(data)
+
+    # ------------------------------------------------------------------ #
+    #  Сохранение в рецепт                                                #
+    # ------------------------------------------------------------------ #
+
+    def save_to_active_recipe(self, parent: "QWidget | None" = None) -> bool:
+        """Сохранить текущий граф в активный рецепт.
+
+        Вызывает graph_to_blueprint для сериализации модели,
+        читает текущий YAML рецепта, обновляет секции blueprint/display_bindings/
+        gui_positions и записывает файл напрямую через recipes_dir.
+
+        Args:
+            parent: родительский виджет для QMessageBox (может быть None).
+
+        Returns:
+            True при успешном сохранении, False при любой ошибке.
+        """
+        import yaml
+        from PySide6.QtWidgets import QMessageBox
+
+        from .io import graph_to_blueprint
+
+        # Шаг 1: проверить RecipeManager
+        recipe_mgr = self._ctx.recipe_manager()
+        if recipe_mgr is None:
+            QMessageBox.warning(parent, "Сохранение рецепта", "RecipeManager недоступен")
+            return False
+
+        # Шаг 2: проверить активный рецепт
+        active_slug = recipe_mgr.get_active()
+        if active_slug is None:
+            QMessageBox.warning(parent, "Сохранение рецепта", "Не выбран активный рецепт")
+            return False
+
+        # Шаг 3: сериализовать модель
+        bp_dict, bindings, gui_positions = graph_to_blueprint(self._model)
+
+        # Обновить gui_positions из scene (если привязана)
+        if self._scene:
+            self._gui_positions.update(self._scene.get_all_node_positions())
+        gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
+
+        # Шаг 4: прочитать текущий YAML рецепта
+        raw_recipe = recipe_mgr.read_recipe(active_slug)
+        if raw_recipe is None:
+            QMessageBox.critical(parent, "Сохранение рецепта", "Не удалось прочитать рецепт")
+            return False
+
+        # Шаг 5: обновить секции в data-части рецепта
+        try:
+            recipe_data = raw_recipe.get("data", {})
+            if not isinstance(recipe_data, dict):
+                recipe_data = {}
+
+            recipe_data["blueprint"] = bp_dict
+            recipe_data["display_bindings"] = bindings
+            recipe_data["gui_positions"] = gui_positions
+
+            raw_recipe["data"] = recipe_data
+
+            # Записать YAML напрямую через recipes_dir (обходя TreeStore)
+            recipes_dir = recipe_mgr.recipes_dir
+            file_path = recipes_dir / f"{active_slug}.yaml"
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(raw_recipe, f, default_flow_style=False, allow_unicode=True)
+
+            logger.info("Pipeline сохранён в рецепт '%s': %s", active_slug, file_path)
+        except Exception as exc:
+            logger.exception("Ошибка при сохранении рецепта '%s'", active_slug)
+            QMessageBox.critical(parent, "Сохранение рецепта", f"Ошибка: {exc}")
+            return False
+
+        QMessageBox.information(parent, "Сохранение рецепта", f"Рецепт сохранён: {active_slug}")
+        return True
 
     # ------------------------------------------------------------------ #
     #  Legacy API compatibility                                            #

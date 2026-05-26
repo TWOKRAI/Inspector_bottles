@@ -62,7 +62,7 @@ class PipelineTab(QWidget):
     Canvas + Inspector — в 3-й колонке через вертикальный сплиттер.
     """
 
-    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo"})
+    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe"})
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -143,6 +143,7 @@ class PipelineTab(QWidget):
             ("delete", "Удалить"),
             ("auto_layout", "Раскладка"),
             ("validate", "Валидация"),
+            ("save_recipe", "Сохранить"),
             ("fit", "По размеру"),
             ("zoom_in", "Zoom +"),
             ("zoom_out", "Zoom −"),
@@ -154,10 +155,10 @@ class PipelineTab(QWidget):
 
         action_layout.addStretch(1)
 
-        # Permission gating: только mutating actions (delete/auto_layout).
+        # Permission gating: mutating actions (delete/auto_layout/save_recipe).
         _auth = getattr(self._ctx, "auth", None)
         auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        for aid in ("delete", "auto_layout"):
+        for aid in ("delete", "auto_layout", "save_recipe"):
             install_permission_aware_enable(
                 self._action_buttons[aid],
                 "tabs.pipeline.edit",
@@ -245,6 +246,8 @@ class PipelineTab(QWidget):
                 QMessageBox.warning(self, "Валидация", "\n".join(errors))
             else:
                 QMessageBox.information(self, "Валидация", "Topology валидна")
+        elif action_id == "save_recipe":
+            self._presenter.save_to_active_recipe(parent=self)
         elif action_id == "auto_layout":
             self._presenter.auto_layout_scene()
         elif action_id == "delete":
