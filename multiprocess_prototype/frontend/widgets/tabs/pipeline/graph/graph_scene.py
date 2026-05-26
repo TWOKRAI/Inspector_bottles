@@ -163,7 +163,15 @@ class GraphScene(QGraphicsScene):
         return nodes, edges
 
     def clear_all(self) -> None:
-        """Очистить все."""
+        """Очистить все узлы и связи.
+
+        Эмиттит edge_removed для каждого wire ДО clear() — это даёт
+        слушателям (например, WireMetricsController) шанс снять свои
+        QGraphicsItem'ы до того, как Qt их уничтожит, и избежать
+        ссылок на удалённые C++ объекты.
+        """
+        for edge in list(self._edges):
+            self.edge_removed.emit(edge)
         self.clear()
         self._nodes.clear()
         self._edges.clear()

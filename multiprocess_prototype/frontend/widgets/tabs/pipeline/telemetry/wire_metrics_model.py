@@ -96,7 +96,7 @@ class WireMetricsModel(QObject):
         self,
         src: str,
         tgt: str,
-        state: str,
+        state: Literal["ok", "idle", "error"],
         last_message_time: float = 0.0,
     ) -> None:
         """Обновить или создать запись о статусе wire-соединения.
@@ -110,7 +110,7 @@ class WireMetricsModel(QObject):
             last_message_time: Время последнего сообщения (Unix timestamp).
         """
         self._statuses[(src, tgt)] = WireStatus(
-            state=state,  # type: ignore[arg-type]
+            state=state,
             last_message_time=last_message_time,
         )
 

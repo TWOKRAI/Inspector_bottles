@@ -102,6 +102,29 @@ class TestGraphScene:
         scene.clear_all()
         assert scene.node_count() == 0
 
+    def test_clear_all_emits_edge_removed(self, qtbot):
+        """clear_all должен эмиттить edge_removed для каждого edge.
+
+        Это нужно для слушателей вроде WireMetricsController, которые
+        держат свои QGraphicsItem'ы (badges) per-edge и должны их снять
+        ДО того, как Qt уничтожит C++ объекты edge'ов через clear().
+        """
+        scene = GraphScene()
+        scene.add_node(NodeData("a", "A"))
+        scene.add_node(NodeData("b", "B"))
+        scene.add_edge(EdgeData("a", "b"))
+        scene.add_node(NodeData("c", "C"))
+        scene.add_edge(EdgeData("a", "c"))
+
+        removed: list = []
+        scene.edge_removed.connect(lambda e: removed.append(e))
+
+        scene.clear_all()
+
+        assert len(removed) == 2
+        assert scene.edge_count() == 0
+        assert scene.node_count() == 0
+
     def test_remove_edge(self, qtbot):
         scene = GraphScene()
         scene.add_node(NodeData("a", "A"))
