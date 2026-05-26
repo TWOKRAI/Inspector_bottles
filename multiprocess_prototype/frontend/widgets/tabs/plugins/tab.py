@@ -90,7 +90,7 @@ class PluginsTab(BaseTreeNavTab):
         bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
         super().__init__(
             title="Плагины",
-            sections=build_plugin_sections(ctx),
+            sections=build_plugin_sections(ctx, open_sandbox_cb=self.open_sandbox),
             ctx=ctx,
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
@@ -135,6 +135,27 @@ class PluginsTab(BaseTreeNavTab):
     #  Task 2.6 — обновление каталога после rescan                        #
     # ------------------------------------------------------------------ #
 
+    def open_sandbox(self, plugin_name: str, sandbox_widget: QWidget) -> None:
+        """Открыть sandbox-виджет для плагина в content-панели.
+
+        Добавляет виджет в content_stack если его там ещё нет,
+        затем переключает на него. Используется как callback из _PluginSection.
+
+        Args:
+            plugin_name: имя плагина (для идентификации).
+            sandbox_widget: готовый PluginSandboxWidget (singleton per plugin).
+        """
+        # Проверяем — виджет уже в stack?
+        stack = self._content_stack
+        found = False
+        for i in range(stack.count()):
+            if stack.widget(i) is sandbox_widget:
+                found = True
+                break
+        if not found:
+            stack.addWidget(sandbox_widget)
+        stack.setCurrentWidget(sandbox_widget)
+
     def refresh_catalog(self) -> None:
         """Перестроить дерево навигации и таблицу после rescan плагинов.
 
@@ -145,7 +166,8 @@ class PluginsTab(BaseTreeNavTab):
             return
 
         # Пересобрать список секций с актуальным каталогом плагинов
-        self._sections_specs = build_plugin_sections(self._ctx)
+        # Передаём open_sandbox как callback — секции получат кнопку «Тест».
+        self._sections_specs = build_plugin_sections(self._ctx, open_sandbox_cb=self.open_sandbox)
 
         # Очистить дерево и перестроить заново
         self._tree_nav.clear()
