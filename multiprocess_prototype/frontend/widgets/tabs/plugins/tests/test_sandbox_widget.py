@@ -1,10 +1,16 @@
-"""Тесты для PluginSandboxWidget — vertical slice (Task 6.2).
+"""Тесты для PluginSandboxWidget — vertical slice (Task 6.2 + Task 6.3).
 
 Покрывает:
+Task 6.2:
 - test_widget_creates_for_compatible_plugin    — виджет для grayscale без исключений
 - test_apply_button_disabled_initially         — кнопка disabled при старте
 - test_show_result_displays_pixmaps            — show_result → after_label.pixmap() не None
 - test_show_error_shows_label                  — show_error → label видим
+
+Task 6.3 (новые):
+- test_webcam_button_disabled_when_service_stopped — webcam кнопка disabled при stopped сервисе
+- test_params_widget_builds_for_color_mask     — color_mask → 6+ спинбоксов
+- test_params_widget_empty_for_grayscale       — grayscale без register_class → params скрыт
 
 Используется qtbot (pytest-qt, qt_api = pyside6).
 """
@@ -51,15 +57,21 @@ class _MockRegistry:
         return list(self._entries.values())
 
 
-def _make_ctx(registry=None) -> MagicMock:
-    """Собрать минимальный mock AppContext."""
+def _make_ctx(registry=None, service_registry=None) -> MagicMock:
+    """Собрать минимальный mock AppContext.
+
+    Args:
+        registry: возвращаемое значение ctx.plugin_registry().
+        service_registry: возвращаемое значение ctx.service_registry().
+    """
     ctx = MagicMock()
     ctx.plugin_registry.return_value = registry
+    ctx.service_registry.return_value = service_registry
     return ctx
 
 
 # ---------------------------------------------------------------------------
-# Фикстура с реальными плагинами (grayscale)
+# Фикстура с реальными плагинами (grayscale + color_mask)
 # ---------------------------------------------------------------------------
 
 
@@ -69,6 +81,7 @@ def _import_real_plugins():
     import importlib
 
     importlib.import_module("Plugins.processing.grayscale.plugin")
+    importlib.import_module("Plugins.processing.color_mask.plugin")
 
 
 @pytest.fixture()
@@ -81,8 +94,8 @@ def real_registry():
 
 @pytest.fixture()
 def ctx_with_real_registry(real_registry):
-    """AppContext с реальным PluginRegistry."""
-    return _make_ctx(registry=real_registry)
+    """AppContext с реальным PluginRegistry и без сервис-реестра."""
+    return _make_ctx(registry=real_registry, service_registry=None)
 
 
 # ---------------------------------------------------------------------------
@@ -98,8 +111,16 @@ def grayscale_presenter(ctx_with_real_registry):
     return SandboxPresenter(ctx_with_real_registry)
 
 
+@pytest.fixture()
+def color_mask_presenter(ctx_with_real_registry):
+    """SandboxPresenter для color_mask плагина."""
+    from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+    return SandboxPresenter(ctx_with_real_registry)
+
+
 # ---------------------------------------------------------------------------
-# Тесты
+# Тесты (Task 6.2)
 # ---------------------------------------------------------------------------
 
 
@@ -110,11 +131,12 @@ class TestPluginSandboxWidgetCreation:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """Виджет для grayscale создаётся без исключений."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Виджет создан — заголовок содержит имя плагина
@@ -125,11 +147,12 @@ class TestPluginSandboxWidgetCreation:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """Кнопка «Применить» должна быть disabled пока нет загруженного кадра."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # При старте _current_frame is None → кнопка disabled
@@ -140,11 +163,12 @@ class TestPluginSandboxWidgetCreation:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """Начальный текст кнопки «Применить»."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         assert widget._btn_apply.text() == "Применить"
@@ -157,11 +181,12 @@ class TestShowResult:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """show_result с двумя numpy-кадрами 10×10 → after_label.pixmap() не None."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Два реальных BGR кадра 10×10
@@ -180,11 +205,12 @@ class TestShowResult:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """show_result(before, after=None) не бросает исключений, before показывается."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         before = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -208,11 +234,12 @@ class TestShowError:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """После show_error('bad') — error label видим."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Изначально ошибки нет
@@ -228,11 +255,12 @@ class TestShowError:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """show_error('') — label скрывается (не падает)."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Сначала показываем ошибку
@@ -251,11 +279,12 @@ class TestSetRunning:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """set_running(True) — кнопка disabled + текст 'Применяется…'."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Имитируем загруженный кадр (чтобы кнопка была enabled)
@@ -271,11 +300,12 @@ class TestSetRunning:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """set_running(False) после True — кнопка enabled + текст 'Применить'."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Загруженный кадр — чтобы set_running(False) мог включить кнопку
@@ -295,11 +325,12 @@ class TestApplyFlow:
         self,
         qtbot,
         grayscale_presenter,
+        ctx_with_real_registry,
     ) -> None:
         """Устанавливаем _current_frame вручную, вызываем apply → after_label.pixmap() не None."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale")
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Устанавливаем кадр напрямую (минуя QFileDialog)
@@ -307,9 +338,287 @@ class TestApplyFlow:
         widget._current_frame = frame
         widget._btn_apply.setEnabled(True)
 
-        # Применяем
+        # Применяем — теперь через QThread, ждём завершения
         widget._on_apply_clicked()
+        qtbot.waitSignal(
+            widget._last_worker_signals_finished
+            if hasattr(widget, "_last_worker_signals_finished")
+            else widget._btn_apply.clicked,
+            timeout=3000,
+            raising=False,
+        )
 
-        # after_label должен показать результат grayscale
+        # Даём Qt обработать события (worker завершается асинхронно)
+        from PySide6.QtWidgets import QApplication
+
+        for _ in range(10):
+            QApplication.processEvents()
+            import time
+
+            time.sleep(0.05)
+            if widget.after_label.pixmap() is not None and not widget.after_label.pixmap().isNull():
+                break
+
         assert widget.after_label.pixmap() is not None
         assert not widget.after_label.pixmap().isNull()
+
+
+# ---------------------------------------------------------------------------
+# Тесты Task 6.3 (новые)
+# ---------------------------------------------------------------------------
+
+
+class TestWebcamButton:
+    """Тесты кнопки «Снимок с камеры» (Task 6.3)."""
+
+    def test_webcam_button_disabled_when_service_stopped(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """Кнопка webcam disabled если webcam_camera service не RUNNING.
+
+        Создаём mock service_registry с сервисом в статусе 'stopped'.
+        """
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        # Mock сервис в состоянии stopped
+        mock_webcam_svc = MagicMock()
+        mock_webcam_svc.status = "stopped"
+
+        mock_svc_registry = MagicMock()
+        mock_svc_registry.get.return_value = mock_webcam_svc
+
+        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
+
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        # Кнопка должна быть disabled при stopped сервисе
+        assert not widget._btn_webcam.isEnabled()
+
+    def test_webcam_button_enabled_when_service_running(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """Кнопка webcam enabled если webcam_camera service RUNNING."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        # Mock сервис в состоянии running
+        mock_webcam_svc = MagicMock()
+        mock_webcam_svc.status = "running"
+
+        mock_svc_registry = MagicMock()
+        mock_svc_registry.get.return_value = mock_webcam_svc
+
+        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
+
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        assert widget._btn_webcam.isEnabled()
+
+    def test_webcam_button_disabled_when_no_service_registry(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """Кнопка webcam disabled если service_registry() → None."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
+
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        assert not widget._btn_webcam.isEnabled()
+
+    def test_webcam_snapshot_shows_error_when_frame_none(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """Снимок с камеры: если get_current_frame() → None → показать ошибку."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        # Сервис работает, но кадр недоступен
+        mock_webcam_svc = MagicMock()
+        mock_webcam_svc.status = "running"
+        mock_webcam_svc.get_current_frame.return_value = None
+
+        mock_svc_registry = MagicMock()
+        mock_svc_registry.get.return_value = mock_webcam_svc
+
+        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
+
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        widget._on_webcam_snapshot()
+
+        # Должна появиться ошибка
+        assert not widget._lbl_error.isHidden()
+        assert "Камера" in widget._lbl_error.text() or "недоступна" in widget._lbl_error.text()
+
+    def test_webcam_snapshot_sets_current_frame(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """Снимок с камеры: если get_current_frame() возвращает frame → _current_frame установлен."""
+        import numpy as np
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        mock_webcam_svc = MagicMock()
+        mock_webcam_svc.status = "running"
+        mock_webcam_svc.get_current_frame.return_value = fake_frame
+
+        mock_svc_registry = MagicMock()
+        mock_svc_registry.get.return_value = mock_webcam_svc
+
+        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
+
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        widget._on_webcam_snapshot()
+
+        # _current_frame должен быть установлен
+        assert widget._current_frame is not None
+        # Кнопка «Применить» должна быть активна
+        assert widget._btn_apply.isEnabled()
+
+
+class TestParamsWidget:
+    """Тесты зоны параметров (Task 6.3)."""
+
+    def test_params_widget_builds_for_color_mask(
+        self,
+        qtbot,
+        color_mask_presenter,
+        real_registry,
+    ) -> None:
+        """color_mask имеет register_class → виджет содержит >= 6 спинбоксов.
+
+        Ожидаемые поля: h_min, h_max, s_min, s_max, v_min, v_max.
+        """
+        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
+
+        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        # Должны быть спинбоксы для 6 полей
+        assert len(widget._param_widgets) >= 6
+
+        # Конкретные поля присутствуют
+        expected_fields = {"h_min", "h_max", "s_min", "s_max", "v_min", "v_max"}
+        assert expected_fields.issubset(set(widget._param_widgets.keys()))
+
+        # Все виджеты — спинбоксы
+        for field_name, spinbox in widget._param_widgets.items():
+            assert isinstance(spinbox, (QSpinBox, QDoubleSpinBox)), (
+                f"Поле {field_name!r} должно быть QSpinBox или QDoubleSpinBox"
+            )
+
+        # Группа параметров видна
+        assert not widget._params_group.isHidden()
+
+    def test_params_color_mask_hue_range(
+        self,
+        qtbot,
+        color_mask_presenter,
+        real_registry,
+    ) -> None:
+        """Спинбоксы h_min/h_max имеют правильный диапазон 0..179 (OpenCV HSV)."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
+        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        h_min_box = widget._param_widgets.get("h_min")
+        h_max_box = widget._param_widgets.get("h_max")
+
+        assert h_min_box is not None
+        assert h_max_box is not None
+        assert h_min_box.minimum() == 0
+        assert h_min_box.maximum() == 179
+        assert h_max_box.minimum() == 0
+        assert h_max_box.maximum() == 179
+
+    def test_params_widget_empty_for_grayscale(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """grayscale не имеет register_class → params_widget пуст/скрыт.
+
+        _param_widgets должен быть пустым, _params_group — скрыт.
+        """
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
+
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        # Нет параметров для grayscale
+        assert len(widget._param_widgets) == 0
+
+        # Группа параметров скрыта
+        assert widget._params_group.isHidden()
+
+    def test_collect_config_overrides_returns_correct_dict(
+        self,
+        qtbot,
+        color_mask_presenter,
+        real_registry,
+    ) -> None:
+        """_collect_config_overrides() возвращает dict с правильными ключами и значениями."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
+        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        # Установим конкретные значения в спинбоксах
+        if "h_min" in widget._param_widgets:
+            widget._param_widgets["h_min"].setValue(10)
+        if "h_max" in widget._param_widgets:
+            widget._param_widgets["h_max"].setValue(150)
+
+        overrides = widget._collect_config_overrides()
+
+        assert isinstance(overrides, dict)
+        assert "h_min" in overrides
+        assert "h_max" in overrides
+        assert overrides["h_min"] == 10
+        assert overrides["h_max"] == 150
+
+    def test_collect_config_overrides_empty_for_grayscale(
+        self,
+        qtbot,
+        grayscale_presenter,
+        real_registry,
+    ) -> None:
+        """_collect_config_overrides() → {} для grayscale (нет register_class)."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
+
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        qtbot.addWidget(widget)
+
+        overrides = widget._collect_config_overrides()
+        assert overrides == {}
