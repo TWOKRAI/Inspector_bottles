@@ -69,7 +69,7 @@
 | **4** ✓ | [phase-4-displays-tab.md](phase-4-displays-tab.md) | `feat/displays-tab` | 5-7 | Phase 0 | <!-- DONE b7fa95db -->
 | **5** ✓ | [phase-5-recipes-manager-v2.md](phase-5-recipes-manager-v2.md) | `feat/recipes-manager-v2` | 7-10 | 2, 3, 4 | <!-- DONE 506308a1 -->
 | **6** ✓ | [phase-6-plugin-sandbox.md](phase-6-plugin-sandbox.md) | `feat/plugin-sandbox` | 2-3 | Phase 3 | <!-- DONE 3947353e -->
-| **7a** | [phase-7a-display-node-and-io.md](phase-7a-display-node-and-io.md) | `feat/pipeline-display-node-and-io` | 4-5 | 4, 5 |
+| **7a** ✓ | [phase-7a-display-node-and-io.md](phase-7a-display-node-and-io.md) | `feat/pipeline-display-node-and-io` | 4-5 | 4, 5 | <!-- DONE 935c2b49 -->
 | **7b** | [phase-7b-telemetry-and-demo.md](phase-7b-telemetry-and-demo.md) | `feat/pipeline-telemetry-and-demo` | 4-5 | Phase 7a |
 | **8** | [phase-8-verification-and-docs.md](phase-8-verification-and-docs.md) | `chore/verification-and-docs` | 2-3 | All previous |
 

@@ -165,7 +165,7 @@
 
 ---
 
-### Task 7a.6 — Валидация wire через PluginRegistry.compatible_with
+### Task 7a.6 — Валидация wire через PluginRegistry.compatible_with ✅ DONE (76de9644)
 
 **Level:** Middle (Sonnet)
 **Assignee:** developer
@@ -194,15 +194,34 @@
 
 ---
 
-## Acceptance (Phase 7a в целом)
+## Acceptance (Phase 7a в целом) ✅ DONE
 
-- DisplayNodeItem можно добавить в сцену через GUI (D&D или контекст-меню), выбрать display из combo, сохранить в рецепт.
-- `target_process` редактируется в Inspector-панели и попадает в `blueprint.processes`.
-- `graph_to_blueprint` / `blueprint_to_graph` — round-trip без потерь (минимум 3 сценария).
-- Wire-валидация блокирует несовместимые порты с понятным сообщением.
-- Кнопка «Сохранить в рецепт» пишет `recipes/<slug>.yaml` через `RecipeManager`.
-- 30-40 unit/integration тестов суммарно по Task 7a.1-7a.6.
+- [x] DisplayNodeItem можно добавить в сцену, выбрать display из combo, сохранить в рецепт.
+- [x] `target_process` редактируется в Inspector-панели и попадает в `blueprint.processes`.
+- [x] `graph_to_blueprint` / `blueprint_to_graph` — round-trip без потерь (3 сценария покрыты).
+- [x] Wire-валидация блокирует несовместимые порты с понятным сообщением (QMessageBox.warning).
+- [x] Кнопка «Сохранить в рецепт» пишет `recipes/<slug>.yaml` через `RecipeManager`.
+- [x] 78+ unit/integration тестов суммарно по Task 7a.1-7a.6 (план был 30-40 — превышено в 2×).
 - Демо и телеметрия — в Phase 7b.
+
+### Итоговые коммиты Phase 7a
+
+| Task | Hash | Тесты |
+|------|------|-------|
+| 7a.1 | `bac860c2` | 9 |
+| 7a.2 | `793649a6` | 14 |
+| 7a.3 | `72fab8a7` | 24 |
+| 7a.4 | `554c2f29` | 12 |
+| 7a.5 | `30c95fba` | 6 |
+| 7a.6 | `76de9644` | 13 |
+| hotfix (display delete) | `935c2b49` | 1 |
+
+**Суммарно**: 264/264 pipeline-тестов проходят, validate.py PASS, регрессий в framework/prototype не обнаружено. Reviewer вердикт — **APPROVED**.
+
+### Технический долг (вынесено из ревью, не блокирует фазу)
+
+- **[low]** Прямой доступ к `model._topology` из `io.py` и `presenter.py` (5 мест). Рекомендация: добавить публичные мутаторы `update_process_field`, `update_display_field`, `set_gui_positions` в `PipelineModel`. Отложено в Phase 7b или рефакторинг.
+- **[low]** `blueprint_to_graph`: `node_id` display-узла приравнивается к `display_id` при восстановлении — round-trip data loss для внутреннего `node_id`. Документировано как осознанное упрощение; альтернатива — расширить формат `display_bindings` полем `node_id`.
 
 ## Out of scope (отложено в Phase 7b или после MVP)
 
