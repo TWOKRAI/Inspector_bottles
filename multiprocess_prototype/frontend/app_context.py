@@ -131,6 +131,15 @@ class AppContext:
         """
         return self.extras.get("service_registry")
 
+    @property
+    def recipe_manager(self) -> Any | None:
+        """RecipeManager — менеджер рецептов v2 (blueprint-based CRUD).
+
+        Инициализируется в run_gui() через RecipeEngine + wire-up (Task 5.8).
+        None если GUI-процесс не инициализировал (тесты или ошибка при старте).
+        """
+        return self.extras.get("recipe_manager")
+
     def form_context(self) -> "FormContext | None":
         """Собрать FormContext из доступных в AppContext компонентов.
 

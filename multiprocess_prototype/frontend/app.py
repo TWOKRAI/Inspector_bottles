@@ -235,6 +235,53 @@ def run_gui(process: "GuiProcess") -> None:
     except Exception as e:
         process._log_warning(f"ServiceStateAdapter: не удалось создать: {e}", module="startup")
 
+    # 3g. RecipeManager + RecipeStateAdapter (Task 5.8 wire-up)
+    #
+    # Порядок: RecipeEngine (framework) → RecipeManager (prototype) →
+    #          RecipeStateAdapter → ctx.extras["recipe_manager"].
+    #
+    # state_proxy = None в GUI-процессе (аналогично ServiceStateAdapter выше).
+    # RecipeStateAdapter.connect() не вызывается без proxy — graceful degradation.
+    #
+    # RecipeEngine читает/пишет recipes_dir и вызывает migration_fn при load()
+    # legacy-файлов (is_v1_recipe → True).
+    _recipes_dir = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
+    try:
+        from multiprocess_framework.modules.state_store_module.recipes.recipe_engine import RecipeEngine
+        from multiprocess_prototype.recipes.manager import RecipeManager
+        from multiprocess_prototype.recipes.migrations.format_v1_to_v2 import (
+            migrate_v1_to_v2,
+            is_v1_recipe,
+        )
+        from multiprocess_prototype.backend.state.adapters.recipe_adapter import RecipeStateAdapter
+
+        _recipe_engine = RecipeEngine(
+            recipes_dir=_recipes_dir,
+            migration_fn=migrate_v1_to_v2,
+            migration_check_fn=is_v1_recipe,
+        )
+        _recipe_manager = RecipeManager(
+            engine=_recipe_engine,
+            state_proxy=None,  # GUI-процесс не имеет StateProxy
+            logger=None,
+        )
+        _recipe_adapter = RecipeStateAdapter(
+            recipe_manager=_recipe_manager,
+            state_proxy=None,  # no-op без proxy
+        )
+        # sync_domain_to_state — no-op если proxy=None (adapter логирует warning)
+        _recipe_adapter.sync_domain_to_state()
+
+        ctx.extras["recipe_manager"] = _recipe_manager
+        ctx.extras["recipe_state_adapter"] = _recipe_adapter
+
+        process._log_info(
+            f"recipe_manager: создан, recipes_dir={_recipes_dir}, доступно рецептов={len(_recipe_manager.list())}",
+            module="startup",
+        )
+    except Exception as e:
+        process._log_warning(f"RecipeManager: не удалось создать: {e}", module="startup")
+
     # 3e. Auth: инициализация AuthManager + AuthState (PR2 auth-rbac)
     import os
     from Services.auth import AuthManager, AuthConfig, YamlUserStorage
