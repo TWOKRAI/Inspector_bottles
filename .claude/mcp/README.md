@@ -43,7 +43,7 @@
 
 ### Не в core, обсуждаются в ROADMAP
 
-См. `../ROADMAP.md` § D — кандидаты для будущих opt-in модулей:
+См. `../docs/ROADMAP.md` § D — кандидаты для будущих opt-in модулей:
 **claude-context** (конкурент qex), **preflight** (валидатор промптов),
 **container-use** (изолированные dev env), **claude-mem** (семантика над сессиями).
 

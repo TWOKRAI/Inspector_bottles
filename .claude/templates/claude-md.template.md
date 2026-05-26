@@ -58,7 +58,8 @@
 
 - `.claude/agents/`, `.claude/commands/`, `.claude/hooks/`, `.claude/skills/`
 - `.claude/templates/`, `.claude/scripts/`, `.claude/mcp/`
-- `.claude/COMMIT_GUIDE.md`, `.claude/BOOTSTRAP.md`, `.claude/STACK.md`, `.claude/SYSTEM_OVERVIEW.md`, `.claude/CLAUDE.md`
+- `.claude/COMMIT_GUIDE.md`, `.claude/BOOTSTRAP.md`, `.claude/STACK.md`, `.claude/CLAUDE.md`
+- `.claude/docs/` (SYSTEM_OVERVIEW.md, ROADMAP.md, VSCODE_EXTENSIONS.md, CLAUDE-SETUP.md)
 
 **Workflow для правки seed-контента:** правишь в canonical seed → `claude-kit upgrade . --apply` в этом проекте. Если правка началась здесь — сначала `claude-kit sync-back <seed-repo> --apply`, потом upgrade обратно.
 

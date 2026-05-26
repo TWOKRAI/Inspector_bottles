@@ -205,7 +205,7 @@ If you don't need semantic search or DSM analysis, skip this part — the projec
 
 ## Part 5. VS Code (optional)
 
-See [`VSCODE_EXTENSIONS.md`](VSCODE_EXTENSIONS.md) for the curated list. Minimum:
+See [`docs/VSCODE_EXTENSIONS.md`](docs/VSCODE_EXTENSIONS.md) for the curated list. Minimum:
 
 ```bash
 code --install-extension charliermarsh.ruff
@@ -439,8 +439,10 @@ Memory is **per-project**: `claude-kit sync-back` excludes `memory/` so individu
 | [README.md](README.md) | Quickstart + seed structure |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each seed version |
 | [STACK.md](STACK.md) | Every tool with rationale |
-| [VSCODE_EXTENSIONS.md](VSCODE_EXTENSIONS.md) | VS Code extension list |
-| [CLAUDE-SETUP.md](CLAUDE-SETUP.md) | Quick orientation in `.claude/` |
+| [docs/VSCODE_EXTENSIONS.md](docs/VSCODE_EXTENSIONS.md) | VS Code extension list |
+| [docs/CLAUDE-SETUP.md](docs/CLAUDE-SETUP.md) | Quick orientation in `.claude/` |
+| [docs/SYSTEM_OVERVIEW.md](docs/SYSTEM_OVERVIEW.md) | 8-layer system architecture |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Seed evolution backlog |
 | [templates/README.md](templates/README.md) | How `claude-kit new` consumes templates |
 | [mcp/README.md](mcp/README.md) | MCP servers config |
 | [modes/_stack.md](modes/_stack.md) | Per-project customization |

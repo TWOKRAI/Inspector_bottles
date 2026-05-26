@@ -5,6 +5,7 @@
 **Целевой репозиторий:** upstream `claude_seed` (bundled template источник для `claude-kit`)
 **Дата:** 2026-05-26
 **Автор:** Director (Opus)
+**Статус:** ✅ **DONE upstream** (закрыт в seed 0.5.2 — `scripts/lint_routing.py` + canonical `ROUTING.md`, doctor зелёный)
 
 ---
 

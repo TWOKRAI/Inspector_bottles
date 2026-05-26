@@ -50,6 +50,24 @@ copy .claude\platforms\settings.local.windows.json .claude\settings.local.json
 
 ---
 
+## `statusLine` — per-OS поведение
+
+`statusLine.command` в `settings.json` определяется во время `claude-kit new` по OS, на которой запускается команда:
+
+| OS | statusLine.command | Что показывает |
+|----|--------------------|----------------|
+| macOS / Linux | `printf 'branch: %s \| ollama: %s' "$(git branch --show-current)" "$(curl ... && echo UP \|\| echo DOWN)"` | `branch: main \| ollama: UP` |
+| Windows | `git branch --show-current` | `main` |
+
+**Почему так:** bash-команда с `printf` + `"$(...)"` + `curl` + `\|\|` — POSIX-конструкции. На Windows их не понимает ни `cmd.exe`, ни PowerShell, statusLine падает с warning'ом и пользователь видит пустую строку. Windows-вариант — чистый git-вызов, который работает в любой оболочке.
+
+**Двух-машинный workflow:** `settings.json` зафиксирован под OS на момент создания (он же в git). Если проект создан на Windows и синкается на macOS — bash-варианта не будет. Решения:
+
+1. Скопировать `settings.json` руками после первого `git pull` на новой ОС.
+2. Использовать `settings.local.json` для платформенного override — он gitignored, у каждой машины свой. См. ниже.
+
+---
+
 ## Двух-машинный workflow
 
 Сценарий: днём работаю на Windows, вечером — на macOS.

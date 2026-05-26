@@ -47,6 +47,40 @@ warn()  { echo "${C_WARN}[WARN]${C_RESET}  $1 — ${2:-}"; WARN_COUNT=$((WARN_CO
 fail()  { echo "${C_FAIL}[FAIL]${C_RESET}  $1 — ${2:-}"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 vlog()  { [ $VERBOSE -eq 1 ] && echo "  · $1"; }
 
+# Python interpreter — cached resolution. Python is a hard dep for several
+# checks (lint_settings/lint_agents/lint_routing); reused here for portable
+# mtime computation (avoids GNU `find -printf` and `bc` in Git Bash/BusyBox).
+_PYTHON=""
+resolve_python() {
+    if [ -z "$_PYTHON" ]; then
+        if command -v python >/dev/null 2>&1; then _PYTHON="python"
+        elif command -v python3 >/dev/null 2>&1; then _PYTHON="python3"
+        fi
+    fi
+    [ -n "$_PYTHON" ] && echo "$_PYTHON"
+}
+
+# Max mtime (epoch sec, integer) of any file under a directory.
+# Portable: walks via Python — no GNU `find -printf`, no `stat -c %Y`.
+# Echoes empty string on error or empty dir.
+max_mtime() {
+    local dir="$1"
+    local py
+    py=$(resolve_python) || return 1
+    [ -z "$py" ] && return 1
+    "$py" -c "import os, sys
+mt = 0
+for root, _, files in os.walk(sys.argv[1]):
+    for f in files:
+        try:
+            t = os.path.getmtime(os.path.join(root, f))
+            if t > mt:
+                mt = t
+        except OSError:
+            pass
+print(int(mt) if mt > 0 else '')" "$dir" 2>/dev/null
+}
+
 # Resolve project root (script lives in .claude/scripts/doctor.sh)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # .claude/scripts → .claude → project root
@@ -170,23 +204,59 @@ fi
 # ---------------------------------------------------------------------------
 
 if [ -f ".claude/mcp/ROUTING.md" ] && [ -d ".claude/agents" ]; then
-    # Collect mcp tools mentioned in agent .md files (tools: line in frontmatter + body)
-    AGENT_MCPS=$(grep -rhoE "mcp:[a-z_-]+:[a-zA-Z_-]+" .claude/agents/ 2>/dev/null | sort -u)
-    ROUTING_MCPS=$(grep -oE "mcp__[a-z_-]+__[a-zA-Z_-]+|mcp:[a-z_-]+:[a-zA-Z_-]+" .claude/mcp/ROUTING.md 2>/dev/null | sed 's/mcp__/mcp:/;s/__/:/g' | sort -u)
+    # Prefer Python lint_routing.py (strict canonical-aware check).
+    # Fallback to inline bash grep — устойчивый к коротким формам в bullet'ах
+    # за счёт парсинга `**Canonical refs:**` блоков как authoritative-источника.
+    LINT_PY=".claude/scripts/lint_routing.py"
+    LINT_OUT=""
+    LINT_EXIT=99
 
-    MISSING=""
-    while IFS= read -r tool; do
-        [ -z "$tool" ] && continue
-        if ! echo "$ROUTING_MCPS" | grep -qF "$tool"; then
-            MISSING="$MISSING $tool"
+    if [ -f "$LINT_PY" ]; then
+        if command -v python >/dev/null 2>&1; then
+            LINT_OUT=$(python "$LINT_PY" --quiet 2>&1)
+            LINT_EXIT=$?
+        elif command -v python3 >/dev/null 2>&1; then
+            LINT_OUT=$(python3 "$LINT_PY" --quiet 2>&1)
+            LINT_EXIT=$?
         fi
-    done <<< "$AGENT_MCPS"
+    fi
 
-    if [ -z "$MISSING" ]; then
-        TOOL_COUNT=$(echo "$AGENT_MCPS" | wc -l | tr -d ' ')
-        ok "Routing sync" "$TOOL_COUNT mcp:server:tool references — all valid"
+    if [ $LINT_EXIT -eq 0 ]; then
+        # Python линтер дал OK (возможно с non-blocking orphan warnings).
+        N_REFS=$(grep -rhoE "mcp:[a-z_-]+:[a-zA-Z_-]+" .claude/agents/ 2>/dev/null | sort -u | wc -l | tr -d ' ')
+        ok "Routing sync" "${N_REFS} mcp:server:tool refs — canonical (via lint_routing.py)"
+    elif [ $LINT_EXIT -eq 1 ]; then
+        fail "Routing sync" "$(echo "$LINT_OUT" | grep -E '^\[FAIL\]' | head -3 | tr '\n' '|')"
+    elif [ $LINT_EXIT -eq 2 ]; then
+        # Strict-mode warnings (orphans). Non-blocking for doctor — лишь сигнал.
+        warn "Routing sync" "orphan tools listed in ROUTING.md (non-blocking, see lint_routing.py --strict)"
     else
-        fail "Routing sync" "agents reference unknown MCP tools (not in ROUTING.md):$MISSING"
+        # Fallback: lint_routing.py не доступен или python отсутствует.
+        # Канон — `**Canonical refs:**` строки в ROUTING.md.
+        AGENT_MCPS=$(grep -rhoE "mcp:[a-z_-]+:[a-zA-Z_-]+" .claude/agents/ 2>/dev/null | sort -u)
+        # Извлечь tools из Canonical refs строк (preferred) + любых mcp__ или mcp: упоминаний (fallback).
+        CANON_REFS=$(grep -E "^\*\*Canonical refs:\*\*" .claude/mcp/ROUTING.md 2>/dev/null \
+            | grep -oE "mcp:[a-z_-]+:[a-zA-Z_-]+" | sort -u)
+        if [ -z "$CANON_REFS" ]; then
+            # Совсем старый ROUTING.md без Canonical блоков — fallback на все упоминания.
+            CANON_REFS=$(grep -oE "mcp__[a-z_-]+__[a-zA-Z_-]+|mcp:[a-z_-]+:[a-zA-Z_-]+" .claude/mcp/ROUTING.md 2>/dev/null \
+                | sed 's/mcp__/mcp:/;s/__/:/g' | sort -u)
+        fi
+
+        MISSING=""
+        while IFS= read -r tool; do
+            [ -z "$tool" ] && continue
+            if ! echo "$CANON_REFS" | grep -qF "$tool"; then
+                MISSING="$MISSING $tool"
+            fi
+        done <<< "$AGENT_MCPS"
+
+        if [ -z "$MISSING" ]; then
+            TOOL_COUNT=$(echo "$AGENT_MCPS" | wc -l | tr -d ' ')
+            ok "Routing sync" "$TOOL_COUNT mcp:server:tool refs — canonical (bash fallback)"
+        else
+            fail "Routing sync" "agents reference unknown MCP tools (not in ROUTING.md):$MISSING"
+        fi
     fi
 else
     warn "Routing sync" ".claude/mcp/ROUTING.md or .claude/agents/ not found"
@@ -199,11 +269,12 @@ fi
 # qex index existence and age
 QEX_INDEX_PATH=".qex"
 if [ $QEX_FOUND -eq 1 ] && [ -d "$QEX_INDEX_PATH" ]; then
-    # Approximate age via mtime of any file inside
-    QEX_MTIME=$(find "$QEX_INDEX_PATH" -type f -printf "%T@\n" 2>/dev/null | sort -n | tail -1)
+    # Approximate age via max mtime under .qex/. Portable: max_mtime() uses
+    # Python (no GNU `find -printf`), shell arithmetic (no `bc`).
+    QEX_MTIME=$(max_mtime "$QEX_INDEX_PATH")
     if [ -n "$QEX_MTIME" ]; then
         NOW=$(date +%s)
-        AGE_SEC=$(echo "$NOW - ${QEX_MTIME%.*}" | bc 2>/dev/null || echo 0)
+        AGE_SEC=$((NOW - QEX_MTIME))
         AGE_DAYS=$((AGE_SEC / 86400))
         if [ $AGE_DAYS -gt 7 ]; then
             warn "Indexes" "qex index age: ${AGE_DAYS} days (consider /qex-reindex)"
@@ -226,13 +297,22 @@ fi
 # ---------------------------------------------------------------------------
 
 if [ -d ".claude/hooks" ]; then
-    TOTAL_HOOKS=$(find .claude/hooks -name "*.sh" -type f | wc -l | tr -d ' ')
-    EXEC_HOOKS=$(find .claude/hooks -name "*.sh" -type f -perm -u+x 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$TOTAL_HOOKS" = "$EXEC_HOOKS" ]; then
-        ok "Hooks executable" "${TOTAL_HOOKS}/${TOTAL_HOOKS} +x"
-    else
-        warn "Hooks executable" "${EXEC_HOOKS}/${TOTAL_HOOKS} +x (run: chmod +x .claude/hooks/**/*.sh)"
-    fi
+    case "$OSTYPE" in
+        msys*|cygwin*|win32*)
+            # NTFS не имеет POSIX executable bit → проверка бессмысленна.
+            # Hooks на Windows запускаются через `bash` явно, +x не требуется.
+            vlog "Hooks executable: skipped on $OSTYPE (no POSIX executable bit on NTFS)"
+            ;;
+        *)
+            TOTAL_HOOKS=$(find .claude/hooks -name "*.sh" -type f | wc -l | tr -d ' ')
+            EXEC_HOOKS=$(find .claude/hooks -name "*.sh" -type f -perm -u+x 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$TOTAL_HOOKS" = "$EXEC_HOOKS" ]; then
+                ok "Hooks executable" "${TOTAL_HOOKS}/${TOTAL_HOOKS} +x"
+            else
+                warn "Hooks executable" "${EXEC_HOOKS}/${TOTAL_HOOKS} +x (run: chmod +x .claude/hooks/**/*.sh)"
+            fi
+            ;;
+    esac
 else
     warn "Hooks executable" ".claude/hooks/ not found"
 fi

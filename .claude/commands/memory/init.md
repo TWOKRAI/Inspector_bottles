@@ -11,26 +11,14 @@ description: Инициализация .claude/memory/ для нового пр
 ## Шаги
 
 1. Создай папку `.claude/memory/` если её нет.
-2. Создай `.claude/memory/MEMORY.md` со скелетом:
-   ```markdown
-   # MEMORY — index
-
-   > Project-local memory store. Lives under `.claude/memory/`, tracked in git.
-   > Each file is one memory; this file is just an index to them.
-   > See `.claude/CLAUDE.md` → "Memory (OVERRIDE)" for write/read rules.
-
-   ## Feedback
-   _(empty)_
-
-   ## User
-   _(empty)_
-
-   ## Project
-   _(empty)_
-
-   ## Reference
-   _(empty)_
-   ```
+2. Создай `.claude/memory/MEMORY.md` — **скопируй содержимое из bundled
+   seed-template** (single source of truth). Не вписывай skeleton руками,
+   чтобы не дрифтить от canonical-версии.
+   - Предпочтительно: запусти `claude-kit init <target> --mode empty`
+     (он использует `read_memory_skeleton()` под капотом).
+   - Альтернатива: скопируй файл целиком из bundled seed —
+     `cp <claude-kit>/src/claude_kit/template/memory/MEMORY.md .claude/memory/MEMORY.md`
+     (точный путь можно найти через `python -c "from claude_kit.core.composition.skeleton import read_memory_skeleton; print(read_memory_skeleton())"`).
 3. Если в `.claude/memory/` лежит только `.gitkeep` — удали его (теперь папка не пустая).
 4. Подскажи следующий шаг:
    - `/memory:status` — посмотреть состояние.
