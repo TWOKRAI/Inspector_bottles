@@ -541,7 +541,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.7 — RecipesTab переписать (Qt MVP)
 
-- [ ] Task 5.7
+- [x] Task 5.7 (c601de6b)
 
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
