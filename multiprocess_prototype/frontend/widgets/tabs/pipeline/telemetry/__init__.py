@@ -1,5 +1,6 @@
 """Пакет телеметрии wire-соединений pipeline."""
 
-from .wire_metrics_model import WireStatus, WireMetrics, WireMetricsModel
+from .wire_metrics_badge import WireMetricsBadge
+from .wire_metrics_model import WireMetrics, WireMetricsModel, WireStatus
 
-__all__ = ["WireStatus", "WireMetrics", "WireMetricsModel"]
+__all__ = ["WireStatus", "WireMetrics", "WireMetricsModel", "WireMetricsBadge"]
