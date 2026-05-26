@@ -386,7 +386,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.5 — RecipeStateAdapter + wire StateProxy↔RecipeManager
 
-- [ ] Task 5.5
+- [x] Task 5.5 (315a6b6a)
 
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
