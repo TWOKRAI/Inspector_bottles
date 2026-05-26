@@ -2,12 +2,13 @@
 
 Проверяют:
 1. Импорты без ошибок.
-2. isinstance для StateAdapterBase (для CameraStateAdapter и RegistersStateAdapter).
-3. RecipeAdapter НЕ наследует StateAdapterBase.
-4. Конструирование без аргументов (где применимо).
-5. Нет logging.getLogger в файлах адаптеров.
+2. isinstance для StateAdapterBase (для CameraStateAdapter, RegistersStateAdapter, RecipeStateAdapter).
+3. Конструирование без аргументов (где применимо).
+4. Нет logging.getLogger в файлах адаптеров.
 
-Комплексное тестирование с реальным StateProxy отложено до Phase 3 bootstrap.
+Breaking change Task 5.5: RecipeAdapter (slot-based wrapper) удалён.
+Тест test_recipe_adapter_not_state_adapter_base помечен skip — legacy API удалён.
+RecipeStateAdapter теперь полноценный StateAdapterBase-наследник.
 """
 
 from __future__ import annotations
@@ -15,11 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 
 from multiprocess_framework.modules.state_store_module.adapters import StateAdapterBase
 from multiprocess_prototype.backend.state.adapters import (
     CameraStateAdapter,
-    RecipeAdapter,
+    RecipeStateAdapter,
     RegistersStateAdapter,
 )
 
@@ -30,10 +32,10 @@ from multiprocess_prototype.backend.state.adapters import (
 
 
 def test_imports_available():
-    """Все три адаптера импортируются из пакета без ошибок."""
+    """Все адаптеры импортируются из пакета без ошибок."""
     assert CameraStateAdapter is not None
     assert RegistersStateAdapter is not None
-    assert RecipeAdapter is not None
+    assert RecipeStateAdapter is not None
 
 
 # ---------------------------------------------------------------------------
@@ -54,11 +56,18 @@ def test_registers_adapter_is_state_adapter_base():
     assert isinstance(adapter, StateAdapterBase), "RegistersStateAdapter должен наследовать StateAdapterBase"
 
 
+def test_recipe_state_adapter_is_state_adapter_base():
+    """RecipeStateAdapter наследует StateAdapterBase (Task 5.5 — breaking change)."""
+    mock_rm = MagicMock()
+    adapter = RecipeStateAdapter(recipe_manager=mock_rm)
+    assert isinstance(adapter, StateAdapterBase), "RecipeStateAdapter должен наследовать StateAdapterBase"
+    assert issubclass(RecipeStateAdapter, StateAdapterBase)
+
+
+@pytest.mark.skip(reason="legacy RecipeAdapter API removed in Task 5.5 — заменён на RecipeStateAdapter")
 def test_recipe_adapter_not_state_adapter_base():
-    """RecipeAdapter НЕ наследует StateAdapterBase."""
-    assert not issubclass(RecipeAdapter, StateAdapterBase), (
-        "RecipeAdapter не должен наследовать StateAdapterBase (это утилитный wrapper)"
-    )
+    """RecipeAdapter НЕ наследует StateAdapterBase. — УДАЛЁН в Task 5.5."""
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +91,16 @@ def test_registers_adapter_construct_minimal():
     assert adapter._proxy is None
     assert not adapter.is_bound
     assert not adapter.is_connected
+
+
+def test_recipe_state_adapter_construct_minimal():
+    """RecipeStateAdapter создаётся с минимальными аргументами (только manager)."""
+    mock_rm = MagicMock()
+    adapter = RecipeStateAdapter(recipe_manager=mock_rm)
+    assert adapter._proxy is None
+    assert not adapter.is_bound
+    assert not adapter.is_connected
+    assert adapter._sub_ids == []
 
 
 def test_camera_adapter_bind_unbind():

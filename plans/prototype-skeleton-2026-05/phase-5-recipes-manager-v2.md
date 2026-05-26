@@ -322,7 +322,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.4 — Integration-тесты replace_blueprint (15-20 тестов)
 
-- [ ] Task 5.4
+- [x] Task 5.4 (ee704141)
 
 **Level:** Senior (Opus, normal thinking)
 **Assignee:** teamlead

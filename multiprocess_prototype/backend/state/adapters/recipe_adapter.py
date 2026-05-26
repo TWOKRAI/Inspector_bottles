@@ -1,148 +1,194 @@
-"""recipe_adapter.py — Утилитный wrapper: RecipeManagerProtocol → RecipeEngine.
+"""recipe_adapter.py — RecipeStateAdapter: двусторонняя синхронизация RecipeManager ↔ StateProxy.
 
-НЕ является StateAdapter — не подписывается на StateProxy, не наследует StateAdapterBase.
-Это тонкий адаптер старого API виджетов (list_slots/get_slot/save_slot/delete_slot)
-поверх RecipeEngine из framework.
+Наследует StateAdapterBase и реализует паттерн anti-loop:
+- при state.recipes.active → RecipeManager.set_active(slug)
+- при RecipeManager.set_active → state.recipes.active обновляется через sync_domain_to_state
 
-Виджеты вызывают старый API (list_slots/get_slot/save_slot/delete_slot),
-данные идут через StateStore (RecipeEngine → TreeStore → YAML).
+Anti-loop: _mark_pending перед state_proxy.set(), _check_and_clear_pending в callback —
+предотвращает эхо-зацикливание (паттерн из StateAdapterBase / RegistersStateAdapter).
 
-Адаптер не хранит собственного состояния рецептов:
-- list_slots()    → recipe_engine.list()
-- save_slot()     → данные кладутся во временный TreeStore → recipe_engine.save()
-- get_slot()      → читает YAML-файл напрямую через recipe_engine
-- delete_slot()   → recipe_engine.delete()
+Breaking change (Task 5.5): старый RecipeAdapter (list_slots/get_slot/save_slot/delete_slot)
+удалён. GUI-виджеты tabs/recipes/ будут переписаны в Task 5.7.
+
+Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.5
 """
 
 from __future__ import annotations
 
-import copy
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-import yaml
-
-from multiprocess_prototype.backend.state.recipes.recipe_engine import RecipeEngine
+from multiprocess_framework.modules.state_store_module import Delta
+from multiprocess_framework.modules.state_store_module.adapters import StateAdapterBase
 
 
-class RecipeAdapter:
-    """Утилитный wrapper: адаптер RecipeManagerProtocol → RecipeEngine.
+# Путь в StateStore для активного рецепта
+_PATH_ACTIVE = "recipes.active"
+# Путь в StateStore для списка доступных рецептов
+_PATH_AVAILABLE = "recipes.available"
 
-    Не является StateAdapter (не подписывается на StateProxy).
-    Виджеты вызывают старый API, данные идут через StateStore.
+
+class RecipeStateAdapter(StateAdapterBase):
+    """Двусторонняя синхронизация RecipeManager ↔ StateProxy.
+
+    Направление 1 (state→domain):
+        StateProxy.subscribe("recipes.active") → _on_state_active_changed
+        → RecipeManager.set_active(slug)
+
+    Направление 2 (domain→state):
+        sync_domain_to_state() → state_proxy.set("recipes.active", active)
+                                + state_proxy.set("recipes.available", slugs)
+
+    Anti-loop:
+        Перед set() в StateProxy → _mark_pending(path).
+        В callback → _check_and_clear_pending(path): True = эхо, skip.
 
     Args:
-        recipe_engine: готовый RecipeEngine с подключённым TreeStore.
-        logger: менеджер логирования (LoggerManager или совместимый).
-                Если None — методы логирования ничего не делают (silent fallback).
+        recipe_manager: RecipeManager (application-обёртка над RecipeEngine).
+        state_proxy: GuiStateProxy или StateProxy (опционален, можно bind() позже).
+        logger: менеджер логирования (LoggerManager или совместимый, опционален).
+        stats: менеджер статистики (опционален).
+        error: менеджер ошибок (опционален).
     """
 
-    def __init__(self, recipe_engine: RecipeEngine, logger: Any | None = None) -> None:
-        self._engine = recipe_engine
-        self._logger = logger
+    def __init__(
+        self,
+        recipe_manager: Any,
+        state_proxy: Any | None = None,
+        logger: Any | None = None,
+        stats: Any | None = None,
+        error: Any | None = None,
+    ) -> None:
+        super().__init__(state_proxy=state_proxy, logger=logger, stats=stats, error=error)
+        self._recipe_manager = recipe_manager
 
-    # ------------------------------------------------------------------
-    # Вспомогательные методы логирования (silent fallback)
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # StateAdapterBase — реализация абстрактных методов
+    # -------------------------------------------------------------------
 
-    def _log_info(self, msg: str) -> None:
-        """Логировать info через инжектированный logger. Если None — молча."""
-        if self._logger is not None:
-            self._logger.log_info(msg)
+    def _subscribe_all(self) -> None:
+        """Создать подписку на state.recipes.active → _on_state_active_changed.
 
-    def _log_warning(self, msg: str) -> None:
-        """Логировать warning через инжектированный logger. Если None — молча."""
-        if self._logger is not None:
-            self._logger.log_warning(msg)
-
-    def _log_error(self, msg: str) -> None:
-        """Логировать error через инжектированный logger. Если None — молча."""
-        if self._logger is not None:
-            self._logger.log_error(msg)
-
-    # ------------------------------------------------------------------
-    # RecipeManagerProtocol-совместимый API
-    # ------------------------------------------------------------------
-
-    def list_slots(self) -> List[str]:
-        """Список имён доступных рецептов.
-
-        Делегирует в recipe_engine.list() → файлы *.yaml в recipes_dir.
+        Вызывается базовым классом из connect().
         """
-        return self._engine.list()
+        sub_id = self._proxy.subscribe(
+            _PATH_ACTIVE,
+            self._on_state_active_changed,
+        )
+        self._sub_ids.append(sub_id)
+        self._log_info(
+            "RecipeStateAdapter: подписка создана, path=%s, sub_id=%s",
+            _PATH_ACTIVE,
+            sub_id,
+        )
 
-    def get_slot(self, name: str) -> Optional[Dict[str, Any]]:
-        """Получить данные рецепта по имени.
+    def _unsubscribe_all(self) -> None:
+        """Отменить все подписки на StateProxy.
 
-        Читает YAML-файл рецепта напрямую и возвращает секцию 'data'.
-        Возвращает None если рецепт не найден.
-
-        Args:
-            name: имя рецепта (без расширения .yaml).
-
-        Returns:
-            dict с данными рецепта, или None если не найден.
+        Вызывается базовым классом из disconnect().
         """
-        file_path = self._engine.recipes_dir / f"{name}.yaml"
-        if not file_path.exists():
-            return None
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                recipe = yaml.safe_load(f)
-            data = recipe.get("data", {}) if isinstance(recipe, dict) else {}
-            return copy.deepcopy(data)
-        except (yaml.YAMLError, OSError) as exc:
-            self._log_warning(f"Ошибка чтения рецепта '{name}': {exc}")
-            return None
+        for sub_id in self._sub_ids:
+            self._proxy.unsubscribe(sub_id)
+        self._log_info("RecipeStateAdapter: подписки отменены, sub_ids=%d", len(self._sub_ids))
 
-    def save_slot(self, name: str, data: Optional[Dict[str, Any]] = None) -> None:
-        """Сохранить рецепт под именем name.
+    def sync_domain_to_state(self) -> None:
+        """Синхронизировать текущее состояние RecipeManager → StateProxy.
 
-        Если data передана — она записывается как YAML напрямую (без TreeStore),
-        чтобы не перетирать текущее состояние store.
-        Если data=None — делает snapshot текущего store через recipe_engine.save().
+        Публикует:
+        - state.recipes.active = recipe_manager.get_active()
+        - state.recipes.available = recipe_manager.list()
 
-        Args:
-            name: имя слота (имя файла без .yaml).
-            data: словарь данных рецепта, или None для snapshot из store.
+        Использует _mark_pending для предотвращения echo-loop.
         """
-        if data is None:
-            # Snapshot текущего состояния store
-            self._engine.save(name)
-            self._log_info(f"RecipeAdapter: snapshot store → рецепт '{name}'")
+        if self._proxy is None:
+            self._log_warning("RecipeStateAdapter: sync_domain_to_state — нет proxy")
             return
 
-        # Записываем переданные данные напрямую в YAML,
-        # сохраняя формат, совместимый с RecipeEngine.
-        recipe = {
-            "meta": {
-                "name": name,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "description": "",
-            },
-            "data": copy.deepcopy(data),
-        }
-        file_path = self._engine.recipes_dir / f"{name}.yaml"
+        # Публикуем активный рецепт
+        active = self._recipe_manager.get_active()
+        self._mark_pending(_PATH_ACTIVE)
         try:
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "w", encoding="utf-8") as f:
-                yaml.dump(recipe, f, default_flow_style=False, allow_unicode=True)
-            self._log_info(f"RecipeAdapter: сохранён рецепт '{name}' (data-режим)")
-        except OSError as exc:
-            self._log_error(f"RecipeAdapter: ошибка записи рецепта '{name}': {exc}")
+            self._proxy.set(_PATH_ACTIVE, active)
+        except Exception:
+            # Если set упал — убираем pending чтобы не блокировать обратный путь
+            self._pending_paths.discard(_PATH_ACTIVE)
 
-    def delete_slot(self, name: str) -> bool:
-        """Удалить рецепт по имени.
+        # Публикуем список доступных рецептов
+        available = self._recipe_manager.list()
+        self._mark_pending(_PATH_AVAILABLE)
+        try:
+            self._proxy.set(_PATH_AVAILABLE, available)
+        except Exception:
+            self._pending_paths.discard(_PATH_AVAILABLE)
 
-        Делегирует в recipe_engine.delete().
+        self._log_info(
+            "RecipeStateAdapter: sync_domain_to_state — active=%s, available=%d",
+            active,
+            len(available) if available else 0,
+        )
+
+    def sync_state_to_domain(self) -> None:
+        """Синхронизировать state.recipes.active → RecipeManager.
+
+        Читает активный slug из StateProxy и вызывает set_active.
+        Если slug is None — ничего не делает.
+        """
+        if self._proxy is None:
+            self._log_warning("RecipeStateAdapter: sync_state_to_domain — нет proxy")
+            return
+
+        slug = self._proxy.get(_PATH_ACTIVE)
+        if slug is None:
+            self._log_info("RecipeStateAdapter: sync_state_to_domain — active=None, пропуск")
+            return
+
+        result = self._recipe_manager.set_active(slug)
+        if not result:
+            self._log_warning(
+                "RecipeStateAdapter: sync_state_to_domain — set_active('%s') вернул False (рецепт не найден?)",
+                slug,
+            )
+        else:
+            self._log_info("RecipeStateAdapter: sync_state_to_domain — активирован рецепт '%s'", slug)
+
+    # -------------------------------------------------------------------
+    # Callback: StateProxy → RecipeManager
+    # -------------------------------------------------------------------
+
+    def _on_state_active_changed(self, deltas: list[Delta]) -> None:
+        """Callback при изменении state.recipes.active в StateProxy.
+
+        Для каждой дельты с path == "recipes.active":
+        - Проверяет anti-loop (_check_and_clear_pending).
+        - Если new_value is None — пропускает.
+        - Иначе вызывает recipe_manager.set_active(new_value).
 
         Args:
-            name: имя слота.
-
-        Returns:
-            True если удалён, False если не существовал.
+            deltas: список Delta от StateProxy.
         """
-        return self._engine.delete(name)
+        for delta in deltas:
+            if delta.path != _PATH_ACTIVE:
+                continue
+
+            # Anti-loop: если мы сами инициировали это изменение — пропускаем
+            if self._check_and_clear_pending(delta.path):
+                continue
+
+            # Пропускаем None (сброс активного рецепта)
+            if delta.new_value is None:
+                self._log_info("RecipeStateAdapter: delta new_value=None — пропуск set_active")
+                continue
+
+            result = self._recipe_manager.set_active(delta.new_value)
+            if not result:
+                self._log_warning(
+                    "RecipeStateAdapter: set_active('%s') вернул False (рецепт не найден?)",
+                    delta.new_value,
+                )
+            else:
+                self._log_info(
+                    "RecipeStateAdapter: state→domain — активирован рецепт '%s'",
+                    delta.new_value,
+                )
 
 
-__all__ = ["RecipeAdapter"]
+__all__ = ["RecipeStateAdapter"]
