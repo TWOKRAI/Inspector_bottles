@@ -452,7 +452,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.6 — RecipesPresenter + IRecipesView Protocol (MVP)
 
-- [ ] Task 5.6
+- [x] Task 5.6 (0d931b2a)
 
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
