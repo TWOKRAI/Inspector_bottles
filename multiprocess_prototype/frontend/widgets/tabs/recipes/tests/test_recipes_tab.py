@@ -1,181 +1,192 @@
-"""Тесты для RecipesTab (Phase 6c --- BaseListNavTab pilot)."""
+# -*- coding: utf-8 -*-
+"""Тесты RecipesTab (Qt MVP, Task 5.7).
+
+6 Qt-тестов через pytest-qt (qtbot fixture).
+Mock ctx — без реального AppContext и RecipeManager.
+
+Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.7
+"""
 
 from __future__ import annotations
+
 from unittest.mock import MagicMock
 
-from multiprocess_prototype.frontend.widgets.tabs.recipes.recipe_io import (
-    delete_recipe,
-    load_recipe,
-    save_recipe,
-    scan_recipes,
-)
-from multiprocess_prototype.frontend.widgets.tabs.recipes.presenter import RecipesPresenter
+import pytest
+
+from PySide6.QtWidgets import QMessageBox
+
 from multiprocess_prototype.frontend.widgets.tabs.recipes.tab import RecipesTab
+from multiprocess_prototype.frontend.widgets.tabs.recipes.view import IRecipesView
 
 
-class TestRecipeIO:
-    def test_save_and_load(self, tmp_path):
-        path = tmp_path / "recipe_0.yaml"
-        save_recipe(path, "Test Recipe", "A test", {"name": "test_topo"})
-        assert path.exists()
-
-        data = load_recipe(path)
-        assert data["name"] == "Test Recipe"
-        assert data["description"] == "A test"
-        assert "topology" in data
-        assert data["topology"]["name"] == "test_topo"
-
-    def test_scan_recipes(self, tmp_path):
-        save_recipe(tmp_path / "recipe_0.yaml", "R0", "", {})
-        save_recipe(tmp_path / "recipe_3.yaml", "R3", "", {})
-
-        infos = scan_recipes(tmp_path)
-        assert len(infos) == 2
-        slots = {info.slot for info in infos}
-        assert slots == {0, 3}
-
-    def test_scan_empty_dir(self, tmp_path):
-        infos = scan_recipes(tmp_path)
-        assert infos == []
-
-    def test_delete_recipe(self, tmp_path):
-        path = tmp_path / "recipe_0.yaml"
-        save_recipe(path, "R", "", {})
-        assert path.exists()
-
-        result = delete_recipe(path)
-        assert result is True
-        assert not path.exists()
-
-    def test_delete_nonexistent(self, tmp_path):
-        path = tmp_path / "nonexistent.yaml"
-        result = delete_recipe(path)
-        assert result is True  # missing_ok=True
+# ---------------------------------------------------------------------------
+# Вспомогательные фабрики
+# ---------------------------------------------------------------------------
 
 
-class TestRecipesPresenter:
-    def _make_ctx(self):
-        ctx = MagicMock()
-        ctx.config = {"topology": {"name": "test_topology", "processes": []}}
-        ctx.extras = {"topology": {"name": "test_topology", "processes": []}}
-        ctx.get = lambda key, default=None: ctx.extras.get(key, default)
-        return ctx
-
-    def test_refresh_empty(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        assert len(p._recipes) == 0
-
-    def test_save_and_refresh(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        p.save_to_slot(0, "My Recipe", "Test desc")
-        assert 0 in p._recipes
-        assert p._recipes[0].name == "My Recipe"
-
-    def test_get_slot_states(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        p.save_to_slot(2, "R2", "")
-        states = p.get_slot_states()
-        assert states[2] == "occupied"
-        assert states[0] == "empty"
-
-    def test_get_slot_labels(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        p.save_to_slot(1, "Camera Setup", "")
-        labels = p.get_slot_labels()
-        assert labels[1] == "Camera Setup"
-        assert labels[0] == "Слот 0"
-
-    def test_delete_from_slot(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        p.save_to_slot(0, "R", "")
-        assert 0 in p._recipes
-        p.delete_from_slot(0)
-        assert 0 not in p._recipes
-
-    def test_load_from_slot(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        p.save_to_slot(0, "R", "desc")
-        data = p.load_from_slot(0)
-        assert data is not None
-        assert data["name"] == "R"
-
-    def test_load_empty_slot(self, tmp_path):
-        ctx = self._make_ctx()
-        p = RecipesPresenter(ctx, recipes_dir=tmp_path)
-        data = p.load_from_slot(5)
-        assert data is None
+def _make_mock_recipe_manager(slugs: list[str] | None = None) -> MagicMock:
+    """Создать mock RecipeManager с минимальным API."""
+    rm = MagicMock()
+    rm.list.return_value = slugs if slugs is not None else []
+    rm.get_active.return_value = None
+    # _engine нужен RecipesPresenter для чтения YAML (on_select)
+    engine = MagicMock()
+    engine.recipes_dir = MagicMock()
+    # Делаем так, чтобы файл рецепта не существовал по умолчанию
+    engine.recipes_dir.__truediv__ = lambda self, other: MagicMock(exists=lambda: False)
+    rm._engine = engine
+    return rm
 
 
-class TestRecipesTab:
-    def _make_ctx(self, tmp_path):
-        ctx = MagicMock()
-        ctx.config = {"topology": {"name": "test", "processes": []}}
-        ctx.extras = {"topology": {"name": "test", "processes": []}}
-        ctx.get = lambda key, default=None: ctx.extras.get(key, default)
-        ctx.bindings.return_value = None
-        ctx.action_bus.return_value = None
-        return ctx
+def _make_ctx(recipe_manager: MagicMock | None = None) -> MagicMock:
+    """Создать mock AppContext с recipe_manager."""
+    ctx = MagicMock()
+    ctx.recipe_manager = recipe_manager if recipe_manager is not None else _make_mock_recipe_manager()
+    # Аксессоры, которые могут понадобиться BaseListNavTab / DiffScrollTabLayout
+    ctx.auth = None
+    return ctx
 
-    def test_create(self, qtbot, tmp_path):
-        ctx = self._make_ctx(tmp_path)
-        tab = RecipesTab(ctx)
-        tab._presenter._recipes_dir = tmp_path
-        tab._presenter.refresh()
-        tab._sync_nav()
-        qtbot.addWidget(tab)
+
+def _make_tab(
+    qtbot,
+    slugs: list[str] | None = None,
+) -> RecipesTab:
+    """Создать RecipesTab с mock ctx и добавить в qtbot."""
+    rm = _make_mock_recipe_manager(slugs)
+    ctx = _make_ctx(rm)
+    tab = RecipesTab(ctx)
+    qtbot.addWidget(tab)
+    return tab
+
+
+# ---------------------------------------------------------------------------
+# Тесты
+# ---------------------------------------------------------------------------
+
+
+class TestRecipesTabQt:
+    """Qt-тесты RecipesTab через pytest-qt."""
+
+    def test_recipes_tab_creates_without_error(self, qtbot: pytest.FixtureRequest) -> None:
+        """RecipesTab создаётся без исключений с mock ctx."""
+        tab = _make_tab(qtbot)
         assert tab is not None
-        # Nav содержит как минимум «+ Новый рецепт»
-        assert tab.nav_widget.count() >= 1
+        assert hasattr(tab, "_presenter")
+        assert hasattr(tab, "_form_widget")
 
-    def test_slot_selection_empty(self, qtbot, tmp_path):
-        ctx = self._make_ctx(tmp_path)
-        tab = RecipesTab(ctx)
-        tab._presenter._recipes_dir = tmp_path
-        tab._presenter.refresh()
-        tab._sync_nav()
-        qtbot.addWidget(tab)
-        # Выбрать слот 0 через select_item (нет рецепта)
-        tab.add_item("0", "Slot 0")
-        tab.select_item("0")
-        form = tab._forms.get("0")
-        assert form is not None
-        assert form.name_edit.text() == ""
+    def test_isinstance_irecipes_view(self, qtbot: pytest.FixtureRequest) -> None:
+        """isinstance(tab, IRecipesView) == True (runtime_checkable Protocol)."""
+        tab = _make_tab(qtbot)
+        assert isinstance(tab, IRecipesView)
 
-    def test_save_and_select(self, qtbot, tmp_path):
-        ctx = self._make_ctx(tmp_path)
-        tab = RecipesTab(ctx)
-        tab._presenter._recipes_dir = tmp_path
-        tab._presenter.refresh()
-        tab._sync_nav()
-        qtbot.addWidget(tab)
+    def test_refresh_list_adds_items(self, qtbot: pytest.FixtureRequest) -> None:
+        """refresh_list(['a', 'b']) → nav содержит 2 элемента."""
+        tab = _make_tab(qtbot)
+        # Перестраиваем nav с конкретными slug'ами
+        tab.refresh_list(["recipe_a", "recipe_b"])
+        assert tab.nav_widget.count() == 2
 
-        # Выбрать «+ Новый рецепт» (slot -1) → ввести имя → save
-        tab.select_item("-1")
-        form = tab._forms.get("-1")
-        assert form is not None
-        form.name_edit.setText("Test Recipe")
-        tab._on_action("save")
+    def test_show_recipe_populates_form(self, qtbot: pytest.FixtureRequest) -> None:
+        """show_recipe с mock данными → форма заполнена."""
+        tab = _make_tab(qtbot)
+        data = {
+            "name": "Тестовый рецепт",
+            "description": "Описание теста",
+            "version": 2,
+            "created": "2026-05-01",
+            "modified": "2026-05-26",
+            "blueprint": {
+                "processes": [{"process_name": "worker", "plugins": ["p1", "p2"]}],
+                "wires": [],
+            },
+            "active_services": ["webcam"],
+            "display_bindings": [{"source": "s", "display": "d"}],
+        }
+        tab.show_recipe("test_recipe", data)
 
-        # После save рецепт появился в presenter
-        info = tab._presenter.get_recipe_info(0)
-        assert info is not None
-        assert info.name == "Test Recipe"
+        assert tab._form_widget.name_edit.text() == "Тестовый рецепт"
+        assert "2026-05-01" in tab._form_widget.created_label.text()
+        # Сводка blueprint содержит количество процессов
+        summary = tab._form_widget.summary_label.text()
+        assert "Процессы: 1" in summary
+        assert "Плагины: 2" in summary
+        assert "Сервисы: 1" in summary
+        assert "Дисплеи: 1" in summary
 
-    def test_item_selected_signal(self, qtbot, tmp_path):
-        ctx = self._make_ctx(tmp_path)
-        tab = RecipesTab(ctx)
-        tab._presenter._recipes_dir = tmp_path
-        tab._presenter.refresh()
-        tab._sync_nav()
-        qtbot.addWidget(tab)
+    def test_set_buttons_state_no_selection(self, qtbot: pytest.FixtureRequest) -> None:
+        """set_buttons_state(has_selection=False, is_active=False) → кнопки disabled."""
+        tab = _make_tab(qtbot)
+        tab.set_buttons_state(has_selection=False, is_active=False)
 
-        # Сигнал item_selected эмитится при выборе
-        with qtbot.waitSignal(tab.item_selected, timeout=1000) as blocker:
-            tab.select_item("-1")
-        assert blocker.args == ["-1"]
+        assert not tab._duplicate_btn.isEnabled()
+        assert not tab._delete_btn.isEnabled()
+        assert not tab._activate_btn.isEnabled()
+        # «Создать» всегда активна
+        assert tab._create_btn.isEnabled()
+        # «Открыть в Pipeline» постоянно disabled (Task 7a)
+        assert not tab._pipeline_btn.isEnabled()
+
+    def test_set_buttons_state_with_selection(self, qtbot: pytest.FixtureRequest) -> None:
+        """set_buttons_state(has_selection=True, is_active=False) → кнопки enabled."""
+        tab = _make_tab(qtbot)
+        tab.set_buttons_state(has_selection=True, is_active=False)
+
+        assert tab._duplicate_btn.isEnabled()
+        assert tab._delete_btn.isEnabled()
+        # is_active=False → «Сделать активным» enabled
+        assert tab._activate_btn.isEnabled()
+
+    def test_set_buttons_state_already_active(self, qtbot: pytest.FixtureRequest) -> None:
+        """set_buttons_state(has_selection=True, is_active=True) → activate disabled."""
+        tab = _make_tab(qtbot)
+        tab.set_buttons_state(has_selection=True, is_active=True)
+
+        # Дублировать/Удалить активны, но «Сделать активным» — нет (уже активен)
+        assert tab._duplicate_btn.isEnabled()
+        assert tab._delete_btn.isEnabled()
+        assert not tab._activate_btn.isEnabled()
+
+    def test_confirm_delete_returns_bool(self, qtbot: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+        """confirm_delete возвращает True при Yes, False при No."""
+        tab = _make_tab(qtbot)
+
+        # Monkeypatch: симулировать ответ Yes
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        )
+        result = tab.confirm_delete("test_recipe")
+        assert result is True
+
+        # Monkeypatch: симулировать ответ No
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *args, **kwargs: QMessageBox.StandardButton.No,
+        )
+        result = tab.confirm_delete("test_recipe")
+        assert result is False
+
+    def test_show_recipe_none_clears_form(self, qtbot: pytest.FixtureRequest) -> None:
+        """show_recipe(None, None) → форма очищается без ошибок."""
+        tab = _make_tab(qtbot)
+        # Сначала заполняем
+        tab.show_recipe("r", {"name": "R", "description": "D", "version": 2})
+        # Затем очищаем
+        tab.show_recipe(None, None)
+        assert tab._form_widget.name_edit.text() == ""
+        assert tab._form_widget.version_label.text() == "—"
+
+    def test_refresh_list_empty_clears_nav(self, qtbot: pytest.FixtureRequest) -> None:
+        """refresh_list([]) → nav пустой, кнопки (кроме Создать) disabled."""
+        tab = _make_tab(qtbot, slugs=["old_recipe"])
+        tab.refresh_list([])
+        assert tab.nav_widget.count() == 0
+
+    def test_pipeline_button_always_disabled(self, qtbot: pytest.FixtureRequest) -> None:
+        """«Открыть в Pipeline» постоянно disabled (Task 7a)."""
+        tab = _make_tab(qtbot)
+        # Даже после set_buttons_state True — Pipeline остаётся disabled
+        tab.set_buttons_state(has_selection=True, is_active=False)
+        assert not tab._pipeline_btn.isEnabled()
