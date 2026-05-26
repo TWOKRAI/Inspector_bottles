@@ -85,6 +85,8 @@
 - `codegraph_node` — полная инфа об одном символе.
 - `codegraph_status` — здоровье индекса.
 
+**Canonical refs:** `mcp:codegraph:callers`, `mcp:codegraph:callees`, `mcp:codegraph:impact`, `mcp:codegraph:context`, `mcp:codegraph:files`.
+
 **Не дублируй:** codegraph дал callers → не Grep'ай те же символы.
 
 ### serena — LSP symbol retrieval (optional, experimental)
@@ -97,6 +99,8 @@
 - `mcp__serena__replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol`, `safe_delete_symbol`.
 - `mcp__serena__get_symbols_overview`, `get_diagnostics_for_file`.
 
+**Canonical refs:** `mcp:serena:find_symbol`, `mcp:serena:find_referencing_symbols`, `mcp:serena:find_implementations`, `mcp:serena:find_declaration`, `mcp:serena:rename_symbol`, `mcp:serena:replace_symbol_body`, `mcp:serena:safe_delete_symbol`.
+
 **Конфликт с codegraph/ast-grep:** serena делает scope-aware (LSP) операции; ast-grep — pattern-based; codegraph — pre-indexed graph. Выбирай по задаче.
 
 ### ast-grep — structural codemods (optional)
@@ -107,6 +111,8 @@
 - `ast-grep:scan` — найти паттерн.
 - `ast-grep:rewrite` (через rules) — AST-safe замена.
 
+**Canonical refs:** `mcp:ast-grep:scan`.
+
 **Не дублируй с serena:** serena для одного символа (scope-aware), ast-grep для bulk patterns.
 
 ### graphify — knowledge graph (optional)
@@ -116,6 +122,8 @@
 **Ключевые tools:**
 - `graphify:query_graph` — natural language запросы к графу.
 - `graphify:get_node`, `shortest_path`.
+
+**Canonical refs:** `mcp:graphify:query_graph`.
 
 **Не для:** обычная навигация по коду — это `qex`/`codegraph`.
 
@@ -157,6 +165,8 @@
 
 **`qt_type` с `use_clipboard=True`** — для многострочного текста (иначе newline сабмитит каждую строку в console-виджетах).
 
+**Canonical refs:** `mcp:qt-mcp:qt_find_widget`, `mcp:qt-mcp:qt_snapshot`, `mcp:qt-mcp:qt_batch`, `mcp:qt-mcp:qt_screenshot`, `mcp:qt-mcp:qt_click`, `mcp:qt-mcp:qt_type`, `mcp:qt-mcp:qt_key_press`, `mcp:qt-mcp:qt_trigger_action`, `mcp:qt-mcp:qt_get_text`, `mcp:qt-mcp:qt_widget_details`, `mcp:qt-mcp:qt_messages`, `mcp:qt-mcp:qt_thread_check`, `mcp:qt-mcp:qt_signals`, `mcp:qt-mcp:qt_object_tree`, `mcp:qt-mcp:qt_active_popup`, `mcp:qt-mcp:qt_list_windows`, `mcp:qt-mcp:qt_menu_items`, `mcp:qt-mcp:qt_wait_for`.
+
 ### playwright — browser automation (optional, web-only)
 
 **Когда подключён:** проект — веб-приложение, нужно verify UI в браузере (`verify-done` для веб).
@@ -170,6 +180,8 @@
 **Когда подключён:** investigator на 3-й гипотезе, teamlead на эскалации, ADR с 3+ альтернативами.
 
 **Один tool:** `sequentialthinking` — chain-of-thought scratchpad с поддержкой revision и branching.
+
+**Canonical refs:** `mcp:sequential-thinking:sequentialthinking`.
 
 **Используется:** investigator (Workflow §1 при сложных cross-module bugs), teamlead (Escalation mode).
 
