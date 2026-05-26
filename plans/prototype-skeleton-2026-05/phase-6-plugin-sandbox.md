@@ -165,10 +165,12 @@
    - `test_params_widget_empty_for_grayscale` — grayscale нет register_class → params_widget пуст или скрыт.
 
 **Acceptance criteria:**
-- [ ] `WebcamCameraService.get_current_frame()` возвращает None если status != "running".
-- [ ] `test_sandbox_widget.py` — все 7+ тестов зелёные.
-- [ ] Кнопка «Применить» не блокирует UI при `time.sleep(0.1)` в mock run_once (проверяется через `QApplication.processEvents()` в тесте).
-- [ ] Параметры color_mask (h_min … v_max) отображаются как спинбоксы с правильными min/max.
+- [x] `WebcamCameraService.get_current_frame()` возвращает None если status != "running".
+- [x] `test_sandbox_widget.py` — все 20 тестов зелёные (было 9, добавлено 11).
+- [x] Кнопка «Применить» не блокирует UI — run_once в QThreadPool/_SandboxWorker.
+- [x] Параметры color_mask (h_min … v_max) отображаются как спинбоксы с правильными min/max.
+
+**Done:** af9b24f0 — 2026-05-26
 
 **Out of scope:** сохранение результата в файл, история предыдущих запусков, blur-плагин (не в репо).
 **Edge cases:** `get_current_frame()` вызван при `_cap is None` — не падает, возвращает None. Плагин без `register_class` (grayscale, flip) → params_widget скрыт, `config_overrides = {}`.
