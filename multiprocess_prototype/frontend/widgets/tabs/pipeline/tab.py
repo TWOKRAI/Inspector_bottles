@@ -271,10 +271,13 @@ class PipelineTab(QWidget):
         self._presenter.add_process_from_plugin(plugin_name, scene_pos.x(), scene_pos.y())
 
     def _on_wire_created(self, source_endpoint: str, target_endpoint: str) -> None:
-        """Wire creation через GraphView."""
+        """Wire creation через GraphView.
+
+        Передаёт self как parent для QMessageBox при несовместимых портах.
+        """
         if not self._can_edit():
             return
-        self._presenter.add_wire(source_endpoint, target_endpoint)
+        self._presenter.add_wire(source_endpoint, target_endpoint, parent=self)
 
     def _on_selection_changed(self) -> None:
         """Обработчик изменения выбора в scene.

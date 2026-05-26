@@ -379,11 +379,26 @@ class PipelinePresenter:
                 with self._block_signals():
                     self._scene.remove_node(node_id)
 
-    def add_wire(self, source: str, target: str) -> bool:
-        """Добавить wire с валидацией.
+    def add_wire(self, source: str, target: str, parent: "QWidget | None" = None) -> bool:
+        """Добавить wire с валидацией совместимости портов.
 
-        Returns: True если wire создан.
+        Перед добавлением wire проверяет совместимость типов портов через
+        PluginRegistry.are_ports_compatible(). Если registry недоступен или
+        порты не найдены — graceful degradation (wire добавляется без блокировки).
+
+        Args:
+            source: endpoint источника в формате "process.plugin.port"
+            target: endpoint приёмника в формате "process.plugin.port"
+                    или "display.<node_id>.frame" для display-узлов
+            parent: родительский виджет для QMessageBox (может быть None)
+
+        Returns:
+            True если wire создан, False если заблокирован.
         """
+        # --- Валидация совместимости портов ---
+        if not self._validate_wire_ports(source, target, parent):
+            return False
+
         try:
             old_topo, new_topo = self._model.add_wire(source, target)
         except ValueError as e:
@@ -403,6 +418,132 @@ class PipelinePresenter:
                 src_proc = source.split(".")[0]
                 tgt_proc = target.split(".")[0]
                 self._scene.add_edge(EdgeData(src_proc, tgt_proc, ""))
+
+        return True
+
+    def _validate_wire_ports(
+        self,
+        source: str,
+        target: str,
+        parent: "QWidget | None" = None,
+    ) -> bool:
+        """Проверить совместимость портов source и target перед созданием wire.
+
+        Graceful degradation:
+        - Registry недоступен → пропустить валидацию, вернуть True
+        - Plugin/port не найден → лог warning, вернуть True (legacy compat)
+        - Display-цель → использует wildcard Port(dtype="image/*")
+
+        Returns:
+            True — wire можно создать, False — wire заблокирован.
+        """
+        from multiprocess_framework.modules.process_module.plugins.port import (
+            Port,
+            are_ports_compatible,
+        )
+
+        # Шаг 1: получить registry (graceful degradation если None)
+        registry = self._ctx.plugin_registry()
+        if registry is None:
+            return True
+
+        # Шаг 2: разобрать source endpoint → (process, plugin, port)
+        src_parts = source.split(".")
+        if len(src_parts) < 3:
+            logger.debug("_validate_wire_ports: некорректный source endpoint '%s', пропуск", source)
+            return True
+
+        src_plugin_name = src_parts[1]
+        src_port_name = src_parts[2]
+
+        # Шаг 3: найти выходной порт источника
+        out_entry = registry.get(src_plugin_name)
+        if out_entry is None:
+            logger.warning(
+                "_validate_wire_ports: плагин '%s' не найден в registry (source=%s), пропуск",
+                src_plugin_name,
+                source,
+            )
+            return True
+
+        out_port: Port | None = None
+        for port in out_entry.outputs:
+            if port.name == src_port_name:
+                out_port = port
+                break
+
+        if out_port is None:
+            logger.warning(
+                "_validate_wire_ports: выходной порт '%s' не найден у плагина '%s', пропуск",
+                src_port_name,
+                src_plugin_name,
+            )
+            return True
+
+        # Шаг 4: определить входной порт приёмника
+        tgt_parts = target.split(".")
+        is_display_target = tgt_parts[0] == "display"
+
+        if is_display_target:
+            # Display-узел принимает любой image-выход через wildcard
+            in_port = Port(name="frame", dtype="image/*", shape="")
+        else:
+            if len(tgt_parts) < 3:
+                logger.debug(
+                    "_validate_wire_ports: некорректный target endpoint '%s', пропуск",
+                    target,
+                )
+                return True
+
+            tgt_plugin_name = tgt_parts[1]
+            tgt_port_name = tgt_parts[2]
+
+            in_entry = registry.get(tgt_plugin_name)
+            if in_entry is None:
+                logger.warning(
+                    "_validate_wire_ports: плагин '%s' не найден в registry (target=%s), пропуск",
+                    tgt_plugin_name,
+                    target,
+                )
+                return True
+
+            in_port = None
+            for port in in_entry.inputs:
+                if port.name == tgt_port_name:
+                    in_port = port
+                    break
+
+            if in_port is None:
+                logger.warning(
+                    "_validate_wire_ports: входной порт '%s' не найден у плагина '%s', пропуск",
+                    tgt_port_name,
+                    tgt_plugin_name,
+                )
+                return True
+
+        # Шаг 5: проверить совместимость
+        ok = are_ports_compatible(out_port, in_port)
+        if not ok:
+            logger.warning(
+                "Несовместимые порты: %s (%s) → %s (%s)",
+                source,
+                out_port.dtype,
+                target,
+                in_port.dtype,
+            )
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                parent,
+                "Несовместимые порты",
+                f"Невозможно соединить порты:\n"
+                f"  Источник: {source}\n"
+                f"  Тип: {out_port.dtype}\n\n"
+                f"  Приёмник: {target}\n"
+                f"  Тип: {in_port.dtype}\n\n"
+                f"Типы данных несовместимы.",
+            )
+            return False
 
         return True
 
