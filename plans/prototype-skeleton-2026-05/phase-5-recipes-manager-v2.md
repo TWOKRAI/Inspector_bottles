@@ -614,7 +614,7 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 
 ### Task 5.8 — ADR + финальный интеграционный smoke-test
 
-- [ ] Task 5.8
+- [x] Task 5.8 (506308a1)
 
 **Level:** Middle (Sonnet, normal thinking)
 **Assignee:** developer
