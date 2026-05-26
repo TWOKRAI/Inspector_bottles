@@ -179,7 +179,7 @@
 
 ---
 
-### Task 6.4 — Интеграция кнопки «Тест» в _sections.py + disabled для несовместимых
+### Task 6.4 — Интеграция кнопки «Тест» в _sections.py + disabled для несовместимых ✅ DONE (7d5ccf65)
 
 **Level:** Middle (Sonnet, normal thinking)
 **Assignee:** developer
@@ -213,10 +213,10 @@
    - `test_open_sandbox_switches_content` — клик по кнопке «Тест» для grayscale → `content_stack.currentWidget()` является `PluginSandboxWidget`.
 
 **Acceptance criteria:**
-- [ ] `pytest .../test_sandbox_integration.py` — 4+ тестов зелёные.
-- [ ] `build_plugin_sections` сигнатура совместима с существующим вызовом в `tab.py` (обратная совместимость через default `open_sandbox_cb=None`).
-- [ ] Для source/stitcher/runtime — tooltip непустой, понятная по-русски причина.
-- [ ] После клика «Тест» — `PluginSandboxWidget` создаётся ровно один раз (singleton per plugin).
+- [x] `pytest .../test_sandbox_integration.py` — 4+ тестов зелёные (5 passed).
+- [x] `build_plugin_sections` сигнатура совместима с существующим вызовом в `tab.py` (обратная совместимость через default `open_sandbox_cb=None`).
+- [x] Для source/stitcher/runtime — tooltip непустой, понятная по-русски причина.
+- [x] После клика «Тест» — `PluginSandboxWidget` создаётся ровно один раз (singleton per plugin).
 
 **Out of scope:** анимация перехода, история sandbox-сессий, кнопка «Закрыть sandbox» (content переключается обратно через обычный клик в дереве).
 **Edge cases:** `build_plugin_sections` вызывается повторно через `refresh_catalog()` — callback должен сохраняться (передаётся из tab'а, не пересоздаётся).
