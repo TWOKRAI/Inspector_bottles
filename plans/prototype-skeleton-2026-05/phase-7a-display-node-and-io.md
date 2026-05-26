@@ -137,7 +137,7 @@
 
 ---
 
-### Task 7a.5 — Кнопка «Сохранить в рецепт» + интеграция с RecipeManager
+### Task 7a.5 — Кнопка «Сохранить в рецепт» + интеграция с RecipeManager ✅ DONE (30c95fba)
 
 **Level:** Middle (Sonnet)
 **Assignee:** developer
