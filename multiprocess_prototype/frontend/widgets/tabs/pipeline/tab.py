@@ -107,6 +107,16 @@ class PipelineTab(QWidget):
         self._presenter.set_scene(self._scene)
         self._presenter.set_inspector(self._inspector)
 
+        # Создать контроллер телеметрии edges (Task 7b.3)
+        from .telemetry import WireMetricsController
+
+        self._wire_metrics_controller = WireMetricsController(
+            self._scene,
+            self._presenter.wire_metrics_model,
+            parent=self,
+        )
+        self._wire_metrics_controller.start()
+
         # Drop target для D&D из палитры на canvas.
         self._drop_target = PipelineDropTarget(self._view, self._on_plugin_dropped)
 

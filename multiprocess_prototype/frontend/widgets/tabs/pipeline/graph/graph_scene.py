@@ -25,6 +25,10 @@ class GraphScene(QGraphicsScene):
     edge_delete_requested = Signal(object)  # EdgeItem
     add_process_requested = Signal(float, float)  # scene x, y
 
+    # Сигналы жизненного цикла edges (Task 7b.3 — телеметрия)
+    edge_added = Signal(object)  # EdgeItem — новый edge добавлен
+    edge_removed = Signal(object)  # EdgeItem — edge удалён (до removeItem)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._nodes: dict[str, NodeItem] = {}
@@ -85,6 +89,8 @@ class GraphScene(QGraphicsScene):
         edges_to_remove = [e for e in self._edges if e.source_id == node_id or e.target_id == node_id]
         for edge in edges_to_remove:
             self._edges.remove(edge)
+            # Уведомить до removeItem — после удаления из сцены edge недоступен (Task 7b.3)
+            self.edge_removed.emit(edge)
             self.removeItem(edge)
 
         self.removeItem(item)
@@ -104,6 +110,8 @@ class GraphScene(QGraphicsScene):
         )
         self.addItem(edge)
         self._edges.append(edge)
+        # Уведомить подписчиков о добавлении нового edge (Task 7b.3)
+        self.edge_added.emit(edge)
         return edge
 
     def on_node_moved(self, node_id: str) -> None:
@@ -125,6 +133,8 @@ class GraphScene(QGraphicsScene):
         """Удалить связь."""
         if edge in self._edges:
             self._edges.remove(edge)
+            # Уведомить до removeItem (Task 7b.3)
+            self.edge_removed.emit(edge)
             self.removeItem(edge)
 
     # ------------------------------------------------------------------ #

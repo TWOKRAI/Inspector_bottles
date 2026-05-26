@@ -16,6 +16,7 @@ from .graph.edge_item import EdgeData
 from .graph.port_schema import PortSchema
 from .model import PipelineModel
 from .layout import auto_layout
+from .telemetry import WireMetricsModel
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -44,6 +45,9 @@ class PipelinePresenter:
         self._scene: GraphScene | None = None
         self._suppress = False
         self._gui_positions: dict[str, tuple[float, float]] = {}
+
+        # Модель телеметрии wire-соединений (Task 7b.3)
+        self._wire_metrics_model = WireMetricsModel()
 
         # Ленивый импорт TopologyPresenter (для load/save YAML)
         from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
@@ -624,6 +628,15 @@ class PipelinePresenter:
     def model(self) -> PipelineModel:
         """Доступ к модели (read-only intent)."""
         return self._model
+
+    @property
+    def wire_metrics_model(self) -> WireMetricsModel:
+        """Доступ к модели телеметрии wire-соединений (Task 7b.3).
+
+        Returns:
+            WireMetricsModel — источник данных для WireMetricsController.
+        """
+        return self._wire_metrics_model
 
     # ------------------------------------------------------------------ #
     #  Конвертация (оставлена для обратной совместимости)                   #
