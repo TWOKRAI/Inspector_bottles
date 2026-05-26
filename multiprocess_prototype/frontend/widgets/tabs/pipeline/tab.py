@@ -62,7 +62,7 @@ class PipelineTab(QWidget):
     Canvas + Inspector — в 3-й колонке через вертикальный сплиттер.
     """
 
-    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo"})
+    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe"})
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -103,8 +103,9 @@ class PipelineTab(QWidget):
         bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
         self._tab_layout.enable_undo_redo(bus)
 
-        # Передать scene в presenter.
+        # Передать scene и inspector в presenter.
         self._presenter.set_scene(self._scene)
+        self._presenter.set_inspector(self._inspector)
 
         # Drop target для D&D из палитры на canvas.
         self._drop_target = PipelineDropTarget(self._view, self._on_plugin_dropped)
@@ -142,6 +143,7 @@ class PipelineTab(QWidget):
             ("delete", "Удалить"),
             ("auto_layout", "Раскладка"),
             ("validate", "Валидация"),
+            ("save_recipe", "Сохранить"),
             ("fit", "По размеру"),
             ("zoom_in", "Zoom +"),
             ("zoom_out", "Zoom −"),
@@ -153,10 +155,10 @@ class PipelineTab(QWidget):
 
         action_layout.addStretch(1)
 
-        # Permission gating: только mutating actions (delete/auto_layout).
+        # Permission gating: mutating actions (delete/auto_layout/save_recipe).
         _auth = getattr(self._ctx, "auth", None)
         auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        for aid in ("delete", "auto_layout"):
+        for aid in ("delete", "auto_layout", "save_recipe"):
             install_permission_aware_enable(
                 self._action_buttons[aid],
                 "tabs.pipeline.edit",
@@ -244,6 +246,8 @@ class PipelineTab(QWidget):
                 QMessageBox.warning(self, "Валидация", "\n".join(errors))
             else:
                 QMessageBox.information(self, "Валидация", "Topology валидна")
+        elif action_id == "save_recipe":
+            self._presenter.save_to_active_recipe(parent=self)
         elif action_id == "auto_layout":
             self._presenter.auto_layout_scene()
         elif action_id == "delete":
@@ -267,28 +271,62 @@ class PipelineTab(QWidget):
         self._presenter.add_process_from_plugin(plugin_name, scene_pos.x(), scene_pos.y())
 
     def _on_wire_created(self, source_endpoint: str, target_endpoint: str) -> None:
-        """Wire creation через GraphView."""
+        """Wire creation через GraphView.
+
+        Передаёт self как parent для QMessageBox при несовместимых портах.
+        """
         if not self._can_edit():
             return
-        self._presenter.add_wire(source_endpoint, target_endpoint)
+        self._presenter.add_wire(source_endpoint, target_endpoint, parent=self)
 
     def _on_selection_changed(self) -> None:
-        """Обработчик изменения выбора в scene."""
+        """Обработчик изменения выбора в scene.
+
+        Определяет тип узла (plugin vs display) и вызывает соответствующий
+        метод inspector'а: show_plugin_node или show_display_node.
+        """
+        from .graph.display_node_item import DisplayNodeItem
+
         selected = self._scene.selectedItems()
         node_items = [item for item in selected if hasattr(item, "node_id")]
 
         if len(node_items) == 1:
             node = node_items[0]
             topo = self._presenter.model.to_topology_dict()
-            process_data = None
-            for proc in topo.get("processes", []):
-                if isinstance(proc, dict) and proc.get("process_name") == node.node_id:
-                    process_data = proc
-                    break
 
-            plugins = process_data.get("plugins", []) if process_data else []
-            category = node.data.category if hasattr(node, "data") else "utility"
-            self._inspector.show_node(node.node_id, category, plugins=plugins)
+            if isinstance(node, DisplayNodeItem):
+                # Display-узел: найти запись в topology.displays
+                display_id = ""
+                display_name = ""
+                for disp in topo.get("displays", []):
+                    if isinstance(disp, dict) and disp.get("node_id") == node.node_id:
+                        display_id = disp.get("display_id", "")
+                        display_name = disp.get("display_name", "")
+                        break
+
+                # Если не найден в topology — взять из node.data
+                if not display_id and hasattr(node, "data"):
+                    display_id = getattr(node.data, "display_id", "")
+                    display_name = getattr(node.data, "display_name", "")
+
+                self._inspector.show_display_node(node.node_id, display_id, display_name)
+            else:
+                # Plugin-узел (process node)
+                process_data = None
+                for proc in topo.get("processes", []):
+                    if isinstance(proc, dict) and proc.get("process_name") == node.node_id:
+                        process_data = proc
+                        break
+
+                plugins = process_data.get("plugins", []) if process_data else []
+                category = node.data.category if hasattr(node, "data") else "utility"
+                target_process = process_data.get("target_process", "") if process_data else ""
+                self._inspector.show_plugin_node(
+                    node.node_id,
+                    category,
+                    target_process=target_process,
+                    plugins=plugins,
+                )
         else:
             self._inspector.clear()
 

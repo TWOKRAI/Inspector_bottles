@@ -26,3 +26,6 @@ WIRE_WIDTH = 2.0
 # Grid / Layout
 GRID_SPACING_X = 220
 GRID_SPACING_Y = 100
+
+# Цвет узла Display (SHM-канал)
+DISPLAY_CATEGORY_COLOR = "#2e7d32"
