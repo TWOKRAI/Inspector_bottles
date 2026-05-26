@@ -57,9 +57,7 @@ class ProcessManagerProcess(ProcessModule):
 
     def _create_components(self) -> None:
         """Создать внутренние компоненты оркестратора."""
-        process_data = (
-            self.shared_resources.get_process_data(self.name) if self.shared_resources else None
-        )
+        process_data = self.shared_resources.get_process_data(self.name) if self.shared_resources else None
         custom = process_data.custom if process_data and process_data.custom else {}
         from multiprocessing import Event as _MpEvent
 
@@ -113,14 +111,12 @@ class ProcessManagerProcess(ProcessModule):
                 registry = getattr(self.shared_resources, "process_state_registry", None)
                 if registry and hasattr(registry, "queue_registry"):
                     return registry.queue_registry
-            except Exception:
+            except Exception:  # nosec B110 — fallback к локальному QueueRegistry
                 pass
         # Fallback: создать локальный QueueRegistry
         queue_registry = QueueRegistry(
             manager_name="queue_registry",
-            process_state_registry=(
-                self.shared_resources.process_state_registry if self.shared_resources else None
-            ),
+            process_state_registry=(self.shared_resources.process_state_registry if self.shared_resources else None),
         )
         queue_registry.initialize()
         return queue_registry
@@ -162,9 +158,7 @@ class ProcessManagerProcess(ProcessModule):
 
             # Router endpoint: другие процессы могут слать команды через Router (AD-8)
             if self.router_manager:
-                self.router_manager.register_message_handler(
-                    "process.command", self._handle_process_command
-                )
+                self.router_manager.register_message_handler("process.command", self._handle_process_command)
 
             # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
             # К этому моменту: все дочерние процессы spawned и started,
@@ -218,6 +212,10 @@ class ProcessManagerProcess(ProcessModule):
             "wire.setup": (self._cmd_wire_setup, "Настроить wire-канал (SHM + routes)"),
             "wire.teardown": (self._cmd_wire_teardown, "Разобрать wire-канал"),
             "wire.status": (self._cmd_wire_status, "Статусы wire-каналов"),
+            "blueprint.replace": (
+                self._cmd_blueprint_replace,
+                "Заменить blueprint (горячая замена процессов)",
+            ),
         }
 
         for cmd_name, (handler, description) in commands.items():
@@ -424,8 +422,7 @@ class ProcessManagerProcess(ProcessModule):
                         buffer_slots,
                     )
                     self._log_info(
-                        f"wire.setup: SHM аллоцирован — owner={owner}, "
-                        f"slot={shm_name}, buffer_slots={buffer_slots}"
+                        f"wire.setup: SHM аллоцирован — owner={owner}, slot={shm_name}, buffer_slots={buffer_slots}"
                     )
                 except Exception as exc:
                     self._log_error(f"wire.setup: SHM аллокация не удалась: {exc}")
@@ -515,9 +512,7 @@ class ProcessManagerProcess(ProcessModule):
                 try:
                     self.send_message(process_name, deconfigure_cmd_base)
                 except Exception as exc:
-                    self._log_error(
-                        f"wire.teardown: не удалось отправить wire.deconfigure в {process_name}: {exc}"
-                    )
+                    self._log_error(f"wire.teardown: не удалось отправить wire.deconfigure в {process_name}: {exc}")
 
         # Удалить из трекера
         self._active_wires.pop(wire_key, None)
@@ -538,6 +533,271 @@ class ProcessManagerProcess(ProcessModule):
                 "transport": info.get("transport", ""),
             }
         return {"success": True, "wires": result}
+
+    # -------------------------------------------------------------------------
+    # Blueprint replace — горячая замена незащищённых процессов (Phase 5)
+    # -------------------------------------------------------------------------
+
+    def _get_protected_names(self) -> set[str]:
+        """Вернуть множество имён процессов, которые нельзя перезапускать.
+
+        Protected-процессы определяются по ключу ``"protected": True``
+        в ``_process_configs``.  ProcessManager всегда защищает себя.
+        """
+        protected: set[str] = {self.name}
+        for proc_name, cfg in self._process_configs.items():
+            if isinstance(cfg, dict) and cfg.get("protected"):
+                protected.add(proc_name)
+        return protected
+
+    def _stop_and_cleanup_process(self, name: str, timeout: float) -> bool:
+        """Остановить процесс, снять с реестра и освободить SHM.
+
+        Не бросает исключений — при ошибке логирует и возвращает False.
+
+        Args:
+            name: имя процесса.
+            timeout: таймаут остановки (секунды).
+
+        Returns:
+            True если процесс остановлен успешно, False при ошибке.
+        """
+        try:
+            # Остановить процесс через registry (graceful → terminate → kill)
+            stopped = self._process_registry.stop_one(name, timeout)
+            if not stopped:
+                self._log_warning(
+                    f"replace_blueprint: stop_one вернул False для '{name}', возможно процесс не найден в реестре"
+                )
+                return False
+        except Exception as exc:
+            self._log_error(f"replace_blueprint: ошибка остановки '{name}': {exc}")
+            return False
+
+        try:
+            self._process_registry.remove_process(name)
+        except Exception as exc:
+            self._log_warning(f"replace_blueprint: ошибка удаления '{name}' из реестра: {exc}")
+
+        # Cleanup SHM-сегментов процесса
+        if self.shared_resources is not None:
+            mm = getattr(self.shared_resources, "memory_manager", None)
+            if mm is not None:
+                release_fn = getattr(mm, "release_process_memory", None)
+                if release_fn is not None:
+                    try:
+                        release_fn(name)
+                    except Exception as exc:
+                        self._log_warning(f"replace_blueprint: SHM cleanup для '{name}' не удался: {exc}")
+                else:
+                    self._log_warning(
+                        f"replace_blueprint: memory_manager не имеет release_process_memory, SHM для '{name}' не очищен"
+                    )
+
+        return True
+
+    def _restore_from_snapshot(self, snapshot_configs: dict[str, dict]) -> None:
+        """Восстановить процессы из snapshot-конфигов (rollback).
+
+        Для каждой записи: удаляет текущую запись в реестре (если есть),
+        пересоздаёт и запускает процесс.  При ошибке — логирует и
+        продолжает (rollback не прерывается).
+
+        Args:
+            snapshot_configs: ``{process_name: proc_config}`` — конфиги
+                до начала replace.
+        """
+        for proc_name, cfg in snapshot_configs.items():
+            try:
+                # Убрать остатки (если процесс был частично создан)
+                self._process_registry.remove_process(proc_name)
+
+                # Зарегистрировать процесс в shared_resources
+                if self.shared_resources:
+                    self.shared_resources.register_process(proc_name, cfg)
+
+                class_path = cfg.get("class", "")
+                priority = cfg.get("priority", "normal")
+                process = self._process_registry.create_and_register(proc_name, class_path, cfg, priority)
+                if process:
+                    process.start()
+                    self._priority.apply_priority(process)
+                    self._log_info(f"replace_blueprint rollback: процесс '{proc_name}' восстановлен")
+                else:
+                    self._log_error(f"replace_blueprint rollback: не удалось пересоздать '{proc_name}'")
+            except Exception as exc:
+                self._log_error(f"replace_blueprint rollback: ошибка восстановления '{proc_name}': {exc}")
+
+        # Восстановить _process_configs из snapshot
+        for proc_name, cfg in snapshot_configs.items():
+            self._process_configs[proc_name] = copy.deepcopy(cfg)
+
+    def replace_blueprint(self, new_blueprint: dict[str, Any] | None) -> dict[str, Any]:
+        """Заменить blueprint: остановить незащищённые процессы, поднять новые.
+
+        Dict at Boundary: принимает dict, не Pydantic-модель.
+
+        Алгоритм:
+            1. Извлечь список процессов из ``new_blueprint["processes"]``.
+            2. Вычислить protected (``_get_protected_names``).
+            3. Вычислить ``to_replace`` — текущие незащищённые процессы.
+            4. Snapshot ``copy.deepcopy(to_replace)``.
+            5. Pause ProcessMonitor.
+            6. Stop+cleanup каждого ``to_replace``; при ошибке → rollback.
+            7. Register+start новых процессов; при ошибке → rollback.
+            8. Обновить ``_process_configs``, resume monitor.
+            9. Вернуть результат.
+
+        Args:
+            new_blueprint: dict-представление SystemBlueprint.  Если ``None``
+                или ``{}`` — трактуется как пустой blueprint.
+
+        Returns:
+            dict с ключами ``success``, ``replaced``, ``skipped_protected``,
+            ``error``, ``rolled_back``.
+        """
+        # --- Edge case: None → пустой dict ---
+        if new_blueprint is None:
+            new_blueprint = {}
+
+        # 1. Извлечь список новых процессов (graceful при отсутствии ключа)
+        new_processes_list: list[dict[str, Any]] = new_blueprint.get("processes") or []
+
+        # Индексируем новые процессы по имени
+        new_by_name: dict[str, dict[str, Any]] = {}
+        for proc_cfg in new_processes_list:
+            pname = proc_cfg.get("process_name") or proc_cfg.get("name", "")
+            if pname:
+                new_by_name[pname] = proc_cfg
+
+        # 2. Protected-процессы
+        protected = self._get_protected_names()
+
+        # 3. Текущие незащищённые процессы (кандидаты на замену)
+        to_replace: dict[str, dict[str, Any]] = {
+            name: cfg for name, cfg in self._process_configs.items() if name not in protected
+        }
+
+        # 4. Snapshot
+        old_configs = copy.deepcopy(to_replace)
+
+        skipped_protected = sorted(name for name in self._process_configs if name in protected)
+        replaced_names: list[str] = []
+
+        self._log_info(
+            f"replace_blueprint: начало замены. "
+            f"to_replace={list(to_replace.keys())}, "
+            f"protected={skipped_protected}, "
+            f"new_processes={list(new_by_name.keys())}"
+        )
+
+        # 5. Pause ProcessMonitor (безопасно при повторном вызове)
+        monitor_was_running = getattr(self._process_monitor, "_monitoring", False)
+        if monitor_was_running:
+            try:
+                self._process_monitor.stop()
+            except Exception as exc:
+                self._log_warning(f"replace_blueprint: ошибка остановки ProcessMonitor: {exc}")
+
+        stop_timeout = float(self.get_config("stop_process_timeout") or 5.0)
+
+        # 6. Остановить и cleanup каждого незащищённого процесса
+        for proc_name in list(to_replace.keys()):
+            ok = self._stop_and_cleanup_process(proc_name, stop_timeout)
+            if ok:
+                replaced_names.append(proc_name)
+                # Удалить конфиг (будет обновлён из нового blueprint)
+                self._process_configs.pop(proc_name, None)
+            else:
+                # Partial failure — rollback
+                self._log_error(f"replace_blueprint: не удалось остановить '{proc_name}', rollback")
+                self._restore_from_snapshot(old_configs)
+                self._resume_monitor(monitor_was_running)
+                return {
+                    "success": False,
+                    "replaced": replaced_names,
+                    "skipped_protected": skipped_protected,
+                    "error": f"Не удалось остановить процесс '{proc_name}'",
+                    "rolled_back": True,
+                }
+
+        # 7. Зарегистрировать и запустить новые процессы (не-protected)
+        started_names: list[str] = []
+        for pname, pcfg in new_by_name.items():
+            if pname in protected:
+                continue
+            try:
+                # Зарегистрировать в shared_resources
+                if self.shared_resources:
+                    self.shared_resources.register_process(pname, pcfg)
+
+                class_path = pcfg.get("class", "")
+                priority = pcfg.get("priority", "normal")
+                process = self._process_registry.create_and_register(pname, class_path, pcfg, priority)
+                if not process:
+                    raise RuntimeError(f"create_and_register вернул None для '{pname}'")
+                process.start()
+                self._priority.apply_priority(process)
+                self._priority.register_priority(pname, priority)
+
+                # Обновить _process_configs
+                self._process_configs[pname] = copy.deepcopy(pcfg)
+                started_names.append(pname)
+                self._log_info(f"replace_blueprint: процесс '{pname}' запущен")
+
+            except Exception as exc:
+                self._log_error(f"replace_blueprint: ошибка старта '{pname}': {exc}, rollback")
+                # Откатить уже запущенные новые процессы
+                for started in started_names:
+                    try:
+                        self._process_registry.stop_one(started, stop_timeout)
+                        self._process_registry.remove_process(started)
+                    except Exception as cleanup_exc:  # noqa: PERF203
+                        self._log_warning(f"replace_blueprint: cleanup '{started}' при rollback: {cleanup_exc}")
+                    self._process_configs.pop(started, None)
+
+                self._restore_from_snapshot(old_configs)
+                self._resume_monitor(monitor_was_running)
+                return {
+                    "success": False,
+                    "replaced": replaced_names,
+                    "skipped_protected": skipped_protected,
+                    "error": f"Ошибка старта процесса '{pname}': {exc}",
+                    "rolled_back": True,
+                }
+
+        # 8. Resume ProcessMonitor
+        self._resume_monitor(monitor_was_running)
+
+        self._log_info(
+            f"replace_blueprint: завершено. "
+            f"stopped={replaced_names}, started={started_names}, "
+            f"protected={skipped_protected}"
+        )
+
+        return {
+            "success": True,
+            "replaced": replaced_names,
+            "skipped_protected": skipped_protected,
+            "error": None,
+            "rolled_back": False,
+        }
+
+    def _resume_monitor(self, was_running: bool) -> None:
+        """Безопасно возобновить ProcessMonitor если он был запущен."""
+        if was_running:
+            try:
+                self._process_monitor.start()
+            except Exception as exc:
+                self._log_warning(f"replace_blueprint: ошибка возобновления ProcessMonitor: {exc}")
+
+    def _cmd_blueprint_replace(self, data=None, **kwargs) -> dict:
+        """Команда CommandManager: заменить blueprint (горячая замена процессов)."""
+        args = _merge_cmd_args(data, kwargs)
+        new_blueprint = args.get("blueprint")
+        if new_blueprint is None and "blueprint" not in args:
+            return {"error": "blueprint required"}
+        return self.replace_blueprint(new_blueprint)
 
     # -------------------------------------------------------------------------
     # Router endpoint — приём команд от других процессов (AD-8)
@@ -643,15 +903,13 @@ class ProcessManagerProcess(ProcessModule):
             process_data = self.shared_resources.get_process_data(self.name)
             if process_data and process_data.custom:
                 return process_data.custom.get("error_manager")
-        except Exception:
+        except Exception:  # nosec B110 — error_manager опционален, None безопасен
             pass
         return None
 
     def _create_processes_from_config(self, processes_config: dict[str, dict[str, Any]]) -> None:
         """Двухфазно: очереди для всех, затем create + start."""
-        valid = [
-            (n, c) for n, c in processes_config.items() if isinstance(c, dict) and c.get("class")
-        ]
+        valid = [(n, c) for n, c in processes_config.items() if isinstance(c, dict) and c.get("class")]
         if not valid:
             return
 
@@ -662,9 +920,7 @@ class ProcessManagerProcess(ProcessModule):
 
         for name, proc_config in valid:
             priority = proc_config.get("priority", "normal")
-            if self._process_registry.create_and_register(
-                name, proc_config["class"], proc_config, priority
-            ):
+            if self._process_registry.create_and_register(name, proc_config["class"], proc_config, priority):
                 self._priority.register_priority(name, priority)
                 process = self._process_registry.get_process_by_name(name)
                 if process:
@@ -757,9 +1013,7 @@ class ProcessManagerProcess(ProcessModule):
         if self.shared_resources:
             self.shared_resources.register_process(process_name, config)
         priority = config.get("priority", "normal")
-        process = self._process_registry.create_and_register(
-            process_name, config["class"], config, priority
-        )
+        process = self._process_registry.create_and_register(process_name, config["class"], config, priority)
         if not process:
             self._log_error(f"Failed to recreate process '{process_name}'")
             return False
@@ -808,9 +1062,7 @@ class ProcessManagerProcess(ProcessModule):
             if self.shared_resources:
                 process_data = self.shared_resources.get_process_data(process_name)
                 if process_data:
-                    status["state"] = (
-                        process_data.to_dict() if hasattr(process_data, "to_dict") else {}
-                    )
+                    status["state"] = process_data.to_dict() if hasattr(process_data, "to_dict") else {}
             return status
         return self._status.get_all_status()
 

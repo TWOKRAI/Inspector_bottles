@@ -8,6 +8,7 @@
     IProcessManagerProcess   — оркестратор процессов
     IProcessRegistry         — реестр процессов ОС + lifecycle
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -194,6 +195,34 @@ class IProcessManagerProcess(ABC):
 
         Returns:
             Dict[process_name, status_dict].
+        """
+        ...
+
+    @abstractmethod
+    def replace_blueprint(self, new_blueprint: Dict[str, Any]) -> Dict[str, Any]:
+        """Заменить blueprint: остановить незащищённые процессы, поднять новые.
+
+        Горячая замена рабочих процессов при переключении рецепта.
+        Protected-процессы (GUI, orchestrator) не затрагиваются.
+        При partial failure — полный rollback до snapshot.
+
+        Dict at Boundary: принимает dict-представление SystemBlueprint,
+        не Pydantic-модель.
+
+        Args:
+            new_blueprint: dict с ключами ``processes`` (list[dict]) и
+                ``wires`` (list[dict]).  Если ``None`` или ``{}`` —
+                трактуется как пустой blueprint (все незащищённые
+                процессы будут остановлены, новые не поднимутся).
+
+        Returns:
+            dict с ключами:
+                - ``success`` (bool) — операция завершена без ошибок.
+                - ``replaced`` (list[str]) — имена остановленных процессов.
+                - ``skipped_protected`` (list[str]) — имена пропущенных
+                  protected-процессов.
+                - ``error`` (str | None) — описание ошибки или None.
+                - ``rolled_back`` (bool) — True если произведён rollback.
         """
         ...
 

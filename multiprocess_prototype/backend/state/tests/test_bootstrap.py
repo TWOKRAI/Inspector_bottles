@@ -9,6 +9,7 @@ from multiprocess_prototype.backend.state.bootstrap import (
     build_initial_state,
 )
 from multiprocess_prototype.backend.config.schemas import DisplayEntrySchema, DisplaysConfig
+from multiprocess_prototype.registers.manager import build_rm_from_topology, _RawRegisterData
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +436,143 @@ def test_bootstrap_displays_config_none_backward_compat(empty_topology, default_
     result = build_initial_state(empty_topology, default_sys_config, displays_config=None)
 
     assert result["displays"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Тесты Task 5.3 — recipes_dir в build_initial_state
+# ---------------------------------------------------------------------------
+
+
+def test_build_initial_state_recipes_available(tmp_path, empty_topology, default_sys_config):
+    """recipes_dir с двумя yaml → available содержит оба slug'а в отсортированном порядке."""
+    # Создаём два yaml-файла в tmp_path
+    (tmp_path / "bottle_inspection.yaml").write_text("name: bottle\n", encoding="utf-8")
+    (tmp_path / "cup_inspection.yaml").write_text("name: cup\n", encoding="utf-8")
+
+    result = build_initial_state(empty_topology, default_sys_config, recipes_dir=tmp_path)
+
+    available = result["recipes"]["available"]
+    assert available == ["bottle_inspection", "cup_inspection"]
+
+
+def test_build_initial_state_recipes_empty_dir(tmp_path, empty_topology, default_sys_config):
+    """Пустая recipes_dir → available == []."""
+    result = build_initial_state(empty_topology, default_sys_config, recipes_dir=tmp_path)
+
+    assert result["recipes"]["available"] == []
+
+
+def test_build_initial_state_no_recipes_dir(empty_topology, default_sys_config):
+    """recipes_dir=None → available == [] (обратная совместимость)."""
+    result = build_initial_state(empty_topology, default_sys_config, recipes_dir=None)
+
+    assert result["recipes"]["available"] == []
+
+
+def test_build_initial_state_recipes_dir_not_exists(tmp_path, empty_topology, default_sys_config):
+    """recipes_dir указан, но не существует → available == [] (без FileNotFoundError)."""
+    nonexistent = tmp_path / "does_not_exist"
+
+    result = build_initial_state(empty_topology, default_sys_config, recipes_dir=nonexistent)
+
+    assert result["recipes"]["available"] == []
+
+
+def test_build_initial_state_recipes_active_always_none(tmp_path, empty_topology, default_sys_config):
+    """active всегда None при bootstrap (независимо от наличия yaml-файлов)."""
+    (tmp_path / "some_recipe.yaml").write_text("name: test\n", encoding="utf-8")
+
+    result = build_initial_state(empty_topology, default_sys_config, recipes_dir=tmp_path)
+
+    assert result["recipes"]["active"] is None
+
+
+# ---------------------------------------------------------------------------
+# Тесты Task 5.3 — base_registers_dir в build_rm_from_topology
+# ---------------------------------------------------------------------------
+
+
+def test_build_rm_base_layer(tmp_path):
+    """base_registers_dir с одним yaml → регистр из него попадает в менеджер."""
+    # Создаём базовый yaml-регистр
+    (tmp_path / "capture.yaml").write_text("camera_id: 0\nfps: 30\n", encoding="utf-8")
+
+    topology = {"processes": []}
+    rm = build_rm_from_topology(topology, base_registers_dir=tmp_path)
+
+    # Регистр "capture" должен присутствовать в менеджере
+    assert "capture" in rm.register_names()
+    reg = rm.get_register("capture")
+    assert reg is not None
+    assert isinstance(reg, _RawRegisterData)
+    assert reg.data == {"camera_id": 0, "fps": 30}
+
+
+def test_build_rm_active_overrides_base(tmp_path):
+    """Base YAML + topology с тем же именем → topology wins (целиком, не merge полей)."""
+    from pydantic import BaseModel
+
+    # Создаём базовый yaml-регистр для "capture"
+    (tmp_path / "capture.yaml").write_text("camera_id: 99\nfps: 10\n", encoding="utf-8")
+
+    # Создаём mock plugin_registry с register_classes для "capture"
+    class CaptureRegisters(BaseModel):
+        camera_id: int = 0
+        fps: float = 25.0
+
+    class MockEntry:
+        register_classes = [CaptureRegisters]
+        category = "source"
+
+    class MockPluginRegistry:
+        def get(self, name: str) -> MockEntry | None:
+            if name == "capture":
+                return MockEntry()
+            return None
+
+    topology = {
+        "processes": [
+            {
+                "process_name": "camera_proc",
+                "plugins": [
+                    {"plugin_name": "capture", "camera_id": 1, "fps": 25.0},
+                ],
+            }
+        ]
+    }
+
+    rm = build_rm_from_topology(
+        topology,
+        plugin_registry=MockPluginRegistry(),
+        base_registers_dir=tmp_path,
+    )
+
+    # Регистр должен быть — из topology (CaptureRegisters), не из base (_RawRegisterData)
+    assert "capture" in rm.register_names()
+    reg = rm.get_register("capture")
+    assert isinstance(reg, CaptureRegisters)
+    # Topology-значения: camera_id=1, не base (camera_id=99)
+    assert reg.camera_id == 1
+
+
+def test_build_rm_base_layer_invalid_yaml(tmp_path):
+    """Невалидный YAML в base_registers_dir → пропустить файл, не падать."""
+    (tmp_path / "bad_register.yaml").write_text("{ invalid: yaml: content:\n", encoding="utf-8")
+    (tmp_path / "good_register.yaml").write_text("key: value\n", encoding="utf-8")
+
+    topology = {"processes": []}
+    # Не должно бросать исключений
+    rm = build_rm_from_topology(topology, base_registers_dir=tmp_path)
+
+    # bad_register пропущен, good_register загружен
+    assert "good_register" in rm.register_names()
+    assert "bad_register" not in rm.register_names()
+
+
+def test_build_rm_no_base_dir_backward_compat():
+    """build_rm_from_topology без base_registers_dir → прежнее поведение."""
+    topology = {"processes": []}
+    rm = build_rm_from_topology(topology)
+
+    # Менеджер пустой — без регистров (topology тоже пустой)
+    assert rm.register_names() == []

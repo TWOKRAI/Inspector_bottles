@@ -150,6 +150,8 @@
 - [ADR-128](#adr-128-foundation-phase-0-перенос-из-backup-framerouter-istateadapter-pluginmanager-state-schema): Foundation Phase 0 — перенос из backup, FrameRouter, IStateAdapter, PluginManager, state schema
 - [ADR-129](#adr-129-serviceregistry-отдельный-реестр-long-running-сервисов): ServiceRegistry — отдельный реестр long-running сервисов
 - [ADR-130](#adr-130-displayregistry-декларативный-реестр-shm-каналов): DisplayRegistry — декларативный реестр SHM-каналов
+- [ADR-131](#adr-131-systemblueprint-остаётся-generic-application-расширения-рецепта-живут-параллельными-секциями-yaml): SystemBlueprint остаётся generic; application-расширения рецепта живут параллельными секциями yaml
+- [ADR-132](#adr-132-replace_blueprint-в-processmanagerprocess-с-snapshotrollback): replace_blueprint в ProcessManagerProcess с snapshot+rollback
 <!-- ADR-TOC:END -->
 
 ---
@@ -2167,6 +2169,20 @@
 
 ---
 
+## ADR-131: SystemBlueprint остаётся generic; application-расширения рецепта живут параллельными секциями yaml
+- Дата: 2026-05-26
+- Статус: принято
+- Контекст: Рецепт Inspector содержит application-специфичные данные (`active_services`, `display_bindings`), которые не должны загрязнять generic SystemBlueprint. Рецепт — полноценный blueprint для перезапуска рабочих процессов, но помимо blueprint он содержит Inspector-специфику: список активных сервисов (камера, БД, метрики) и привязки дисплеев (SHM-каналы, к которым подписываются preview-окна). Попытка добавить эти поля в `SystemBlueprint` нарушила бы принцип «framework first» — framework не должен знать о vision-семантике.
+- Решение: Application-секции (`active_services`, `display_bindings`) хранятся рядом с `blueprint` в том же YAML-файле рецепта, но не внутри `blueprint`. `SystemBlueprint` остаётся generic-контрактом framework (только `processes`, `wires`, `name`, `description`). Prototype-слой самостоятельно парсит свои секции из того же файла.
+- Причина: Чистота слоёв (ADR-120/121/122): framework generic, prototype application-specific. Один файл рецепта держит всё, что нужно для восстановления состояния, без дублирования.
+- Последствия: При загрузке рецепта prototype-слой читает `blueprint` и передаёт его в `ProcessManagerProcess.replace_blueprint()`; application-секции обрабатывает отдельно (`ServiceRegistry`, `DisplayRegistry`). Framework не знает об `active_services` и `display_bindings`.
+- Отклонённые альтернативы:
+  - **SubBlueprint** (вложенная схема в SystemBlueprint) — отвергнут: усложняет schema framework; каждое приложение добавит свои поля → blueprint становится God-объектом.
+  - **Отдельный файл** (`recipe_<slug>_app.yaml` рядом с `recipe_<slug>.yaml`) — отвергнут: неудобно держать синхронно два файла при переименовании/удалении; атомарные операции с рецептом (copy, delete) требуют пары файлов.
+- Refs: [plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md](../../plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md)
+
+---
+
 ## ADR-130: DisplayRegistry — декларативный реестр SHM-каналов
 - Дата: 2026-05-25
 - Статус: принято
@@ -2189,6 +2205,21 @@
   - ADR-120 (Plugins vocabulary), ADR-121/122 (Services carve-out) — границы слоёв, объясняющие, почему дисплей — не плагин.
 - Коммиты Phase 4 (display_module): Task 4.1 interfaces, Task 4.2 registry, Task 4.3 blueprint_binding, Task 4.9 docs+ADR.
 - Refs: [plans/prototype-skeleton-2026-05/phase-4-displays-tab.md](../../plans/prototype-skeleton-2026-05/phase-4-displays-tab.md), [plans/prototype-skeleton-2026-05/plan.md](../../plans/prototype-skeleton-2026-05/plan.md)
+
+---
+
+## ADR-132: replace_blueprint в ProcessManagerProcess с snapshot+rollback
+- Дата: 2026-05-26
+- Статус: принято
+- Контекст: Переключение активного рецепта требует перезапуска рабочих процессов без остановки GUI и orchestrator. До Phase 5 такого механизма не существовало — смена blueprint означала полную остановку и перезапуск системы. Это делало «горячую замену» рецепта невозможной в runtime.
+- Решение: `ProcessManagerProcess.replace_blueprint(new_blueprint: dict)` реализует горячую замену с защитой: (1) snapshot конфигов незащищённых процессов; (2) остановка текущих незащищённых процессов; (3) запуск новых из нового blueprint; (4) при partial failure (любой процесс не стартовал) — полный rollback до snapshot. GUI-процесс и orchestrator (ProcessManagerProcess) помечаются `"protected": True` в конфиге — они никогда не трогаются при replace. `ProcessMonitor` на время replace останавливается (чтобы не реагировал на промежуточные death-events). Метод принимает `dict`, не Pydantic-объект — Dict at Boundary (ADR-008).
+- Причина: Graceful degradation: при любой ошибке (stop timeout, start failure) система возвращается в рабочее состояние через rollback. Protected-список предотвращает случайный самоубийственный перезапуск GUI. Dict at Boundary обеспечивает pickle-safe IPC.
+- Последствия: GUI и orchestrator обязательно помечаются `"protected": True` в blueprint. `ProcessMonitor` имеет явный `pause/resume` интерфейс. Команда `blueprint.replace` зарегистрирована в `CommandManager` для IPC-доступа.
+- Отклонённые альтернативы:
+  - **Hot-swap без rollback** — отвергнут: частичное состояние (часть процессов из старого blueprint, часть из нового) хуже полного отказа и сложнее диагностировать.
+  - **Применение через TopologyManager** — отвергнут: `topology.apply()` не знает о protected-флаге и SHM-cleanup; смешивание ответственностей нарушает SRP.
+  - **Полная остановка системы перед заменой** — отвергнут: GUI теряет связь с пользователем, UX неприемлем для production-сценария.
+- Refs: [plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md](../../plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md)
 
 ---
 
