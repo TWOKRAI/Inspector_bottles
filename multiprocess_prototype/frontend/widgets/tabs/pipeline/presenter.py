@@ -363,17 +363,28 @@ class PipelinePresenter:
         return name
 
     def remove_selected(self, selected_node_ids: list[str]) -> None:
-        """Удалить выбранные ноды."""
+        """Удалить выбранные ноды (включая display-узлы)."""
+        # Множество известных display-узлов — чтобы развести process/display ветки
+        display_node_ids = {d.get("node_id", "") for d in self._model.get_displays()}
+
         for node_id in selected_node_ids:
-            old_topo, new_topo = self._model.remove_process(node_id)
+            is_display = node_id in display_node_ids
+
+            if is_display:
+                old_topo, new_topo = self._model.remove_display(node_id)
+            else:
+                old_topo, new_topo = self._model.remove_process(node_id)
+
             self._gui_positions.pop(node_id, None)
 
-            bus = self._ctx.action_bus()
-            if bus:
-                from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+            # ActionBus undo/redo поддержан только для process_remove (legacy)
+            if not is_display:
+                bus = self._ctx.action_bus()
+                if bus:
+                    from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 
-                action = V2ActionBuilder.process_remove(old_topo, new_topo, node_id)
-                bus.execute(action)
+                    action = V2ActionBuilder.process_remove(old_topo, new_topo, node_id)
+                    bus.execute(action)
 
             if self._scene:
                 with self._block_signals():
