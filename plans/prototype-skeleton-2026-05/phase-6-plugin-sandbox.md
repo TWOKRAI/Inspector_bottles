@@ -124,10 +124,10 @@
    - `test_show_error_shows_label` — после `show_error("bad")` — error label видим.
 
 **Acceptance criteria:**
-- [ ] `pytest .../test_sandbox_widget.py` — 4+ тестов зелёные.
-- [ ] Кнопка «Применить» disabled пока `_current_frame is None`.
-- [ ] `show_result` не роняет исключений при `after=None` (показывает only before).
-- [ ] E2E: выбрать jpg из тест-фикстуры → нажать «Применить» для grayscale → `after_label.pixmap()` не None (проверяется в тесте через mock `QFileDialog`).
+- [x] `pytest .../test_sandbox_widget.py` — 4+ тестов зелёные (10 passed, ab812c21).
+- [x] Кнопка «Применить» disabled пока `_current_frame is None`.
+- [x] `show_result` не роняет исключений при `after=None` (показывает only before).
+- [x] E2E: выбрать jpg из тест-фикстуры → нажать «Применить» для grayscale → `after_label.pixmap()` не None (проверяется в тесте через прямое задание `_current_frame`).
 
 **Out of scope:** QThread (синхронный apply — ок для MVP), webcam snapshot, параметры конфига, кнопка disabled для несовместимых плагинов.
 **Edge cases:** `cv2.imread` вернул None (файл повреждён) → show_error. `run_once` вернул None (плагин не дал output) → `after_label` остаётся пустым, сообщение «нет результата».
