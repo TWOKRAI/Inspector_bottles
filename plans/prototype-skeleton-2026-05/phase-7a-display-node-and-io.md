@@ -113,7 +113,7 @@
 
 ---
 
-### Task 7a.4 — pipeline/io.py — graph↔blueprint serialization
+### Task 7a.4 — pipeline/io.py — graph↔blueprint serialization ✅ DONE (554c2f29)
 
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
