@@ -247,6 +247,7 @@ def run_gui(process: "GuiProcess") -> None:
     # legacy-файлов (is_v1_recipe → True).
     _recipes_dir = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
     try:
+        from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
         from multiprocess_framework.modules.state_store_module.recipes.recipe_engine import RecipeEngine
         from multiprocess_prototype.recipes.manager import RecipeManager
         from multiprocess_prototype.recipes.migrations.format_v1_to_v2 import (
@@ -255,7 +256,12 @@ def run_gui(process: "GuiProcess") -> None:
         )
         from multiprocess_prototype.backend.state.adapters.recipe_adapter import RecipeStateAdapter
 
+        # Отдельный TreeStore для RecipeEngine в GUI-процессе.
+        # GUI-процесс не имеет общего StateStoreManager, поэтому создаём
+        # изолированный store — используется только для внутреннего snapshot/restore.
+        _recipe_store = TreeStore()
         _recipe_engine = RecipeEngine(
+            store=_recipe_store,
             recipes_dir=_recipes_dir,
             migration_fn=migrate_v1_to_v2,
             migration_check_fn=is_v1_recipe,

@@ -71,28 +71,36 @@ def _write_recipe(recipes_dir: Path, slug: str, data: dict | None = None) -> Non
         yaml.dump(recipe_data, f, default_flow_style=False, allow_unicode=True)
 
 
-class _FakeEngine:
-    """Минимальный fake для RecipeEngine API, нужного presenter'у."""
-
-    def __init__(self, recipes_dir: Path) -> None:
-        self.recipes_dir = recipes_dir
-
-    def get_active(self) -> str | None:
-        return None
-
-
 class _FakeRecipeManager:
     """Fake RecipeManager с реальным recipes_dir для тестов, требующих YAML.
 
     Поддерживает настраиваемые возвращаемые значения через атрибуты.
+    Реализует публичный API RecipeManager: recipes_dir property + read_recipe().
     """
 
     def __init__(self, recipes_dir: Path, active: str | None = None) -> None:
         self._active = active
-        self._engine = _FakeEngine(recipes_dir)
+        self._recipes_dir = recipes_dir
         self._list: list[str] = []
         self._duplicate_result: bool = True
         self._set_active_result: bool = True
+
+    @property
+    def recipes_dir(self) -> Path:
+        """Директория с YAML-файлами рецептов."""
+        return self._recipes_dir
+
+    def read_recipe(self, slug: str) -> dict | None:
+        """Прочитать YAML рецепта по slug через публичный API."""
+        recipe_path = self._recipes_dir / f"{slug}.yaml"
+        if not recipe_path.exists():
+            return None
+        try:
+            with open(recipe_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else None
+        except (yaml.YAMLError, OSError):
+            return None
 
     def list(self) -> list[str]:
         return list(self._list)

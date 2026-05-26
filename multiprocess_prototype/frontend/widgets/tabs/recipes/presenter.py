@@ -143,21 +143,12 @@ class RecipesPresenter:
 
         self._selected_slug = slug
 
-        # Читаем YAML напрямую через recipes_dir engine
-        yaml_path: Path = self._recipe_manager._engine.recipes_dir / f"{slug}.yaml"
-        if not yaml_path.exists():
+        # Читаем YAML через публичный API RecipeManager (не трогаем _engine)
+        data = self._recipe_manager.read_recipe(slug)
+        if data is None:
             self._view.show_recipe(slug, None)
             self._view.show_error("Рецепт не найден")
-            self._log_warning(f"RecipesPresenter.on_select: '{slug}' не найден")
-            return
-
-        try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                data: dict = yaml.safe_load(f) or {}
-        except (yaml.YAMLError, OSError) as exc:
-            self._view.show_recipe(slug, None)
-            self._view.show_error(f"Ошибка чтения рецепта: {exc}")
-            self._log_error(f"RecipesPresenter.on_select: ошибка чтения '{slug}': {exc}")
+            self._log_warning(f"RecipesPresenter.on_select: '{slug}' не найден или нечитаем")
             return
 
         active = self._recipe_manager.get_active()
@@ -185,7 +176,8 @@ class RecipesPresenter:
             self._log_warning(f"RecipesPresenter.on_create: пустой slug из name='{name}'")
             return
 
-        recipes_dir: Path = self._recipe_manager._engine.recipes_dir
+        # Используем публичное свойство recipes_dir (не _engine)
+        recipes_dir: Path = self._recipe_manager.recipes_dir
         target_path = recipes_dir / f"{slug}.yaml"
 
         if target_path.exists():
@@ -229,14 +221,30 @@ class RecipesPresenter:
             self._log_warning("RecipesPresenter.on_duplicate: нет выбранного рецепта")
             return
 
-        new_slug = f"{target_slug}_copy"
+        # Auto-increment: пробуем _copy, _copy_2 ... _copy_99
+        new_slug: str | None = None
+        base_copy = f"{target_slug}_copy"
+        if self._recipe_manager.read_recipe(base_copy) is None:
+            new_slug = base_copy
+        else:
+            for n in range(2, 100):
+                candidate = f"{target_slug}_copy_{n}"
+                if self._recipe_manager.read_recipe(candidate) is None:
+                    new_slug = candidate
+                    break
+
+        if new_slug is None:
+            self._view.show_error("Слишком много копий рецепта")
+            self._log_warning(f"RecipesPresenter.on_duplicate: все суффиксы заняты для '{target_slug}'")
+            return
+
         result = self._recipe_manager.duplicate(target_slug, new_slug)
 
         if result:
             self._log_info(f"RecipesPresenter.on_duplicate: '{target_slug}' → '{new_slug}'")
             self.load()
         else:
-            self._view.show_error("Не удалось дублировать рецепт")
+            self._view.show_error(f"Не удалось дублировать рецепт '{target_slug}'")
             self._log_warning(f"RecipesPresenter.on_duplicate: дублирование '{target_slug}' не удалось")
 
     def on_delete(self, slug: str | None = None) -> None:
@@ -294,13 +302,11 @@ class RecipesPresenter:
 
         # Если задан replace_blueprint_fn — выполняем горячую замену
         if self._replace_blueprint_fn is not None:
-            yaml_path: Path = self._recipe_manager._engine.recipes_dir / f"{target_slug}.yaml"
-            try:
-                with open(yaml_path, "r", encoding="utf-8") as f:
-                    recipe_data: dict = yaml.safe_load(f) or {}
-            except (yaml.YAMLError, OSError) as exc:
-                self._view.show_error(f"Ошибка чтения blueprint: {exc}")
-                self._log_error(f"RecipesPresenter.on_set_active: ошибка чтения '{target_slug}': {exc}")
+            # Читаем через публичный API RecipeManager (не _engine)
+            recipe_data = self._recipe_manager.read_recipe(target_slug)
+            if recipe_data is None:
+                self._view.show_error(f"Ошибка чтения blueprint рецепта '{target_slug}'")
+                self._log_error(f"RecipesPresenter.on_set_active: не удалось прочитать '{target_slug}'")
                 return
 
             # Dict at Boundary: передаём dict, не Pydantic-модель

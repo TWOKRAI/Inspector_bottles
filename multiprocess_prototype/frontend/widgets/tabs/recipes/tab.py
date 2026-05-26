@@ -15,10 +15,10 @@ Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.7
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
+    QLabel,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -33,8 +33,6 @@ from .recipe_form import RecipeFormWidget
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
-
-logger = logging.getLogger(__name__)
 
 
 def _layout_factory() -> DiffScrollTabLayout:
@@ -85,22 +83,25 @@ class RecipesTab(BaseListNavTab):
 
         self._setup_actions()
 
-        # Presenter инициализируется после UI (view уже готов)
+        # Presenter инициализируется после UI (view уже готов).
+        # Если recipe_manager недоступен — показываем сообщение и не создаём presenter.
         recipe_manager = getattr(ctx, "recipe_manager", None)
+        self._presenter: RecipesPresenter | None = None
+
         if recipe_manager is None:
-            logger.warning("RecipesTab: ctx.recipe_manager недоступен, используется mock")
-            from unittest.mock import MagicMock
-
-            recipe_manager = MagicMock()
-            recipe_manager.list.return_value = []
-            recipe_manager.get_active.return_value = None
-            recipe_manager._engine = MagicMock()
-
-        self._presenter = RecipesPresenter(
-            recipe_manager=recipe_manager,
-            view=self,
-        )
-        self._presenter.load()
+            # Показываем информационное сообщение в content-области
+            _unavailable_label = QLabel("RecipeManager недоступен")
+            _unavailable_label.setStyleSheet("color: gray; font-style: italic;")
+            self._content_stack.addWidget(_unavailable_label)
+            self._content_stack.setCurrentWidget(_unavailable_label)
+            # Все кнопки CRUD остаются disabled (уже по умолчанию disabled кроме «Создать»)
+            self._create_btn.setEnabled(False)
+        else:
+            self._presenter = RecipesPresenter(
+                recipe_manager=recipe_manager,
+                view=self,
+            )
+            self._presenter.load()
 
     # ------------------------------------------------------------------ #
     #  Фабричный метод                                                     #
@@ -141,7 +142,8 @@ class RecipesTab(BaseListNavTab):
         self._content_stack.setCurrentIndex(self._form_stack_index)
         self.item_selected.emit(key)
         self.section_changed.emit(key)
-        self._presenter.on_select(key)
+        if self._presenter is not None:
+            self._presenter.on_select(key)
 
     # ------------------------------------------------------------------ #
     #  IRecipesView implementation                                         #
@@ -289,6 +291,8 @@ class RecipesTab(BaseListNavTab):
 
     def _on_create_clicked(self) -> None:
         """Обработать нажатие «Создать»."""
+        if self._presenter is None:
+            return
         form_data = self._form_widget.get_form_data()
         name = form_data.get("name", "").strip()
         description = form_data.get("description", "").strip()
@@ -298,12 +302,18 @@ class RecipesTab(BaseListNavTab):
 
     def _on_duplicate_clicked(self) -> None:
         """Обработать нажатие «Дублировать»."""
+        if self._presenter is None:
+            return
         self._presenter.on_duplicate(self._selected_slug)
 
     def _on_delete_clicked(self) -> None:
         """Обработать нажатие «Удалить»."""
+        if self._presenter is None:
+            return
         self._presenter.on_delete(self._selected_slug)
 
     def _on_activate_clicked(self) -> None:
         """Обработать нажатие «Сделать активным»."""
+        if self._presenter is None:
+            return
         self._presenter.on_set_active(self._selected_slug)

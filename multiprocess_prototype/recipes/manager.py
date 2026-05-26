@@ -262,5 +262,40 @@ class RecipeManager:
         """
         return self._engine.is_dirty()
 
+    @property
+    def recipes_dir(self) -> Path:
+        """Директория с YAML-файлами рецептов.
+
+        Делегирует в engine.recipes_dir.
+
+        Returns:
+            Path к директории рецептов.
+        """
+        return self._engine.recipes_dir
+
+    def read_recipe(self, slug: str) -> dict | None:
+        """Прочитать YAML рецепта по slug.
+
+        Инкапсулирует чтение файла — presenter не работает с путями напрямую.
+
+        Args:
+            slug: имя рецепта (без .yaml).
+
+        Returns:
+            dict с данными рецепта или None если файл не найден / невалиден.
+        """
+        import yaml  # noqa: PLC0415
+
+        recipe_path = self._engine.recipes_dir / f"{slug}.yaml"
+        if not recipe_path.exists():
+            return None
+        try:
+            with open(recipe_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else None
+        except (yaml.YAMLError, OSError) as exc:
+            self._log_error(f"RecipeManager.read_recipe: ошибка чтения '{slug}': {exc}")
+            return None
+
 
 __all__ = ["RecipeManager"]

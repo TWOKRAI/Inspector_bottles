@@ -628,14 +628,14 @@ display_bindings:                     # application-секция, ВНЕ SystemB
 **Steps:**
 1. Добавить в `multiprocess_framework/DECISIONS.md` (в секцию активных решений):
 
-   **ADR-PM-009: SystemBlueprint остаётся generic; application-расширения рецепта живут параллельными секциями yaml**
+   **ADR-131: SystemBlueprint остаётся generic; application-расширения рецепта живут параллельными секциями yaml**
    - Статус: Accepted
    - Контекст: Рецепт Inspector содержит application-специфичные данные (`active_services`, `display_bindings`), которые не должны загрязнять generic SystemBlueprint.
    - Решение: Application-секции хранятся рядом с `blueprint` в том же YAML, но не внутри `blueprint`. `SystemBlueprint` остаётся generic-контрактом framework.
    - Последствия: application-слой парсит свои секции сам; framework не знает о них.
    - Альтернативы: SubBlueprint (отвергнут — усложняет схему framework); отдельный файл (отвергнут — неудобно держать синхронно).
 
-   **ADR-PM-010: replace_blueprint в ProcessManagerProcess с snapshot+rollback**
+   **ADR-132: replace_blueprint в ProcessManagerProcess с snapshot+rollback**
    - Статус: Accepted
    - Контекст: Переключение рецепта требует перезапуска рабочих процессов без остановки GUI и orchestrator.
    - Решение: `replace_blueprint(new_blueprint: dict)` делает snapshot конфигов незащищённых процессов, останавливает их, поднимает новые. При partial failure (любой процесс не стартовал) — полный rollback до snapshot.
@@ -661,11 +661,11 @@ display_bindings:                     # application-секция, ВНЕ SystemB
      - `manager.set_active("new_recipe")`.
      - Проверить: `manager.get_active() == "new_recipe"`.
 
-3. Обновить `multiprocess_framework/DECISIONS.md` — добавить ссылки на новые ADR в индексную таблицу (строки для ADR-PM-009 и ADR-PM-010).
+3. Обновить `multiprocess_framework/DECISIONS.md` — добавить ссылки на новые ADR в индексную таблицу (строки для ADR-131 и ADR-132).
 
 **Acceptance criteria:**
 - [ ] `pytest multiprocess_prototype/recipes/tests/test_recipes_integration.py` — все 3 теста зелёные
-- [ ] `multiprocess_framework/DECISIONS.md` содержит ADR-PM-009 и ADR-PM-010 в таблице индекса
+- [ ] `multiprocess_framework/DECISIONS.md` содержит ADR-131 и ADR-132 в таблице индекса
 - [ ] `test_migrate_and_load_v1_smoke` проверяет наличие `.bak` файла
 
 **Out of scope:**
