@@ -265,15 +265,34 @@
 
 ---
 
-## Acceptance (Phase 7b в целом)
+## Acceptance (Phase 7b в целом) ✅ DONE
 
-- WireMetricsBadge на каждом edge показывает fps/latency/buffer_fill (даже idle-значения "-- fps | -- ms | --%").
-- Цвет badge меняется по WireStatus (ok/idle/error).
-- Плагин `blur` обнаруживается в реестре и валидно обрабатывает BGR.
-- `recipes/demo_webcam_split_merge.yaml` загружается через RecipeManager, проходит integration-тест.
-- Кнопка «Запустить активный рецепт» в action-колонке (graceful warning без proxy).
-- 25-35 unit/integration тестов суммарно по Task 7b.1-7b.6.
+- [x] WireMetricsBadge на каждом edge показывает fps/latency/buffer_fill (даже idle "-- fps | -- ms | --%").
+- [x] Цвет badge меняется по WireStatus (ok/idle/error).
+- [x] Плагин `blur` обнаруживается в реестре и валидно обрабатывает BGR.
+- [x] `recipes/demo_webcam_split_merge.yaml` загружается через RecipeManager, integration-тест зелёный.
+- [x] Кнопка «Запустить активный рецепт» в action-колонке (graceful warning без proxy).
+- [x] 77 unit/integration тестов суммарно (план был 25-35, превышено).
 - E2E-тест с реальной webcam — вне scope (требует hardware), но рецепт готов к запуску при наличии работающего ProcessManager.
+
+### Итоговые коммиты Phase 7b
+
+| Task | Hash | Тесты |
+|------|------|-------|
+| 7b.1 | `30516920` | 16 |
+| 7b.2 | `420c896d` | 15 |
+| 7b.3 | `c39c4e45` | 18 |
+| 7b.4 | `238fe9e2` | 15 |
+| 7b.5 | `da227903` | 8 |
+| 7b.6 | `1cdadfcc` | 5 |
+| fix (clear_all + Literal) | `4a3b0b28` | +1 |
+
+**Суммарно**: 322/322 pipeline-тестов проходят, validate.py PASS, регрессий нет. Reviewer вердикт после фикса — **APPROVED**.
+
+### Что закрыто фиксом по ревью
+
+- **medium**: `GraphScene.clear_all()` теперь эмиттит `edge_removed` для каждого wire до `clear()` — `WireMetricsController._badges` больше не держит stale-ссылки на удалённые C++ объекты.
+- **low**: `WireMetricsModel.update_status` теперь принимает `Literal["ok", "idle", "error"]` — type checker ловит опечатки.
 
 ## Out of scope (отложено)
 
