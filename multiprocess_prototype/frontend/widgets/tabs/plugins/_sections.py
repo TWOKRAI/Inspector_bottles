@@ -17,8 +17,8 @@
 Каждый плагин — ``_PluginSection``:
 - ``widget()`` строит лениво ``RegisterView`` (если есть register fields) или
   ``PluginInfoCard`` (иначе);
-- ``action_buttons()`` пуст — глобальный тогглер Cards/Table живёт в первой
-  колонке таба, а не per-section.
+- ``action_buttons()`` возвращает кнопку «Тест» (sandbox), если передан
+  ``open_sandbox_cb``; для несовместимых плагинов — disabled с tooltip.
 - ``bus_change_callback`` обновляет редактор при undo/redo через ActionBus.
 """
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
 from multiprocess_prototype.frontend.forms import RegisterView
@@ -97,19 +97,33 @@ def _cat_key(category: str) -> str:
 
 
 class _PluginSection:
-    """Секция одного плагина: RegisterView или PluginInfoCard в content."""
+    """Секция одного плагина: RegisterView или PluginInfoCard в content.
+
+    Args:
+        ctx: AppContext — DI-контейнер приложения.
+        plugin_name: имя плагина (ключ в registry).
+        title: отображаемый заголовок в дереве.
+        open_sandbox_cb: callback для открытия sandbox-виджета в content-панели.
+            Сигнатура: ``(plugin_name: str, sandbox_widget: QWidget) -> None``.
+            Если None — кнопка «Тест» disabled с tooltip «sandbox недоступен».
+    """
 
     def __init__(
         self,
         ctx: "AppContext",
         plugin_name: str,
         title: str,
+        open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
     ) -> None:
         self._ctx = ctx
         self._key = plugin_name
         self._title = title
         self._widget: QWidget | None = None
         self._register_view: RegisterView | None = None
+        # Callback для открытия sandbox (передаётся из PluginsTab)
+        self._open_sandbox_cb = open_sandbox_cb
+        # Singleton sandbox-виджет для этой секции (создаётся при первом клике)
+        self._sandbox_widget: QWidget | None = None
 
     # -------- SectionProtocol --------
 
@@ -127,10 +141,58 @@ class _PluginSection:
         return self._widget  # type: ignore[return-value]
 
     def action_buttons(self) -> list[QWidget]:
-        return []
+        """Вернуть кнопку «Тест» для запуска sandbox.
+
+        Если open_sandbox_cb не задан — кнопка disabled с tooltip.
+        Если плагин несовместим с sandbox — кнопка disabled с причиной.
+        Если плагин совместим — кнопка enabled, клик открывает sandbox.
+        """
+        btn = QPushButton("Тест")
+
+        if self._open_sandbox_cb is None:
+            # Обратная совместимость: таб без sandbox-поддержки
+            btn.setEnabled(False)
+            btn.setToolTip("sandbox недоступен")
+            return [btn]
+
+        # Проверяем совместимость плагина с sandbox
+        from .sandbox_presenter import SandboxPresenter
+
+        compat = SandboxPresenter(self._ctx).check_compatibility(self._key)
+        if not compat.ok:
+            btn.setEnabled(False)
+            btn.setToolTip(compat.reason)
+        else:
+            btn.clicked.connect(self._on_test_clicked)
+
+        return [btn]
 
     def on_activated(self) -> None: ...
     def on_deactivated(self) -> None: ...
+
+    # -------- Sandbox --------
+
+    def _on_test_clicked(self) -> None:
+        """Открыть sandbox-виджет для этого плагина.
+
+        Создаёт PluginSandboxWidget один раз (singleton per section).
+        При повторном клике — просто переключает на уже созданный виджет.
+        """
+        if self._open_sandbox_cb is None:
+            return
+
+        if self._sandbox_widget is None:
+            from .sandbox import PluginSandboxWidget
+            from .sandbox_presenter import SandboxPresenter
+
+            presenter = SandboxPresenter(self._ctx)
+            self._sandbox_widget = PluginSandboxWidget(
+                presenter=presenter,
+                plugin_name=self._key,
+                ctx=self._ctx,
+            )
+
+        self._open_sandbox_cb(self._key, self._sandbox_widget)
 
     # -------- SectionWithEvents (bus подписка через BaseTreeNavTab) --------
 
@@ -268,9 +330,13 @@ def _make_category_factory(category_title: str) -> Callable[["AppContext"], _Cat
     return factory
 
 
-def _make_plugin_factory(plugin_name: str, title: str) -> Callable[["AppContext"], _PluginSection]:
+def _make_plugin_factory(
+    plugin_name: str,
+    title: str,
+    open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
+) -> "Callable[[AppContext], _PluginSection]":
     def factory(ctx: "AppContext") -> _PluginSection:
-        return _PluginSection(ctx, plugin_name, title)
+        return _PluginSection(ctx, plugin_name, title, open_sandbox_cb=open_sandbox_cb)
 
     return factory
 
@@ -305,7 +371,10 @@ def _make_paths_factory(ctx: "AppContext") -> "Callable[[AppContext], _PathsSect
     return factory
 
 
-def build_plugin_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]":
+def build_plugin_sections(
+    ctx: "AppContext",
+    open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
+) -> "list[SectionSpec[AppContext]]":
     """Сформировать декларацию секций PluginsTab.
 
     Структура:
@@ -314,6 +383,12 @@ def build_plugin_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]":
     3. Под каждой категорией — lazy-секции плагинов.
 
     Порядок категорий — по сортированному списку из реестра.
+
+    Args:
+        ctx: AppContext — DI-контейнер приложения.
+        open_sandbox_cb: callback для открытия sandbox в content-панели.
+            Сигнатура: ``(plugin_name: str, sandbox_widget: QWidget) -> None``.
+            По умолчанию None — кнопка «Тест» disabled (обратная совместимость).
     """
     presenter = PluginsPresenter(ctx)
     plugins = presenter.list_plugins()  # [(name, display, category), ...]
@@ -354,7 +429,7 @@ def build_plugin_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]":
                 SectionSpec(
                     key=plugin_name,
                     title=plugin_title,
-                    factory=_make_plugin_factory(plugin_name, plugin_title),
+                    factory=_make_plugin_factory(plugin_name, plugin_title, open_sandbox_cb),
                     parent_key=cat_section_key,
                     lazy=True,
                 )
