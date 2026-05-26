@@ -103,8 +103,9 @@ class PipelineTab(QWidget):
         bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
         self._tab_layout.enable_undo_redo(bus)
 
-        # Передать scene в presenter.
+        # Передать scene и inspector в presenter.
         self._presenter.set_scene(self._scene)
+        self._presenter.set_inspector(self._inspector)
 
         # Drop target для D&D из палитры на canvas.
         self._drop_target = PipelineDropTarget(self._view, self._on_plugin_dropped)
@@ -273,22 +274,53 @@ class PipelineTab(QWidget):
         self._presenter.add_wire(source_endpoint, target_endpoint)
 
     def _on_selection_changed(self) -> None:
-        """Обработчик изменения выбора в scene."""
+        """Обработчик изменения выбора в scene.
+
+        Определяет тип узла (plugin vs display) и вызывает соответствующий
+        метод inspector'а: show_plugin_node или show_display_node.
+        """
+        from .graph.display_node_item import DisplayNodeItem
+
         selected = self._scene.selectedItems()
         node_items = [item for item in selected if hasattr(item, "node_id")]
 
         if len(node_items) == 1:
             node = node_items[0]
             topo = self._presenter.model.to_topology_dict()
-            process_data = None
-            for proc in topo.get("processes", []):
-                if isinstance(proc, dict) and proc.get("process_name") == node.node_id:
-                    process_data = proc
-                    break
 
-            plugins = process_data.get("plugins", []) if process_data else []
-            category = node.data.category if hasattr(node, "data") else "utility"
-            self._inspector.show_node(node.node_id, category, plugins=plugins)
+            if isinstance(node, DisplayNodeItem):
+                # Display-узел: найти запись в topology.displays
+                display_id = ""
+                display_name = ""
+                for disp in topo.get("displays", []):
+                    if isinstance(disp, dict) and disp.get("node_id") == node.node_id:
+                        display_id = disp.get("display_id", "")
+                        display_name = disp.get("display_name", "")
+                        break
+
+                # Если не найден в topology — взять из node.data
+                if not display_id and hasattr(node, "data"):
+                    display_id = getattr(node.data, "display_id", "")
+                    display_name = getattr(node.data, "display_name", "")
+
+                self._inspector.show_display_node(node.node_id, display_id, display_name)
+            else:
+                # Plugin-узел (process node)
+                process_data = None
+                for proc in topo.get("processes", []):
+                    if isinstance(proc, dict) and proc.get("process_name") == node.node_id:
+                        process_data = proc
+                        break
+
+                plugins = process_data.get("plugins", []) if process_data else []
+                category = node.data.category if hasattr(node, "data") else "utility"
+                target_process = process_data.get("target_process", "") if process_data else ""
+                self._inspector.show_plugin_node(
+                    node.node_id,
+                    category,
+                    target_process=target_process,
+                    plugins=plugins,
+                )
         else:
             self._inspector.clear()
 

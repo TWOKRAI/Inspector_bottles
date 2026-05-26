@@ -7,13 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QFrame,
     QLabel,
+    QLineEdit,
     QScrollArea,
     QVBoxLayout,
     QWidget,
-    QFrame,
-    QFormLayout,
-    QLineEdit,
 )
 
 if TYPE_CHECKING:
@@ -32,18 +33,31 @@ class NodeInspectorPanel(QWidget):
     Если RegistersManager доступен — создаёт типизированные виджеты
     через CardsFieldFactory. Иначе — QLineEdit (fallback).
 
+    Поддерживает два режима отображения:
+    - show_plugin_node() — для plugin-узлов: combo «Процесс назначения» + параметры.
+    - show_display_node() — для display-узлов: combo «Display» из DisplayRegistry.
+
     При отсутствии выбора — placeholder.
 
     Signals:
         field_changed(process_name, field_name, value): параметр изменён пользователем.
+        target_process_changed(node_id, new_process_name): выбран новый процесс назначения.
+        display_id_changed(node_id, new_display_id): выбран новый display.
     """
 
     # Signal: (process_name, field_name, new_value)
     field_changed = Signal(str, str, object)
 
+    # Signal: (node_id, new_process_name) — пользователь выбрал целевой процесс
+    target_process_changed = Signal(str, str)
+
+    # Signal: (node_id, new_display_id) — пользователь выбрал display
+    display_id_changed = Signal(str, str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._current_process: str = ""
+        self._current_node_id: str = ""
         self._suppress_changes: bool = False
         # Хранит и QLineEdit (fallback) и FieldEditor (cards-режим)
         self._field_editors: dict[str, Any] = {}
@@ -51,10 +65,16 @@ class NodeInspectorPanel(QWidget):
         self._use_cards: bool = False
         # AppContext — задаётся через set_context()
         self._ctx: AppContext | None = None
+        # Текущий режим отображения: "plugin" или "display"
+        self._mode: str = "plugin"
+        # Combo «Процесс назначения» (для plugin-узлов)
+        self._target_process_combo: QComboBox | None = None
+        # Combo «Display» (для display-узлов)
+        self._display_id_combo: QComboBox | None = None
         self._init_ui()
 
     def set_context(self, ctx: "AppContext") -> None:
-        """Передать AppContext для доступа к RegistersManager."""
+        """Передать AppContext для доступа к RegistersManager и DisplayRegistry."""
         self._ctx = ctx
 
     def _init_ui(self) -> None:
@@ -90,6 +110,35 @@ class NodeInspectorPanel(QWidget):
         line.setObjectName("InspectorDivider")
         content_layout.addWidget(line)
 
+        # Combo «Процесс назначения» (только для plugin-узлов)
+        self._target_process_form = QWidget()
+        tp_layout = QFormLayout(self._target_process_form)
+        tp_layout.setContentsMargins(0, 0, 0, 0)
+        tp_layout.setSpacing(4)
+        self._target_process_combo = QComboBox()
+        self._target_process_combo.setObjectName("TargetProcessCombo")
+        tp_layout.addRow("Процесс назначения:", self._target_process_combo)
+        content_layout.addWidget(self._target_process_form)
+        self._target_process_form.setVisible(False)
+
+        # Combo «Display» (только для display-узлов)
+        self._display_id_form = QWidget()
+        di_layout = QFormLayout(self._display_id_form)
+        di_layout.setContentsMargins(0, 0, 0, 0)
+        di_layout.setSpacing(4)
+        self._display_id_combo = QComboBox()
+        self._display_id_combo.setObjectName("DisplayIdCombo")
+        di_layout.addRow("Display:", self._display_id_combo)
+        content_layout.addWidget(self._display_id_form)
+        self._display_id_form.setVisible(False)
+
+        # Разделитель между combo и параметрами
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setObjectName("InspectorDivider2")
+        content_layout.addWidget(line2)
+        self._divider2 = line2
+
         # Scroll area для параметров
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -105,42 +154,59 @@ class NodeInspectorPanel(QWidget):
         self._content.setVisible(False)
         layout.addWidget(self._content, stretch=1)
 
-    def show_node(
+        # Подключить обработчики изменений combo
+        self._target_process_combo.currentIndexChanged.connect(self._on_target_process_combo_changed)
+        self._display_id_combo.currentIndexChanged.connect(self._on_display_id_combo_changed)
+
+    # ------------------------------------------------------------------ #
+    #  Публичный API: show_plugin_node                                     #
+    # ------------------------------------------------------------------ #
+
+    def show_plugin_node(
         self,
-        process_name: str,
+        node_id: str,
         category: str = "utility",
+        target_process: str = "",
         plugins: list[dict[str, Any]] | None = None,
         params: dict[str, Any] | None = None,
     ) -> None:
-        """Показать параметры узла.
+        """Показать inspector для plugin-узла (process node).
 
-        Если AppContext + RegistersManager доступны — создаёт типизированные
-        виджеты через CardsFieldFactory. Иначе fallback на QLineEdit.
+        Отображает combo «Процесс назначения» (заполняется из активного рецепта)
+        и параметры плагина через CardsFieldFactory или QLineEdit (fallback).
 
         Args:
-            process_name: имя процесса.
+            node_id: идентификатор узла.
             category: категория плагина.
+            target_process: текущее значение целевого процесса.
             plugins: список плагинов [{plugin_name, ...}].
             params: dict параметров {field_name: value}.
         """
         self._suppress_changes = True
         try:
-            self._current_process = process_name
+            self._mode = "plugin"
+            self._current_node_id = node_id
+            self._current_process = node_id
             self._placeholder.setVisible(False)
             self._content.setVisible(True)
 
             # Заголовок
-            self._title.setText(process_name)
+            self._title.setText(node_id)
 
             # Badge
             color = CATEGORY_COLORS.get(category, "#9e9e9e")
             self._category_badge.setText(category)
             self._category_badge.setStyleSheet(f"background-color: {color}; color: #fff;")
 
-            # Очистить параметры
-            self._clear_params()
+            # Скрыть display-combo, показать target_process-combo
+            self._display_id_form.setVisible(False)
+            self._target_process_form.setVisible(True)
 
-            # Плагины
+            # Заполнить combo процессов из активного рецепта
+            self._populate_target_process_combo(target_process)
+
+            # Показать параметры плагина в scroll area
+            self._clear_params()
             if plugins:
                 for p in plugins:
                     pname = p.get("plugin_name", "") if isinstance(p, dict) else str(p)
@@ -148,16 +214,265 @@ class NodeInspectorPanel(QWidget):
                     label.setProperty("role", "plugin-name")
                     self._params_layout.addRow(label)
 
-            # Попытаться получить FieldInfo из RegistersManager
-            fields_used = self._try_build_cards_editors(process_name, params)
+            fields_used = self._try_build_cards_editors(node_id, params)
             self._use_cards = bool(fields_used)
 
-            # Fallback: QLineEdit если CardsFieldFactory не применился
             if not self._use_cards and params:
                 self._build_lineedit_editors(params)
 
         finally:
             self._suppress_changes = False
+
+    def show_display_node(
+        self,
+        node_id: str,
+        display_id: str = "",
+        display_name: str = "",
+    ) -> None:
+        """Показать inspector для display-узла.
+
+        Отображает только combo «Display» заполненный из DisplayRegistry.
+        Параметры не показываются (display-узел не имеет настраиваемых полей).
+
+        Args:
+            node_id: идентификатор узла.
+            display_id: текущий выбранный display_id.
+            display_name: имя выбранного дисплея (для отображения).
+        """
+        self._suppress_changes = True
+        try:
+            self._mode = "display"
+            self._current_node_id = node_id
+            self._current_process = node_id
+            self._placeholder.setVisible(False)
+            self._content.setVisible(True)
+
+            # Заголовок
+            title = display_name if display_name else node_id
+            self._title.setText(title)
+
+            # Badge — зелёный display
+            from ..graph.constants import DISPLAY_CATEGORY_COLOR
+
+            self._category_badge.setText("display")
+            self._category_badge.setStyleSheet(f"background-color: {DISPLAY_CATEGORY_COLOR}; color: #fff;")
+
+            # Показать display-combo, скрыть target_process-combo
+            self._target_process_form.setVisible(False)
+            self._display_id_form.setVisible(True)
+
+            # Заполнить combo из DisplayRegistry
+            self._populate_display_id_combo(display_id)
+
+            # Очистить параметры (у display нет параметров)
+            self._clear_params()
+
+        finally:
+            self._suppress_changes = False
+
+    def show_node(
+        self,
+        process_name: str,
+        category: str = "utility",
+        plugins: list[dict[str, Any]] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        """Показать параметры plugin-узла (алиас для show_plugin_node).
+
+        Обратная совместимость: делегирует в show_plugin_node без target_process.
+
+        Args:
+            process_name: имя процесса (используется как node_id).
+            category: категория плагина.
+            plugins: список плагинов [{plugin_name, ...}].
+            params: dict параметров {field_name: value}.
+        """
+        self.show_plugin_node(
+            node_id=process_name,
+            category=category,
+            target_process="",
+            plugins=plugins,
+            params=params,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Заполнение combo                                                    #
+    # ------------------------------------------------------------------ #
+
+    def _populate_target_process_combo(self, current_value: str = "") -> None:
+        """Заполнить combo «Процесс назначения» именами процессов из рецепта.
+
+        Если RecipeManager или активный рецепт недоступны — combo пустое и disabled.
+
+        Args:
+            current_value: текущее значение, которое нужно выбрать.
+        """
+        combo = self._target_process_combo
+        if combo is None:
+            return
+
+        combo.clear()
+        process_names = self._get_process_names_from_recipe()
+
+        if not process_names:
+            combo.setEnabled(False)
+            return
+
+        combo.setEnabled(True)
+        for name in process_names:
+            combo.addItem(name)
+
+        # Установить текущее значение
+        if current_value:
+            idx = combo.findText(current_value)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
+    def _populate_display_id_combo(self, current_display_id: str = "") -> None:
+        """Заполнить combo «Display» из DisplayRegistry.
+
+        Если DisplayRegistry недоступен — combo пустое и disabled.
+
+        Args:
+            current_display_id: текущий выбранный display_id.
+        """
+        combo = self._display_id_combo
+        if combo is None:
+            return
+
+        combo.clear()
+        entries = self._get_display_entries()
+
+        if not entries:
+            combo.setEnabled(False)
+            return
+
+        combo.setEnabled(True)
+        for entry in entries:
+            label = f"{entry.name} ({entry.id})" if entry.name else entry.id
+            combo.addItem(label, userData=entry.id)
+
+        # Установить текущее значение
+        if current_display_id:
+            for i in range(combo.count()):
+                if combo.itemData(i) == current_display_id:
+                    combo.setCurrentIndex(i)
+                    break
+
+    def refresh_display_combo(self) -> None:
+        """Обновить combo «Display» при изменении DisplayRegistry.
+
+        Вызывается при подписке на state.displays.changed.
+        Работает только в режиме display (иначе no-op).
+        """
+        if self._mode != "display":
+            return
+        # Получить текущий выбранный display_id
+        current_id = ""
+        if self._display_id_combo is not None:
+            idx = self._display_id_combo.currentIndex()
+            if idx >= 0:
+                current_id = self._display_id_combo.itemData(idx) or ""
+
+        self._suppress_changes = True
+        try:
+            self._populate_display_id_combo(current_id)
+        finally:
+            self._suppress_changes = False
+
+    # ------------------------------------------------------------------ #
+    #  Вспомогательные методы: получение данных из контекста               #
+    # ------------------------------------------------------------------ #
+
+    def _get_process_names_from_recipe(self) -> list[str]:
+        """Получить имена процессов из активного рецепта.
+
+        Returns:
+            Список имён процессов или пустой список если недоступно.
+        """
+        if self._ctx is None:
+            return []
+
+        # recipe_manager — это property в AppContext, не метод
+        rm = getattr(self._ctx, "recipe_manager", None)
+        if rm is None:
+            return []
+
+        try:
+            active_slug = rm.get_active()
+            if not active_slug:
+                return []
+
+            recipe_dict = rm.read_recipe(active_slug)
+            if not isinstance(recipe_dict, dict):
+                return []
+
+            blueprint = recipe_dict.get("blueprint", {})
+            if not isinstance(blueprint, dict):
+                return []
+
+            processes = blueprint.get("processes", [])
+            names = []
+            for proc in processes:
+                if isinstance(proc, dict):
+                    name = proc.get("process_name", "")
+                else:
+                    name = getattr(proc, "process_name", "")
+                if name:
+                    names.append(name)
+            return names
+
+        except Exception:
+            logger.debug("Не удалось получить список процессов из рецепта", exc_info=True)
+            return []
+
+    def _get_display_entries(self) -> list[Any]:
+        """Получить список DisplayEntry из DisplayRegistry.
+
+        Returns:
+            Список DisplayEntry или пустой список если реестр недоступен.
+        """
+        if self._ctx is None:
+            return []
+
+        # display_registry — атрибут (не метод) в AppContext
+        registry = getattr(self._ctx, "display_registry", None)
+        if registry is None:
+            return []
+
+        try:
+            return registry.list()
+        except Exception:
+            logger.debug("Не удалось получить список дисплеев из реестра", exc_info=True)
+            return []
+
+    # ------------------------------------------------------------------ #
+    #  Обработчики сигналов combo                                          #
+    # ------------------------------------------------------------------ #
+
+    def _on_target_process_combo_changed(self, index: int) -> None:
+        """Обработчик выбора процесса в combo «Процесс назначения»."""
+        if self._suppress_changes:
+            return
+        if self._target_process_combo is None:
+            return
+        new_process = self._target_process_combo.currentText()
+        if new_process and self._current_node_id:
+            self.target_process_changed.emit(self._current_node_id, new_process)
+
+    def _on_display_id_combo_changed(self, index: int) -> None:
+        """Обработчик выбора display в combo «Display»."""
+        if self._suppress_changes:
+            return
+        if self._display_id_combo is None:
+            return
+        new_display_id = self._display_id_combo.itemData(index) or ""
+        if new_display_id and self._current_node_id:
+            self.display_id_changed.emit(self._current_node_id, new_display_id)
+
+    # ------------------------------------------------------------------ #
+    #  Оригинальные методы (backward compatibility)                        #
+    # ------------------------------------------------------------------ #
 
     def _try_build_cards_editors(
         self,
@@ -227,8 +542,11 @@ class NodeInspectorPanel(QWidget):
     def clear(self) -> None:
         """Очистить inspector (показать placeholder)."""
         self._current_process = ""
+        self._current_node_id = ""
         self._placeholder.setVisible(True)
         self._content.setVisible(False)
+        self._target_process_form.setVisible(False)
+        self._display_id_form.setVisible(False)
         self._clear_params()
 
     def update_field(self, field_name: str, value: Any) -> None:

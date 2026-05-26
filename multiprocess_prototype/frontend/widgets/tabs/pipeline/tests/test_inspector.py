@@ -389,3 +389,313 @@ class TestPresenterInspectorIntegration:
 
         # В лог записано предупреждение
         assert any("warning" in r.levelname.lower() or r.levelno >= logging.WARNING for r in caplog.records)
+
+
+# ------------------------------------------------------------------ #
+#  Task 7a.3: combo target_process + combo display_id                 #
+# ------------------------------------------------------------------ #
+
+
+def _make_ctx_with_recipe(process_names: list[str]):
+    """AppContext с RecipeManager, возвращающим заданные имена процессов.
+
+    recipe_manager в AppContext — @property, поэтому используем PropertyMock.
+    """
+    from unittest.mock import PropertyMock
+
+    ctx = MagicMock()
+    ctx.registers_manager.return_value = None
+    ctx.action_bus.return_value = None
+    ctx.topology_holder.return_value = None
+    ctx.plugin_registry.return_value = None
+    ctx.form_context.return_value = None
+
+    rm_mock = MagicMock()
+    rm_mock.get_active.return_value = "test_recipe"
+    blueprint_processes = [{"process_name": name} for name in process_names]
+    rm_mock.read_recipe.return_value = {"blueprint": {"processes": blueprint_processes, "wires": []}}
+
+    # recipe_manager — @property в AppContext, устанавливаем через PropertyMock
+    type(ctx).recipe_manager = PropertyMock(return_value=rm_mock)
+    ctx.display_registry = None
+    return ctx
+
+
+def _make_display_entry(display_id: str, name: str):
+    """Создать mock DisplayEntry."""
+    entry = MagicMock()
+    entry.id = display_id
+    entry.name = name
+    return entry
+
+
+def _make_ctx_with_display_registry(entries: list):
+    """AppContext с DisplayRegistry, возвращающим заданные DisplayEntry."""
+    ctx = MagicMock()
+    ctx.registers_manager.return_value = None
+    ctx.action_bus.return_value = None
+    ctx.topology_holder.return_value = None
+    ctx.plugin_registry.return_value = None
+    ctx.form_context.return_value = None
+    ctx.recipe_manager = None
+
+    registry_mock = MagicMock()
+    registry_mock.list.return_value = entries
+    registry_mock.get.side_effect = lambda did: next((e for e in entries if e.id == did), None)
+    ctx.display_registry = registry_mock
+    return ctx
+
+
+class TestTargetProcessCombo:
+    """Тесты combo «Процесс назначения» для plugin-узлов."""
+
+    def test_show_plugin_node_creates_target_process_combo(self, qtbot):
+        """Combo «Процесс назначения» появляется и заполнен именами процессов."""
+        ctx = _make_ctx_with_recipe(["camera", "processor", "output"])
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.show()  # нужно для корректной проверки isVisible()
+        panel.set_context(ctx)
+
+        panel.show_plugin_node("camera", "source", target_process="camera")
+
+        # Форма с combo должна быть видима (panel.show() активирует дерево)
+        assert panel._target_process_form.isVisible()
+        assert not panel._display_id_form.isVisible()
+
+        combo = panel._target_process_combo
+        assert combo is not None
+        assert combo.isEnabled()
+        # Проверяем что combo заполнен именами процессов
+        items = [combo.itemText(i) for i in range(combo.count())]
+        assert "camera" in items
+        assert "processor" in items
+        assert "output" in items
+
+    def test_show_plugin_node_selects_current_target_process(self, qtbot):
+        """Combo показывает текущее значение target_process."""
+        ctx = _make_ctx_with_recipe(["camera", "processor"])
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+
+        panel.show_plugin_node("camera", "source", target_process="processor")
+
+        combo = panel._target_process_combo
+        assert combo.currentText() == "processor"
+
+    def test_target_process_change_emits_signal(self, qtbot):
+        """Выбор нового процесса в combo → испускается сигнал target_process_changed."""
+        ctx = _make_ctx_with_recipe(["camera", "processor"])
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+        panel.show_plugin_node("node1", "source", target_process="camera")
+
+        received = []
+        panel.target_process_changed.connect(lambda nid, proc: received.append((nid, proc)))
+
+        # Симулируем выбор другого процесса
+        combo = panel._target_process_combo
+        idx = combo.findText("processor")
+        assert idx >= 0
+        combo.setCurrentIndex(idx)
+
+        assert len(received) == 1
+        assert received[0] == ("node1", "processor")
+
+    def test_show_with_no_recipe_manager_combo_disabled(self, qtbot):
+        """Если RecipeManager недоступен — combo disabled, не падает."""
+        ctx = _make_ctx_no_rm()
+        ctx.recipe_manager = None  # Явно None
+        ctx.display_registry = None
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+
+        # Не должно упасть
+        panel.show_plugin_node("node1", "utility", target_process="")
+
+        combo = panel._target_process_combo
+        # Combo должен быть disabled и пустым
+        assert not combo.isEnabled() or combo.count() == 0
+
+    def test_show_with_no_ctx_doesnt_crash(self, qtbot):
+        """set_context(None) — combo disabled, не падает при show_plugin_node."""
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        # ctx не задан
+
+        # Не должно упасть
+        panel.show_plugin_node("node1", "utility", target_process="proc1")
+
+        combo = panel._target_process_combo
+        assert combo is not None
+        # Без контекста combo должен быть пустым/disabled
+        assert not combo.isEnabled() or combo.count() == 0
+
+    def test_signal_suppression_during_show_plugin_node(self, qtbot):
+        """При show_plugin_node сигнал target_process_changed НЕ испускается."""
+        ctx = _make_ctx_with_recipe(["camera", "processor"])
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+
+        received = []
+        panel.target_process_changed.connect(lambda *args: received.append(args))
+
+        # show_plugin_node должен подавить сигналы
+        panel.show_plugin_node("camera", "source", target_process="camera")
+
+        assert len(received) == 0, "Сигнал target_process_changed не должен эмитироваться при programmatic show"
+
+    def test_show_node_alias_still_works(self, qtbot):
+        """show_node() продолжает работать как алиас show_plugin_node."""
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+
+        # Не должно упасть, показывает plugin-узел
+        panel.show_node("camera", "source", params={"fps": "30"})
+
+        assert panel.current_process == "camera"
+        assert panel._mode == "plugin"
+
+
+class TestDisplayIdCombo:
+    """Тесты combo «Display» для display-узлов."""
+
+    def test_show_display_node_creates_display_id_combo(self, qtbot):
+        """Combo «Display» появляется и заполнен display id+name."""
+        entries = [
+            _make_display_entry("main_output", "Основной дисплей"),
+            _make_display_entry("debug_view", "Отладочный вид"),
+        ]
+        ctx = _make_ctx_with_display_registry(entries)
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.show()  # нужно для корректной проверки isVisible()
+        panel.set_context(ctx)
+
+        panel.show_display_node("disp1", "main_output", "Основной дисплей")
+
+        # Форма с combo display должна быть видима (panel.show() активирует дерево)
+        assert panel._display_id_form.isVisible()
+        assert not panel._target_process_form.isVisible()
+
+        combo = panel._display_id_combo
+        assert combo is not None
+        assert combo.isEnabled()
+        # Проверяем что display_id доступны через userData
+        ids = [combo.itemData(i) for i in range(combo.count())]
+        assert "main_output" in ids
+        assert "debug_view" in ids
+
+    def test_show_display_node_selects_current_display_id(self, qtbot):
+        """Combo показывает текущий display_id."""
+        entries = [
+            _make_display_entry("main_output", "Основной"),
+            _make_display_entry("debug", "Отладка"),
+        ]
+        ctx = _make_ctx_with_display_registry(entries)
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+
+        panel.show_display_node("disp1", "debug", "Отладка")
+
+        combo = panel._display_id_combo
+        # Выбранный элемент должен соответствовать display_id="debug"
+        assert combo.itemData(combo.currentIndex()) == "debug"
+
+    def test_display_id_change_emits_signal(self, qtbot):
+        """Выбор display в combo → испускается сигнал display_id_changed."""
+        entries = [
+            _make_display_entry("main_output", "Основной"),
+            _make_display_entry("debug", "Отладка"),
+        ]
+        ctx = _make_ctx_with_display_registry(entries)
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+        panel.show_display_node("disp1", "main_output", "Основной")
+
+        received = []
+        panel.display_id_changed.connect(lambda nid, did: received.append((nid, did)))
+
+        # Выбрать другой display
+        combo = panel._display_id_combo
+        target_idx = -1
+        for i in range(combo.count()):
+            if combo.itemData(i) == "debug":
+                target_idx = i
+                break
+        assert target_idx >= 0
+        combo.setCurrentIndex(target_idx)
+
+        assert len(received) == 1
+        assert received[0] == ("disp1", "debug")
+
+    def test_display_combo_disabled_when_registry_unavailable(self, qtbot):
+        """Если DisplayRegistry недоступен — combo disabled, не падает."""
+        ctx = _make_ctx_no_rm()
+        ctx.display_registry = None
+        ctx.recipe_manager = None
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+
+        # Не должно упасть
+        panel.show_display_node("disp1", "some_id", "")
+
+        combo = panel._display_id_combo
+        assert not combo.isEnabled() or combo.count() == 0
+
+    def test_signal_suppression_during_show_display_node(self, qtbot):
+        """При show_display_node сигнал display_id_changed НЕ испускается."""
+        entries = [_make_display_entry("main_output", "Основной")]
+        ctx = _make_ctx_with_display_registry(entries)
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+
+        received = []
+        panel.display_id_changed.connect(lambda *args: received.append(args))
+
+        panel.show_display_node("disp1", "main_output", "Основной")
+
+        assert len(received) == 0, "Сигнал display_id_changed не должен эмитироваться при programmatic show"
+
+    def test_refresh_display_combo_updates_entries(self, qtbot):
+        """refresh_display_combo() обновляет список дисплеев из реестра."""
+        entries = [_make_display_entry("main_output", "Основной")]
+        ctx = _make_ctx_with_display_registry(entries)
+
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_context(ctx)
+        panel.show_display_node("disp1", "main_output", "Основной")
+
+        # Добавить новый дисплей в реестр
+        new_entries = [
+            _make_display_entry("main_output", "Основной"),
+            _make_display_entry("secondary", "Вторичный"),
+        ]
+        ctx.display_registry.list.return_value = new_entries
+        ctx.display_registry.get.side_effect = lambda did: next((e for e in new_entries if e.id == did), None)
+
+        # Обновить combo
+        panel.refresh_display_combo()
+
+        combo = panel._display_id_combo
+        ids = [combo.itemData(i) for i in range(combo.count())]
+        assert "secondary" in ids

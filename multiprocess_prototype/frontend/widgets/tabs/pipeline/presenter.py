@@ -3,6 +3,7 @@
 Координирует: PipelineModel (SSOT) + ActionBus + GraphScene + TopologyHolder + Bridge.
 Signal suppression предотвращает циклы при programmatic update.
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,6 +45,7 @@ class PipelinePresenter:
 
         # Ленивый импорт TopologyPresenter (для load/save YAML)
         from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
+
         self._topo = TopologyPresenter()
 
         # Подписка на TopologyHolder (если доступен)
@@ -58,10 +60,13 @@ class PipelinePresenter:
     def set_inspector(self, panel: "NodeInspectorPanel") -> None:
         """Привязать NodeInspectorPanel и настроить интеграцию с ActionBus.
 
-        Передаёт AppContext в panel и подписывается на field_changed.
+        Передаёт AppContext в panel и подписывается на field_changed,
+        target_process_changed, display_id_changed.
         """
         panel.set_context(self._ctx)
         panel.field_changed.connect(self._on_inspector_field_changed)
+        panel.target_process_changed.connect(self._on_target_process_changed)
+        panel.display_id_changed.connect(self._on_display_id_changed)
 
     def _on_inspector_field_changed(
         self,
@@ -88,6 +93,7 @@ class PipelinePresenter:
 
         if bus is not None:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
             action = V2ActionBuilder.field_set_timed(
                 register_name=process_name,
                 field_name=field_name,
@@ -107,11 +113,111 @@ class PipelinePresenter:
                 )
         else:
             logger.warning(
-                "field_changed: ни ActionBus ни RegistersManager недоступны "
-                "для %s.%s = %s",
+                "field_changed: ни ActionBus ни RegistersManager недоступны для %s.%s = %s",
                 process_name,
                 field_name,
                 new_value,
+            )
+
+    def _on_target_process_changed(self, node_id: str, new_process: str) -> None:
+        """Обработчик выбора нового целевого процесса для plugin-узла.
+
+        Записывает target_process как мета-поле в запись процесса в topology.
+        Это метаданные для сериализации в blueprint (Task 7a.4), не переименование.
+
+        Args:
+            node_id: идентификатор узла (обычно совпадает с process_name).
+            new_process: имя целевого процесса из активного рецепта.
+        """
+        if self._suppress:
+            return
+
+        processes = self._model._topology.get("processes", [])
+
+        # Найти запись узла и записать target_process как мета-поле
+        found = False
+        for proc in processes:
+            if isinstance(proc, dict):
+                if proc.get("process_name") == node_id:
+                    proc["target_process"] = new_process
+                    found = True
+                    break
+            else:
+                if getattr(proc, "process_name", "") == node_id:
+                    try:
+                        proc.target_process = new_process
+                    except AttributeError:
+                        pass
+                    found = True
+                    break
+
+        if found:
+            logger.debug(
+                "target_process обновлён: узел '%s' → процесс '%s'",
+                node_id,
+                new_process,
+            )
+        else:
+            logger.warning(
+                "_on_target_process_changed: узел '%s' не найден в topology",
+                node_id,
+            )
+
+    def _on_display_id_changed(self, node_id: str, new_display_id: str) -> None:
+        """Обработчик выбора нового display для display-узла.
+
+        Находит запись display в topology по node_id, обновляет display_id
+        и display_name (если DisplayRegistry доступен).
+
+        Args:
+            node_id: идентификатор display-узла.
+            new_display_id: новый выбранный display_id.
+        """
+        if self._suppress:
+            return
+
+        displays = self._model._topology.get("displays", [])
+
+        # Получить display_name из реестра если доступен
+        new_display_name = ""
+        registry = getattr(self._ctx, "display_registry", None)
+        if registry is not None:
+            try:
+                entry = registry.get(new_display_id)
+                if entry is not None:
+                    new_display_name = getattr(entry, "name", "")
+            except Exception:
+                logger.debug("Не удалось получить имя display '%s' из реестра", new_display_id, exc_info=True)
+
+        found = False
+        for disp in displays:
+            if isinstance(disp, dict):
+                if disp.get("node_id") == node_id:
+                    disp["display_id"] = new_display_id
+                    disp["display_name"] = new_display_name
+                    found = True
+                    break
+            else:
+                if getattr(disp, "node_id", "") == node_id:
+                    try:
+                        disp.display_id = new_display_id
+                        disp.display_name = new_display_name
+                    except AttributeError:
+                        pass
+                    found = True
+                    break
+
+        if found:
+            logger.debug(
+                "display_id обновлён: узел '%s' → display '%s' (name='%s')",
+                node_id,
+                new_display_id,
+                new_display_name,
+            )
+        else:
+            logger.warning(
+                "_on_display_id_changed: display-узел '%s' не найден в topology",
+                node_id,
             )
 
     # ------------------------------------------------------------------ #
@@ -146,9 +252,7 @@ class PipelinePresenter:
         if isinstance(metadata, dict):
             gui_pos = metadata.get("gui_positions", {})
             if isinstance(gui_pos, dict):
-                self._gui_positions = {
-                    k: tuple(v) for k, v in gui_pos.items()
-                }
+                self._gui_positions = {k: tuple(v) for k, v in gui_pos.items()}
 
         return self._topology_to_graph(topology)
 
@@ -170,15 +274,13 @@ class PipelinePresenter:
 
         # Записать позиции в metadata
         topo.setdefault("metadata", {})
-        topo["metadata"]["gui_positions"] = {
-            node_id: list(pos)
-            for node_id, pos in self._gui_positions.items()
-        }
+        topo["metadata"]["gui_positions"] = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
         return topo
 
     def save_topology_to_file(self, path: Path) -> None:
         """Сохранить topology с позициями в YAML файл."""
         import yaml
+
         topo = self.export_topology_with_positions()
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(topo, f, default_flow_style=False, allow_unicode=True)
@@ -187,9 +289,7 @@ class PipelinePresenter:
     #  Мутации через PipelineModel + ActionBus                             #
     # ------------------------------------------------------------------ #
 
-    def add_process_from_plugin(
-        self, plugin_name: str, x: float = 0.0, y: float = 0.0
-    ) -> str | None:
+    def add_process_from_plugin(self, plugin_name: str, x: float = 0.0, y: float = 0.0) -> str | None:
         """Добавить процесс из палитры плагинов.
 
         Returns: имя процесса или None если не удалось.
@@ -215,19 +315,23 @@ class PipelinePresenter:
                 try:
                     schemas: list[PortSchema] = []
                     for port in entry.inputs:
-                        schemas.append(PortSchema(
-                            name=port.name,
-                            direction="input",
-                            dtype=port.dtype,
-                            optional=port.optional,
-                        ))
+                        schemas.append(
+                            PortSchema(
+                                name=port.name,
+                                direction="input",
+                                dtype=port.dtype,
+                                optional=port.optional,
+                            )
+                        )
                     for port in entry.outputs:
-                        schemas.append(PortSchema(
-                            name=port.name,
-                            direction="output",
-                            dtype=port.dtype,
-                            optional=port.optional,
-                        ))
+                        schemas.append(
+                            PortSchema(
+                                name=port.name,
+                                direction="output",
+                                dtype=port.dtype,
+                                optional=port.optional,
+                            )
+                        )
                     port_schemas = schemas if schemas else None
                 except Exception:
                     port_schemas = None
@@ -239,6 +343,7 @@ class PipelinePresenter:
         bus = self._ctx.action_bus()
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
             action = V2ActionBuilder.process_add(old_topo, new_topo, name)
             bus.execute(action)
         else:
@@ -264,6 +369,7 @@ class PipelinePresenter:
             bus = self._ctx.action_bus()
             if bus:
                 from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
                 action = V2ActionBuilder.process_remove(old_topo, new_topo, node_id)
                 bus.execute(action)
 
@@ -285,6 +391,7 @@ class PipelinePresenter:
         bus = self._ctx.action_bus()
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
             action = V2ActionBuilder.wire_add(old_topo, new_topo, source, target)
             bus.execute(action)
 
@@ -307,6 +414,7 @@ class PipelinePresenter:
         bus = self._ctx.action_bus()
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
             action = V2ActionBuilder.node_move(node_id, old_x, old_y, new_x, new_y)
             bus.execute(action)
 
@@ -397,9 +505,16 @@ class PipelinePresenter:
 
             # Восстановить позицию из gui_positions
             x, y = self._gui_positions.get(name, (0.0, 0.0))
-            nodes.append(NodeData(
-                node_id=name, title=name, subtitle=category, category=category, x=x, y=y,
-            ))
+            nodes.append(
+                NodeData(
+                    node_id=name,
+                    title=name,
+                    subtitle=category,
+                    category=category,
+                    x=x,
+                    y=y,
+                )
+            )
 
         wires = topo_dict.get("wires", [])
         for w in wires:
