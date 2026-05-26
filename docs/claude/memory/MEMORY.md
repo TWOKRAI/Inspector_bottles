@@ -1,4 +1,5 @@
 - [Qt widget editing patterns](feedback_widget_qt_patterns.md) — setFlags recursion, blockSignals, EditTriggers (critical)
+- [Qt-MCP smoke verification mandatory](feedback_qt_mcp_smoke_verification.md) — after any Qt tab/widget rewrite, run proto + qt_snapshot; pytest-qt unit tests don't prove real assembly
 - [Dict at Boundary for GUI](feedback_dict_at_boundary_gui.md) — widgets work with dict only, never live SchemaBase
 - [Register routing hang](feedback_register_routing_hang.md) — FieldRouting without IPC channel = GUI freeze
 - [SourceTopology two-layer architecture](project_source_topology.md) — Layer 1 (sources) + Layer 2 (processing), shared region keys
