@@ -1,13 +1,21 @@
 # MCP Routing — Canonical Map
 
 > **Назначение этого файла:** для авторов агентов (при правке `.md`), для verify-скрипта
-> (`scripts/verify-mcp-orchestration.sh`), для человека-ревьюера системы. **Агенты этот
-> файл runtime НЕ читают** (this file is not for runtime — agents do not load it) —
-> у каждого свой самодостаточный routing-блок в собственной `.md`. Эта карта — единый канон,
-> на который опираются авторы при правке агентов и при ревью изменений.
+> (`scripts/verify-mcp-orchestration.sh`), для линтера (`scripts/lint_routing.py`),
+> для человека-ревьюера системы. **Агенты этот файл runtime НЕ читают** (this file is
+> not for runtime — agents do not load it) — у каждого свой самодостаточный routing-блок
+> в собственной `.md`. Эта карта — единый канон, на который опираются авторы при правке
+> агентов и при ревью изменений.
 >
 > Если правишь routing-блок в каком-то агенте — сверяйся с этим файлом. Если добавляешь
-> новый MCP — сначала описываешь здесь, потом в агентах.
+> новый MCP — сначала описываешь здесь (включая `**Canonical refs:**` блок), потом
+> в агентах.
+>
+> **Canonical refs:** каждая `### <server>` секция заканчивается блоком
+> `**Canonical refs:** \`mcp:<server>:<tool>\`, …` — это authoritative-список tools.
+> Линтер (`scripts/lint_routing.py`) сверяет каждое упоминание `mcp:server:tool` в агентах
+> с этим списком. Короткие формы в bullet'ах (`qt_find_widget`, `callers`) — читабельность,
+> канон — только в `Canonical refs`.
 
 ---
 
@@ -43,8 +51,11 @@
 - `mcp__qex__search_code` — гибридный BM25 + dense поиск.
 - `mcp__qex__get_indexing_status` — состояние индекса.
 - `mcp__qex__index_codebase` — переиндексация (force/incremental).
+- `mcp__qex__clear_index` — сбросить индекс (редко, при corruption).
 
 **Не дублируй:** если qex дал релевантный список — не Grep'ай те же файлы.
+
+**Canonical refs:** `mcp:qex:search_code`, `mcp:qex:get_indexing_status`, `mcp:qex:index_codebase`, `mcp:qex:clear_index`, `mcp:qex:download_model`.
 
 ### sentrux — архитектурный health-gate (core)
 
@@ -61,6 +72,8 @@
 
 **Не дублируй:** если sentrux:check_rules дал список нарушений — не пересматривай руками.
 
+**Canonical refs:** `mcp:sentrux:check_rules`, `mcp:sentrux:dsm`, `mcp:sentrux:health`, `mcp:sentrux:test_gaps`, `mcp:sentrux:git_stats`, `mcp:sentrux:scan`, `mcp:sentrux:rescan`, `mcp:sentrux:session_start`, `mcp:sentrux:session_end`.
+
 ### context7 — документация библиотек (core, user-level)
 
 **Когда вызывать:** работа с любой внешней библиотекой — особенно при unfamiliar API, version-specific migration, exact method signature.
@@ -70,6 +83,8 @@
 - `mcp__context7__query-docs` — задать вопрос по докам.
 
 **Не для:** stdlib, well-known patterns core-стека проекта (если уверен в API), refactoring внутренней бизнес-логики.
+
+**Canonical refs:** `mcp:context7:resolve-library-id`, `mcp:context7:query-docs`.
 
 ### codegraph — function-level call graph (optional)
 
@@ -87,6 +102,8 @@
 
 **Не дублируй:** codegraph дал callers → не Grep'ай те же символы.
 
+**Canonical refs:** `mcp:codegraph:callers`, `mcp:codegraph:callees`, `mcp:codegraph:impact`, `mcp:codegraph:context`, `mcp:codegraph:files`, `mcp:codegraph:search`, `mcp:codegraph:node`, `mcp:codegraph:status`.
+
 ### serena — LSP symbol retrieval (optional, experimental)
 
 **Когда подключён:** проекты ≥10k LOC с активным cross-file refactoring + стабильным LSP для языка.
@@ -99,6 +116,8 @@
 
 **Конфликт с codegraph/ast-grep:** serena делает scope-aware (LSP) операции; ast-grep — pattern-based; codegraph — pre-indexed graph. Выбирай по задаче.
 
+**Canonical refs:** `mcp:serena:find_symbol`, `mcp:serena:find_referencing_symbols`, `mcp:serena:find_implementations`, `mcp:serena:find_declaration`, `mcp:serena:rename_symbol`, `mcp:serena:replace_symbol_body`, `mcp:serena:insert_before_symbol`, `mcp:serena:insert_after_symbol`, `mcp:serena:safe_delete_symbol`, `mcp:serena:get_symbols_overview`, `mcp:serena:get_diagnostics_for_file`.
+
 ### ast-grep — structural codemods (optional)
 
 **Когда подключён:** проекты с активным codemod-refactoring, polyglot, или строгие code-rules в CI.
@@ -108,6 +127,8 @@
 - `ast-grep:rewrite` (через rules) — AST-safe замена.
 
 **Не дублируй с serena:** serena для одного символа (scope-aware), ast-grep для bulk patterns.
+
+**Canonical refs:** `mcp:ast-grep:scan`, `mcp:ast-grep:rewrite`.
 
 ### graphify — knowledge graph (optional)
 
@@ -119,13 +140,17 @@
 
 **Не для:** обычная навигация по коду — это `qex`/`codegraph`.
 
+**Canonical refs:** `mcp:graphify:query_graph`, `mcp:graphify:get_node`, `mcp:graphify:shortest_path`.
+
 ### github-mcp — GitHub state (optional)
 
 **Когда подключён:** проект на GitHub, активная работа с PR/Issues/Actions.
 
-**Категории tools:** Issues, Pulls, Actions, Repo, Projects (всего 80+).
+**Категории tools:** Issues, Pulls, Actions, Repo, Projects (всего 80+ tools — динамический набор, точные имена эволюционируют между релизами upstream).
 
 **Не для:** локальный `git` (status, log, diff, commit) — это shell `git`, всегда дешевле.
+
+**Canonical refs:** *dynamic tool set — конкретные tools перечисляются в агентах при необходимости. Линтер `lint_routing.py` для github-mcp работает в режиме warning (orphan-tools допустимы).*
 
 ### qt-mcp — PyQt/PySide runtime (optional, GUI-only)
 
@@ -157,6 +182,8 @@
 
 **`qt_type` с `use_clipboard=True`** — для многострочного текста (иначе newline сабмитит каждую строку в console-виджетах).
 
+**Canonical refs:** `mcp:qt-mcp:qt_find_widget`, `mcp:qt-mcp:qt_snapshot`, `mcp:qt-mcp:qt_batch`, `mcp:qt-mcp:qt_screenshot`, `mcp:qt-mcp:qt_click`, `mcp:qt-mcp:qt_type`, `mcp:qt-mcp:qt_key_press`, `mcp:qt-mcp:qt_trigger_action`, `mcp:qt-mcp:qt_invoke_slot`, `mcp:qt-mcp:qt_get_text`, `mcp:qt-mcp:qt_widget_details`, `mcp:qt-mcp:qt_set_property`, `mcp:qt-mcp:qt_messages`, `mcp:qt-mcp:qt_thread_check`, `mcp:qt-mcp:qt_signals`, `mcp:qt-mcp:qt_object_tree`, `mcp:qt-mcp:qt_layout_check`, `mcp:qt-mcp:qt_active_popup`, `mcp:qt-mcp:qt_list_windows`, `mcp:qt-mcp:qt_menu_items`, `mcp:qt-mcp:qt_wait_for`, `mcp:qt-mcp:qt_vtk_screenshot`, `mcp:qt-mcp:qt_vtk_scene_info`.
+
 ### playwright — browser automation (optional, web-only)
 
 **Когда подключён:** проект — веб-приложение, нужно verify UI в браузере (`verify-done` для веб).
@@ -164,6 +191,8 @@
 **Ключевые tools:** `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_fill`, `browser_press_key`, `browser_evaluate`, `browser_console_logs`, `browser_network_requests`.
 
 **Используется:** verify-done skill (golden-path screenshot), tester при e2e debugging.
+
+**Canonical refs:** `mcp:playwright:browser_navigate`, `mcp:playwright:browser_screenshot`, `mcp:playwright:browser_click`, `mcp:playwright:browser_fill`, `mcp:playwright:browser_press_key`, `mcp:playwright:browser_evaluate`, `mcp:playwright:browser_console_logs`, `mcp:playwright:browser_network_requests`.
 
 ### sequential-thinking — externalized reasoning (optional)
 
@@ -173,17 +202,7 @@
 
 **Используется:** investigator (Workflow §1 при сложных cross-module bugs), teamlead (Escalation mode).
 
-### playwright — browser automation (optional, web-only)
-
-**Когда подключён:** проект — веб-приложение, нужно verify UI в браузере (`verify-done` для веб).
-
-**Ключевые tools:** `browser_navigate`, `screenshot`, `click`, `fill`, `evaluate`.
-
-### sequential-thinking — multi-step reasoning (optional)
-
-**Когда подключён:** для investigator на 3-й гипотезе, teamlead на эскалации, сложные debugging-цепочки.
-
-**Один tool:** `sequentialthinking` — chain-of-thought scratchpad.
+**Canonical refs:** `mcp:sequential-thinking:sequentialthinking`.
 
 ---
 
@@ -224,6 +243,7 @@ Health-check выводится при `SessionStart` хуком `hooks/quality/
 
 ## Maintenance
 
-- При добавлении нового MCP — сначала описать здесь (новая секция + строка в TL;DR), потом править агентов.
+- При добавлении нового MCP — сначала описать здесь (новая секция + строка в TL;DR + блок `**Canonical refs:**`), потом править агентов.
 - При удалении MCP — убрать отсюда, прогнать verify-скрипт (найдёт orphan-упоминания в агентах).
 - verify-скрипт (`scripts/verify-mcp-orchestration.sh`) проверяет consistency: все `mcp:server:tool` упомянутые в агентах присутствуют здесь.
+- Линтер (`scripts/lint_routing.py`) — строгая Python-проверка для CI: agents → canonical (error), canonical → agents (warning, orphans допустимы).

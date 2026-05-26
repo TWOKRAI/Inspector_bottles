@@ -229,6 +229,10 @@
       }
     ]
   },
+  "env": {
+    "MCP_TIMEOUT": "7200000",
+    "MCP_TOOL_TIMEOUT": "7200000"
+  },
   "alwaysThinkingEnabled": true,
   "preferredLanguage": "ru",
   "statusLine": {

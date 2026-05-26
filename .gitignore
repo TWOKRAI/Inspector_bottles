@@ -81,6 +81,10 @@ milvus-docker/volumes/
 # qex-mcp-v2 source
 /qex/
 
+# qex semantic index (junction → ~/.qex/projects/Inspector_bottles_<hash>/)
+/.qex/
+.qex-reindex.log
+
 # Pytest
 .pytest_cache/
 .coverage
