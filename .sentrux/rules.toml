@@ -152,3 +152,30 @@ reason = "adapters не импортируют Qt-виджеты (UI-agnostic). 
 from   = "multiprocess_prototype/adapters/*"
 to     = "PySide6/*"
 reason = "adapters UI-agnostic — PySide6 импорт запрещён. Adapter-слой Phase C."
+
+# Domain-слой (Phase D cross-tab refactor) — чистый Python, без UI и без adapters
+# domain/ знает только о себе: entities, events, commands, protocols, EventBus, AppServices.
+# UI-зависимости и adapter-слой появляются выше (frontend/ и adapters/).
+[[boundaries]]
+from   = "multiprocess_prototype/domain/*"
+to     = "multiprocess_prototype/adapters/*"
+reason = "domain UI-agnostic и adapter-agnostic — знает только собственные протоколы. Phase D."
+
+[[boundaries]]
+from   = "multiprocess_prototype/domain/*"
+to     = "multiprocess_prototype/frontend/*"
+reason = "domain не импортирует Qt/frontend. Phase D Q1 — UI-agnostic invariant."
+
+[[boundaries]]
+from   = "multiprocess_prototype/domain/*"
+to     = "PySide6/*"
+reason = "domain — pure Python, без Qt. Phase D."
+
+# frontend → adapters разрешено (Phase D добавил AppServices DI в frontend/).
+# Явное разрешение документирует намерение; sentrux использует boundaries как deny-список,
+# поэтому отсутствие boundary = разрешено. Этот комментарий — архитектурный маркер.
+#
+# Направление: frontend/ использует adapters/ через AppServices Protocol'ы.
+# Обратное (adapters/ импортирует frontend/) — запрещено выше.
+#
+# Phase F удалит прямые ctx.extras[...] → останется только services.X через Protocols.

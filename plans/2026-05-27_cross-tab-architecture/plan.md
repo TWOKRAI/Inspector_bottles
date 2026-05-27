@@ -22,9 +22,9 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 |------|----------|--------|------|-------------|
 | **A** | Audit (read-only inventory) | DONE (2026-05-27, commit `bdfccd50`) | [`phase-a-audit.md`](phase-a-audit.md) | — |
 | **B** | Domain skeleton (`multiprocess_prototype/domain/`) | **DONE** (2026-05-27, коммиты `83274ef8` → `e65f7158`, 233 теста, APPROVED) | [`phase-b-domain.md`](phase-b-domain.md) | A done |
-| **C** | Adapters (9 классов + расширения) | **IN PROGRESS** (C.0/C.1 DONE; +C.1.5/C.1.6 added после investigator-ревью) | [`phase-c-adapters.md`](phase-c-adapters.md) | B done |
-| **D** | `AppServices` DI + QtEventBus + ConfigStore + deprecation shim + Settings PoC | **APPROVED** (open questions закрыты 2026-05-27, +D.2b ConfigStore) | [`phase-d-app-services.md`](phase-d-app-services.md) | C done |
-| **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays → Settings) | NOT PLANNED | — | D done |
+| **C** | Adapters (9 классов + расширения) | **DONE** (2026-05-27, 9/9 Tasks, коммиты `1f1d28ff`…`2884b971`, 113 adapter + 240 domain тестов) | [`phase-c-adapters.md`](phase-c-adapters.md) | B done |
+| **D** | `AppServices` DI + QtEventBus + ConfigStore + deprecation shim + Settings PoC | **DONE** (2026-05-27, 7/7 Tasks, коммиты `bfc71c10`, `12f57c44`, `7dfc27fd`, `79639cc3`, `931461a2`, `a876f73e`, `94983ed2` + D.6) | [`phase-d-app-services.md`](phase-d-app-services.md) | C done |
+| **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays) | **READY** (Pipeline = первый приоритет) | — | D done |
 | **F** | Удаление legacy (`config["topology"]`, `extras["topology"]`, fallback chains) | NOT PLANNED | — | E done |
 | **G** | UX-фишки (auto-reveal, domain-level validation, cross-tab linking, diff-view) | NOT PLANNED | — | F done |
 
@@ -35,7 +35,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 - Phase A — DONE. Deliverable: [`docs/refactors/2026-05_cross_tab_audit.md`](../../docs/refactors/2026-05_cross_tab_audit.md), 380 строк. Коммит `bdfccd50`.
 - recipe_manager double-contract — закрыт hotfix `85eec097` (presenter.py:730,803 + 2 теста).
 - **Phase B — DONE (2026-05-27).** Все 6 Tasks выполнены последовательно (B.1 review iteration → B.2 → B.3 → B.5 → B.4 APPROVED → B.6). Deliverable: `multiprocess_prototype/domain/` — 7 frozen-entities, 14 events, 14 commands, 9 Protocols, EventBus + AppServices, builder + _fakes.py. 233 теста зелёных, 0 ruff errors, 0 запрещённых импортов. Коммиты: `83274ef8`, `d3c812de`, `f53b828c`, `c8ec137b`, `c6e697e9`, `24d1fc3f`, `e65f7158`.
-- **Phase C — IN PROGRESS (2026-05-27).** 6 open questions закрыты + 1 новое (Q7 suppress_legacy_notify не используется по умолчанию). Изначальные 7 Tasks расширены до **9** после investigator-ревью реальных call sites:
+- **Phase C — DONE (2026-05-27).** 9/9 Tasks выполнены. 10 adapter-классов, 113 adapter + 240 domain тестов, ruff 0, 0 запрещённых импортов. Q1-Q7 + 7 documented compromises. Коммиты: `1f1d28ff`…`2884b971`. Изначальные 7 Tasks расширены до **9** после investigator-ревью реальных call sites:
   - **C.0 DONE** (`1f1d28ff` + `210f21a1`): domain hot-fixes — Wire.description, Process.metadata, lazy register_domain_schemas. 240 tests.
   - **C.1 DONE** (`551ebdad`): 3 read-only catalog adapters (Plugin/Service/Display). 30 tests + 2 skipped.
   - **C.1.5 NEW** (Middle, developer): backport PluginSpec.description + PortSpec.optional/shape + DisplayRegistry.load(yaml) в app.py. Reason: investigator выявил, что без этих полей PluginCatalog покрывает только 14% call sites.
@@ -46,7 +46,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
   - **C.5** (Senior): RecipeStore (variant A — denormalize meta→top-level).
   - **C.6** (Senior): CommandDispatcher без suppress_legacy_notify (double notification до Phase F — осознанный компромисс).
   - **C.7** (Middle): adapters/__init__.py + README + integration smoke.
-- **Phase D — APPROVED (2026-05-27).** 5 open questions закрыты, +1 Task добавлен (D.2b ConfigStore Protocol — user-confirmed). 7 Tasks: D.1 AppServices factory (10 полей), D.2 QtEventBus в `frontend/`, **D.2b ConfigStore Protocol+adapter**, D.3 ProjectHolder в `adapters/dispatch/`, D.4 deprecation shim, D.5 Settings tab PoC (использует services.config), D.6 migration guide + sentrux baseline. **Pipeline = первый Phase E** (главный consumer, валидирует архитектуру end-to-end).
+- **Phase D — DONE (2026-05-27, 7/7 Tasks).** AppServices factory + QtEventBus + ConfigStore Protocol + ProjectHolder + deprecation shim + Settings PoC + migration guide + sentrux baseline. Qt-MCP smoke прошёл: MainWindow + SettingsTab рендерятся, 25 widgets, no Qt warnings. ~1981 тест passed, 3 skipped (macOS SHM — known). Коммиты: D.2 `bfc71c10`, D.3 `12f57c44`, D.2b `7dfc27fd`, D.4 `79639cc3`, D.1 `931461a2`, D.5 `a876f73e` + `94983ed2`, D.6 текущий коммит. **Pipeline = первый Phase E** (главный consumer, валидирует архитектуру end-to-end).
 - Архитектурный обзор Phase B (investigator-ревью 2026-05-27): 3 главных риска — двойная нотификация TopologyHolder+EventBus (HIGH), SchemaRegistry name collision (MEDIUM), RecipeStore adapter complexity (MEDIUM). Все учтены в Phase C/D планах.
 
 ## Известные ограничения и риски (вне Phase A)

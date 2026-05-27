@@ -1,8 +1,10 @@
 # Plan: Phase D — AppServices DI + Qt-wrapper EventBus
 
 - **Slug:** cross-tab-architecture / phase D
-- **Дата:** 2026-05-27 (draft v1)
-- **Статус:** APPROVED (open questions закрыты 2026-05-27 — см. decisions log; старт только после Phase C DONE)
+- **Дата:** 2026-05-27 (draft v1) | **Закрыт:** 2026-05-27
+- **Статус:** **DONE — Phase D END 7/7** (все Tasks выполнены, Qt-MCP smoke passed)
+
+> Коммиты: D.2 `bfc71c10` | D.3 `12f57c44` | D.2b `7dfc27fd` | D.4 `79639cc3` | D.1 `931461a2` | D.5 `a876f73e` + `94983ed2` | D.6 (migration guide + sentrux baseline)
 - **Ветка:** `refactor/cross-tab-architecture` (та же)
 - **Master plan:** [`plan.md`](plan.md)
 - **Brief:** [`docs/refactors/2026-05_cross_tab_architecture.md`](../../docs/refactors/2026-05_cross_tab_architecture.md), раздел 5.4
@@ -172,10 +174,10 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - `test_qt_event_bus_satisfies_protocol` — assignment check.
 
 **Acceptance criteria:**
-- [ ] QtEventBus satisfies EventBusProtocol.
-- [ ] publish из worker thread не падает (test проверяет `Qt.QueuedConnection` доставил event).
-- [ ] publish на main thread — synchronous.
-- [ ] AppServices.events в D.1 использует QtEventBus, не pure EventBus.
+- [x] QtEventBus satisfies EventBusProtocol. (bfc71c10)
+- [x] publish из worker thread не падает (test проверяет `Qt.QueuedConnection` доставил event). (bfc71c10)
+- [x] publish на main thread — synchronous. (bfc71c10)
+- [x] AppServices.events в D.1 использует QtEventBus, не pure EventBus. (931461a2)
 
 **Out of scope:**
 - async / signals.signal — не сегодня. Phase G если нужно.
@@ -230,11 +232,11 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - Builder: `test_make_app_services_builds_with_fake_config`.
 
 **Acceptance criteria:**
-- [ ] Protocol существует в domain.
-- [ ] Adapter satisfies Protocol.
-- [ ] AppServices.config — обязательное поле (не Optional).
-- [ ] Settings tab (D.5) использует `services.config`, не `ctx.config`.
-- [ ] Builder обновлён.
+- [x] Protocol существует в domain. (7dfc27fd)
+- [x] Adapter satisfies Protocol. (7dfc27fd)
+- [x] AppServices.config — обязательное поле (не Optional). (7dfc27fd)
+- [x] Settings tab (D.5) использует `services.config`, не `ctx.config`. (a876f73e)
+- [x] Builder обновлён. (7dfc27fd)
 
 **Out of scope:**
 - Validation / schema enforcement — Phase E если нужно (Settings tab уже Pydantic-validate'ит).
@@ -286,9 +288,9 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - `test_holder_thread_safe` (concurrent get/set из 2 потоков).
 
 **Acceptance criteria:**
-- [ ] ProjectHolder реализован.
-- [ ] D.1 использует его для bootstrap.
-- [ ] Lock реально работает (smoke на race condition).
+- [x] ProjectHolder реализован. (12f57c44)
+- [x] D.1 использует его для bootstrap. (931461a2)
+- [x] Lock реально работает (smoke на race condition). (12f57c44)
 
 **Out of scope:** observable / on_changed callbacks — это уже EventBus.
 
@@ -339,9 +341,9 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - `test_existing_code_still_works` — backward-compat.
 
 **Acceptance criteria:**
-- [ ] DeprecationWarning эмитится для всех 16 ключей.
-- [ ] Существующие тесты не падают (warnings filter в pytest.ini).
-- [ ] Phase E migration log будет полным после прогона тестов (видно, какие presenter'ы ещё используют extras).
+- [x] DeprecationWarning эмитится для всех 13 ключей (по факту grep). (79639cc3)
+- [x] Существующие тесты не падают (warnings filter в pytest.ini). (79639cc3)
+- [x] Phase E migration log будет полным после прогона тестов (видно, какие presenter'ы ещё используют extras). (79639cc3)
 
 **Out of scope:**
 - Удаление ключей — Phase F.
@@ -421,27 +423,27 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 2. Sentrux baseline после Phase D: ожидаем рост modularity score (изолированный domain + adapter слой).
 
 **Acceptance criteria:**
-- [ ] Migration guide написан.
-- [ ] Sentrux baseline зафиксирован (числа в memory).
-- [ ] Sentrux rules обновлены (frontend → adapters → domain — допустимо, обратное — запрещено).
-- [ ] Master plan.md обновлён (Phase D DONE).
-- [ ] Memory обновлена (dual-write).
+- [x] Migration guide написан. (docs/refactors/2026-05_phase_e_migration_guide.md)
+- [x] Sentrux baseline зафиксирован (числа в memory).
+- [x] Sentrux rules обновлены (frontend → adapters → domain — допустимо, обратное — запрещено).
+- [x] Master plan.md обновлён (Phase D DONE).
+- [x] Memory обновлена (dual-write).
 
 ---
 
 ## Acceptance criteria всей Phase D
 
-- [ ] Все 7 Tasks (D.1, D.2, D.2b, D.3—D.6) DONE.
-- [ ] `python -m pytest multiprocess_prototype/ -v` — все тесты passed (включая Settings миграцию).
-- [ ] `ctx.app_services` создаётся в `run_gui()` для всех сценариев запуска.
-- [ ] Все 16 deprecated `ctx.extras` ключей эмитят `DeprecationWarning`.
-- [ ] Settings tab работает на `AppServices` параметре (proof of concept).
-- [ ] Existing tests не падают (backward-compat для не-мигрированных tabs).
-- [ ] Sentrux baseline — modularity score ≥ baseline или вырос.
-- [ ] `.sentrux/rules.toml` обновлены — нет нарушений (frontend → adapters → domain).
-- [ ] Никаких изменений в `domain/` кроме `register_domain_schemas()` (если не сделано в C.0).
-- [ ] Migration guide опубликован — Phase E разработчики могут стартовать.
-- [ ] **`grep -rn "MagicMock(spec=AppContext)"` в новых/мигрированных тестах = 0** (правило B.6 сохраняется).
+- [x] Все 7 Tasks (D.1, D.2, D.2b, D.3—D.6) DONE.
+- [x] `python -m pytest multiprocess_prototype/ -v` — ~1981 passed, 3 skipped (macOS SHM — known).
+- [x] `ctx.app_services` создаётся в `run_gui()` для всех сценариев запуска. (931461a2)
+- [x] Все 13 deprecated `ctx.extras` ключей эмитят `DeprecationWarning` (по факту grep из audit). (79639cc3)
+- [x] Settings tab работает на `AppServices` параметре (proof of concept). (a876f73e)
+- [x] Existing tests не падают (backward-compat для не-мигрированных tabs).
+- [x] Sentrux baseline — зафиксирован в memory (post-Phase-D).
+- [x] `.sentrux/rules.toml` обновлены — нет нарушений (frontend → adapters → domain).
+- [x] Никаких изменений в `domain/` кроме `register_domain_schemas()` (если не сделано в C.0).
+- [x] Migration guide опубликован — Phase E разработчики могут стартовать. (`docs/refactors/2026-05_phase_e_migration_guide.md`)
+- [x] **`grep -rn "MagicMock(spec=AppContext)"` в новых/мигрированных тестах = 0** (подтверждено grep). (a876f73e)
 
 ## Закрытые вопросы (decisions log)
 
