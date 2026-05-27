@@ -35,6 +35,23 @@ from .entities import (
     Wire,
 )
 from .errors import DomainError, EntityValidationError
+from .events import (
+    DisplayBound,
+    DisplayUnbound,
+    PluginConfigChanged,
+    PluginInserted,
+    PluginRemoved,
+    ProcessAdded,
+    ProcessRemoved,
+    ProcessRenamed,
+    ProjectEvent,
+    RecipeActivated,
+    RecipeDeactivated,
+    TargetProcessAssigned,
+    TopologyReplaced,
+    WireConnected,
+    WireDisconnected,
+)
 
 # ------------------------------------------------------------------
 # Опциональная регистрация в SchemaRegistry
@@ -87,4 +104,20 @@ __all__ = [
     # Исключения
     "DomainError",
     "EntityValidationError",
+    # События (Task B.2)
+    "ProjectEvent",
+    "ProcessAdded",
+    "ProcessRemoved",
+    "ProcessRenamed",
+    "PluginInserted",
+    "PluginRemoved",
+    "PluginConfigChanged",
+    "WireConnected",
+    "WireDisconnected",
+    "DisplayBound",
+    "DisplayUnbound",
+    "TargetProcessAssigned",
+    "RecipeActivated",
+    "RecipeDeactivated",
+    "TopologyReplaced",
 ]
