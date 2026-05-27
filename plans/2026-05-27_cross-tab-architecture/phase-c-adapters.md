@@ -221,13 +221,13 @@ multiprocess_prototype/adapters/
 - `start()` на уже запущенном сервисе — idempotent (no-op) или `DomainError`? Рекомендация: idempotent (no-op + log).
 
 **Acceptance criteria:**
-- [ ] `ServiceManager` Protocol существует с 4-5 методами.
-- [ ] Adapter satisfies Protocol.
-- [ ] Lifecycle тесты: start/stop/restart/get_lifecycle.
-- [ ] `make_test_app_services()` builder использует `FakeServiceManager`.
-- [ ] AppServices.services переименовано/расширено корректно.
-- [ ] 240+ domain тестов passed.
-- [ ] phase-d-app-services.md обновлён (D.1 snippet).
+- [x] `ServiceManager` Protocol существует с 6 методами (list/resolve/start/stop/restart/get_lifecycle).
+- [x] Adapter ServiceManagerFromRegistry satisfies Protocol.
+- [x] Lifecycle тесты: start/stop/restart/get_lifecycle + error cases + idempotency.
+- [x] `make_test_app_services()` builder использует `FakeServiceManager`.
+- [x] AppServices.services: ServiceManager (расширено корректно).
+- [x] 240+ domain тестов passed (240 domain + 51 adapter catalogs = 291 passed).
+- [x] phase-d-app-services.md обновлён (D.1 snippet).
 
 **Out of scope:**
 - Migration ServicesPresenter — это Phase E.

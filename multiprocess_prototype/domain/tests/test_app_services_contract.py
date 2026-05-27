@@ -27,6 +27,7 @@ from ..protocols import (
     RecipeStore,
     RegistersBackend,
     ServiceCatalog,
+    ServiceManager,
     TopologyRepository,
 )
 from ._fakes import (
@@ -38,6 +39,7 @@ from ._fakes import (
     FakeRecipeStore,
     FakeRegistersBackend,
     FakeServiceCatalog,
+    FakeServiceManager,
     FakeTopologyRepository,
 )
 from .conftest import make_test_app_services
@@ -80,7 +82,7 @@ def test_make_test_app_services_override_plugins() -> None:
     assert svc.plugins is custom_plugins
 
     # Остальные — дефолтные Fake-реализации (не None)
-    assert isinstance(svc.services, FakeServiceCatalog)
+    assert isinstance(svc.services, FakeServiceManager)
     assert isinstance(svc.displays, FakeDisplayCatalog)
     assert isinstance(svc.recipes, FakeRecipeStore)
     assert isinstance(svc.registers, FakeRegistersBackend)
@@ -157,10 +159,13 @@ def test_each_fake_satisfies_protocol() -> None:
     assert plugins.resolve("x") is None
     assert plugins.categories() == ("default",)
 
-    # ServiceCatalog
-    services: ServiceCatalog = FakeServiceCatalog()
+    # ServiceManager (+ backward-compat alias ServiceCatalog)
+    services: ServiceManager = FakeServiceManager()
     assert services.list_services() == ()
     assert services.resolve("x") is None
+    # Backward-compat: ServiceCatalog = ServiceManager
+    services_alias: ServiceCatalog = FakeServiceCatalog()
+    assert services_alias.list_services() == ()
 
     # DisplayCatalog
     displays: DisplayCatalog = FakeDisplayCatalog()

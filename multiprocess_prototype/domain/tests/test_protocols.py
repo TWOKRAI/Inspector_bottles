@@ -337,6 +337,11 @@ def test_all_protocols_exported() -> None:
     assert hasattr(domain, "EventBusProtocol"), "EventBusProtocol не экспортирован"
     assert hasattr(domain, "AuthFacade"), "AuthFacade не экспортирован"
 
+    # ServiceManager (Phase C.1.6) + backward-compat alias
+    assert hasattr(domain, "ServiceManager"), "ServiceManager не экспортирован"
+    assert domain.ServiceCatalog is domain.ServiceManager, "ServiceCatalog должен быть alias ServiceManager"
+    assert hasattr(domain, "ServiceLifecycle"), "ServiceLifecycle не экспортирован"
+
     # Sidecar-dataclasses
     assert hasattr(domain, "PluginSpec"), "PluginSpec не экспортирован"
     assert hasattr(domain, "PortSpec"), "PortSpec не экспортирован"

@@ -7,7 +7,8 @@ default-реализации — только сигнатуры. Реализа
 
 Экспортируемые Protocols:
   PluginCatalog     — read-only реестр плагинов
-  ServiceCatalog    — read-only реестр сервисов
+  ServiceManager    — управление сервисами (read + lifecycle)
+  ServiceCatalog    — backward-compatible alias для ServiceManager
   DisplayCatalog    — read-only реестр дисплеев
   RecipeStore       — CRUD-доступ к рецептам
   RegistersBackend  — чтение/запись регистров Inspector
@@ -18,7 +19,8 @@ default-реализации — только сигнатуры. Реализа
 
 Sidecar-dataclasses (frozen, slots):
   PluginSpec, PortSpec   — из PluginCatalog
-  ServiceSpec            — из ServiceCatalog
+  ServiceSpec            — из ServiceManager
+  ServiceLifecycle       — из ServiceManager (реэкспорт из framework)
   DisplaySpec            — из DisplayCatalog
   FieldSpec              — из RegistersBackend
   Subscription           — управление подпиской EventBus
@@ -33,13 +35,15 @@ from .event_bus import EventBusProtocol, Subscription
 from .plugin_catalog import PluginCatalog, PluginSpec, PortSpec
 from .recipe_store import RecipeStore
 from .registers_backend import FieldSpec, RegistersBackend
-from .service_catalog import ServiceCatalog, ServiceSpec
+from .service_catalog import ServiceCatalog, ServiceLifecycle, ServiceManager, ServiceSpec
 from .topology_repository import TopologyRepository
 
 __all__ = [
     # Protocols
     "PluginCatalog",
+    "ServiceManager",
     "ServiceCatalog",
+    "ServiceLifecycle",
     "DisplayCatalog",
     "RecipeStore",
     "RegistersBackend",

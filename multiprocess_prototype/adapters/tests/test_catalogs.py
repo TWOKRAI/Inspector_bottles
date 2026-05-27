@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-adapters/tests/test_catalogs.py — тесты для трёх read-only catalog адаптеров.
+adapters/tests/test_catalogs.py — тесты для catalog адаптеров.
 
 Покрываемые классы:
     - PluginCatalogFromRegistry  (plugin_catalog.py)
-    - ServiceCatalogFromRegistry (service_catalog.py)
+    - ServiceManagerFromRegistry (service_catalog.py) — read + lifecycle
+    - ServiceCatalogFromRegistry — backward-compatible alias
     - DisplayCatalogFromRegistry (display_catalog.py)
 
 Паттерн:
@@ -17,12 +18,15 @@ from __future__ import annotations
 import pytest
 
 from multiprocess_prototype.domain.protocols.plugin_catalog import PluginCatalog, PluginSpec
-from multiprocess_prototype.domain.protocols.service_catalog import ServiceCatalog
+from multiprocess_framework.modules.service_module.interfaces import ServiceLifecycle
+from multiprocess_prototype.domain.errors import DomainError
+from multiprocess_prototype.domain.protocols.service_catalog import ServiceCatalog, ServiceManager
 from multiprocess_prototype.domain.protocols.display_catalog import DisplayCatalog
 
 from multiprocess_prototype.adapters.catalogs import (
     PluginCatalogFromRegistry,
     ServiceCatalogFromRegistry,
+    ServiceManagerFromRegistry,
     DisplayCatalogFromRegistry,
 )
 
@@ -81,14 +85,72 @@ class _FakePluginRegistry:
         return self._entries.get(name)
 
 
-class _FakeServiceEntry:
-    """Имитация ServiceEntry из ServiceRegistry."""
+class _FakeService:
+    """Минимальная имитация IService для lifecycle тестов."""
 
-    def __init__(self, name: str, display_name: str = "", meta: dict | None = None) -> None:
+    def __init__(self, *, start_ok: bool = True, stop_ok: bool = True) -> None:
+        self._start_ok = start_ok
+        self._stop_ok = stop_ok
+        self.started = False
+        self.stopped = False
+
+    def start(self, config: dict) -> bool:
+        self.started = True
+        return self._start_ok
+
+    def stop(self) -> bool:
+        self.stopped = True
+        return self._stop_ok
+
+    def get_status(self) -> dict:
+        return {"status": "ok"}
+
+
+def _make_service_cls(display_name: str = "Svc", *, start_ok: bool = True, stop_ok: bool = True) -> type:
+    """Создать фейковый класс сервиса с настраиваемым поведением start/stop."""
+
+    class _Svc:
+        name: str = display_name
+
+        def __init__(self) -> None:
+            self._start_ok = start_ok
+            self._stop_ok = stop_ok
+
+        def start(self, config: dict) -> bool:
+            return self._start_ok
+
+        def stop(self) -> bool:
+            return self._stop_ok
+
+        def get_status(self) -> dict:
+            return {"name": self.name, "status": "ok"}
+
+    _Svc.__name__ = display_name
+    _Svc.__qualname__ = display_name
+    return _Svc
+
+
+class _FakeServiceEntry:
+    """Имитация ServiceEntry из ServiceRegistry.
+
+    Обновлён в Task C.1.6: lifecycle + cls с start/stop методами.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        display_name: str = "",
+        meta: dict | None = None,
+        lifecycle: "ServiceLifecycle | None" = None,
+        *,
+        start_ok: bool = True,
+        stop_ok: bool = True,
+    ) -> None:
         self.name = name
-        # cls — в ServiceEntry это тип класса; эмулируем через внутренний объект
-        self.cls = type(display_name, (), {"__name__": display_name})
+        # cls — тип класса с start/stop для lifecycle тестов
+        self.cls = _make_service_cls(display_name, start_ok=start_ok, stop_ok=stop_ok)
         self.meta = meta or {}
+        self.lifecycle = lifecycle if lifecycle is not None else ServiceLifecycle.READY
 
 
 class _FakeServiceRegistry:
@@ -443,6 +505,196 @@ class TestServiceCatalogFromRegistry:
 
         with pytest.raises((AttributeError, TypeError)):
             spec.service_id = "changed"  # type: ignore[misc]
+
+
+# ==============================================================================
+# Тесты ServiceManagerFromRegistry (lifecycle — Task C.1.6)
+# ==============================================================================
+
+
+class TestServiceManagerFromRegistry:
+    """Lifecycle-тесты для ServiceManagerFromRegistry (Phase C.1.6)."""
+
+    def _make_registry(self, entries: list[_FakeServiceEntry] | None = None) -> _FakeServiceRegistry:
+        return _FakeServiceRegistry(entries or [])
+
+    def _make_adapter(self, entries: list[_FakeServiceEntry] | None = None) -> ServiceManagerFromRegistry:
+        return ServiceManagerFromRegistry(self._make_registry(entries))  # type: ignore[arg-type]
+
+    def test_service_manager_satisfies_protocol(self):
+        """Adapter удовлетворяет ServiceManager Protocol (assignment-проверка)."""
+        manager = self._make_adapter([])
+        _protocol_check: ServiceManager = manager  # type: ignore[assignment]
+        assert _protocol_check is manager
+
+    def test_service_catalog_alias_works(self):
+        """Backward-compat: ServiceCatalogFromRegistry alias работает как ServiceManager."""
+        entries = [_FakeServiceEntry("svc1", "Svc1")]
+        registry = self._make_registry(entries)
+        # Используем alias ServiceCatalogFromRegistry
+        adapter = ServiceCatalogFromRegistry(registry)  # type: ignore[arg-type]
+        assert adapter.list_services() is not None
+        _protocol_check: ServiceCatalog = adapter  # type: ignore[assignment]
+        assert _protocol_check is adapter
+
+    def test_start_changes_lifecycle_to_running(self):
+        """start() меняет lifecycle на RUNNING."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.READY)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        manager.start("cam")
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.RUNNING
+
+    def test_start_idempotent_if_already_running(self):
+        """start() на уже RUNNING сервисе — idempotent no-op."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.RUNNING)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        manager.start("cam")  # не бросает
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.RUNNING
+
+    def test_start_unknown_service_raises_domain_error(self):
+        """start() с неизвестным service_id бросает DomainError."""
+        manager = self._make_adapter([])
+
+        with pytest.raises(DomainError, match="Unknown service"):
+            manager.start("nonexistent")
+
+    def test_stop_changes_lifecycle_to_stopped(self):
+        """stop() меняет lifecycle на STOPPED."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.RUNNING)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+        # Нужно закэшировать instance для корректного stop
+        manager._instances["cam"] = entries[0].cls()
+
+        manager.stop("cam")
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.STOPPED
+
+    def test_stop_idempotent_if_already_stopped(self):
+        """stop() на уже STOPPED сервисе — idempotent no-op."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.STOPPED)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        manager.stop("cam")  # не бросает
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.STOPPED
+
+    def test_stop_without_instance_syncs_lifecycle(self):
+        """stop() без instance в кэше — синхронизирует lifecycle → STOPPED."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.RUNNING)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+        # Instance не в кэше — stop() просто синхронизирует lifecycle
+
+        manager.stop("cam")
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.STOPPED
+
+    def test_stop_unknown_service_raises_domain_error(self):
+        """stop() с неизвестным service_id бросает DomainError."""
+        manager = self._make_adapter([])
+
+        with pytest.raises(DomainError, match="Unknown service"):
+            manager.stop("nonexistent")
+
+    def test_restart_stops_then_starts(self):
+        """restart() вызывает stop() → start()."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.RUNNING)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+        # Кэшируем instance для корректного stop
+        manager._instances["cam"] = entries[0].cls()
+
+        manager.restart("cam")
+
+        # После restart — lifecycle RUNNING
+        assert registry.get("cam").lifecycle == ServiceLifecycle.RUNNING
+
+    def test_restart_unknown_service_raises_domain_error(self):
+        """restart() с неизвестным service_id бросает DomainError."""
+        manager = self._make_adapter([])
+
+        with pytest.raises(DomainError, match="Unknown service"):
+            manager.restart("nonexistent")
+
+    def test_get_lifecycle_known_service_returns_status(self):
+        """get_lifecycle() для известного сервиса возвращает его lifecycle."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.READY)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        result = manager.get_lifecycle("cam")
+
+        assert result == ServiceLifecycle.READY
+
+    def test_get_lifecycle_after_start(self):
+        """get_lifecycle() после start() возвращает RUNNING."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.READY)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        manager.start("cam")
+
+        assert manager.get_lifecycle("cam") == ServiceLifecycle.RUNNING
+
+    def test_get_lifecycle_unknown_service_raises_domain_error(self):
+        """get_lifecycle() с неизвестным service_id бросает DomainError."""
+        manager = self._make_adapter([])
+
+        with pytest.raises(DomainError, match="Unknown service"):
+            manager.get_lifecycle("nonexistent")
+
+    def test_start_cls_raises_sets_error_lifecycle(self):
+        """Если cls() бросает исключение — lifecycle = ERROR + DomainError."""
+
+        class _BadCls:
+            __name__ = "BadService"
+
+            def __init__(self) -> None:
+                raise RuntimeError("Cannot instantiate")
+
+        entry = _FakeServiceEntry("bad", "BadService", lifecycle=ServiceLifecycle.READY)
+        entry.cls = _BadCls  # type: ignore[assignment]
+        registry = self._make_registry([entry])
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        with pytest.raises(DomainError, match="Failed to instantiate"):
+            manager.start("bad")
+
+        assert registry.get("bad").lifecycle == ServiceLifecycle.ERROR
+
+    def test_start_returns_false_sets_error_lifecycle(self):
+        """Если instance.start() возвращает False — lifecycle = ERROR + DomainError."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.READY, start_ok=False)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        with pytest.raises(DomainError, match="returned False"):
+            manager.start("cam")
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.ERROR
+
+    def test_read_only_methods_still_work(self):
+        """ServiceManagerFromRegistry сохраняет read-only функциональность C.1."""
+        entries = [_FakeServiceEntry("svc1", "Svc1", meta={"vendor": "test"})]
+        manager = self._make_adapter(entries)
+
+        result = manager.list_services()
+        assert len(result) == 1
+        assert result[0].service_id == "svc1"
+
+        spec = manager.resolve("svc1")
+        assert spec is not None
+        assert spec.metadata.get("vendor") == "test"
+
+        assert manager.resolve("unknown") is None
 
 
 # ==============================================================================

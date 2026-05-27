@@ -6,7 +6,8 @@ multiprocess_prototype.adapters — adapter-слой между domain Protocols
 соответствующий domain Protocol из multiprocess_prototype.domain.protocols.
 
 Текущий состав (Phase C):
-    catalogs/ — PluginCatalogFromRegistry, ServiceCatalogFromRegistry, DisplayCatalogFromRegistry
+    catalogs/ — PluginCatalogFromRegistry, ServiceManagerFromRegistry,
+                ServiceCatalogFromRegistry (alias), DisplayCatalogFromRegistry
 
 Phase D подключит эти adapters к AppServices через DI-контейнер.
 
@@ -18,10 +19,16 @@ Phase D подключит эти adapters к AppServices через DI-конт
 
 from __future__ import annotations
 
-from .catalogs import DisplayCatalogFromRegistry, PluginCatalogFromRegistry, ServiceCatalogFromRegistry
+from .catalogs import (
+    DisplayCatalogFromRegistry,
+    PluginCatalogFromRegistry,
+    ServiceCatalogFromRegistry,
+    ServiceManagerFromRegistry,
+)
 
 __all__ = [
     "PluginCatalogFromRegistry",
+    "ServiceManagerFromRegistry",
     "ServiceCatalogFromRegistry",
     "DisplayCatalogFromRegistry",
 ]

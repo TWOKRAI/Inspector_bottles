@@ -21,7 +21,7 @@ from ..protocols import (
     PluginCatalog,
     RecipeStore,
     RegistersBackend,
-    ServiceCatalog,
+    ServiceManager,
     TopologyRepository,
 )
 from ._fakes import (
@@ -32,7 +32,7 @@ from ._fakes import (
     FakePluginCatalog,
     FakeRecipeStore,
     FakeRegistersBackend,
-    FakeServiceCatalog,
+    FakeServiceManager,
     FakeTopologyRepository,
 )
 
@@ -46,7 +46,7 @@ def fixtures_dir() -> Path:
 def make_test_app_services(
     *,
     plugins: PluginCatalog | None = None,
-    services: ServiceCatalog | None = None,
+    services: ServiceManager | None = None,
     displays: DisplayCatalog | None = None,
     recipes: RecipeStore | None = None,
     registers: RegistersBackend | None = None,
@@ -69,7 +69,7 @@ def make_test_app_services(
     """
     return AppServices(
         plugins=plugins if plugins is not None else FakePluginCatalog(),
-        services=services if services is not None else FakeServiceCatalog(),
+        services=services if services is not None else FakeServiceManager(),
         displays=displays if displays is not None else FakeDisplayCatalog(),
         recipes=recipes if recipes is not None else FakeRecipeStore(),
         registers=registers if registers is not None else FakeRegistersBackend(),

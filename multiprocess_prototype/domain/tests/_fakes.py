@@ -26,6 +26,7 @@ from typing import Any
 from ..commands import ProjectCommand
 from ..entities import Recipe, Topology
 from ..events import ProjectEvent
+from ..errors import DomainError
 from ..protocols import (
     AuthFacade,
     CommandDispatcher,
@@ -37,7 +38,8 @@ from ..protocols import (
     PluginSpec,
     RecipeStore,
     RegistersBackend,
-    ServiceCatalog,
+    ServiceLifecycle,
+    ServiceManager,
     ServiceSpec,
     Subscription,
     TopologyRepository,
@@ -76,15 +78,20 @@ del _
 
 
 # ==============================================================================
-# FakeServiceCatalog
+# FakeServiceManager (бывший FakeServiceCatalog)
 # ==============================================================================
 
 
-class FakeServiceCatalog:
-    """In-memory ServiceCatalog с настраиваемым набором известных сервисов."""
+class FakeServiceManager:
+    """In-memory ServiceManager с настраиваемым набором известных сервисов.
+
+    Поддерживает lifecycle: start/stop/restart/get_lifecycle.
+    По умолчанию все сервисы в состоянии STOPPED.
+    """
 
     def __init__(self, known: set[str] | None = None) -> None:
         self._known: set[str] = known or set()
+        self._lifecycles: dict[str, ServiceLifecycle] = {s: ServiceLifecycle.STOPPED for s in self._known}
 
     def list_services(self) -> tuple[ServiceSpec, ...]:
         return tuple(ServiceSpec(service_id=s, display_name=s) for s in sorted(self._known))
@@ -94,8 +101,38 @@ class FakeServiceCatalog:
             return ServiceSpec(service_id=service_id, display_name=service_id)
         return None
 
+    def start(self, service_id: str) -> None:
+        """Запускает сервис. Idempotent: если уже RUNNING — no-op."""
+        if service_id not in self._known:
+            raise DomainError(f"Unknown service: {service_id}")
+        if self._lifecycles[service_id] == ServiceLifecycle.RUNNING:
+            return  # idempotent no-op
+        self._lifecycles[service_id] = ServiceLifecycle.RUNNING
 
-_s: ServiceCatalog = FakeServiceCatalog()
+    def stop(self, service_id: str) -> None:
+        """Останавливает сервис. Idempotent: если уже STOPPED — no-op."""
+        if service_id not in self._known:
+            raise DomainError(f"Unknown service: {service_id}")
+        if self._lifecycles[service_id] == ServiceLifecycle.STOPPED:
+            return  # idempotent no-op
+        self._lifecycles[service_id] = ServiceLifecycle.STOPPED
+
+    def restart(self, service_id: str) -> None:
+        """stop() + start()."""
+        self.stop(service_id)
+        self.start(service_id)
+
+    def get_lifecycle(self, service_id: str) -> ServiceLifecycle:
+        """Текущий lifecycle статус. Бросает DomainError если service_id неизвестен."""
+        if service_id not in self._known:
+            raise DomainError(f"Unknown service: {service_id}")
+        return self._lifecycles[service_id]
+
+
+# Backward-compatible alias
+FakeServiceCatalog = FakeServiceManager
+
+_s: ServiceManager = FakeServiceManager()
 del _s
 
 
@@ -333,6 +370,7 @@ del _af
 
 __all__ = [
     "FakePluginCatalog",
+    "FakeServiceManager",
     "FakeServiceCatalog",
     "FakeDisplayCatalog",
     "FakeRecipeStore",

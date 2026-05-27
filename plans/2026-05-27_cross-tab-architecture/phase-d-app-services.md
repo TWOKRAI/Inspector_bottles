@@ -59,7 +59,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
        AuthFacadeFromAuthState, CommandDispatcherOrchestrator,
        DisplayCatalogFromRegistry, PluginCatalogFromRegistry,
        RecipeStoreFromManager, RegistersBackendFromManager,
-       ServiceCatalogFromRegistry, TopologyRepositoryFromHolder,
+       ServiceManagerFromRegistry, TopologyRepositoryFromHolder,
    )
 
    register_domain_schemas()  # вместо import-time side-effect
@@ -82,7 +82,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 
    ctx.app_services = AppServices(
        plugins=plugins,
-       services=ServiceCatalogFromRegistry(ctx.extras["service_registry"]),
+       services=ServiceManagerFromRegistry(ctx.extras["service_registry"]),
        displays=displays,
        recipes=recipes,
        registers=RegistersBackendFromManager(

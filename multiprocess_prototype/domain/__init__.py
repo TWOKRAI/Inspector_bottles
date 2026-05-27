@@ -51,6 +51,8 @@ from .protocols import (
     RecipeStore,
     RegistersBackend,
     ServiceCatalog,
+    ServiceLifecycle,
+    ServiceManager,
     ServiceSpec,
     Subscription,
     TopologyRepository,
@@ -163,7 +165,9 @@ __all__ = [
     "EntityValidationError",
     # Protocols (Task B.5)
     "PluginCatalog",
+    "ServiceManager",
     "ServiceCatalog",
+    "ServiceLifecycle",
     "DisplayCatalog",
     "RecipeStore",
     "RegistersBackend",

@@ -27,7 +27,7 @@ from .protocols import (
     PluginCatalog,
     RecipeStore,
     RegistersBackend,
-    ServiceCatalog,
+    ServiceManager,
     TopologyRepository,
 )
 
@@ -42,7 +42,7 @@ class AppServices:
 
     Поля:
       plugins   — read-only реестр плагинов (PluginCatalog)
-      services  — read-only реестр сервисов (ServiceCatalog)
+      services  — управление сервисами (ServiceManager: read + lifecycle)
       displays  — read-only реестр дисплеев (DisplayCatalog)
       recipes   — CRUD-доступ к рецептам (RecipeStore)
       registers — доступ к регистрам Inspector (RegistersBackend)
@@ -53,7 +53,7 @@ class AppServices:
     """
 
     plugins: PluginCatalog
-    services: ServiceCatalog
+    services: ServiceManager
     displays: DisplayCatalog
     recipes: RecipeStore
     registers: RegistersBackend
