@@ -21,7 +21,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 | Фаза | Название | Статус | Файл | Зависимости |
 |------|----------|--------|------|-------------|
 | **A** | Audit (read-only inventory) | DONE (2026-05-27, commit `bdfccd50`) | [`phase-a-audit.md`](phase-a-audit.md) | — |
-| **B** | Domain skeleton (`multiprocess_prototype/domain/`) | NOT PLANNED | — | A done |
+| **B** | Domain skeleton (`multiprocess_prototype/domain/`) | DRAFT (ready for approval) | [`phase-b-domain.md`](phase-b-domain.md) | A done |
 | **C** | Adapters (YAML I/O, TopologyHolder compat, ProcessManager) | NOT PLANNED | — | B done |
 | **D** | `AppServices` DI (replace `ctx.extras` dict-bag) | NOT PLANNED | — | C done |
 | **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays → Settings) | NOT PLANNED | — | D done |
@@ -32,9 +32,9 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 
 ## Текущая позиция
 
-Phase A — план готов (`phase-a-audit.md`), исполнен investigator-агентом (read-only). Deliverable: [`docs/refactors/2026-05_cross_tab_audit.md`](../../docs/refactors/2026-05_cross_tab_audit.md), 380 строк.
-
-Следующий шаг: ревью audit'а + approval. После approval — детализация Phase B (создание `phase-b-domain.md`).
+- Phase A — DONE. Deliverable: [`docs/refactors/2026-05_cross_tab_audit.md`](../../docs/refactors/2026-05_cross_tab_audit.md), 380 строк. Коммит `bdfccd50`.
+- recipe_manager double-contract — закрыт hotfix `85eec097` (presenter.py:730,803 + 2 теста).
+- Phase B — план детализирован (`phase-b-domain.md`, 6 Tasks), готов к approval. Следующий шаг: ревью плана, при approval — implementation (B.1 → B.2/B.3/B.5 параллельно → B.4 + B.6).
 
 ## Известные ограничения и риски (вне Phase A)
 
