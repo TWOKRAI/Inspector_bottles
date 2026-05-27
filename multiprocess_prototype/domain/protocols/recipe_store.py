@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ..entities import Recipe
+from ..entities.recipe import Recipe
 
 
 class RecipeStore(Protocol):

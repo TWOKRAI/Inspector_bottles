@@ -29,7 +29,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Union
 
-from multiprocess_prototype.domain.entities import PluginInstance, Topology
+from multiprocess_prototype.domain.entities.plugin import PluginInstance
+from multiprocess_prototype.domain.entities.topology import Topology
 
 # ==============================================================================
 # Process-команды

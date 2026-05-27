@@ -22,12 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, ClassVar, Union
 
-from multiprocess_prototype.domain.entities import (
-    DisplayInstance,
-    PluginInstance,
-    Process,
-    Wire,
-)
+from multiprocess_prototype.domain.entities.display import DisplayInstance
+from multiprocess_prototype.domain.entities.plugin import PluginInstance
+from multiprocess_prototype.domain.entities.process import Process
+from multiprocess_prototype.domain.entities.wire import Wire
 
 # ==============================================================================
 # Process-события

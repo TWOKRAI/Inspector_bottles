@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ..entities import Topology
+from ..entities.topology import Topology
 
 
 class TopologyRepository(Protocol):

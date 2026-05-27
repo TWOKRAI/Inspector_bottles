@@ -101,6 +101,44 @@ class Topology(SchemaBase):
         return v  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
+    # Structural query helpers (Task B.4)
+    # ------------------------------------------------------------------
+
+    def find_process(self, name: str) -> Process | None:
+        """Найти процесс по имени. Возвращает None если не найден."""
+        for proc in self.processes:
+            if proc.process_name == name:
+                return proc
+        return None
+
+    def find_wires_for(self, process_name: str) -> tuple[Wire, ...]:
+        """Найти все wires, связанные с данным процессом.
+
+        Wire считается связанным, если первый сегмент source или target
+        (по точке) совпадает с process_name.
+        """
+        result: list[Wire] = []
+        for wire in self.wires:
+            src_proc = wire.source.split(".")[0]
+            tgt_proc = wire.target.split(".")[0]
+            if src_proc == process_name or tgt_proc == process_name:
+                result.append(wire)
+        return tuple(result)
+
+    def find_display_bindings_for(self, process_name: str) -> tuple[DisplayInstance, ...]:
+        """Найти все display bindings, связанные с данным процессом.
+
+        DisplayInstance считается связанным, если первый сегмент node_id
+        (по точке) совпадает с process_name.
+        """
+        result: list[DisplayInstance] = []
+        for di in self.displays:
+            node_proc = di.node_id.split(".")[0]
+            if node_proc == process_name:
+                result.append(di)
+        return tuple(result)
+
+    # ------------------------------------------------------------------
     # Сериализация
     # ------------------------------------------------------------------
 

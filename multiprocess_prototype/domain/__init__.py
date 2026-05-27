@@ -34,6 +34,7 @@ from .entities import (
     Topology,
     Wire,
 )
+from .entities.project import ApplyContext
 from .errors import DomainError, EntityValidationError
 from .protocols import (
     AuthFacade,
@@ -126,6 +127,8 @@ except Exception as _exc:
 
 
 __all__ = [
+    # ApplyContext (Task B.4)
+    "ApplyContext",
     # Entities
     "PluginInstance",
     "Wire",
