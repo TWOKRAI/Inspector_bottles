@@ -91,44 +91,59 @@ from .events import (
 )
 
 # ------------------------------------------------------------------
-# Опциональная регистрация в SchemaRegistry
+# Явная регистрация в SchemaRegistry (lazy — вызывается явно)
 # ------------------------------------------------------------------
-# SchemaRegistry.register(name, class) принимает два аргумента (str + Type[BaseModel]).
-# Domain entities — frozen Pydantic модели, что совместимо с BaseModel.
-# Регистрируем в глобальный default registry для discovery в Phase E (Inspector).
-# Если импорт SchemaRegistry недоступен — пропускаем с предупреждением в log.
-# TODO(B.1): Если глобальный default registry конфликтует с изолированными
-# тестовыми registry — вынести регистрацию в фабрику AppServices (Phase D).
-try:
-    from multiprocess_framework.modules.data_schema_module import (
-        get_default_registry,
-    )
+# Импорт пакета НЕ регистрирует ничего в SchemaRegistry (Task C.0).
+# Вызовите register_domain_schemas() явно (например, в фабрике AppServices).
+# При registry=None использует глобальный default registry.
+#
+# Решение Q3 (Phase C decisions): lazy registration вместо import-time side-effect,
+# чтобы избежать name collision с framework-уровневыми регистрациями.
 
-    _registry = get_default_registry()
-    _domain_classes = [
-        ("PluginInstance", PluginInstance),
-        ("Wire", Wire),
-        ("DisplayInstance", DisplayInstance),
-        ("Process", Process),
-        ("RecipeMeta", RecipeMeta),
-        ("Recipe", Recipe),
-        ("Topology", Topology),
-        ("Project", Project),
-    ]
-    for _name, _cls in _domain_classes:
-        try:
-            _registry.register(_name, _cls)
-        except Exception as _reg_exc:  # nosec B110 — дублирующая регистрация не критична
-            import logging as _log
 
-            _log.getLogger(__name__).debug("domain: register %s skipped: %s", _name, _reg_exc)
-except Exception as _exc:
-    import logging as _logging
+def register_domain_schemas(registry: object = None) -> None:  # type: ignore[assignment]
+    """Зарегистрировать все 7 domain-entity в SchemaRegistry.
 
-    _logging.getLogger(__name__).debug("domain: SchemaRegistry registration skipped: %s", _exc)
+    Args:
+        registry: Экземпляр SchemaRegistry. При None — использует глобальный
+                  default registry (get_default_registry()).
+
+    Вызывается явно (например, в фабрике AppServices или в тестах).
+    Импорт пакета больше не вызывает эту функцию автоматически.
+    """
+    try:
+        from multiprocess_framework.modules.data_schema_module import (
+            get_default_registry,
+        )
+
+        target = registry if registry is not None else get_default_registry()
+        _domain_classes = [
+            ("PluginInstance", PluginInstance),
+            ("Wire", Wire),
+            ("DisplayInstance", DisplayInstance),
+            ("Process", Process),
+            ("RecipeMeta", RecipeMeta),
+            ("Recipe", Recipe),
+            ("Topology", Topology),
+            ("Project", Project),
+        ]
+        import logging as _log
+
+        _logger = _log.getLogger(__name__)
+        for _name, _cls in _domain_classes:
+            try:
+                target.register(_name, _cls)  # type: ignore[union-attr]
+            except Exception as _reg_exc:  # nosec B110 — дублирующая регистрация не критична
+                _logger.debug("domain: register %s skipped: %s", _name, _reg_exc)
+    except Exception as _exc:
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug("domain: SchemaRegistry registration skipped: %s", _exc)
 
 
 __all__ = [
+    # Регистрация в SchemaRegistry (Task C.0, lazy)
+    "register_domain_schemas",
     # ApplyContext (Task B.4)
     "ApplyContext",
     # EventBus + AppServices (Task B.6)

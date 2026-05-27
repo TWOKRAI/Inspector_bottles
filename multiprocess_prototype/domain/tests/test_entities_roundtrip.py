@@ -360,6 +360,43 @@ class TestToDictFromDictIdempotent:
         assert wire2.src_dtype == wire.src_dtype
         assert wire2.tgt_dtype == wire.tgt_dtype
 
+    def test_wire_description_roundtrip(self) -> None:
+        """Wire.description: round-trip lossless (Task C.0)."""
+        wire = Wire(
+            source="proc_a.plugin.port",
+            target="proc_b.plugin.port",
+            description="hello",
+        )
+        wire_dict = wire.to_dict()
+        wire2 = Wire.from_dict(wire_dict)
+        assert wire2.description == "hello"
+        assert wire2 == wire
+
+    def test_wire_description_default_empty(self) -> None:
+        """Wire.description по умолчанию пустая строка."""
+        wire = Wire(source="a", target="b")
+        assert wire.description == ""
+        wire2 = Wire.from_dict(wire.to_dict())
+        assert wire2.description == ""
+
+    def test_process_metadata_roundtrip(self) -> None:
+        """Process.metadata: round-trip lossless с runtime-полями (Task C.0)."""
+        proc = Process(
+            process_name="capture_proc",
+            metadata={"source_target_fps": 30.0, "custom": "x"},
+        )
+        proc_dict = proc.to_dict()
+        proc2 = Process.from_dict(proc_dict)
+        assert proc2.metadata == {"source_target_fps": 30.0, "custom": "x"}
+        assert proc2.process_name == "capture_proc"
+
+    def test_process_metadata_default_empty(self) -> None:
+        """Process.metadata по умолчанию пустой dict."""
+        proc = Process(process_name="p")
+        assert proc.metadata == {}
+        proc2 = Process.from_dict(proc.to_dict())
+        assert proc2.metadata == {}
+
     def test_project_roundtrip(self) -> None:
         """Project: to_dict → from_dict идемпотентен."""
         topo = Topology(

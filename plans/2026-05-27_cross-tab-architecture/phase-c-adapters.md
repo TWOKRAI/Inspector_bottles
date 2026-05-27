@@ -94,11 +94,11 @@ multiprocess_prototype/adapters/
 - `multiprocess_prototype/domain/tests/test_schema_registry_lazy.py` — новый тест: импорт `multiprocess_prototype.domain` не регистрирует ничего в default registry; вызов `register_domain_schemas()` — регистрирует.
 
 **Acceptance criteria:**
-- [ ] `Wire.description: str = ""` существует, round-trip lossless.
-- [ ] `Process.metadata: dict[str, Any]` существует, default empty dict, round-trip lossless.
-- [ ] `import multiprocess_prototype.domain` — 0 регистраций в `SchemaRegistry.get_default_registry()`.
-- [ ] `register_domain_schemas()` — регистрирует все 7 entities.
-- [ ] Все 233 теста Phase B остаются зелёными.
+- [x] `Wire.description: str = ""` существует, round-trip lossless.
+- [x] `Process.metadata: dict[str, Any]` существует, default empty dict, round-trip lossless.
+- [x] `import multiprocess_prototype.domain` — 0 регистраций в `SchemaRegistry.get_default_registry()`.
+- [x] `register_domain_schemas()` — регистрирует все 7 entities.
+- [x] Все 233 теста Phase B остаются зелёными. (240 passed: 233 + 7 новых)
 
 **Out of scope:** трогать `Recipe.from_dict` (там уже две формата поддержано), trogue `display_bindings` (миграция в Phase F).
 

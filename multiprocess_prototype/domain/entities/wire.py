@@ -30,6 +30,7 @@ class Wire(SchemaBase):
     target: Annotated[str, FieldMeta("Узел-приёмник")]
     src_dtype: Annotated[str | None, FieldMeta("Тип данных на выходе источника")] = None
     tgt_dtype: Annotated[str | None, FieldMeta("Тип данных на входе приёмника")] = None
+    description: Annotated[str, FieldMeta("Текстовое описание соединения (для UI и документации)")] = ""
 
     # ------------------------------------------------------------------
     # Сериализация

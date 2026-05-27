@@ -61,6 +61,13 @@ class Process(SchemaBase):
         str | None,
         FieldMeta("Категория процесса (для фильтрации в UI)"),
     ] = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Passthrough-bag для runtime-полей (source_target_fps, телеметрия и пр.). "
+            "Не интерпретируется domain-слоем — прозрачно передаётся adapter'ами."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Валидаторы: конвертируем list → tuple для совместимости с YAML
