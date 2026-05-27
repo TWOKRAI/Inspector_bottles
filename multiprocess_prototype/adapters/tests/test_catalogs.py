@@ -681,6 +681,43 @@ class TestServiceManagerFromRegistry:
 
         assert registry.get("cam").lifecycle == ServiceLifecycle.ERROR
 
+    def test_stop_returns_false_sets_error_lifecycle(self):
+        """instance.stop() возвращает False → lifecycle = ERROR + DomainError."""
+        entries = [_FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.RUNNING, stop_ok=False)]
+        registry = self._make_registry(entries)
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+        # Кэшируем instance с stop_ok=False (имитация: start() ранее создал)
+        manager._instances["cam"] = entries[0].cls()
+
+        with pytest.raises(DomainError, match="returned False"):
+            manager.stop("cam")
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.ERROR
+
+    def test_start_instance_raises_sets_error_lifecycle(self):
+        """instance.start({}) бросает exception → lifecycle = ERROR + DomainError."""
+
+        class _RaisingOnStart:
+            """cls() работает нормально, но instance.start() бросает."""
+
+            __name__ = "RaisingService"
+
+            def start(self, config: dict) -> bool:
+                raise RuntimeError("boom from instance.start")
+
+            def stop(self) -> bool:
+                return True
+
+        entry = _FakeServiceEntry("cam", "Camera", lifecycle=ServiceLifecycle.READY)
+        entry.cls = _RaisingOnStart  # type: ignore[assignment]
+        registry = self._make_registry([entry])
+        manager = ServiceManagerFromRegistry(registry)  # type: ignore[arg-type]
+
+        with pytest.raises(DomainError, match="start\\(\\) failed"):
+            manager.start("cam")
+
+        assert registry.get("cam").lifecycle == ServiceLifecycle.ERROR
+
     def test_read_only_methods_still_work(self):
         """ServiceManagerFromRegistry сохраняет read-only функциональность C.1."""
         entries = [_FakeServiceEntry("svc1", "Svc1", meta={"vendor": "test"})]

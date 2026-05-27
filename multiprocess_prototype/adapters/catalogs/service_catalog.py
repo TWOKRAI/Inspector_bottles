@@ -29,6 +29,7 @@ Lifecycle-логика повторяет паттерн ServicesPresenter
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from multiprocess_framework.modules.service_module.interfaces import ServiceLifecycle
 from multiprocess_framework.modules.service_module.registry import (
@@ -77,6 +78,13 @@ class ServiceManagerFromRegistry:
         from multiprocess_framework.modules.service_module.registry import ServiceRegistry
         manager = ServiceManagerFromRegistry(ServiceRegistry())
         manager.start("webcam_camera")
+
+    Migration note (Phase E):
+        Adapter бросает DomainError при сбоях start/stop. Legacy ServicesPresenter
+        возвращает bool. При миграции presenter'а в Phase E — оборачивать
+        services.start(id) / services.stop(id) в try/except DomainError и
+        конвертировать в bool/UI feedback, иначе exception пробросится в Qt
+        event loop.
     """
 
     def __init__(self, registry: ServiceRegistry) -> None:
@@ -87,7 +95,7 @@ class ServiceManagerFromRegistry:
         """
         self._registry = registry
         # Кэш запущенных экземпляров: name → instance.
-        self._instances: dict[str, object] = {}
+        self._instances: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Read-only методы (Phase B / C.1)
@@ -156,7 +164,7 @@ class ServiceManagerFromRegistry:
 
         # Запуск: вызываем instance.start({}) как в presenter
         try:
-            ok = bool(instance.start({}))  # type: ignore[union-attr]
+            ok = bool(instance.start({}))
         except Exception as exc:
             entry.lifecycle = ServiceLifecycle.ERROR
             raise DomainError(f"Service '{service_id}' start() failed: {exc}") from exc
@@ -197,7 +205,7 @@ class ServiceManagerFromRegistry:
             return
 
         try:
-            ok = bool(instance.stop())  # type: ignore[union-attr]
+            ok = bool(instance.stop())
         except Exception as exc:
             entry.lifecycle = ServiceLifecycle.ERROR
             raise DomainError(f"Service '{service_id}' stop() failed: {exc}") from exc
