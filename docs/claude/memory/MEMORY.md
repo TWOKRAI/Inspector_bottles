@@ -31,4 +31,4 @@
 - [RecipesManager v2 state](project_recipes_manager.md) — Phase 5 DONE: Recipe=SystemBlueprint+yaml-sections, replace_blueprint with rollback, ADR-131/132
 - [Pipeline demo and telemetry](project_pipeline_demo.md) — Phase 7b DONE: webcam→split→merge→display demo, WireStatus telemetry, blur plugin
 - [Cross-tab Phase B domain skeleton](project_cross_tab_phase_b.md) — Phase B DONE (2026-05-27): multiprocess_prototype/domain/ изолированный пакет, 7 entities + 14 events + 14 commands + 9 protocols + EventBus + AppServices + builder, 233 теста
-- [Cross-tab Phase C adapters](project_cross_tab_phase_c.md) — Phase C IN PROGRESS (4/9 DONE): C.0/C.1/C.1.5/C.1.6 на ветке refactor/cross-tab-architecture. Q1-Q7 decisions, investigator-followup, compromise по plugin_class. Pending: C.2-C.7
+- [Cross-tab Phase C adapters](project_cross_tab_phase_c.md) — Phase C DONE 9/9 (2026-05-27): 10 adapter-классов в multiprocess_prototype/adapters/, 113 tests + 240 domain, ruff 0. Ready for Phase D. Q1-Q7 + 7 documented compromises
