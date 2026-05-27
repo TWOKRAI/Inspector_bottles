@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase C
 - **Дата:** 2026-05-27 (draft v1)
-- **Статус:** DRAFT (готов к ревью; не стартовать имплементацию до approval'а Phase B deliverable и закрытия open questions)
+- **Статус:** APPROVED (open questions закрыты 2026-05-27 — см. decisions log; готов к имплементации)
 - **Ветка:** `refactor/cross-tab-architecture` (та же)
 - **Master plan:** [`plan.md`](plan.md)
 - **Brief:** [`docs/refactors/2026-05_cross_tab_architecture.md`](../../docs/refactors/2026-05_cross_tab_architecture.md), раздел 5.3
@@ -88,14 +88,14 @@ multiprocess_prototype/adapters/
 
 **Файлы:**
 - `multiprocess_prototype/domain/entities/wire.py` — добавить `description: str = ""`.
-- `multiprocess_prototype/domain/entities/process.py` — добавить либо `source_target_fps: float | None = None`, либо `metadata: dict[str, Any] = Field(default_factory=dict)` для passthrough runtime-полей. **Решить:** что предпочтительнее.
+- `multiprocess_prototype/domain/entities/process.py` — добавить `metadata: dict[str, Any] = Field(default_factory=dict)` для passthrough runtime-полей (включая `source_target_fps`). Решение Q3 закрыто (см. decisions log): metadata-bag, не отдельное поле.
 - `multiprocess_prototype/domain/__init__.py` — вынести регистрацию в default SchemaRegistry из import-time side-effect в explicit `register_domain_schemas(registry=None)` функцию. Сам импорт пакета **больше не должен** регистрировать ничего.
 - `multiprocess_prototype/domain/tests/test_entities_roundtrip.py` — обновить тесты на новые поля (round-trip + frozen + extra-forbid).
 - `multiprocess_prototype/domain/tests/test_schema_registry_lazy.py` — новый тест: импорт `multiprocess_prototype.domain` не регистрирует ничего в default registry; вызов `register_domain_schemas()` — регистрирует.
 
 **Acceptance criteria:**
 - [ ] `Wire.description: str = ""` существует, round-trip lossless.
-- [ ] `Process` имеет либо `source_target_fps`, либо `metadata` (decision log в README + решение задокументировано).
+- [ ] `Process.metadata: dict[str, Any]` существует, default empty dict, round-trip lossless.
 - [ ] `import multiprocess_prototype.domain` — 0 регистраций в `SchemaRegistry.get_default_registry()`.
 - [ ] `register_domain_schemas()` — регистрирует все 7 entities.
 - [ ] Все 233 теста Phase B остаются зелёными.
@@ -203,7 +203,7 @@ multiprocess_prototype/adapters/
 
 **Steps:**
 
-1. **Решить** до старта: «Phase C source of truth» — holder (как сейчас) или начать переход на Project? Рекомендация investigator'а: holder остаётся для legacy, Project = source при использовании AppServices.
+1. **Decision Q1 закрыт (см. decisions log):** Project = source of truth в Phase D+. На уровне Phase C `TopologyRepositoryFromHolder` — bidirectional bridge, без переноса state в Project (Project живёт в C.6 `ProjectHolder`). `save()` пишет в holder; legacy callbacks подавляются через `suppress_legacy_notify()` cm (см. шаг 4).
 2. `TopologyRepositoryFromHolder`:
    ```python
    class TopologyRepositoryFromHolder:
@@ -217,20 +217,33 @@ multiprocess_prototype/adapters/
 3. **Edge cases:**
    - `holder.topology` пустой / `None` → `Topology()` (пустой immutable).
    - `holder.set_topology()` валидирует через свой собственный pydantic? Проверь: может возникнуть рассинхрон с domain validate.
+4. **`suppress_legacy_notify()` context manager** (Decision Q6 — toggle-флаг подход):
+   ```python
+   @contextlib.contextmanager
+   def suppress_legacy_notify(self) -> Iterator[None]:
+       self._holder._suppress_notify = True
+       try:
+           yield
+       finally:
+           self._holder._suppress_notify = False
+   ```
+   Реализация в `TopologyHolder._notify(...)`: если `_suppress_notify` истинно — `return` без вызова callbacks. Это **temporary measure до Phase F** (удаление `holder.on_changed`). Документировать в docstring adapter'а как «known compromise».
 
 **Тесты:**
 - `test_load_returns_topology_entity` — set_topology(...) → load() возвращает frozen domain.Topology с правильными полями.
 - `test_save_writes_to_holder` — `save(topology)` → `holder.topology` содержит соответствующий dict.
 - `test_round_trip_holder_load_save_load` — записываем pilot_widgets.yaml в holder, load → save → load — identical.
 - `test_holder_callback_fires_on_save` — `holder.on_changed(cb)` → `repo.save(...)` → cb вызван 1 раз. **Это важно: подтверждает, что adapter использует legacy notification.**
+- `test_suppress_legacy_notify_suppresses_callback` — внутри `with repo.suppress_legacy_notify(): repo.save(...)` cb не вызывается; после выхода из cm cb снова вызывается на следующий save.
 
 **Acceptance criteria:**
 - [ ] Adapter satisfies Protocol.
 - [ ] Round-trip lossless на pilot_widgets.yaml.
-- [ ] Legacy `holder.on_changed` callback продолжает работать.
+- [ ] Legacy `holder.on_changed` callback продолжает работать (по умолчанию).
+- [ ] `suppress_legacy_notify()` cm подавляет callbacks внутри блока, восстанавливает после.
 - [ ] Edge case: пустой holder → пустой Topology.
 
-**Out of scope:** Suppression legacy callbacks — это C.6 (CommandDispatcher).
+**Out of scope:** Использование `suppress_legacy_notify()` из dispatcher — это C.6 (там cm применяется при `save()`).
 
 **Refs:** `multiprocess_prototype/frontend/bridge/topology_bridge.py`, `multiprocess_prototype/frontend/topology_holder.py`.
 
@@ -250,11 +263,7 @@ multiprocess_prototype/adapters/
 
 **Steps:**
 
-1. **Решить** до старта (open question): где брать mapping? Варианты:
-   - (A) Из текущего topology — для процесса P берём `plugins[plugin_index]`, имя плагина → имена register_classes из `PluginRegistry` → выбор первого/основного.
-   - (B) Domain знает: `PluginInstance` имеет связку `plugin_name → register_classes` через `PluginCatalog.resolve(plugin_name).config_schema`.
-   - (C) Передавать в Protocol `register_name` явно, а не `plugin_index`.
-   Рекомендация: **(A)** — adapter имеет ссылку на `TopologyRepository` (или текущий Project через AppServices в Phase D), читает topology, разрешает plugin_index → plugin_name → register.
+1. **Decision Q4 закрыт (см. decisions log): Variant A.** Adapter знает `TopologyRepository + PluginCatalog`. Для процесса `process_name` загружает topology → берёт `plugins[plugin_index].plugin_name` → через `PluginCatalog.resolve(plugin_name).config_schema` находит `register_class_name`. Protocol не меняется. Mapping локализован, документировать в docstring.
 
 2. `RegistersBackendFromManager`:
    ```python
@@ -300,10 +309,7 @@ multiprocess_prototype/adapters/
 
 **Steps:**
 
-1. **Решить** до старта (open question): «Recipe YAML backward-compat». `Recipe.to_dict()` пишет `meta: {name, version, ...}`, а живой формат имеет top-level `name/version/...`. Варианты:
-   - (A) Adapter де-нормализует: `recipe.to_dict()` → перенос `meta.name → top-level name` перед записью. Сохраняет совместимость с legacy reader'ами.
-   - (B) Принимаем новый формат сразу; live YAML мигрируется (одним коммитом или вручную).
-   Рекомендация: **(A)** для безопасной миграции (можно откатить Phase C без поломки рецепта).
+1. **Decision Q2 закрыт (см. decisions log): Variant A** — денормализация `meta → top-level`. Adapter перед записью на диск переносит `data["meta"]["name"] → data["name"]`, `data["meta"]["version"] → data["version"]` и т.д. Live YAML остаётся читаемым legacy reader'ами; Phase C reversible без миграции файлов рецептов.
 2. `RecipeStoreFromManager`:
    ```python
    class RecipeStoreFromManager:
@@ -470,16 +476,22 @@ multiprocess_prototype/adapters/
 - [ ] Никаких изменений вне `multiprocess_prototype/adapters/`, `multiprocess_prototype/domain/` (для C.0), и `.sentrux/rules.toml` (правило).
 - [ ] Coverage `adapters/` ≥ 80%. Critical: `CommandDispatcherOrchestrator` ≥ 90%.
 
-## Открытые вопросы (закрыть до старта Phase C)
+## Закрытые вопросы (decisions log)
 
-1. **TopologyHolder source of truth.** Holder остаётся source (Phase D) или Project = source? Investigator рекомендовал Project = source, holder = derived. **Подтвердить.**
-2. **Recipe YAML backward-compat при write.** Денормализация `meta → top-level` (вариант A) или принять новый формат (B)? **Подтвердить (A) — рекомендация investigator'а.**
-3. **Wire.description / Process.source_target_fps.** Добавить в entity (C.0) или в metadata? Investigator рекомендует поле для Wire.description, metadata для Process. **Подтвердить.**
-4. **RegistersBackend адресация.** Variant (A): adapter знает Topology+PluginCatalog, маппит plugin_index→register. **Подтвердить.**
-5. **DisplayRegistry production access.** Поместить в `ctx.extras["display_registry"]` (для adapter) или брать singleton напрямую? **Решение: singleton напрямую**, audit зафиксировал что в `ctx.extras` его нет, а добавление = scope creep.
-6. **Качество `suppress_legacy_notify`.** Это «грязная» техника (toggling холдера). Альтернатива: dispatcher временно снимает все legacy callbacks и восстанавливает их после save. Какой вариант чище? Решить при C.6.
+Все 6 open questions закрыты 2026-05-27 (auto mode). См. секцию «Решения» ниже — каждое решение продублировано с обоснованием.
 
 ## Решения (decisions log)
+
+### Стратегические (закрытые open questions)
+
+- **2026-05-27 (closed Q1):** **Project = source of truth** в Phase D+. `TopologyHolder` остаётся как derived store: dispatcher после `Project.apply()` пишет в repo (под `suppress_legacy_notify`). Все читатели через AppServices видят `services.topology.load()` (derived из current Project) либо подписываются на EventBus. Holder.on_changed остаётся работать **только** для немигрированных presenter'ов (Phase E постепенно их переключает). Refs: investigator-ревью раздел 4.
+- **2026-05-27 (closed Q2):** **Recipe YAML backward-compat — Variant A** (denormalize `meta → top-level` при `write()`). Reason: live YAML файлы (`demo_webcam_split_merge.yaml`, prod-рецепты) имеют top-level `name/version/...`; миграция формата = отдельный риск, отложить в Phase F. C.5 реализует `_denormalize(data)`.
+- **2026-05-27 (closed Q3):** **Wire.description: str = "" как поле** + **Process.metadata: dict[str, Any]** как passthrough-bag. Reason: Wire.description — семантическая часть entity (используется в UI/документации wire), `Process.source_target_fps` — runtime-телеметрия (FPS-таргет), не часть persistent topology → metadata gracefully accumulates. **НЕ** добавляем `source_target_fps` как поле (избегаем расширения core entity ради runtime-полей).
+- **2026-05-27 (closed Q4):** **RegistersBackend адресация — Variant A**. Adapter принимает `topology_repo` + `plugin_catalog` в ctor; в `get_field_specs(process, plugin_index)` читает текущую topology через repo, разрешает `plugin_index → plugin_name`, затем через `PluginCatalog.resolve(plugin_name).config_schema` находит `register_class_name`. Маппинг локализован в adapter, Protocol не меняется. Документировать в docstring + edge case `out of range → DomainError`.
+- **2026-05-27 (closed Q5):** **DisplayRegistry — singleton напрямую**. Adapter получает `DisplayRegistry()` в ctor без захода через `ctx.extras`. Reason: audit зафиксировал, что в `ctx.extras` его нет; добавление = scope creep.
+- **2026-05-27 (closed Q6):** **`suppress_legacy_notify` — toggle-флаг** `holder._suppress_notify: bool` + context manager в `TopologyRepositoryFromHolder`. Альтернатива (снимать/восстанавливать callbacks) — race-prone и сложнее тестировать. Toggling — **temporary measure до Phase F** (удаление `holder.on_changed`). В C.3 реализовать `suppress_legacy_notify()` cm, в C.6 dispatcher его использует. Документировать в README adapter'а как «known compromise, removed in Phase F».
+
+### Тактические (структура Phase C)
 
 - **2026-05-27 (draft):** Phase C — **7 Tasks**: C.0 hot-fix domain, C.1 catalogs (3-в-1), C.2 auth, C.3 topology, C.4 registers, C.5 recipes (сложный), C.6 dispatcher (центральный), C.7 README+integration. Группировка чтобы каждый Task ≤ 1 день.
 - **2026-05-27 (draft):** Параллелизация: C.1, C.2, C.3, C.4 можно делать параллельно (3-4 worktree или последовательно). C.5 и C.6 зависят от C.3 (topology). C.7 — последним.

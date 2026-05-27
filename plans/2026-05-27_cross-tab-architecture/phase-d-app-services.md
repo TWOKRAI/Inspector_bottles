@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase D
 - **Дата:** 2026-05-27 (draft v1)
-- **Статус:** DRAFT (готов к ревью; не стартовать до завершения Phase C)
+- **Статус:** APPROVED (open questions закрыты 2026-05-27 — см. decisions log; старт только после Phase C DONE)
 - **Ветка:** `refactor/cross-tab-architecture` (та же)
 - **Master plan:** [`plan.md`](plan.md)
 - **Brief:** [`docs/refactors/2026-05_cross_tab_architecture.md`](../../docs/refactors/2026-05_cross_tab_architecture.md), раздел 5.4
@@ -92,6 +92,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
        commands=commands,
        events=bus,
        auth=AuthFacadeFromAuthState(ctx.auth_state, auth_manager),
+       config=ConfigStoreFromManager(ctx.extras["config_store"]),  # D.2b
    )
    ```
 2. **Failure handling:** если какой-то adapter падает на инициализации (например, plugin discovery провалился) — логировать и `sys.exit(1)`, аналогично текущим startup-checks. **Нет `AppServices = None` варианта.**
@@ -103,7 +104,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 
 **Acceptance criteria:**
 - [ ] `ctx.app_services` создаётся в `run_gui()` после всех extras.
-- [ ] AppServices содержит 9 полей, все не None.
+- [ ] AppServices содержит 10 полей (включая `config`), все не None.
 - [ ] Existing tests (test_phase15_smoke, test_app_context) проходят без изменений (backward-compat).
 - [ ] Новый тест: `dispatch(AddProcess(...))` через `services.commands` → процесс появляется в `services.topology.load()`.
 - [ ] `register_domain_schemas()` вызывается ровно один раз.
@@ -183,6 +184,70 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 
 ---
 
+### Task D.2b — ConfigStore Protocol + adapter
+
+- **Level:** Middle+ (Sonnet)
+- **Assignee:** developer
+- **Module contract:** new-full (protocol в domain + adapter в adapters/, AppServices field)
+
+**Goal:** Добавить `ConfigStore` Protocol в `domain/protocols/`, реализовать `ConfigStoreFromManager` adapter поверх существующего `ConfigStore` (или `ConfigManager`) из `multiprocess_framework/modules/config_module/`, добавить поле `config: ConfigStore` в `AppServices`. Settings tab (D.5) использует `services.config` вместо `ctx.config`.
+
+**Файлы:**
+- `multiprocess_prototype/domain/protocols/config_store.py` — Protocol с read/write/observe методами.
+- `multiprocess_prototype/domain/protocols/__init__.py` — re-export.
+- `multiprocess_prototype/domain/app_services.py` — добавить поле `config: ConfigStore`.
+- `multiprocess_prototype/domain/tests/_fakes.py` — `FakeConfigStore` для builder.
+- `multiprocess_prototype/domain/tests/test_make_app_services_builder.py` — обновить (теперь 10 полей).
+- `multiprocess_prototype/adapters/stores/config_store.py` — `ConfigStoreFromManager`.
+- `multiprocess_prototype/adapters/tests/test_config_store.py`.
+
+**Steps:**
+
+1. Protocol (минимальный, расширяется в Phase E):
+   ```python
+   class ConfigStore(Protocol):
+       def get(self, key: str, default: Any = None) -> Any: ...
+       def set(self, key: str, value: Any) -> None: ...
+       def get_section(self, section: str) -> Mapping[str, Any]: ...
+       def list_keys(self, prefix: str = "") -> Sequence[str]: ...
+       def subscribe(self, key_pattern: str, handler: Callable[[str, Any], None]) -> Subscription: ...
+       def save(self) -> None: ...  # persist to disk
+   ```
+   - **Решить при имплементации:** `Subscription` — re-use из EventBus или отдельный тип? Рекомендация: re-use (Phase E может обсудить, если нужна другая семантика).
+2. `ConfigStoreFromManager` adapter в `adapters/stores/config_store.py`:
+   - Wrapper над `multiprocess_framework/modules/config_module/ConfigStore` (или `ConfigManager` — проверить точный singleton).
+   - `subscribe` — обёртка над механизмом change-callbacks из config_module (если есть; иначе simple internal pub-sub).
+3. Добавить `AppServices.config: ConfigStore` (10-е поле).
+4. `make_test_app_services()` builder возвращает `FakeConfigStore` по умолчанию.
+5. В D.1 — `ctx.app_services = AppServices(..., config=ConfigStoreFromManager(ctx.extras["config_store"]))`.
+
+**Тесты:**
+- `test_config_store_protocol_satisfaction` (assignment check).
+- `test_config_store_get_set_roundtrip`.
+- `test_config_store_get_section_returns_mapping`.
+- `test_config_store_subscribe_fires_on_change`.
+- `test_config_store_save_persists_to_disk`.
+- Builder: `test_make_app_services_builds_with_fake_config`.
+
+**Acceptance criteria:**
+- [ ] Protocol существует в domain.
+- [ ] Adapter satisfies Protocol.
+- [ ] AppServices.config — обязательное поле (не Optional).
+- [ ] Settings tab (D.5) использует `services.config`, не `ctx.config`.
+- [ ] Builder обновлён.
+
+**Out of scope:**
+- Validation / schema enforcement — Phase E если нужно (Settings tab уже Pydantic-validate'ит).
+- Multi-tenant config — нет такой потребности.
+
+**Edge cases:**
+- Config file отсутствует → `get(...)` возвращает default. `save()` создаёт файл.
+- Concurrent writes — single-threaded GUI assumption, lock внутри adapter если нужно.
+
+**Refs:** `multiprocess_framework/modules/config_module/`, memory `project_settings_mvp_refactor`.
+
+---
+
 ### Task D.3 — ProjectHolder + initial Project bootstrap
 
 - **Level:** Middle (Sonnet)
@@ -212,7 +277,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
            with self._lock:
                self._current = project
    ```
-2. **Решить:** ProjectHolder должен публиковать `ProjectReplaced` event при `set()` или это делает CommandDispatcher? Рекомендация: dispatcher (он публикует granular events; ProjectHolder остаётся «тупым» state-контейнером).
+2. **Decision закрыт (см. decisions log):** ProjectHolder — «тупой» state-контейнер. Granular events публикует CommandDispatcher (он знает, какие domain-events вернула `Project.apply()`). Holder не публикует ничего.
 3. `Project.from_topology(topology: Topology) -> Project` — convenience factory в `domain/entities/project.py`: `Project(topology=topology, active_recipe=None)`.
 
 **Тесты:**
@@ -306,6 +371,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
    - SettingsHistoryPresenter — потенциально использует `services.events.subscribe(...)` для timeline.
    - SettingsAdministration — uses `services.auth` для permission checks.
 3. **Тесты обязательно через `make_test_app_services()`** builder, не MagicMock. Это zero-tolerance запрет из B.6.
+4. **ConfigStore через services.config** (D.2b закрыл вопрос Q3): SettingsSystemPresenter использует `services.config.get_section("display")` вместо `ctx.config.get(...)`. Замена прямой.
 
 **Тесты:**
 - Все existing test_*.py для Settings tab — переписать на builder.
@@ -320,7 +386,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - [ ] DeprecationWarning'и от extras не появляются в Settings tab (всё через AppServices).
 
 **Edge cases:**
-- ConfigStore не в Protocols — оставить как `ctx.config` (read-only, через AppContext). В Phase E решить, нужен ли `ConfigStore Protocol`.
+- ConfigStore теперь часть AppServices (D.2b) — Settings использует `services.config`. `ctx.config` остаётся для backward-compat (тоже через DeprecationWarning, если pattern попадает в Phase F).
 
 **Out of scope:**
 - Pipeline/Processes/Recipes/Services/Plugins/Displays — Phase E.
@@ -365,7 +431,7 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 
 ## Acceptance criteria всей Phase D
 
-- [ ] Все 6 Tasks (D.1—D.6) DONE.
+- [ ] Все 7 Tasks (D.1, D.2, D.2b, D.3—D.6) DONE.
 - [ ] `python -m pytest multiprocess_prototype/ -v` — все тесты passed (включая Settings миграцию).
 - [ ] `ctx.app_services` создаётся в `run_gui()` для всех сценариев запуска.
 - [ ] Все 16 deprecated `ctx.extras` ключей эмитят `DeprecationWarning`.
@@ -377,20 +443,27 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - [ ] Migration guide опубликован — Phase E разработчики могут стартовать.
 - [ ] **`grep -rn "MagicMock(spec=AppContext)"` в новых/мигрированных тестах = 0** (правило B.6 сохраняется).
 
-## Открытые вопросы (закрыть до старта Phase D)
+## Закрытые вопросы (decisions log)
 
-1. **QtEventBus в frontend/ или новый пакет?** Phase B решила: domain UI-agnostic. Phase D wrapper живёт в `frontend/`. Альтернатива: `multiprocess_prototype/qt_layer/` — Qt-aware пакет между frontend и domain. **Решение по умолчанию:** `frontend/qt_event_bus.py` (одного файла достаточно). Подтвердить.
-2. **ProjectHolder location.** В `adapters/dispatch/` (рядом с dispatcher) или в `domain/` (часть aggregate)? Investigator не комментировал. **Решение:** `adapters/`, потому что mutable wrapper — не domain-сущность.
-3. **ConfigStore — добавлять в AppServices?** Сейчас `ctx.config` отдельный. Если Settings tab его использует — может потребоваться `ConfigStore Protocol`. **Решить при D.5.**
-4. **Что делать с `bindings`?** Investigator подтвердил: оставить вне AppServices. Но 25+ точек `bindings.bind(...)` в presenter'ах будут продолжать использовать `ctx.bindings()`. Это OK — bindings не часть editor state. **Подтвердить.**
-5. **DeprecationWarning verbosity.** При импорте конфиг для pytest может потребоваться `filterwarnings = "error::DeprecationWarning:multiprocess_prototype.*"` или `ignore`. Решить до D.4.
+Все 5 open questions закрыты 2026-05-27 (с подтверждением пользователя через AskUserQuestion на 2 ключевых). См. секцию «Решения» ниже.
 
 ## Решения (decisions log)
 
-- **2026-05-27 (draft):** Phase D — **6 Tasks**: D.1 factory, D.2 QtEventBus, D.3 ProjectHolder, D.4 deprecation shim, D.5 Settings PoC, D.6 docs+baseline. Settings выбрана для PoC: simplest, MVP уже сделана (memory).
-- **2026-05-27 (draft):** **Не удалять `ctx.extras`.** Только deprecation. Удаление — Phase F.
-- **2026-05-27 (draft):** **Не мигрировать Pipeline tab в Phase D.** Phase E первым делом возьмёт Pipeline (audit показал — главный consumer), но D ограничивается Settings для validation паттерна.
-- **2026-05-27 (draft):** QtEventBus реализуется в `frontend/`, не в `domain/`. Domain остаётся UI-agnostic (правило B.6).
+### Стратегические (закрытые open questions)
+
+- **2026-05-27 (closed Q1):** **QtEventBus в `frontend/qt_event_bus.py`** — один файл достаточно. Domain остаётся UI-agnostic. Альтернатива (`multiprocess_prototype/qt_layer/` пакет) отложена до тех пор, пока не появится 2+ Qt-aware wrapper'ов.
+- **2026-05-27 (closed Q2):** **ProjectHolder в `adapters/dispatch/project_holder.py`** — mutable wrapper не является domain-сущностью. Также: holder НЕ публикует event'ы (тупой state-контейнер), все publish'ы делает `CommandDispatcherOrchestrator`.
+- **2026-05-27 (closed Q3 — user-confirmed):** **ConfigStore Protocol добавляется в Phase D** (новый Task D.2b). Settings tab сразу мигрирует на `services.config`, не на `ctx.config`. Reason: пользовательское решение — лучше единая инкапсуляция через AppServices, чем смешанный паттерн. Domain Protocol простой (get/set/section/subscribe/save), adapter wraps `multiprocess_framework/modules/config_module/`.
+- **2026-05-27 (closed Q4):** **`bindings` остаётся вне AppServices**. Это Qt-signal runtime state (live data binding), не editor state. 25+ точек `ctx.bindings()` в presenter'ах продолжают работать через AppContext, без deprecation. Возможно ревизия в Phase G (если bindings объединять с EventBus).
+- **2026-05-27 (closed Q5):** **DeprecationWarning verbosity** — `pytest.ini` добавляет `filterwarnings = ignore::DeprecationWarning:multiprocess_prototype.frontend._deprecated_extras`. Тесты НЕ падают на warnings. Logging-mode (`always::DeprecationWarning`) для одной локальной сессии — опционально, документировать в migration guide D.6. Удаление ключей и `error::DeprecationWarning` — Phase F.
+
+### Тактические (структура Phase D)
+
+- **2026-05-27 (user-confirmed):** **Phase D PoC — Settings tab.** Pipeline остаётся первым приоритетом Phase E (главный consumer, валидирует архитектуру end-to-end). Settings выбран для D.5 потому что: (а) уже на MVP-паттерне, (б) минимум topology consumer'ов, (в) низкий риск регрессии — безопасный «sanity check» что AppServices + QtEventBus + dispatcher работают вместе.
+- **2026-05-27:** Phase D — **7 Tasks** (после добавления D.2b ConfigStore): D.1 factory, D.2 QtEventBus, D.2b ConfigStore Protocol+adapter, D.3 ProjectHolder, D.4 deprecation shim, D.5 Settings PoC, D.6 docs+baseline.
+- **2026-05-27:** **Не удалять `ctx.extras`.** Только deprecation. Удаление — Phase F.
+- **2026-05-27:** **Не мигрировать Pipeline tab в Phase D.** Phase E начинается с Pipeline.
+- **2026-05-27:** QtEventBus реализуется в `frontend/`, не в `domain/`. Domain остаётся UI-agnostic (правило B.6).
 
 ## Что разблокирует Phase D
 
