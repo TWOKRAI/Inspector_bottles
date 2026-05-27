@@ -147,7 +147,93 @@ multiprocess_prototype/adapters/
 
 **Out of scope:** `config_schema` детализация (Phase E когда нужен Inspector).
 
-**Refs:** `multiprocess_prototype/plugin_manager.py` (PluginRegistry), `Services/service_module/registry.py` (ServiceRegistry), `multiprocess_framework/modules/display_module/registry.py` (DisplayRegistry).
+**Refs:** `multiprocess_framework/modules/process_module/plugins/registry.py` (PluginRegistry, fixed после C.1 discovery), `multiprocess_framework/modules/service_module/registry.py` (ServiceRegistry, fixed после C.1 discovery), `multiprocess_framework/modules/display_module/registry.py` (DisplayRegistry).
+
+---
+
+### Task C.1.5 — Backport PluginSpec/PortSpec gaps + DisplayRegistry preload
+
+- **Level:** Middle (Sonnet)
+- **Assignee:** developer
+- **Module contract:** patch (расширение domain protocols + adapter mapping + app.py bootstrap)
+
+**Goal:** Закрыть lossy mapping в PluginSpec/PortSpec, чтобы Phase E pipeline migration не упёрлась в отсутствие полей. + Загрузить DisplayRegistry из YAML в `app.py` до создания AppServices (чтобы read-only consumers видели данные).
+
+**Reason:** investigator-отчёт 2026-05-27 выявил, что текущий PluginCatalog покрывает только 14% prod call sites (9/14 нуждаются в `description`, `optional`, ...). Pipeline migration в Phase E невозможна без этих полей. DisplayRegistry загружается лениво (только при открытии вкладки) — после Phase D `services.displays.list_displays()` вернёт пустой tuple.
+
+**Файлы:**
+- `multiprocess_prototype/domain/protocols/plugin_catalog.py` — добавить:
+  - `PluginSpec.description: str = ""`
+  - `PortSpec.optional: bool = False`
+  - `PortSpec.shape: str = ""` (для round-trip lossless)
+- `multiprocess_prototype/adapters/catalogs/plugin_catalog.py` — расширить mapping: `entry.description → spec.description`, для каждого `Port` → `PortSpec(name, kind, optional=port.optional, shape=port.shape or "")`.
+- `multiprocess_prototype/frontend/app.py` — после строки `_service_registry = ServiceRegistry()` и discover, добавить `DisplayRegistry().load_from_yaml(...)` или эквивалент (найти как реальный DisplayRegistry знает path; вероятно `displays.yaml` в `multiprocess_prototype/`). Минимальное изменение: 3-5 строк.
+- `multiprocess_prototype/adapters/tests/test_catalogs.py` — обновить fake-fixtures на новые поля, добавить тесты `test_plugin_spec_has_description`, `test_port_spec_has_optional_shape`.
+- `multiprocess_prototype/domain/tests/test_protocols.py` (или соответствующий) — обновить assignment-проверки если требуется.
+
+**Acceptance criteria:**
+- [ ] `PluginSpec.description: str = ""` добавлено.
+- [ ] `PortSpec.optional: bool = False` и `PortSpec.shape: str = ""` добавлены.
+- [ ] PluginCatalogFromRegistry заполняет эти поля из `PluginEntry` lossless.
+- [ ] `app.py` загружает DisplayRegistry из YAML до создания AppServices (если path существует).
+- [ ] 240 domain тестов passed + расширенные C.1 тесты passed.
+- [ ] 0 ruff errors.
+
+**Out of scope:**
+- `plugin_class: type` и `register_classes: list[type]` в PluginSpec — это явный compromise: adapter покрывает «catalog read» (~35%), а sandbox/command_catalog остаются на raw registry. Документировать в `adapters/README.md` (C.7).
+- ServiceCatalog → ServiceManager расширение — это C.1.6.
+- suppress_legacy_notify — не включаем в C.6 (см. decisions log Q7).
+
+**Refs:** investigator-отчёт 2026-05-27, разделы 1.2 (Lossy mapping) и 3.1 (PluginSpec расширение).
+
+---
+
+### Task C.1.6 — ServiceCatalog → ServiceManager (расширение Protocol до lifecycle)
+
+- **Level:** Senior (Opus)
+- **Assignee:** teamlead
+- **Module contract:** public-api-change (расширение domain Protocol + adapter API)
+
+**Goal:** Текущий ServiceCatalog read-only не покрывает ни одного существующего consumer'а — ServicesPresenter мутирует `entry.lifecycle = RUNNING` и инстанцирует `entry.cls()` (start/stop/restart). Расширить до ServiceManager — добавить lifecycle methods, чтобы Phase E мог мигрировать ServicesPresenter.
+
+**Reason:** investigator-отчёт 2026-05-27, раздел 1.1 / ServiceRegistry: 7 prod call sites, **0% покрыто** read-only adapter'ом.
+
+**Decision (user-confirmed):** расширить, не убирать. Adapter охватывает реальный use case.
+
+**Файлы:**
+- `multiprocess_prototype/domain/protocols/service_catalog.py` — переименовать `ServiceCatalog` → `ServiceManager` (Protocol). Добавить методы:
+  - `start(service_id) -> None` — инстанцирует и запускает сервис.
+  - `stop(service_id) -> None` — останавливает.
+  - `restart(service_id) -> None` — stop + start.
+  - `get_lifecycle(service_id) -> ServiceLifecycle` — текущий статус.
+  - `discover(*paths) -> DiscoveryResult` — пересканирование (опционально, если нужно из Services tab).
+- `multiprocess_prototype/domain/__init__.py` — обновить re-export.
+- `multiprocess_prototype/domain/app_services.py` — переименовать поле `services: ServiceCatalog` → `services: ServiceManager` (имя поля можно оставить `services` или переименовать в `service_manager` — решить teamlead).
+- `multiprocess_prototype/domain/tests/_fakes.py` — `FakeServiceCatalog` → `FakeServiceManager` с lifecycle поддержкой.
+- `multiprocess_prototype/adapters/catalogs/service_catalog.py` — переименовать класс в `ServiceManagerFromRegistry` (или новый файл `service_manager.py`), реализовать lifecycle методы делегацией к `ServiceRegistry.get(...).cls()` + lifecycle мутации. Read-only методы (`list_services`, `resolve`) остаются.
+- `multiprocess_prototype/adapters/catalogs/__init__.py` — обновить re-export.
+- `multiprocess_prototype/adapters/tests/test_catalogs.py` — обновить + добавить тесты lifecycle (start → RUNNING, stop → STOPPED, restart, get_lifecycle).
+- `plans/2026-05-27_cross-tab-architecture/phase-d-app-services.md` — обновить D.1 snippet (`services: ServiceManagerFromRegistry(...)`).
+
+**Edge cases:**
+- Concurrent start/stop — single-threaded GUI предположение, но lock внутри adapter если нужен.
+- `entry.cls()` падает — `DomainError` или `ServiceError`? Решить при имплементации.
+- `start()` на уже запущенном сервисе — idempotent (no-op) или `DomainError`? Рекомендация: idempotent (no-op + log).
+
+**Acceptance criteria:**
+- [ ] `ServiceManager` Protocol существует с 4-5 методами.
+- [ ] Adapter satisfies Protocol.
+- [ ] Lifecycle тесты: start/stop/restart/get_lifecycle.
+- [ ] `make_test_app_services()` builder использует `FakeServiceManager`.
+- [ ] AppServices.services переименовано/расширено корректно.
+- [ ] 240+ domain тестов passed.
+- [ ] phase-d-app-services.md обновлён (D.1 snippet).
+
+**Out of scope:**
+- Migration ServicesPresenter — это Phase E.
+- ConfigStore (D.2b) — независимая задача, не пересекается.
+
+**Refs:** investigator-отчёт 2026-05-27, разделы 1.1/1.2/3.3.
 
 ---
 
@@ -385,9 +471,8 @@ multiprocess_prototype/adapters/
            current = self._holder.get()
            catalogs = self._apply_context_factory()
            new_project, events = current.apply(command, catalogs=catalogs)
-           # 1. save в topology repo (suppression legacy)
-           with self._topology_repo.suppress_legacy_notify():
-               self._topology_repo.save(new_project.topology)
+           # 1. save в topology repo (БЕЗ suppression — double notification до Phase F)
+           self._topology_repo.save(new_project.topology)
            # 2. update holder
            self._holder.set(new_project)
            # 3. publish events
@@ -396,20 +481,20 @@ multiprocess_prototype/adapters/
            return events
    ```
 2. `ProjectHolder` — простой mutable wrapper над текущим Project (frozen внутри). Живёт в `adapters/dispatch/project_holder.py` или прямо в `command_dispatcher.py`. Это **state** dispatcher'а.
-3. **`suppress_legacy_notify` context manager** — добавить в `TopologyRepository` adapter (C.3): когда установлен флаг, `save()` не вызывает `holder._notify()`. Реализация: `holder._suppress_notify = True` или подобное. **Это нужно потому что domain-events уже идут через EventBus** — двойная нотификация = race conditions (investigator risk #2).
+3. **`suppress_legacy_notify` НЕ используется по умолчанию (Decision Q7 — user-confirmed 2026-05-27).** Context manager остаётся доступен в `TopologyRepository` adapter (C.3) на случай Phase F, но dispatcher вызывает `topology_repo.save()` штатно. Reason: investigator-отчёт 2026-05-27 (раздел 2.5) выявил 2 prod подписчика на `holder.on_changed`: `app.py:197` (TopologyBridge) + `pipeline/presenter.py:60` (PipelinePresenter). Подавление до миграции Phase E → UI рассинхрон. **Двойная нотификация (legacy callbacks + EventBus) — осознанный временный компромисс на Phase D/E.** Suppression включается только в Phase F после миграции всех подписчиков на EventBus.
 
 **Тесты:**
 - `test_dispatch_add_process_updates_project_and_publishes_event`.
 - `test_dispatch_propagates_domain_error` — `AddProcess` с дубликатом имени → `DomainError`, holder/repo не меняется.
 - `test_dispatch_save_to_topology_repo` — после dispatch, `repo.load()` отражает новое состояние.
-- `test_dispatch_suppress_legacy_notify` — legacy callback `holder.on_changed(cb)` не вызывается при dispatch (cb получит уведомление только через EventBus, если presenter мигрировал).
+- `test_dispatch_calls_legacy_notify_too` — legacy callback `holder.on_changed(cb)` **вызывается** при dispatch (Phase D/E — двойная нотификация по дизайну). Cb также получит EventBus event если подписан.
 - `test_dispatch_publish_order` — события публикуются в порядке возврата из `apply()` (важно для cascade RemoveProcess).
 - `test_dispatch_remove_process_cascade_events_published` — все 5 событий (ProcessRemoved + 3×WireDisconnected + 1×DisplayUnbound) опубликованы в порядке.
 - `test_apply_context_factory_called_on_each_dispatch` — динамический контекст (catalogs могут меняться).
 
 **Acceptance criteria:**
 - [ ] Orchestrator satisfies CommandDispatcher Protocol.
-- [ ] `suppress_legacy_notify` работает (legacy callback не вызывается).
+- [ ] Dispatcher вызывает `topology_repo.save()` БЕЗ `suppress_legacy_notify` — legacy callbacks вызываются как обычно (двойная нотификация).
 - [ ] Cascade events публикуются в правильном порядке.
 - [ ] DomainError не оставляет holder в inconsistent state (rollback semantic не нужен, потому что `apply()` чистая функция — новый Project не записывается).
 
@@ -466,7 +551,7 @@ multiprocess_prototype/adapters/
 
 ## Acceptance criteria всей Phase C
 
-- [ ] Все 7 Tasks (C.0—C.7) DONE.
+- [ ] Все 9 Tasks (C.0, C.1, **C.1.5**, **C.1.6**, C.2—C.7) DONE.
 - [ ] `python -m pytest multiprocess_prototype/adapters/tests/ -v` — все тесты passed.
 - [ ] `python -m pytest multiprocess_prototype/domain/tests/ -v` — 233+ (плюс новые тесты C.0) тесты passed.
 - [ ] `ruff check multiprocess_prototype/adapters/` — 0 errors.
@@ -489,7 +574,12 @@ multiprocess_prototype/adapters/
 - **2026-05-27 (closed Q3):** **Wire.description: str = "" как поле** + **Process.metadata: dict[str, Any]** как passthrough-bag. Reason: Wire.description — семантическая часть entity (используется в UI/документации wire), `Process.source_target_fps` — runtime-телеметрия (FPS-таргет), не часть persistent topology → metadata gracefully accumulates. **НЕ** добавляем `source_target_fps` как поле (избегаем расширения core entity ради runtime-полей).
 - **2026-05-27 (closed Q4):** **RegistersBackend адресация — Variant A**. Adapter принимает `topology_repo` + `plugin_catalog` в ctor; в `get_field_specs(process, plugin_index)` читает текущую topology через repo, разрешает `plugin_index → plugin_name`, затем через `PluginCatalog.resolve(plugin_name).config_schema` находит `register_class_name`. Маппинг локализован в adapter, Protocol не меняется. Документировать в docstring + edge case `out of range → DomainError`.
 - **2026-05-27 (closed Q5):** **DisplayRegistry — singleton напрямую**. Adapter получает `DisplayRegistry()` в ctor без захода через `ctx.extras`. Reason: audit зафиксировал, что в `ctx.extras` его нет; добавление = scope creep.
-- **2026-05-27 (closed Q6):** **`suppress_legacy_notify` — toggle-флаг** `holder._suppress_notify: bool` + context manager в `TopologyRepositoryFromHolder`. Альтернатива (снимать/восстанавливать callbacks) — race-prone и сложнее тестировать. Toggling — **temporary measure до Phase F** (удаление `holder.on_changed`). В C.3 реализовать `suppress_legacy_notify()` cm, в C.6 dispatcher его использует. Документировать в README adapter'а как «known compromise, removed in Phase F».
+- **2026-05-27 (closed Q6):** **`suppress_legacy_notify` cm реализуется в C.3 как toggle-флаг** `holder._suppress_notify: bool` — но **НЕ применяется по умолчанию** (см. Q7 ниже). Контекст-менеджер остаётся в API repo для Phase F. Реализация: `holder._suppress_notify = True/False` через cm.
+- **2026-05-27 (closed Q7 — user-confirmed после investigator-ревью):** **CommandDispatcher (C.6) НЕ использует `suppress_legacy_notify` по умолчанию.** Save через `topology_repo.save()` штатно вызывает legacy callbacks (`holder.on_changed`). EventBus publish идёт параллельно. **Двойная нотификация — осознанный временный компромисс Phase D/E.** Reason: investigator-отчёт 2026-05-27 (раздел 2.5) выявил 2 prod подписчика на legacy callbacks (`app.py:197` TopologyBridge + `pipeline/presenter.py:60` PipelinePresenter). Suppression до их миграции в Phase E → UI рассинхрон. Suppression активируется только в Phase F после полной миграции на EventBus.
+- **2026-05-27 (added Tasks C.1.5 + C.1.6 — investigator follow-up):** В план Phase C добавлены 2 новых Task'а после C.1 (созданы пост-фактум после ревью реальных call sites):
+  - **C.1.5** (Middle, developer): backport gaps в PluginSpec (`description`) и PortSpec (`optional`, `shape`) + загрузка DisplayRegistry из YAML в `app.py` до создания AppServices. Reason: PluginCatalog покрывает только 14% prod call sites без этих полей; DisplayRegistry загружается лениво и AppServices видит пустой tuple.
+  - **C.1.6** (Senior, teamlead): расширение ServiceCatalog → **ServiceManager** Protocol с lifecycle методами (start/stop/restart/get_lifecycle). Reason: текущий read-only ServiceCatalog покрывает 0% prod call sites (ServicesPresenter мутирует lifecycle и инстанцирует cls()).
+  - **Compromise documented:** PluginSpec НЕ получает `plugin_class: type` / `register_classes: list[type]` — sandbox и command_catalog остаются на raw registry. Adapter покрывает «catalog read» ~35%, не 100%.
 
 ### Тактические (структура Phase C)
 
