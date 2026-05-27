@@ -62,7 +62,7 @@ class PipelineTab(QWidget):
     Canvas + Inspector — в 3-й колонке через вертикальный сплиттер.
     """
 
-    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe"})
+    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe", "launch_recipe"})
 
     def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -107,6 +107,16 @@ class PipelineTab(QWidget):
         self._presenter.set_scene(self._scene)
         self._presenter.set_inspector(self._inspector)
 
+        # Создать контроллер телеметрии edges (Task 7b.3)
+        from .telemetry import WireMetricsController
+
+        self._wire_metrics_controller = WireMetricsController(
+            self._scene,
+            self._presenter.wire_metrics_model,
+            parent=self,
+        )
+        self._wire_metrics_controller.start()
+
         # Drop target для D&D из палитры на canvas.
         self._drop_target = PipelineDropTarget(self._view, self._on_plugin_dropped)
 
@@ -144,6 +154,7 @@ class PipelineTab(QWidget):
             ("auto_layout", "Раскладка"),
             ("validate", "Валидация"),
             ("save_recipe", "Сохранить"),
+            ("launch_recipe", "Запустить"),
             ("fit", "По размеру"),
             ("zoom_in", "Zoom +"),
             ("zoom_out", "Zoom −"),
@@ -158,7 +169,7 @@ class PipelineTab(QWidget):
         # Permission gating: mutating actions (delete/auto_layout/save_recipe).
         _auth = getattr(self._ctx, "auth", None)
         auth_state = getattr(_auth, "state", None) if _auth is not None else None
-        for aid in ("delete", "auto_layout", "save_recipe"):
+        for aid in ("delete", "auto_layout", "save_recipe", "launch_recipe"):
             install_permission_aware_enable(
                 self._action_buttons[aid],
                 "tabs.pipeline.edit",
@@ -248,6 +259,8 @@ class PipelineTab(QWidget):
                 QMessageBox.information(self, "Валидация", "Topology валидна")
         elif action_id == "save_recipe":
             self._presenter.save_to_active_recipe(parent=self)
+        elif action_id == "launch_recipe":
+            self._presenter.launch_active_recipe(parent=self)
         elif action_id == "auto_layout":
             self._presenter.auto_layout_scene()
         elif action_id == "delete":

@@ -1,0 +1,50 @@
+version: 2
+name: demo_webcam_split_merge
+description: webcam -> split ROI -> parallel processing -> merge -> display
+
+# Структура blueprint: соответствует SystemBlueprint.model_validate()
+# ProcessConfig.plugins — список dict с ключом plugin_name
+blueprint:
+  name: demo_webcam_split_merge
+  description: Demo рецепт Phase 7b — split/merge pipeline
+  processes:
+    - process_name: capture_proc
+      plugins:
+        - plugin_name: capture
+        - plugin_name: resize
+        - plugin_name: region_split
+    - process_name: roi_a_proc
+      plugins:
+        - plugin_name: grayscale
+        - plugin_name: color_mask
+    - process_name: roi_b_proc
+      plugins:
+        - plugin_name: negative
+        - plugin_name: blur
+    - process_name: merge_proc
+      plugins:
+        - plugin_name: stitcher
+        - plugin_name: render_overlay
+  wires:
+    # region_split output port: region (не frame)
+    - source: capture_proc.region_split.region
+      target: roi_a_proc.grayscale.frame
+    - source: capture_proc.region_split.region
+      target: roi_b_proc.negative.frame
+    # color_mask выходит frame, stitcher принимает region — семантически корректно
+    - source: roi_a_proc.color_mask.frame
+      target: merge_proc.stitcher.region
+    # blur выходит frame, stitcher принимает region
+    - source: roi_b_proc.blur.frame
+      target: merge_proc.stitcher.region
+
+# Дополнительные секции (не обрабатываются RecipeEngine, хранятся как data)
+active_services:
+  - webcam_camera
+
+display_bindings:
+  # render_overlay output port: rendered_frame (не frame)
+  - source: merge_proc.render_overlay.rendered_frame
+    display: main_output
+  - source: capture_proc.resize.frame
+    display: debug_input

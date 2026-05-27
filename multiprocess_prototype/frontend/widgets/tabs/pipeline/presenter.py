@@ -16,6 +16,7 @@ from .graph.edge_item import EdgeData
 from .graph.port_schema import PortSchema
 from .model import PipelineModel
 from .layout import auto_layout
+from .telemetry import WireMetricsModel
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -44,6 +45,9 @@ class PipelinePresenter:
         self._scene: GraphScene | None = None
         self._suppress = False
         self._gui_positions: dict[str, tuple[float, float]] = {}
+
+        # Модель телеметрии wire-соединений (Task 7b.3)
+        self._wire_metrics_model = WireMetricsModel()
 
         # Ленивый импорт TopologyPresenter (для load/save YAML)
         from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
@@ -625,6 +629,15 @@ class PipelinePresenter:
         """Доступ к модели (read-only intent)."""
         return self._model
 
+    @property
+    def wire_metrics_model(self) -> WireMetricsModel:
+        """Доступ к модели телеметрии wire-соединений (Task 7b.3).
+
+        Returns:
+            WireMetricsModel — источник данных для WireMetricsController.
+        """
+        return self._wire_metrics_model
+
     # ------------------------------------------------------------------ #
     #  Конвертация (оставлена для обратной совместимости)                   #
     # ------------------------------------------------------------------ #
@@ -765,6 +778,106 @@ class PipelinePresenter:
 
         QMessageBox.information(parent, "Сохранение рецепта", f"Рецепт сохранён: {active_slug}")
         return True
+
+    # ------------------------------------------------------------------ #
+    #  Запуск активного рецепта                                           #
+    # ------------------------------------------------------------------ #
+
+    def launch_active_recipe(self, parent: "QWidget | None" = None) -> bool:
+        """Запустить активный рецепт через ProcessManager-proxy.
+
+        Получает blueprint из активного рецепта и вызывает
+        ``proxy.replace_blueprint(blueprint)`` — горячую замену процессов
+        без остановки GUI.
+
+        Args:
+            parent: родительский виджет для QMessageBox (может быть None).
+
+        Returns:
+            True при успешном запуске, False при любой ошибке или при
+            отсутствии proxy.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        # Шаг 1: проверить RecipeManager
+        recipe_mgr = self._ctx.recipe_manager()
+        if recipe_mgr is None:
+            QMessageBox.warning(parent, "Запуск рецепта", "RecipeManager недоступен")
+            return False
+
+        # Шаг 2: проверить активный рецепт
+        active_slug = recipe_mgr.get_active()
+        if active_slug is None:
+            QMessageBox.warning(parent, "Запуск рецепта", "Не выбран активный рецепт")
+            return False
+
+        # Шаг 3: прочитать рецепт
+        current = recipe_mgr.read_recipe(active_slug)
+        if current is None:
+            QMessageBox.critical(parent, "Запуск рецепта", "Не удалось прочитать рецепт")
+            return False
+
+        # Шаг 4: извлечь blueprint
+        blueprint = current.get("blueprint") or current.get("data", {}).get("blueprint") or {}
+        if not blueprint:
+            QMessageBox.warning(
+                parent,
+                "Запуск рецепта",
+                f"Рецепт '{active_slug}' не содержит blueprint",
+            )
+            return False
+
+        # Шаг 5: найти ProcessManager-proxy
+        proxy = None
+
+        # Вариант 1: явный proxy в ctx.extras
+        extras = getattr(self._ctx, "extras", {}) or {}
+        proxy = extras.get("process_manager_proxy") or extras.get("system_launcher")
+
+        # Вариант 2: специальный метод на ctx
+        if proxy is None and hasattr(self._ctx, "process_manager"):
+            pm = self._ctx.process_manager
+            if callable(pm):
+                pm = pm()
+            if pm is not None:
+                proxy = pm
+
+        if proxy is None or not hasattr(proxy, "replace_blueprint"):
+            QMessageBox.warning(
+                parent,
+                "Запуск рецепта",
+                "ProcessManager-proxy недоступен в GUI-процессе.\nЗапуск возможен только при работающей системе.",
+            )
+            return False
+
+        # Шаг 6: вызвать replace_blueprint
+        try:
+            result = proxy.replace_blueprint(blueprint)
+            success = result.get("success", False)
+            if success:
+                replaced = result.get("replaced", [])
+                skipped = result.get("skipped_protected", [])
+                QMessageBox.information(
+                    parent,
+                    "Запуск рецепта",
+                    f"Рецепт '{active_slug}' запущен.\n"
+                    f"Заменено процессов: {len(replaced)}\n"
+                    f"Пропущено (protected): {len(skipped)}",
+                )
+                return True
+            else:
+                error = result.get("error") or "неизвестная ошибка"
+                rolled_back = result.get("rolled_back", False)
+                QMessageBox.critical(
+                    parent,
+                    "Запуск рецепта",
+                    f"Ошибка: {error}\nRollback: {'выполнен' if rolled_back else 'не выполнен'}",
+                )
+                return False
+        except Exception as exc:
+            logger.exception("launch_active_recipe failed")
+            QMessageBox.critical(parent, "Запуск рецепта", f"Ошибка: {exc}")
+            return False
 
     # ------------------------------------------------------------------ #
     #  Legacy API compatibility                                            #
