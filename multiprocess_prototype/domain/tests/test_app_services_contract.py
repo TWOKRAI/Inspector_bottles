@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-test_app_services_contract.py — тесты контракта AppServices (Task B.6).
+test_app_services_contract.py — тесты контракта AppServices (Task B.6, D.2b).
 
 Тестирует:
   - make_test_app_services() без аргументов → валидный AppServices
   - make_test_app_services(plugins=custom) подменяет только plugins
   - AppServices frozen (FrozenInstanceError при попытке записи)
   - AppServices slots (__dict__ отсутствует)
-  - 9 полей с правильными именами
+  - 10 полей с правильными именами (включая config, Task D.2b)
   - каждый Fake* удовлетворяет своему Protocol (assignment-проверка)
 """
 
@@ -21,6 +21,7 @@ from ..app_services import AppServices
 from ..protocols import (
     AuthFacade,
     CommandDispatcher,
+    ConfigStore,
     DisplayCatalog,
     EventBusProtocol,
     PluginCatalog,
@@ -33,6 +34,7 @@ from ..protocols import (
 from ._fakes import (
     FakeAuthFacade,
     FakeCommandDispatcher,
+    FakeConfigStore,
     FakeDisplayCatalog,
     FakeEventBus,
     FakePluginCatalog,
@@ -51,12 +53,12 @@ from .conftest import make_test_app_services
 
 
 def test_make_test_app_services_no_args_returns_valid_appservices() -> None:
-    """Builder без аргументов возвращает валидный AppServices с 9 не-None полями."""
+    """Builder без аргументов возвращает валидный AppServices с 10 не-None полями."""
     svc = make_test_app_services()
 
     assert isinstance(svc, AppServices)
 
-    # Все 9 полей не None
+    # Все 10 полей не None
     assert svc.plugins is not None
     assert svc.services is not None
     assert svc.displays is not None
@@ -66,6 +68,7 @@ def test_make_test_app_services_no_args_returns_valid_appservices() -> None:
     assert svc.commands is not None
     assert svc.events is not None
     assert svc.auth is not None
+    assert svc.config is not None
 
 
 # ==============================================================================
@@ -90,6 +93,7 @@ def test_make_test_app_services_override_plugins() -> None:
     assert isinstance(svc.commands, FakeCommandDispatcher)
     assert isinstance(svc.events, FakeEventBus)
     assert isinstance(svc.auth, FakeAuthFacade)
+    assert isinstance(svc.config, FakeConfigStore)
 
 
 # ==============================================================================
@@ -121,10 +125,10 @@ def test_app_services_has_slots() -> None:
 # ==============================================================================
 
 
-def test_app_services_has_9_fields() -> None:
-    """AppServices содержит ровно 9 полей с правильными именами."""
+def test_app_services_has_10_fields() -> None:
+    """AppServices содержит ровно 10 полей с правильными именами (включая config)."""
     fields = dataclasses.fields(AppServices)
-    assert len(fields) == 9
+    assert len(fields) == 10
 
     field_names = {f.name for f in fields}
     expected = {
@@ -137,6 +141,7 @@ def test_app_services_has_9_fields() -> None:
         "commands",
         "events",
         "auth",
+        "config",
     }
     assert field_names == expected
 
@@ -201,3 +206,10 @@ def test_each_fake_satisfies_protocol() -> None:
     assert auth.access_level == 0
     assert auth.is_authenticated() is False
     assert auth.has_permission("any_key") is True
+
+    # ConfigStore (Task D.2b)
+    config: ConfigStore = FakeConfigStore()
+    config.set("x.y", 42)
+    assert config.get("x.y") == 42
+    assert config.get("missing", "default") == "default"
+    assert isinstance(config, ConfigStore)

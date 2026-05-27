@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-domain/app_services.py — типизированный DI-контейнер (Task B.6).
+domain/app_services.py — типизированный DI-контейнер (Task B.6, расширен D.2b).
 
-AppServices — frozen dataclass с 9 обязательными полями.
+AppServices — frozen dataclass с 10 обязательными полями.
 Все поля — Protocols (интерфейсы), никаких конкретных реализаций.
 Никаких Optional / None / accessor-методов.
 
@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from .protocols import (
     AuthFacade,
     CommandDispatcher,
+    ConfigStore,
     DisplayCatalog,
     EventBusProtocol,
     PluginCatalog,
@@ -34,7 +35,7 @@ from .protocols import (
 
 @dataclass(frozen=True, slots=True)
 class AppServices:
-    """Типизированный DI-контейнер. 9 обязательных полей.
+    """Типизированный DI-контейнер. 10 обязательных полей.
 
     Никаких Optional / None / accessor-методов. Domain ждёт полный набор.
     Тесты строят через make_test_app_services() из conftest.py — это
@@ -50,6 +51,7 @@ class AppServices:
       commands  — диспетчеризация команд (CommandDispatcher)
       events    — typed pub/sub шина событий (EventBusProtocol)
       auth      — read-only auth-состояние (AuthFacade)
+      config    — конфиг-хранилище с реактивным API (ConfigStore, Task D.2b)
     """
 
     plugins: PluginCatalog
@@ -61,6 +63,7 @@ class AppServices:
     commands: CommandDispatcher
     events: EventBusProtocol
     auth: AuthFacade
+    config: ConfigStore
 
 
 __all__ = [

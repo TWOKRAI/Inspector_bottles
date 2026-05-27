@@ -29,6 +29,7 @@ from .catalogs import (
 )
 from .dispatch import CommandDispatcherOrchestrator, ProjectHolder
 from .stores import (
+    ConfigStoreFromManager,
     RecipeStoreFromManager,
     RegistersBackendFromManager,
     TopologyRepositoryFromHolder,
@@ -43,6 +44,7 @@ __all__ = [
     "TopologyRepositoryFromHolder",
     "RegistersBackendFromManager",
     "RecipeStoreFromManager",
+    "ConfigStoreFromManager",
     "CommandDispatcherOrchestrator",
     "ProjectHolder",
 ]

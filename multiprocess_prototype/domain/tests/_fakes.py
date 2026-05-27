@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-domain/tests/_fakes.py — 9 default in-memory реализаций Protocols (Task B.6).
+domain/tests/_fakes.py — 10 default in-memory реализаций Protocols (Task B.6, D.2b).
 
 Каждый класс — минимальная type-checked реализация соответствующего Protocol.
 Никаких MagicMock — это даёт pyright-проверку сигнатур (audit Inventory 6 fix).
@@ -16,12 +16,14 @@ domain/tests/_fakes.py — 9 default in-memory реализаций Protocols (T
         FakePluginCatalog, FakeServiceCatalog, FakeDisplayCatalog,
         FakeRecipeStore, FakeRegistersBackend, FakeTopologyRepository,
         FakeCommandDispatcher, FakeEventBus, FakeAuthFacade,
+        FakeConfigStore,
     )
 """
 
 from __future__ import annotations
 
-from typing import Any
+import fnmatch
+from typing import Any, Callable
 
 from ..commands import ProjectCommand
 from ..entities import Recipe, Topology
@@ -30,6 +32,7 @@ from ..errors import DomainError
 from ..protocols import (
     AuthFacade,
     CommandDispatcher,
+    ConfigStore,
     DisplayCatalog,
     DisplaySpec,
     EventBusProtocol,
@@ -368,6 +371,71 @@ _af: AuthFacade = FakeAuthFacade()
 del _af
 
 
+# ==============================================================================
+# FakeConfigStore
+# ==============================================================================
+
+
+class _FakeConfigSubscription:
+    """Subscription-реализация для FakeConfigStore."""
+
+    def __init__(self, subs: list, pair: tuple) -> None:
+        self._subs = subs
+        self._pair = pair
+
+    def unsubscribe(self) -> None:
+        """Удалить подписку. Повторный вызов — no-op."""
+        if self._pair in self._subs:
+            self._subs.remove(self._pair)
+
+    def __enter__(self) -> "_FakeConfigSubscription":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.unsubscribe()
+
+
+class FakeConfigStore:
+    """In-memory ConfigStore для тестов. Satisfies ConfigStore Protocol.
+
+    По умолчанию — пустое хранилище. Ключи в dot-notation.
+    subscribe() поддерживает glob-паттерны (fnmatch).
+    save() — no-op (in-memory).
+    """
+
+    def __init__(self, initial: dict[str, Any] | None = None) -> None:
+        self._data: dict[str, Any] = dict(initial or {})
+        self._subs: list[tuple[str, Callable[[str, Any], None]]] = []
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+        for pattern, handler in list(self._subs):
+            if fnmatch.fnmatch(key, pattern):
+                handler(key, value)
+
+    def get_section(self, section: str) -> dict[str, Any]:
+        prefix = f"{section}."
+        return {k[len(prefix) :]: v for k, v in self._data.items() if k.startswith(prefix)}
+
+    def list_keys(self, prefix: str = "") -> tuple[str, ...]:
+        return tuple(k for k in self._data if k.startswith(prefix))
+
+    def subscribe(self, key_pattern: str, handler: Callable[[str, Any], None]) -> Subscription:
+        pair: tuple[str, Callable[[str, Any], None]] = (key_pattern, handler)
+        self._subs.append(pair)
+        return _FakeConfigSubscription(self._subs, pair)  # type: ignore[return-value]
+
+    def save(self) -> None:
+        pass  # in-memory — no-op
+
+
+_fc: ConfigStore = FakeConfigStore()
+del _fc
+
+
 __all__ = [
     "FakePluginCatalog",
     "FakeServiceManager",
@@ -379,4 +447,5 @@ __all__ = [
     "FakeCommandDispatcher",
     "FakeEventBus",
     "FakeAuthFacade",
+    "FakeConfigStore",
 ]

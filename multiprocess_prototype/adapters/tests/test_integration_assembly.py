@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Phase C / Task C.7 — Integration smoke: AppServices через реальные adapter'ы.
+Phase C / Task C.7 + D.2b — Integration smoke: AppServices через реальные adapter'ы.
 
-Тест проверяет, что все 9 adapter'ов из Phase C можно собрать в AppServices
-и выполнить dispatch(AddProcess) end-to-end:
+Тест проверяет, что все 10 adapter'ов (9 из Phase C + ConfigStoreFromManager D.2b)
+можно собрать в AppServices и выполнить dispatch(AddProcess) end-to-end:
 
     1. Сборка AppServices без TypeError (все adapter'ы satisfy Protocol'ы).
     2. dispatch(AddProcess("test")) → ProcessAdded event в списке.
@@ -32,6 +32,7 @@ import pytest
 from multiprocess_prototype.adapters import (
     AuthFacadeFromAuthState,
     CommandDispatcherOrchestrator,
+    ConfigStoreFromManager,
     DisplayCatalogFromRegistry,
     PluginCatalogFromRegistry,
     ProjectHolder,
@@ -40,6 +41,7 @@ from multiprocess_prototype.adapters import (
     ServiceManagerFromRegistry,
     TopologyRepositoryFromHolder,
 )
+from multiprocess_framework.modules.config_module.core.config import Config
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.domain.commands import AddProcess
 from multiprocess_prototype.domain.entities.project import ApplyContext, Project
@@ -252,6 +254,9 @@ def _build_app_services(tmp_path: Path) -> AppServices:
         apply_context_factory=_apply_ctx_factory,
     )
 
+    # 10. ConfigStoreFromManager (Task D.2b) — пустой Config для integration smoke
+    config_store = ConfigStoreFromManager(backend=Config())
+
     return AppServices(
         plugins=plugin_catalog,
         services=service_manager,
@@ -262,6 +267,7 @@ def _build_app_services(tmp_path: Path) -> AppServices:
         commands=dispatcher,
         events=event_bus,
         auth=auth_facade,
+        config=config_store,
     )
 
 
@@ -271,7 +277,7 @@ def _build_app_services(tmp_path: Path) -> AppServices:
 
 
 def test_assemble_app_services_with_real_adapters(tmp_path: Path) -> None:
-    """Integration smoke: 9 реальных adapter'ов собираются в AppServices без TypeError.
+    """Integration smoke: 10 реальных adapter'ов собираются в AppServices без TypeError.
 
     Верифицирует сборку (AppServices.__init__ с реальными adapter'ами) —
     отсутствие TypeError означает, что все adapter'ы satisfy соответствующие Protocol'ы

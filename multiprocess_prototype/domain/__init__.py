@@ -41,6 +41,7 @@ from .app_services import AppServices
 from .protocols import (
     AuthFacade,
     CommandDispatcher,
+    ConfigStore,
     DisplayCatalog,
     DisplaySpec,
     EventBusProtocol,
@@ -163,7 +164,7 @@ __all__ = [
     # Исключения
     "DomainError",
     "EntityValidationError",
-    # Protocols (Task B.5)
+    # Protocols (Task B.5 + D.2b)
     "PluginCatalog",
     "ServiceManager",
     "ServiceCatalog",
@@ -175,6 +176,7 @@ __all__ = [
     "CommandDispatcher",
     "EventBusProtocol",
     "AuthFacade",
+    "ConfigStore",
     # Sidecar-dataclasses (Task B.5)
     "PluginSpec",
     "PortSpec",

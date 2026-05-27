@@ -16,6 +16,7 @@ from ..app_services import AppServices
 from ..protocols import (
     AuthFacade,
     CommandDispatcher,
+    ConfigStore,
     DisplayCatalog,
     EventBusProtocol,
     PluginCatalog,
@@ -27,6 +28,7 @@ from ..protocols import (
 from ._fakes import (
     FakeAuthFacade,
     FakeCommandDispatcher,
+    FakeConfigStore,
     FakeDisplayCatalog,
     FakeEventBus,
     FakePluginCatalog,
@@ -54,6 +56,7 @@ def make_test_app_services(
     commands: CommandDispatcher | None = None,
     events: EventBusProtocol | None = None,
     auth: AuthFacade | None = None,
+    config: ConfigStore | None = None,
 ) -> AppServices:
     """Builder для тестового AppServices.
 
@@ -77,4 +80,5 @@ def make_test_app_services(
         commands=commands if commands is not None else FakeCommandDispatcher(),
         events=events if events is not None else FakeEventBus(),
         auth=auth if auth is not None else FakeAuthFacade(),
+        config=config if config is not None else FakeConfigStore(),
     )

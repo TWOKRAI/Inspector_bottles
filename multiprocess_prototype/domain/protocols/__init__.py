@@ -2,8 +2,8 @@
 """
 multiprocess_prototype.domain.protocols — Protocols для внешних зависимостей domain.
 
-Пакет содержит 9 Protocol-файлов и sidecar-dataclasses. Ни один Protocol не имеет
-default-реализации — только сигнатуры. Реализации (адаптеры) создаются в Phase C.
+Пакет содержит 10 Protocol-файлов и sidecar-dataclasses. Ни один Protocol не имеет
+default-реализации — только сигнатуры. Реализации (адаптеры) создаются в Phase C/D.
 
 Экспортируемые Protocols:
   PluginCatalog     — read-only реестр плагинов
@@ -16,6 +16,7 @@ default-реализации — только сигнатуры. Реализа
   CommandDispatcher — диспетчеризация команд
   EventBusProtocol  — typed pub/sub шина событий
   AuthFacade        — read-only auth-состояние
+  ConfigStore       — конфиг-хранилище с реактивным API (Task D.2b)
 
 Sidecar-dataclasses (frozen, slots):
   PluginSpec, PortSpec   — из PluginCatalog
@@ -23,13 +24,14 @@ Sidecar-dataclasses (frozen, slots):
   ServiceLifecycle       — из ServiceManager (реэкспорт из framework)
   DisplaySpec            — из DisplayCatalog
   FieldSpec              — из RegistersBackend
-  Subscription           — управление подпиской EventBus
+  Subscription           — управление подпиской EventBus / ConfigStore
 """
 
 from __future__ import annotations
 
 from .auth_facade import AuthFacade
 from .command_dispatcher import CommandDispatcher
+from .config_store import ConfigStore
 from .display_catalog import DisplayCatalog, DisplaySpec
 from .event_bus import EventBusProtocol, Subscription
 from .plugin_catalog import PluginCatalog, PluginSpec, PortSpec
@@ -51,6 +53,7 @@ __all__ = [
     "CommandDispatcher",
     "EventBusProtocol",
     "AuthFacade",
+    "ConfigStore",
     # Sidecar-dataclasses
     "PluginSpec",
     "PortSpec",
