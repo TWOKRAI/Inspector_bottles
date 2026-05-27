@@ -268,8 +268,8 @@ multiprocess_prototype/adapters/
 **Тесты:** 3-4 unit тестa с in-memory AuthState + AuthManager fakes.
 
 **Acceptance criteria:**
-- [ ] AuthFacadeFromAuthState satisfies `AuthFacade` Protocol.
-- [ ] Тесты на (un)authenticated / level 0/100 / permission missing.
+- [x] AuthFacadeFromAuthState satisfies `AuthFacade` Protocol.
+- [x] Тесты на (un)authenticated / level 0/100 / permission missing.
 
 **Out of scope:** AuthLevelChanged / UserLoggedIn события через EventBus (Phase D / E).
 
