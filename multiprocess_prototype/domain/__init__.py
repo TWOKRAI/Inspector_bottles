@@ -36,6 +36,8 @@ from .entities import (
 )
 from .entities.project import ApplyContext
 from .errors import DomainError, EntityValidationError
+from .event_bus import EventBus
+from .app_services import AppServices
 from .protocols import (
     AuthFacade,
     CommandDispatcher,
@@ -129,6 +131,9 @@ except Exception as _exc:
 __all__ = [
     # ApplyContext (Task B.4)
     "ApplyContext",
+    # EventBus + AppServices (Task B.6)
+    "EventBus",
+    "AppServices",
     # Entities
     "PluginInstance",
     "Wire",

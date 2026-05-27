@@ -59,74 +59,11 @@ from multiprocess_prototype.domain.events import (
     WireConnected,
     WireDisconnected,
 )
-from multiprocess_prototype.domain.protocols import (
-    DisplaySpec,
-    PluginSpec,
+from multiprocess_prototype.domain.tests._fakes import (
+    FakeDisplayCatalog,
+    FakePluginCatalog,
+    FakeRecipeStore,
 )
-
-
-# ======================================================================
-# In-memory fakes (не MagicMock)
-# ======================================================================
-
-
-class _FakePluginCatalog:
-    """In-memory реализация PluginCatalog."""
-
-    def __init__(self, known: set[str]) -> None:
-        self._known = known
-
-    def list_plugins(self) -> tuple[PluginSpec, ...]:
-        return tuple(PluginSpec(name=n, category="cat") for n in self._known)
-
-    def resolve(self, plugin_name: str) -> PluginSpec | None:
-        if plugin_name in self._known:
-            return PluginSpec(name=plugin_name, category="cat")
-        return None
-
-    def categories(self) -> tuple[str, ...]:
-        return ("cat",)
-
-
-class _FakeDisplayCatalog:
-    """In-memory реализация DisplayCatalog."""
-
-    def __init__(self, known: set[str]) -> None:
-        self._known = known
-
-    def list_displays(self) -> tuple[DisplaySpec, ...]:
-        return tuple(DisplaySpec(display_id=d, display_name=d) for d in self._known)
-
-    def resolve(self, display_id: str) -> DisplaySpec | None:
-        if display_id in self._known:
-            return DisplaySpec(display_id=display_id, display_name=display_id)
-        return None
-
-
-class _FakeRecipeStore:
-    """In-memory реализация RecipeStore."""
-
-    def __init__(self, recipes: dict[str, Recipe] | None = None) -> None:
-        self._data: dict[str, Recipe] = recipes or {}
-        self._active: str | None = None
-
-    def list(self) -> tuple[str, ...]:
-        return tuple(self._data.keys())
-
-    def read(self, slug: str) -> Recipe | None:
-        return self._data.get(slug)
-
-    def write(self, slug: str, recipe: Recipe) -> None:
-        self._data[slug] = recipe
-
-    def delete(self, slug: str) -> None:
-        self._data.pop(slug, None)
-
-    def get_active(self) -> str | None:
-        return self._active
-
-    def set_active(self, slug: str | None) -> None:
-        self._active = slug
 
 
 # ======================================================================
@@ -183,7 +120,7 @@ def test_add_process_with_unknown_plugin_raises() -> None:
         process_name="proc1",
         plugins=(PluginInstance(plugin_name="unknown"),),
     )
-    ctx = ApplyContext(plugins=_FakePluginCatalog({"blur"}))
+    ctx = ApplyContext(plugins=FakePluginCatalog({"blur"}))
     with pytest.raises(DomainError, match="plugin 'unknown' not found"):
         project.apply(cmd, catalogs=ctx)
 
@@ -351,7 +288,7 @@ def test_insert_plugin_unknown_plugin_raises() -> None:
     project = _project_with_processes("proc1")
     plugin = PluginInstance(plugin_name="unknown")
     cmd = InsertPlugin(process_name="proc1", plugin=plugin)
-    ctx = ApplyContext(plugins=_FakePluginCatalog({"blur"}))
+    ctx = ApplyContext(plugins=FakePluginCatalog({"blur"}))
     with pytest.raises(DomainError, match="plugin 'unknown' not found"):
         project.apply(cmd, catalogs=ctx)
 
@@ -650,7 +587,7 @@ def test_bind_display_unknown_display_raises() -> None:
     """Привязка несуществующего display вызывает DomainError."""
     project = _project_with_processes("proc1")
     cmd = BindDisplay(node_id="proc1.blur", display_id="unknown")
-    ctx = ApplyContext(displays=_FakeDisplayCatalog({"main"}))
+    ctx = ApplyContext(displays=FakeDisplayCatalog({"main"}))
     with pytest.raises(DomainError, match="display 'unknown' not found"):
         project.apply(cmd, catalogs=ctx)
 
@@ -739,7 +676,7 @@ def test_activate_recipe_ok() -> None:
         meta=RecipeMeta(name="demo", created_at="2026-01-01T00:00:00"),
         blueprint=recipe_blueprint,
     )
-    store = _FakeRecipeStore({"demo": recipe})
+    store = FakeRecipeStore({"demo": recipe})
     ctx = ApplyContext(recipes=store)
 
     project = _empty_project()
@@ -768,7 +705,7 @@ def test_activate_recipe_no_store_raises() -> None:
 
 def test_activate_recipe_unknown_raises() -> None:
     """Активация несуществующего рецепта вызывает DomainError."""
-    store = _FakeRecipeStore({})
+    store = FakeRecipeStore({})
     ctx = ApplyContext(recipes=store)
     project = _empty_project()
     cmd = ActivateRecipe(slug="nonexistent")
@@ -792,7 +729,7 @@ def test_activate_recipe_with_cycle_raises() -> None:
         meta=RecipeMeta(name="cyclic", created_at="2026-01-01T00:00:00"),
         blueprint=cyclic_blueprint,
     )
-    store = _FakeRecipeStore({"cyclic": recipe})
+    store = FakeRecipeStore({"cyclic": recipe})
     ctx = ApplyContext(recipes=store)
     project = _empty_project()
     cmd = ActivateRecipe(slug="cyclic")

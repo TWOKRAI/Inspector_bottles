@@ -32,48 +32,10 @@ from multiprocess_prototype.domain.entities.project import (
     _check_unique_process_names,
 )
 from multiprocess_prototype.domain.errors import DomainError
-from multiprocess_prototype.domain.protocols import (
-    DisplaySpec,
-    PluginSpec,
+from multiprocess_prototype.domain.tests._fakes import (
+    FakeDisplayCatalog,
+    FakePluginCatalog,
 )
-
-
-# ======================================================================
-# In-memory fakes для Protocols
-# ======================================================================
-
-
-class _FakePluginCatalog:
-    """In-memory реализация PluginCatalog для тестов."""
-
-    def __init__(self, known: set[str]) -> None:
-        self._known = known
-
-    def list_plugins(self) -> tuple[PluginSpec, ...]:
-        return tuple(PluginSpec(name=n, category="cat") for n in self._known)
-
-    def resolve(self, plugin_name: str) -> PluginSpec | None:
-        if plugin_name in self._known:
-            return PluginSpec(name=plugin_name, category="cat")
-        return None
-
-    def categories(self) -> tuple[str, ...]:
-        return ("cat",)
-
-
-class _FakeDisplayCatalog:
-    """In-memory реализация DisplayCatalog для тестов."""
-
-    def __init__(self, known: set[str]) -> None:
-        self._known = known
-
-    def list_displays(self) -> tuple[DisplaySpec, ...]:
-        return tuple(DisplaySpec(display_id=d, display_name=d) for d in self._known)
-
-    def resolve(self, display_id: str) -> DisplaySpec | None:
-        if display_id in self._known:
-            return DisplaySpec(display_id=display_id, display_name=display_id)
-        return None
 
 
 # ======================================================================
@@ -214,7 +176,7 @@ def test_plugin_references_ok() -> None:
             ),
         ),
     )
-    catalogs = ApplyContext(plugins=_FakePluginCatalog({"blur", "resize"}))
+    catalogs = ApplyContext(plugins=FakePluginCatalog({"blur", "resize"}))
     _check_plugin_references(topo, catalogs)
 
 
@@ -228,7 +190,7 @@ def test_unknown_plugin_raises() -> None:
             ),
         ),
     )
-    catalogs = ApplyContext(plugins=_FakePluginCatalog({"blur"}))
+    catalogs = ApplyContext(plugins=FakePluginCatalog({"blur"}))
     with pytest.raises(DomainError, match="plugin 'unknown_plugin' not found"):
         _check_plugin_references(topo, catalogs)
 
@@ -259,7 +221,7 @@ def test_display_references_ok() -> None:
         processes=(Process(process_name="proc1"),),
         displays=(DisplayInstance(node_id="proc1.blur", display_id="main"),),
     )
-    catalogs = ApplyContext(displays=_FakeDisplayCatalog({"main"}))
+    catalogs = ApplyContext(displays=FakeDisplayCatalog({"main"}))
     _check_display_references(topo, catalogs)
 
 
@@ -269,6 +231,6 @@ def test_unknown_display_raises() -> None:
         processes=(Process(process_name="proc1"),),
         displays=(DisplayInstance(node_id="proc1.blur", display_id="nonexistent"),),
     )
-    catalogs = ApplyContext(displays=_FakeDisplayCatalog({"main"}))
+    catalogs = ApplyContext(displays=FakeDisplayCatalog({"main"}))
     with pytest.raises(DomainError, match="display 'nonexistent' not found"):
         _check_display_references(topo, catalogs)
