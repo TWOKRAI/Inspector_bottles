@@ -4,7 +4,7 @@
 - [Dict at Boundary for GUI](feedback_dict_at_boundary_gui.md) — widgets work with dict only, never live SchemaBase
 - [Register routing hang](feedback_register_routing_hang.md) — FieldRouting without IPC channel = GUI freeze
 - [SourceTopology two-layer architecture](project_source_topology.md) — Layer 1 (sources) + Layer 2 (processing), shared region keys
-- [Processes tab state](project_processes_tab.md) — Phase 1-3 done, pending: pause, workers/threads tree, process→camera binding
+- [Processes tab state](project_processes_tab.md) — Phase 1-7b done, все 6 вкладок активны (prototype-skeleton-2026-05)
 - [Workers architecture](project_workers_architecture.md) — Real threads via WorkerManager, GUI CRUD except protected main worker
 - [Worker cycle timing](project_worker_cycle_timing.md) — Monitor cycle duration/Hz + editable target_interval_ms with smart sleep
 - [GenericProcess vision](project_generic_process_vision.md) — DONE: ProcessModule natively supports plugins (ADR-PM-007/008), GenericProcess deprecated
@@ -26,3 +26,7 @@
 - [Sentrux baseline 2026-05](project_sentrux_baseline_2026_05.md) — Quality 7161/10000 после seed 0.2.0, точка отсчёта для рефакторингов
 - [Logger/Error/Stats managers](feedback_logger_error_stats_managers.md) — логирование через logger_manager, ошибки через error_manager, статистика через statistics_manager (ObservableMixin в base_manager)
 - [Parallel agents commit race](feedback_parallel_agents_commit_race.md) — 5 параллельных агентов без worktree склеивают коммиты, теряют файлы; макс 2 без worktree
+- [ServiceRegistry state](project_service_registry.md) — Phase 3 DONE: service_module framework, 91 tests, 4 services, ADR-129/SVC-001/002/003
+- [DisplayRegistry state](project_display_registry.md) — Phase 4 DONE: display_module framework, 12 tests, generic (no vision fields), ADR-130/DM-001/002/003
+- [RecipesManager v2 state](project_recipes_manager.md) — Phase 5 DONE: Recipe=SystemBlueprint+yaml-sections, replace_blueprint with rollback, ADR-131/132
+- [Pipeline demo and telemetry](project_pipeline_demo.md) — Phase 7b DONE: webcam→split→merge→display demo, WireStatus telemetry, blur plugin

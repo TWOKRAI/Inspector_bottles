@@ -71,7 +71,7 @@
 | **6** ✓ | [phase-6-plugin-sandbox.md](phase-6-plugin-sandbox.md) | `feat/plugin-sandbox` | 2-3 | Phase 3 | <!-- DONE 3947353e -->
 | **7a** ✓ | [phase-7a-display-node-and-io.md](phase-7a-display-node-and-io.md) | `feat/pipeline-display-node-and-io` | 4-5 | 4, 5 | <!-- DONE 935c2b49 -->
 | **7b** ✓ | [phase-7b-telemetry-and-demo.md](phase-7b-telemetry-and-demo.md) | `feat/pipeline-telemetry-and-demo` | 4-5 | Phase 7a | <!-- DONE 4a3b0b28 -->
-| **8** | [phase-8-verification-and-docs.md](phase-8-verification-and-docs.md) | `chore/verification-and-docs` | 2-3 | All previous |
+| **8** ✓ | [phase-8-verification-and-docs.md](phase-8-verification-and-docs.md) | `chore/verification-and-docs` | 2-3 | All previous | <!-- DONE 9665ed4d -->
 
 **Параллелизация**:
 - Phase 0 — обязательно первой, блокирует 4, 5, частично 3 (нужен StateAdapterBase).
