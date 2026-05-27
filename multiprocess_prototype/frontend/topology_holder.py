@@ -3,6 +3,7 @@
 Используется GUI-слоем для доступа к текущей topology без привязки к IPC.
 Recipe Apply заменяет topology через set_topology() → слушатели обновляют UI.
 """
+
 from __future__ import annotations
 
 import copy
@@ -23,6 +24,7 @@ class TopologyHolder:
     def __init__(self, initial: dict[str, Any] | None = None) -> None:
         self._topology: dict[str, Any] = initial or {}
         self._callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._suppress_notify: bool = False  # toggle для suppress_legacy_notify() из C.3
 
     @property
     def topology(self) -> dict[str, Any]:
@@ -59,7 +61,13 @@ class TopologyHolder:
             pass
 
     def _notify(self, topology: dict[str, Any]) -> None:
-        """Уведомить всех подписчиков."""
+        """Уведомить всех подписчиков (если не подавлено).
+
+        Подавление активируется через TopologyRepositoryFromHolder.suppress_legacy_notify()
+        context manager — временная мера до Phase F (миграция всех подписчиков на EventBus).
+        """
+        if self._suppress_notify:
+            return
         for cb in self._callbacks:
             try:
                 cb(topology)

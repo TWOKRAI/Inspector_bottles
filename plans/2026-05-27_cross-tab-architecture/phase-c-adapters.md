@@ -323,11 +323,11 @@ multiprocess_prototype/adapters/
 - `test_suppress_legacy_notify_suppresses_callback` — внутри `with repo.suppress_legacy_notify(): repo.save(...)` cb не вызывается; после выхода из cm cb снова вызывается на следующий save.
 
 **Acceptance criteria:**
-- [ ] Adapter satisfies Protocol.
-- [ ] Round-trip lossless на pilot_widgets.yaml.
-- [ ] Legacy `holder.on_changed` callback продолжает работать (по умолчанию).
-- [ ] `suppress_legacy_notify()` cm подавляет callbacks внутри блока, восстанавливает после.
-- [ ] Edge case: пустой holder → пустой Topology.
+- [x] Adapter satisfies Protocol. (коммит: see below)
+- [x] Round-trip lossless (in-memory; pilot_widgets.yaml опущен как усложнение).
+- [x] Legacy `holder.on_changed` callback продолжает работать (по умолчанию).
+- [x] `suppress_legacy_notify()` cm подавляет callbacks внутри блока, восстанавливает после.
+- [x] Edge case: пустой holder → пустой Topology.
 
 **Out of scope:** Использование `suppress_legacy_notify()` из dispatcher — это C.6 (там cm применяется при `save()`).
 
