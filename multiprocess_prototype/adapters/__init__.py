@@ -27,6 +27,7 @@ from .catalogs import (
     ServiceCatalogFromRegistry,
     ServiceManagerFromRegistry,
 )
+from .dispatch import CommandDispatcherOrchestrator, ProjectHolder
 from .stores import (
     RecipeStoreFromManager,
     RegistersBackendFromManager,
@@ -42,4 +43,6 @@ __all__ = [
     "TopologyRepositoryFromHolder",
     "RegistersBackendFromManager",
     "RecipeStoreFromManager",
+    "CommandDispatcherOrchestrator",
+    "ProjectHolder",
 ]
