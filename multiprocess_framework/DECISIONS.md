@@ -152,6 +152,7 @@
 - [ADR-130](#adr-130-displayregistry-декларативный-реестр-shm-каналов): DisplayRegistry — декларативный реестр SHM-каналов
 - [ADR-131](#adr-131-systemblueprint-остаётся-generic-application-расширения-рецепта-живут-параллельными-секциями-yaml): SystemBlueprint остаётся generic; application-расширения рецепта живут параллельными секциями yaml
 - [ADR-132](#adr-132-replace_blueprint-в-processmanagerprocess-с-snapshotrollback): replace_blueprint в ProcessManagerProcess с snapshot+rollback
+- [ADR-133](#adr-133-framerouter-helper-camera_id-специфичная-логика-в-prototype-не-в-framework): FrameRouter helper — camera_id-специфичная логика в prototype, не в framework
 <!-- ADR-TOC:END -->
 
 ---
@@ -2220,6 +2221,23 @@
   - **Применение через TopologyManager** — отвергнут: `topology.apply()` не знает о protected-флаге и SHM-cleanup; смешивание ответственностей нарушает SRP.
   - **Полная остановка системы перед заменой** — отвергнут: GUI теряет связь с пользователем, UX неприемлем для production-сценария.
 - Refs: [plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md](../../plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md)
+
+---
+
+## ADR-133: FrameRouter helper — camera_id-специфичная логика в prototype, не в framework
+- Дата: 2026-05-27
+- Статус: принято
+- Контекст: `multiprocess_prototype/backend/routing/frame_router_setup.py` реализует helper для broadcast fan-out кадров по камерам: `setup_frame_routes(router_manager, camera_ids)`, `subscribe_to_camera(router_manager, camera_id, subscriber_channel)`, `unsubscribe_from_camera(router_manager, camera_id, subscriber_channel)`. Все три функции оперируют семантикой `camera_id` — понятием, специфичным для video-vision-домена (Inspector). Generic framework не должен знать о камерах, потоках видео и semantics `frame.camera_{id}`. При проектировании Phase 0 (`prototype-skeleton-2026-05`) возник вопрос: где разместить helper — в `multiprocess_prototype` или в `shared_resources_module` фреймворка как переиспользуемый routing-примитив. ADR-128 кратко зафиксировал факт выбора; настоящий ADR документирует полное обоснование и отклонённые альтернативы.
+- Решение: Helper `frame_router_setup.py` остаётся в `multiprocess_prototype/backend/routing/`. Framework предоставляет только `RouterManager.register_broadcast_route(channel_id, subscribers)` — generic broadcast по произвольному строковому ключу. Prototype-helper строит поверх этого API camera-специфичную семантику (`frame_route_key(camera_id) → "frame.camera_{id}"`), не перенося её в framework.
+- Причина: Принцип generic-first (ADR-120): framework — словарь переиспользуемых механизмов без привязки к доменной модели. Приложения с другой fan-out-семантикой (аудио-каналы, lidar streams, sensor buses) строят собственные helpers поверх `register_broadcast_route()` — каждый в своём слое. Тащить `camera_id` в framework означало бы, что framework знает о vision-домене: нарушение принципа layering (слой `framework → Services → Plugins → prototype`, обратные импорты запрещены). Текущее решение подтверждено в ADR-128 и зафиксировано в docstring самого модуля.
+- Отклонённые альтернативы:
+  - **Перенести helper в `shared_resources_module/routing/`** — отклонено: `camera_id`-семантика в framework нарушает принцип generic-first и ADR-120; любое другое приложение (аудио, lidar) получало бы в framework ненужный video-специфичный код; даже параметрическая переменная `camera_id` в названии ключа (`frame.camera_{id}`) — это domain leak.
+  - **Параметризовать через generic `subject_id` вместо `camera_id`** — отклонено как преждевременная абстракция: на момент Phase 0 существует одно приложение (Inspector) с одной fan-out-семантикой. Обобщение до `subject_id` не снимает вопроса о размещении (framework vs prototype) и создаёт абстракцию без второго потребителя; по YAGNI — добавлять только тогда, когда появится второй domain.
+- Связанные ADR:
+  - ADR-128 (Foundation Phase 0) — зафиксировал факт выбора при переносе `FrameRouter` из backup.
+  - ADR-120 (Plugins vocabulary) — принцип generic-first и границы слоёв.
+  - ADR-008 (Dict at Boundary) — `register_broadcast_route` принимает строковые ключи и список строк, без Pydantic.
+- Refs: [plans/prototype-skeleton-2026-05/phase-8-verification-and-docs.md](../../plans/prototype-skeleton-2026-05/phase-8-verification-and-docs.md), [plans/prototype-skeleton-2026-05/plan.md](../../plans/prototype-skeleton-2026-05/plan.md)
 
 ---
 

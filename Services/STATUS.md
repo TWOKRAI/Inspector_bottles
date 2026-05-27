@@ -4,11 +4,13 @@
 
 **Слои:** `multiprocess_framework → Services → Plugins → multiprocess_prototype`.
 
-**Обновлено:** 2026-05-10 — приведение к стандарту валидации (`__init__.py`, `interfaces.py`, `STATUS.md`, `README.md`, `tests/`).
+**Обновлено:** 2026-05-27 — добавлен `webcam_camera` (Phase 0/3, ADR-128).
+Ранее 2026-05-10 — приведение к стандарту валидации (`__init__.py`, `interfaces.py`, `STATUS.md`, `README.md`, `tests/`).
 
 | Сервис | Готовность | Комментарий | ADR |
 |--------|-----------|-------------|-----|
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
+| `webcam_camera` | stable | WebcamCameraService — IService реализация для USB-камеры через OpenCV; зарегистрирован через @register_service; перенесён из backup в Phase 0; ADR-128 | ADR-128 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
 | `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |
 | `Operation_crop` | utility | Утилита для нарезки кадров | — |
