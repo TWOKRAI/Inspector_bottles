@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 from .auth_context import AuthContext  # noqa: F401 — re-export для backward-compat
 from .bridge.command_sender import CommandSender
+from ._deprecated_extras import _DeprecatedExtrasDict
 
 if TYPE_CHECKING:
     from .process import GuiProcess
@@ -42,7 +43,7 @@ class AppContext:
     command_sender: CommandSender
     bridge: "DataReceiverBridge"
     config: dict[str, Any] = field(default_factory=dict)
-    extras: dict[str, Any] = field(default_factory=dict)
+    extras: _DeprecatedExtrasDict = field(default_factory=_DeprecatedExtrasDict)
 
     # -- Domain-grouped accessors (новый API) --
 
@@ -222,7 +223,7 @@ def build_app_context(
     command_sender = CommandSender(process)
 
     # Собираем extras с опциональными зависимостями
-    extras: dict[str, Any] = {}
+    extras: _DeprecatedExtrasDict = _DeprecatedExtrasDict()
     if plugin_registry is not None:
         extras["plugin_registry"] = plugin_registry
     if registers_manager is not None:

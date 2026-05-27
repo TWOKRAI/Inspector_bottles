@@ -92,6 +92,11 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=multiprocess_prototype_backup"
+filterwarnings = [
+    # Q5 decision (Phase D, Task D.4): DeprecationWarning из _deprecated_extras не должны
+    # ломать существующие тесты. Phase F переведёт на error::DeprecationWarning.
+    "ignore::DeprecationWarning:multiprocess_prototype.frontend._deprecated_extras",
+]
 qt_api = "pyside6"
 
 # ── pyright ──
