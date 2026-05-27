@@ -20,7 +20,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 
 | Фаза | Название | Статус | Файл | Зависимости |
 |------|----------|--------|------|-------------|
-| **A** | Audit (read-only inventory) | DRAFT | [`phase-a-audit.md`](phase-a-audit.md) | — |
+| **A** | Audit (read-only inventory) | DONE (2026-05-27, commit `bdfccd50`) | [`phase-a-audit.md`](phase-a-audit.md) | — |
 | **B** | Domain skeleton (`multiprocess_prototype/domain/`) | NOT PLANNED | — | A done |
 | **C** | Adapters (YAML I/O, TopologyHolder compat, ProcessManager) | NOT PLANNED | — | B done |
 | **D** | `AppServices` DI (replace `ctx.extras` dict-bag) | NOT PLANNED | — | C done |
@@ -40,7 +40,7 @@ Phase A — план готов (`phase-a-audit.md`), исполнен investiga
 
 Этот раздел растёт по ходу выполнения, фиксируя то, что нашлось в audit'е и требует внимания позже.
 
-- **Recipe_manager double contract** (audit, Inventory 6) — `@property` в `app_context.py:135`, но вызывается как `recipe_manager()` в `pipeline/presenter.py:730,803`. MagicMock-тесты прощают оба. **Требует расследования** до Phase B (это симптомный баг, может ломать live GUI). Возможно — отдельный hotfix.
+- ~~**Recipe_manager double contract**~~ — закрыт hotfix'ом до старта Phase B: presenter.py:730,803 переведён на property-доступ, тесты приведены к атрибутному моку (48/48 pipeline-рецепт тестов зелёные). Кейс остаётся примером того, что Phase D обязана исправить тестовой стратегией (strict `MagicMock(spec=AppContext)` или builder), иначе подобный рассинхрон контракта легко вернётся.
 - **DisplayRegistry — 8-й реестр**, не в `extras`. Доступ через `getattr` всегда возвращает `None` в production (Inventory 3). Phase D должна это исправить.
 - **4 параллельные dataclass-обёртки** (`TopologyContext`, `StateContext`, `PluginsContext`, `ActionsContext`) — созданы, не подключены. Phase D решит: либо подключить, либо удалить.
 - **Pipeline tab — крупнейший consumer** (21 из 40 топологических чтений). Phase E начинает с него.
