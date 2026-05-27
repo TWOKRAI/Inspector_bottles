@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.service_module import ServiceRegistry
     from Services.auth.interfaces import IAuthManager
     from Services.auth.storage.audit_storage import SqliteAuditStorage
+    from multiprocess_prototype.domain.app_services import AppServices
 
 
 @dataclass
@@ -44,6 +45,7 @@ class AppContext:
     bridge: "DataReceiverBridge"
     config: dict[str, Any] = field(default_factory=dict)
     extras: _DeprecatedExtrasDict = field(default_factory=_DeprecatedExtrasDict)
+    app_services: "AppServices | None" = field(default=None)
 
     # -- Domain-grouped accessors (новый API) --
 

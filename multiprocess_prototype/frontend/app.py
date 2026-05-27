@@ -414,6 +414,23 @@ def run_gui(process: "GuiProcess") -> None:
     )
     ctx.extras["action_bus"] = action_bus
 
+    # 3h. Phase D (Task D.1): AppServices factory — собирает 10 adapter'ов
+    # из ctx.extras в типизированный DI-контейнер.
+    # Failure = sys.exit(1) с понятным логом (аналог startup-checks).
+    from .app_services_factory import build_app_services
+
+    try:
+        ctx.app_services = build_app_services(ctx)
+    except Exception as exc:
+        process._log_error(
+            f"AppServices factory failed: {exc}",
+            module="startup",
+        )
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+
     # 4. Создать MainWindow
     window = MainWindow()
 

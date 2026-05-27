@@ -103,11 +103,11 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - `test_factory_fails_loudly_on_adapter_init_error` — если plugin_registry empty / RecipeManager не может прочитать recipe_dir — `sys.exit(1)` или RuntimeError.
 
 **Acceptance criteria:**
-- [ ] `ctx.app_services` создаётся в `run_gui()` после всех extras.
-- [ ] AppServices содержит 10 полей (включая `config`), все не None.
-- [ ] Existing tests (test_phase15_smoke, test_app_context) проходят без изменений (backward-compat).
-- [ ] Новый тест: `dispatch(AddProcess(...))` через `services.commands` → процесс появляется в `services.topology.load()`.
-- [ ] `register_domain_schemas()` вызывается ровно один раз.
+- [x] `ctx.app_services` создаётся в `run_gui()` после всех extras.
+- [x] AppServices содержит 10 полей (включая `config`), все не None.
+- [x] Existing tests (test_phase15_smoke, test_app_context) проходят без изменений (backward-compat).
+- [x] Новый тест: `dispatch(AddProcess(...))` через `services.commands` → процесс появляется в `services.topology.load()`.
+- [x] `register_domain_schemas()` вызывается ровно один раз.
 
 **Edge cases:**
 - Auth не инициализирован (пользователь нажал Cancel) — `ctx.auth_state.is_authenticated = False`, но `AppServices.auth` всё равно создаётся (level 0). **Не блокер.**
