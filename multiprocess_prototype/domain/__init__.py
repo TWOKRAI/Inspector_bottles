@@ -35,6 +35,23 @@ from .entities import (
     Wire,
 )
 from .errors import DomainError, EntityValidationError
+from .protocols import (
+    AuthFacade,
+    CommandDispatcher,
+    DisplayCatalog,
+    DisplaySpec,
+    EventBusProtocol,
+    FieldSpec,
+    PluginCatalog,
+    PluginSpec,
+    PortSpec,
+    RecipeStore,
+    RegistersBackend,
+    ServiceCatalog,
+    ServiceSpec,
+    Subscription,
+    TopologyRepository,
+)
 from .commands import (
     ActivateRecipe,
     AddProcess,
@@ -121,6 +138,23 @@ __all__ = [
     # Исключения
     "DomainError",
     "EntityValidationError",
+    # Protocols (Task B.5)
+    "PluginCatalog",
+    "ServiceCatalog",
+    "DisplayCatalog",
+    "RecipeStore",
+    "RegistersBackend",
+    "TopologyRepository",
+    "CommandDispatcher",
+    "EventBusProtocol",
+    "AuthFacade",
+    # Sidecar-dataclasses (Task B.5)
+    "PluginSpec",
+    "PortSpec",
+    "ServiceSpec",
+    "DisplaySpec",
+    "FieldSpec",
+    "Subscription",
     # События (Task B.2)
     "ProjectEvent",
     "ProcessAdded",
