@@ -34,37 +34,14 @@ import logging
 from collections.abc import Callable
 
 from multiprocess_prototype.domain.commands import ProjectCommand
-from multiprocess_prototype.domain.entities.project import ApplyContext, Project
+from multiprocess_prototype.domain.entities.project import ApplyContext
 from multiprocess_prototype.domain.events import ProjectEvent
 from multiprocess_prototype.domain.protocols import EventBusProtocol
 from multiprocess_prototype.domain.protocols import TopologyRepository
 
+from .project_holder import ProjectHolder  # re-export для backward-compat
+
 logger = logging.getLogger(__name__)
-
-
-class ProjectHolder:
-    """Mutable wrapper над текущим (immutable) frozen Project.
-
-    State dispatcher'а: каждый dispatch получает current Project,
-    после apply() -> set новый (frozen) Project.
-
-    Thread-safety: НЕ потокобезопасен (single-threaded GUI editor предположение).
-    """
-
-    def __init__(self, initial: Project) -> None:
-        self._project: Project = initial
-
-    def get(self) -> Project:
-        """Получить текущий frozen Project."""
-        return self._project
-
-    def set(self, project: Project) -> None:
-        """Заменить текущий Project на новый (frozen).
-
-        Pre: project -- валидный frozen Project (после apply()).
-        Post: get() возвращает новый project.
-        """
-        self._project = project
 
 
 class CommandDispatcherOrchestrator:

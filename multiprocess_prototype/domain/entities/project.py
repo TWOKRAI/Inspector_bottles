@@ -269,6 +269,23 @@ class Project(SchemaBase):
     ] = None
 
     # ------------------------------------------------------------------
+    # Фабричные методы
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_topology(cls, topology: Topology) -> "Project":
+        """Создать Project с заданной топологией и без активного рецепта.
+
+        Convenience factory для bootstrap при старте приложения:
+            project = Project.from_topology(topology_repo.load())
+
+        Post:
+            - project.topology is topology
+            - project.active_recipe is None
+        """
+        return cls(topology=topology, active_recipe=None)
+
+    # ------------------------------------------------------------------
     # Сериализация
     # ------------------------------------------------------------------
 

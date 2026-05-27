@@ -554,3 +554,42 @@ class TestDisplayInstanceHybridFormat:
         """
         with pytest.raises(ValidationError):
             DisplayInstance(node_id="n", display_id="d", source="s")  # type: ignore[call-arg]
+
+
+# ==============================================================================
+# Project.from_topology factory (Task D.3)
+# ==============================================================================
+
+
+class TestProjectFromTopologyFactory:
+    """Тесты factory-метода Project.from_topology (Task D.3)."""
+
+    def test_project_from_topology_creates_with_active_recipe_none(self) -> None:
+        """Project.from_topology(topology) создаёт Project без активного рецепта."""
+        topology = Topology()
+        project = Project.from_topology(topology)
+
+        assert project.topology is topology
+        assert project.active_recipe is None
+
+    def test_project_from_topology_with_processes(self) -> None:
+        """from_topology сохраняет processes из topology."""
+        from multiprocess_prototype.domain import Process
+
+        topology = Topology(
+            processes=(Process(process_name="cam"),),
+        )
+        project = Project.from_topology(topology)
+
+        assert project.topology is topology
+        assert len(project.topology.processes) == 1
+        assert project.topology.processes[0].process_name == "cam"
+        assert project.active_recipe is None
+
+    def test_project_from_topology_returns_frozen_project(self) -> None:
+        """Project созданный через from_topology — frozen (нельзя мутировать)."""
+        topology = Topology()
+        project = Project.from_topology(topology)
+
+        with pytest.raises((ValidationError, TypeError)):
+            project.active_recipe = "mutated"  # type: ignore[misc]
