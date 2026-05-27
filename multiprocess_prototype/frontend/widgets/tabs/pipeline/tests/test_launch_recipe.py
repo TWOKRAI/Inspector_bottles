@@ -2,7 +2,7 @@
 """Тесты кнопки «Запустить активный рецепт» — PipelinePresenter.launch_active_recipe.
 
 7 unit-тестов:
-- test_launch_no_recipe_manager_warns: ctx.recipe_manager() == None → False
+- test_launch_no_recipe_manager_warns: ctx.recipe_manager is None → False
 - test_launch_no_active_recipe_warns: get_active() == None → False
 - test_launch_recipe_read_fails: read_recipe == None → critical, False
 - test_launch_no_blueprint_warns: рецепт без blueprint → warning, False
@@ -36,7 +36,7 @@ def _make_ctx(recipe_manager=None, extras: dict | None = None) -> MagicMock:
     ctx.action_bus.return_value = None
     ctx.topology_holder.return_value = None
     ctx.plugin_registry.return_value = None
-    ctx.recipe_manager.return_value = recipe_manager
+    ctx.recipe_manager = recipe_manager
     ctx.extras = extras or {}
     # Убедиться, что ctx.process_manager не существует (нет случайного proxy)
     del ctx.process_manager
@@ -79,7 +79,7 @@ def _make_recipe_manager_mock(
 
 
 class TestLaunchNoRecipeManager:
-    """ctx.recipe_manager() == None → QMessageBox.warning, return False."""
+    """ctx.recipe_manager is None → QMessageBox.warning, return False."""
 
     def test_launch_no_recipe_manager_warns(self, monkeypatch) -> None:
         ctx = _make_ctx(recipe_manager=None)

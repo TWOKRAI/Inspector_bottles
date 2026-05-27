@@ -4,7 +4,7 @@
 4 smoke/integration-теста:
 - test_save_to_active_recipe_writes_blueprint: YAML обновляется blueprint/display_bindings
 - test_save_no_active_recipe_warns: без активного рецепта → False, не падает
-- test_save_no_recipe_manager_warns: ctx.recipe_manager() → None → False
+- test_save_no_recipe_manager_warns: ctx.recipe_manager is None → False
 - test_save_handles_exception: recipe_mgr.save поднимает Exception → False
 
 Запуск:
@@ -75,7 +75,7 @@ def _make_ctx(recipe_manager=None) -> MagicMock:
     ctx.action_bus.return_value = None
     ctx.topology_holder.return_value = None
     ctx.plugin_registry.return_value = None
-    ctx.recipe_manager.return_value = recipe_manager
+    ctx.recipe_manager = recipe_manager
     return ctx
 
 
@@ -217,10 +217,10 @@ class TestSaveNoActiveRecipe:
 
 
 class TestSaveNoRecipeManager:
-    """Если ctx.recipe_manager() возвращает None — warning и False."""
+    """Если ctx.recipe_manager is None — warning и False."""
 
     def test_save_no_recipe_manager_warns(self, monkeypatch) -> None:
-        """ctx.recipe_manager() == None → QMessageBox.warning, return False."""
+        """ctx.recipe_manager is None → QMessageBox.warning, return False."""
         ctx = _make_ctx(recipe_manager=None)
         presenter = PipelinePresenter(ctx)
 

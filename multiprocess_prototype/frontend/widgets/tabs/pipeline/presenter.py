@@ -727,7 +727,7 @@ class PipelinePresenter:
         from .io import graph_to_blueprint
 
         # Шаг 1: проверить RecipeManager
-        recipe_mgr = self._ctx.recipe_manager()
+        recipe_mgr = self._ctx.recipe_manager
         if recipe_mgr is None:
             QMessageBox.warning(parent, "Сохранение рецепта", "RecipeManager недоступен")
             return False
@@ -800,7 +800,7 @@ class PipelinePresenter:
         from PySide6.QtWidgets import QMessageBox
 
         # Шаг 1: проверить RecipeManager
-        recipe_mgr = self._ctx.recipe_manager()
+        recipe_mgr = self._ctx.recipe_manager
         if recipe_mgr is None:
             QMessageBox.warning(parent, "Запуск рецепта", "RecipeManager недоступен")
             return False
