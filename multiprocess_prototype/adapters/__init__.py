@@ -27,7 +27,11 @@ from .catalogs import (
     ServiceCatalogFromRegistry,
     ServiceManagerFromRegistry,
 )
-from .stores import TopologyRepositoryFromHolder
+from .stores import (
+    RecipeStoreFromManager,
+    RegistersBackendFromManager,
+    TopologyRepositoryFromHolder,
+)
 
 __all__ = [
     "AuthFacadeFromAuthState",
@@ -36,4 +40,6 @@ __all__ = [
     "ServiceCatalogFromRegistry",
     "DisplayCatalogFromRegistry",
     "TopologyRepositoryFromHolder",
+    "RegistersBackendFromManager",
+    "RecipeStoreFromManager",
 ]
