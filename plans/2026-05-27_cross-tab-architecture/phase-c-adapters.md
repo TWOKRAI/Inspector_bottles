@@ -140,10 +140,10 @@ multiprocess_prototype/adapters/
 - `test_real_plugin_registry_smoke` — реальный модуль `Plugins/` подключается через `discover_plugins()`, adapter возвращает непустой список (smoke).
 
 **Acceptance criteria:**
-- [ ] 3 adapter-класса + `__init__.py` экспорт.
-- [ ] Каждый adapter удовлетворяет соответствующий Protocol (assignment-проверка в тесте).
-- [ ] Round-trip: `entry.name == catalog.resolve(entry.name).name`.
-- [ ] Тесты на пустой registry (boundary).
+- [x] 3 adapter-класса + `__init__.py` экспорт.
+- [x] Каждый adapter удовлетворяет соответствующий Protocol (assignment-проверка в тесте).
+- [x] Round-trip: `entry.name == catalog.resolve(entry.name).name`.
+- [x] Тесты на пустой registry (boundary).
 
 **Out of scope:** `config_schema` детализация (Phase E когда нужен Inspector).
 

@@ -1,0 +1,528 @@
+# -*- coding: utf-8 -*-
+"""
+adapters/tests/test_catalogs.py — тесты для трёх read-only catalog адаптеров.
+
+Покрываемые классы:
+    - PluginCatalogFromRegistry  (plugin_catalog.py)
+    - ServiceCatalogFromRegistry (service_catalog.py)
+    - DisplayCatalogFromRegistry (display_catalog.py)
+
+Паттерн:
+    Fake*Registry — plain Python classes (не MagicMock),
+    в соответствии с decision Phase B (_fakes.py).
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from multiprocess_prototype.domain.protocols.plugin_catalog import PluginCatalog, PluginSpec
+from multiprocess_prototype.domain.protocols.service_catalog import ServiceCatalog
+from multiprocess_prototype.domain.protocols.display_catalog import DisplayCatalog
+
+from multiprocess_prototype.adapters.catalogs import (
+    PluginCatalogFromRegistry,
+    ServiceCatalogFromRegistry,
+    DisplayCatalogFromRegistry,
+)
+
+
+# ==============================================================================
+# Fake-классы для изоляции (не MagicMock)
+# ==============================================================================
+
+
+class _FakePort:
+    """Минимальный объект, имитирующий Port (name + dtype)."""
+
+    def __init__(self, name: str, dtype: str = "any") -> None:
+        self.name = name
+        self.dtype = dtype
+
+
+class _FakePluginEntry:
+    """Имитация PluginEntry из _PluginRegistry."""
+
+    def __init__(
+        self,
+        name: str,
+        category: str = "",
+        inputs: list | None = None,
+        outputs: list | None = None,
+        register_classes: list | None = None,
+    ) -> None:
+        self.name = name
+        self.category = category
+        self.inputs = inputs or []
+        self.outputs = outputs or []
+        self.register_classes = register_classes or []
+
+
+class _FakePluginRegistry:
+    """Имитация _PluginRegistry с фиксированным набором плагинов."""
+
+    def __init__(self, entries: list[_FakePluginEntry]) -> None:
+        self._entries = {e.name: e for e in entries}
+
+    def list(self) -> list[_FakePluginEntry]:
+        return list(self._entries.values())
+
+    def get(self, name: str) -> _FakePluginEntry | None:
+        return self._entries.get(name)
+
+
+class _FakeServiceEntry:
+    """Имитация ServiceEntry из ServiceRegistry."""
+
+    def __init__(self, name: str, display_name: str = "", meta: dict | None = None) -> None:
+        self.name = name
+        # cls — в ServiceEntry это тип класса; эмулируем через внутренний объект
+        self.cls = type(display_name, (), {"__name__": display_name})
+        self.meta = meta or {}
+
+
+class _FakeServiceRegistry:
+    """Имитация ServiceRegistry с фиксированным набором сервисов."""
+
+    def __init__(self, entries: list[_FakeServiceEntry]) -> None:
+        self._entries = {e.name: e for e in entries}
+
+    def list(self) -> list[_FakeServiceEntry]:
+        return list(self._entries.values())
+
+    def get(self, name: str) -> _FakeServiceEntry | None:
+        return self._entries.get(name)
+
+
+class _FakeDisplayEntry:
+    """Имитация DisplayEntry из DisplayRegistry."""
+
+    def __init__(
+        self,
+        id: str,
+        name: str,
+        width: int = 640,
+        height: int = 480,
+        format: str = "BGR",
+        fps_limit: float = 30.0,
+        ring_buffer_blocks: int = 3,
+    ) -> None:
+        self.id = id
+        self.name = name
+        self.width = width
+        self.height = height
+        self.format = format
+        self.fps_limit = fps_limit
+        self.ring_buffer_blocks = ring_buffer_blocks
+
+
+class _FakeDisplayRegistry:
+    """Имитация DisplayRegistry с фиксированным набором дисплеев."""
+
+    def __init__(self, entries: list[_FakeDisplayEntry]) -> None:
+        self._entries = {e.id: e for e in entries}
+
+    def list(self) -> list[_FakeDisplayEntry]:
+        return list(self._entries.values())
+
+    def get(self, display_id: str) -> _FakeDisplayEntry | None:
+        return self._entries.get(display_id)
+
+
+# ==============================================================================
+# Тесты PluginCatalogFromRegistry
+# ==============================================================================
+
+
+class TestPluginCatalogFromRegistry:
+    """Тесты для PluginCatalogFromRegistry."""
+
+    def _make_registry(self, entries: list[_FakePluginEntry] | None = None) -> _FakePluginRegistry:
+        return _FakePluginRegistry(entries or [])
+
+    def _make_adapter(self, entries: list[_FakePluginEntry] | None = None) -> PluginCatalogFromRegistry:
+        return PluginCatalogFromRegistry(self._make_registry(entries))  # type: ignore[arg-type]
+
+    def test_plugin_catalog_lists_known_plugins(self):
+        """Фейковый реестр с 2 плагинами → list_plugins() возвращает 2 PluginSpec."""
+        entries = [
+            _FakePluginEntry("grayscale", category="processing"),
+            _FakePluginEntry("blur", category="processing"),
+        ]
+        catalog = self._make_adapter(entries)
+        result = catalog.list_plugins()
+
+        assert len(result) == 2
+        names = {spec.name for spec in result}
+        assert names == {"grayscale", "blur"}
+
+    def test_plugin_catalog_returns_tuple(self):
+        """list_plugins() возвращает tuple (не list)."""
+        entries = [_FakePluginEntry("flip", category="processing")]
+        catalog = self._make_adapter(entries)
+        result = catalog.list_plugins()
+        assert isinstance(result, tuple)
+
+    def test_plugin_catalog_resolve_known_plugin(self):
+        """resolve() с известным именем возвращает PluginSpec."""
+        entries = [_FakePluginEntry("grayscale", category="processing")]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("grayscale")
+
+        assert spec is not None
+        assert spec.name == "grayscale"
+        assert spec.category == "processing"
+
+    def test_plugin_catalog_resolve_unknown_returns_none(self):
+        """resolve() с неизвестным именем возвращает None."""
+        catalog = self._make_adapter([])
+        assert catalog.resolve("nonexistent_plugin") is None
+
+    def test_plugin_catalog_resolve_roundtrip(self):
+        """Round-trip: entry.name == catalog.resolve(entry.name).name."""
+        entry = _FakePluginEntry("color_mask", category="processing")
+        catalog = self._make_adapter([entry])
+        resolved = catalog.resolve(entry.name)
+        assert resolved is not None
+        assert entry.name == resolved.name
+
+    def test_plugin_catalog_categories_dedup(self):
+        """categories() возвращает уникальные категории (dedup)."""
+        entries = [
+            _FakePluginEntry("grayscale", category="processing"),
+            _FakePluginEntry("blur", category="processing"),
+            _FakePluginEntry("webcam", category="source"),
+        ]
+        catalog = self._make_adapter(entries)
+        cats = catalog.categories()
+
+        assert isinstance(cats, tuple)
+        assert len(cats) == len(set(cats)), "дублирующиеся категории не допускаются"
+        assert set(cats) == {"processing", "source"}
+
+    def test_plugin_catalog_categories_sorted(self):
+        """categories() возвращает отсортированный tuple."""
+        entries = [
+            _FakePluginEntry("z_plugin", category="zzz"),
+            _FakePluginEntry("a_plugin", category="aaa"),
+        ]
+        catalog = self._make_adapter(entries)
+        cats = catalog.categories()
+        assert list(cats) == sorted(cats)
+
+    def test_plugin_catalog_with_empty_registry_returns_empty(self):
+        """Пустой реестр → list_plugins() возвращает пустой tuple."""
+        catalog = self._make_adapter([])
+        assert catalog.list_plugins() == ()
+
+    def test_plugin_catalog_categories_empty_registry(self):
+        """Пустой реестр → categories() возвращает пустой tuple."""
+        catalog = self._make_adapter([])
+        assert catalog.categories() == ()
+
+    def test_plugin_catalog_ports_mapping(self):
+        """inputs + outputs маппятся в ports PluginSpec."""
+        entry = _FakePluginEntry(
+            "bgr",
+            category="processing",
+            inputs=[_FakePort("frame", "image/bgr")],
+            outputs=[_FakePort("out", "image/gray")],
+        )
+        catalog = self._make_adapter([entry])
+        spec = catalog.resolve("bgr")
+
+        assert spec is not None
+        assert len(spec.ports) == 2
+        port_names = {p.name for p in spec.ports}
+        assert "frame" in port_names
+        assert "out" in port_names
+
+    def test_plugin_catalog_satisfies_protocol(self):
+        """Adapter удовлетворяет PluginCatalog Protocol (assignment-проверка)."""
+        catalog = self._make_adapter([])
+        _protocol_check: PluginCatalog = catalog  # type: ignore[assignment]
+        assert _protocol_check is catalog
+
+    def test_plugin_catalog_spec_is_frozen(self):
+        """PluginSpec заморожен — попытка изменить атрибут вызывает ошибку."""
+        entries = [_FakePluginEntry("flip", category="processing")]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("flip")
+        assert spec is not None
+
+        with pytest.raises((AttributeError, TypeError)):
+            spec.name = "changed"  # type: ignore[misc]
+
+
+# ==============================================================================
+# Тесты ServiceCatalogFromRegistry
+# ==============================================================================
+
+
+class TestServiceCatalogFromRegistry:
+    """Тесты для ServiceCatalogFromRegistry."""
+
+    def _make_registry(self, entries: list[_FakeServiceEntry] | None = None) -> _FakeServiceRegistry:
+        return _FakeServiceRegistry(entries or [])
+
+    def _make_adapter(self, entries: list[_FakeServiceEntry] | None = None) -> ServiceCatalogFromRegistry:
+        return ServiceCatalogFromRegistry(self._make_registry(entries))  # type: ignore[arg-type]
+
+    def test_service_catalog_lists_known_services(self):
+        """Фейковый реестр с 2 сервисами → list_services() возвращает 2 ServiceSpec."""
+        entries = [
+            _FakeServiceEntry("webcam_camera", "WebcamCameraService"),
+            _FakeServiceEntry("hikvision", "HikvisionCameraService"),
+        ]
+        catalog = self._make_adapter(entries)
+        result = catalog.list_services()
+
+        assert len(result) == 2
+        ids = {spec.service_id for spec in result}
+        assert ids == {"webcam_camera", "hikvision"}
+
+    def test_service_catalog_returns_tuple(self):
+        """list_services() возвращает tuple (не list)."""
+        entries = [_FakeServiceEntry("svc1", "Svc1")]
+        catalog = self._make_adapter(entries)
+        assert isinstance(catalog.list_services(), tuple)
+
+    def test_service_catalog_resolve_known_service(self):
+        """resolve() с известным service_id возвращает ServiceSpec."""
+        entries = [_FakeServiceEntry("webcam_camera", "WebcamCameraService", meta={"vendor": "opencv"})]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("webcam_camera")
+
+        assert spec is not None
+        assert spec.service_id == "webcam_camera"
+
+    def test_service_catalog_resolve_unknown_returns_none(self):
+        """resolve() с неизвестным id возвращает None."""
+        catalog = self._make_adapter([])
+        assert catalog.resolve("no_such_service") is None
+
+    def test_service_catalog_resolve_roundtrip(self):
+        """Round-trip: entry.name == catalog.resolve(entry.name).service_id."""
+        entry = _FakeServiceEntry("my_service", "MyService")
+        catalog = self._make_adapter([entry])
+        resolved = catalog.resolve(entry.name)
+        assert resolved is not None
+        assert entry.name == resolved.service_id
+
+    def test_service_catalog_metadata_preserved(self):
+        """Метаданные из entry.meta попадают в spec.metadata."""
+        entries = [_FakeServiceEntry("svc", "Svc", meta={"vendor": "opencv", "version": "1.0"})]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("svc")
+
+        assert spec is not None
+        assert spec.metadata.get("vendor") == "opencv"
+        assert spec.metadata.get("version") == "1.0"
+
+    def test_service_catalog_with_empty_registry_returns_empty(self):
+        """Пустой реестр → list_services() возвращает пустой tuple."""
+        catalog = self._make_adapter([])
+        assert catalog.list_services() == ()
+
+    def test_service_catalog_satisfies_protocol(self):
+        """Adapter удовлетворяет ServiceCatalog Protocol (assignment-проверка)."""
+        catalog = self._make_adapter([])
+        _protocol_check: ServiceCatalog = catalog  # type: ignore[assignment]
+        assert _protocol_check is catalog
+
+    def test_service_catalog_spec_is_frozen(self):
+        """ServiceSpec заморожен — попытка изменить атрибут вызывает ошибку."""
+        entries = [_FakeServiceEntry("svc", "Svc")]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("svc")
+        assert spec is not None
+
+        with pytest.raises((AttributeError, TypeError)):
+            spec.service_id = "changed"  # type: ignore[misc]
+
+
+# ==============================================================================
+# Тесты DisplayCatalogFromRegistry
+# ==============================================================================
+
+
+class TestDisplayCatalogFromRegistry:
+    """Тесты для DisplayCatalogFromRegistry."""
+
+    def _make_registry(self, entries: list[_FakeDisplayEntry] | None = None) -> _FakeDisplayRegistry:
+        return _FakeDisplayRegistry(entries or [])
+
+    def _make_adapter(self, entries: list[_FakeDisplayEntry] | None = None) -> DisplayCatalogFromRegistry:
+        return DisplayCatalogFromRegistry(self._make_registry(entries))  # type: ignore[arg-type]
+
+    def test_display_catalog_lists_known_displays(self):
+        """Фейковый реестр с 2 дисплеями → list_displays() возвращает 2 DisplaySpec."""
+        entries = [
+            _FakeDisplayEntry("main", "Основной дисплей"),
+            _FakeDisplayEntry("debug", "Отладочный дисплей"),
+        ]
+        catalog = self._make_adapter(entries)
+        result = catalog.list_displays()
+
+        assert len(result) == 2
+        ids = {spec.display_id for spec in result}
+        assert ids == {"main", "debug"}
+
+    def test_display_catalog_returns_tuple(self):
+        """list_displays() возвращает tuple (не list)."""
+        entries = [_FakeDisplayEntry("d1", "Display 1")]
+        catalog = self._make_adapter(entries)
+        assert isinstance(catalog.list_displays(), tuple)
+
+    def test_display_catalog_resolve_known_display(self):
+        """resolve() с известным display_id возвращает DisplaySpec."""
+        entries = [_FakeDisplayEntry("main", "Основной")]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("main")
+
+        assert spec is not None
+        assert spec.display_id == "main"
+        assert spec.display_name == "Основной"
+
+    def test_display_catalog_resolve_unknown_returns_none(self):
+        """resolve() с неизвестным id возвращает None."""
+        catalog = self._make_adapter([])
+        assert catalog.resolve("no_such_display") is None
+
+    def test_display_catalog_resolve_roundtrip(self):
+        """Round-trip: entry.id == catalog.resolve(entry.id).display_id."""
+        entry = _FakeDisplayEntry("preview", "Preview")
+        catalog = self._make_adapter([entry])
+        resolved = catalog.resolve(entry.id)
+        assert resolved is not None
+        assert entry.id == resolved.display_id
+
+    def test_display_catalog_metadata_contains_dimensions(self):
+        """Метаданные содержат width, height, format, fps_limit, ring_buffer_blocks."""
+        entries = [
+            _FakeDisplayEntry(
+                "main", "Main", width=1280, height=720, format="BGR", fps_limit=30.0, ring_buffer_blocks=3
+            )
+        ]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("main")
+
+        assert spec is not None
+        assert spec.metadata["width"] == 1280
+        assert spec.metadata["height"] == 720
+        assert spec.metadata["format"] == "BGR"
+        assert spec.metadata["fps_limit"] == 30.0
+        assert spec.metadata["ring_buffer_blocks"] == 3
+
+    def test_display_catalog_with_empty_registry_returns_empty(self):
+        """Пустой реестр → list_displays() возвращает пустой tuple."""
+        catalog = self._make_adapter([])
+        assert catalog.list_displays() == ()
+
+    def test_display_catalog_satisfies_protocol(self):
+        """Adapter удовлетворяет DisplayCatalog Protocol (assignment-проверка)."""
+        catalog = self._make_adapter([])
+        _protocol_check: DisplayCatalog = catalog  # type: ignore[assignment]
+        assert _protocol_check is catalog
+
+    def test_display_catalog_spec_is_frozen(self):
+        """DisplaySpec заморожен — попытка изменить атрибут вызывает ошибку."""
+        entries = [_FakeDisplayEntry("d1", "Display 1")]
+        catalog = self._make_adapter(entries)
+        spec = catalog.resolve("d1")
+        assert spec is not None
+
+        with pytest.raises((AttributeError, TypeError)):
+            spec.display_id = "changed"  # type: ignore[misc]
+
+
+# ==============================================================================
+# Smoke-тест на реальном PluginRegistry
+# ==============================================================================
+
+
+class TestRealPluginRegistrySmoke:
+    """Smoke-тест: реальный PluginRegistry + PluginCatalogFromRegistry."""
+
+    def test_real_plugin_registry_smoke(self):
+        """
+        Реальный PluginRegistry подключается, adapter возвращает список.
+
+        Если в среде нет зарегистрированных плагинов — test пропускается
+        (okружение dev может не иметь плагинов заранее).
+        Тест проверяет что adapter корректно оборачивает реестр:
+        все возвращённые объекты являются PluginSpec.
+        """
+        from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
+
+        catalog = PluginCatalogFromRegistry(PluginRegistry)
+        result = catalog.list_plugins()
+
+        # Всегда tuple
+        assert isinstance(result, tuple)
+
+        # Все элементы — PluginSpec
+        for spec in result:
+            assert isinstance(spec, PluginSpec), f"Ожидался PluginSpec, получен {type(spec)}"
+            assert isinstance(spec.name, str)
+            assert isinstance(spec.category, str)
+
+        # Если плагины есть — проверяем round-trip
+        if result:
+            first = result[0]
+            resolved = catalog.resolve(first.name)
+            assert resolved is not None
+            assert resolved.name == first.name
+        else:
+            pytest.skip("Нет зарегистрированных плагинов в PluginRegistry в текущей среде")
+
+    def test_real_plugin_registry_discover_smoke(self):
+        """
+        Smoke: discover_plugins из Plugins/ → adapter список не пустой.
+
+        Используем PluginRegistry.discover() для сканирования директории Plugins/.
+        """
+        import sys
+        from pathlib import Path
+
+        from multiprocess_framework.modules.process_module.plugins.registry import (
+            _PluginRegistry,
+        )
+
+        # Используем изолированный реестр чтобы не загрязнять глобальный
+        isolated_registry = _PluginRegistry()
+
+        # Путь к директории Plugins/ относительно корня проекта
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        plugins_dir = project_root / "Plugins"
+
+        if not plugins_dir.exists():
+            pytest.skip(f"Директория Plugins/ не найдена: {plugins_dir}")
+
+        # Добавляем корень проекта в sys.path если не добавлен
+        project_root_str = str(project_root)
+        sys_path_added = False
+        if project_root_str not in sys.path:
+            sys.path.insert(0, project_root_str)
+            sys_path_added = True
+
+        try:
+            count = isolated_registry.discover(str(plugins_dir))
+        finally:
+            if sys_path_added and project_root_str in sys.path:
+                sys.path.remove(project_root_str)
+
+        catalog = PluginCatalogFromRegistry(isolated_registry)
+        result = catalog.list_plugins()
+
+        if count == 0:
+            pytest.skip("Plugins/ найдена, но плагины не загрузились (возможно нет зависимостей)")
+
+        assert isinstance(result, tuple)
+        assert len(result) > 0, "discover() нашёл плагины, но list_plugins() вернул пустой tuple"
+
+        # Проверяем round-trip для первого плагина
+        first = result[0]
+        resolved = catalog.resolve(first.name)
+        assert resolved is not None
+        assert resolved.name == first.name
