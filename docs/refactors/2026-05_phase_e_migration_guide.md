@@ -151,8 +151,8 @@ def closeEvent(self, event: QCloseEvent) -> None:
 ```
 
 `QtEventBus` маршалит `publish()` из worker thread на main thread через
-`QMetaObject.invokeMethod(..., Qt.QueuedConnection)`. Подписчики **всегда** получают
-события на main thread — Qt-виджеты обновлять безопасно.
+внутренний `Signal(object)` с `Qt.QueuedConnection` (Qt event loop). Подписчики
+**всегда** получают события на main thread — Qt-виджеты обновлять безопасно.
 
 ---
 
@@ -261,6 +261,29 @@ Admin-панели используют полный `AuthContext` (manager + st
 | `bindings` (GuiStateBindings) перевод в AppServices | Phase G (возможная ревизия) |
 | `error::DeprecationWarning` в тестах (force-fail) | Phase F |
 | Расширение AuthFacade Protocol до Admin-уровня | Phase E (при миграции Processes/Admin tab) |
+
+---
+
+## Phase E follow-ups (из ревью Phase D)
+
+Эти замечания **не блокируют** Phase D merge, но Phase E developer должен учесть:
+
+1. **Split ConfigStore instance** — `build_app_services()` оборачивает `Config(initial_data=dict(ctx.config))`,
+   что создаёт **отдельный** `Config` instance, не связанный с `ctx.config` не-мигрированных
+   presenter'ов. Изменения через `services.config.set()` не видны через `ctx.config` и наоборот.
+   В Phase D OK (только Settings мигрирован, и он использует yaml_io, не ctx.config), но Phase E
+   при миграции нескольких табов должна решить: либо ConfigStoreFromManager wraps тот же backend
+   что `ctx.config`, либо явно документировать split.
+
+2. **ConfigStore subscriber recursion** — `set()` держит lock во время `_fire_subscribers()`.
+   RLock + `list(self._subscribers)` копия защищают от мутации, но если handler A.set() триггерит
+   handler B.set() → handler A.set() → ... это бесконечная рекурсия. В Phase D не проблема
+   (Settings не делает reactive chains). Phase E добавит `_firing: bool` guard или `_depth_limit`.
+
+3. **InterfaceSection ctx=None graceful degradation** — кнопка "Обновить UI" в Interface subtab'е
+   получает `ctx=None` и логирует warning. Документированное ограничение Phase D; полноценная
+   миграция требует расширения какого-то Protocol (например, `ProcessControlProtocol`) для
+   GUI restart-фичи.
 
 ---
 

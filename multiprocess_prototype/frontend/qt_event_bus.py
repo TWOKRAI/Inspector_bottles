@@ -92,8 +92,9 @@ class QtEventBus(QObject):
         super().__init__(parent)
         # Инициализируем внутренний bus с кастомным error_handler для логирования
         self._bus = EventBus(error_handler=self._on_error)
-        # Подключаем сигнал к слоту: соединение AutoConnection позволяет Qt
-        # выбрать QueuedConnection при cross-thread и DirectConnection на same thread.
+        # QueuedConnection форсирует доставку через event loop main thread'а,
+        # даже если emit() произошёл с main thread (но в этом случае мы идём
+        # синхронным путём в publish() и emit() не вызываем).
         self._worker_event.connect(
             self._dispatch_on_main,
             Qt.ConnectionType.QueuedConnection,
