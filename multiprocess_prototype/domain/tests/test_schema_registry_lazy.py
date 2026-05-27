@@ -4,7 +4,7 @@
 
 Проверяет:
 - Импорт `multiprocess_prototype.domain` НЕ регистрирует ничего в default registry.
-- `register_domain_schemas()` регистрирует все 7 entities.
+- `register_domain_schemas()` регистрирует все 8 entities (7 + RecipeMeta).
 - `register_domain_schemas(registry=custom)` регистрирует только в custom registry,
   default registry остаётся пустым.
 """
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-# Имена всех 7 domain-entity, которые должны регистрироваться
+# Имена всех 8 domain-entity (7 + вспомогательный RecipeMeta), которые регистрируются
 _DOMAIN_ENTITY_NAMES = frozenset(
     {
         "PluginInstance",
@@ -76,7 +76,7 @@ class TestImportDoesNotRegister:
         import multiprocess_prototype.domain  # noqa: F401
 
         registered = clean_default_registry.list_schemas()
-        # Ни одной из 7 domain-entity не должно быть в registry
+        # Ни одной из 8 domain-entity не должно быть в registry
         domain_registered = _DOMAIN_ENTITY_NAMES & set(registered)
         assert domain_registered == frozenset(), (
             f"Импорт domain зарегистрировал схемы: {domain_registered}. "
@@ -85,15 +85,15 @@ class TestImportDoesNotRegister:
 
 
 # ==============================================================================
-# Test 2: register_domain_schemas() регистрирует все 7
+# Test 2: register_domain_schemas() регистрирует все 8
 # ==============================================================================
 
 
 class TestRegisterDomainSchemas:
-    """register_domain_schemas() регистрирует все 7 domain-entity."""
+    """register_domain_schemas() регистрирует все 8 domain-entity (7 + RecipeMeta)."""
 
     def test_register_domain_schemas_registers_all_seven(self, clean_default_registry) -> None:
-        """Вызов register_domain_schemas() → все 7 entities в default registry."""
+        """Вызов register_domain_schemas() → все 8 entities в default registry."""
         from multiprocess_prototype.domain import register_domain_schemas
 
         register_domain_schemas()  # регистрирует в default registry

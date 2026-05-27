@@ -102,7 +102,7 @@ from .events import (
 
 
 def register_domain_schemas(registry: object = None) -> None:  # type: ignore[assignment]
-    """Зарегистрировать все 7 domain-entity в SchemaRegistry.
+    """Зарегистрировать все 8 domain-entity в SchemaRegistry (7 + RecipeMeta).
 
     Args:
         registry: Экземпляр SchemaRegistry. При None — использует глобальный
