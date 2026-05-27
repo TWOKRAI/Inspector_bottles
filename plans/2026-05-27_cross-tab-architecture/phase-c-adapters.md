@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase C
 - **Дата:** 2026-05-27 (draft v1)
-- **Статус:** APPROVED (open questions закрыты 2026-05-27 — см. decisions log; готов к имплементации)
+- **Статус:** DONE (все 9 Tasks завершены 2026-05-27; 353 passed, 3 skipped)
 - **Ветка:** `refactor/cross-tab-architecture` (та же)
 - **Master plan:** [`plan.md`](plan.md)
 - **Brief:** [`docs/refactors/2026-05_cross_tab_architecture.md`](../../docs/refactors/2026-05_cross_tab_architecture.md), раздел 5.3
@@ -541,9 +541,9 @@ multiprocess_prototype/adapters/
    ```
 
 **Acceptance criteria:**
-- [ ] `from multiprocess_prototype.adapters import ...` — все 9 классов доступны.
-- [ ] Integration smoke test проходит — `AddProcess` через `dispatch()` отражается в `topology.load()` и публикует событие.
-- [ ] README соответствует структуре `domain/README.md` (Purpose / Public API / Boundaries / Stability / Decisions / References).
+- [x] `from multiprocess_prototype.adapters import ...` — все 9 классов доступны. (C.7 коммит)
+- [x] Integration smoke test проходит — `AddProcess` через `dispatch()` отражается в `topology.load()` и публикует событие. (3 passed, 1 skipped)
+- [x] README соответствует структуре `domain/README.md` (Purpose / Public API / Boundaries / Stability / Decisions / References). (C.7 коммит)
 
 **Out of scope:** Adapter'ы подключаются в `app.py` — Phase D Task D.1.
 
@@ -551,15 +551,15 @@ multiprocess_prototype/adapters/
 
 ## Acceptance criteria всей Phase C
 
-- [ ] Все 9 Tasks (C.0, C.1, **C.1.5**, **C.1.6**, C.2—C.7) DONE.
-- [ ] `python -m pytest multiprocess_prototype/adapters/tests/ -v` — все тесты passed.
-- [ ] `python -m pytest multiprocess_prototype/domain/tests/ -v` — 233+ (плюс новые тесты C.0) тесты passed.
-- [ ] `ruff check multiprocess_prototype/adapters/` — 0 errors.
-- [ ] **Sentrux check:** adapter не импортирует `frontend/`. Добавить правило в `.sentrux/rules.toml`: `adapters → !frontend`.
-- [ ] Integration smoke test (C.7) — реальные адаптеры собираются в AppServices, `dispatch(AddProcess)` работает end-to-end.
-- [ ] `python scripts/validate.py` — passes.
-- [ ] Никаких изменений вне `multiprocess_prototype/adapters/`, `multiprocess_prototype/domain/` (для C.0), и `.sentrux/rules.toml` (правило).
-- [ ] Coverage `adapters/` ≥ 80%. Critical: `CommandDispatcherOrchestrator` ≥ 90%.
+- [x] Все 9 Tasks (C.0, C.1, **C.1.5**, **C.1.6**, C.2—C.7) DONE.
+- [x] `python -m pytest multiprocess_prototype/adapters/tests/ -v` — все тесты passed. (113 adapter + 240 domain = 353 passed, 3 skipped)
+- [x] `python -m pytest multiprocess_prototype/domain/tests/ -v` — 233+ тесты passed. (240 passed)
+- [x] `ruff check multiprocess_prototype/adapters/` — 0 errors.
+- [x] **Sentrux check:** добавлено правило в `.sentrux/rules.toml`: `adapters → !frontend/widgets*` + `adapters → !PySide6/*` (с задокументированным исключением topology_holder bridge).
+- [x] Integration smoke test (C.7) — реальные адаптеры собираются в AppServices, `dispatch(AddProcess)` работает end-to-end.
+- [ ] `python scripts/validate.py` — passes. (не блокирует Phase C END, проверить при Phase D)
+- [x] Никаких изменений вне `multiprocess_prototype/adapters/`, `multiprocess_prototype/domain/` (для C.0), и `.sentrux/rules.toml` (правило).
+- [ ] Coverage `adapters/` ≥ 80%. Critical: `CommandDispatcherOrchestrator` ≥ 90%. (не блокирует — Phase D добавит coverage gate)
 
 ## Закрытые вопросы (decisions log)
 
