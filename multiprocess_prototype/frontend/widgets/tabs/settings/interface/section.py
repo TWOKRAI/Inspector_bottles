@@ -39,13 +39,21 @@ class InterfaceSection(QWidget):
 
     Реализует SectionProtocol: key, title, widget(), action_buttons(),
     on_activated(), on_deactivated().
+
+    Task D.5: принимает ctx как Optional для backward compat. Если ctx=None —
+    кнопка «Обновить UI» показывается, но не выполняет перезапуск (graceful degradation).
+    TODO (Phase E): передавать ProcessControl Protocol через AppServices.
     """
 
     # SectionProtocol — идентификаторы секции
     key: str = "interface_settings"
     title: str = "Настройка интерфейса"
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        ctx: "AppContext | None" = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._ctx = ctx
         self._init_ui()
@@ -71,9 +79,7 @@ class InterfaceSection(QWidget):
         # Кнопка «Обновить UI»
         btn_row = QHBoxLayout()
         self._btn_rebuild = QPushButton("Обновить UI")
-        self._btn_rebuild.setToolTip(
-            "Перезапустить графический интерфейс (процесс продолжит работу)"
-        )
+        self._btn_rebuild.setToolTip("Перезапустить графический интерфейс (процесс продолжит работу)")
         self._btn_rebuild.setMinimumWidth(200)
         self._btn_rebuild.setMinimumHeight(36)
         self._btn_rebuild.setProperty("role", "primary")
@@ -108,7 +114,15 @@ class InterfaceSection(QWidget):
     # ------------------------------------------------------------------
 
     def _on_rebuild_ui(self) -> None:
-        """Перезапустить UI: ставим флаг на процессе и закрываем QApplication."""
+        """Перезапустить UI: ставим флаг на процессе и закрываем QApplication.
+
+        Если ctx=None (Task D.5 / тесты без полного AppContext) — graceful no-op.
+        TODO (Phase E): ProcessControl Protocol в AppServices устранит этот guard.
+        """
+        if self._ctx is None:
+            _logger.warning("[InterfaceSection] ctx=None — перезапуск UI недоступен")
+            return
+
         process = self._ctx.process
         process._restart_ui = True
         _logger.info("[InterfaceSection] Перезапуск UI по запросу пользователя")

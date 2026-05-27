@@ -33,7 +33,7 @@ from ..yaml_io import schema_to_field_infos, load_settings
 
 if TYPE_CHECKING:
     from .presenter import SystemSettingsPresenter
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.domain.app_services import AppServices
 
 # Русские названия секций для group-box (RegisterView)
 _SECTION_TITLES: dict[str, str] = {
@@ -59,9 +59,13 @@ class SystemSection(QWidget):
     section_dirty_changed = Signal(bool)
     section_data_saved = Signal(dict)
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        services: "AppServices | None" = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self._ctx = ctx
+        self._services = services
 
         # Предпочтения (режим отображения)
         self._prefs = UiPrefsStore()

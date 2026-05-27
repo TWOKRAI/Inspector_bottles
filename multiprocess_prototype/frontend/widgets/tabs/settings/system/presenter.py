@@ -10,6 +10,9 @@
 - синхронизацию undo/redo с RegisterView
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через SystemSettingsView Protocol.
+
+Task D.5: мигрирован на AppServices. ActionBus берётся через
+services.commands.action_bus() если доступен (graceful degradation для тестов).
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from .view import SystemSettingsView
 from ..yaml_io import load_settings, save_settings, schema_to_field_infos
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.domain.app_services import AppServices
     from multiprocess_prototype.backend.config.schemas import SystemConfig
     from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
@@ -35,6 +38,10 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
 
     Хранит состояние конфига и dirty-флаг, делегирует все UI-операции в view.
     Не содержит Qt-кода.
+
+    Task D.5: принимает AppServices вместо AppContext.
+    ActionBus берётся через services.commands.action_bus() если метод доступен
+    (командный диспетчер в production-режиме предоставляет его через duck typing).
     """
 
     def __init__(
@@ -43,10 +50,10 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         view: SystemSettingsView,
         rm=None,
         ui=None,
-        ctx: "AppContext",
+        services: "AppServices",
     ) -> None:
         super().__init__(view=view, rm=rm, ui=ui)
-        self._ctx = ctx
+        self._services = services
 
         # Текущий конфиг (загружается при инициализации)
         self._cfg: "SystemConfig" = load_settings()
@@ -123,6 +130,18 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         """Обработать изменение любого поля редактора → пометить dirty."""
         self._set_dirty(True)
 
+    def _get_action_bus(self):
+        """Получить ActionBus из services.commands если доступен.
+
+        CommandDispatcher в production предоставляет action_bus() через duck typing
+        (CommandDispatcherOrchestrator оборачивает ActionBus).
+        В тестах FakeCommandDispatcher не имеет action_bus() → возвращаем None.
+        """
+        bus_fn = getattr(self._services.commands, "action_bus", None)
+        if callable(bus_fn):
+            return bus_fn()
+        return None
+
     def on_field_changed_action_bus(
         self,
         register_name: str,
@@ -131,7 +150,7 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         new_value: object,
     ) -> None:
         """Записать изменение поля в ActionBus для undo/redo."""
-        bus = self._ctx.action_bus()
+        bus = self._get_action_bus()
         if bus is None:
             return
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
@@ -147,7 +166,7 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
 
     def on_bus_undo_redo_sync(self) -> None:
         """Синхронизировать редакторы с ActionBus при undo/redo."""
-        bus = self._ctx.action_bus()
+        bus = self._get_action_bus()
         if bus is None:
             return
         event = bus.last_event

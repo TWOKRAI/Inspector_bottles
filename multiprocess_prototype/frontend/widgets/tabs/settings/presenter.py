@@ -6,6 +6,8 @@
 ActionBus. Класс оставлен ради явного типа `SettingsView` и точки расширения
 для app-specific логики, которая может появиться в Phase 5+.
 
+Task D.5: мигрирован на AppServices — принимает services вместо ctx.
+
 См. ADR-126.
 """
 
@@ -20,11 +22,14 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import (
 from .view import SettingsView
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.domain.app_services import AppServices
 
 
 class SettingsPresenter(TreeNavTabPresenter[SettingsView, None]):
-    """Презентер таба Settings — тонкая обёртка над TreeNavTabPresenter."""
+    """Презентер таба Settings — тонкая обёртка над TreeNavTabPresenter.
+
+    Task D.5: принимает AppServices. Нет прямых обращений к ctx.extras.
+    """
 
     def __init__(
         self,
@@ -32,7 +37,7 @@ class SettingsPresenter(TreeNavTabPresenter[SettingsView, None]):
         view: SettingsView,
         rm=None,
         ui=None,
-        ctx: "AppContext",
+        services: "AppServices",
     ) -> None:
         super().__init__(view=view, rm=rm, ui=ui)
-        self._ctx = ctx
+        self._services = services

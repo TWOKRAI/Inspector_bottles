@@ -285,3 +285,28 @@ class TabFactory:
             title=tab_info["title"],
             description=tab_info.get("description", ""),
         )
+
+
+# ---------------------------------------------------------------------------
+# Standalone factory — Task D.5 (Phase D)
+# ---------------------------------------------------------------------------
+
+
+def create_settings_tab(ctx: "AppContext") -> "QWidget":
+    """Создать SettingsTab из AppContext через AppServices DI (Task D.5).
+
+    Передаёт ctx.app_services в SettingsTab. auth_ctx берётся из ctx.auth.
+
+    Precondition: ctx.app_services не None (инициализирован в run_gui(),
+    TaskD.1). Если app_services is None — AssertionError с диагностикой.
+
+    Используется в custom_factories TabFactory:
+        factory = TabFactory(ctx, custom_factories={"settings": create_settings_tab})
+    """
+    from .widgets.tabs.settings.tab import SettingsTab
+
+    assert ctx.app_services is not None, (
+        "AppServices не инициализирован в ctx. "
+        "Убедитесь, что Task D.1 factory вызван в run_gui() до создания TabFactory."
+    )
+    return SettingsTab(ctx.app_services, auth_ctx=ctx.auth)

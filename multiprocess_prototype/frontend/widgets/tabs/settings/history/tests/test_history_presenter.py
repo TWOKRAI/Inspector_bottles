@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """Тесты HistoryPresenter — pure-Python, без Qt.
 
+Task D.5: presenter мигрирован на AppServices. Тесты используют
+make_test_app_services() builder (zero MagicMock для AppContext).
+ActionBus передаётся через FakeCommandDispatcher с методом action_bus().
+
 Проверяет:
   - test_refresh_populates_table      : presenter заполняет таблицу из bus.history()
   - test_refresh_enables_buttons      : после refresh кнопки enabled/disabled корректно
@@ -18,7 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
+from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 from multiprocess_prototype.frontend.widgets.tabs.settings.history.presenter import (
     HistoryPresenter,
 )
@@ -64,11 +68,22 @@ def _make_bus(
     return bus
 
 
-def _make_ctx(bus: MagicMock | None = None) -> MagicMock:
-    """Фабрика mock AppContext."""
-    ctx = MagicMock()
-    ctx.action_bus.return_value = bus
-    return ctx
+class _FakeDispatcherWithBus:
+    """FakeCommandDispatcher с методом action_bus() — имитирует production dispatcher.
+
+    Task D.5: HistoryPresenter использует services.commands.action_bus() через
+    duck typing. FakeCommandDispatcher из domain/_fakes.py не имеет action_bus(),
+    поэтому используем этот враппер в тестах с ActionBus.
+    """
+
+    def __init__(self, bus=None) -> None:
+        self._bus = bus
+
+    def action_bus(self):
+        return self._bus
+
+    def dispatch(self, command):
+        return []
 
 
 def _make_view() -> MagicMock:
@@ -81,11 +96,19 @@ def _make_presenter(
     bus: MagicMock | None = None,
     view: MagicMock | None = None,
 ) -> HistoryPresenter:
-    """Создать HistoryPresenter с моками."""
+    """Создать HistoryPresenter через make_test_app_services() builder (zero MagicMock).
+
+    Task D.5: commands переопределяется через _FakeDispatcherWithBus если bus задан,
+    иначе используется стандартный FakeCommandDispatcher (action_bus() → None).
+    """
     if view is None:
         view = _make_view()
-    ctx = _make_ctx(bus)
-    return HistoryPresenter(view=view, rm=None, ui=None, ctx=ctx)
+    if bus is not None:
+        commands = _FakeDispatcherWithBus(bus)
+        services = make_test_app_services(commands=commands)
+    else:
+        services = make_test_app_services()
+    return HistoryPresenter(view=view, rm=None, ui=None, services=services)
 
 
 # ---------------------------------------------------------------------------
@@ -155,11 +178,13 @@ class TestHistoryPresenterRefresh:
         view.scroll_to_bottom.assert_called_once()
 
     def test_refresh_empty_bus(self) -> None:
-        """Если bus=None — presenter не бросает исключений."""
-        ctx = MagicMock()
-        ctx.action_bus.return_value = None
+        """Если bus=None — presenter не бросает исключений.
+
+        Task D.5: FakeCommandDispatcher не имеет action_bus() → _get_action_bus() = None.
+        """
         view = _make_view()
-        presenter = HistoryPresenter(view=view, rm=None, ui=None, ctx=ctx)
+        services = make_test_app_services()  # FakeCommandDispatcher без action_bus()
+        presenter = HistoryPresenter(view=view, rm=None, ui=None, services=services)
 
         # Не должно бросать исключений
         presenter.refresh()
@@ -200,11 +225,13 @@ class TestHistoryPresenterClear:
         bus.clear.assert_called_once()
 
     def test_clear_noop_when_no_bus(self) -> None:
-        """presenter.clear() без bus — нет исключений."""
-        ctx = MagicMock()
-        ctx.action_bus.return_value = None
+        """presenter.clear() без bus — нет исключений.
+
+        Task D.5: FakeCommandDispatcher не имеет action_bus() → None.
+        """
         view = _make_view()
-        presenter = HistoryPresenter(view=view, rm=None, ui=None, ctx=ctx)
+        services = make_test_app_services()
+        presenter = HistoryPresenter(view=view, rm=None, ui=None, services=services)
 
         # Не должно бросать исключений
         presenter.clear()

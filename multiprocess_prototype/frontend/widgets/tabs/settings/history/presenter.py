@@ -7,7 +7,13 @@
 - экспорт истории в CSV через view.get_save_path()
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через HistoryView Protocol.
+
+Task D.5: мигрирован на AppServices. ActionBus берётся через
+services.commands.action_bus() если доступен (duck typing).
+History секция не использует EventBus для timeline — исторически работает
+на ActionBus (undo/redo store, не domain events). Phase E может пересмотреть.
 """
+
 from __future__ import annotations
 
 import csv
@@ -20,7 +26,7 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import TabPrese
 from .view import HistoryView
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.domain.app_services import AppServices
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,9 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
     """Презентер секции «История» — запросы ActionBus, CSV-экспорт.
 
     Получает зависимости через конструктор. Не содержит Qt-кода.
+
+    Task D.5: принимает AppServices вместо AppContext.
+    ActionBus берётся через services.commands.action_bus() если доступен.
     """
 
     def __init__(
@@ -37,10 +46,21 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
         view: HistoryView,
         rm=None,
         ui=None,
-        ctx: "AppContext",
+        services: "AppServices",
     ) -> None:
         super().__init__(view=view, rm=rm, ui=ui)
-        self._ctx = ctx
+        self._services = services
+
+    def _get_action_bus(self):
+        """Получить ActionBus из services.commands если доступен.
+
+        В production: CommandDispatcherOrchestrator.action_bus() → ActionBus.
+        В тестах: FakeCommandDispatcher не имеет action_bus() → None (graceful).
+        """
+        bus_fn = getattr(self._services.commands, "action_bus", None)
+        if callable(bus_fn):
+            return bus_fn()
+        return None
 
     # ------------------------------------------------------------------
     # Публичный API
@@ -52,7 +72,7 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
         Формирует строки (Время, Вкладка, Параметр, Значение) и передаёт в view.
         Также обновляет доступность кнопок «Сохранить» и «Очистить».
         """
-        bus = self._ctx.action_bus()
+        bus = self._get_action_bus()
         if bus is None:
             self._view.set_table_data([])
             self._view.set_save_enabled(False)
@@ -81,7 +101,7 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
 
     def clear(self) -> None:
         """Очистить историю через bus.clear()."""
-        bus = self._ctx.action_bus()
+        bus = self._get_action_bus()
         if bus is not None:
             bus.clear()
 
@@ -91,7 +111,7 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
         Получает путь от view (та показывает QFileDialog), записывает CSV
         с разделителем «;» и кодировкой UTF-8-BOM для совместимости с Excel.
         """
-        bus = self._ctx.action_bus()
+        bus = self._get_action_bus()
         if bus is None:
             return
 
@@ -108,9 +128,7 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
                 writer = csv.writer(f, delimiter=";")
                 writer.writerow(["Время", "Вкладка", "Параметр", "Значение"])
                 for action in actions:
-                    ts = datetime.fromtimestamp(action.timestamp).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
+                    ts = datetime.fromtimestamp(action.timestamp).strftime("%Y-%m-%d %H:%M:%S")
                     tab = action.register_name or action.action_type
                     param = action.field_name or action.description
                     value = action.forward_patch.get("value", "")

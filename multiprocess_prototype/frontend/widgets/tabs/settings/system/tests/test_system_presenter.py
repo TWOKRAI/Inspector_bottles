@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Тесты SystemSettingsPresenter — pure-Python, без Qt.
 
+Task D.5: presenter мигрирован на AppServices. Тесты используют
+make_test_app_services() builder (zero MagicMock для AppContext).
+
 Проверяет:
   - test_save_validates_and_persists        : save() валидирует через SystemConfig и вызывает save_settings
   - test_save_validation_error_shows_on_view: невалидные данные → view.show_validation_error()
@@ -14,9 +17,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-
+from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 from multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter import (
     SystemSettingsPresenter,
 )
@@ -71,18 +74,13 @@ class MockSystemView:
         """Управление кнопкой сброса (в тестах не проверяем)."""
 
 
-def _make_mock_ctx() -> MagicMock:
-    """Создать mock AppContext с action_bus() → None."""
-    ctx = MagicMock()
-    ctx.action_bus.return_value = None
-    return ctx
-
-
 def _make_presenter(
     view: MockSystemView | None = None,
     cfg: SystemConfig | None = None,
 ) -> SystemSettingsPresenter:
     """Создать presenter с замоканными yaml_io функциями.
+
+    Task D.5: использует make_test_app_services() builder (zero MagicMock).
 
     load_settings → возвращает cfg (или SystemConfig()),
     save_settings → заглушка,
@@ -93,7 +91,7 @@ def _make_presenter(
     if cfg is None:
         cfg = SystemConfig()
 
-    ctx = _make_mock_ctx()
+    services = make_test_app_services()
 
     # Патчим yaml_io в контексте модуля presenter
     target_module = "multiprocess_prototype.frontend.widgets.tabs.settings.system.presenter"
@@ -102,7 +100,7 @@ def _make_presenter(
         patch(f"{target_module}.save_settings"),
         patch(f"{target_module}.schema_to_field_infos", return_value=[]),
     ):
-        presenter = SystemSettingsPresenter(view=view, rm=None, ui=None, ctx=ctx)
+        presenter = SystemSettingsPresenter(view=view, rm=None, ui=None, services=services)
 
     return presenter
 

@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 if TYPE_CHECKING:
     from .presenter import HistoryPresenter
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.domain.app_services import AppServices
 
 # Заголовки колонок таблицы истории
 _HISTORY_COLUMNS = ["Время", "Вкладка", "Параметр", "Значение"]
@@ -45,11 +45,20 @@ class HistorySection(QWidget):
 
     Реализует SectionProtocol и HistoryView — presenter вызывает view-методы
     напрямую на объекте секции.
+
+    Task D.5: принимает services: AppServices вместо ctx: AppContext.
+    HistorySection сам по себе не использует services — presenter инжектируется
+    через set_presenter() из BaseTreeNavTab._apply_presenter_factory.
+    Параметр services сохранён для потенциального расширения (Phase E).
     """
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        services: "AppServices | None" = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self._ctx = ctx
+        self._services = services
         # Presenter инжектируется позже через set_presenter() — до этого None.
         # Первый refresh() произойдёт при on_activated() после inject'а.
         self._presenter: "HistoryPresenter | None" = None
