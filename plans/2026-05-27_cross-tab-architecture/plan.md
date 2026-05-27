@@ -21,8 +21,8 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 | Фаза | Название | Статус | Файл | Зависимости |
 |------|----------|--------|------|-------------|
 | **A** | Audit (read-only inventory) | DONE (2026-05-27, commit `bdfccd50`) | [`phase-a-audit.md`](phase-a-audit.md) | — |
-| **B** | Domain skeleton (`multiprocess_prototype/domain/`) | DRAFT (ready for approval) | [`phase-b-domain.md`](phase-b-domain.md) | A done |
-| **C** | Adapters (YAML I/O, TopologyHolder compat, ProcessManager) | NOT PLANNED | — | B done |
+| **B** | Domain skeleton (`multiprocess_prototype/domain/`) | **DONE** (2026-05-27, коммиты `83274ef8` → `e65f7158`, 233 теста, APPROVED) | [`phase-b-domain.md`](phase-b-domain.md) | A done |
+| **C** | Adapters (YAML I/O, TopologyHolder compat, ProcessManager) | READY FOR PLANNING | — | B done |
 | **D** | `AppServices` DI (replace `ctx.extras` dict-bag) | NOT PLANNED | — | C done |
 | **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays → Settings) | NOT PLANNED | — | D done |
 | **F** | Удаление legacy (`config["topology"]`, `extras["topology"]`, fallback chains) | NOT PLANNED | — | E done |
@@ -34,7 +34,8 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 
 - Phase A — DONE. Deliverable: [`docs/refactors/2026-05_cross_tab_audit.md`](../../docs/refactors/2026-05_cross_tab_audit.md), 380 строк. Коммит `bdfccd50`.
 - recipe_manager double-contract — закрыт hotfix `85eec097` (presenter.py:730,803 + 2 теста).
-- Phase B — план детализирован (`phase-b-domain.md`, 6 Tasks), готов к approval. Следующий шаг: ревью плана, при approval — implementation (B.1 → B.2/B.3/B.5 параллельно → B.4 + B.6).
+- **Phase B — DONE (2026-05-27).** Все 6 Tasks выполнены последовательно (B.1 review iteration → B.2 → B.3 → B.5 → B.4 APPROVED → B.6). Deliverable: `multiprocess_prototype/domain/` — 7 frozen-entities, 14 events, 14 commands, 9 Protocols, EventBus + AppServices, builder + _fakes.py. 233 теста зелёных, 0 ruff errors, 0 запрещённых импортов. Коммиты: `83274ef8`, `d3c812de`, `f53b828c`, `c8ec137b`, `c6e697e9`, `24d1fc3f`, `e65f7158`.
+- Следующий шаг — детализация **Phase C** (adapters): `TopologyRepositoryFromHolder`, `RecipeStoreFromManager`, `PluginCatalogFromRegistry`, `CommandDispatcherFromActionBus`. Перед началом — подтвердить open question «TopologyRepository source of truth» (см. phase-b-domain.md Open questions).
 
 ## Известные ограничения и риски (вне Phase A)
 

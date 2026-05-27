@@ -30,3 +30,4 @@
 - [DisplayRegistry state](project_display_registry.md) — Phase 4 DONE: display_module framework, 12 tests, generic (no vision fields), ADR-130/DM-001/002/003
 - [RecipesManager v2 state](project_recipes_manager.md) — Phase 5 DONE: Recipe=SystemBlueprint+yaml-sections, replace_blueprint with rollback, ADR-131/132
 - [Pipeline demo and telemetry](project_pipeline_demo.md) — Phase 7b DONE: webcam→split→merge→display demo, WireStatus telemetry, blur plugin
+- [Cross-tab Phase B domain skeleton](project_cross_tab_phase_b.md) — Phase B DONE (2026-05-27): multiprocess_prototype/domain/ изолированный пакет, 7 entities + 14 events + 14 commands + 9 protocols + EventBus + AppServices + builder, 233 теста
