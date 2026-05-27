@@ -22,8 +22,8 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 |------|----------|--------|------|-------------|
 | **A** | Audit (read-only inventory) | DONE (2026-05-27, commit `bdfccd50`) | [`phase-a-audit.md`](phase-a-audit.md) | — |
 | **B** | Domain skeleton (`multiprocess_prototype/domain/`) | **DONE** (2026-05-27, коммиты `83274ef8` → `e65f7158`, 233 теста, APPROVED) | [`phase-b-domain.md`](phase-b-domain.md) | A done |
-| **C** | Adapters (YAML I/O, TopologyHolder compat, ProcessManager) | READY FOR PLANNING | — | B done |
-| **D** | `AppServices` DI (replace `ctx.extras` dict-bag) | NOT PLANNED | — | C done |
+| **C** | Adapters (9 классов: catalogs, stores, dispatcher, auth) | **DRAFT (ready for review)** | [`phase-c-adapters.md`](phase-c-adapters.md) | B done + open questions закрыты |
+| **D** | `AppServices` DI + QtEventBus + deprecation shim + Settings PoC | **DRAFT (ready for review)** | [`phase-d-app-services.md`](phase-d-app-services.md) | C done |
 | **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays → Settings) | NOT PLANNED | — | D done |
 | **F** | Удаление legacy (`config["topology"]`, `extras["topology"]`, fallback chains) | NOT PLANNED | — | E done |
 | **G** | UX-фишки (auto-reveal, domain-level validation, cross-tab linking, diff-view) | NOT PLANNED | — | F done |
@@ -35,7 +35,9 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 - Phase A — DONE. Deliverable: [`docs/refactors/2026-05_cross_tab_audit.md`](../../docs/refactors/2026-05_cross_tab_audit.md), 380 строк. Коммит `bdfccd50`.
 - recipe_manager double-contract — закрыт hotfix `85eec097` (presenter.py:730,803 + 2 теста).
 - **Phase B — DONE (2026-05-27).** Все 6 Tasks выполнены последовательно (B.1 review iteration → B.2 → B.3 → B.5 → B.4 APPROVED → B.6). Deliverable: `multiprocess_prototype/domain/` — 7 frozen-entities, 14 events, 14 commands, 9 Protocols, EventBus + AppServices, builder + _fakes.py. 233 теста зелёных, 0 ruff errors, 0 запрещённых импортов. Коммиты: `83274ef8`, `d3c812de`, `f53b828c`, `c8ec137b`, `c6e697e9`, `24d1fc3f`, `e65f7158`.
-- Следующий шаг — детализация **Phase C** (adapters): `TopologyRepositoryFromHolder`, `RecipeStoreFromManager`, `PluginCatalogFromRegistry`, `CommandDispatcherFromActionBus`. Перед началом — подтвердить open question «TopologyRepository source of truth» (см. phase-b-domain.md Open questions).
+- **Phase C — DRAFT (ready for review).** Создан `phase-c-adapters.md`: 7 Tasks (C.0 domain hot-fixes, C.1 read-only catalogs, C.2 auth, C.3 topology, C.4 registers, C.5 recipes, C.6 dispatcher-оркестратор, C.7 integration smoke). Структура: `multiprocess_prototype/adapters/{catalogs,stores,dispatch,auth}/`. Перед стартом Phase C нужно закрыть 6 open questions (TopologyHolder source of truth, Recipe YAML backward-compat, Wire.description/Process.metadata, RegistersBackend адресация, DisplayRegistry доступ, suppress_legacy_notify подход).
+- **Phase D — DRAFT (ready for review).** Создан `phase-d-app-services.md`: 6 Tasks (D.1 AppServices factory в app.py, D.2 QtEventBus, D.3 ProjectHolder, D.4 deprecation shim для ctx.extras, D.5 Settings tab как proof-of-concept миграции, D.6 migration guide + sentrux baseline). Per-tab migration (Pipeline и др.) — **Phase E**, не D.
+- Архитектурный обзор Phase B (investigator-ревью 2026-05-27): 3 главных риска — двойная нотификация TopologyHolder+EventBus (HIGH), SchemaRegistry name collision (MEDIUM), RecipeStore adapter complexity (MEDIUM). Все учтены в Phase C/D планах.
 
 ## Известные ограничения и риски (вне Phase A)
 
