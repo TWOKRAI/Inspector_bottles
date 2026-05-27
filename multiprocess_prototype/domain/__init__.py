@@ -35,6 +35,23 @@ from .entities import (
     Wire,
 )
 from .errors import DomainError, EntityValidationError
+from .commands import (
+    ActivateRecipe,
+    AddProcess,
+    AssignTargetProcess,
+    BindDisplay,
+    ConnectWire,
+    DeactivateRecipe,
+    DisconnectWire,
+    InsertPlugin,
+    ProjectCommand,
+    RemovePlugin,
+    RemoveProcess,
+    RenameProcess,
+    ReplaceTopology,
+    SetPluginConfig,
+    UnbindDisplay,
+)
 from .events import (
     DisplayBound,
     DisplayUnbound,
@@ -120,4 +137,20 @@ __all__ = [
     "RecipeActivated",
     "RecipeDeactivated",
     "TopologyReplaced",
+    # Команды (Task B.3)
+    "ProjectCommand",
+    "AddProcess",
+    "RemoveProcess",
+    "RenameProcess",
+    "InsertPlugin",
+    "RemovePlugin",
+    "SetPluginConfig",
+    "ConnectWire",
+    "DisconnectWire",
+    "BindDisplay",
+    "UnbindDisplay",
+    "AssignTargetProcess",
+    "ActivateRecipe",
+    "DeactivateRecipe",
+    "ReplaceTopology",
 ]
