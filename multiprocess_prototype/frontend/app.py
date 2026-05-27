@@ -133,6 +133,34 @@ def run_gui(process: "GuiProcess") -> None:
 
     ctx.extras["service_registry"] = _service_registry
 
+    # 3b-pre2. Preload DisplayRegistry из YAML до создания AppServices (Task C.1.5).
+    #
+    # Phase D adapter ожидает заполненный singleton. Без этого блока
+    # services.displays.list_displays() вернёт пустой tuple до открытия DisplaysTab.
+    # Idempotent: DisplayRegistry — singleton; повторный register() от DisplaysTab
+    # будет отловлен через ValueError (дубликат) и проигнорирован.
+    from multiprocess_framework.modules.display_module import DisplayRegistry as _DisplayRegistry
+    from multiprocess_prototype.backend.config.displays_loader import (
+        load_displays_config,
+        displays_config_to_registry,
+    )
+
+    _displays_yaml_path = PROJECT_ROOT / "multiprocess_prototype" / "backend" / "config" / "displays.yaml"
+    _display_registry = _DisplayRegistry()
+    if _displays_yaml_path.exists():
+        _displays_config = load_displays_config(_displays_yaml_path)
+        displays_config_to_registry(_displays_config, _display_registry)
+        process._log_info(
+            f"display_registry: preloaded {len(_displays_config.displays)} дисплей(ов) из {_displays_yaml_path.name}",
+            module="startup",
+        )
+    else:
+        process._log_info(
+            f"display_registry: {_displays_yaml_path.name} не найден — singleton инициализирован пустым",
+            module="startup",
+        )
+    ctx.extras["display_registry"] = _display_registry
+
     # 3a. Загрузить topology для GUI и создать TopologyHolder
     import yaml as _yaml
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT

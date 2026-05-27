@@ -33,16 +33,31 @@ from multiprocess_prototype.domain.protocols.plugin_catalog import (
 def _entry_to_spec(entry: PluginEntry) -> PluginSpec:
     """Конвертировать PluginEntry в PluginSpec.
 
+    Маппинг новых полей (Task C.1.5 — backport gaps):
+        entry.description          → spec.description (getattr fallback для legacy entry)
+        port.optional              → PortSpec.optional
+        port.shape (getattr guard) → PortSpec.shape (getattr fallback если у port нет shape)
+
     Args:
         entry: Запись плагина из _PluginRegistry.
 
     Returns:
         Frozen PluginSpec для domain-слоя.
     """
+
+    def _port_to_spec(port: object) -> PortSpec:
+        """Конвертировать Port в PortSpec с lossless маппингом."""
+        return PortSpec(
+            name=port.name,  # type: ignore[attr-defined]
+            dtype=port.dtype,  # type: ignore[attr-defined]
+            optional=getattr(port, "optional", False),
+            shape=getattr(port, "shape", ""),
+        )
+
     # Входные порты
-    input_ports = tuple(PortSpec(name=port.name, dtype=port.dtype) for port in entry.inputs)
+    input_ports = tuple(_port_to_spec(port) for port in entry.inputs)
     # Выходные порты — добавляем к входным в общий tuple
-    output_ports = tuple(PortSpec(name=port.name, dtype=port.dtype) for port in entry.outputs)
+    output_ports = tuple(_port_to_spec(port) for port in entry.outputs)
     ports = input_ports + output_ports
 
     # config_schema — Phase E детализирует структуру; сейчас храним имена классов
@@ -55,6 +70,7 @@ def _entry_to_spec(entry: PluginEntry) -> PluginSpec:
     return PluginSpec(
         name=entry.name,
         category=entry.category,
+        description=getattr(entry, "description", ""),
         config_schema=config_schema,
         ports=ports,
     )

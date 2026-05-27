@@ -19,22 +19,30 @@ from typing import Any, Protocol
 
 @dataclass(frozen=True, slots=True)
 class PortSpec:
-    """Описание одного порта плагина (входного или выходного)."""
+    """Описание одного порта плагина (входного или выходного).
+
+    optional — порт может быть не подключён (соответствует Port.optional).
+    shape    — шаблон размерности, например "(H, W, 3)" (соответствует Port.shape).
+    """
 
     name: str
     dtype: str
+    optional: bool = False
+    shape: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class PluginSpec:
     """Описание плагина из реестра.
 
+    description   — человекочитаемое описание плагина (соответствует PluginEntry.description).
     config_schema — схема конфигурации в виде dict (опциональная).
     ports         — tuple входных/выходных портов.
     """
 
     name: str
     category: str
+    description: str = ""
     config_schema: dict[str, Any] = field(default_factory=dict)
     ports: tuple[PortSpec, ...] = ()
 

@@ -33,26 +33,36 @@ from multiprocess_prototype.adapters.catalogs import (
 
 
 class _FakePort:
-    """Минимальный объект, имитирующий Port (name + dtype)."""
+    """Минимальный объект, имитирующий Port (name + dtype + optional + shape).
 
-    def __init__(self, name: str, dtype: str = "any") -> None:
+    Обновлён в Task C.1.5: добавлены optional и shape для lossless маппинга.
+    """
+
+    def __init__(self, name: str, dtype: str = "any", optional: bool = False, shape: str = "") -> None:
         self.name = name
         self.dtype = dtype
+        self.optional = optional
+        self.shape = shape
 
 
 class _FakePluginEntry:
-    """Имитация PluginEntry из _PluginRegistry."""
+    """Имитация PluginEntry из _PluginRegistry.
+
+    Обновлён в Task C.1.5: добавлен description для lossless маппинга.
+    """
 
     def __init__(
         self,
         name: str,
         category: str = "",
+        description: str = "",
         inputs: list | None = None,
         outputs: list | None = None,
         register_classes: list | None = None,
     ) -> None:
         self.name = name
         self.category = category
+        self.description = description
         self.inputs = inputs or []
         self.outputs = outputs or []
         self.register_classes = register_classes or []
@@ -252,6 +262,100 @@ class TestPluginCatalogFromRegistry:
 
         with pytest.raises((AttributeError, TypeError)):
             spec.name = "changed"  # type: ignore[misc]
+
+    # ------------------------------------------------------------------
+    # Task C.1.5 — тесты новых полей description / optional / shape
+    # ------------------------------------------------------------------
+
+    def test_plugin_spec_has_description(self):
+        """entry с description='Test plugin' → spec.description == 'Test plugin'."""
+        entry = _FakePluginEntry("edge_detect", category="processing", description="Test plugin")
+        catalog = self._make_adapter([entry])
+        spec = catalog.resolve("edge_detect")
+
+        assert spec is not None
+        assert spec.description == "Test plugin"
+
+    def test_plugin_spec_description_defaults_empty(self):
+        """entry без атрибута description (getattr fallback) → spec.description == ''."""
+
+        class _LegacyEntry:
+            """Имитация legacy entry без атрибута description."""
+
+            def __init__(self) -> None:
+                self.name = "legacy_plugin"
+                self.category = "legacy"
+                self.inputs: list = []
+                self.outputs: list = []
+                self.register_classes: list = []
+
+            # Намеренно: атрибут description отсутствует
+
+        class _LegacyRegistry:
+            def list(self):
+                return [_LegacyEntry()]
+
+            def get(self, name: str):
+                if name == "legacy_plugin":
+                    return _LegacyEntry()
+                return None
+
+        from multiprocess_prototype.adapters.catalogs.plugin_catalog import PluginCatalogFromRegistry
+
+        catalog = PluginCatalogFromRegistry(_LegacyRegistry())  # type: ignore[arg-type]
+        spec = catalog.resolve("legacy_plugin")
+
+        assert spec is not None
+        assert spec.description == "", f"Ожидался пустой description, получен: {spec.description!r}"
+
+    def test_port_spec_has_optional_and_shape(self):
+        """port с optional=True, shape='(3,4)' → PortSpec.optional=True, shape='(3,4)'."""
+        entry = _FakePluginEntry(
+            "transform",
+            category="processing",
+            inputs=[_FakePort("frame", "image/bgr", optional=True, shape="(3,4)")],
+            outputs=[_FakePort("out", "image/gray", optional=False, shape="(H, W, 1)")],
+        )
+        catalog = self._make_adapter([entry])
+        spec = catalog.resolve("transform")
+
+        assert spec is not None
+        assert len(spec.ports) == 2
+
+        input_port = next(p for p in spec.ports if p.name == "frame")
+        assert input_port.optional is True
+        assert input_port.shape == "(3,4)"
+
+        output_port = next(p for p in spec.ports if p.name == "out")
+        assert output_port.optional is False
+        assert output_port.shape == "(H, W, 1)"
+
+    def test_port_spec_optional_defaults_false(self):
+        """port без явных optional/shape атрибутов → PortSpec defaults (optional=False, shape='')."""
+
+        class _MinimalPort:
+            """Порт только с name и dtype (нет optional/shape)."""
+
+            def __init__(self, name: str, dtype: str) -> None:
+                self.name = name
+                self.dtype = dtype
+
+            # Намеренно: optional и shape отсутствуют
+
+        entry = _FakePluginEntry(
+            "minimal_plugin",
+            category="processing",
+            inputs=[_MinimalPort("in", "any")],
+        )
+        # Подменяем inputs на minimal port без optional/shape
+        catalog = self._make_adapter([entry])
+        spec = catalog.resolve("minimal_plugin")
+
+        assert spec is not None
+        assert len(spec.ports) == 1
+        port = spec.ports[0]
+        assert port.optional is False, f"Ожидался optional=False, получен: {port.optional}"
+        assert port.shape == "", f"Ожидался shape='', получен: {port.shape!r}"
 
 
 # ==============================================================================
