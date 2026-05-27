@@ -379,11 +379,11 @@ Phase B создала domain skeleton (frozen entities + Project.apply + EventB
 - pytest-qt: open Settings tab → click `Save` → verify dispatch happened (mock'нув CommandDispatcher через builder override).
 
 **Acceptance criteria:**
-- [ ] Settings tab принимает `AppServices` в `__init__`.
-- [ ] Существующие 22 settings + 67 admin тестов проходят (после миграции на builder).
-- [ ] **Никаких MagicMock в новых тестах.**
-- [ ] Smoke pytest-qt: открытие Settings tab из реального GUI — не падает (если pytest-qt доступен).
-- [ ] DeprecationWarning'и от extras не появляются в Settings tab (всё через AppServices).
+- [x] Settings tab принимает `AppServices` в `__init__`. (a876f73e)
+- [x] Существующие 22 settings + 67 admin тестов проходят (после миграции на builder). (130 settings + 4 integration = 134 passed)
+- [x] **Никаких MagicMock в новых тестах.** (zero MagicMock(spec=AppContext), подтверждено grep)
+- [x] Smoke pytest-qt: открытие Settings tab из реального GUI — не падает (если pytest-qt доступен). (test_all_tabs_creatable passed)
+- [x] DeprecationWarning'и от extras не появляются в Settings tab (всё через AppServices). (test_no_extras_deprecation_warnings passed)
 
 **Edge cases:**
 - ConfigStore теперь часть AppServices (D.2b) — Settings использует `services.config`. `ctx.config` остаётся для backward-compat (тоже через DeprecationWarning, если pattern попадает в Phase F).
