@@ -172,12 +172,12 @@ multiprocess_prototype/adapters/
 - `multiprocess_prototype/domain/tests/test_protocols.py` (или соответствующий) — обновить assignment-проверки если требуется.
 
 **Acceptance criteria:**
-- [ ] `PluginSpec.description: str = ""` добавлено.
-- [ ] `PortSpec.optional: bool = False` и `PortSpec.shape: str = ""` добавлены.
-- [ ] PluginCatalogFromRegistry заполняет эти поля из `PluginEntry` lossless.
-- [ ] `app.py` загружает DisplayRegistry из YAML до создания AppServices (если path существует).
-- [ ] 240 domain тестов passed + расширенные C.1 тесты passed.
-- [ ] 0 ruff errors.
+- [x] `PluginSpec.description: str = ""` добавлено.
+- [x] `PortSpec.optional: bool = False` и `PortSpec.shape: str = ""` добавлены.
+- [x] PluginCatalogFromRegistry заполняет эти поля из `PluginEntry` lossless.
+- [x] `app.py` загружает DisplayRegistry из YAML до создания AppServices (если path существует).
+- [x] 240 domain тестов passed + расширенные C.1 тесты passed.
+- [x] 0 ruff errors.
 
 **Out of scope:**
 - `plugin_class: type` и `register_classes: list[type]` в PluginSpec — это явный compromise: adapter покрывает «catalog read» (~35%), а sandbox/command_catalog остаются на raw registry. Документировать в `adapters/README.md` (C.7).
