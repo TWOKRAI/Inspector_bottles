@@ -27,6 +27,7 @@ from multiprocess_prototype.domain import (
     Process,
     Project,
     Recipe,
+    RecipeMeta,
     Topology,
     Wire,
 )
@@ -231,15 +232,17 @@ class TestExtraForbid:
 
 
 class TestMissingRequired:
-    """Тесты на отсутствие обязательных полей."""
+    """Тесты на отсутствие обязательных полей.
+
+    Проверяют реальное поведение API: entities бросают pydantic.ValidationError
+    напрямую (domain-слой не оборачивает ошибки автоматически).
+    EntityValidationError — утилита для consumers, не автоматический wrapper.
+    """
 
     def test_process_missing_name(self) -> None:
-        """Process без process_name → EntityValidationError."""
-        with pytest.raises((EntityValidationError, ValidationError)):
-            try:
-                Process(plugins=())  # type: ignore[call-arg]
-            except ValidationError as exc:
-                raise EntityValidationError.from_pydantic(exc) from exc
+        """Process без process_name → ValidationError (реальное поведение API)."""
+        with pytest.raises(ValidationError):
+            Process(plugins=())  # type: ignore[call-arg]
 
     def test_wire_missing_source(self) -> None:
         """Wire без source → ValidationError."""
@@ -255,6 +258,18 @@ class TestMissingRequired:
         """PluginInstance без plugin_name → ValidationError."""
         with pytest.raises(ValidationError):
             PluginInstance()  # type: ignore[call-arg]
+
+    def test_entity_validation_error_wraps_pydantic(self) -> None:
+        """EntityValidationError.from_pydantic() корректно оборачивает ValidationError."""
+        try:
+            Process(plugins=())  # type: ignore[call-arg]
+        except ValidationError as exc:
+            wrapped = EntityValidationError.from_pydantic(exc)
+            assert isinstance(wrapped, EntityValidationError)
+            assert wrapped.cause is exc
+            assert str(exc) in str(wrapped)
+        else:
+            pytest.fail("ValidationError должен был быть брошен")
 
 
 # ==============================================================================
@@ -362,3 +377,143 @@ class TestToDictFromDictIdempotent:
         assert project2.active_recipe == "my_recipe"
         assert len(project2.topology.processes) == 1
         assert project2.topology.processes[0].process_name == "proc"
+
+
+# ==============================================================================
+# Topology.from_dict: whitelist / typo protection
+# ==============================================================================
+
+
+class TestTopologyFromDictWhitelist:
+    """Тесты защиты whitelist в Topology.from_dict."""
+
+    def test_topology_typo_field_raises(self) -> None:
+        """Опечатка в ключе (proceses вместо processes) → ValidationError.
+
+        extra='forbid' должен сработать через from_dict, а не молча поглотить опечатку.
+        """
+        with pytest.raises(ValidationError):
+            Topology.from_dict({"proceses": [], "wires": [], "displays": []})
+
+    def test_topology_meta_field_normalizes(self) -> None:
+        """SystemBlueprint-поля name/description помещаются в metadata.
+
+        Whitelist {"name", "description"} перемещается в Topology.metadata,
+        не вызывая extra='forbid'.
+        """
+        topo = Topology.from_dict(
+            {
+                "processes": [],
+                "wires": [],
+                "displays": [],
+                "name": "x",
+                "description": "y",
+            }
+        )
+        assert topo.metadata.get("name") == "x"
+        assert topo.metadata.get("description") == "y"
+
+    def test_topology_known_keys_no_metadata_shuffle(self) -> None:
+        """Только known_keys → from_dict не трогает metadata."""
+        topo = Topology.from_dict({"processes": [], "wires": [], "displays": []})
+        assert topo.metadata == {}
+
+    def test_topology_mixed_meta_and_typo_raises(self) -> None:
+        """name (whitelist) + опечатка (вне whitelist) → ValidationError."""
+        with pytest.raises(ValidationError):
+            Topology.from_dict(
+                {
+                    "proceses": [],  # опечатка — не в known_keys и не в whitelist
+                    "wires": [],
+                    "displays": [],
+                    "name": "x",
+                }
+            )
+
+
+# ==============================================================================
+# Frozen behaviour: PluginInstance, DisplayInstance, RecipeMeta, Recipe, Project
+# ==============================================================================
+
+
+class TestFrozenBehaviourExtended:
+    """Frozen-тесты для entities, не охваченных TestFrozenBehaviour."""
+
+    def test_plugin_instance_frozen(self) -> None:
+        """Попытка мутации PluginInstance.plugin_name → TypeError (frozen=True)."""
+        plugin = PluginInstance(plugin_name="blur")
+        with pytest.raises((ValidationError, TypeError)):
+            plugin.plugin_name = "mutated"  # type: ignore[misc]
+
+    def test_display_instance_frozen(self) -> None:
+        """Попытка мутации DisplayInstance.node_id → TypeError (frozen=True)."""
+        display = DisplayInstance(node_id="n", display_id="d")
+        with pytest.raises((ValidationError, TypeError)):
+            display.node_id = "mutated"  # type: ignore[misc]
+
+    def test_recipe_meta_frozen(self) -> None:
+        """Попытка мутации RecipeMeta.name → TypeError (frozen=True)."""
+        meta = RecipeMeta(name="my_recipe")
+        with pytest.raises((ValidationError, TypeError)):
+            meta.name = "mutated"  # type: ignore[misc]
+
+    def test_recipe_frozen(self) -> None:
+        """Попытка мутации Recipe.meta → TypeError (frozen=True)."""
+        recipe = Recipe(meta=RecipeMeta(name="r"))
+        with pytest.raises((ValidationError, TypeError)):
+            recipe.meta = RecipeMeta(name="mutated")  # type: ignore[misc]
+
+    def test_project_frozen(self) -> None:
+        """Попытка мутации Project.active_recipe → TypeError (frozen=True)."""
+        project = Project(topology=Topology(), active_recipe="r1")
+        with pytest.raises((ValidationError, TypeError)):
+            project.active_recipe = "mutated"  # type: ignore[misc]
+
+
+# ==============================================================================
+# Recipe: полный YAML round-trip (yaml.dump → yaml.safe_load → from_dict)
+# ==============================================================================
+
+
+class TestDemoRecipeYamlRoundtrip:
+    """Полный YAML round-trip: entity → yaml.dump → yaml.safe_load → entity."""
+
+    def test_demo_recipe_yaml_full_roundtrip(self, fixtures_dir: Path) -> None:
+        """Полный round-trip через yaml.dump → yaml.safe_load подтверждает сохранность данных."""
+        recipe_path = fixtures_dir / "recipes" / "demo_webcam_split_merge.yaml"
+        assert recipe_path.exists(), f"Файл не найден: {recipe_path}"
+
+        raw = _load_yaml(recipe_path)
+        recipe1 = Recipe.from_dict(raw)
+
+        # Сериализуем в dict → YAML-строку → обратно в dict → entity
+        recipe_dict = recipe1.to_dict()
+        yaml_str = yaml.dump(recipe_dict, allow_unicode=True, default_flow_style=False)
+        reloaded_dict = yaml.safe_load(yaml_str)
+        recipe2 = Recipe.from_dict(reloaded_dict)
+
+        assert recipe2.meta.name == recipe1.meta.name
+        assert len(recipe2.blueprint.processes) == len(recipe1.blueprint.processes)
+        assert len(recipe2.blueprint.wires) == len(recipe1.blueprint.wires)
+        assert len(recipe2.display_bindings) == len(recipe1.display_bindings)
+        assert recipe2.display_bindings[0].node_id == recipe1.display_bindings[0].node_id
+        assert recipe2.display_bindings[0].display_id == recipe1.display_bindings[0].display_id
+        assert len(recipe2.active_services) == len(recipe1.active_services)
+
+
+# ==============================================================================
+# DisplayInstance: гибридный формат display_binding
+# ==============================================================================
+
+
+class TestDisplayInstanceHybridFormat:
+    """Тест на гибридный формат display_binding (одновременно node_id и source)."""
+
+    def test_display_binding_hybrid_node_id_and_source_raises(self) -> None:
+        """DisplayInstance с node_id и source одновременно → ValidationError (extra='forbid').
+
+        DisplayInstance принимает только нормализованный формат (node_id/display_id).
+        Поле 'source' — устаревший live-формат, не разрешён в entity напрямую.
+        """
+        with pytest.raises(ValidationError):
+            DisplayInstance(node_id="n", display_id="d", source="s")  # type: ignore[call-arg]

@@ -110,18 +110,29 @@ class Topology(SchemaBase):
 
         Поддерживает SystemBlueprint-формат, где на верхнем уровне
         могут присутствовать поля «name» и «description» (мета-поля blueprint).
-        Эти поля помещаются в metadata['name'] / metadata['description'],
-        чтобы не нарушать extra='forbid'.
+        Только эти два поля перемещаются в metadata — whitelist защищает от
+        молчаливого поглощения опечаток (extra='forbid' сработает корректно).
         """
         known_keys = {"processes", "wires", "displays", "metadata"}
+        # Whitelist: только известные мета-поля SystemBlueprint
+        _BLUEPRINT_META_KEYS: frozenset[str] = frozenset({"name", "description"})
+
         extra_keys = set(data.keys()) - known_keys
-        if extra_keys:
-            # Перемещаем неизвестные ключи в metadata
-            data = dict(data)
-            meta = dict(data.get("metadata", {}))
-            for key in extra_keys:
-                meta[key] = data.pop(key)
-            data["metadata"] = meta
+        if not extra_keys:
+            return cls.model_validate(data)
+
+        unexpected = extra_keys - _BLUEPRINT_META_KEYS
+        if unexpected:
+            # Неизвестные ключи вне whitelist — передаём как есть,
+            # чтобы extra="forbid" поднял ValidationError
+            return cls.model_validate(data)
+
+        # Перемещаем только whitelisted мета-поля в metadata
+        data = dict(data)
+        meta = dict(data.get("metadata") or {})
+        for key in _BLUEPRINT_META_KEYS & extra_keys:
+            meta[key] = data.pop(key)
+        data["metadata"] = meta
         return cls.model_validate(data)
 
     def to_dict(self) -> dict[str, Any]:
