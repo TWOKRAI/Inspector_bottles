@@ -11,7 +11,10 @@ metadata:
 - E.1 Pipeline — **DONE** (Senior+, teamlead). Коммиты `8566f994` + `e7bd3d97`. Reviewer APPROVED итерация 2/2. 322 теста, sentrux 7141 (-20 принято).
 - E.2 Processes — **DONE** (Middle). 6 файлов, sentrux 7140 (−1, шум). 50 processes/624 tabs тестов зелёные. Реально было 7 legacy ctx-обращений (не 1 — audit устарел).
 - E.3 Recipes — **DONE** (Middle). Маленький: только tab.py + tests/_helpers.py + test_recipes_tab.py. Presenter уже декомпозирован (MVP, принимает recipe_manager напрямую) — не тронут. RecipeManager через `services.recipes._rm` bridge. 23/624 тестов, sentrux 7139.
-- E.4 Services — **NEXT** (Middle, мутирует config lifecycle). → E.5 Plugins (Middle+, 25 точек) → E.6 Displays (Junior).
+- E.4 Services — **DONE** (Middle). 4 файла. **Protocol вместо bridge:** presenter стал тонким, делегирует lifecycle в `services.services` (ServiceManager Protocol start/stop/restart/get_lifecycle) с DomainError→bool. Кэш экземпляров + мутация entry.lifecycle переехали в адаптер ServiceManagerFromRegistry (он уже дублировал логику с Phase C.1.6). Sections: build_services_sections(services) closures. 24/623 тестов, sentrux 7138.
+- E.5 Plugins — **NEXT** (Middle+, 25 точек в 11 файлах, plugin_registry+plugin_manager смешаны). → E.6 Displays (Junior).
+
+**E.4 урок:** перед выбором bridge vs Protocol — проверить, не реализует ли adapter уже логику presenter'а. ServiceManagerFromRegistry дублировал ServicesPresenter (инстанцирование/кэш/lifecycle) — миграция на Protocol-делегирование убрала дублирование. Follow-up #1 (shared ConfigStore) **РЕШЁН**: ни один мигрированный таб (E.1-E.4) не вызывает `services.config.set()` cross-tab; Services пишет пути в user_overrides.yaml напрямую (не через config). Split безопасен.
 
 **E.2 ключевой урок (важно для E.3–E.6):** topology в production живёт в `ctx.extras["topology"]`/holder, **не** в `ctx.config`. `build_app_services` оборачивает только `ctx.config` → читать topology надо через `services.topology.load()` (domain Topology entity), иначе регрессия (пустой список). Runtime-deps не покрытые AppServices (command_sender, topology_bridge, bindings) → explicit kwargs + извлечение в `create(ctx)` (паттерн Settings `auth_ctx`), НЕ через `self._ctx`. Базовый класс `BaseListNavTab`/`BaseColumnarTab` принимает `ctx=None` (как Settings D.5).
 

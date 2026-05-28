@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-e
 - **Дата:** 2026-05-28
-- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 READY (next), E.5–E.6 HIGH-LEVEL
+- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 DONE, E.5 READY (next), E.6 HIGH-LEVEL
 - **Ветка:** `refactor/cross-tab-architecture` (та же ветка что Phase A–D; sub-branch не нужен — D.5 Settings tab коммитился прямо в неё, и Pipeline аналогично; отдельные sub-branch'и создаются только если параллельная работа по нескольким табам одновременно, что исключено правилом «таб за заходом»)
 
 ---
@@ -41,8 +41,8 @@ Settings tab уже мигрирован в D.5 и служит образцом
 | **E.1** | Pipeline | ~14 | Senior+ | teamlead | D done | **DONE (APPROVED)** |
 | **E.2** | Processes | 6 | Middle | developer | E.1 approved | **DONE** |
 | **E.3** | Recipes | 3 | Middle | developer | E.2 | **DONE** |
-| **E.4** | Services | ~4 | Middle | developer | E.3 | READY (next) |
-| **E.5** | Plugins | ~11 | Middle+ | developer | E.4 | TBD |
+| **E.4** | Services | 4 | Middle | developer | E.3 | **DONE** |
+| **E.5** | Plugins | ~11 | Middle+ | developer | E.4 | READY (next) |
 | **E.6** | Displays | ~3 | Junior | developer | E.5 | TBD |
 
 **Почему Pipeline = Senior+:** 21 из 40 топологических чтений в кодовой базе. Пять слоёв
@@ -75,6 +75,8 @@ scene-reload с позициями узлов, undo/redo chain.
 Из [migration guide строки 267–286](../../docs/refactors/2026-05_phase_e_migration_guide.md):
 
 - [x] **Split ConfigStore decision** принят и задокументирован (Task E.1 review iteration 1): Pipeline только **читает** config через `services.config.get(...)` (topology, process_manager_proxy) — не пишет через `set()`. Текущий split (`Config(initial_data=dict(ctx.config))`) безопасен для E.1: read-only consumer не вызовет рассинхрон. **Открытый вопрос для E.4 Services:** Services tab будет мутировать config (lifecycle / overrides) — там должен быть shared backend. Решение перенесено на старт E.4. **E.2 Processes (2026-05-28):** split-вопрос не применим — Processes вообще не использует `services.config`, topology читается через `services.topology.load()` (TopologyRepository поверх holder, не config). Read-only consumer.
+
+> **РЕШЕНО на E.4 Services (2026-05-28):** предпосылка «Services мутирует config» оказалась **неверной**. Фактически Services — **read-only config consumer**: читает `services.config.get("discovery")` (get_service_paths), а изменения путей пишет напрямую в `user_overrides.yaml` (`_save_service_paths`), **не** через `services.config.set()`. Эффект применяется при следующем рестарте (существующее поведение, не введено миграцией). Split безопасен (как E.1). **Shared ConfigStore по-прежнему не нужен** — ни один мигрированный таб (E.1 Pipeline, E.2 Processes, E.3 Recipes, E.4 Services) не вызывает `services.config.set()` с требованием cross-tab видимости. Вопрос остаётся открытым только если такой таб появится (E.5 Plugins / Phase G).
 - [ ] **ConfigStore `_firing: bool` guard** добавлен в `ConfigStore` impl — защита от бесконечной рекурсии при reactive chains (`set()` → subscriber.set() → ...). Добавить в том табе, который первым использует реактивные config-chains (ожидается E.3 Recipes или E.4 Services).
 - [ ] **InterfaceSection `ctx=None` graceful degradation** — кнопка «Обновить UI» логирует warning при `ctx=None`. Решено в рамках расширения какого-то Protocol (например `ProcessControlProtocol`) либо явно отложено в Phase G с обоснованием. Зафиксировать решение здесь.
 
@@ -128,9 +130,15 @@ scene-reload с позициями узлов, undo/redo chain.
   - `BaseListNavTab` принимает `ctx=None` (паттерн Settings/Processes).
   - Follow-up #2 (`ConfigStore _firing guard`): **не применим** — Recipes вообще не использует `services.config`/reactive chains.
 
-### Phase E.4 — Services tab [PENDING] (зависит от E.3)
+### Phase E.4 — Services tab [DONE] (2026-05-28, коммит `27c72f64`)
 
 - **Module contract:** public-api-change
+- **Тесты:** 24 passed (services), 623 passed (все табы; −1 vs 624 — удалён устаревший тест «registry=None», невозможный с обязательным ServiceManager в AppServices)
+- **Sentrux:** 7138 (−1 vs E.3 7139, шум)
+- **Объём:** 4 production-файла (tab.py, presenter.py, _sections.py + новый tests/_helpers.py), 1 test-файл.
+- **Ключевое решение — Protocol вместо bridge:** presenter стал **тонким** — делегирует lifecycle в `services.services` (ServiceManager Protocol: start/stop/restart/get_lifecycle/list_services), оборачивая `DomainError → bool/None`. Кэш экземпляров и мутация `entry.lifecycle` **переехали в адаптер** `ServiceManagerFromRegistry` (он уже дублировал эту логику с Phase C.1.6 — migration note прямо это предписывала). Убрано дублирование логики инстанцирования сервисов presenter↔adapter.
+- **Тесты lifecycle** переписаны на реальный `ServiceManagerFromRegistry` над stub-реестром (через `make_services_services()`) — проверяют настоящий Protocol-путь; `entry.lifecycle` и `services.services._instances` верифицируются вместо `presenter._instances`.
+- **Sections (BaseTreeNavTab):** `build_services_sections(services)` — closures захватывают services, factory'и игнорируют ctx-арг (паттерн Settings `_make_factory`); `_ServiceSection`/`_ServicePathsSection` принимают services; auth через `services.auth._state`.
 
 ### Phase E.5 — Plugins tab [PENDING] (зависит от E.4)
 
@@ -329,11 +337,12 @@ scene-reload с позициями узлов, undo/redo chain.
 **Примечание:** `service_registry()` маппится на `services.services` (ServicesManager Protocol). Presenter мутирует lifecycle (start/stop/restart) — убедиться, что ServicesManager Protocol покрывает эти методы.
 
 **Acceptance criteria (высокий уровень):**
-- [ ] `ServicesTab.__init__(services: AppServices, *, parent=...)` без ctx
-- [ ] 0 `ctx.service_registry()` в production-коде
-- [ ] ServicesManager Protocol покрывает все mutation-методы (start/stop/restart/get_lifecycle) — если нет, расширить Protocol в domain (impl-only change)
-- [ ] Все тесты зелёные
-- [ ] Qt-MCP smoke
+- [x] `ServicesTab.__init__(services: AppServices, *, parent=...)` без ctx
+- [x] 0 `ctx.service_registry()` в production-коде
+- [x] ServiceManager Protocol покрывает все mutation-методы (start/stop/restart/get_lifecycle) — **покрывает**, presenter делегирует напрямую (DomainError→bool). Расширение Protocol не потребовалось.
+- [x] Все тесты зелёные (24 services / 623 tabs), `make_services_services()` builder
+- [x] 0 DeprecationWarning из `_deprecated_extras`
+- [ ] Qt-MCP smoke — **deferred to cumulative после E.6**
 
 **Module contract:** public-api-change
 
