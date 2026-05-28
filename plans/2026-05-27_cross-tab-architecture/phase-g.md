@@ -301,10 +301,13 @@ bindings числится как Phase G долг. Снять неоднозна
 - [x] pipeline 321 + frontend/adapters 423 passed; sentrux 7135 / 9-9; ruff clean
 - [x] Commit `75a6c41f`, `Layer: prototype`
 
-> **Caveat верификации:** unit + wiring-тест (реальный EventBus) проходят. Полный end-to-end в живом
-> multiprocess-GUI (ActionBus→holder.set_topology→publisher→EventBus→scene) НЕ проверен — qt-mcp
-> недостижим до дочернего GUI-процесса (см. память feedback_qt_mcp_smoke_verification). Логика publisher-моста
-> — однострочник в composition root, тот же экземпляр bus у табов; риск низкий, но live-smoke рекомендован перед merge.
+> **Верификация цепочки (closed `1411ee57`):** обвязка вынесена в `frontend/topology_events.py`
+> (`wire_topology_events`) и покрыта интеграционным тестом `frontend/tests/test_topology_events_wiring.py`
+> на РЕАЛЬНЫХ компонентах: `TopologyHolder.set_topology()` → publisher → `QtEventBus` →
+> `PipelinePresenter` scene-model reload (+ bridge cache invalidation). Это детерминированно доказывает
+> полную цепочку (включая ранее непокрытый publisher-мост) без GUI-окна.
+> **Остаётся manual:** только визуальный рендер окна в живом multiprocess-GUI (qt-mcp недостижим до
+> дочернего процесса) — рекомендован перед merge, но логика цепочки уже доказана тестом.
 
 **Out of scope:** TopologyBridge IPC sync (G.1.2); granular events ProcessAdded/WireConnected (G.4); удаление holder (G.3).
 **Edge cases:** пустая топология → load() даёт пустой Topology; `_suppress` во время собственных мутаций presenter'а — publish синхронный, guard срабатывает как раньше.
