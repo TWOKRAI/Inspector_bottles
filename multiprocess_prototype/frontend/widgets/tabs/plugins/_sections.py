@@ -115,12 +115,15 @@ class _PluginSection:
         plugin_name: str,
         title: str,
         open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
+        registers_manager: Any = None,
     ) -> None:
         self._services = services
         self._key = plugin_name
         self._title = title
         self._widget: QWidget | None = None
         self._register_view: RegisterView | None = None
+        # G.2: live RegistersManager (FieldInfo для RegisterView) — runtime-dep (Q-F1=B).
+        self._registers_manager = registers_manager
         # Callback для открытия sandbox (передаётся из PluginsTab)
         self._open_sandbox_cb = open_sandbox_cb
         # Singleton sandbox-виджет для этой секции (создаётся при первом клике)
@@ -204,7 +207,7 @@ class _PluginSection:
     # -------- Internal --------
 
     def _build_widget(self) -> None:
-        presenter = PluginsPresenter(self._services)
+        presenter = PluginsPresenter(self._services, registers_manager=self._registers_manager)
         info = presenter.get_plugin_info(self._key)
 
         if info.get("has_registers"):
@@ -345,9 +348,16 @@ def _make_plugin_factory(
     plugin_name: str,
     title: str,
     open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
+    registers_manager: Any = None,
 ) -> "Callable[[object], _PluginSection]":
     def factory(_ctx_arg: object) -> _PluginSection:
-        return _PluginSection(services, plugin_name, title, open_sandbox_cb=open_sandbox_cb)
+        return _PluginSection(
+            services,
+            plugin_name,
+            title,
+            open_sandbox_cb=open_sandbox_cb,
+            registers_manager=registers_manager,
+        )
 
     return factory
 
@@ -389,6 +399,7 @@ def build_plugin_sections(
     services: AppServices,
     *,
     plugin_manager: Any = None,
+    registers_manager: Any = None,
     open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
 ) -> "list[SectionSpec]":
     """Сформировать декларацию секций PluginsTab.
@@ -406,6 +417,7 @@ def build_plugin_sections(
     Args:
         services: AppServices — DI-контейнер приложения.
         plugin_manager: PluginManager (discovery/hot-reload) — для секции «Пути».
+        registers_manager: live RegistersManager (FieldInfo) — для RegisterView плагин-секций (G.2).
         open_sandbox_cb: callback для открытия sandbox в content-панели.
             Сигнатура: ``(plugin_name: str, sandbox_widget: QWidget) -> None``.
             По умолчанию None — кнопка «Тест» disabled (обратная совместимость).
@@ -449,7 +461,13 @@ def build_plugin_sections(
                 SectionSpec(
                     key=plugin_name,
                     title=plugin_title,
-                    factory=_make_plugin_factory(services, plugin_name, plugin_title, open_sandbox_cb),
+                    factory=_make_plugin_factory(
+                        services,
+                        plugin_name,
+                        plugin_title,
+                        open_sandbox_cb,
+                        registers_manager=registers_manager,
+                    ),
                     parent_key=cat_section_key,
                     lazy=True,
                 )

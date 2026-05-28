@@ -209,6 +209,32 @@ class TestPluginsTab:
         widget = tab._content_stack.widget(idx)
         assert isinstance(widget, PluginInfoCard)
 
+    def test_registers_manager_via_runtime_builds_register_view(self, qtbot: pytest.fixture) -> None:
+        # G.2: registers_manager провёден через RuntimeDeps → _PluginSection строит
+        # RegisterView из framework FieldInfo (а не fallback PluginInfoCard).
+        from unittest.mock import MagicMock
+
+        from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
+        from multiprocess_prototype.frontend.forms import RegisterView
+
+        fi = FieldInfo(
+            plugin_name="color_mask",
+            field_name="threshold",
+            field_type=int,
+            default=128,
+            meta=None,
+            category="test",
+        )
+        rm = MagicMock()
+        rm.get_fields.return_value = [fi]
+
+        tab = PluginsTab.create(_make_services(), make_plugins_runtime(registers_manager=rm))
+        qtbot.addWidget(tab)
+        tab.select_tree_key("color_mask")
+        idx = tab.presenter._page_index["color_mask"]  # type: ignore[attr-defined]
+        widget = tab._content_stack.widget(idx)
+        assert isinstance(widget, RegisterView)
+
     def test_search_filter(self, qtbot: pytest.fixture) -> None:
         tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)

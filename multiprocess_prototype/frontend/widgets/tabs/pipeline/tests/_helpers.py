@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Вспомогательные фабрики для pipeline-тестов (Task E.1 -> F.4).
+"""Вспомогательные фабрики для pipeline-тестов (Task E.1 -> F.4 -> G.2).
 
 Предоставляет make_pipeline_services() — специализированный builder
 поверх make_test_app_services(), добавляющий config с topology
@@ -7,6 +7,8 @@
 
 Task F.4: recipe_manager больше не навешивается как _rm bridge.
 Вместо этого FakeRecipeStore наполняется через raw-хранилище.
+Task G.2: registers_manager — runtime-объект, НЕ на services. Передаётся через
+make_pipeline_runtime()/RuntimeDeps или напрямую в PipelinePresenter/NodeInspectorPanel.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from multiprocess_prototype.domain.tests._fakes import (
     FakeTopologyRepository,
 )
 from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 
 
 _DEFAULT_TOPOLOGY = {
@@ -46,7 +49,6 @@ def make_pipeline_services(
     action_bus: Any = None,
     plugin_registry: Any = None,
     plugin_specs: "dict[str, PluginSpec] | None" = None,
-    registers_manager: Any = None,
     recipe_manager: Any = None,
     display_registry: Any = None,
     config_extra: dict[str, Any] | None = None,
@@ -70,7 +72,6 @@ def make_pipeline_services(
         action_bus: legacy ActionBus mock для undo/redo bridge.
         plugin_registry: raw _PluginRegistry для sandbox bridge (by design).
         plugin_specs: dict[str, PluginSpec] для FakePluginCatalog (wire-валидация).
-        registers_manager: legacy RegistersManager для inspector bridge.
         recipe_manager: legacy RecipeManager (mock или реальный) для recipe-данных.
         display_registry: legacy DisplayRegistry.
         config_extra: дополнительные ключи для ConfigStore.
@@ -100,10 +101,10 @@ def make_pipeline_services(
     if plugin_registry is not None:
         plugins._registry = plugin_registry  # type: ignore[attr-defined]
 
-    # Registers: навесить _rm bridge для inspector cards
+    # Registers: domain RegistersBackend Protocol (value-семантика).
+    # G.2: live RegistersManager (FieldInfo для inspector cards) НЕ здесь —
+    # это runtime-объект, передаётся в PipelinePresenter/NodeInspectorPanel напрямую.
     registers = FakeRegistersBackend()
-    if registers_manager is not None:
-        registers._rm = registers_manager  # type: ignore[attr-defined]
 
     # Recipes: Task F.4 -- строим FakeRecipeStore из recipe_manager данных
     recipes = _build_recipe_store(recipe_manager)
@@ -183,4 +184,12 @@ def _build_recipe_store(recipe_manager: Any) -> FakeRecipeStore:
     return FakeRecipeStore(raw=raw, active=active)
 
 
-__all__ = ["make_pipeline_services"]
+def make_pipeline_runtime(*, registers_manager: Any = None) -> RuntimeDeps:
+    """Создать RuntimeDeps для pipeline tab-тестов (G.2).
+
+    registers_manager — live RegistersManager (FieldInfo) для inspector-карточек.
+    """
+    return RuntimeDeps(registers_manager=registers_manager)
+
+
+__all__ = ["make_pipeline_services", "make_pipeline_runtime"]

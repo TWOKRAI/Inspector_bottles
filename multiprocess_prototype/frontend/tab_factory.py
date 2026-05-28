@@ -309,5 +309,6 @@ class TabFactory:
             topology_bridge=ctx.topology_bridge() if hasattr(ctx, "topology_bridge") else None,
             bindings=ctx.bindings() if hasattr(ctx, "bindings") else None,
             plugin_manager=ctx.plugin_manager() if hasattr(ctx, "plugin_manager") else None,
+            registers_manager=ctx.registers_manager() if hasattr(ctx, "registers_manager") else None,
             auth_ctx=ctx.auth if hasattr(ctx, "auth") else None,
         )

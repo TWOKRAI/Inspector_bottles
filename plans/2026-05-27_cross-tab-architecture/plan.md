@@ -26,7 +26,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 | **D** | `AppServices` DI + QtEventBus + ConfigStore + deprecation shim + Settings PoC | **DONE** (2026-05-27, 7/7 Tasks, коммиты `bfc71c10`, `12f57c44`, `7dfc27fd`, `79639cc3`, `931461a2`, `a876f73e`, `94983ed2` + D.6) | [`phase-d-app-services.md`](phase-d-app-services.md) | C done |
 | **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays) | **DONE** (2026-05-28, E.1–E.6 все DONE; коммиты E.1 `8566f994`+`e7bd3d97`, E.2 `be462f59`, E.3 `5f8c0a4e`, E.4 `27c72f64`, E.5 `62279a85`, E.6 `fc533dcb`) | [`phase-e-per-tab-migration.md`](phase-e-per-tab-migration.md) | D done |
 | **F** | Удаление legacy + закрытие bridge-компромиссов (dead code, Protocol-расширения, ctx removal) | **DONE** (2026-05-28; F.2a/F.2b/F.3–F.10 + F.7-rework + theme-fix; F.1 suppress + ActionBus вынесены в G. Ретро-ревью Opus: DONE без блокеров) | [`phase-f-legacy-removal.md`](phase-f-legacy-removal.md) | E done |
-| **G** | ActionBus→domain commands (#9, undo/redo) + suppress_legacy_notify (F.1) + удаление AppContext/extras + typed events + UX | **IN PROGRESS** (2026-05-28, audit + decomposition G.0–G.6; G.0 DONE `ffeca3ba`, G.1–G.6 NOT DETAILED) | [`phase-g.md`](phase-g.md) | F done |
+| **G** | ActionBus→domain commands (#9, undo/redo) + suppress_legacy_notify (F.1) + удаление AppContext/extras + typed events + UX | **IN PROGRESS** (2026-05-28; G.0 DONE `ffeca3ba`, G.1 DONE `75a6c41f`+`64bd2cd1`, G.2 DONE reviewer-APPROVED; G.3–G.6 NOT DETAILED) | [`phase-g.md`](phase-g.md) | F done |
 
 **Правило:** phase-N+1 не детализируется до approval'а deliverable phase-N. Например, `phase-b-domain.md` пишется ТОЛЬКО после ревью отчёта Phase A.
 

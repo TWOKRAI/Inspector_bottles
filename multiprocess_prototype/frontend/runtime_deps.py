@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from multiprocess_framework.modules.registers_module import RegistersManager
     from multiprocess_prototype.frontend.auth_context import AuthContext
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
@@ -43,6 +44,11 @@ class RuntimeDeps:
         topology_bridge: GUI<->Runtime мост для field_set/state_delta (ProcessesTab).
         bindings: реактивные Qt-bindings к StateStore (ProcessesTab).
         plugin_manager: discovery/hot-reload плагинов (PluginsTab).
+        registers_manager: live-регистры (FieldInfo-схемы + значения) для inspector-карточек
+            Pipeline/Plugins. Runtime-объект (live-инстансы + observers), не editor-state →
+            живёт здесь, а не в AppServices. domain RegistersBackend Protocol покрывает только
+            value-семантику (FieldSpec), но forms-слой строит виджеты из framework FieldInfo,
+            который domain не может экспонировать (запрет импорта framework). G.2 / Q-F1=B.
         auth_ctx: AuthContext (manager+state+audit) для admin-панелей (SettingsTab).
     """
 
@@ -50,4 +56,5 @@ class RuntimeDeps:
     topology_bridge: "TopologyBridge | None" = None
     bindings: "GuiStateBindings | None" = None
     plugin_manager: Any = None
+    registers_manager: "RegistersManager | None" = None
     auth_ctx: "AuthContext | None" = None

@@ -75,6 +75,9 @@ class NodeInspectorPanel(QWidget):
         self._use_cards: bool = False
         # AppServices — задаётся через set_services()
         self._services: AppServices | None = None
+        # G.2: live RegistersManager (FieldInfo-схемы) — runtime-dep через set_services,
+        # т.к. forms-фабрике нужен framework FieldInfo (domain FieldSpec lossy).
+        self._registers_manager: Any = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
         # Combo «Процесс назначения» (для plugin-узлов)
@@ -83,9 +86,19 @@ class NodeInspectorPanel(QWidget):
         self._display_id_combo: QComboBox | None = None
         self._init_ui()
 
-    def set_services(self, services: "AppServices") -> None:
-        """Передать AppServices для доступа к registers, displays, recipes."""
+    def set_services(
+        self,
+        services: "AppServices",
+        *,
+        registers_manager: Any = None,
+    ) -> None:
+        """Передать AppServices + live RegistersManager (G.2, runtime-dep).
+
+        registers_manager используется в _try_build_cards_editors для получения
+        framework FieldInfo (forms-фабрика строит виджеты из FieldInfo, не domain FieldSpec).
+        """
         self._services = services
+        self._registers_manager = registers_manager
 
     def set_context(self, ctx: object) -> None:
         """Legacy bridge для backward compatibility. Deprecated.
@@ -507,10 +520,10 @@ class NodeInspectorPanel(QWidget):
         if self._services is None:
             return False
 
-        # TODO Phase G (G.2): RegistersBackend Protocol имеет другую сигнатуру
-        # (get_field_specs(process_name, plugin_index) вместо get_fields(process_name)).
-        # Используем legacy RegistersManager через adapter bridge.
-        rm = getattr(self._services.registers, "_rm", None)
+        # G.2: live RegistersManager — explicit runtime-dep (через set_services, Q-F1=B).
+        # forms-фабрике нужен framework FieldInfo (get_fields), который domain RegistersBackend
+        # не может экспонировать (FieldSpec lossy + запрет импорта framework в domain).
+        rm = self._registers_manager
         if rm is None:
             return False
 

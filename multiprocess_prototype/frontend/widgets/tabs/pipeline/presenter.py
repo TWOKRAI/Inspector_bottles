@@ -29,6 +29,8 @@ from .telemetry import WireMetricsModel
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
+    from multiprocess_framework.modules.registers_module import RegistersManager
+
     from .graph.graph_scene import GraphScene
     from .inspector.inspector_panel import NodeInspectorPanel
 
@@ -46,8 +48,17 @@ class PipelinePresenter:
     - TopologyBridge — IPC (опционально)
     """
 
-    def __init__(self, services: AppServices) -> None:
+    def __init__(
+        self,
+        services: AppServices,
+        *,
+        registers_manager: "RegistersManager | None" = None,
+    ) -> None:
         self._services = services
+        # G.2: live RegistersManager — runtime-объект (FieldInfo-схемы + значения)
+        # для inspector-карточек. Передаётся через RuntimeDeps (Q-F1=B), НЕ через
+        # services.registers (domain RegistersBackend не может экспонировать framework FieldInfo).
+        self._registers_manager = registers_manager
         self._model = PipelineModel()
         self._scene: GraphScene | None = None
         self._suppress = False
@@ -82,7 +93,7 @@ class PipelinePresenter:
         Передаёт AppServices в panel и подписывается на field_changed,
         target_process_changed, display_id_changed.
         """
-        panel.set_services(self._services)
+        panel.set_services(self._services, registers_manager=self._registers_manager)
         panel.field_changed.connect(self._on_inspector_field_changed)
         panel.target_process_changed.connect(self._on_target_process_changed)
         panel.display_id_changed.connect(self._on_display_id_changed)
@@ -100,11 +111,10 @@ class PipelinePresenter:
         - Иначе: прямой вызов rm.set_value() если rm доступен.
         - Warning если ни ActionBus ни rm недоступны.
         """
-        # TODO Phase G (G.2): заменить legacy RegistersManager API на services.registers Protocol.
-        # RegistersBackend Protocol имеет другую сигнатуру (process_name, plugin_index, field),
-        # но здесь нужен get_register(process_name) для получения old_value.
-        # Используем legacy rm через getattr bridge.
-        rm = getattr(self._services.registers, "_rm", None)
+        # G.2: live RegistersManager — explicit runtime-dep (через RuntimeDeps, Q-F1=B).
+        # Здесь нужен flat get_register(process_name) для old_value + no-bus fallback set_value.
+        # bus.execute(field_set) путь ниже остаётся для G.4 (ActionBus→domain commands).
+        rm = self._registers_manager
         bus = self._action_bus
 
         # Получить старое значение для undo

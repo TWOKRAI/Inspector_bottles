@@ -58,6 +58,8 @@ from .presenter import PluginsPresenter
 if TYPE_CHECKING:
     from typing import Any
 
+    from multiprocess_framework.modules.registers_module import RegistersManager
+
 
 # Размеры колонок: nav шире в 1.5× по сравнению с Recipes/Processes/Services
 # (230 × 1.5 = 345) — дерево с категориями требует больше места.
@@ -86,11 +88,15 @@ class PluginsTab(BaseTreeNavTab):
         services: AppServices,
         *,
         plugin_manager: "Any" = None,
+        registers_manager: "RegistersManager | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         self._services = services
         self._plugin_manager = plugin_manager
-        self._presenter_local = PluginsPresenter(services, plugin_manager=plugin_manager)
+        self._registers_manager = registers_manager
+        self._presenter_local = PluginsPresenter(
+            services, plugin_manager=plugin_manager, registers_manager=registers_manager
+        )
         # Поле поиска создаётся в _build_nav_widget (вызывается из super().__init__).
         self._search: QLineEdit | None = None
         self._tree_nav: QTreeWidget | None = None  # type: ignore[assignment]
@@ -102,7 +108,12 @@ class PluginsTab(BaseTreeNavTab):
         bus = _bus_accessor() if callable(_bus_accessor) else None
         super().__init__(
             title="Плагины",
-            sections=build_plugin_sections(services, plugin_manager=plugin_manager, open_sandbox_cb=self.open_sandbox),
+            sections=build_plugin_sections(
+                services,
+                plugin_manager=plugin_manager,
+                registers_manager=registers_manager,
+                open_sandbox_cb=self.open_sandbox,
+            ),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
@@ -147,9 +158,13 @@ class PluginsTab(BaseTreeNavTab):
         """Фабричный метод для register_all_tabs() / TabFactory.
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
-        plugin_manager -- accepted: runtime layer, не AppServices.
+        plugin_manager + registers_manager -- runtime layer, не AppServices (G.2).
         """
-        return cls(services, plugin_manager=runtime.plugin_manager)
+        return cls(
+            services,
+            plugin_manager=runtime.plugin_manager,
+            registers_manager=runtime.registers_manager,
+        )
 
     # ------------------------------------------------------------------ #
     #  Task 2.6 — обновление каталога после rescan                        #

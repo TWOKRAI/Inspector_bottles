@@ -46,6 +46,8 @@ from .presenter import PipelinePresenter
 if TYPE_CHECKING:
     from PySide6.QtCore import QPointF
 
+    from multiprocess_framework.modules.registers_module import RegistersManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,10 +69,16 @@ class PipelineTab(QWidget):
 
     _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe", "launch_recipe"})
 
-    def __init__(self, services: AppServices, *, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        services: AppServices,
+        *,
+        registers_manager: "RegistersManager | None" = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._services = services
-        self._presenter = PipelinePresenter(services)
+        self._presenter = PipelinePresenter(services, registers_manager=registers_manager)
 
         self._tab_layout = DiffScrollTabLayout(
             title="Pipeline",
@@ -143,9 +151,9 @@ class PipelineTab(QWidget):
         """Фабричный метод для register_all_tabs() / TabFactory.
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
-        PipelineTab не использует runtime-зависимостей.
+        G.2: registers_manager — runtime-объект (live-регистры) для inspector-карточек.
         """
-        return cls(services)
+        return cls(services, registers_manager=runtime.registers_manager)
 
     # ------------------------------------------------------------------ #
     #  Build helpers                                                       #

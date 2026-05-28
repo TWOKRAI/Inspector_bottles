@@ -20,15 +20,19 @@ from ._helpers import make_pipeline_services
 
 
 def _make_services_no_rm():
-    """AppServices без RegistersManager bridge."""
+    """AppServices без registers-зависимостей (FakeRegistersBackend пустой)."""
     return make_pipeline_services()
 
 
-def _make_services_with_rm(fields: list):
-    """AppServices с RegistersManager bridge, возвращающим заданные FieldInfo."""
+def _make_rm(fields: list):
+    """MagicMock RegistersManager, возвращающий заданные FieldInfo.
+
+    G.2: registers_manager — explicit runtime-dep, передаётся в panel.set_services()
+    или PipelinePresenter(registers_manager=...), НЕ через services.
+    """
     rm = MagicMock()
     rm.get_fields.return_value = fields
-    return make_pipeline_services(registers_manager=rm)
+    return rm
 
 
 def _make_field_info(field_name: str, field_type: type = str, default: Any = ""):
@@ -45,11 +49,13 @@ def _make_field_info(field_name: str, field_type: type = str, default: Any = "")
     )
 
 
-def _make_presenter_services(rm=None, bus=None):
-    """AppServices для PipelinePresenter с опциональным rm и bus."""
+def _make_presenter_services(bus=None):
+    """AppServices для PipelinePresenter с опциональным action_bus.
+
+    G.2: registers_manager больше не на services — передаётся в PipelinePresenter напрямую.
+    """
     return make_pipeline_services(
         topology={"processes": [], "wires": []},
-        registers_manager=rm,
         action_bus=bus,
     )
 
@@ -147,11 +153,11 @@ class TestCardsFieldFactoryBranch:
     def test_cards_branch_activated_when_rm_has_fields(self, qtbot):
         """Если rm.get_fields() возвращает список — создаются FieldEditor."""
         fi = _make_field_info("threshold", int, 128)
-        services = _make_services_with_rm([fi])
+        rm = _make_rm([fi])
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
         panel.show_node("camera", "source")
 
         assert panel._use_cards is True
@@ -170,10 +176,10 @@ class TestCardsFieldFactoryBranch:
 
     def test_lineedit_fallback_when_rm_empty_fields(self, qtbot):
         """Fallback на QLineEdit если rm.get_fields() возвращает пустой список."""
-        services = _make_services_with_rm([])
+        rm = _make_rm([])
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
 
         panel.show_node("camera", "source", params={"fps": "30"})
 
@@ -183,11 +189,11 @@ class TestCardsFieldFactoryBranch:
     def test_update_field_cards_suppresses_signal(self, qtbot):
         """update_field через FieldEditor не тригерит field_changed."""
         fi = _make_field_info("threshold", int, 128)
-        services = _make_services_with_rm([fi])
+        rm = _make_rm([fi])
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
         panel.show_node("camera", "source")
 
         signals_received = []
@@ -199,11 +205,11 @@ class TestCardsFieldFactoryBranch:
     def test_update_field_cards_sets_value(self, qtbot):
         """update_field через FieldEditor корректно устанавливает значение."""
         fi = _make_field_info("threshold", int, 128)
-        services = _make_services_with_rm([fi])
+        rm = _make_rm([fi])
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
         panel.show_node("camera", "source")
 
         panel.update_field("threshold", 42)
@@ -213,11 +219,11 @@ class TestCardsFieldFactoryBranch:
     def test_cards_field_changed_signal_emitted(self, qtbot):
         """Изменение значения через FieldEditor эмитит field_changed."""
         fi = _make_field_info("threshold", int, 128)
-        services = _make_services_with_rm([fi])
+        rm = _make_rm([fi])
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
         panel.show_node("my_process", "source")
 
         signals_received = []
@@ -238,11 +244,10 @@ class TestCardsFieldFactoryBranch:
 
         rm = MagicMock()
         rm.get_fields.return_value = [fi_a]
-        services = make_pipeline_services(registers_manager=rm)
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
 
         signals_received = []
         panel.field_changed.connect(lambda *args: signals_received.append(args))
@@ -269,11 +274,11 @@ class TestCardsFieldFactoryBranch:
     def test_suppress_changes_during_show_node(self, qtbot):
         """Во время show_node _suppress_changes=True, поэтому сигналы не эмитятся."""
         fi = _make_field_info("rate", float, 1.0)
-        services = _make_services_with_rm([fi])
+        rm = _make_rm([fi])
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        panel.set_services(services)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
 
         signals_received = []
         panel.field_changed.connect(lambda *args: signals_received.append(args))
@@ -310,8 +315,8 @@ class TestPresenterInspectorIntegration:
 
         bus = MagicMock()
 
-        services = _make_presenter_services(rm=rm, bus=bus)
-        presenter = PipelinePresenter(services)
+        services = _make_presenter_services(bus=bus)
+        presenter = PipelinePresenter(services, registers_manager=rm)
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
@@ -329,8 +334,8 @@ class TestPresenterInspectorIntegration:
         rm.get_fields.return_value = []
         rm.get_register.return_value = None
 
-        services = _make_presenter_services(rm=rm, bus=None)
-        presenter = PipelinePresenter(services)
+        services = _make_presenter_services(bus=None)
+        presenter = PipelinePresenter(services, registers_manager=rm)
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
@@ -344,7 +349,7 @@ class TestPresenterInspectorIntegration:
         """Если ни ActionBus ни rm — логируется warning."""
         import logging
 
-        services = _make_presenter_services(rm=None, bus=None)
+        services = _make_presenter_services(bus=None)
         presenter = PipelinePresenter(services)
 
         panel = NodeInspectorPanel()

@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (G.1.1 `75a6c41f` + G.1.2); G.2–G.6 NOT DETAILED (детализируются по очереди, избегаем premature planning большого G.4).
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (G.1.1 `75a6c41f` + G.1.2), G.2 DONE (премиса исправлена: RuntimeDeps, не Protocol; reviewer APPROVED); G.3–G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -95,7 +95,7 @@ G.1 typed events (ФУНДАМЕНТ) ──┬──> G.3 holder removal ──
 |---|---|---|---|---|
 | **G.0** | Quick-wins: RecipeEngine.deactivate(), удаление dead AdministrationSection, переквалификация 16 TODO, документирование bindings/RuntimeDeps | S (~10 файлов, мелкие) | — | **DONE** (`ffeca3ba`) |
 | **G.1** | Typed events в production: PipelinePresenter + TopologyBridge на EventBus (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | **DONE** (G.1.1 `75a6c41f` + G.1.2) |
-| **G.2** | RegistersBackend Protocol alignment: расширить Protocol, убрать 3 `_rm` getattr | M (4-5) | — | NOT DETAILED |
+| **G.2** | RegistersManager → RuntimeDeps (Q-F1=B): убрать 3 `_rm` getattr. **NB:** не «расширить Protocol» (domain не может FieldInfo) — provide RegistersManager как runtime-dep | M (8 prod + 3 test) | — | **DONE** (reviewer APPROVED) |
 | **G.3** | holder removal: активировать suppress_legacy_notify (F.1) / редуцировать-удалить TopologyHolder | M (3-4) | G.1 | NOT DETAILED |
 | **G.4** | ActionBus→domain commands: 11 call-sites + undo/redo поверх domain + register→domain mapping | **L (15-20)** | G.1, G.2, G.3 | NOT DETAILED (+audit-like подготовка) |
 | **G.5** | AppContext removal: отвязать TabFactory/sections/factory от ctx, удалить AppContext + `_deprecated_extras` | M (5-7) | G.4 | NOT DETAILED |
@@ -322,6 +322,68 @@ bindings числится как Phase G долг. Снять неоднозна
 **Результат:** production `holder.on_changed` теперь = ОДИН подписчик (publisher-мост) → разблокирует **G.3**
 (замена хука на публикацию в преемнике set_topology + удаление holder).
 **Verify:** bridge+frontend+pipeline 805 passed; sentrux 7135 / 9-9; ruff clean. +test_clears_slider_cache_no_arg.
+
+---
+
+## Wave 3 — G.2 (RegistersBackend / RegistersManager alignment)
+
+> Детализировано 2026-05-28 после grep актуальных call-sites + investigator-разбора FieldInfo-зависимости.
+
+### Исправление премисы (важно)
+
+Исходная формулировка («расширить domain `RegistersBackend` Protocol, убрать 3 getattr») **не работает** и была бы костылём. Факты grep:
+
+1. `RegistersManager` (framework) — **плоский** `{name: model_instance}` dict (`core/manager.py:77`). Координатная адресация `(process_name, plugin_index)` в domain Protocol — спекулятивная абстракция Phase C с **0 production-вызовами** (`get_field_specs`/`get_value`/`set_value` встречаются только в адаптере + тестах).
+2. Три реальных call-site используют **flat register_name** + требуют rich framework `FieldInfo`:
+   - `pipeline/inspector/inspector_panel.py:513` — `rm.get_fields(process_name)` → `CardsFieldFactory.create(field_info)` (строит виджеты).
+   - `plugins/presenter.py:48,115` — `rm.get_fields(plugin_name)` → `RegisterView(fields)` (строит виджеты).
+   - `pipeline/presenter.py:107` — `rm.get_register(process_name)` (old_value) + fallback `rm.set_value` (no-bus путь).
+3. Весь `forms/`-слой (~1100 строк: `CardsFieldFactory`, `RegisterView`, `form_builder`, `field_editor`) построен на framework `FieldInfo`. Domain `FieldSpec` (name/dtype/label/metadata) — **lossy** проекция, её недостаточно для построения виджетов.
+4. **Domain-слой по правилам импортов не может импортировать framework `FieldInfo`** (`.sentrux/rules.toml`). ⇒ FieldInfo-доступ к регистрам **в принципе не может** идти через domain `AppServices.registers`.
+
+### Решение (правильная архитектура, без костылей)
+
+`RegistersManager` держит **live-инстансы** регистров с runtime-значениями и observer'ами — это **runtime-объект** (брат `topology_bridge`, который сам его оборачивает, и `command_sender`), а не editor-state. Это ровно разделение **Q-F1=B**: `AppServices` = editor-state (типизированные domain Protocol'ы), `RuntimeDeps` = runtime-layer (IPC-мосты, discovery-менеджеры, live-менеджеры).
+
+⇒ `RegistersManager` проводится как **явная типизированная runtime-зависимость через `RuntimeDeps`** (точно тем же путём, что `plugin_manager`), а 3 `getattr(services.registers, "_rm")` заменяются на explicit `self._registers_manager`. Никакой Protocol-обёртки над `RegistersManager` — это была бы церемония (он уже стабильный framework API, forms-слой и так импортирует `FieldInfo` напрямую; слой `prototype → framework` разрешён).
+
+Domain `RegistersBackend` Protocol + `RegistersBackendFromManager` adapter **остаются нетронутыми** — это контракт **записи значений для domain-команд** (FieldSetHandler → domain command в G.4), вид другого слоя, не дубликат. После G.2 у `services.registers` 0 frontend-потребителей — он зарезервирован под G.4. Его координатная адресация — тоже вопрос G.4 (когда появятся реальные потребители).
+
+**Site #1 (ActionBus-entangled):** в G.2 мигрируется только **read-path** (old_value через `get_register` + no-bus fallback `set_value`) на explicit `registers_manager`. Сам `bus.execute(V2ActionBuilder.field_set...)` путь остаётся для **G.4** (затаскивать ActionBus→commands в G.2 = big-bang, запрещён brief §8).
+
+### Task G.2.1 — registers_manager в RuntimeDeps + проводка в 3 консьюмера
+
+**Level:** Senior (teamlead/director-direct — трогает живые Pipeline/Plugins табы, DI-проводку)
+**Goal:** Убрать 3 `getattr(services.registers, "_rm", None)`, заменив на явный typed `registers_manager` через `RuntimeDeps` (Q-F1=B).
+
+**Files:**
+- `frontend/runtime_deps.py` — добавить поле `registers_manager: "RegistersManager | None" = None` (TYPE_CHECKING import из `multiprocess_framework.modules.registers_module`) + docstring.
+- `frontend/tab_factory.py:_build_runtime_deps()` — `registers_manager=ctx.registers_manager() if hasattr(ctx, "registers_manager") else None`.
+- `pipeline/tab.py` — `create()` → `cls(services, registers_manager=runtime.registers_manager)`; `__init__(services, *, registers_manager=None, ...)` → `PipelinePresenter(services, registers_manager=registers_manager)`.
+- `pipeline/presenter.py` — `__init__(services, *, registers_manager=None)` хранит `self._registers_manager`; `set_inspector` пробрасывает в panel; `_on_inspector_field_changed` использует `self._registers_manager` вместо getattr.
+- `pipeline/inspector/inspector_panel.py` — `set_services(services, *, registers_manager=None)` хранит `self._registers_manager`; `_try_build_cards_editors` использует его вместо getattr.
+- `plugins/tab.py` — `create()` → `cls(..., registers_manager=runtime.registers_manager)`; `__init__` → `PluginsPresenter(..., registers_manager=...)` + `build_plugin_sections(..., registers_manager=...)`.
+- `plugins/presenter.py` — `__init__(services, *, plugin_manager=None, registers_manager=None)` хранит `self._registers_manager` (вместо getattr).
+- `plugins/_sections.py` — `build_plugin_sections(..., registers_manager=None)` → `_make_plugin_factory(..., registers_manager=...)` → `_PluginSection(..., registers_manager=...)` → `PluginsPresenter(services, registers_manager=...)` в `_build_widget`.
+
+**Тесты:**
+- `pipeline/tests/_helpers.py` (104-106), `plugins/tests/_helpers.py` (46-48) — убрать `registers._rm = registers_manager` bridge-хак, провести `registers_manager` через конструктор таба/презентера/RuntimeDeps.
+- `pipeline/tests/test_inspector.py` — `_make_services_with_rm`/`_make_services_no_rm` → инъекция через panel.set_services(registers_manager=...).
+
+**Acceptance criteria:** — ✅ DONE (2026-05-28, reviewer APPROVED)
+- [x] `grep 'getattr(.*services.registers.*_rm'` → 0 (production)
+- [x] `grep 'registers\._rm ='` (вне адаптера) → 0
+- [x] `registers_manager` типизирован в RuntimeDeps как `RegistersManager | None` (не `Any`)
+- [x] domain `RegistersBackend` Protocol + adapter не изменены
+- [x] site #1 `bus.execute` путь не тронут (остаётся G.4); мигрирован только read-path
+- [x] pytest pipeline+plugins+adapters **532 passed/2 skipped**, frontend **283 passed**; ruff clean; sentrux check_rules **9/9**, quality 7133
+- [x] +позитивный тест `test_registers_manager_via_runtime_builds_register_view` (полная цепочка RuntimeDeps→RegisterView)
+- [x] Commit с `Refs: phase-g.md`, `Layer: prototype`
+
+**Verify-замечание (reviewer, non-blocking):** leaf-консьюмеры (`_sections.py`, `inspector_panel.py`, plugins `presenter.py`) аннотируют `registers_manager` как `Any` — консистентно с существующим `plugin_manager: Any`. Унификация типизации → G.4/G.5.
+
+**Out of scope:** ActionBus→domain commands (G.4); удаление/переделка domain RegistersBackend coordinate-адресации (G.4); form_context (G.4); удаление services.registers (G.4 решит).
+**Edge cases:** `registers_manager=None` (табы без регистров / тесты) → методы возвращают [] / no-op как сейчас; кэш `_PATHS_SECTION_CACHE` по id(services) — registers_manager в _PathsSection не нужен (только пути).
 
 ---
 
