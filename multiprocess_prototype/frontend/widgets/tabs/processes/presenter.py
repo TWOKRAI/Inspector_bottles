@@ -1,13 +1,23 @@
 """ProcessesPresenter — бизнес-логика таба процессов.
 
+Task E.2: мигрирован на AppServices DI. Принимает services: AppServices.
+topology читается через services.topology.load() (TopologyRepository Protocol),
+category — через services.plugins.resolve() (PluginCatalog Protocol).
+
+command_sender и topology_bridge — runtime IPC, не покрыты AppServices Protocol'ами
+(live runtime — Phase G aggregate). Передаются отдельными параметрами как bridge.
+
 Pure Python (без Qt импортов кроме TYPE_CHECKING).
 """
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
+from multiprocess_prototype.domain.app_services import AppServices
+
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
+    from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
 
 from .data import ProcessInfo
 
@@ -15,7 +25,9 @@ from .data import ProcessInfo
 class ProcessesPresenter:
     """Presenter для ProcessesTab.
 
-    Работает через AppContext: читает topology, шлёт команды, подписывается на state.
+    Читает topology через services.topology (read-only consumer),
+    шлёт команды управления через topology_bridge (предпочтительно) или
+    command_sender (fallback) — оба runtime-зависимости вне scope AppServices.
     """
 
     # Маппинг категорий → русские названия
@@ -29,78 +41,52 @@ class ProcessesPresenter:
         "service": "Сервисы",
     }
 
-    def __init__(self, ctx: "AppContext") -> None:
-        self._ctx = ctx
+    def __init__(
+        self,
+        services: AppServices,
+        *,
+        command_sender: "CommandSender | None" = None,
+        topology_bridge: "TopologyBridge | None" = None,
+    ) -> None:
+        self._services = services
+        # TODO Phase G: command_sender / topology_bridge — live-runtime IPC,
+        # вынести в отдельный runtime-aggregate (см. Out of scope Phase E).
+        self._command_sender = command_sender
+        self._topology_bridge = topology_bridge
 
     def get_processes(self) -> list[ProcessInfo]:
         """Получить список процессов из topology.
 
-        Читает blueprint через TopologyPresenter или напрямую из config.
-        Определяет category по первому плагину каждого процесса.
+        Читает domain.Topology через services.topology.load() (read-only).
+        Определяет category по первому плагину через services.plugins.resolve().
         """
+        topology = self._services.topology.load()
+        catalog = self._services.plugins
         processes: list[ProcessInfo] = []
 
-        # Получить topology данные из AppContext
-        # AppContext может содержать topology в config или extras
-        topology_data = self._ctx.config.get("topology", {})
-        raw_processes = topology_data.get("processes", [])
+        for proc in topology.processes:
+            plugin_names: list[str] = []
+            category = "utility"
 
-        # Если topology не в config, пробуем extras
-        if not raw_processes:
-            topo = self._ctx.extras.get("topology", {})
-            raw_processes = topo.get("processes", []) if isinstance(topo, dict) else []
+            for plugin in proc.plugins:
+                pname = plugin.plugin_name
+                if not pname:
+                    continue
+                plugin_names.append(pname)
+                # Категория процесса — по первому плагину, который реестр знает.
+                if category == "utility":
+                    spec = catalog.resolve(pname)
+                    if spec is not None and spec.category:
+                        category = spec.category
 
-        registry = self._ctx.plugin_registry()
-
-        for proc_dict in raw_processes:
-            if isinstance(proc_dict, dict):
-                name = proc_dict.get("process_name", "unnamed")
-                plugins_list = proc_dict.get("plugins", [])
-                plugin_names: list[str] = []
-                category = "utility"
-
-                for p in plugins_list:
-                    pname = p.get("plugin_name", "") if isinstance(p, dict) else ""
-                    if pname:
-                        plugin_names.append(pname)
-                        # Определяем category по первому плагину
-                        if category == "utility" and registry:
-                            entry = registry.get(pname)
-                            if entry and hasattr(entry, "category"):
-                                category = entry.category
-
-                processes.append(
-                    ProcessInfo(
-                        name=name,
-                        category=category,
-                        plugins=plugin_names,
-                        protected=proc_dict.get("protected", False),
-                    )
+            processes.append(
+                ProcessInfo(
+                    name=proc.process_name,
+                    category=category,
+                    plugins=plugin_names,
+                    protected=proc.protected,
                 )
-            else:
-                # Если proc_dict — это Pydantic модель (ProcessConfig)
-                name = getattr(proc_dict, "process_name", "unnamed")
-                plugins = getattr(proc_dict, "plugins", [])
-                plugin_names = []
-                category = "utility"
-
-                for p in plugins:
-                    pname = p.get("plugin_name", "") if isinstance(p, dict) else getattr(p, "plugin_name", "")
-                    if pname:
-                        plugin_names.append(pname)
-                        if category == "utility" and registry:
-                            entry = registry.get(pname)
-                            if entry and hasattr(entry, "category"):
-                                category = entry.category
-
-                processes.append(
-                    ProcessInfo(
-                        name=name,
-                        category=category,
-                        plugins=plugin_names,
-                        protected=getattr(proc_dict, "protected", False),
-                    )
-                )
+            )
 
         return processes
 
@@ -110,10 +96,10 @@ class ProcessesPresenter:
         Phase 12: если TopologyBridge доступен — использует его
         (валидация + маршрутизация). Иначе — прямой CommandSender.
         """
-        bridge = self._ctx.extras.get("topology_bridge")
+        bridge = self._topology_bridge
 
         if bridge is not None:
-            bridge_methods = {
+            bridge_methods: dict[str, Any] = {
                 "start": bridge.start_process,
                 "stop": bridge.stop_process,
                 "restart": bridge.restart_process,
@@ -124,13 +110,15 @@ class ProcessesPresenter:
                 return
 
         # Fallback: прямой CommandSender (обратная совместимость)
+        if self._command_sender is None:
+            return
         cmd_map = {
             "start": "process.start",
             "stop": "process.stop",
             "restart": "process.restart",
         }
         command = cmd_map.get(action_id, action_id)
-        self._ctx.command_sender.send_command(process_name, command, {})
+        self._command_sender.send_command(process_name, command, {})
 
     def get_health_summary(self) -> dict[str, Any]:
         """Сводка здоровья системы.

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
+from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QIcon
 
     from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
+    from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
+    from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
 
 
 def _layout_factory() -> DiffScrollTabLayout:
@@ -43,14 +47,32 @@ def _layout_factory() -> DiffScrollTabLayout:
 class ProcessesTab(BaseListNavTab):
     """Таб управления процессами на шаблоне ``DiffScrollTabLayout`` (как Settings/Recipes).
 
+    Task E.2: мигрирован на AppServices DI. Принимает ``services: AppServices``.
+    command_sender / topology_bridge / bindings — live-runtime зависимости вне
+    scope AppServices (Phase G aggregate) — передаются отдельными параметрами.
+
     Каждый процесс (и сводный ключ ``ALL_PROCESSES_KEY``) получает свой
     композитный content-виджет с внутренним Cards/Table стеком. Toggle в
     первой колонке переключает режим во всех созданных панелях разом —
     режим сохраняется при смене выбора в nav.
     """
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        self._presenter = ProcessesPresenter(ctx)
+    def __init__(
+        self,
+        services: AppServices,
+        *,
+        command_sender: "CommandSender | None" = None,
+        topology_bridge: "TopologyBridge | None" = None,
+        bindings: "GuiStateBindings | None" = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        self._services = services
+        self._bindings = bindings
+        self._presenter = ProcessesPresenter(
+            services,
+            command_sender=command_sender,
+            topology_bridge=topology_bridge,
+        )
         self._all_panel: AllProcessesPanel | None = None
         self._single_panels: dict[str, SingleProcessPanel] = {}
         self._selected_process: str | None = None  # None при ALL_PROCESSES_KEY
@@ -62,7 +84,7 @@ class ProcessesTab(BaseListNavTab):
 
         super().__init__(
             title="Процессы",
-            ctx=ctx,
+            ctx=None,  # type: ignore[arg-type]  # BaseListNavTab legacy параметр (Phase F удалит)
             layout_factory=_layout_factory,
             parent=parent,
         )
@@ -82,8 +104,23 @@ class ProcessesTab(BaseListNavTab):
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "ProcessesTab":
-        """Фабричный метод для TabFactory."""
-        return cls(ctx)
+        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+
+        Runtime-зависимости (command_sender, topology_bridge, bindings) не покрыты
+        AppServices Protocol'ами — извлекаются из ctx как live-runtime bridge.
+        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
+        """
+        assert ctx.app_services is not None, (
+            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
+        )
+        # TODO Phase F: topology_bridge — runtime IPC, не покрыт AppServices Protocol
+        # (live-runtime aggregate Phase G). Доступ через accessor — deprecated.
+        return cls(
+            ctx.app_services,
+            command_sender=ctx.command_sender,
+            topology_bridge=ctx.topology_bridge(),
+            bindings=ctx.bindings(),
+        )
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #
@@ -91,14 +128,14 @@ class ProcessesTab(BaseListNavTab):
 
     def _create_item_widget(self, key: str) -> QWidget:
         if key == ALL_PROCESSES_KEY:
-            panel = AllProcessesPanel(self._presenter, self._ctx)
+            panel = AllProcessesPanel(self._presenter, self._bindings)
             panel.card_action_requested.connect(self._on_card_action)
             self._all_panel = panel
             return panel
-        panel = SingleProcessPanel(self._presenter, self._ctx, key)
-        panel.card_action_requested.connect(self._on_card_action)
-        self._single_panels[key] = panel
-        return panel
+        single_panel = SingleProcessPanel(self._presenter, self._bindings, key)
+        single_panel.card_action_requested.connect(self._on_card_action)
+        self._single_panels[key] = single_panel
+        return single_panel
 
     def _make_nav_item(
         self,
@@ -173,8 +210,10 @@ class ProcessesTab(BaseListNavTab):
             install_permission_aware_enable,
         )
 
-        _auth = getattr(self._ctx, "auth", None)
-        auth_state = getattr(_auth, "state", None) if _auth is not None else None
+        # AuthFacade Protocol покрывает has_permission(), но install_permission_aware_enable
+        # нуждается в AuthState (access_context_changed signal). Bridge через adapter.
+        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating.
+        auth_state = getattr(self._services.auth, "_state", None)
         for btn in (self._btn_create, self._btn_delete, self._btn_start, self._btn_stop):
             install_permission_aware_enable(btn, "tabs.processes.edit", auth_state)
 

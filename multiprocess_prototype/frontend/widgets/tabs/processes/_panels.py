@@ -10,6 +10,10 @@ Cards (детальная EntityCard) и Table (key-value метрики).
 
 Обе панели сами подписываются на свои bindings (StateStore) в __init__.
 Каждая знает, как переключаться между Cards/Table через ``set_view_mode``.
+
+Task E.2: панели принимают ``bindings`` (GuiStateBindings) напрямую вместо
+``ctx``. bindings — live runtime state, не покрыт AppServices Protocol'ами
+(Q4 Phase D, ревизия Phase G).
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ from multiprocess_prototype.frontend.widgets.primitives import (
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
 
     from .presenter import ProcessesPresenter
 
@@ -66,12 +70,12 @@ class AllProcessesPanel(QWidget):
     def __init__(
         self,
         presenter: "ProcessesPresenter",
-        ctx: "AppContext",
+        bindings: "GuiStateBindings | None",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
-        self._ctx = ctx
+        self._bindings = bindings
         self._cards: dict[str, EntityCard] = {}
 
         outer = QVBoxLayout(self)
@@ -205,7 +209,7 @@ class AllProcessesPanel(QWidget):
 
     def _connect_bindings(self) -> None:
         """Подписаться на StateStore для карточек и health-меток."""
-        bindings = self._ctx.bindings()
+        bindings = self._bindings
         if bindings is None:
             return
 
@@ -268,13 +272,13 @@ class SingleProcessPanel(QWidget):
     def __init__(
         self,
         presenter: "ProcessesPresenter",
-        ctx: "AppContext",
+        bindings: "GuiStateBindings | None",
         process_name: str,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
-        self._ctx = ctx
+        self._bindings = bindings
         self._process_name = process_name
 
         outer = QVBoxLayout(self)
@@ -355,7 +359,7 @@ class SingleProcessPanel(QWidget):
             self._detail_table.setItem(row, 1, QTableWidgetItem(value))
 
     def _connect_bindings(self) -> None:
-        bindings = self._ctx.bindings()
+        bindings = self._bindings
         if bindings is None or not hasattr(self, "_card"):
             return
 
