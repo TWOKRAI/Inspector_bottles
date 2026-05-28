@@ -12,23 +12,73 @@ CommandDispatcher оборачивает её вместе с EventBus в Phase 
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from ..commands import ProjectCommand
 from ..events import ProjectEvent
 
 
-class CommandDispatcher(Protocol):
-    """Контракт для диспетчеризации команд в domain.
+@dataclass(frozen=True, slots=True)
+class HistoryEntry:
+    """Запись истории команд (G.4.1) — для отображения и навигации undo/redo.
 
-    Реализации: CommandDispatcherFromActionBus (Phase C), _FakeCommandDispatcher (тесты).
+    Хранит только проекцию метаданных команды, без снимков Project
+    (снимки — внутренняя деталь реализации undo-стека). Domain-чистый dataclass
+    без framework-импортов.
+
+    Поля:
+      label        — человекочитаемое описание ("AddProcess: camera").
+      command_type — дискриминатор команды (type(command).__name__).
+      timestamp    — unix time момента записи в историю.
+    """
+
+    label: str
+    command_type: str
+    timestamp: float
+
+
+class CommandDispatcher(Protocol):
+    """Контракт для диспетчеризации команд в domain + история undo/redo (G.4.1).
+
+    Реализации: CommandDispatcherOrchestrator (Phase C + G.4.1 undo/redo),
+    FakeCommandDispatcher (тесты).
+
+    G.4.1: undo/redo — snapshot-based поверх ProjectHolder. Восстановление снимка
+    проходит через topology_repo.save → store публикует TopologyReplaced
+    (store-publishes, G.3) → подписчики (презентеры) делают full reload.
     """
 
     def dispatch(self, command: ProjectCommand) -> list[ProjectEvent]:
         """Выполнить команду. Возвращает список эмитированных событий."""
         ...
 
+    def undo(self) -> bool:
+        """Отменить последнюю команду. True — что-то отменено, False — стек пуст."""
+        ...
+
+    def redo(self) -> bool:
+        """Повторить последнюю отменённую команду. True — выполнено, False — стек пуст."""
+        ...
+
+    def can_undo(self) -> bool:
+        """Есть ли команда для отмены."""
+        ...
+
+    def can_redo(self) -> bool:
+        """Есть ли команда для повтора."""
+        ...
+
+    def history(self, n: int = 20) -> list[HistoryEntry]:
+        """Последние n записей истории (от старых к новым)."""
+        ...
+
+    def clear_history(self) -> None:
+        """Полностью очистить undo/redo историю."""
+        ...
+
 
 __all__ = [
     "CommandDispatcher",
+    "HistoryEntry",
 ]

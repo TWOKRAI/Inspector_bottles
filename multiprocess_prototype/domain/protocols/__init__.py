@@ -30,7 +30,7 @@ Sidecar-dataclasses (frozen, slots):
 from __future__ import annotations
 
 from .auth_facade import AuthFacade
-from .command_dispatcher import CommandDispatcher
+from .command_dispatcher import CommandDispatcher, HistoryEntry
 from .config_store import ConfigStore
 from .display_catalog import DisplayCatalog, DisplaySpec
 from .event_bus import EventBusProtocol, Subscription
@@ -55,6 +55,7 @@ __all__ = [
     "AuthFacade",
     "ConfigStore",
     # Sidecar-dataclasses
+    "HistoryEntry",
     "PluginSpec",
     "PortSpec",
     "ServiceSpec",

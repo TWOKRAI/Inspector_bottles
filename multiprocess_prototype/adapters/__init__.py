@@ -25,7 +25,7 @@ from .catalogs import (
     PluginCatalogFromRegistry,
     ServiceManagerFromRegistry,
 )
-from .dispatch import CommandDispatcherOrchestrator, ProjectHolder
+from .dispatch import CommandDispatcherOrchestrator, ProjectHistory, ProjectHolder
 from .stores import (
     ConfigStoreFromManager,
     RecipeStoreFromManager,
@@ -44,4 +44,5 @@ __all__ = [
     "ConfigStoreFromManager",
     "CommandDispatcherOrchestrator",
     "ProjectHolder",
+    "ProjectHistory",
 ]

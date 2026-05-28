@@ -85,6 +85,27 @@ class _FakeDispatcherWithBus:
     def dispatch(self, command):
         return []
 
+    # G.4.1: CommandDispatcher Protocol расширен undo/redo/history.
+    # HistoryPresenter пока читает legacy ActionBus через action_bus() (миграция — G.4.4),
+    # поэтому здесь — no-op заглушки для соответствия Protocol.
+    def undo(self) -> bool:
+        return False
+
+    def redo(self) -> bool:
+        return False
+
+    def can_undo(self) -> bool:
+        return False
+
+    def can_redo(self) -> bool:
+        return False
+
+    def history(self, n: int = 20):
+        return []
+
+    def clear_history(self) -> None:
+        pass
+
 
 def _make_view() -> MagicMock:
     """Фабрика mock HistoryView."""

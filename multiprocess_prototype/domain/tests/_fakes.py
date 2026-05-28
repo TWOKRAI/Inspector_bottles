@@ -37,6 +37,7 @@ from ..protocols import (
     DisplaySpec,
     EventBusProtocol,
     FieldSpec,
+    HistoryEntry,
     PluginCatalog,
     PluginSpec,
     RecipeStore,
@@ -370,7 +371,12 @@ del _tr
 
 
 class FakeCommandDispatcher:
-    """In-memory CommandDispatcher. Хранит последнюю команду, возвращает []."""
+    """In-memory CommandDispatcher. Хранит последнюю команду, возвращает [].
+
+    G.4.1: undo/redo/history — no-op заглушки (fake не применяет команды и не
+    держит снимков Project). Тесты, которым нужна реальная undo/redo-семантика,
+    используют CommandDispatcherOrchestrator + ProjectHistory.
+    """
 
     def __init__(self) -> None:
         self.last_command: ProjectCommand | None = None
@@ -380,6 +386,24 @@ class FakeCommandDispatcher:
         self.last_command = command
         self.dispatched.append(command)
         return []
+
+    def undo(self) -> bool:
+        return False
+
+    def redo(self) -> bool:
+        return False
+
+    def can_undo(self) -> bool:
+        return False
+
+    def can_redo(self) -> bool:
+        return False
+
+    def history(self, n: int = 20) -> list[HistoryEntry]:
+        return []
+
+    def clear_history(self) -> None:
+        pass
 
 
 _cd: CommandDispatcher = FakeCommandDispatcher()

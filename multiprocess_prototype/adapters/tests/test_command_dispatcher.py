@@ -434,3 +434,141 @@ def test_dispatch_sequential_accumulates_state(
     assert final.topology.find_process("alpha") is not None
     assert final.topology.find_process("beta") is not None
     assert len(final.topology.processes) == 2
+
+
+# ===========================================================================
+# G.4.1 — undo / redo поверх domain (snapshot-based)
+# ===========================================================================
+
+
+def _orchestrator_with_store(initial: Project | None = None):
+    """Orchestrator на РЕАЛЬНОМ TopologyRepositoryStore+EventBus.
+
+    Возвращает (dispatcher, holder, store, bus, collected_topology_replaced).
+    Store публикует TopologyReplaced на тот же bus → проверяем undo-публикацию.
+    """
+    from multiprocess_prototype.adapters.stores.topology_repository import (
+        TopologyRepositoryStore,
+    )
+    from multiprocess_prototype.domain.events import TopologyReplaced
+
+    project = initial if initial is not None else _make_project()
+    holder = ProjectHolder(initial=project)
+    bus = EventBus()
+    replaced: list[ProjectEvent] = []
+    bus.subscribe(TopologyReplaced, lambda ev: replaced.append(ev))
+
+    store = TopologyRepositoryStore(project.topology.to_dict(), events=bus)
+    dispatcher = CommandDispatcherOrchestrator(
+        project_holder=holder,
+        topology_repo=store,
+        event_bus=bus,
+        apply_context_factory=_default_ctx_factory,
+    )
+    return dispatcher, holder, store, bus, replaced
+
+
+def test_undo_restores_previous_project_and_publishes_topology_replaced() -> None:
+    """dispatch(AddProcess) -> undo восстанавливает пустой Project + публикует TopologyReplaced."""
+    dispatcher, holder, store, _bus, replaced = _orchestrator_with_store()
+
+    assert dispatcher.can_undo() is False
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    assert dispatcher.can_undo() is True
+    assert holder.get().topology.find_process("cam") is not None
+    replaced.clear()  # сбрасываем публикацию от dispatch
+
+    ok = dispatcher.undo()
+    assert ok is True
+    # Project откатан
+    assert holder.get().topology.find_process("cam") is None
+    # store откатан
+    assert [p.get("process_name") for p in store.topology.get("processes", [])] == []
+    # undo опубликовал TopologyReplaced (store-publishes)
+    assert len(replaced) == 1
+    # флаги
+    assert dispatcher.can_undo() is False
+    assert dispatcher.can_redo() is True
+
+
+def test_redo_reapplies_command() -> None:
+    """undo -> redo восстанавливает процесс."""
+    dispatcher, holder, _store, _bus, _replaced = _orchestrator_with_store()
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    dispatcher.undo()
+    assert holder.get().topology.find_process("cam") is None
+
+    ok = dispatcher.redo()
+    assert ok is True
+    assert holder.get().topology.find_process("cam") is not None
+    assert dispatcher.can_redo() is False
+    assert dispatcher.can_undo() is True
+
+
+def test_undo_redo_empty_returns_false() -> None:
+    """undo/redo на пустой истории -> False, без побочных эффектов."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    assert dispatcher.undo() is False
+    assert dispatcher.redo() is False
+    assert dispatcher.can_undo() is False
+    assert dispatcher.can_redo() is False
+
+
+def test_domain_error_does_not_record_history() -> None:
+    """AddProcess дубликат -> DomainError, история не пополняется."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    assert dispatcher.can_undo() is True
+    history_len_before = len(dispatcher.history(50))
+
+    with pytest.raises(DomainError):
+        dispatcher.dispatch(AddProcess(process_name="cam"))
+
+    # История не изменилась (rollback-семантика)
+    assert len(dispatcher.history(50)) == history_len_before
+
+
+def test_dispatch_coalesce_key_merges_undo_steps() -> None:
+    """Два dispatch с одинаковым coalesce_key -> одна undo-запись (откат всей серии)."""
+    initial = _make_project(
+        topology=Topology.from_dict(
+            {"processes": [{"process_name": "cam", "plugins": []}], "wires": [], "displays": []}
+        )
+    )
+    dispatcher, holder, _store, _bus, _replaced = _orchestrator_with_store(initial)
+
+    from multiprocess_prototype.domain.commands import AssignTargetProcess
+
+    dispatcher.dispatch(AssignTargetProcess(process_name="cam", target="a"), coalesce_key="tgt:cam")
+    dispatcher.dispatch(AssignTargetProcess(process_name="cam", target="b"), coalesce_key="tgt:cam")
+
+    # Слились в одну запись
+    assert len(dispatcher.history(50)) == 1
+    proc = holder.get().topology.find_process("cam")
+    assert proc is not None and proc.target_process == "b"
+
+    # Один undo откатывает всю серию к исходному (target=None)
+    dispatcher.undo()
+    proc_after = holder.get().topology.find_process("cam")
+    assert proc_after is not None and proc_after.target_process is None
+    assert dispatcher.can_undo() is False
+
+
+def test_dispatch_undoable_false_skips_history() -> None:
+    """dispatch(undoable=False) не пишет в историю."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    dispatcher.dispatch(AddProcess(process_name="cam"), undoable=False)
+    assert dispatcher.can_undo() is False
+
+
+def test_history_returns_entries_with_labels() -> None:
+    """history() возвращает HistoryEntry с label/command_type."""
+    from multiprocess_prototype.domain.protocols import HistoryEntry
+
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    entries = dispatcher.history(50)
+    assert len(entries) == 1
+    assert isinstance(entries[0], HistoryEntry)
+    assert entries[0].command_type == "AddProcess"
+    assert "cam" in entries[0].label

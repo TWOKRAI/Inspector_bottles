@@ -230,15 +230,36 @@ def test_topology_repository_protocol() -> None:
 
 
 def test_command_dispatcher_protocol() -> None:
-    """In-memory реализация CommandDispatcher удовлетворяет Protocol."""
+    """In-memory реализация CommandDispatcher удовлетворяет Protocol (включая undo/redo G.4.1)."""
+    from multiprocess_prototype.domain.protocols import HistoryEntry
 
     class _FakeDispatcher:
         def dispatch(self, command: ProjectCommand) -> list[ProjectEvent]:
             return []
 
+        def undo(self) -> bool:
+            return False
+
+        def redo(self) -> bool:
+            return False
+
+        def can_undo(self) -> bool:
+            return False
+
+        def can_redo(self) -> bool:
+            return False
+
+        def history(self, n: int = 20) -> list[HistoryEntry]:
+            return []
+
+        def clear_history(self) -> None:
+            pass
+
     dispatcher: CommandDispatcher = _FakeDispatcher()  # assignment-проверка
     result = dispatcher.dispatch(AddProcess(process_name="proc"))
     assert result == []
+    assert dispatcher.can_undo() is False
+    assert dispatcher.undo() is False
 
 
 # ==============================================================================
