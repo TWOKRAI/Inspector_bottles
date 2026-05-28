@@ -8,6 +8,7 @@ Protocol — оставлены как bridge через adapter с TODO Phase F
 from __future__ import annotations
 
 import logging
+from collections import namedtuple
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 
 from ..graph.constants import CATEGORY_COLORS
+
+# Thin wrapper для backward compatibility: combo _populate_display_id_combo
+# ожидает .id и .name, а DisplaySpec имеет display_id/display_name.
+_DisplayEntry = namedtuple("_DisplayEntry", ["id", "name"])
 
 logger = logging.getLogger(__name__)
 
@@ -459,8 +464,7 @@ class NodeInspectorPanel(QWidget):
             # Создаём thin wrapper для backward compatibility с combo код.
             result = []
             for spec in specs:
-                wrapper = type("_DisplayEntry", (), {"id": spec.display_id, "name": spec.display_name})()
-                result.append(wrapper)
+                result.append(_DisplayEntry(id=spec.display_id, name=spec.display_name))
             return result
         except Exception:
             logger.debug("Не удалось получить список дисплеев из реестра", exc_info=True)

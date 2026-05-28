@@ -21,12 +21,14 @@ from typing import Any, Protocol
 class PortSpec:
     """Описание одного порта плагина (входного или выходного).
 
-    optional — порт может быть не подключён (соответствует Port.optional).
-    shape    — шаблон размерности, например "(H, W, 3)" (соответствует Port.shape).
+    direction — направление порта: "input" или "output".
+    optional  — порт может быть не подключён (соответствует Port.optional).
+    shape     — шаблон размерности, например "(H, W, 3)" (соответствует Port.shape).
     """
 
     name: str
     dtype: str
+    direction: str = "input"
     optional: bool = False
     shape: str = ""
 

@@ -309,6 +309,29 @@ class TestPluginCatalogFromRegistry:
         assert "frame" in port_names
         assert "out" in port_names
 
+    def test_plugin_catalog_ports_direction(self):
+        """inputs получают direction='input', outputs — direction='output'."""
+        entry = _FakePluginEntry(
+            "split",
+            category="processing",
+            inputs=[_FakePort("frame", "image/bgr")],
+            outputs=[_FakePort("mask", "image/gray"), _FakePort("preview", "image/bgr")],
+        )
+        catalog = self._make_adapter([entry])
+        spec = catalog.resolve("split")
+
+        assert spec is not None
+        assert len(spec.ports) == 3
+
+        input_port = next(p for p in spec.ports if p.name == "frame")
+        assert input_port.direction == "input"
+
+        mask_port = next(p for p in spec.ports if p.name == "mask")
+        assert mask_port.direction == "output"
+
+        preview_port = next(p for p in spec.ports if p.name == "preview")
+        assert preview_port.direction == "output"
+
     def test_plugin_catalog_satisfies_protocol(self):
         """Adapter удовлетворяет PluginCatalog Protocol (assignment-проверка)."""
         catalog = self._make_adapter([])

@@ -45,19 +45,20 @@ def _entry_to_spec(entry: PluginEntry) -> PluginSpec:
         Frozen PluginSpec для domain-слоя.
     """
 
-    def _port_to_spec(port: object) -> PortSpec:
+    def _port_to_spec(port: object, direction: str) -> PortSpec:
         """Конвертировать Port в PortSpec с lossless маппингом."""
         return PortSpec(
             name=port.name,  # type: ignore[attr-defined]
             dtype=port.dtype,  # type: ignore[attr-defined]
+            direction=direction,
             optional=getattr(port, "optional", False),
             shape=getattr(port, "shape", ""),
         )
 
-    # Входные порты
-    input_ports = tuple(_port_to_spec(port) for port in entry.inputs)
-    # Выходные порты — добавляем к входным в общий tuple
-    output_ports = tuple(_port_to_spec(port) for port in entry.outputs)
+    # Входные порты (direction="input")
+    input_ports = tuple(_port_to_spec(port, "input") for port in entry.inputs)
+    # Выходные порты (direction="output")
+    output_ports = tuple(_port_to_spec(port, "output") for port in entry.outputs)
     ports = input_ports + output_ports
 
     # config_schema — Phase E детализирует структуру; сейчас храним имена классов

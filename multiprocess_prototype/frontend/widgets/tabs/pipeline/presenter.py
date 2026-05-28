@@ -331,14 +331,14 @@ class PipelinePresenter:
         spec = self._services.plugins.resolve(plugin_name)
         if spec is not None:
             category = spec.category
-            # PluginSpec хранит ports как tuple[PortSpec, ...] (inputs+outputs вместе)
+            # PluginSpec хранит ports как tuple[PortSpec, ...] c direction
             try:
                 schemas: list[PortSchema] = []
                 for port_spec in spec.ports:
                     schemas.append(
                         PortSchema(
                             name=port_spec.name,
-                            direction="input",  # PortSpec не различает direction; fallback
+                            direction=port_spec.direction,
                             dtype=port_spec.dtype,
                             optional=port_spec.optional,
                         )

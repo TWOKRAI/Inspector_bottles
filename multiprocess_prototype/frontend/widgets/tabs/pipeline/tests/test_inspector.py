@@ -381,18 +381,6 @@ def _make_display_entry(display_id: str, name: str):
     return entry
 
 
-def _make_services_with_display_registry(entries: list):
-    """AppServices с DisplayCatalog, возвращающим заданные DisplaySpec-like."""
-    from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
-
-    displays = MagicMock()
-    display_specs = tuple(DisplaySpec(display_id=e.id, display_name=e.name) for e in entries)
-    displays.list_displays.return_value = display_specs
-    displays.resolve.side_effect = lambda did: next((s for s in display_specs if s.display_id == did), None)
-
-    return make_pipeline_services(), displays
-
-
 class TestTargetProcessCombo:
     """Тесты combo «Процесс назначения» для plugin-узлов."""
 

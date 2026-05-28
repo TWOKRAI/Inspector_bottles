@@ -41,18 +41,6 @@ def _make_services_for_presenter(topology=None, display_registry=None):
 
         # Создаём mock DisplayCatalog с resolve поддержкой
         displays = MagicMock()
-        displays.resolve.side_effect = lambda did: (
-            next(
-                (
-                    type("DS", (), {"display_name": getattr(e, "name", "")})()
-                    for e in display_registry.get.side_effect.__self__
-                    if False  # не используется
-                ),
-                None,
-            )
-            if False
-            else None
-        )  # fallback
 
         # Простой маппинг: если display_registry.get() возвращает entry с .name
         def _resolve(did):

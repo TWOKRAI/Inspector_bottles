@@ -106,8 +106,8 @@ class PipelineTab(QWidget):
         # Undo/Redo в статичной зоне (legacy ActionBus bridge).
         # TODO Phase F: полностью заменить ActionBus на domain commands
         _bus_accessor = getattr(services.commands, "action_bus", None)
-        bus = _bus_accessor() if callable(_bus_accessor) else None
-        self._tab_layout.enable_undo_redo(bus)
+        self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
+        self._tab_layout.enable_undo_redo(self._action_bus)
 
         # Передать scene и inspector в presenter.
         self._presenter.set_scene(self._scene)
@@ -182,7 +182,8 @@ class PipelineTab(QWidget):
         # Permission gating: mutating actions (delete/auto_layout/save_recipe).
         # AuthFacade Protocol покрывает has_permission(), но install_permission_aware_enable
         # нуждается в AuthState (state.access_context_changed signal). Bridge через adapter.
-        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating.
+        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating
+        # (access_context_changed signal — нужен для install_permission_aware_enable).
         auth_state = getattr(self._services.auth, "_state", None)
         for aid in ("delete", "auto_layout", "save_recipe", "launch_recipe"):
             install_permission_aware_enable(
@@ -271,16 +272,12 @@ class PipelineTab(QWidget):
                 self._inspector.clear()
         elif action_id == "undo":
             # TODO Phase F: domain command для undo
-            _bus_accessor = getattr(self._services.commands, "action_bus", None)
-            bus = _bus_accessor() if callable(_bus_accessor) else None
-            if bus:
-                bus.undo()
+            if self._action_bus:
+                self._action_bus.undo()
         elif action_id == "redo":
             # TODO Phase F: domain command для redo
-            _bus_accessor = getattr(self._services.commands, "action_bus", None)
-            bus = _bus_accessor() if callable(_bus_accessor) else None
-            if bus:
-                bus.redo()
+            if self._action_bus:
+                self._action_bus.redo()
 
     def _on_plugin_dropped(self, plugin_name: str, scene_pos: "QPointF") -> None:
         """D&D из палитры → создать процесс на canvas."""
