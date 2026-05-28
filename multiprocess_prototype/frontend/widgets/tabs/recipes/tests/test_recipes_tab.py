@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Тесты RecipesTab (Qt MVP, Task 5.7).
+"""Тесты RecipesTab (Qt MVP, Task 5.7; Task E.2: AppServices DI).
 
-6 Qt-тестов через pytest-qt (qtbot fixture).
-Mock ctx — без реального AppContext и RecipeManager.
+Qt-тесты через pytest-qt (qtbot fixture).
+RecipeManager навешивается на AppServices через _rm bridge (make_recipes_services).
 
 Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.7
 """
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import QMessageBox
 
 from multiprocess_prototype.frontend.widgets.tabs.recipes.tab import RecipesTab
 from multiprocess_prototype.frontend.widgets.tabs.recipes.view import IRecipesView
+
+from ._helpers import make_recipes_services
 
 
 # ---------------------------------------------------------------------------
@@ -38,23 +40,14 @@ def _make_mock_recipe_manager(slugs: list[str] | None = None) -> MagicMock:
     return rm
 
 
-def _make_ctx(recipe_manager: MagicMock | None = None) -> MagicMock:
-    """Создать mock AppContext с recipe_manager."""
-    ctx = MagicMock()
-    ctx.recipe_manager = recipe_manager if recipe_manager is not None else _make_mock_recipe_manager()
-    # Аксессоры, которые могут понадобиться BaseListNavTab / DiffScrollTabLayout
-    ctx.auth = None
-    return ctx
-
-
 def _make_tab(
     qtbot,
     slugs: list[str] | None = None,
 ) -> RecipesTab:
-    """Создать RecipesTab с mock ctx и добавить в qtbot."""
+    """Создать RecipesTab с AppServices (RecipeManager через _rm bridge)."""
     rm = _make_mock_recipe_manager(slugs)
-    ctx = _make_ctx(rm)
-    tab = RecipesTab(ctx)
+    services = make_recipes_services(recipe_manager=rm)
+    tab = RecipesTab(services)
     qtbot.addWidget(tab)
     return tab
 

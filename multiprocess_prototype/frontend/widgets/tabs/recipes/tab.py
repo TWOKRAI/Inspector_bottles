@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
+from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
 from .presenter import RecipesPresenter
@@ -46,6 +47,11 @@ def _layout_factory() -> DiffScrollTabLayout:
 class RecipesTab(BaseListNavTab):
     """Таб «Рецепты» v2 — BaseListNavTab + MVP (RecipesPresenter + IRecipesView).
 
+    Task E.3: мигрирован на AppServices DI. Принимает ``services: AppServices``.
+    RecipeManager берётся через ``services.recipes._rm`` bridge — RecipeStore
+    Protocol не покрывает богатый legacy API (read_recipe→dict, duplicate,
+    recipes_dir, replace_blueprint). TODO Phase F: расширить RecipeStore Protocol.
+
     Реализует IRecipesView через structural subtyping:
     ``isinstance(tab, IRecipesView)`` → True без явного наследования.
 
@@ -56,22 +62,23 @@ class RecipesTab(BaseListNavTab):
 
     def __init__(
         self,
-        ctx: "AppContext",
+        services: AppServices,
+        *,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб рецептов.
 
         Args:
-            ctx: контекст приложения (AppContext).
+            services: типизированный DI-контейнер AppServices.
             parent: родительский виджет.
         """
-        self._ctx = ctx
+        self._services = services
         self._selected_slug: str | None = None
         self._form_stack_index: int = 0
 
         super().__init__(
             title="Рецепты",
-            ctx=ctx,
+            ctx=None,  # type: ignore[arg-type]  # BaseListNavTab legacy параметр (Phase F удалит)
             layout_factory=_layout_factory,
             parent=parent,
         )
@@ -85,7 +92,9 @@ class RecipesTab(BaseListNavTab):
 
         # Presenter инициализируется после UI (view уже готов).
         # Если recipe_manager недоступен — показываем сообщение и не создаём presenter.
-        recipe_manager = getattr(ctx, "recipe_manager", None)
+        # TODO Phase F: RecipeStore Protocol не покрывает read_recipe→dict / duplicate /
+        # recipes_dir — presenter работает с legacy RecipeManager через _rm bridge.
+        recipe_manager = getattr(services.recipes, "_rm", None)
         self._presenter: RecipesPresenter | None = None
 
         if recipe_manager is None:
@@ -109,7 +118,9 @@ class RecipesTab(BaseListNavTab):
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "RecipesTab":
-        """Фабричный метод для TabFactory.
+        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+
+        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
 
         Args:
             ctx: контекст приложения (AppContext).
@@ -117,7 +128,10 @@ class RecipesTab(BaseListNavTab):
         Returns:
             Полностью инициализированный RecipesTab с загруженными данными.
         """
-        return cls(ctx)
+        assert ctx.app_services is not None, (
+            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
+        )
+        return cls(ctx.app_services)
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #
