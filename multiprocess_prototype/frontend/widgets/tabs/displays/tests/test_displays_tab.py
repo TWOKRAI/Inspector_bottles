@@ -1,7 +1,7 @@
 """test_displays_tab.py -- Unit-тесты DisplaysPresenter + DisplaysTab.create (MVP pattern).
 
 Покрытие:
-1. DisplaysTab.create(ctx) с MagicMock ctx — без исключений
+1. DisplaysTab.create(ctx) с AppServices (Task E.6) — без исключений
 2. isinstance(tab, IDisplaysView) → True
 3. presenter.load() → view.refresh_list вызван
 4. presenter.on_create() → registry.register вызван, refresh_list вызван
@@ -9,7 +9,8 @@
 6. presenter.on_duplicate('main') → в registry появился 'main_copy'
 7. on_create с уже существующим id → view.show_error вызван
 
-Refs: plans/prototype-skeleton-2026-05/phase-4-displays-tab.md Task 4.8
+Refs: plans/prototype-skeleton-2026-05/phase-4-displays-tab.md Task 4.8,
+      plans/2026-05-27_cross-tab-architecture/phase-e-per-tab-migration.md Task E.6
 """
 
 from __future__ import annotations
@@ -97,20 +98,17 @@ def presenter(registry: DisplayRegistry, mock_view: MagicMock, tmp_yaml: Path) -
 
 
 # ---------------------------------------------------------------------------
-# Тест 1: DisplaysTab.create(ctx) с MagicMock ctx — без исключений
+# Тест 1: DisplaysTab.create(ctx) с AppServices (Task E.6) — без исключений
 # ---------------------------------------------------------------------------
 
 
-def test_create_with_mock_ctx(qtbot):
-    """DisplaysTab.create(ctx) с MagicMock ctx — без исключений."""
+def test_create_with_app_services(qtbot):
+    """DisplaysTab.create(ctx) с AppServices DI — без исключений."""
     from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
 
-    ctx = MagicMock()
-    ctx.display_registry = DisplayRegistry()
-    ctx.config_paths = MagicMock()
-    ctx.config_paths.displays = None
-    ctx.auth = None
+    from ._helpers import _StubDisplaysCtx, make_displays_services
 
+    ctx = _StubDisplaysCtx(make_displays_services(registry=DisplayRegistry()))
     tab = DisplaysTab.create(ctx)
     qtbot.addWidget(tab)
 
@@ -126,16 +124,37 @@ def test_is_idisplaysview(qtbot):
     """isinstance(tab, IDisplaysView) → True (structural subtyping)."""
     from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
 
-    ctx = MagicMock()
-    ctx.display_registry = DisplayRegistry()
-    ctx.config_paths = MagicMock()
-    ctx.config_paths.displays = None
-    ctx.auth = None
+    from ._helpers import _StubDisplaysCtx, make_displays_services
 
+    ctx = _StubDisplaysCtx(make_displays_services(registry=DisplayRegistry()))
     tab = DisplaysTab.create(ctx)
     qtbot.addWidget(tab)
 
     assert isinstance(tab, IDisplaysView)
+
+
+# ---------------------------------------------------------------------------
+# Тест 2b: bridge — DisplaysTab берёт registry из services.displays._registry
+# ---------------------------------------------------------------------------
+
+
+def test_create_wires_bridge_registry(qtbot):
+    """DisplaysTab резолвит реальный DisplayRegistry через services.displays._registry."""
+    from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
+
+    from ._helpers import _StubDisplaysCtx, make_displays_services
+
+    reg = DisplayRegistry()
+    reg.register(_make_entry("cam1"))
+
+    ctx = _StubDisplaysCtx(make_displays_services(registry=reg))
+    tab = DisplaysTab.create(ctx)
+    qtbot.addWidget(tab)
+
+    # Bridge подключил тот же экземпляр реестра, что и в AppServices
+    assert tab._registry is reg
+    # presenter.load() при init заполнил nav-список из bridge-реестра
+    assert "cam1" in tab._key_to_item
 
 
 # ---------------------------------------------------------------------------
