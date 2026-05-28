@@ -58,29 +58,29 @@ class AppContext:
                 auth.manager.login(...)
                 auth.state.access_context
         """
-        mgr = self.extras.get("auth_manager")
-        state = self.extras.get("auth_state")
+        mgr = self.extras.peek("auth_manager")
+        state = self.extras.peek("auth_state")
         if mgr is None or state is None:
             return None
         return AuthContext(
             manager=mgr,
             state=state,
-            audit=self.extras.get("audit_storage"),
+            audit=self.extras.peek("audit_storage"),
         )
 
     # -- Legacy accessors (deprecated, удалить после миграции) --
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Доступ к extras по ключу."""
+        """Доступ к extras по ключу (generic passthrough; работает с любым dict)."""
         return self.extras.get(key, default)
 
     def registers_manager(self) -> "RegistersManager | None":
         """Вернуть RegistersManager из extras, если был передан при сборке контекста."""
-        return self.extras.get("registers_manager")
+        return self.extras.peek("registers_manager")
 
     def plugin_registry(self) -> Any | None:
         """Вернуть PluginRegistry из extras, если был передан при сборке контекста."""
-        return self.extras.get("plugin_registry")
+        return self.extras.peek("plugin_registry")
 
     def bindings(self) -> "GuiStateBindings | None":
         """Вернуть GuiStateBindings из extras, если был создан в run_gui().
@@ -88,35 +88,35 @@ class AppContext:
         Используется табами Phase 10B для реактивного обновления виджетов
         по путям StateStore (FPS, status, latency и т.п.).
         """
-        return self.extras.get("bindings")
+        return self.extras.peek("bindings")
 
     def action_bus(self) -> "ActionBus | None":
         """Вернуть ActionBus из extras, если был создан в run_gui().
 
         Используется табами Phase 11 для undo/redo изменений параметров.
         """
-        return self.extras.get("action_bus")
+        return self.extras.peek("action_bus")
 
     def topology_holder(self) -> "TopologyHolder | None":
         """Вернуть TopologyHolder из extras, если был создан в run_gui().
 
         Содержит текущую topology dict с уведомлениями об изменении.
         """
-        return self.extras.get("topology_holder")
+        return self.extras.peek("topology_holder")
 
     def topology_bridge(self) -> "TopologyBridge | None":
         """Вернуть TopologyBridge из extras (Phase 12).
 
         Единый мост GUI ↔ Runtime: field_set → IPC, state_delta → rm sync.
         """
-        return self.extras.get("topology_bridge")
+        return self.extras.peek("topology_bridge")
 
     def command_catalog(self) -> "CommandCatalog | None":
         """Вернуть CommandCatalog из extras (Phase 12).
 
         Каталог IPC-команд, собранный из PluginRegistry + ConnectionMap.
         """
-        return self.extras.get("command_catalog")
+        return self.extras.peek("command_catalog")
 
     def plugin_manager(self) -> "PluginManager | None":
         """Singleton PluginManager — автообнаружение и hot-reload плагинов.
@@ -124,7 +124,7 @@ class AppContext:
         Инициализируется в run_gui() из путей sys_config.discovery.plugin_paths.
         None если GUI-процесс не инициализировал (например, в тестах).
         """
-        return self.extras.get("plugin_manager")
+        return self.extras.peek("plugin_manager")
 
     def service_registry(self) -> "ServiceRegistry | None":
         """Singleton ServiceRegistry — реестр long-running сервисов.
@@ -132,7 +132,7 @@ class AppContext:
         Инициализируется в run_gui() после ServiceRegistry bootstrap.
         None если GUI-процесс не инициализировал (например, в тестах).
         """
-        return self.extras.get("service_registry")
+        return self.extras.peek("service_registry")
 
     @property
     def recipe_manager(self) -> Any | None:
@@ -141,7 +141,7 @@ class AppContext:
         Инициализируется в run_gui() через RecipeEngine + wire-up (Task 5.8).
         None если GUI-процесс не инициализировал (тесты или ошибка при старте).
         """
-        return self.extras.get("recipe_manager")
+        return self.extras.peek("recipe_manager")
 
     def form_context(self) -> "FormContext | None":
         """Собрать FormContext из доступных в AppContext компонентов.
@@ -178,11 +178,11 @@ class AppContext:
 
     def auth_manager(self) -> "IAuthManager | None":
         """IAuthManager из extras, если был инициализирован в run_gui()."""
-        return self.extras.get("auth_manager")
+        return self.extras.peek("auth_manager")
 
     def auth_state(self) -> "AuthState | None":
         """AuthState из extras, если был инициализирован в run_gui()."""
-        return self.extras.get("auth_state")
+        return self.extras.peek("auth_state")
 
     def audit_storage(self) -> "SqliteAuditStorage | None":
         """SqliteAuditStorage из extras, если был инициализирован в run_gui().
@@ -190,7 +190,7 @@ class AppContext:
         Используется панелями SessionsPanel и AuditLogPanel (PR4 Group C)
         для чтения сессий и аудит-лога.
         """
-        return self.extras.get("audit_storage")
+        return self.extras.peek("audit_storage")
 
 
 def build_app_context(

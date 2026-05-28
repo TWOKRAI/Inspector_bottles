@@ -93,9 +93,13 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=multiprocess_prototype_backup"
 filterwarnings = [
-    # Q5 decision (Phase D, Task D.4): DeprecationWarning из _deprecated_extras не должны
-    # ломать существующие тесты. Phase F переведёт на error::DeprecationWarning.
-    "ignore::DeprecationWarning:multiprocess_prototype.frontend._deprecated_extras",
+    # Task F.7 (Phase F / cross-tab): forcing-функция против регрессии. Прямой
+    # ctx.extras[...]/get() с мигрированным ключом из потребителя (презентер/таб) валит тест
+    # → используй services.X (AppServices). Легитимный bridge (build_app_services + аксессоры
+    # AppContext) читает через ctx.extras.peek()/peek_required() и не триггерит warning.
+    # ВАЖНО: фильтр по ТЕКСТУ сообщения, а не module-scoped: warning эмитится со stacklevel=3
+    # и атрибутируется вызывающему модулю, а не _deprecated_extras (старый фильтр был no-op).
+    'error:ctx\.extras.*deprecated:DeprecationWarning',
 ]
 qt_api = "pyside6"
 

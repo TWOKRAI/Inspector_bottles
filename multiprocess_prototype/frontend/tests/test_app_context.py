@@ -216,7 +216,7 @@ class TestAppContextExtras:
 
         ctx = build_app_context(process, registers_manager=mock_rm)
 
-        assert ctx.extras.get("registers_manager") is mock_rm
+        assert ctx.registers_manager() is mock_rm
 
     def test_plugin_registry_stored_in_extras(self):
         """build_app_context сохраняет plugin_registry в extras["plugin_registry"]."""
@@ -225,7 +225,7 @@ class TestAppContextExtras:
 
         ctx = build_app_context(process, plugin_registry=mock_registry)
 
-        assert ctx.extras.get("plugin_registry") is mock_registry
+        assert ctx.plugin_registry() is mock_registry
 
     def test_accessor_returns_none_when_absent(self):
         """registers_manager() и plugin_registry() возвращают None если не переданы."""

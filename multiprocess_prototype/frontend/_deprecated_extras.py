@@ -66,6 +66,23 @@ class _DeprecatedExtrasDict(dict):  # type: ignore[type-arg]
         self._maybe_warn(key)
         return super().get(key, default)
 
+    def peek(self, key: Any, default: Any = None) -> Any:
+        """Тихое чтение (зеркало dict.get) без DeprecationWarning.
+
+        Internal: ТОЛЬКО для bridge-кода (build_app_services + аксессоры AppContext),
+        который легитимно собирает AppServices из extras. Потребители (презентеры/табы)
+        ОБЯЗАНЫ использовать AppServices (services.X), а не extras — прямой ctx.extras[...]
+        остаётся deprecated и валит тест (Task F.7).
+        """
+        return dict.get(self, key, default)
+
+    def peek_required(self, key: Any) -> Any:
+        """Тихое чтение обязательного ключа (зеркало dict.__getitem__) — KeyError если нет.
+
+        Internal: ТОЛЬКО для bridge-кода (см. peek). Сохраняет fails-loud-контракт фабрики.
+        """
+        return dict.__getitem__(self, key)
+
     def _maybe_warn(self, key: Any) -> None:
         """Эмитит DeprecationWarning если key мигрирован в AppServices."""
         if key in _DEPRECATED_KEYS_MAP:

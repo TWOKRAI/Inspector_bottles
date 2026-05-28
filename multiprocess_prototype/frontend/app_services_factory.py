@@ -79,17 +79,20 @@ def build_app_services(ctx: "AppContext") -> AppServices:
     # 3. Adapter'ы — 10 штук
 
     # TopologyRepository: bidirectional bridge domain.Topology <-> TopologyHolder
-    topology_repo = TopologyRepositoryFromHolder(ctx.extras["topology_holder"])
+    # peek_required/peek — тихое bridge-чтение: фабрика СТРОИТ AppServices из extras,
+    # поэтому читает мигрированные ключи легитимно (Task F.7). Прямой ctx.extras[...]
+    # из потребителей остаётся deprecated → error.
+    topology_repo = TopologyRepositoryFromHolder(ctx.extras.peek_required("topology_holder"))
 
     # PluginCatalog: read-only реестр плагинов
-    plugins = PluginCatalogFromRegistry(ctx.extras["plugin_registry"])
+    plugins = PluginCatalogFromRegistry(ctx.extras.peek_required("plugin_registry"))
 
     # DisplayCatalog: read+write реестр дисплеев (Phase F — writable store)
     _displays_yaml = Path("multiprocess_prototype/backend/config/displays.yaml")
-    displays = DisplayCatalogFromRegistry(ctx.extras["display_registry"], yaml_path=_displays_yaml)
+    displays = DisplayCatalogFromRegistry(ctx.extras.peek_required("display_registry"), yaml_path=_displays_yaml)
 
     # RecipeStore: CRUD-доступ к рецептам через RecipeManager
-    recipe_manager = ctx.extras.get("recipe_manager")
+    recipe_manager = ctx.extras.peek("recipe_manager")
     if recipe_manager is not None:
         recipes = RecipeStoreFromManager(recipe_manager, _RECIPES_DIR)
     else:
@@ -99,17 +102,17 @@ def build_app_services(ctx: "AppContext") -> AppServices:
         )
 
     # ServiceManager: read + lifecycle управление сервисами
-    services = ServiceManagerFromRegistry(ctx.extras["service_registry"])
+    services = ServiceManagerFromRegistry(ctx.extras.peek_required("service_registry"))
 
     # RegistersBackend: доступ к регистрам через TopologyRepository + PluginCatalog
     registers = RegistersBackendFromManager(
-        ctx.extras["registers_manager"],
+        ctx.extras.peek_required("registers_manager"),
         topology_repo,
         plugins,
     )
 
     # AuthFacade: read-only auth-состояние
-    auth_state = ctx.extras.get("auth_state")
+    auth_state = ctx.extras.peek("auth_state")
     if auth_state is None:
         raise RuntimeError(
             "AppServices factory: auth_state отсутствует в ctx.extras. "
