@@ -179,17 +179,12 @@ class PipelineTab(QWidget):
 
         action_layout.addStretch(1)
 
-        # Permission gating: mutating actions (delete/auto_layout/save_recipe).
-        # AuthFacade Protocol покрывает has_permission(), но install_permission_aware_enable
-        # нуждается в AuthState (state.access_context_changed signal). Bridge через adapter.
-        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating
-        # (access_context_changed signal — нужен для install_permission_aware_enable).
-        auth_state = getattr(self._services.auth, "_state", None)
+        # Permission gating через AuthFacade Protocol (F.6).
         for aid in ("delete", "auto_layout", "save_recipe", "launch_recipe"):
             install_permission_aware_enable(
                 self._action_buttons[aid],
                 "tabs.pipeline.edit",
-                auth_state,
+                self._services.auth,
             )
 
         return action_widget

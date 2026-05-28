@@ -205,17 +205,13 @@ class ProcessesTab(BaseListNavTab):
         action_layout.addStretch(1)
         lay.set_action_widget(action_widget)
 
-        # Permission gating: tabs.processes.edit.
+        # Permission gating через AuthFacade Protocol (F.6).
         from multiprocess_prototype.frontend.widgets.access import (
             install_permission_aware_enable,
         )
 
-        # AuthFacade Protocol покрывает has_permission(), но install_permission_aware_enable
-        # нуждается в AuthState (access_context_changed signal). Bridge через adapter.
-        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating.
-        auth_state = getattr(self._services.auth, "_state", None)
         for btn in (self._btn_create, self._btn_delete, self._btn_start, self._btn_stop):
-            install_permission_aware_enable(btn, "tabs.processes.edit", auth_state)
+            install_permission_aware_enable(btn, "tabs.processes.edit", self._services.auth)
 
     def _make_action_button(self, action_id: str, label: str) -> QPushButton:
         btn = QPushButton(label)

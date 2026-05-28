@@ -409,12 +409,10 @@ class DisplaysTab(BaseListNavTab):
         action_layout.addStretch(1)
         self._tab_layout.set_action_widget(action_widget)
 
-        # Permission gating: services.auth — AuthFacadeFromAuthState, реальный AuthState
-        # хранится в _state (паттерн E.4/E.5). Fake/тесты не имеют _state -> None (no-op gate).
-        auth_state = getattr(self._services.auth, "_state", None)
-        install_permission_aware_enable(self._create_btn, "tabs.displays.edit", auth_state)
-        install_permission_aware_enable(self._delete_btn, "tabs.displays.edit", auth_state)
-        install_permission_aware_enable(self._duplicate_btn, "tabs.displays.edit", auth_state)
+        # Permission gating через AuthFacade Protocol (F.6).
+        install_permission_aware_enable(self._create_btn, "tabs.displays.edit", self._services.auth)
+        install_permission_aware_enable(self._delete_btn, "tabs.displays.edit", self._services.auth)
+        install_permission_aware_enable(self._duplicate_btn, "tabs.displays.edit", self._services.auth)
 
     # ------------------------------------------------------------------ #
     #  Button handlers                                                     #

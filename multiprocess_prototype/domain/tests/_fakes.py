@@ -447,6 +447,9 @@ class FakeAuthFacade:
 
     По умолчанию: access_level=0, is_authenticated()=False, has_permission()=True.
     Настраивается через конструктор для тестов с разными уровнями доступа.
+
+    on_access_changed сохраняет callback в self._access_callbacks — в тестах
+    можно тригерить вручную: fake.trigger_access_changed().
     """
 
     def __init__(
@@ -458,6 +461,7 @@ class FakeAuthFacade:
         self._access_level = access_level
         self._authenticated = authenticated
         self._all_permissions = all_permissions
+        self._access_callbacks: list[Callable[[], None]] = []
 
     @property
     def access_level(self) -> int:
@@ -468,6 +472,15 @@ class FakeAuthFacade:
 
     def has_permission(self, key: str) -> bool:
         return self._all_permissions
+
+    def on_access_changed(self, callback: Callable[[], None]) -> None:
+        """Сохранить callback. Вызвать trigger_access_changed() для симуляции смены роли."""
+        self._access_callbacks.append(callback)
+
+    def trigger_access_changed(self) -> None:
+        """Тест-помощник: вызвать все зарегистрированные callbacks (симуляция смены роли)."""
+        for cb in list(self._access_callbacks):
+            cb()
 
 
 _af: AuthFacade = FakeAuthFacade()

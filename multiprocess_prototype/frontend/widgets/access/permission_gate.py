@@ -1,25 +1,37 @@
-"""permission_gate — привязка виджета к permission через AuthState.
+"""permission_gate — привязка виджета к permission через AuthFacade.
 
 Использование во вкладках:
 
-    from multiprocess_prototype.frontend.widgets.access import bind_edit_permission
+    from multiprocess_prototype.frontend.widgets.access import (
+        bind_edit_permission,
+        install_permission_aware_enable,
+    )
 
     bind_edit_permission(
         self._save_btn,
         permission="tabs.settings.edit",
-        auth_state=(ctx.auth.state if ctx.auth is not None else None),
+        auth=services.auth,
+    )
+
+    install_permission_aware_enable(
+        self._btn,
+        permission="tabs.settings.edit",
+        auth=services.auth,
     )
 
 Эффект:
-- При отсутствии permission в текущем `AccessContext` виджет переходит в
-  `setEnabled(False)` и получает Qt-свойство `readOnly=true` — стиль QSS
-  применяется автоматически (см. AccessTrait/BaseConfigurableWidget).
-- Подписка на `auth_state.access_context_changed` пересчитывает состояние
-  при login/logout/смене роли.
+- При отсутствии permission виджет переходит в `setEnabled(False)` и получает
+  Qt-свойство `readOnly=true` — стиль QSS применяется автоматически.
+- Подписка через `auth.on_access_changed(callback)` пересчитывает состояние
+  при login/logout/смене роли (domain-pure, не Qt-signal в domain).
 
-Если `auth_state` равен `None` (тесты/legacy) — виджет остаётся в текущем
-состоянии (None permission означает «безусловный доступ»).
+Если `auth` равен `None` (тесты/legacy) — виджет остаётся в текущем
+состоянии (None означает «безусловный доступ»).
+
+Совместимость: функции принимают AuthFacade Protocol (adapters/auth/auth_facade.py)
+или любой duck-type объект с has_permission(key) + on_access_changed(callback).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterable
@@ -29,6 +41,7 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.frontend_module.managers.access_context import (
         AccessContext,
     )
+    from multiprocess_prototype.domain.protocols.auth_facade import AuthFacade
     from multiprocess_prototype.frontend.state.auth_state import AuthState
 
 
@@ -45,37 +58,36 @@ def _apply_permission(widget: "QWidget", permitted: bool) -> None:
 def bind_edit_permission(
     widget: "QWidget",
     permission: str,
-    auth_state: "AuthState | None",
+    auth: "AuthFacade | None",
 ) -> None:
-    """Привязать виджет к permission: enabled только при `ctx.has_permission`.
+    """Привязать виджет к permission: enabled только при `auth.has_permission`.
 
     Args:
         widget: целевой виджет (обычно QPushButton, но любой QWidget подходит).
         permission: имя permission, например `tabs.recipes.edit`.
-        auth_state: текущий AuthState. Если None — функция no-op (legacy/тесты).
+        auth: AuthFacade (services.auth). Если None — функция no-op (legacy/тесты).
 
-    Подписка живёт пока живёт виджет; AuthState.access_context_changed
-    автоматически отвязывается, если виджет удалён (Qt управляет lifetime).
+    Подписка через auth.on_access_changed пересчитывает состояние при смене роли.
     """
-    if auth_state is None:
+    if auth is None:
         return
 
-    def _update(ctx: "AccessContext") -> None:
-        _apply_permission(widget, ctx.has_permission(permission))
+    def _refresh() -> None:
+        _apply_permission(widget, auth.has_permission(permission))
 
     # Применяем текущее состояние сразу — до первого сигнала.
-    _update(auth_state.access_context)
-    auth_state.access_context_changed.connect(_update)
+    _refresh()
+    auth.on_access_changed(_refresh)
 
 
 def gate_edit_widgets(
     widgets: "Iterable[QWidget]",
     permission: str,
-    auth_state: "AuthState | None",
+    auth: "AuthFacade | None",
 ) -> None:
     """Batch-применить permission к набору виджетов с одним правом."""
     for w in widgets:
-        bind_edit_permission(w, permission, auth_state)
+        bind_edit_permission(w, permission, auth)
 
 
 def propagate_access_context_to_tree(
@@ -111,13 +123,13 @@ def propagate_access_context_to_tree(
             if trait is not None and hasattr(trait, "update"):
                 try:
                     trait.update(ctx)
-                except Exception:
+                except Exception:  # nosec B110 — best-effort, один виджет не ломает цикл
                     pass
             apply_access = getattr(widget, "_apply_access", None)
             if callable(apply_access):
                 try:
                     apply_access()
-                except Exception:
+                except Exception:  # nosec B110 — best-effort
                     pass
             for attr in ("_presenter", "presenter"):
                 presenter = getattr(widget, attr, None)
@@ -127,7 +139,7 @@ def propagate_access_context_to_tree(
                 if callable(set_ctx):
                     try:
                         set_ctx(ctx)
-                    except Exception:
+                    except Exception:  # nosec B110 — best-effort
                         pass
                 break  # достаточно одного presenter-атрибута
 
@@ -201,23 +213,23 @@ def gate_register_view(
 def install_permission_aware_enable(
     widget: "QWidget",
     permission: str,
-    auth_state: "AuthState | None",
+    auth: "AuthFacade | None",
 ) -> None:
     """Подменить `widget.setEnabled` на permission-aware proxy.
 
     После установки вызовы `widget.setEnabled(True)` со стороны selection-aware
     логики таба автоматически учитывают наличие permission: enabled только
     если `base_enabled AND has_permission`. `setEnabled(False)` всегда
-    отключает. Дополнительно подписка на `access_context_changed`
-    пересчитывает состояние при смене роли.
+    отключает. Подписка через `auth.on_access_changed` пересчитывает
+    состояние при смене роли (domain-pure callback, не Qt-signal в domain).
 
-    Без `auth_state` — no-op (legacy/тесты).
+    Без `auth` — no-op (legacy/тесты).
 
     Use case: вкладки с selection-driven кнопками (Load/Delete), которые
     управляют enabled по выбору строки. Permission-driven gating
     наслаивается прозрачно — таб-код не меняется.
     """
-    if auth_state is None:
+    if auth is None:
         return
 
     original_set_enabled = widget.setEnabled
@@ -229,7 +241,7 @@ def install_permission_aware_enable(
             original_set_enabled(False)
             widget.setProperty("readOnly", False)
             return
-        allowed = auth_state.access_context.has_permission(permission)
+        allowed = auth.has_permission(permission)
         original_set_enabled(allowed)
         widget.setProperty("readOnly", not allowed)
         style = widget.style()
@@ -242,5 +254,5 @@ def install_permission_aware_enable(
         _refresh()
 
     widget.setEnabled = proxy  # type: ignore[method-assign]
-    auth_state.access_context_changed.connect(lambda _ctx: _refresh())
+    auth.on_access_changed(_refresh)
     _refresh()

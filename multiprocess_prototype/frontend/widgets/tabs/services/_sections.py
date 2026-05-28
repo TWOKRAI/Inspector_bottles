@@ -162,12 +162,9 @@ class _ServiceSection:
         # Установить начальное состояние disabled/enabled по lifecycle
         self._refresh_button_state()
 
-        # Привязать к permission system (если auth доступен).
-        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating
-        # (access_context_changed signal — нужен для install_permission_aware_enable).
-        auth_state = getattr(self._services.auth, "_state", None)
+        # Привязать к permission system через AuthFacade Protocol (F.6).
         for btn in (self._btn_start, self._btn_stop, self._btn_restart):
-            install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
+            install_permission_aware_enable(btn, "tabs.services.edit", self._services.auth)
 
     def _on_start_click(self) -> None:
         """Запустить сервис и обновить отображение."""

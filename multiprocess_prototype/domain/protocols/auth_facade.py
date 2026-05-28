@@ -2,25 +2,27 @@
 """
 domain/protocols/auth_facade.py — Protocol для read-only доступа к auth-состоянию.
 
-AuthFacade — минимальный read-only контракт для permission-gating в presenter'ах.
-Эквивалент текущего ctx.auth.state.access_context.level, упакованный в Protocol.
+AuthFacade — минимальный read-only контракт для permission-gating в presenter'ах
+и реактивной подписки на смену прав доступа.
 
-Phase C создаст адаптер AuthFacadeAdapter поверх существующих IAuthManager + AuthState.
+Реализации:
+  - AuthFacadeFromAuthState (adapters/auth/auth_facade.py) — prod-адаптер над AuthState.
+  - FakeAuthFacade (domain/tests/_fakes.py) — тестовая реализация без Qt.
 
-NB: Auth-сигналы (смена пользователя, смена уровня доступа) идут через EventBus
-через отдельные доменные события (AuthLevelChanged, UserLoggedIn/UserLoggedOut —
-Phase D). Не через Qt-signals в domain.
+Реактивность через domain-pure callback (не Qt-signals в domain):
+  - on_access_changed(callback) — adapter мостит Qt-сигнал AuthState → callback.
+  - Fakes/тесты без сигналов — no-op или сохраняют callback для ручного тригера.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 class AuthFacade(Protocol):
-    """Контракт для read-only доступа к auth-состоянию.
+    """Контракт для read-only доступа к auth-состоянию с реактивной подпиской.
 
-    Реализации: AuthFacadeAdapter (Phase C), _FakeAuthFacade (тесты).
+    Реализации: AuthFacadeFromAuthState (adapters), FakeAuthFacade (тесты).
     """
 
     @property
@@ -34,6 +36,16 @@ class AuthFacade(Protocol):
 
     def has_permission(self, key: str) -> bool:
         """Проверить наличие конкретного разрешения по ключу."""
+        ...
+
+    def on_access_changed(self, callback: Callable[[], None]) -> None:
+        """Подписаться на изменение прав доступа (смена роли/пользователя).
+
+        callback вызывается без аргументов при каждом изменении access-контекста.
+        Реализация (adapter) мостит Qt-сигнал AuthState.access_context_changed →
+        callback; domain остаётся UI-agnostic. Fake/тесты без сигнала — no-op
+        или сохраняют callback для ручного тригера.
+        """
         ...
 
 

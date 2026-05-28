@@ -219,12 +219,11 @@ class _PluginSection:
                     bind_edit_permission,
                 )
 
-                # TODO Phase F: AuthFacade Protocol для permission gating.
-                auth_state = getattr(self._services.auth, "_state", None)
+                # Permission gating через AuthFacade Protocol (F.6).
                 bind_edit_permission(
                     view,
                     "tabs.plugins.edit",
-                    auth_state,
+                    self._services.auth,
                 )
                 self._widget = view
                 return

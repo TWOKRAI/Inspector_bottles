@@ -1,4 +1,4 @@
-"""Тесты bind_edit_permission — gating виджетов по permission через AuthState."""
+"""Тесты bind_edit_permission — gating виджетов по permission через AuthFacade."""
 
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ from multiprocess_prototype.frontend.widgets.access import (
 
 
 class _StubAuthState(QObject):
+    """Stub-реализация AuthFacade с Qt-сигналом для реактивных тестов.
+
+    Совместима с AuthFacade duck-type (has_permission + on_access_changed).
+    Qt-сигнал access_context_changed используется adapter'ом через on_access_changed.
+    """
+
     access_context_changed = Signal(AccessContext)
 
     def __init__(self, ctx: AccessContext | None = None) -> None:
@@ -25,15 +31,31 @@ class _StubAuthState(QObject):
         self.access_context = ctx
         self.access_context_changed.emit(ctx)
 
+    # --- AuthFacade Protocol методы ---
+
+    @property
+    def access_level(self) -> int:
+        return self.access_context.level
+
+    def is_authenticated(self) -> bool:
+        return self.access_context.level > 0
+
+    def has_permission(self, key: str) -> bool:
+        return self.access_context.has_permission(key)
+
+    def on_access_changed(self, callback) -> None:
+        """Мостит Qt-сигнал → callback (0 аргументов)."""
+        self.access_context_changed.connect(lambda *_: callback())
+
 
 class TestBindEditPermission:
-    def test_no_auth_state_is_noop(self, qtbot):
+    def test_no_auth_is_noop(self, qtbot):
         btn = QPushButton()
         qtbot.addWidget(btn)
         btn.setEnabled(True)
 
-        bind_edit_permission(btn, "tabs.recipes.edit", auth_state=None)
-        # Состояние не меняется — функция no-op без auth_state
+        bind_edit_permission(btn, "tabs.recipes.edit", auth=None)
+        # Состояние не меняется — функция no-op без auth
         assert btn.isEnabled() is True
 
     def test_disables_when_permission_missing(self, qtbot):

@@ -29,7 +29,7 @@ Phase D подключит этот adapter к AppServices:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 
 class AuthFacadeFromAuthState:
@@ -71,3 +71,13 @@ class AuthFacadeFromAuthState:
             key: строковый ключ права, например 'tabs.pipeline.edit'.
         """
         return bool(self._state.access_context.has_permission(key))
+
+    def on_access_changed(self, callback: Callable[[], None]) -> None:
+        """Подписаться на изменение прав доступа.
+
+        Мостит Qt-сигнал AuthState.access_context_changed → callback (0 аргументов).
+        getattr-guard: если _state не имеет сигнала (plain fake) — no-op.
+        """
+        signal = getattr(self._state, "access_context_changed", None)
+        if signal is not None and hasattr(signal, "connect"):
+            signal.connect(lambda *_args: callback())
