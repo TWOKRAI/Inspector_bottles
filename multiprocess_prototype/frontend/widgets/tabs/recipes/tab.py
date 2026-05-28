@@ -15,7 +15,6 @@ Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.7
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QLabel,
@@ -27,13 +26,11 @@ from PySide6.QtWidgets import (
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
 from .presenter import RecipesPresenter
 from .recipe_form import RecipeFormWidget
-
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
 
 
 def _layout_factory() -> DiffScrollTabLayout:
@@ -78,7 +75,7 @@ class RecipesTab(BaseListNavTab):
 
         super().__init__(
             title="Рецепты",
-            ctx=None,  # type: ignore[arg-type]  # BaseListNavTab legacy параметр (Phase F удалит)
+            ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             parent=parent,
         )
@@ -113,21 +110,17 @@ class RecipesTab(BaseListNavTab):
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "RecipesTab":
-        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "RecipesTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
-
-        Args:
-            ctx: контекст приложения (AppContext).
-
-        Returns:
-            Полностью инициализированный RecipesTab с загруженными данными.
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        RecipesTab не использует runtime-зависимостей.
         """
-        assert ctx.app_services is not None, (
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        return cls(ctx.app_services)
+        return cls(services)
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #

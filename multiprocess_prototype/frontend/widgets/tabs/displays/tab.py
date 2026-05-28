@@ -37,7 +37,6 @@ explicit-параметром (паттерн E.2/E.5).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QComboBox,
@@ -55,14 +54,12 @@ from PySide6.QtWidgets import (
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
 
 from .presenter import DisplaysPresenter
-
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +109,7 @@ class DisplaysTab(BaseListNavTab):
 
         super().__init__(
             title="Дисплеи",
-            ctx=None,  # type: ignore[arg-type]  # BaseListNavTab legacy параметр (Phase F удалит)
+            ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             parent=parent,
         )
@@ -142,21 +139,17 @@ class DisplaysTab(BaseListNavTab):
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "DisplaysTab":
-        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "DisplaysTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
-
-        Args:
-            ctx: контекст приложения (AppContext).
-
-        Returns:
-            Полностью инициализированный DisplaysTab с загруженными данными.
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        DisplaysTab не использует runtime-зависимостей.
         """
-        assert ctx.app_services is not None, (
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        return cls(ctx.app_services)
+        return cls(services)
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #

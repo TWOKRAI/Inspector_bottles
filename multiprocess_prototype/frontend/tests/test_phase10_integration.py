@@ -1,4 +1,7 @@
-"""Smoke test Phase 10 — все 7 табов создаются и работают."""
+"""Smoke test Phase 10 — все 7 табов создаются и работают.
+
+Task F.9: фабрики принимают (AppServices, RuntimeDeps) вместо AppContext.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +10,21 @@ from unittest.mock import MagicMock
 from PySide6.QtWidgets import QTabWidget
 
 from multiprocess_prototype.frontend.tab_factory import TabFactory, TAB_ORDER
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.tabs import register_all_tabs
 from multiprocess_prototype.frontend.widgets.tabs.placeholder import PlaceholderTab
 
 
 def _make_mock_ctx():
-    """Создать mock AppContext для smoke-тестов."""
+    """Создать mock AppContext для smoke-тестов.
+
+    TabFactory по-прежнему принимает ctx для permission-фильтрации.
+    app_services создаётся через make_test_app_services (реальный builder).
+    """
+    from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+
     ctx = MagicMock()
+    ctx.app_services = make_test_app_services()
     ctx.config = {
         "topology": {
             "processes": [
@@ -26,10 +37,11 @@ def _make_mock_ctx():
         },
     }
     ctx.extras = {}
-    ctx.plugin_registry.return_value = None
-    ctx.registers_manager.return_value = None
-    ctx.bindings.return_value = None
+    ctx.auth = None
     ctx.command_sender = MagicMock()
+    ctx.topology_bridge.return_value = None
+    ctx.bindings.return_value = None
+    ctx.plugin_manager.return_value = None
     return ctx
 
 
@@ -44,12 +56,15 @@ class TestPhase10Integration:
             assert tab_info["id"] in factories, f"Таб '{tab_info['id']}' не зарегистрирован"
 
     def test_all_tabs_creatable(self, qtbot):
-        """Каждый таб создаётся без исключений через create(ctx)."""
-        ctx = _make_mock_ctx()
+        """Каждый таб создаётся без исключений через create(services, runtime)."""
+        from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+
+        services = make_test_app_services()
+        runtime = RuntimeDeps()
         factories = register_all_tabs()
 
         for tab_id, factory in factories.items():
-            widget = factory(ctx)
+            widget = factory(services, runtime)
             qtbot.addWidget(widget)
             assert widget is not None, f"Таб '{tab_id}' вернул None"
 

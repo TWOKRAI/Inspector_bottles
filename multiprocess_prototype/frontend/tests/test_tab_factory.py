@@ -30,8 +30,14 @@ def _make_ctx(auth_state: object | None = None) -> MagicMock:
     без фильтрации по permissions (все табы видны). Для тестов фильтрации
     передавай stub AuthState с атрибутом `access_context` и сигналом
     `access_context_changed`.
+
+    Task F.9: app_services создаётся через make_test_app_services,
+    TabFactory собирает RuntimeDeps из ctx в __init__.
     """
+    from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+
     ctx = MagicMock()
+    ctx.app_services = make_test_app_services()
     # legacy API (для старого кода)
     ctx.auth_state.return_value = auth_state
     # new API: ctx.auth = AuthContext | None
@@ -41,6 +47,11 @@ def _make_ctx(auth_state: object | None = None) -> MagicMock:
         _auth = MagicMock()
         _auth.state = auth_state
         ctx.auth = _auth
+    # runtime accessor'ы (TabFactory._build_runtime_deps вызывает их)
+    ctx.topology_bridge.return_value = None
+    ctx.bindings.return_value = None
+    ctx.plugin_manager.return_value = None
+    ctx.command_sender = None
     return ctx
 
 
@@ -258,7 +269,10 @@ class TestTabFactoryCreateTab:
         assert result.tab_id == "settings"
 
     def test_custom_factory_called_directly(self, qtbot):
-        """create_tab вызывает custom factory напрямую (без LazyTabWidget)."""
+        """create_tab вызывает custom factory напрямую (без LazyTabWidget).
+
+        Task F.9: factory получает (app_services, RuntimeDeps), не ctx.
+        """
         custom_widget = QWidget()
         qtbot.addWidget(custom_widget)
         factory_fn = MagicMock(return_value=custom_widget)
@@ -267,7 +281,7 @@ class TestTabFactoryCreateTab:
         factory = TabFactory(ctx, custom_factories={"recipes": factory_fn})
         result = factory.create_tab("recipes")
 
-        factory_fn.assert_called_once_with(ctx)
+        factory_fn.assert_called_once_with(ctx.app_services, factory._runtime)
         assert result is custom_widget
 
     def test_custom_factory_returns_none_falls_back_to_placeholder(self, qtbot):
@@ -285,7 +299,7 @@ class TestTabFactoryCreateTab:
     def test_custom_factory_raises_falls_back_to_placeholder(self, qtbot):
         """Если custom factory выбросила исключение — используется PlaceholderTab."""
 
-        def bad_factory(ctx):
+        def bad_factory(services, runtime):
             raise ValueError("Намеренная ошибка")
 
         factory = TabFactory(_make_ctx(), custom_factories={"plugins": bad_factory})

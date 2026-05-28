@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Вспомогательные фабрики для services-тестов (Task E.4).
+"""Вспомогательные фабрики для services-тестов (Task E.4, F.9).
 
 make_services_services() строит AppServices с реальным ServiceManagerFromRegistry
 поверх stub-реестра — это тестирует настоящий Protocol-путь (presenter делегирует
@@ -100,17 +100,9 @@ def make_services_services(
     )
 
 
-class _StubServicesCtx:
-    """Минимальный AppContext-стуб для ServicesTab.create() (без _DeprecatedExtrasDict)."""
-
-    def __init__(self, services: AppServices) -> None:
-        self.app_services = services
-
-
 __all__ = [
     "_FakeService",
     "_StubServiceEntry",
     "_StubServiceRegistry",
     "make_services_services",
-    "_StubServicesCtx",
 ]

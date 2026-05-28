@@ -1,10 +1,11 @@
 """test_displays_tab.py -- Unit-тесты DisplaysPresenter + DisplaysTab.create (MVP pattern).
 
 Phase F.3: тесты переписаны на DisplaySpec + DisplayCatalog Protocol (writable store).
+Phase F.9: create() принимает (AppServices, RuntimeDeps) — Q-F1=B.
 Паттерн: FakeDisplayCatalog из domain/tests/_fakes.py (не MagicMock).
 
 Покрытие:
-1. DisplaysTab.create(ctx) с AppServices — без исключений
+1. DisplaysTab.create(services) — без исключений
 2. isinstance(tab, IDisplaysView) -> True
 3. DisplaysTab получает store=services.displays (нет bridge _registry)
 4. presenter.load() -> view.refresh_list вызван
@@ -13,7 +14,7 @@ Phase F.3: тесты переписаны на DisplaySpec + DisplayCatalog Pro
 7. presenter.on_duplicate('main') -> в store появился 'main_copy'
 8. on_create с уже существующим id -> view.show_error вызван
 
-Refs: plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md Task F.3
+Refs: plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md Task F.3, F.9
 """
 
 from __future__ import annotations
@@ -95,18 +96,17 @@ def presenter(store: FakeDisplayCatalog, mock_view: MagicMock) -> DisplaysPresen
 
 
 # ---------------------------------------------------------------------------
-# Тест 1: DisplaysTab.create(ctx) с AppServices — без исключений
+# Тест 1: DisplaysTab.create(services) — без исключений
 # ---------------------------------------------------------------------------
 
 
 def test_create_with_app_services(qtbot):
-    """DisplaysTab.create(ctx) с AppServices DI — без исключений."""
+    """DisplaysTab.create(services) с AppServices DI — без исключений."""
     from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
 
-    from ._helpers import _StubDisplaysCtx, make_displays_services
+    from ._helpers import make_displays_services
 
-    ctx = _StubDisplaysCtx(make_displays_services())
-    tab = DisplaysTab.create(ctx)
+    tab = DisplaysTab.create(make_displays_services())
     qtbot.addWidget(tab)
 
     assert tab is not None
@@ -121,10 +121,9 @@ def test_is_idisplaysview(qtbot):
     """isinstance(tab, IDisplaysView) -> True (structural subtyping)."""
     from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
 
-    from ._helpers import _StubDisplaysCtx, make_displays_services
+    from ._helpers import make_displays_services
 
-    ctx = _StubDisplaysCtx(make_displays_services())
-    tab = DisplaysTab.create(ctx)
+    tab = DisplaysTab.create(make_displays_services())
     qtbot.addWidget(tab)
 
     assert isinstance(tab, IDisplaysView)
@@ -139,11 +138,10 @@ def test_create_wires_store_from_services(qtbot):
     """DisplaysTab использует services.displays как store (без bridge _registry)."""
     from multiprocess_prototype.frontend.widgets.tabs.displays.tab import DisplaysTab
 
-    from ._helpers import _StubDisplaysCtx, make_displays_services
+    from ._helpers import make_displays_services
 
     spec = _make_spec("cam1")
-    ctx = _StubDisplaysCtx(make_displays_services(specs={"cam1": spec}))
-    tab = DisplaysTab.create(ctx)
+    tab = DisplaysTab.create(make_displays_services(specs={"cam1": spec}))
     qtbot.addWidget(tab)
 
     # presenter.load() при init заполнил nav-список из services.displays

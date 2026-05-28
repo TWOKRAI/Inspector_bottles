@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
 from ._panels import AllProcessesPanel, SingleProcessPanel
@@ -33,7 +34,6 @@ from .presenter import ProcessesPresenter
 if TYPE_CHECKING:
     from PySide6.QtGui import QIcon
 
-    from multiprocess_prototype.frontend.app_context import AppContext
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
@@ -84,7 +84,7 @@ class ProcessesTab(BaseListNavTab):
 
         super().__init__(
             title="Процессы",
-            ctx=None,  # type: ignore[arg-type]  # BaseListNavTab legacy параметр (Phase F удалит)
+            ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             parent=parent,
         )
@@ -103,23 +103,22 @@ class ProcessesTab(BaseListNavTab):
         self._publish_all_panel_aliases()
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "ProcessesTab":
-        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "ProcessesTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        Runtime-зависимости (command_sender, topology_bridge, bindings) не покрыты
-        AppServices Protocol'ами — извлекаются из ctx как live-runtime bridge.
-        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        Runtime-зависимости (command_sender, topology_bridge, bindings) --
+        accepted: runtime layer, не AppServices.
         """
-        assert ctx.app_services is not None, (
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        # TODO Phase F: topology_bridge — runtime IPC, не покрыт AppServices Protocol
-        # (live-runtime aggregate Phase G). Доступ через accessor — deprecated.
         return cls(
-            ctx.app_services,
-            command_sender=ctx.command_sender,
-            topology_bridge=ctx.topology_bridge(),
-            bindings=ctx.bindings(),
+            services,
+            command_sender=runtime.command_sender,
+            topology_bridge=runtime.topology_bridge,
+            bindings=runtime.bindings,
         )
 
     # ------------------------------------------------------------------ #

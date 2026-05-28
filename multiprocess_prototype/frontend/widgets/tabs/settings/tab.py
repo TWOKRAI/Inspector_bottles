@@ -1,8 +1,8 @@
 """SettingsTab — таб «Настройки» (BaseTreeNavTab + 9 секций). ADR-126.
 
-Task D.5: мигрирован на AppServices DI. Принимает services: AppServices как
-основной параметр. auth_ctx передаётся отдельно — AuthContext содержит manager/state/audit,
-которые не покрыты AuthFacade Protocol (Phase E расширит Protocol).
+Task D.5: мигрирован на AppServices DI. Принимает services: AppServices.
+Task F.9: create() принимает (services, runtime: RuntimeDeps) — Q-F1=B.
+auth_ctx передаётся через RuntimeDeps.auth_ctx.
 """
 
 from __future__ import annotations
@@ -19,8 +19,9 @@ from multiprocess_prototype.domain.app_services import AppServices
 from ._sections import build_settings_sections
 from .presenter import SettingsPresenter
 
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
+
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
     from multiprocess_prototype.frontend.auth_context import AuthContext
 
 
@@ -31,10 +32,8 @@ def _layout_factory() -> DiffScrollTabLayout:
 class SettingsTab(BaseTreeNavTab):
     """Таб «Настройки» — 9 секций через BaseTreeNavTab.
 
-    Task D.5: принимает AppServices вместо AppContext. auth_ctx отдельно —
-    admin-панели используют AuthContext (manager+state+audit), которые выходят
-    за рамки минимального AuthFacade Protocol из domain. Phase E расширит
-    AuthFacade или введёт отдельный AdminAuthContext Protocol.
+    Task D.5: принимает AppServices вместо AppContext.
+    Task F.9: create(services, runtime) — Q-F1=B. auth_ctx через RuntimeDeps.
     """
 
     settings_saved = Signal(dict)
@@ -60,7 +59,7 @@ class SettingsTab(BaseTreeNavTab):
         super().__init__(
             title="Настройки",
             sections=build_settings_sections(services, auth_ctx=auth_ctx),
-            ctx=None,  # type: ignore[arg-type]  # BaseTreeNavTab legacy параметр
+            ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
             parent=parent,
@@ -86,18 +85,17 @@ class SettingsTab(BaseTreeNavTab):
         return cls(services, auth_ctx=auth_ctx)
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "SettingsTab":
-        """Адаптер для register_all_tabs() / TabFactory — принимает AppContext.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "SettingsTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        Task D.5: AppServices из ctx.app_services. auth_ctx из ctx.auth.
-        Если ctx.app_services is None — AssertionError с диагностикой.
-
-        Phase E заменит AppContext на AppServices напрямую в register_all_tabs().
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        auth_ctx берётся из runtime.auth_ctx.
         """
-        assert ctx.app_services is not None, (  # type: ignore[union-attr]
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        return cls(ctx.app_services, auth_ctx=ctx.auth)  # type: ignore[union-attr]
+        return cls(services, auth_ctx=runtime.auth_ctx)
 
     def _tree_object_name(self) -> str:
         return "SettingsTreeNav"

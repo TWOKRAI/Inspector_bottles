@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Вспомогательные фабрики для processes-тестов (Task E.2).
+"""Вспомогательные фабрики для processes-тестов (Task E.2, F.9).
 
 make_processes_services() — builder поверх make_test_app_services(),
 строит AppServices с заданной topology (через FakeTopologyRepository).
 
-_StubProcessesCtx — минимальный AppContext-стуб для теста create() bridge,
-без _DeprecatedExtrasDict (чтобы не эмитить DeprecationWarning).
+make_processes_runtime() — builder RuntimeDeps для тестов create().
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 from multiprocess_prototype.adapters.stores.topology_repository import (
     TopologyRepositoryFromHolder,
 )
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
@@ -68,30 +68,18 @@ def make_processes_services(
     )
 
 
-class _StubProcessesCtx:
-    """Минимальный AppContext-стуб для теста ProcessesTab.create().
-
-    Без _DeprecatedExtrasDict — обращения не эмитят DeprecationWarning.
-    """
-
-    def __init__(
-        self,
-        services: AppServices,
-        *,
-        command_sender: Any = None,
-        topology_bridge: Any = None,
-        bindings: Any = None,
-    ) -> None:
-        self.app_services = services
-        self.command_sender = command_sender
-        self._topology_bridge = topology_bridge
-        self._bindings = bindings
-
-    def topology_bridge(self) -> Any:
-        return self._topology_bridge
-
-    def bindings(self) -> Any:
-        return self._bindings
+def make_processes_runtime(
+    *,
+    command_sender: Any = None,
+    topology_bridge: Any = None,
+    bindings: Any = None,
+) -> RuntimeDeps:
+    """Создать RuntimeDeps для processes-тестов (Task F.9)."""
+    return RuntimeDeps(
+        command_sender=command_sender,
+        topology_bridge=topology_bridge,
+        bindings=bindings,
+    )
 
 
-__all__ = ["make_processes_services", "_StubProcessesCtx", "_DEFAULT_PROCESSES"]
+__all__ = ["make_processes_services", "make_processes_runtime", "_DEFAULT_PROCESSES"]

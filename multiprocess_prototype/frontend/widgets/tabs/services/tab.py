@@ -13,20 +13,17 @@ tree-навигация через ``BaseTreeNavTab``. Под родительс
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTreeNavTab
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
 
 from ._sections import build_services_sections
-
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
 
 
 def _layout_factory() -> DiffScrollTabLayout:
@@ -57,7 +54,7 @@ class ServicesTab(BaseTreeNavTab):
         super().__init__(
             title="Сервисы",
             sections=build_services_sections(services),
-            ctx=None,  # type: ignore[arg-type]  # BaseTreeNavTab legacy параметр (Phase F удалит)
+            ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
             parent=parent,
@@ -67,15 +64,17 @@ class ServicesTab(BaseTreeNavTab):
         self._connect_paths_signal()
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "ServicesTab":
-        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "ServicesTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        ServicesTab не использует runtime-зависимостей.
         """
-        assert ctx.app_services is not None, (
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        return cls(ctx.app_services)
+        return cls(services)
 
     def _tree_object_name(self) -> str:
         return "ServicesTreeNav"

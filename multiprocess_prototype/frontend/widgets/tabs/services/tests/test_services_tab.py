@@ -17,7 +17,6 @@ from multiprocess_prototype.frontend.widgets.tabs.services.tab import ServicesTa
 from ._helpers import (
     _FakeService,
     _StubServiceEntry,
-    _StubServicesCtx,
     make_services_services,
 )
 
@@ -73,7 +72,7 @@ class TestServicesTab:
     def test_create(self, qtbot):
         """ServicesTab.create() создаёт экземпляр без ошибок."""
         services = make_services_services(entries=[_StubServiceEntry("sql")])
-        tab = ServicesTab.create(_StubServicesCtx(services))
+        tab = ServicesTab.create(services)
         qtbot.addWidget(tab)
         assert tab is not None
 

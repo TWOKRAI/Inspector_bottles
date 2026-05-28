@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Вспомогательные фабрики для plugins-тестов (Task E.5).
+"""Вспомогательные фабрики для plugins-тестов (Task E.5, F.9).
 
 make_plugins_services() навешивает raw-объекты (PluginRegistry, RegistersManager,
 ServiceRegistry) на Fake-протоколы через bridge-атрибуты (_registry/_rm), т.к.
 PluginCatalog/ServiceManager/RegistersBackend Protocol'ы не покрывают rich API
 (plugin_class, register_classes, inputs/outputs, service entry status).
 
-plugin_manager — runtime-объект вне AppServices, передаётся explicit-параметром.
+plugin_manager — runtime-объект вне AppServices, передаётся через RuntimeDeps.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from multiprocess_prototype.domain.tests._fakes import (
     FakeServiceManager,
 )
 from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 
 
 def make_plugins_services(
@@ -58,15 +59,9 @@ def make_plugins_services(
     )
 
 
-class _StubPluginsCtx:
-    """Минимальный AppContext-стуб для PluginsTab.create() (без _DeprecatedExtrasDict)."""
-
-    def __init__(self, services: AppServices, *, plugin_manager: Any = None) -> None:
-        self.app_services = services
-        self._plugin_manager = plugin_manager
-
-    def plugin_manager(self) -> Any:
-        return self._plugin_manager
+def make_plugins_runtime(*, plugin_manager: Any = None) -> RuntimeDeps:
+    """Создать RuntimeDeps для plugins-тестов (Task F.9)."""
+    return RuntimeDeps(plugin_manager=plugin_manager)
 
 
-__all__ = ["make_plugins_services", "_StubPluginsCtx"]
+__all__ = ["make_plugins_services", "make_plugins_runtime"]

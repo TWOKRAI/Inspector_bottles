@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """PipelineTab — визуальный конструктор pipeline на едином columnar-шаблоне.
 
-Task E.1: мигрирован на AppServices DI. Принимает services: AppServices как
-основной параметр. create() принимает AppContext для TabFactory bridge (Phase F удалит).
+Task E.1: мигрирован на AppServices DI. Принимает services: AppServices.
+Task F.9: create(services, runtime) — Q-F1=B. AppContext bridge убран.
 
 3 колонки + мастер-скролл через ``DiffScrollTabLayout``:
 
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
@@ -44,8 +45,6 @@ from .presenter import PipelinePresenter
 
 if TYPE_CHECKING:
     from PySide6.QtCore import QPointF
-
-    from multiprocess_prototype.frontend.app_context import AppContext
 
 logger = logging.getLogger(__name__)
 
@@ -136,15 +135,17 @@ class PipelineTab(QWidget):
         self._load_palette()
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "PipelineTab":
-        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "PipelineTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        PipelineTab не использует runtime-зависимостей.
         """
-        assert ctx.app_services is not None, (
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        return cls(ctx.app_services)
+        return cls(services)
 
     # ------------------------------------------------------------------ #
     #  Build helpers                                                       #

@@ -1,11 +1,15 @@
 """TabFactory — фабрика табов с ленивой инициализацией, фильтрацией по permissions и заглушками.
 
 Использование:
-    factory = TabFactory(ctx, custom_factories={"settings": my_settings_factory})
+    factory = TabFactory(ctx, custom_factories=register_all_tabs())
     factory.create_tabs(tab_widget)
 
-custom_factories: dict[tab_id -> Callable[[AppContext], QWidget]]
+custom_factories: dict[tab_id -> Callable[[AppServices, RuntimeDeps], QWidget]]
     Если id отсутствует — создаётся PlaceholderTab.
+
+Task F.9: фабрики принимают (AppServices, RuntimeDeps) вместо AppContext.
+TabFactory по-прежнему хранит ctx для permission-фильтрации (ctx.auth.state),
+но при вызове фабрик собирает RuntimeDeps из ctx и передаёт services + runtime.
 
 Фильтрация по permissions:
     После создания всех табов фабрика читает `ctx.auth.state.access_context`
@@ -24,6 +28,7 @@ from typing import TYPE_CHECKING, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
+from .runtime_deps import RuntimeDeps
 from .widgets.tabs.placeholder import PlaceholderTab
 
 if TYPE_CHECKING:
@@ -147,11 +152,12 @@ class TabFactory:
     """Фабрика табов с поддержкой custom factories, ленивой инициализации и permissions.
 
     Args:
-        ctx: AppContext — DI-контейнер, передаётся в custom factory.
-            Если `ctx.auth` не None — фабрика подписывается на
-            `access_context_changed` и применяет видимость табов по
+        ctx: AppContext — используется для permission-фильтрации (ctx.auth.state)
+            и сборки RuntimeDeps. Если `ctx.auth` не None — фабрика подписывается
+            на `access_context_changed` и применяет видимость табов по
             `view_permission` каждой записи `TAB_ORDER`.
-        custom_factories: опциональный dict[tab_id -> factory(ctx) -> QWidget]
+        custom_factories: опциональный dict[tab_id -> factory(services, runtime) -> QWidget]
+            Task F.9: фабрики принимают (AppServices, RuntimeDeps), не AppContext.
             Если передан factory для tab_id, таб создаётся через LazyTabWidget.
             Иначе используется PlaceholderTab.
     """
@@ -167,6 +173,8 @@ class TabFactory:
         self._tab_widget: QTabWidget | None = None
         # Соответствие tab_id → индекс в QTabWidget (порядок TAB_ORDER)
         self._tab_index: dict[str, int] = {}
+        # RuntimeDeps собирается один раз из ctx (Q-F1=B)
+        self._runtime = self._build_runtime_deps()
 
     def create_tabs(self, tab_widget: QTabWidget) -> None:
         """Создать все табы согласно TAB_ORDER и добавить в QTabWidget.
@@ -180,6 +188,9 @@ class TabFactory:
         self._tab_widget = tab_widget
         self._tab_index = {}
 
+        services = self._ctx.app_services
+        runtime = self._runtime
+
         for tab_info in TAB_ORDER:
             tab_id = tab_info["id"]
             title = tab_info["title"]
@@ -187,7 +198,7 @@ class TabFactory:
             if tab_id in self._custom_factories:
                 # Ленивая инициализация: factory вызывается только при первом show
                 factory_fn = self._custom_factories[tab_id]
-                widget: QWidget = LazyTabWidget(lambda fn=factory_fn: fn(self._ctx))
+                widget: QWidget = LazyTabWidget(lambda fn=factory_fn, svc=services, rt=runtime: fn(svc, rt))
             else:
                 # Заглушка — создаётся сразу (лёгкий виджет)
                 widget = PlaceholderTab(
@@ -216,7 +227,7 @@ class TabFactory:
 
         if tab_id in self._custom_factories:
             try:
-                result = self._custom_factories[tab_id](self._ctx)
+                result = self._custom_factories[tab_id](self._ctx.app_services, self._runtime)
                 return result if result is not None else self._make_placeholder(tab_info)
             except Exception:
                 logger.exception("Ошибка создания таба %s", tab_id)
@@ -286,44 +297,17 @@ class TabFactory:
             description=tab_info.get("description", ""),
         )
 
+    def _build_runtime_deps(self) -> RuntimeDeps:
+        """Собрать RuntimeDeps из AppContext (Q-F1=B).
 
-# ---------------------------------------------------------------------------
-# Standalone factories — Task D.5 (Phase D), Task E.1 (Phase E)
-# ---------------------------------------------------------------------------
-
-
-def create_settings_tab(ctx: "AppContext") -> "QWidget":
-    """Создать SettingsTab из AppContext через AppServices DI (Task D.5).
-
-    Передаёт ctx.app_services в SettingsTab. auth_ctx берётся из ctx.auth.
-
-    Precondition: ctx.app_services не None (инициализирован в run_gui(),
-    TaskD.1). Если app_services is None — AssertionError с диагностикой.
-
-    Используется в custom_factories TabFactory:
-        factory = TabFactory(ctx, custom_factories={"settings": create_settings_tab})
-    """
-    from .widgets.tabs.settings.tab import SettingsTab
-
-    assert ctx.app_services is not None, (
-        "AppServices не инициализирован в ctx. "
-        "Убедитесь, что Task D.1 factory вызван в run_gui() до создания TabFactory."
-    )
-    return SettingsTab(ctx.app_services, auth_ctx=ctx.auth)
-
-
-def create_pipeline_tab(ctx: "AppContext") -> "QWidget":
-    """Создать PipelineTab из AppContext через AppServices DI (Task E.1).
-
-    Precondition: ctx.app_services не None (инициализирован в run_gui(), Task D.1).
-
-    Используется в custom_factories TabFactory:
-        factory = TabFactory(ctx, custom_factories={..., "pipeline": create_pipeline_tab})
-    """
-    from .widgets.tabs.pipeline.tab import PipelineTab
-
-    assert ctx.app_services is not None, (
-        "AppServices не инициализирован в ctx. "
-        "Убедитесь, что Task D.1 factory вызван в run_gui() до создания TabFactory."
-    )
-    return PipelineTab(ctx.app_services)
+        Вызывается один раз в __init__. Все runtime-accessor'ы AppContext
+        вызываются здесь и замораживаются в frozen dataclass.
+        """
+        ctx = self._ctx
+        return RuntimeDeps(
+            command_sender=getattr(ctx, "command_sender", None),
+            topology_bridge=ctx.topology_bridge() if hasattr(ctx, "topology_bridge") else None,
+            bindings=ctx.bindings() if hasattr(ctx, "bindings") else None,
+            plugin_manager=ctx.plugin_manager() if hasattr(ctx, "plugin_manager") else None,
+            auth_ctx=ctx.auth if hasattr(ctx, "auth") else None,
+        )

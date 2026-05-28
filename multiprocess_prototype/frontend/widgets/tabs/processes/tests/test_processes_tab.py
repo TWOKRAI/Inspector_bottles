@@ -12,7 +12,7 @@ from multiprocess_prototype.frontend.widgets.tabs.processes.data import (
     ProcessInfo,
 )
 
-from ._helpers import _StubProcessesCtx, make_processes_services
+from ._helpers import make_processes_services, make_processes_runtime
 
 
 def _cmd() -> MagicMock:
@@ -158,8 +158,8 @@ class TestProcessesPresenter:
 class TestProcessesTab:
     def test_create(self, qtbot):
         cmd = _cmd()
-        ctx = _StubProcessesCtx(make_processes_services(), command_sender=cmd)
-        tab = ProcessesTab.create(ctx)
+        runtime = make_processes_runtime(command_sender=cmd)
+        tab = ProcessesTab.create(make_processes_services(), runtime)
         qtbot.addWidget(tab)
         assert tab is not None
 

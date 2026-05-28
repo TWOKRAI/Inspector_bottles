@@ -20,7 +20,7 @@ from multiprocess_prototype.frontend.widgets.tabs.plugins.tab import PluginsTab
 from multiprocess_prototype.frontend.widgets.tabs.plugins.presenter import PluginsPresenter
 from multiprocess_prototype.frontend.widgets.tabs.plugins.detail_panels import PluginInfoCard
 
-from ._helpers import _StubPluginsCtx
+from ._helpers import make_plugins_runtime
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +171,7 @@ def _visible_leaf_keys(tab: PluginsTab) -> list[str]:
 
 class TestPluginsTab:
     def test_create(self, qtbot: pytest.fixture) -> None:
-        tab = PluginsTab.create(_StubPluginsCtx(_make_services()))
+        tab = PluginsTab.create(_make_services(), make_plugins_runtime())
         qtbot.addWidget(tab)
         assert tab is not None
 

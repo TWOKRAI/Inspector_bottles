@@ -47,6 +47,7 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs.nav_tree_utils 
 )
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
@@ -56,8 +57,6 @@ from .presenter import PluginsPresenter
 
 if TYPE_CHECKING:
     from typing import Any
-
-    from multiprocess_prototype.frontend.app_context import AppContext
 
 
 # Размеры колонок: nav шире в 1.5× по сравнению с Recipes/Processes/Services
@@ -104,7 +103,7 @@ class PluginsTab(BaseTreeNavTab):
         super().__init__(
             title="Плагины",
             sections=build_plugin_sections(services, plugin_manager=plugin_manager, open_sandbox_cb=self.open_sandbox),
-            ctx=None,  # type: ignore[arg-type]  # BaseTreeNavTab legacy параметр (Phase F удалит)
+            ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
             parent=parent,
@@ -140,17 +139,17 @@ class PluginsTab(BaseTreeNavTab):
                 catalog_updated.connect(self.refresh_catalog)
 
     @classmethod
-    def create(cls, ctx: "AppContext") -> "PluginsTab":
-        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+    def create(
+        cls,
+        services: AppServices,
+        runtime: RuntimeDeps = RuntimeDeps(),
+    ) -> "PluginsTab":
+        """Фабричный метод для register_all_tabs() / TabFactory.
 
-        plugin_manager (discovery/hot-reload) не входит в AppServices —
-        извлекается из ctx как runtime-зависимость. Phase F заменит AppContext.
+        Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
+        plugin_manager -- accepted: runtime layer, не AppServices.
         """
-        assert ctx.app_services is not None, (
-            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
-        )
-        # TODO Phase F: plugin_manager — runtime IPC, не покрыт AppServices Protocol.
-        return cls(ctx.app_services, plugin_manager=ctx.plugin_manager())
+        return cls(services, plugin_manager=runtime.plugin_manager)
 
     # ------------------------------------------------------------------ #
     #  Task 2.6 — обновление каталога после rescan                        #
