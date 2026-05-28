@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.registers_module import RegistersManager
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
     from multiprocess_prototype.frontend.state.auth_state import AuthState
-    from multiprocess_prototype.frontend.topology_holder import TopologyHolder
     from multiprocess_framework.modules.actions_module.bus import ActionBus
     from multiprocess_framework.modules.frontend_module.forms.form_context import FormContext
     from multiprocess_framework.modules.process_module.plugins.manager import PluginManager
@@ -96,13 +95,6 @@ class AppContext:
         Используется табами Phase 11 для undo/redo изменений параметров.
         """
         return self.extras.peek("action_bus")
-
-    def topology_holder(self) -> "TopologyHolder | None":
-        """Вернуть TopologyHolder из extras, если был создан в run_gui().
-
-        Содержит текущую topology dict с уведомлениями об изменении.
-        """
-        return self.extras.peek("topology_holder")
 
     def topology_bridge(self) -> "TopologyBridge | None":
         """Вернуть TopologyBridge из extras (Phase 12).

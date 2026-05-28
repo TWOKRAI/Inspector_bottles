@@ -19,10 +19,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
 from multiprocess_prototype.domain import AppServices, AddProcess
+from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 from multiprocess_prototype.frontend.app_context import AppContext, build_app_context
 from multiprocess_prototype.frontend.app_services_factory import build_app_services
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
 # ============================================================================
@@ -75,7 +76,7 @@ def _populated_ctx(tmp_path: Path) -> AppContext:
     """AppContext с заполнёнными extras — полный набор для build_app_services.
 
     Использует mock-объекты для всех реальных зависимостей.
-    TopologyHolder с минимальной валидной topology (пустые процессы/wires).
+    EventBus + TopologyRepositoryStore (G.3) с минимальной валидной topology.
     """
     process = _make_mock_process()
     ctx = build_app_context(process)
@@ -86,8 +87,10 @@ def _populated_ctx(tmp_path: Path) -> AppContext:
         "wires": [],
         "displays": [],
     }
-    topology_holder = TopologyHolder(topology_dict)
-    ctx.extras["topology_holder"] = topology_holder
+    # G.3: фабрика читает event_bus + topology_store из extras (создаются рано в app.py)
+    event_bus = FakeEventBus()
+    ctx.extras["event_bus"] = event_bus
+    ctx.extras["topology_store"] = TopologyRepositoryStore(topology_dict, events=event_bus)
 
     # PluginRegistry (mock _PluginRegistry)
     plugin_registry = MagicMock()
@@ -235,9 +238,16 @@ class TestFactoryFailsLoudly:
         with pytest.raises(RuntimeError, match="auth_state"):
             build_app_services(_populated_ctx)
 
-    def test_missing_topology_holder(self, _populated_ctx: AppContext) -> None:
-        """Без topology_holder — KeyError."""
-        del _populated_ctx.extras["topology_holder"]
+    def test_missing_topology_store(self, _populated_ctx: AppContext) -> None:
+        """Без topology_store — KeyError (G.3)."""
+        del _populated_ctx.extras["topology_store"]
+
+        with pytest.raises(KeyError):
+            build_app_services(_populated_ctx)
+
+    def test_missing_event_bus(self, _populated_ctx: AppContext) -> None:
+        """Без event_bus — KeyError (G.3)."""
+        del _populated_ctx.extras["event_bus"]
 
         with pytest.raises(KeyError):
             build_app_services(_populated_ctx)

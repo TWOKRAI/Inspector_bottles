@@ -14,8 +14,7 @@ Phase D подключил эти adapters к AppServices через DI-конт
 Границы импортов (enforced):
     - Разрешено: domain/, multiprocess_framework/modules/*, Services/*, Plugins/*
     - ЗАПРЕЩЕНО: PySide6/Qt
-    - ЗАПРЕЩЕНО: multiprocess_prototype.frontend.* (исключение: topology_holder.py
-      как bridge-объект в TopologyRepositoryFromHolder — задокументировано в decisions Q1 Phase C)
+    - ЗАПРЕЩЕНО: multiprocess_prototype.frontend.* (G.3: TopologyHolder-исключение закрыто)
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from .stores import (
     ConfigStoreFromManager,
     RecipeStoreFromManager,
     RegistersBackendFromManager,
-    TopologyRepositoryFromHolder,
+    TopologyRepositoryStore,
 )
 
 __all__ = [
@@ -39,7 +38,7 @@ __all__ = [
     "PluginCatalogFromRegistry",
     "ServiceManagerFromRegistry",
     "DisplayCatalogFromRegistry",
-    "TopologyRepositoryFromHolder",
+    "TopologyRepositoryStore",
     "RegistersBackendFromManager",
     "RecipeStoreFromManager",
     "ConfigStoreFromManager",

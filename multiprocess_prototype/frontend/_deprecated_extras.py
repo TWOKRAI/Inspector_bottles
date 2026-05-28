@@ -26,8 +26,7 @@ _DEPRECATED_KEYS_MAP: dict[str, str] = {
     "service_registry": "services",
     # DisplayCatalog
     "display_registry": "displays",
-    # TopologyRepository
-    "topology_holder": "topology",
+    # TopologyRepository (G.3: topology_holder удалён, store в extras["topology_store"])
     "topology_bridge": "topology",
     # CommandDispatcher
     "command_catalog": "commands",

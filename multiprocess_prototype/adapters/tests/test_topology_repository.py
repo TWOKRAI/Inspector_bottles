@@ -1,39 +1,36 @@
 # -*- coding: utf-8 -*-
 """
-adapters/tests/test_topology_repository.py — тесты для TopologyRepositoryFromHolder.
+adapters/tests/test_topology_repository.py — тесты для TopologyRepositoryStore.
 
-Покрывает: Task C.3 Phase C (bidirectional bridge domain.Topology <-> TopologyHolder).
+Покрывает Task G.3 (cross-tab-architecture): store владеет topology dict и
+публикует TopologyReplaced на каждую мутацию (save/set_topology). Заменил
+TopologyRepositoryFromHolder + TopologyHolder + suppress_legacy_notify.
 
-Acceptance criteria:
-- Adapter satisfies Protocol TopologyRepository.
-- Round-trip lossless (in-memory).
-- Legacy holder.on_changed callback продолжает работать по умолчанию.
-- suppress_legacy_notify() cm подавляет callbacks внутри блока, восстанавливает после.
-- Edge case: пустой holder → пустой Topology.
+Acceptance:
+- satisfies Protocol TopologyRepository (load/save).
+- round-trip lossless (in-memory).
+- save() и set_topology() публикуют TopologyReplaced (ровно один раз).
+- .topology property отдаёт текущий dict (для TopologyBridge).
+- пустой store → пустой Topology.
 
-Refs: plans/2026-05-27_cross-tab-architecture/phase-c-adapters.md (Task C.3)
+Refs: plans/2026-05-27_cross-tab-architecture/phase-g.md (Task G.3.1)
 """
 
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
-from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryFromHolder
+from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
 from multiprocess_prototype.domain.entities.topology import Topology
+from multiprocess_prototype.domain.events import TopologyReplaced
 from multiprocess_prototype.domain.protocols.topology_repository import TopologyRepository
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
-
-
-# ---------------------------------------------------------------------------
-# Вспомогательные фикстуры
-# ---------------------------------------------------------------------------
+from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 
 
 def _make_topology_dict() -> dict[str, Any]:
-    """Возвращает минимальный корректный dict для Topology с одним процессом и wire."""
+    """Минимальный корректный dict для Topology с одним процессом и wire."""
     return {
         "processes": [
             {
@@ -55,148 +52,96 @@ def _make_topology_dict() -> dict[str, Any]:
 
 @pytest.fixture
 def topology_dict() -> dict[str, Any]:
-    """Корректный topology dict для тестов."""
     return _make_topology_dict()
 
 
 @pytest.fixture
-def holder(topology_dict: dict[str, Any]) -> TopologyHolder:
-    """TopologyHolder с начальной topology."""
-    return TopologyHolder(initial=topology_dict)
+def events() -> FakeEventBus:
+    return FakeEventBus()
 
 
 @pytest.fixture
-def repo(holder: TopologyHolder) -> TopologyRepositoryFromHolder:
-    """Adapter поверх holder."""
-    return TopologyRepositoryFromHolder(holder=holder)
+def store(topology_dict: dict[str, Any], events: FakeEventBus) -> TopologyRepositoryStore:
+    return TopologyRepositoryStore(topology_dict, events=events)
 
 
 @pytest.fixture
-def empty_holder() -> TopologyHolder:
-    """Пустой holder без начальных данных."""
-    return TopologyHolder()
+def empty_store(events: FakeEventBus) -> TopologyRepositoryStore:
+    return TopologyRepositoryStore(None, events=events)
 
 
-@pytest.fixture
-def empty_repo(empty_holder: TopologyHolder) -> TopologyRepositoryFromHolder:
-    """Adapter поверх пустого holder."""
-    return TopologyRepositoryFromHolder(holder=empty_holder)
+# --- load ---
 
 
-# ---------------------------------------------------------------------------
-# Тест 1: load() возвращает Topology entity с правильными полями
-# ---------------------------------------------------------------------------
-
-
-def test_load_returns_topology_entity(holder: TopologyHolder, repo: TopologyRepositoryFromHolder) -> None:
-    """load() возвращает frozen domain.Topology с данными из holder."""
-    topology = repo.load()
+def test_load_returns_topology_entity(store: TopologyRepositoryStore) -> None:
+    """load() возвращает frozen domain.Topology с данными из store."""
+    topology = store.load()
 
     assert isinstance(topology, Topology)
-    # Topology frozen — попытка присвоить поле должна падать
-    with pytest.raises(Exception):  # pydantic frozen raises ValidationError или AttributeError
+    with pytest.raises(Exception):
         topology.processes = ()  # type: ignore[misc]
 
-    # Проверяем что процесс присутствует
     assert len(topology.processes) == 1
     assert topology.processes[0].process_name == "proc_a"
-
-    # Wire присутствует
     assert len(topology.wires) == 1
     assert topology.wires[0].source == "proc_a.out"
     assert topology.wires[0].target == "proc_b.in"
 
 
-# ---------------------------------------------------------------------------
-# Тест 2: save() пишет в holder
-# ---------------------------------------------------------------------------
+# --- save / set_topology ---
 
 
-def test_save_writes_to_holder(empty_holder: TopologyHolder, empty_repo: TopologyRepositoryFromHolder) -> None:
-    """save(topology) обновляет holder.topology через to_dict()."""
+def test_save_updates_topology_property(empty_store: TopologyRepositoryStore) -> None:
+    """save(topology) обновляет .topology через to_dict()."""
     topology = Topology.from_dict(_make_topology_dict())
 
-    empty_repo.save(topology)
+    empty_store.save(topology)
 
-    saved = empty_holder.topology
+    saved = empty_store.topology
     assert isinstance(saved, dict)
-    # Процесс должен быть в сохранённом dict
     assert any(p.get("process_name") == "proc_a" for p in saved.get("processes", []))
 
 
-# ---------------------------------------------------------------------------
-# Тест 3: round-trip lossless
-# ---------------------------------------------------------------------------
+def test_set_topology_updates_property(empty_store: TopologyRepositoryStore) -> None:
+    """set_topology(dict) (интерфейс ActionBus handlers) обновляет .topology."""
+    new_topo = _make_topology_dict()
+    empty_store.set_topology(new_topo)
+    assert empty_store.topology is new_topo
 
 
-def test_round_trip(repo: TopologyRepositoryFromHolder) -> None:
-    """save(t1); t2 = load() — сравнение dict идентично."""
-    t1 = repo.load()
-
-    repo.save(t1)
-    t2 = repo.load()
-
-    # Сравниваем через dict (Topology frozen, поля одинаковы)
+def test_round_trip(store: TopologyRepositoryStore) -> None:
+    """save(t1); t2 = load() — dict идентичен."""
+    t1 = store.load()
+    store.save(t1)
+    t2 = store.load()
     assert t1.to_dict() == t2.to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Тест 4: legacy on_changed callback вызывается при save()
-# ---------------------------------------------------------------------------
+# --- публикация TopologyReplaced ---
 
 
-def test_holder_callback_fires_on_save(
-    holder: TopologyHolder,
-    repo: TopologyRepositoryFromHolder,
-) -> None:
-    """holder.on_changed(cb) — cb вызывается при repo.save() с правильным dict."""
-    cb = MagicMock()
-    holder.on_changed(cb)
+def test_save_publishes_topology_replaced(store: TopologyRepositoryStore, events: FakeEventBus) -> None:
+    """save() публикует ровно одно TopologyReplaced."""
+    store.save(store.load())
 
-    topology = repo.load()
-    repo.save(topology)
-
-    cb.assert_called_once()
-    # Аргумент — dict с нашими данными
-    call_arg = cb.call_args[0][0]
-    assert isinstance(call_arg, dict)
-    assert any(p.get("process_name") == "proc_a" for p in call_arg.get("processes", []))
+    assert len(events.published) == 1
+    assert isinstance(events.published[0], TopologyReplaced)
 
 
-# ---------------------------------------------------------------------------
-# Тест 5: suppress_legacy_notify() подавляет callbacks внутри блока
-# ---------------------------------------------------------------------------
+def test_set_topology_publishes_topology_replaced(empty_store: TopologyRepositoryStore, events: FakeEventBus) -> None:
+    """set_topology() публикует ровно одно TopologyReplaced (для ActionBus-мутаций)."""
+    empty_store.set_topology(_make_topology_dict())
+
+    assert len(events.published) == 1
+    assert isinstance(events.published[0], TopologyReplaced)
 
 
-def test_suppress_legacy_notify_suppresses_callback(
-    holder: TopologyHolder,
-    repo: TopologyRepositoryFromHolder,
-) -> None:
-    """Внутри suppress_legacy_notify() — cb не вызывается; вне cm — вызывается."""
-    cb = MagicMock()
-    holder.on_changed(cb)
-
-    topology = repo.load()
-
-    # Внутри cm — callback НЕ должен вызываться
-    with repo.suppress_legacy_notify():
-        repo.save(topology)
-
-    cb.assert_not_called()
-
-    # После выхода из cm — callback ДОЛЖЕН вызываться снова
-    repo.save(topology)
-    cb.assert_called_once()
+# --- edge cases / protocol ---
 
 
-# ---------------------------------------------------------------------------
-# Тест 6: пустой holder → пустой Topology
-# ---------------------------------------------------------------------------
-
-
-def test_empty_holder_load_returns_empty_topology(empty_repo: TopologyRepositoryFromHolder) -> None:
-    """Пустой holder ({}) → load() возвращает Topology с пустыми коллекциями."""
-    topology = empty_repo.load()
+def test_empty_store_load_returns_empty_topology(empty_store: TopologyRepositoryStore) -> None:
+    """Пустой store (None) → load() возвращает Topology с пустыми коллекциями."""
+    topology = empty_store.load()
 
     assert isinstance(topology, Topology)
     assert topology.processes == ()
@@ -205,46 +150,10 @@ def test_empty_holder_load_returns_empty_topology(empty_repo: TopologyRepository
     assert topology.metadata == {}
 
 
-# ---------------------------------------------------------------------------
-# Тест 7: Protocol-совместимость (assignment check)
-# ---------------------------------------------------------------------------
+def test_satisfies_protocol(store: TopologyRepositoryStore) -> None:
+    """TopologyRepositoryStore удовлетворяет Protocol TopologyRepository."""
+    typed_repo: TopologyRepository = store  # type: ignore[assignment]
 
-
-def test_satisfies_protocol(repo: TopologyRepositoryFromHolder) -> None:
-    """TopologyRepositoryFromHolder удовлетворяет Protocol TopologyRepository."""
-    # Структурная проверка: assignment к Protocol-типизированной переменной
-    typed_repo: TopologyRepository = repo  # type: ignore[assignment] — проверяет наличие методов
-
-    # Убеждаемся что методы callable
     assert callable(typed_repo.load)
     assert callable(typed_repo.save)
-
-    # Функциональная проверка через Protocol
-    result = typed_repo.load()
-    assert isinstance(result, Topology)
-
-
-# ---------------------------------------------------------------------------
-# Тест 8: _suppress_notify сбрасывается после исключения внутри cm
-# ---------------------------------------------------------------------------
-
-
-def test_suppress_notify_restored_after_exception(
-    holder: TopologyHolder,
-    repo: TopologyRepositoryFromHolder,
-) -> None:
-    """_suppress_notify = False восстанавливается даже при исключении внутри cm."""
-    cb = MagicMock()
-    holder.on_changed(cb)
-    topology = repo.load()
-
-    with pytest.raises(RuntimeError):
-        with repo.suppress_legacy_notify():
-            raise RuntimeError("симуляция ошибки внутри cm")
-
-    # После исключения suppress должен быть снят
-    assert holder._suppress_notify is False
-
-    # И callbacks должны снова работать
-    repo.save(topology)
-    cb.assert_called_once()
+    assert isinstance(typed_repo.load(), Topology)

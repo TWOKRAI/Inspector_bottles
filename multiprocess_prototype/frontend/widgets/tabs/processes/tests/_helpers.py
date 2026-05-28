@@ -18,11 +18,11 @@ from multiprocess_prototype.domain.tests._fakes import (
     FakePluginCatalog,
 )
 from multiprocess_prototype.domain.tests.conftest import make_test_app_services
+from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 from multiprocess_prototype.adapters.stores.topology_repository import (
-    TopologyRepositoryFromHolder,
+    TopologyRepositoryStore,
 )
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
 _DEFAULT_PROCESSES: list[dict[str, Any]] = [
@@ -48,14 +48,14 @@ def make_processes_services(
             Передай [] для пустой topology.
         plugins: FakePluginCatalog (по умолчанию — пустой каталог).
         auth: FakeAuthFacade (по умолчанию — all_permissions=True).
-        use_holder: если True — обернуть через TopologyRepositoryFromHolder
-            (production-путь, проверяет совместимость holder ↔ domain).
+        use_holder: если True — использовать production TopologyRepositoryStore
+            (проверяет совместимость store ↔ domain).
     """
     procs = topology_processes if topology_processes is not None else _DEFAULT_PROCESSES
     topo_dict: dict[str, Any] = {"processes": procs}
 
     if use_holder:
-        topology_repo: Any = TopologyRepositoryFromHolder(TopologyHolder(topo_dict))
+        topology_repo: Any = TopologyRepositoryStore(topo_dict, events=FakeEventBus())
     else:
         from multiprocess_prototype.domain.tests._fakes import FakeTopologyRepository
 

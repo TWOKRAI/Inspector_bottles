@@ -49,12 +49,15 @@ class TestPhase15Smoke:
         from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
         from multiprocess_framework.modules.registers_module import RegistersManager
         from multiprocess_prototype.frontend.app_context import build_app_context
-        from multiprocess_prototype.frontend.topology_holder import TopologyHolder
+        from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
+        from multiprocess_prototype.frontend.qt_event_bus import QtEventBus
         from multiprocess_prototype.frontend.startup_checks import StartupChecker
         from multiprocess_prototype.registers.connection_map import ConnectionMap
-        from multiprocess_prototype.frontend.bridge.command_catalog import CommandCatalog
-        from multiprocess_prototype.frontend.bridge.command_validator import CommandValidator
-        from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
+        from multiprocess_prototype.frontend.bridge import (
+            CommandCatalog,
+            CommandValidator,
+            TopologyBridge,
+        )
         from multiprocess_prototype.frontend.actions.bus_factory import create_action_bus
         from multiprocess_prototype.frontend.windows.main_window import MainWindow
         from multiprocess_prototype.frontend.tab_factory import TabFactory
@@ -78,11 +81,13 @@ class TestPhase15Smoke:
         assert ctx is not None, "AppContext создан"
         assert ctx.command_sender is not None, "CommandSender инициализирован"
 
-        # 4. TopologyHolder — контейнер с уведомлениями
-        holder = TopologyHolder(topology_dict)
-        ctx.extras["topology_holder"] = holder
-        ctx.extras["topology"] = topology_dict
-        assert holder.topology is not None, "TopologyHolder содержит topology"
+        # 4. EventBus + TopologyRepositoryStore (G.3): store владеет topology dict
+        # и публикует TopologyReplaced (как в app.py composition root).
+        event_bus = QtEventBus()
+        topology_store = TopologyRepositoryStore(topology_dict, events=event_bus)
+        ctx.extras["event_bus"] = event_bus
+        ctx.extras["topology_store"] = topology_store
+        assert topology_store.topology is not None, "TopologyRepositoryStore содержит topology"
 
         # 5. StartupChecker — валидация topology + плагинов
         checker = StartupChecker()
@@ -104,13 +109,13 @@ class TestPhase15Smoke:
             command_catalog=catalog,
             command_validator=validator,
             registers_manager=rm,
-            topology_holder=holder,
+            topology_holder=topology_store,
         )
         ctx.extras["topology_bridge"] = bridge
         assert bridge is not None, "TopologyBridge создан"
 
         # 9. ActionBus — undo/redo шина
-        action_bus = create_action_bus(rm, holder, topology_bridge=bridge)
+        action_bus = create_action_bus(rm, topology_store, topology_bridge=bridge)
         ctx.extras["action_bus"] = action_bus
         assert action_bus is not None, "ActionBus создан"
         assert action_bus.can_undo() is False, "ActionBus пуст — undo недоступен"
@@ -145,14 +150,18 @@ class TestPhase15Smoke:
         assert report.ok, f"Ошибки: {report.errors}"
         assert len(report.errors) == 0
 
-    def test_topology_holder_callback(self, topology_dict):
-        """TopologyHolder вызывает callback при изменении."""
-        from multiprocess_prototype.frontend.topology_holder import TopologyHolder
+    def test_topology_store_publishes_on_change(self, topology_dict):
+        """TopologyRepositoryStore публикует TopologyReplaced при set_topology (G.3)."""
+        from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
+        from multiprocess_prototype.domain.events import TopologyReplaced
+        from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 
-        holder = TopologyHolder(topology_dict)
-        callback = MagicMock()
-        holder.on_changed(callback)
+        events = FakeEventBus()
+        store = TopologyRepositoryStore(topology_dict, events=events)
 
         new_topo = {**topology_dict, "name": "modified"}
-        holder.set_topology(new_topo)
-        callback.assert_called_once()
+        store.set_topology(new_topo)
+
+        assert store.topology == new_topo
+        assert len(events.published) == 1
+        assert isinstance(events.published[0], TopologyReplaced)

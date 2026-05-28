@@ -19,7 +19,6 @@ Refs: plans/2026-05-27_cross-tab-architecture/phase-c-adapters.md (Task C.6)
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -189,55 +188,51 @@ def test_dispatch_save_to_topology_repo(
 # ---------------------------------------------------------------------------
 
 
-def test_dispatch_calls_legacy_notify_too() -> None:
-    """dispatch -> topology_repo.save() триггерит legacy holder.on_changed (Q7).
+def test_dispatch_publishes_topology_replaced_too() -> None:
+    """dispatch -> topology_repo.save() публикует TopologyReplaced (G.3: store-publishes).
 
-    Используем реальный TopologyHolder + TopologyRepositoryFromHolder
-    для подтверждения двойной нотификации (legacy + EventBus).
+    Используем реальный TopologyRepositoryStore: store.save() публикует TopologyReplaced
+    на тот же EventBus, что и доменные команды (ProcessAdded). Бывший legacy
+    holder.on_changed удалён в G.3.
     """
     from multiprocess_prototype.adapters.stores.topology_repository import (
-        TopologyRepositoryFromHolder,
+        TopologyRepositoryStore,
     )
-    from multiprocess_prototype.frontend.topology_holder import TopologyHolder
+    from multiprocess_prototype.domain.events import TopologyReplaced
 
     # Начальный Project
     project = _make_project()
     holder = ProjectHolder(initial=project)
 
-    # Реальный TopologyHolder + adapter
-    topo_holder = TopologyHolder(initial=project.topology.to_dict())
-    repo = TopologyRepositoryFromHolder(holder=topo_holder)
-
-    # Legacy callback
-    cb = MagicMock()
-    topo_holder.on_changed(cb)
-
-    # EventBus
+    # EventBus — общий для store и dispatcher
     bus = EventBus()
-    published: list[ProjectEvent] = []
-    bus.subscribe(ProcessAdded, lambda ev: published.append(ev))
+    process_added: list[ProjectEvent] = []
+    topo_replaced: list[ProjectEvent] = []
+    bus.subscribe(ProcessAdded, lambda ev: process_added.append(ev))
+    bus.subscribe(TopologyReplaced, lambda ev: topo_replaced.append(ev))
 
-    # Orchestrator
+    # Реальный store публикует TopologyReplaced на этот же bus
+    store = TopologyRepositoryStore(project.topology.to_dict(), events=bus)
+
     dispatcher = CommandDispatcherOrchestrator(
         project_holder=holder,
-        topology_repo=repo,
+        topology_repo=store,
         event_bus=bus,
         apply_context_factory=_default_ctx_factory,
     )
 
     dispatcher.dispatch(AddProcess(process_name="worker"))
 
-    # Legacy callback вызван 1 раз
-    cb.assert_called_once()
-    call_arg = cb.call_args[0][0]
-    assert isinstance(call_arg, dict)
-    # Новый процесс в topology dict
-    proc_names = [p.get("process_name") for p in call_arg.get("processes", [])]
+    # store.save() опубликовал TopologyReplaced
+    assert len(topo_replaced) == 1
+    assert isinstance(topo_replaced[0], TopologyReplaced)
+    # Новый процесс в store.topology
+    proc_names = [p.get("process_name") for p in store.topology.get("processes", [])]
     assert "worker" in proc_names
 
-    # EventBus тоже получил событие (двойная нотификация)
-    assert len(published) == 1
-    assert published[0].process_name == "worker"
+    # Dispatcher также опубликовал доменное событие ProcessAdded
+    assert len(process_added) == 1
+    assert process_added[0].process_name == "worker"
 
 
 # ---------------------------------------------------------------------------

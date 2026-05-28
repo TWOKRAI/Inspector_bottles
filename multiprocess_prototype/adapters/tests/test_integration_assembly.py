@@ -39,7 +39,7 @@ from multiprocess_prototype.adapters import (
     RecipeStoreFromManager,
     RegistersBackendFromManager,
     ServiceManagerFromRegistry,
-    TopologyRepositoryFromHolder,
+    TopologyRepositoryStore,
 )
 from multiprocess_framework.modules.config_module.core.config import Config
 from multiprocess_prototype.domain.app_services import AppServices
@@ -48,7 +48,6 @@ from multiprocess_prototype.domain.entities.project import ApplyContext, Project
 from multiprocess_prototype.domain.entities.topology import Topology
 from multiprocess_prototype.domain.event_bus import EventBus
 from multiprocess_prototype.domain.events import ProcessAdded
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
 # =============================================================================
@@ -189,7 +188,7 @@ def _build_app_services(tmp_path: Path) -> AppServices:
     Стратегия:
         - Adapter'ы — НАСТОЯЩИЕ классы из Phase C.
         - Реестры — минимальные API-compatible fakes (см. выше).
-        - TopologyHolder — реальный (простой Python-объект, не QObject).
+        - TopologyRepositoryStore — реальный (владеет dict, публикует на EventBus).
         - EventBus — реальный.
         - ProjectHolder — реальный.
 
@@ -197,7 +196,6 @@ def _build_app_services(tmp_path: Path) -> AppServices:
         Собранный AppServices с реальными adapter'ами.
     """
     # --- Реальные helper-объекты ---
-    holder = TopologyHolder()  # реальный, не QObject
     event_bus = EventBus()  # реальный
 
     # --- 9 реальных adapter'ов (fakes только для реестров-зависимостей) ---
@@ -211,8 +209,8 @@ def _build_app_services(tmp_path: Path) -> AppServices:
     # 3. DisplayCatalogFromRegistry
     display_catalog = DisplayCatalogFromRegistry(_FakeDisplayRegistry())  # type: ignore[arg-type]
 
-    # 4. TopologyRepositoryFromHolder (реальный holder)
-    topology_repo = TopologyRepositoryFromHolder(holder)
+    # 4. TopologyRepositoryStore (реальный store, публикует на event_bus)
+    topology_repo = TopologyRepositoryStore({}, events=event_bus)
 
     # 5. RecipeStoreFromManager
     recipe_store = RecipeStoreFromManager(
@@ -297,7 +295,7 @@ def test_dispatch_add_process_end_to_end(tmp_path: Path) -> None:
 
     Проверяет полный цикл:
     1. dispatch(AddProcess("test")) → список событий содержит ProcessAdded.
-    2. topology.load() отражает новый процесс (ProjectHolder → TopologyHolder → load()).
+    2. topology.load() отражает новый процесс (ProjectHolder → TopologyRepositoryStore → load()).
     3. Пустой PluginCatalog — catalog-invariant пропускается (ApplyContext.plugins=None
        или пустой каталог не блокирует AddProcess без плагинов).
     """

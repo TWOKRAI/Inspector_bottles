@@ -1,85 +1,80 @@
 # -*- coding: utf-8 -*-
 """
-adapters/stores/topology_repository.py — bidirectional bridge domain.Topology <-> TopologyHolder.
+adapters/stores/topology_repository.py — TopologyRepositoryStore: единый источник topology.
 
-TopologyRepositoryFromHolder реализует Protocol TopologyRepository из domain/protocols/.
+TopologyRepositoryStore владеет текущим topology dict и реализует domain Protocol
+TopologyRepository (load/save). При каждой мутации публикует domain-событие
+TopologyReplaced через injected EventBus — подписчики (PipelinePresenter scene reload,
+TopologyBridge cache invalidation) реагируют через services.events, без прямого
+доступа к store.
 
-Решение Q1 (закрыто 2026-05-27): Project = source of truth в Phase D+.
-На уровне Phase C — bidirectional bridge без переноса state в Project.
-save() пишет в holder; legacy callbacks вызываются по умолчанию.
+Store объединяет роли бывшего TopologyHolder (mutable dict + уведомления) и
+domain-репозитория. Он удовлетворяет трём интерфейсам своих потребителей:
+  - domain TopologyRepository Protocol: load() -> Topology, save(Topology) -> None;
+  - framework TopologyHolderProtocol: set_topology(dict) -> None (ActionBus handlers);
+  - IBridgeTopologyHolder: .topology property (TopologyBridge reads).
 
-Решение Q6 (закрыто 2026-05-27): suppress_legacy_notify() cm реализуется здесь
-как toggle-флаг holder._suppress_notify — НЕ применяется по умолчанию.
-Dispatcher (C.6) вызывает save() штатно, двойная нотификация — осознанный компромисс Phase D/E.
-suppress_legacy_notify() активируется в Phase F после миграции всех подписчиков на EventBus.
+save() делегирует в set_topology() → ровно одна публикация TopologyReplaced на мутацию.
 
-Refs: plans/2026-05-27_cross-tab-architecture/phase-c-adapters.md (Task C.3)
+История (G.3, cross-tab-architecture): заменил TopologyRepositoryFromHolder +
+frontend.topology_holder.TopologyHolder + topology_events.wire_topology_events
+(publisher-мост) + suppress_legacy_notify. Adapters больше не импортируют frontend
+(закрыто Q1-исключение Phase C).
+
+Границы импортов: только domain (entities, events, protocols). frontend/Qt — запрещены.
+
+Refs: plans/2026-05-27_cross-tab-architecture/phase-g.md (Task G.3.1)
 """
 
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
 from multiprocess_prototype.domain.entities.topology import Topology
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
+from multiprocess_prototype.domain.events import TopologyReplaced
+
+if TYPE_CHECKING:
+    from multiprocess_prototype.domain.protocols.event_bus import EventBusProtocol
 
 
-class TopologyRepositoryFromHolder:
-    """Bidirectional bridge: domain.Topology <-> runtime TopologyHolder.
+class TopologyRepositoryStore:
+    """Источник истины topology: владеет dict, публикует TopologyReplaced на мутацию.
 
-    Phase C+D: legacy holder.on_changed callbacks вызываются при save() по умолчанию.
-    Это осознанный компромисс (двойная нотификация legacy + EventBus) — подробнее
-    в decisions log Q7 Phase C.
-
-    Phase F: suppress_legacy_notify() активируется после миграции всех подписчиков
-    holder.on_changed на чистый EventBus, после чего holder может быть удалён.
-
-    Известный компромисс: adapter импортирует frontend.topology_holder напрямую.
-    Это исключение из правила «adapters не импортируют frontend», зафиксированное
-    в decisions log Q1. Holder является bridge-объектом между GUI-слоем и domain.
-    Удаление зависимости — Phase F.
+    Thread-safety: НЕ потокобезопасен — вызывать только из Qt main thread
+    (QtEventBus публикует синхронно на main thread).
     """
 
-    def __init__(self, holder: TopologyHolder) -> None:
-        self._holder = holder
+    def __init__(self, initial: dict[str, Any] | None, events: "EventBusProtocol") -> None:
+        """Args:
+        initial: начальный topology dict (например, из blueprint). None → пустой.
+        events: EventBus для публикации TopologyReplaced при мутациях.
+        """
+        self._topology: dict[str, Any] = initial or {}
+        self._events = events
+
+    @property
+    def topology(self) -> dict[str, Any]:
+        """Текущий topology dict (ссылка, не копия — для IPC-чтений TopologyBridge)."""
+        return self._topology
 
     def load(self) -> Topology:
-        """Загрузить текущую топологию из holder и вернуть как domain entity.
-
-        Если holder пустой ({}), возвращает Topology с пустыми коллекциями.
-        """
-        return Topology.from_dict(self._holder.topology)
+        """Загрузить текущую топологию как domain entity (пустой dict → пустая Topology)."""
+        return Topology.from_dict(self._topology)
 
     def save(self, topology: Topology) -> None:
-        """Сохранить domain Topology в holder, что триггерит legacy on_changed callbacks.
+        """Сохранить domain Topology. Публикует TopologyReplaced (через set_topology)."""
+        self.set_topology(topology.to_dict())
 
-        По умолчанию callbacks вызываются. Для подавления callbacks
-        использовать suppress_legacy_notify() context manager.
+    def set_topology(self, new_topology: dict[str, Any]) -> None:
+        """Заменить topology dict и опубликовать TopologyReplaced.
+
+        Интерфейс для framework TopologyHolderProtocol (ActionBus handlers) —
+        принимает raw dict, возвращает None. Публикация синхронна на main thread.
         """
-        self._holder.set_topology(topology.to_dict())
+        self._topology = new_topology
+        self._events.publish(TopologyReplaced(reason="topology_changed"))
 
-    @contextlib.contextmanager
-    def suppress_legacy_notify(self) -> Iterator[None]:
-        """Временная мера до Phase F: подавить legacy holder.on_changed callbacks.
 
-        Используется когда нужно записать топологию в holder без
-        триггера UI-обновлений (например, при синхронизации из EventBus,
-        чтобы избежать двойного обновления).
-
-        Recursive use не поддерживается (single-thread Qt GUI предположение).
-        Подавление снимается автоматически при выходе из блока with.
-
-        Usage::
-
-            with repo.suppress_legacy_notify():
-                repo.save(new_topology)  # callbacks подавлены
-            # после выхода callbacks работают нормально
-
-        Refs: decisions log Q6/Q7, Phase C.
-        """
-        self._holder._suppress_notify = True
-        try:
-            yield
-        finally:
-            self._holder._suppress_notify = False
+__all__ = [
+    "TopologyRepositoryStore",
+]

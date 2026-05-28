@@ -1,4 +1,5 @@
 """RecipeApplyHandler — apply/revert замены topology при применении рецепта."""
+
 from __future__ import annotations
 
 import logging
@@ -6,20 +7,20 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.actions_module.schemas import Action
-    from multiprocess_prototype.frontend.topology_holder import TopologyHolder
+    from multiprocess_prototype.adapters import TopologyRepositoryStore
 
 logger = logging.getLogger(__name__)
 
 
 class RecipeApplyHandler:
-    """Обработчик recipe_apply: заменяет topology через TopologyHolder.
+    """Обработчик recipe_apply: заменяет topology через TopologyRepositoryStore.
 
     apply: устанавливает topology из forward_patch.
     revert: восстанавливает topology из backward_patch (undo).
     """
 
-    def __init__(self, topology_holder: "TopologyHolder") -> None:
-        self._holder = topology_holder
+    def __init__(self, topology_store: "TopologyRepositoryStore") -> None:
+        self._holder = topology_store
 
     def apply(self, action: "Action", rm: Any) -> None:
         """Применить topology из рецепта (forward_patch)."""

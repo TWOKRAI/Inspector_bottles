@@ -12,8 +12,9 @@ from multiprocess_prototype.frontend.actions import (
     V2ActionBuilder,
     create_action_bus,
 )
+from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
+from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 from multiprocess_prototype.frontend.actions.action_types import FIELD_SET, RECIPE_APPLY
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
 # ---------------------------------------------------------------------------
@@ -44,13 +45,13 @@ def rm() -> FakeRM:
 
 
 @pytest.fixture
-def holder() -> TopologyHolder:
-    """TopologyHolder с пустой topology."""
-    return TopologyHolder(initial={})
+def holder() -> TopologyRepositoryStore:
+    """TopologyRepositoryStore с пустой topology (G.3 заменил TopologyHolder)."""
+    return TopologyRepositoryStore({}, events=FakeEventBus())
 
 
 @pytest.fixture
-def bus(rm: FakeRM, holder: TopologyHolder) -> ActionBus:
+def bus(rm: FakeRM, holder: TopologyRepositoryStore) -> ActionBus:
     """ActionBus v2 с обоими handlers."""
     return create_action_bus(rm, holder)
 
@@ -135,7 +136,7 @@ class TestActionBusBasicOps:
 
 
 class TestActionBusHistory:
-    def test_max_history_50(self, rm: FakeRM, holder: TopologyHolder) -> None:
+    def test_max_history_50(self, rm: FakeRM, holder: TopologyRepositoryStore) -> None:
         """Стек undo не превышает 50 элементов при max_history=50."""
         bus = create_action_bus(rm, holder, max_history=50)
 
@@ -162,7 +163,7 @@ class TestRecipeApplyUndo:
         self,
         bus: ActionBus,
         rm: FakeRM,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """undo recipe_apply восстанавливает предыдущую topology."""
         prev_topo = {"processes": [], "version": 1}
@@ -180,7 +181,7 @@ class TestRecipeApplyUndo:
         self,
         bus: ActionBus,
         rm: FakeRM,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """redo после undo recipe_apply повторно применяет новую topology."""
         prev_topo = {"processes": []}
@@ -263,18 +264,18 @@ class TestCoalescing:
 
 
 class TestBusFactory:
-    def test_bus_factory_creates_with_handlers(self, rm: FakeRM, holder: TopologyHolder) -> None:
+    def test_bus_factory_creates_with_handlers(self, rm: FakeRM, holder: TopologyRepositoryStore) -> None:
         """create_action_bus регистрирует handlers для field_set и recipe_apply."""
         bus = create_action_bus(rm, holder)
         assert FIELD_SET in bus._handlers
         assert RECIPE_APPLY in bus._handlers
 
-    def test_bus_factory_default_max_history_50(self, rm: FakeRM, holder: TopologyHolder) -> None:
+    def test_bus_factory_default_max_history_50(self, rm: FakeRM, holder: TopologyRepositoryStore) -> None:
         """create_action_bus устанавливает max_history=50 по умолчанию."""
         bus = create_action_bus(rm, holder)
         assert bus._max_history == 50
 
-    def test_bus_factory_custom_max_history(self, rm: FakeRM, holder: TopologyHolder) -> None:
+    def test_bus_factory_custom_max_history(self, rm: FakeRM, holder: TopologyRepositoryStore) -> None:
         """create_action_bus принимает кастомный max_history."""
         bus = create_action_bus(rm, holder, max_history=100)
         assert bus._max_history == 100

@@ -41,9 +41,7 @@ from multiprocess_prototype.adapters import (
     RecipeStoreFromManager,
     RegistersBackendFromManager,
     ServiceManagerFromRegistry,
-    TopologyRepositoryFromHolder,
 )
-from multiprocess_prototype.frontend.qt_event_bus import QtEventBus
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.app_context import AppContext
@@ -58,10 +56,10 @@ def build_app_services(ctx: "AppContext") -> AppServices:
     """Собрать AppServices из заполнённого AppContext.
 
     Pre:
-      - ctx.extras заполнен (plugin_registry, registers_manager,
-        service_registry, display_registry, topology_holder,
+      - ctx.extras заполнен (event_bus, topology_store, plugin_registry,
+        registers_manager, service_registry, display_registry,
         recipe_manager, auth_state).
-      - QApplication создан (для QtEventBus).
+      - QApplication создан (для QtEventBus, создаётся в app.py).
 
     Post:
       - Возвращает frozen AppServices с 10 не-None полями.
@@ -73,16 +71,16 @@ def build_app_services(ctx: "AppContext") -> AppServices:
     # 1. Lazy регистрация domain schemas в SchemaRegistry (Q3 closed)
     register_domain_schemas()
 
-    # 2. Qt-aware EventBus (Task D.2)
-    bus = QtEventBus()
+    # 2. EventBus и TopologyRepositoryStore создаются рано в run_gui (app.py) —
+    # store публикует TopologyReplaced на этот же bus (G.3). Фабрика читает оба из extras.
+    # peek_required/peek — тихое bridge-чтение: фабрика СТРОИТ AppServices из extras
+    # (Task F.7). Прямой ctx.extras[...] из потребителей остаётся deprecated → error.
+    bus = ctx.extras.peek_required("event_bus")
 
-    # 3. Adapter'ы — 10 штук
+    # 3. Adapter'ы
 
-    # TopologyRepository: bidirectional bridge domain.Topology <-> TopologyHolder
-    # peek_required/peek — тихое bridge-чтение: фабрика СТРОИТ AppServices из extras,
-    # поэтому читает мигрированные ключи легитимно (Task F.7). Прямой ctx.extras[...]
-    # из потребителей остаётся deprecated → error.
-    topology_repo = TopologyRepositoryFromHolder(ctx.extras.peek_required("topology_holder"))
+    # TopologyRepository: источник истины topology (владеет dict, публикует TopologyReplaced)
+    topology_repo = ctx.extras.peek_required("topology_store")
 
     # PluginCatalog: read-only реестр плагинов
     plugins = PluginCatalogFromRegistry(ctx.extras.peek_required("plugin_registry"))

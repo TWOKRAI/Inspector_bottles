@@ -140,13 +140,11 @@ reason = "старые draft-папки hikvision удалены, framework не
 
 # Adapter-слой (Phase C cross-tab refactor) — UI-agnostic
 # Adapter'ы не должны импортировать frontend-виджеты (PySide6/Qt).
-# Исключение — topology_holder.py как bridge-объект, задокументировано
-# в decisions Q1 Phase C (будет удалено в Phase F после миграции legacy
-# holder.on_changed подписчиков на EventBus).
+# G.3: TopologyHolder удалён, adapters больше не импортируют frontend (Q1-исключение закрыто).
 [[boundaries]]
 from   = "multiprocess_prototype/adapters/*"
 to     = "multiprocess_prototype/frontend/widgets*"
-reason = "adapters не импортируют Qt-виджеты (UI-agnostic). TopologyHolder-исключение задокументировано в decisions Q1."
+reason = "adapters не импортируют Qt-виджеты (UI-agnostic)."
 
 [[boundaries]]
 from   = "multiprocess_prototype/adapters/*"

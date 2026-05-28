@@ -1,4 +1,5 @@
 """Тесты FieldSetHandler и RecipeApplyHandler (Phase 11)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,14 +7,16 @@ from typing import Any
 import pytest
 
 from multiprocess_framework.modules.actions_module.schemas import Action
+from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
+from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 from multiprocess_prototype.frontend.actions.handlers.field_set_handler import FieldSetHandler
 from multiprocess_prototype.frontend.actions.handlers.recipe_handler import RecipeApplyHandler
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательный FakeRM (заменяет RegistersManager)
 # ---------------------------------------------------------------------------
+
 
 class FakeRM:
     """Минимальный stub RegistersManager для тестов handlers."""
@@ -35,6 +38,7 @@ class FakeRM:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def rm() -> FakeRM:
     """Чистый FakeRM для каждого теста."""
@@ -48,20 +52,27 @@ def field_set_handler() -> FieldSetHandler:
 
 
 @pytest.fixture
-def holder() -> TopologyHolder:
-    """TopologyHolder с пустой начальной topology."""
-    return TopologyHolder(initial={})
+def events() -> FakeEventBus:
+    """FakeEventBus для проверки публикации TopologyReplaced."""
+    return FakeEventBus()
 
 
 @pytest.fixture
-def recipe_handler(holder: TopologyHolder) -> RecipeApplyHandler:
-    """RecipeApplyHandler, привязанный к holder."""
+def holder(events: FakeEventBus) -> TopologyRepositoryStore:
+    """TopologyRepositoryStore с пустой начальной topology (G.3 заменил TopologyHolder)."""
+    return TopologyRepositoryStore({}, events=events)
+
+
+@pytest.fixture
+def recipe_handler(holder: TopologyRepositoryStore) -> RecipeApplyHandler:
+    """RecipeApplyHandler, привязанный к store."""
     return RecipeApplyHandler(holder)
 
 
 # ---------------------------------------------------------------------------
 # Тесты FieldSetHandler
 # ---------------------------------------------------------------------------
+
 
 class TestFieldSetHandler:
     def test_field_set_handler_apply(self, field_set_handler: FieldSetHandler, rm: FakeRM) -> None:
@@ -137,11 +148,12 @@ class TestFieldSetHandler:
 # Тесты RecipeApplyHandler
 # ---------------------------------------------------------------------------
 
+
 class TestRecipeApplyHandler:
     def test_recipe_handler_apply_sets_topology(
         self,
         recipe_handler: RecipeApplyHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
         rm: FakeRM,
     ) -> None:
         """apply устанавливает topology из forward_patch в TopologyHolder."""
@@ -157,7 +169,7 @@ class TestRecipeApplyHandler:
     def test_recipe_handler_revert_restores_topology(
         self,
         recipe_handler: RecipeApplyHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
         rm: FakeRM,
     ) -> None:
         """revert восстанавливает предыдущую topology из backward_patch."""
@@ -176,7 +188,7 @@ class TestRecipeApplyHandler:
     def test_recipe_handler_apply_empty_topology_skipped(
         self,
         recipe_handler: RecipeApplyHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
         rm: FakeRM,
     ) -> None:
         """apply с пустой topology в forward_patch не меняет holder."""
@@ -192,15 +204,15 @@ class TestRecipeApplyHandler:
         # topology не должна измениться
         assert holder.topology == old_topo
 
-    def test_recipe_handler_apply_notifies_callbacks(
+    def test_recipe_handler_apply_publishes_topology_replaced(
         self,
         recipe_handler: RecipeApplyHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
+        events: FakeEventBus,
         rm: FakeRM,
     ) -> None:
-        """apply вызывает callbacks TopologyHolder при смене topology."""
-        received: list[dict] = []
-        holder.on_changed(received.append)
+        """apply публикует TopologyReplaced (G.3: store вместо holder.on_changed)."""
+        from multiprocess_prototype.domain.events import TopologyReplaced
 
         new_topo = {"processes": [{"name": "p1"}]}
         action = Action(
@@ -209,5 +221,7 @@ class TestRecipeApplyHandler:
             backward_patch={"topology": {}},
         )
         recipe_handler.apply(action, rm)
-        assert len(received) == 1
-        assert received[0] == new_topo
+
+        assert holder.topology == new_topo
+        assert len(events.published) == 1
+        assert isinstance(events.published[0], TopologyReplaced)

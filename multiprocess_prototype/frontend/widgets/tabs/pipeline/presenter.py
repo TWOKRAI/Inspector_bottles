@@ -44,7 +44,7 @@ class PipelinePresenter:
     - PipelineModel (SSOT) — все мутации через модель
     - ActionBus — undo/redo для всех операций
     - GraphScene — визуализация
-    - TopologyHolder — синхронизация с runtime
+    - services.topology (TopologyRepository) — load/save + TopologyReplaced events
     - TopologyBridge — IPC (опционально)
     """
 

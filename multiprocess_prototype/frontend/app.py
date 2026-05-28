@@ -161,10 +161,15 @@ def run_gui(process: "GuiProcess") -> None:
         )
     ctx.extras["display_registry"] = _display_registry
 
-    # 3a. Загрузить topology для GUI и создать TopologyHolder
+    # 3a. Загрузить topology для GUI + создать EventBus и TopologyRepositoryStore (G.3).
+    # Store владеет topology dict и публикует TopologyReplaced на каждую мутацию.
+    # EventBus создаётся рано (QApplication уже есть, app.py:54) — на него подписываются
+    # PipelinePresenter (scene reload) и TopologyBridge (cache). build_app_services читает
+    # event_bus + topology_store из extras (не создаёт их повторно).
     import yaml as _yaml
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
-    from .topology_holder import TopologyHolder
+    from multiprocess_prototype.adapters import TopologyRepositoryStore
+    from .qt_event_bus import QtEventBus
 
     try:
         _topology_dict = _yaml.safe_load(DEFAULT_BLUEPRINT.read_text(encoding="utf-8"))
@@ -172,8 +177,10 @@ def run_gui(process: "GuiProcess") -> None:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
         _topology_dict = {}
 
-    topology_holder = TopologyHolder(_topology_dict)
-    ctx.extras["topology_holder"] = topology_holder
+    event_bus = QtEventBus()
+    topology_store = TopologyRepositoryStore(_topology_dict, events=event_bus)
+    ctx.extras["event_bus"] = event_bus
+    ctx.extras["topology_store"] = topology_store
 
     # 3a.1. Startup validation
     from .startup_checks import StartupChecker
@@ -214,7 +221,7 @@ def run_gui(process: "GuiProcess") -> None:
         command_catalog=command_catalog,
         command_validator=command_validator,
         registers_manager=registers_manager,
-        topology_holder=topology_holder,
+        topology_holder=topology_store,
     )
 
     ctx.extras["command_catalog"] = command_catalog
@@ -406,7 +413,7 @@ def run_gui(process: "GuiProcess") -> None:
 
     action_bus = create_action_bus(
         registers_manager,
-        topology_holder,
+        topology_store,
         topology_bridge=topology_bridge,
         auth_state=_auth_state,
         auth_manager=_auth_manager,
@@ -430,17 +437,13 @@ def run_gui(process: "GuiProcess") -> None:
         traceback.print_exc()
         sys.exit(1)
 
-    # 3h.1. G.1: typed EventBus вместо legacy holder.on_changed broadcast.
-    # Publisher-мост: любая замена topology (включая ActionBus-мутации через
-    # holder.set_topology) публикует TopologyReplaced. Подписчики работают через
-    # services.events, без прямого доступа к holder:
-    #   - PipelinePresenter (G.1.1) — полный scene reload,
-    #   - TopologyBridge (G.1.2) — инвалидация IPC cache.
-    # После G.1.1+G.1.2 единственный holder.on_changed-подписчик = publisher-мост,
-    # что разблокирует удаление holder в G.3. Обвязка — в topology_events (тестируема).
-    from .topology_events import wire_topology_events
+    # 3h.1. G.3: TopologyRepositoryStore сам публикует TopologyReplaced на каждую
+    # мутацию (set_topology/save) — отдельный publisher-мост (G.1) больше не нужен.
+    # PipelinePresenter подписывается на TopologyReplaced в своём __init__ (scene reload).
+    # Здесь — единственная оставшаяся обвязка: TopologyBridge инвалидирует IPC-кэш.
+    from multiprocess_prototype.domain.events import TopologyReplaced
 
-    wire_topology_events(topology_holder, ctx.app_services.events, topology_bridge)
+    event_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())
 
     # 4. Создать MainWindow
     window = MainWindow()

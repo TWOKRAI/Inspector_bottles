@@ -9,17 +9,16 @@ CommandDispatcherOrchestrator реализует Protocol CommandDispatcher из
     1. project = holder.get()
     2. ctx = apply_context_factory() -- динамический ApplyContext (новый каждый вызов)
     3. new_project, events = project.apply(command, catalogs=ctx)
-    4. topology_repo.save(new_project.topology) -- legacy callbacks вызываются (Q7)
+    4. topology_repo.save(new_project.topology) -- store публикует TopologyReplaced (G.3)
     5. holder.set(new_project)
     6. for ev in events: event_bus.publish(ev)
     7. return events
 
-Q7 (user-confirmed): suppress_legacy_notify НЕ используется по умолчанию.
-Двойная нотификация (legacy holder.on_changed + EventBus) -- осознанный временный
-компромисс на Phase D/E. Suppression активируется только в Phase F после
-миграции всех подписчиков на EventBus.
+G.3: topology_repo.save() публикует TopologyReplaced на тот же EventBus, что и
+доменные события из шага 6. Бывший legacy holder.on_changed + suppress_legacy_notify
+удалены вместе с TopologyHolder.
 
-Q1: Project = source of truth (ProjectHolder), TopologyHolder = derived store.
+Q1: Project = source of truth (ProjectHolder), topology_repo = derived store.
 
 DomainError: если Project.apply() бросает DomainError, orchestrator пробрасывает
 без изменений. holder и topology_repo остаются в предыдущем состоянии (implicit
@@ -50,12 +49,10 @@ class CommandDispatcherOrchestrator:
     Единая точка входа для presenter'ов Phase E: отправил команду, получил
     список событий. Project.apply() остаётся чистой функцией без side effects.
 
-    Q7 (user-confirmed): suppress_legacy_notify НЕ используется по умолчанию.
-    Двойная нотификация (legacy holder.on_changed + EventBus) -- осознанный
-    временный компромисс на Phase D/E. Suppression активируется только в Phase F
-    после миграции всех подписчиков на EventBus.
+    G.3: topology_repo.save() публикует TopologyReplaced (store-publishes); бывший
+    legacy holder.on_changed + suppress_legacy_notify удалены вместе с TopologyHolder.
 
-    Q1: Project = source of truth (ProjectHolder), TopologyHolder = derived store.
+    Q1: Project = source of truth (ProjectHolder), topology_repo = derived store.
     """
 
     def __init__(
@@ -77,7 +74,7 @@ class CommandDispatcherOrchestrator:
             command -- элемент ProjectCommand union.
         Post:
             - Project в holder обновлён.
-            - Topology записана в topology_repo (legacy callbacks вызваны).
+            - Topology записана в topology_repo (store публикует TopologyReplaced).
             - Все события опубликованы через EventBus.
             - Возвращает список опубликованных событий.
         Raises:
@@ -94,7 +91,7 @@ class CommandDispatcherOrchestrator:
         #    Если бросит -- steps 4-6 не выполняются (implicit rollback)
         new_project, events = current.apply(command, catalogs=ctx)
 
-        # 4. Пишем topology в derived store (legacy callbacks вызываются -- Q7)
+        # 4. Пишем topology в derived store (store публикует TopologyReplaced -- G.3)
         self._topology_repo.save(new_project.topology)
 
         # 5. Обновляем Project в holder (source of truth -- Q1)

@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (G.1.1 `75a6c41f` + G.1.2), G.2 DONE (премиса исправлена: RuntimeDeps, не Protocol; reviewer APPROVED); G.3–G.6 NOT DETAILED.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); G.4–G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -96,7 +96,7 @@ G.1 typed events (ФУНДАМЕНТ) ──┬──> G.3 holder removal ──
 | **G.0** | Quick-wins: RecipeEngine.deactivate(), удаление dead AdministrationSection, переквалификация 16 TODO, документирование bindings/RuntimeDeps | S (~10 файлов, мелкие) | — | **DONE** (`ffeca3ba`) |
 | **G.1** | Typed events в production: PipelinePresenter + TopologyBridge на EventBus (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | **DONE** (G.1.1 `75a6c41f` + G.1.2) |
 | **G.2** | RegistersManager → RuntimeDeps (Q-F1=B): убрать 3 `_rm` getattr. **NB:** не «расширить Protocol» (domain не может FieldInfo) — provide RegistersManager как runtime-dep | M (8 prod + 3 test) | — | **DONE** (reviewer APPROVED) |
-| **G.3** | holder removal: активировать suppress_legacy_notify (F.1) / редуцировать-удалить TopologyHolder | M (3-4) | G.1 | NOT DETAILED |
+| **G.3** | TopologyHolder removal → TopologyRepositoryStore (Design 2, store-publishes TopologyReplaced). suppress_legacy_notify оказался мёртв → удалён | **L (28 файлов)** | G.1 | **DONE** (reviewer APPROVED) |
 | **G.4** | ActionBus→domain commands: 11 call-sites + undo/redo поверх domain + register→domain mapping | **L (15-20)** | G.1, G.2, G.3 | NOT DETAILED (+audit-like подготовка) |
 | **G.5** | AppContext removal: отвязать TabFactory/sections/factory от ctx, удалить AppContext + `_deprecated_extras` | M (5-7) | G.4 | NOT DETAILED |
 | **G.6** | UX: auto-reveal, real-time validation, cross-tab linking, diff-view | S-M каждая | G.1 | NOT DETAILED |
@@ -384,6 +384,61 @@ Domain `RegistersBackend` Protocol + `RegistersBackendFromManager` adapter **о�
 
 **Out of scope:** ActionBus→domain commands (G.4); удаление/переделка domain RegistersBackend coordinate-адресации (G.4); form_context (G.4); удаление services.registers (G.4 решит).
 **Edge cases:** `registers_manager=None` (табы без регистров / тесты) → методы возвращают [] / no-op как сейчас; кэш `_PATHS_SECTION_CACHE` по id(services) — registers_manager в _PathsSection не нужен (только пути).
+
+---
+
+## Wave 4 — G.3 (TopologyHolder removal — store-publishes)
+
+> Детализировано 2026-05-28 после grep актуальных writers/readers. **Scope: L (не M)** — затрагивает composition root (app.py assembly) + IPC-мост. Выбран **Design 2** (владелец: «как лучше и правильнее, без костылей»).
+
+### Факты (grep production)
+
+Все записи topology воронкой идут в `holder.set_topology`:
+- `pipeline/presenter.py:378` → `services.topology.save()` → repo → `holder.set_topology`
+- ActionBus: framework `TopologyMutationHandler` (`actions_module/handlers/topology_handler.py`, интерфейс `TopologyHolderProtocol.set_topology(dict)->None`) + prototype `RecipeApplyHandler` → `holder.set_topology(dict)` напрямую
+- `holder.on_changed` → publisher-мост (`topology_events.wire_topology_events`) → `TopologyReplaced`
+
+Читатели: `topology_bridge` (`self._holder.topology.get(...)` ×3, через `IBridgeTopologyHolder.topology`), `topology_repository.load()`, presenter/processes presenter (`services.topology.load()`).
+
+`suppress_legacy_notify` — **мёртв**: его смысл (гасить двойную нотификацию от unused CommandDispatcher) не реализуется в production-пути.
+
+### Design 2 — store владеет dict и публикует domain-события
+
+`TopologyHolder` сливается в `TopologyRepository`-adapter (`TopologyRepositoryStore`): владеет topology dict, при каждой мутации **публикует `TopologyReplaced` через injected EventBus** (никаких on_changed-callback'ов, никакого publisher-моста). Store удовлетворяет:
+- domain `TopologyRepository` Protocol — `load()->Topology`, `save(Topology)` (presenter, processes, RegistersBackend, ProjectHolder bootstrap, CommandDispatcher);
+- framework `TopologyHolderProtocol` — `set_topology(dict)->None` (ActionBus handlers, без изменений в них);
+- `IBridgeTopologyHolder` — `.topology` property (bridge reads, без изменений в bridge).
+
+`save()` делегирует в `set_topology()` → одна публикация на мутацию. adapters больше **не импортируют frontend** (закрывается Q1-исключение). EventBus создаётся **рано** в app.py (QApplication уже создан на app.py:54), store создаётся с bus.
+
+### Task G.3.1 — TopologyHolder removal
+
+**Level:** Senior (teamlead/director — composition root + IPC-мост)
+**Files (prod):**
+- `adapters/stores/topology_repository.py` — переписать: `TopologyRepositoryStore(initial: dict, events: EventBusProtocol)`; `topology` property, `set_topology(dict)` (publishes), `load()/save(Topology)`. Убрать `frontend.topology_holder` import + `suppress_legacy_notify`.
+- `adapters/stores/__init__.py`, `adapters/__init__.py` — rename `TopologyRepositoryFromHolder`→`TopologyRepositoryStore`; убрать Q1-exception из docstring.
+- `frontend/app.py` — создать `QtEventBus` + `TopologyRepositoryStore` рано; `ctx.extras["event_bus"]`/`["topology_store"]`; убрать `TopologyHolder`; передать store в `TopologyBridge` + `create_action_bus`; заменить блок `wire_topology_events` на `event_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())`.
+- `frontend/app_services_factory.py` — читать `event_bus`+`topology_store` из `ctx.extras` (не создавать QtEventBus / не строить из holder).
+- `frontend/actions/bus_factory.py`, `actions/handlers/recipe_handler.py` — type hints holder→store (логика без изменений).
+- DELETE `frontend/topology_holder.py`, `frontend/topology_events.py`.
+- `frontend/app_context.py` — убрать `topology_holder()` accessor + import.
+- `frontend/_deprecated_extras.py` — убрать `topology_holder` entry.
+- `.sentrux/rules.toml` — убрать упоминание TopologyHolder-исключения (lines ~143-149).
+- `adapters/README.md` — Q1/Q6 обновить (holder удалён).
+
+**Tests:** rewrite `adapters/tests/test_topology_repository.py` (store+publish), `frontend/tests/test_topology_events_wiring.py` (store.save→presenter reload+bridge cache на реальном QtEventBus), `test_phase15_smoke.py`, `app_services_factory` tests, `test_integration_assembly.py` (rename). bridge/recipe_handler тесты — MockHolder duck-types, минимально.
+
+**Acceptance:** — ✅ DONE (2026-05-28, reviewer APPROVED)
+- [x] нет runtime-импортов удалённых модулей (`topology_holder import`/`topology_events`/`TopologyRepositoryFromHolder`/`suppress_legacy_notify`/`wire_topology_events` = 0; остатки только в комментариях-истории)
+- [x] store публикует `TopologyReplaced` на save/set_topology (одна публикация: save→set_topology→publish×1)
+- [x] adapters не импортируют frontend (Q1 закрыт, .sentrux/rules.toml обновлён); domain не тронут
+- [x] pytest multiprocess_prototype/ **2003 passed, 3 skipped**; ruff clean; sentrux check_rules **9/9**, quality 7131
+- [x] store duck-types 3 интерфейса (TopologyRepository / TopologyHolderProtocol / IBridgeTopologyHolder) → bridge+ActionBus handlers без логических правок
+- [ ] live boot-smoke (qt-mcp/ручной) перед merge — IPC-мост нельзя проверить только pytest-qt (known caveat)
+- [x] Commit `Refs: phase-g.md`, `Layer: mixed`
+
+**Out of scope:** ActionBus→domain commands (G.4); ProjectHolder как единственный SoT (G.4); удаление CommandDispatcher double-notify compromise (G.4).
+**Риск:** medium — composition root reorder + IPC bridge wiring; митигация: store duck-types все 3 интерфейса (handlers/bridge без логических правок), live-smoke перед merge.
 
 ---
 

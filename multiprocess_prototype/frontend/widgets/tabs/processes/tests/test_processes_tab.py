@@ -96,7 +96,7 @@ class TestProcessesPresenter:
         cmd.send_command.assert_not_called()
 
     def test_get_processes_via_holder(self):
-        """Production-путь: topology через TopologyRepositoryFromHolder."""
+        """Production-путь: topology через TopologyRepositoryStore (G.3)."""
         services = make_processes_services(use_holder=True)
         p = ProcessesPresenter(services)
         procs = p.get_processes()

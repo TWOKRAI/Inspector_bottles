@@ -24,9 +24,9 @@ from multiprocess_prototype.frontend.app_context import build_app_context
 
 def test_deprecated_key_emits_warning() -> None:
     """__getitem__ на deprecated ключе выдаёт DeprecationWarning с указанием замены."""
-    extras = _DeprecatedExtrasDict({"topology_holder": object()})
+    extras = _DeprecatedExtrasDict({"topology_bridge": object()})
     with pytest.warns(DeprecationWarning, match="topology"):
-        _ = extras["topology_holder"]
+        _ = extras["topology_bridge"]
 
 
 # ---------------------------------------------------------------------------
@@ -49,10 +49,10 @@ def test_non_deprecated_key_silent() -> None:
 
 
 def test_get_method_warns_for_deprecated() -> None:
-    """extras.get('topology_holder') — тоже эмитит DeprecationWarning."""
-    extras = _DeprecatedExtrasDict({"topology_holder": "holder_obj"})
+    """extras.get('topology_bridge') — тоже эмитит DeprecationWarning."""
+    extras = _DeprecatedExtrasDict({"topology_bridge": "holder_obj"})
     with pytest.warns(DeprecationWarning, match="topology"):
-        result = extras.get("topology_holder")
+        result = extras.get("topology_bridge")
     assert result == "holder_obj"
 
 
@@ -66,11 +66,11 @@ def test_setitem_silent() -> None:
     extras = _DeprecatedExtrasDict()
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        extras["topology_holder"] = "new_holder"
+        extras["topology_bridge"] = "new_holder"
     # Проверяем значение с подавлением warnings (чтение — отдельная история)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        assert extras["topology_holder"] == "new_holder"
+        assert extras["topology_bridge"] == "new_holder"
 
 
 def test_setitem_silent_for_multiple_keys() -> None:
@@ -89,10 +89,10 @@ def test_setitem_silent_for_multiple_keys() -> None:
 
 def test_contains_silent() -> None:
     """Оператор 'in' для deprecated ключа не эмитит предупреждений."""
-    extras = _DeprecatedExtrasDict({"topology_holder": "holder"})
+    extras = _DeprecatedExtrasDict({"topology_bridge": "holder"})
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        result = "topology_holder" in extras
+        result = "topology_bridge" in extras
     assert result is True
 
 
@@ -114,14 +114,14 @@ def test_existing_code_still_works() -> None:
 
     ctx = build_app_context(process, config={"key": "val"})
     # Запись — тихая
-    ctx.extras["topology_holder"] = "holder_obj"
+    ctx.extras["topology_bridge"] = "holder_obj"
     ctx.extras["recipe_manager"] = "recipe_obj"
     ctx.extras["custom_non_deprecated"] = "other"
 
     # Чтение с подавлением warnings (backward-compat: значения доступны)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        assert ctx.extras["topology_holder"] == "holder_obj"
+        assert ctx.extras["topology_bridge"] == "holder_obj"
         assert ctx.extras["recipe_manager"] == "recipe_obj"
         assert ctx.extras["custom_non_deprecated"] == "other"
 
@@ -133,9 +133,9 @@ def test_existing_code_still_works() -> None:
 
 def test_warning_message_includes_replacement() -> None:
     """Warning-сообщение содержит 'app_services.topology' — точное поле AppServices."""
-    extras = _DeprecatedExtrasDict({"topology_holder": "holder"})
+    extras = _DeprecatedExtrasDict({"topology_bridge": "holder"})
     with pytest.warns(DeprecationWarning, match=r"app_services\.topology"):
-        _ = extras["topology_holder"]
+        _ = extras["topology_bridge"]
 
 
 # ---------------------------------------------------------------------------

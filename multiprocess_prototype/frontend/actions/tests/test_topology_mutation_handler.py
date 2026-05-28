@@ -6,10 +6,11 @@ from __future__ import annotations
 import pytest
 
 from multiprocess_framework.modules.actions_module.schemas import Action
+from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
+from multiprocess_prototype.domain.tests._fakes import FakeEventBus
 from multiprocess_prototype.frontend.actions.handlers.topology_mutation_handler import (
     TopologyMutationHandler,
 )
-from multiprocess_prototype.frontend.topology_holder import TopologyHolder
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +41,9 @@ class FailingBridge:
 
 
 @pytest.fixture
-def holder() -> TopologyHolder:
-    """TopologyHolder с пустой начальной topology."""
-    return TopologyHolder(initial={})
+def holder() -> TopologyRepositoryStore:
+    """TopologyRepositoryStore с пустой начальной topology (G.3 заменил TopologyHolder)."""
+    return TopologyRepositoryStore({}, events=FakeEventBus())
 
 
 @pytest.fixture
@@ -52,13 +53,13 @@ def bridge() -> MockBridge:
 
 
 @pytest.fixture
-def handler(holder: TopologyHolder) -> TopologyMutationHandler:
+def handler(holder: TopologyRepositoryStore) -> TopologyMutationHandler:
     """TopologyMutationHandler без bridge."""
     return TopologyMutationHandler(holder)
 
 
 @pytest.fixture
-def handler_with_bridge(holder: TopologyHolder, bridge: MockBridge) -> TopologyMutationHandler:
+def handler_with_bridge(holder: TopologyRepositoryStore, bridge: MockBridge) -> TopologyMutationHandler:
     """TopologyMutationHandler с MockBridge."""
     return TopologyMutationHandler(holder, topology_bridge=bridge)
 
@@ -85,7 +86,7 @@ class TestTopologyMutationHandlerApply:
     def test_apply_sets_topology(
         self,
         handler: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """apply устанавливает topology через holder из forward_patch."""
         new_topo = {"processes": [{"id": "p1"}], "wires": []}
@@ -96,7 +97,7 @@ class TestTopologyMutationHandlerApply:
     def test_revert_restores_topology(
         self,
         handler: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """revert восстанавливает topology из backward_patch."""
         prev_topo = {"processes": [], "wires": []}
@@ -110,7 +111,7 @@ class TestTopologyMutationHandlerApply:
     def test_apply_calls_bridge(
         self,
         handler_with_bridge: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
         bridge: MockBridge,
     ) -> None:
         """apply вызывает bridge.apply_topology_diff(old, new)."""
@@ -128,7 +129,7 @@ class TestTopologyMutationHandlerApply:
     def test_revert_calls_bridge(
         self,
         handler_with_bridge: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
         bridge: MockBridge,
     ) -> None:
         """revert вызывает bridge.apply_topology_diff(new, old) для undo."""
@@ -148,7 +149,7 @@ class TestTopologyMutationHandlerApply:
     def test_no_bridge_graceful(
         self,
         handler: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """Без bridge apply работает корректно — только holder обновляется."""
         new_topo = {"processes": [{"id": "wire_test"}], "wires": []}
@@ -160,7 +161,7 @@ class TestTopologyMutationHandlerApply:
     def test_apply_empty_topology_skipped(
         self,
         handler: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """apply с пустой topology в forward_patch не меняет holder."""
         existing = {"processes": [{"id": "kept"}], "wires": []}
@@ -175,7 +176,7 @@ class TestTopologyMutationHandlerApply:
     def test_revert_empty_topology_skipped(
         self,
         handler: TopologyMutationHandler,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """revert с пустой topology в backward_patch не меняет holder."""
         existing = {"processes": [{"id": "kept"}], "wires": []}
@@ -189,7 +190,7 @@ class TestTopologyMutationHandlerApply:
 
     def test_bridge_exception_graceful(
         self,
-        holder: TopologyHolder,
+        holder: TopologyRepositoryStore,
     ) -> None:
         """Исключение в bridge не ломает apply — graceful degradation."""
         failing_bridge = FailingBridge()

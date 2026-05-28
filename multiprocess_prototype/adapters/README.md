@@ -17,7 +17,8 @@ Adapter-слой — тонкая прослойка между:
 ```
 Phase D:  presenter'ы (Phase E) → AppServices DI-контейнер → adapters → реестры
 Phase C:  adapters изолированы — к frontend не подключены
-Phase F:  TopologyHolder и legacy holders удаляются → часть adapters упрощается
+G.3:      TopologyHolder удалён → TopologyRepositoryStore владеет dict + публикует
+          TopologyReplaced; adapters больше не импортируют frontend (Q1 закрыт)
 ```
 
 Подключение adapter'ов к `app.py` и `AppServices` выполняется в **Phase D Task D.1**.
@@ -37,7 +38,7 @@ from multiprocess_prototype.adapters import (
     DisplayCatalogFromRegistry,      # DisplayRegistry → DisplayCatalog Protocol
 
     # Stores (persistence)
-    TopologyRepositoryFromHolder,    # TopologyHolder → TopologyRepository Protocol
+    TopologyRepositoryStore,         # источник истины topology (G.3: публикует TopologyReplaced)
     RegistersBackendFromManager,     # RegistersManager → RegistersBackend Protocol
     RecipeStoreFromManager,          # RecipeManager → RecipeStore Protocol
 
@@ -70,7 +71,7 @@ adapters/
 │
 ├── stores/
 │   ├── __init__.py
-│   ├── topology_repository.py       # TopologyRepositoryFromHolder + suppress_legacy_notify()
+│   ├── topology_repository.py       # TopologyRepositoryStore (владеет dict + публикует TopologyReplaced)
 │   ├── registers_backend.py         # RegistersBackendFromManager
 │   └── recipe_store.py              # RecipeStoreFromManager
 │
@@ -108,25 +109,18 @@ adapters/
 - **`multiprocess_prototype.frontend.widgets*`** — adapter'ы не импортируют Qt-виджеты
 - `multiprocess_prototype.frontend.*` (за исключением ниже)
 
-### Исключение (задокументированное)
+### Исключение Q1 — ЗАКРЫТО (G.3)
 
-`adapters/stores/topology_repository.py` импортирует
-`multiprocess_prototype.frontend.topology_holder.TopologyHolder`.
+Исторически `adapters/stores/topology_repository.py` импортировал
+`frontend.topology_holder.TopologyHolder` (bridge-исключение из правила
+«adapters не импортируют frontend»).
 
-Это **bridge-объект**: `TopologyHolder` — простой Python-контейнер (не Qt-виджет),
-хранящий topology dict с уведомлениями об изменении. Он используется GUI-слоем
-как legacy source of truth до Phase F.
-
-Импорт зафиксирован в **decisions Q1** (2026-05-27):
-> Project = source of truth в Phase D+. TopologyHolder остаётся как derived store;
-> dispatcher после `Project.apply()` пишет через `TopologyRepositoryFromHolder.save()`.
-
-**Phase F:** `TopologyHolder` будет удалён после миграции всех подписчиков
-`holder.on_changed` на чистый EventBus. Тогда `topology_repository.py` упростится
-до in-memory store.
+**G.3 (cross-tab-architecture):** `TopologyHolder` удалён. `TopologyRepositoryStore`
+теперь сам владеет topology dict (in-memory) и публикует `TopologyReplaced` через
+injected EventBus. Adapters больше **не импортируют frontend** — исключение закрыто.
 
 Правила enforced через `.sentrux/rules.toml` (границы `adapters → !frontend/widgets*`
-и `adapters → !PySide6/*`). Исключение documented в decisions Q1.
+и `adapters → !PySide6/*`).
 
 ---
 
@@ -137,7 +131,7 @@ adapters/
 | Публичный API (`__init__.py`) | **Stable** — Phase D зависит от него |
 | `PluginCatalogFromRegistry` / `DisplayCatalogFromRegistry` | **Stable** |
 | `ServiceManagerFromRegistry` | **Stable** (lifecycle methods) |
-| `TopologyRepositoryFromHolder` | **Временный** — Phase F: holder удаляется |
+| `TopologyRepositoryStore` | **Stable** (G.3: владеет dict + публикует TopologyReplaced) |
 | `RecipeStoreFromManager` | **Временный** — Phase F: YAML format v2→v3 migration |
 | `RegistersBackendFromManager` | **Временный** — Phase E: Inspector mapping refinement |
 | `CommandDispatcherOrchestrator` | **Stable** (core orchestrator Phase D+) |
@@ -160,10 +154,11 @@ adapters/
 
 **Решение:** Project = source of truth в Phase D+. `TopologyHolder` = derived store.
 `CommandDispatcherOrchestrator.dispatch()` после `Project.apply()` пишет topology
-в holder через `TopologyRepositoryFromHolder.save()` (legacy callbacks вызываются).
+через `topology_repo.save()`.
 
-**Исключение:** `topology_repository.py` импортирует `topology_holder.py` —
-это bridge-объект, удаляется в Phase F.
+**G.3 (закрыто):** `TopologyHolder` удалён, заменён `TopologyRepositoryStore`
+(владеет dict + публикует TopologyReplaced). `topology_repository.py` больше не
+импортирует frontend — bridge-исключение закрыто.
 
 ### Q2 — Recipe YAML backward-compat (Variant A)
 
@@ -188,21 +183,16 @@ adapters/
 **Решение:** `DisplayCatalogFromRegistry(DisplayRegistry())` — adapter получает
 singleton напрямую. В `ctx.extras` его нет — добавление было бы scope creep.
 
-### Q6 — suppress_legacy_notify() context manager
+### Q6 / Q7 — suppress_legacy_notify + двойная нотификация — ЗАКРЫТО (G.1/G.3)
 
-**Решение:** Реализован в `TopologyRepositoryFromHolder` как toggle-флаг
-`holder._suppress_notify`. **Не применяется по умолчанию** (см. Q7).
-Доступен в API на случай Phase F.
+**Историческое решение:** `suppress_legacy_notify()` toggle подавлял legacy
+`holder.on_changed`, чтобы избежать двойной нотификации (legacy callbacks + EventBus).
 
-### Q7 — Двойная нотификация (user-confirmed)
-
-**Решение:** `CommandDispatcherOrchestrator` вызывает `topology_repo.save()` штатно —
-legacy `holder.on_changed` callbacks срабатывают как обычно. EventBus публикует
-параллельно. Двойная нотификация — осознанный временный компромисс Phase D/E.
-
-**Причина:** 2 prod подписчика на `holder.on_changed` (`app.py:197` TopologyBridge +
-`pipeline/presenter.py:60` PipelinePresenter) — подавление до их миграции
-в Phase E приведёт к UI рассинхрону. Suppression активируется в Phase F.
+**G.1:** оба prod-подписчика `holder.on_changed` (TopologyBridge cache, PipelinePresenter
+scene reload) переведены на typed EventBus (`TopologyReplaced`).
+**G.3:** `TopologyHolder` + `suppress_legacy_notify` удалены — `TopologyRepositoryStore`
+публикует `TopologyReplaced` ровно один раз на мутацию (save/set_topology). Двойной
+нотификации больше нет, suppress не нужен.
 
 ---
 
@@ -222,9 +212,9 @@ legacy `holder.on_changed` callbacks срабатывают как обычно.
 `RecipeStoreFromManager.set_active(None)` обращается к приватному полю движка
 (C.5 коммит). Phase F refactor устранит это при YAML format migration.
 
-**TopologyHolder import — bridge-исключение (Q1):**
-`topology_repository.py` нарушает общее правило «adapters не импортируют frontend»,
-но holder — не UI-объект. Исключение задокументировано, удаляется в Phase F.
+**TopologyHolder import — bridge-исключение (Q1) — ЗАКРЫТО (G.3):**
+`topology_repository.py` больше не импортирует frontend. `TopologyRepositoryStore`
+владеет dict in-memory и публикует TopologyReplaced через injected EventBus.
 
 ---
 
