@@ -36,4 +36,4 @@
 - [Cross-tab Phase E per-tab migration](project_cross_tab_phase_e.md) — Phase E IN PROGRESS (2026-05-28): E.1 Pipeline DONE (8566f994+e7bd3d97, APPROVED), E.2 Processes next. Bridge pattern с TODO Phase F допустим, sentrux -20 принято.
 - [Cross-tab Phase F legacy removal](project_cross_tab_phase_f.md) — DONE 2026-05-28 (ретро-ревью Opus, без блокеров); F.7 переосмыслен (peek bridge-readers, no-op фильтр найден); F.1+ActionBus→G; Phase G handoff-долг зафиксирован
 - [Cross-tab Phase G final](project_cross_tab_phase_g.md) — IN PROGRESS 2026-05-28: audit + decomposition G.0–G.6, G.0 DONE (ffeca3ba) + G.1.1 DONE (75a6c41f, scene reload на typed EventBus). Domain-слой готов. G.1.2/G.2–G.6 next
-- [Commit messages ASCII-only](feedback_commit_ascii_only.md) — commit-msg hook отклоняет эмодзи в теле (вводит в заблуждение про Why/Layer); кириллица OK
+- [Commit message format](feedback_commit_msg_format.md) — каждый trailer (Why/Layer/...) одной строкой (перенос ломает парсер); pre-commit ruff-format → re-stage + re-commit
