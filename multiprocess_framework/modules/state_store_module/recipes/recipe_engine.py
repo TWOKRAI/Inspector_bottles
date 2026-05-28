@@ -302,6 +302,17 @@ class RecipeEngine:
         """Имя последнего загруженного рецепта (или None)."""
         return self._active_name
 
+    def deactivate(self) -> None:
+        """Сбросить активный рецепт (симметрично set_active).
+
+        Обнуляет _active_name и loaded-snapshot → is_dirty() становится False.
+        Idempotent: повторный вызов без активного рецепта — no-op.
+        НЕ трогает state_store (active в state обновляет вызывающий, напр. RecipeManager).
+        """
+        self._active_name = None
+        self._loaded_snapshot = None
+        self._loaded_paths = None
+
     # ------------------------------------------------------------------
     # is_dirty / diff
     # ------------------------------------------------------------------

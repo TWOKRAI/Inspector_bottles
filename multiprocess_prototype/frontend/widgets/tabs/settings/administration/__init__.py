@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Пакет administration — секция «Администрация» в табе настроек.
+"""Пакет administration — подсекции «Администрация» таба настроек.
 
-Реэкспортирует основной виджет секции для удобства импорта:
-    from .administration import AdministrationSection
+Подсекции (UsersPanel, RolesPanel, SessionsPanel, AuditLogPanel, AdminDashboard)
+регистрируются через фабрики в `settings/_sections.py` с сигнатурой
+`(services, auth_ctx)` и импортируются оттуда напрямую — реэкспорт не нужен.
 """
-from .section import AdministrationSection
 
-__all__ = ["AdministrationSection"]
+__all__: list[str] = []

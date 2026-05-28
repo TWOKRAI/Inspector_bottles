@@ -2,7 +2,7 @@
 
 Task E.1: мигрирован на AppServices DI. set_services(services) вместо
 set_context(ctx). RegistersManager и form_context() не покрыты AppServices
-Protocol — оставлены как bridge через adapter с TODO Phase F.
+Protocol — оставлены как bridge через adapter (TODO Phase G: registers→G.2, form_context→G.4).
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ class NodeInspectorPanel(QWidget):
         """Legacy bridge для backward compatibility. Deprecated.
 
         Если ctx имеет app_services — используем его. Иначе — сохраняем как fallback.
-        TODO Phase F: удалить после полной миграции.
+        TODO Phase G (G.5): удалить после удаления AppContext.
         """
         app_services = getattr(ctx, "app_services", None)
         if app_services is not None:
@@ -507,7 +507,7 @@ class NodeInspectorPanel(QWidget):
         if self._services is None:
             return False
 
-        # TODO Phase F: RegistersBackend Protocol имеет другую сигнатуру
+        # TODO Phase G (G.2): RegistersBackend Protocol имеет другую сигнатуру
         # (get_field_specs(process_name, plugin_index) вместо get_fields(process_name)).
         # Используем legacy RegistersManager через adapter bridge.
         rm = getattr(self._services.registers, "_rm", None)
@@ -521,7 +521,7 @@ class NodeInspectorPanel(QWidget):
 
         from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
 
-        # TODO Phase F: form_context() не покрыт AppServices Protocol.
+        # TODO Phase G (G.4): form_context() не покрыт AppServices Protocol.
         # Для binding-aware editors нужен form_ctx. Пока — None (legacy путь).
         form_ctx = None
 

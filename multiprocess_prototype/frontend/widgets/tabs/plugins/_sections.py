@@ -210,7 +210,7 @@ class _PluginSection:
         if info.get("has_registers"):
             fields = presenter.get_register_fields(self._key)
             if fields:
-                # TODO Phase F: form_context не покрыт AppServices Protocol'ами.
+                # TODO Phase G (G.4): form_context не покрыт AppServices Protocol'ами.
                 view = RegisterView(fields, form_ctx=None)
                 view.field_changed.connect(self._on_field_changed)
                 self._register_view = view
@@ -232,7 +232,7 @@ class _PluginSection:
         self._widget = PluginInfoCard(info)
 
     def _get_bus(self) -> Any:
-        """ActionBus через services.commands bridge (TODO Phase F: domain commands)."""
+        """ActionBus через services.commands bridge (TODO Phase G (G.4): domain commands)."""
         accessor = getattr(self._services.commands, "action_bus", None)
         return accessor() if callable(accessor) else None
 

@@ -132,12 +132,7 @@ class _FakeRecipeManager:
     def activate(self, slug: str) -> None:
         pass
 
-    @property
-    def _active_name(self) -> None:  # noqa: B027
-        return None
-
-    @_active_name.setter
-    def _active_name(self, value: Any) -> None:
+    def deactivate(self) -> None:
         pass
 
 

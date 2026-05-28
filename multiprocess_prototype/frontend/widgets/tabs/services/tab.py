@@ -47,7 +47,7 @@ class ServicesTab(BaseTreeNavTab):
         self._services = services
         # ActionBus получаем из services.commands если поддерживает action_bus,
         # иначе bus=None (graceful degradation для тестов).
-        # TODO Phase F: расширить CommandDispatcher Protocol методом action_bus().
+        # TODO Phase G (G.4): расширить CommandDispatcher Protocol методом action_bus().
         bus = getattr(services.commands, "action_bus", None)
         if callable(bus):
             bus = bus()

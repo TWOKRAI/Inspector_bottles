@@ -103,7 +103,7 @@ class PipelineTab(QWidget):
         self._view.viewport().removeEventFilter(self._tab_layout)
 
         # Undo/Redo в статичной зоне (legacy ActionBus bridge).
-        # TODO Phase F: полностью заменить ActionBus на domain commands
+        # TODO Phase G (G.4): полностью заменить ActionBus на domain commands
         _bus_accessor = getattr(services.commands, "action_bus", None)
         self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
         self._tab_layout.enable_undo_redo(self._action_bus)
@@ -267,11 +267,11 @@ class PipelineTab(QWidget):
                 self._presenter.remove_selected(selected)
                 self._inspector.clear()
         elif action_id == "undo":
-            # TODO Phase F: domain command для undo
+            # TODO Phase G (G.4): domain command для undo
             if self._action_bus:
                 self._action_bus.undo()
         elif action_id == "redo":
-            # TODO Phase F: domain command для redo
+            # TODO Phase G (G.4): domain command для redo
             if self._action_bus:
                 self._action_bus.redo()
 

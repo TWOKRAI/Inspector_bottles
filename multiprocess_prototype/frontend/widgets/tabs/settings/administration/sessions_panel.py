@@ -6,7 +6,7 @@ Scope фильтра:
   - admin/dev (wildcard users.view) → все сессии (user_id=None)
   - остальные                       → только свои (user_id=current_user_id)
 
-Используется как подсекция «Сессии» в AdministrationSection.
+Регистрируется как подсекция «Сессии» через фабрику в settings/_sections.py.
 """
 
 from __future__ import annotations
@@ -48,9 +48,7 @@ class SessionsPanel(BaseAdminPanel):
         ("host", "Хост", 120),
     ]
 
-    def __init__(
-        self, auth: "AuthContext | None", parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         self._storage = auth.audit if auth is not None else None

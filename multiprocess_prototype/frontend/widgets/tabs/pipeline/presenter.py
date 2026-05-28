@@ -62,7 +62,7 @@ class PipelinePresenter:
 
         # ActionBus bridge: CommandDispatcherOrchestrator не покрывает
         # undo/redo/execute — получаем legacy ActionBus через adapter.
-        # TODO Phase F: полностью заменить ActionBus на domain commands
+        # TODO Phase G (G.4): полностью заменить ActionBus на domain commands
         _bus_accessor = getattr(services.commands, "action_bus", None)
         self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
 
@@ -101,7 +101,7 @@ class PipelinePresenter:
         - Иначе: прямой вызов rm.set_value() если rm доступен.
         - Warning если ни ActionBus ни rm недоступны.
         """
-        # TODO Phase F: заменить legacy RegistersManager API на services.registers Protocol.
+        # TODO Phase G (G.2): заменить legacy RegistersManager API на services.registers Protocol.
         # RegistersBackend Protocol имеет другую сигнатуру (process_name, plugin_index, field),
         # но здесь нужен get_register(process_name) для получения old_value.
         # Используем legacy rm через getattr bridge.
@@ -355,7 +355,7 @@ class PipelinePresenter:
         old_topo, new_topo = self._model.add_process(name, plugin_name, category)
         self._gui_positions[name] = (x, y)
 
-        # ActionBus (legacy bridge, TODO Phase F: domain commands)
+        # ActionBus (legacy bridge, TODO Phase G (G.4): domain commands)
         bus = self._action_bus
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
@@ -849,8 +849,8 @@ class PipelinePresenter:
             return False
 
         # Шаг 5: найти ProcessManager-proxy
-        # TODO Phase F: process_manager_proxy не покрыт AppServices Protocol.
-        # Останется тихим bridge через config или отдельный Protocol.
+        # By design (Q-F1=B): process_manager_proxy — runtime layer, не AppServices Protocol.
+        # Остаётся тихим bridge через config / RuntimeDeps.
         proxy = None
 
         # Попытка получить proxy через config extras (не deprecated ключи)

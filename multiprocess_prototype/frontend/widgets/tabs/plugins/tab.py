@@ -97,7 +97,7 @@ class PluginsTab(BaseTreeNavTab):
         # Текущий режим отображения (Cards/Table).
         self._view_mode: ViewMode = ViewMode.CARDS
 
-        # ActionBus bridge (TODO Phase F: domain commands).
+        # ActionBus bridge (TODO Phase G (G.4): domain commands).
         _bus_accessor = getattr(services.commands, "action_bus", None)
         bus = _bus_accessor() if callable(_bus_accessor) else None
         super().__init__(

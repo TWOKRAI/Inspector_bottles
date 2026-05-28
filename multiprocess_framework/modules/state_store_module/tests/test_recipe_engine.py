@@ -128,9 +128,7 @@ class TestSave:
         assert "renderer" not in data
         assert "robot" not in data
 
-    def test_save_nonexistent_path_skipped(
-        self, engine: RecipeEngine, recipes_dir: Path
-    ) -> None:
+    def test_save_nonexistent_path_skipped(self, engine: RecipeEngine, recipes_dir: Path) -> None:
         """save(paths=["nonexistent"]) → пустые данные (без ошибки)."""
         engine.save("empty", paths=["nonexistent"])
 
@@ -140,9 +138,7 @@ class TestSave:
 
         assert recipe["data"] == {}
 
-    def test_save_overwrites_existing(
-        self, engine: RecipeEngine, recipes_dir: Path
-    ) -> None:
+    def test_save_overwrites_existing(self, engine: RecipeEngine, recipes_dir: Path) -> None:
         """Повторный save перезаписывает файл."""
         engine.save("test")
         engine.save("test")  # перезапись
@@ -157,9 +153,7 @@ class TestSave:
 class TestLoad:
     """Тесты загрузки рецептов."""
 
-    def test_load_applies_to_store(
-        self, store: TreeStore, engine: RecipeEngine
-    ) -> None:
+    def test_load_applies_to_store(self, store: TreeStore, engine: RecipeEngine) -> None:
         """load() применяет рецепт к store через Transaction."""
         engine.save("prod")
 
@@ -172,9 +166,7 @@ class TestLoad:
         assert len(deltas) > 0
         assert store.get("cameras.0.config.fps") == 30
 
-    def test_load_returns_deltas_with_same_transaction_id(
-        self, engine: RecipeEngine
-    ) -> None:
+    def test_load_returns_deltas_with_same_transaction_id(self, engine: RecipeEngine) -> None:
         """Все дельты load() имеют одинаковый transaction_id (batching)."""
         engine.save("prod")
         # Изменяем несколько значений чтобы load вернул дельты
@@ -281,6 +273,40 @@ class TestListDelete:
 
         engine.delete("active_recipe")
         assert engine.get_active() is None
+
+
+# =====================================================================
+# deactivate
+# =====================================================================
+
+
+class TestDeactivate:
+    """Тесты public deactivate() (симметрично set_active/load)."""
+
+    def test_deactivate_resets_active(self, engine: RecipeEngine) -> None:
+        """deactivate() сбрасывает get_active() в None."""
+        engine.save("prod")
+        engine.load("prod")
+        assert engine.get_active() == "prod"
+
+        engine.deactivate()
+        assert engine.get_active() is None
+
+    def test_deactivate_idempotent(self, engine: RecipeEngine) -> None:
+        """deactivate() без активного рецепта — no-op (без ошибки)."""
+        assert engine.get_active() is None
+        engine.deactivate()
+        assert engine.get_active() is None
+
+    def test_not_dirty_after_deactivate(self, store: TreeStore, engine: RecipeEngine) -> None:
+        """После deactivate() is_dirty() = False (snapshot сброшен)."""
+        engine.save("prod")
+        engine.load("prod")
+        store.set("cameras.0.config.fps", 999, source="test")
+        assert engine.is_dirty() is True
+
+        engine.deactivate()
+        assert engine.is_dirty() is False
 
 
 # =====================================================================

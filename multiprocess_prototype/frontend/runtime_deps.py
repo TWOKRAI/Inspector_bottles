@@ -11,7 +11,12 @@ RuntimeDeps  -- IPC-прокси, discovery-менеджеры, Qt-bindings (run
 Поля Optional с дефолтами None: табы, не использующие runtime, зовут
 ``Tab.create(services)`` (RuntimeDeps() по умолчанию).
 
-Refs: plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md (Q-F1)
+NB: ``bindings`` живёт здесь, а не в AppServices — это закрывает Q4 Phase D
+(«GuiStateBindings → AppServices»): bindings — runtime-объект (зависит от
+DataReceiverBridge), поэтому его место в runtime-layer, не в editor-state.
+
+Refs: plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md (Q-F1),
+      plans/2026-05-27_cross-tab-architecture/phase-g.md (G.0.4, Q4 Phase D resolved)
 """
 
 from __future__ import annotations

@@ -43,7 +43,7 @@ class PluginsPresenter:
 
     def __init__(self, services: AppServices, *, plugin_manager: Any = None) -> None:
         self._services = services
-        # TODO Phase F: RegistersBackend Protocol имеет другую сигнатуру --
+        # TODO Phase G (G.2): RegistersBackend Protocol имеет другую сигнатуру —
         # get_fields() через raw RegistersManager bridge.
         self._rm = getattr(services.registers, "_rm", None)
         # plugin_manager (discovery/hot-reload) вне AppServices -- runtime dep (Phase G).

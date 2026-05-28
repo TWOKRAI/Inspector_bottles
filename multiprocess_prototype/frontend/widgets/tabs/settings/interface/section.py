@@ -42,7 +42,7 @@ class InterfaceSection(QWidget):
 
     Task D.5: принимает ctx как Optional для backward compat. Если ctx=None —
     кнопка «Обновить UI» показывается, но не выполняет перезапуск (graceful degradation).
-    TODO (Phase E): передавать ProcessControl Protocol через AppServices.
+    TODO Phase G (G.5): передавать ProcessControl Protocol через AppServices/RuntimeDeps.
     """
 
     # SectionProtocol — идентификаторы секции
@@ -117,7 +117,7 @@ class InterfaceSection(QWidget):
         """Перезапустить UI: ставим флаг на процессе и закрываем QApplication.
 
         Если ctx=None (Task D.5 / тесты без полного AppContext) — graceful no-op.
-        TODO (Phase E): ProcessControl Protocol в AppServices устранит этот guard.
+        TODO Phase G (G.5): ProcessControl Protocol в AppServices устранит этот guard.
         """
         if self._ctx is None:
             _logger.warning("[InterfaceSection] ctx=None — перезапуск UI недоступен")

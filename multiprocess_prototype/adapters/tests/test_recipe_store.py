@@ -91,6 +91,10 @@ class FakeEngine:
     def get_active(self) -> str | None:
         return self._active_name
 
+    def deactivate(self) -> None:
+        """Сброс активного рецепта (симметрично RecipeEngine.deactivate)."""
+        self._active_name = None
+
     def list(self) -> list[str]:
         return sorted(p.stem for p in self.recipes_dir.glob("*.yaml"))
 

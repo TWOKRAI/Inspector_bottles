@@ -9,11 +9,11 @@
 
 Task D.5: переход на AppServices. Принимает AppServices + auth_ctx (AuthContext).
 auth_ctx передаётся отдельно, так как AuthContext имеет поля manager/state/audit,
-выходящие за рамки минимального AuthFacade Protocol. Phase E расширит AuthFacade
-или введёт AdminAuthContext Protocol.
+выходящие за рамки минимального AuthFacade Protocol.
 
-TODO (Phase E): заменить auth_ctx на расширенный AuthFacade Protocol,
-чтобы полностью убрать зависимость от AuthContext в _sections.
+By design (Phase G audit): панели администрации мутируют (create user, update role),
+поэтому им нужен rich AuthContext (manager/state/audit), а не read-only AuthFacade.
+auth_ctx остаётся отдельным параметром — это не долг.
 
 См. ADR-126, Phase 4, Task D.5.
 """
@@ -107,7 +107,7 @@ def _roles_factory(services: AppServices, auth_ctx: "AuthContext | None") -> _Se
     """Фабрика RolesPanel (ленивая).
 
     ActionBus берётся из services.commands если поддерживает action_bus().
-    TODO (Phase E): расширить CommandDispatcher Protocol методом action_bus().
+    TODO Phase G (G.4): расширить CommandDispatcher Protocol методом action_bus().
     """
     from .administration.roles_panel import RolesPanel
 
@@ -156,7 +156,7 @@ def _interface_factory(services: AppServices, auth_ctx: "AuthContext | None") ->
     """Фабрика InterfaceSection — настройки интерфейса.
 
     InterfaceSection использует process._restart_ui — нет в AppServices Protocol.
-    TODO (Phase E): добавить ProcessControl Protocol в AppServices или оставить
+    TODO Phase G (G.5): добавить ProcessControl Protocol в AppServices или оставить
     как separate dependency injection.
     Для D.5 передаём None как AppContext fallback — InterfaceSection работает
     без ctx (кнопка «Обновить UI» не функциональна, но не падает).

@@ -222,10 +222,10 @@ class RecipeManager:
     def deactivate(self) -> None:
         """Сбросить активный рецепт (публичный API вместо прямого доступа к engine).
 
-        Устанавливает engine._active_name = None и обновляет state.recipes.active.
+        Вызывает engine.deactivate() (public) и обновляет state.recipes.active.
         Idempotent: если рецепт уже не активен — no-op (state обновляется на None).
         """
-        self._engine._active_name = None
+        self._engine.deactivate()
         self._update_active_in_state(None)
         self._log_info("RecipeManager: активный рецепт сброшен")
 
