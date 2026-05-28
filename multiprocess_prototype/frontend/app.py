@@ -437,12 +437,10 @@ def run_gui(process: "GuiProcess") -> None:
     #   - PipelinePresenter (G.1.1) — полный scene reload,
     #   - TopologyBridge (G.1.2) — инвалидация IPC cache.
     # После G.1.1+G.1.2 единственный holder.on_changed-подписчик = publisher-мост,
-    # что разблокирует удаление holder в G.3.
-    from multiprocess_prototype.domain.events import TopologyReplaced
+    # что разблокирует удаление holder в G.3. Обвязка — в topology_events (тестируема).
+    from .topology_events import wire_topology_events
 
-    _events_bus = ctx.app_services.events
-    topology_holder.on_changed(lambda _topo: _events_bus.publish(TopologyReplaced(reason="topology_changed")))
-    _events_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())
+    wire_topology_events(topology_holder, ctx.app_services.events, topology_bridge)
 
     # 4. Создать MainWindow
     window = MainWindow()
