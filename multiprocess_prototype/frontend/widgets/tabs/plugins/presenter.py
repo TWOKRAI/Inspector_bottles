@@ -1,10 +1,12 @@
-"""PluginsPresenter — бизнес-логика таба плагинов.
+"""PluginsPresenter -- бизнес-логика таба плагинов.
 
-Task E.5: мигрирован на AppServices DI. Принимает services: AppServices.
-PluginRegistry берётся через services.plugins._registry bridge (PluginCatalog
-Protocol не покрывает rich entry API: plugin_class, register_classes, inputs/outputs).
-RegistersManager — через services.registers._rm bridge.
-plugin_manager (discovery/hot-reload) — отдельный runtime-объект, не входит в
+Task F.5: полностью мигрирован на PluginCatalog Protocol. Все метаданные
+плагинов (list/resolve/categories, ports по direction, has_registers)
+читаются через services.plugins (PluginCatalog Protocol). Bridge _registry
+убран -- метаданные полностью покрываются PluginSpec.
+
+RegistersManager -- через services.registers._rm bridge (F.9 scope).
+plugin_manager (discovery/hot-reload) -- отдельный runtime-объект, не входит в
 AppServices, передаётся explicit-параметром.
 
 Pure Python (без Qt импортов).
@@ -23,9 +25,9 @@ from multiprocess_prototype.domain.app_services import AppServices
 class PluginsPresenter:
     """Presenter для PluginsTab.
 
-    Работает с PluginRegistry (через services.plugins._registry bridge) и
-    RegistersManager (через services.registers._rm bridge). Управление путями —
-    через plugin_manager (runtime-объект вне AppServices).
+    Работает с PluginCatalog Protocol (services.plugins) для метаданных и
+    RegistersManager (через services.registers._rm bridge) для register-полей.
+    Управление путями -- через plugin_manager (runtime-объект вне AppServices).
     """
 
     # Русские названия категорий
@@ -41,13 +43,10 @@ class PluginsPresenter:
 
     def __init__(self, services: AppServices, *, plugin_manager: Any = None) -> None:
         self._services = services
-        # TODO Phase F: PluginCatalog Protocol не покрывает rich entry API
-        # (plugin_class, register_classes, inputs/outputs) — bridge на raw registry.
-        self._registry = getattr(services.plugins, "_registry", None)
-        # TODO Phase F: RegistersBackend Protocol имеет другую сигнатуру —
+        # TODO Phase F: RegistersBackend Protocol имеет другую сигнатуру --
         # get_fields() через raw RegistersManager bridge.
         self._rm = getattr(services.registers, "_rm", None)
-        # plugin_manager (discovery/hot-reload) вне AppServices — runtime dep (Phase G).
+        # plugin_manager (discovery/hot-reload) вне AppServices -- runtime dep (Phase G).
         self._plugin_manager = plugin_manager
 
     def list_plugins(self) -> list[tuple[str, str, str]]:
@@ -55,25 +54,22 @@ class PluginsPresenter:
 
         Формат для MasterDetailLayout.set_items().
         """
-        registry = self._registry
-        if registry is None:
+        catalog = self._services.plugins
+        specs = catalog.list_plugins()
+        if not specs:
             return []
 
         result = []
-        for entry in registry.list():
-            name = entry.name
-            display = f"{name} ({self.CATEGORY_TITLES.get(entry.category, entry.category)})"
-            result.append((name, display, entry.category))
+        for spec in specs:
+            name = spec.name
+            display = f"{name} ({self.CATEGORY_TITLES.get(spec.category, spec.category)})"
+            result.append((name, display, spec.category))
         return result
 
     def get_categories(self) -> list[str]:
-        """Уникальные категории из реестра."""
-        registry = self._registry
-        if registry is None:
-            return []
-
-        cats = sorted({entry.category for entry in registry.list()})
-        return cats
+        """Уникальные категории из каталога."""
+        catalog = self._services.plugins
+        return list(catalog.categories())
 
     def get_plugin_info(self, name: str) -> dict:
         """Информация о плагине для PluginInfoCard.
@@ -81,8 +77,9 @@ class PluginsPresenter:
         Returns:
             dict с ключами: name, category, description, inputs, outputs, has_registers
         """
-        registry = self._registry
-        if registry is None:
+        catalog = self._services.plugins
+        spec = catalog.resolve(name)
+        if spec is None:
             return {
                 "name": name,
                 "category": "",
@@ -92,34 +89,17 @@ class PluginsPresenter:
                 "has_registers": False,
             }
 
-        entry = registry.get(name)
-        if entry is None:
-            return {
-                "name": name,
-                "category": "",
-                "description": "",
-                "inputs": [],
-                "outputs": [],
-                "has_registers": False,
-            }
-
-        # Порты
-        inputs = []
-        outputs = []
-        if hasattr(entry, "inputs"):
-            inputs = [f"{p.name}: {p.dtype}" for p in (entry.inputs or [])]
-        if hasattr(entry, "outputs"):
-            outputs = [f"{p.name}: {p.dtype}" for p in (entry.outputs or [])]
-
-        has_registers = bool(getattr(entry, "register_classes", None))
+        # Порты из PluginSpec.ports по direction
+        inputs = [f"{p.name}: {p.dtype}" for p in spec.ports if p.direction == "input"]
+        outputs = [f"{p.name}: {p.dtype}" for p in spec.ports if p.direction == "output"]
 
         return {
-            "name": entry.name,
-            "category": entry.category,
-            "description": getattr(entry, "description", ""),
+            "name": spec.name,
+            "category": spec.category,
+            "description": spec.description,
             "inputs": inputs,
             "outputs": outputs,
-            "has_registers": has_registers,
+            "has_registers": spec.has_registers,
         }
 
     def get_register_fields(self, plugin_name: str) -> list:
@@ -137,7 +117,7 @@ class PluginsPresenter:
             return []
 
     # ------------------------------------------------------------------ #
-    #  Task 2.5 — управление путями плагинов                              #
+    #  Task 2.5 -- управление путями плагинов                              #
     # ------------------------------------------------------------------ #
 
     def get_plugin_paths(self) -> list[str]:
@@ -173,7 +153,7 @@ class PluginsPresenter:
     def remove_plugin_path(self, path: str) -> None:
         """Удалить путь из директорий поиска плагинов.
 
-        Если пути нет в списке — ничего не делает.
+        Если пути нет в списке -- ничего не делает.
         Сохраняет обновлённый список в user_overrides.yaml и обновляет PluginManager.
 
         Args:

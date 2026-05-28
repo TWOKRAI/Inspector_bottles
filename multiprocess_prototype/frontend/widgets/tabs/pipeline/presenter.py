@@ -454,29 +454,50 @@ class PipelinePresenter:
     ) -> bool:
         """Проверить совместимость портов source и target перед созданием wire.
 
+        Task F.5: использует PluginCatalog Protocol (resolve -> PluginSpec.ports)
+        вместо raw _registry bridge. PortSpec конвертируется в framework Port
+        для проверки через are_ports_compatible.
+
         Graceful degradation:
-        - Registry недоступен → пропустить валидацию, вернуть True
-        - Plugin/port не найден → лог warning, вернуть True (legacy compat)
-        - Display-цель → использует wildcard Port(dtype="image/*")
+        - PluginSpec не найден -> лог warning, вернуть True (legacy compat)
+        - Port не найден -> лог warning, вернуть True
+        - Display-цель -> использует wildcard Port(dtype="image/*")
 
         Returns:
-            True — wire можно создать, False — wire заблокирован.
+            True -- wire можно создать, False -- wire заблокирован.
         """
         from multiprocess_framework.modules.process_module.plugins.port import (
             Port,
             are_ports_compatible,
         )
+        from multiprocess_prototype.domain.protocols.plugin_catalog import PortSpec
 
-        # Шаг 1: получить registry через services.plugins (PluginCatalog)
-        # Для валидации портов нужен доступ к raw Port объектам (inputs/outputs),
-        # которые PluginCatalog Protocol не предоставляет (только PortSpec).
-        # TODO Phase F: расширить PluginCatalog Protocol для валидации портов
-        # или вынести логику в domain. Пока — bridge через adapter._registry.
-        _raw_registry = getattr(self._services.plugins, "_registry", None)
-        if _raw_registry is None:
-            return True
+        catalog = self._services.plugins
 
-        # Шаг 2: разобрать source endpoint → (process, plugin, port)
+        def _find_port_spec(
+            plugin_name: str,
+            port_name: str,
+            direction: str,
+        ) -> "PortSpec | None":
+            """Найти PortSpec по имени плагина, порта и направлению."""
+            spec = catalog.resolve(plugin_name)
+            if spec is None:
+                return None
+            for ps in spec.ports:
+                if ps.name == port_name and ps.direction == direction:
+                    return ps
+            return None
+
+        def _portspec_to_port(ps: "PortSpec") -> Port:
+            """Сконструировать framework Port из domain PortSpec."""
+            return Port(
+                name=ps.name,
+                dtype=ps.dtype,
+                shape=ps.shape,
+                optional=ps.optional,
+            )
+
+        # Шаг 1: разобрать source endpoint -> (process, plugin, port)
         src_parts = source.split(".")
         if len(src_parts) < 3:
             logger.debug("_validate_wire_ports: некорректный source endpoint '%s', пропуск", source)
@@ -485,23 +506,18 @@ class PipelinePresenter:
         src_plugin_name = src_parts[1]
         src_port_name = src_parts[2]
 
-        # Шаг 3: найти выходной порт источника
-        out_entry = _raw_registry.get(src_plugin_name)
-        if out_entry is None:
+        # Шаг 2: найти выходной порт источника через PluginCatalog Protocol
+        src_spec = catalog.resolve(src_plugin_name)
+        if src_spec is None:
             logger.warning(
-                "_validate_wire_ports: плагин '%s' не найден в registry (source=%s), пропуск",
+                "_validate_wire_ports: плагин '%s' не найден в catalog (source=%s), пропуск",
                 src_plugin_name,
                 source,
             )
             return True
 
-        out_port: Port | None = None
-        for port in out_entry.outputs:
-            if port.name == src_port_name:
-                out_port = port
-                break
-
-        if out_port is None:
+        out_ps = _find_port_spec(src_plugin_name, src_port_name, "output")
+        if out_ps is None:
             logger.warning(
                 "_validate_wire_ports: выходной порт '%s' не найден у плагина '%s', пропуск",
                 src_port_name,
@@ -509,7 +525,9 @@ class PipelinePresenter:
             )
             return True
 
-        # Шаг 4: определить входной порт приёмника
+        out_port = _portspec_to_port(out_ps)
+
+        # Шаг 3: определить входной порт приёмника
         tgt_parts = target.split(".")
         is_display_target = tgt_parts[0] == "display"
 
@@ -527,22 +545,17 @@ class PipelinePresenter:
             tgt_plugin_name = tgt_parts[1]
             tgt_port_name = tgt_parts[2]
 
-            in_entry = _raw_registry.get(tgt_plugin_name)
-            if in_entry is None:
+            tgt_spec = catalog.resolve(tgt_plugin_name)
+            if tgt_spec is None:
                 logger.warning(
-                    "_validate_wire_ports: плагин '%s' не найден в registry (target=%s), пропуск",
+                    "_validate_wire_ports: плагин '%s' не найден в catalog (target=%s), пропуск",
                     tgt_plugin_name,
                     target,
                 )
                 return True
 
-            in_port = None
-            for port in in_entry.inputs:
-                if port.name == tgt_port_name:
-                    in_port = port
-                    break
-
-            if in_port is None:
+            in_ps = _find_port_spec(tgt_plugin_name, tgt_port_name, "input")
+            if in_ps is None:
                 logger.warning(
                     "_validate_wire_ports: входной порт '%s' не найден у плагина '%s', пропуск",
                     tgt_port_name,
@@ -550,11 +563,13 @@ class PipelinePresenter:
                 )
                 return True
 
-        # Шаг 5: проверить совместимость
+            in_port = _portspec_to_port(in_ps)
+
+        # Шаг 4: проверить совместимость
         ok = are_ports_compatible(out_port, in_port)
         if not ok:
             logger.warning(
-                "Несовместимые порты: %s (%s) → %s (%s)",
+                "Несовместимые порты: %s (%s) -> %s (%s)",
                 source,
                 out_port.dtype,
                 target,

@@ -15,6 +15,7 @@ from typing import Any
 
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.domain.entities import Topology
+from multiprocess_prototype.domain.protocols.plugin_catalog import PluginSpec
 from multiprocess_prototype.domain.tests._fakes import (
     FakeAuthFacade,
     FakeCommandDispatcher,
@@ -44,6 +45,7 @@ def make_pipeline_services(
     topology: dict[str, Any] | None = None,
     action_bus: Any = None,
     plugin_registry: Any = None,
+    plugin_specs: "dict[str, PluginSpec] | None" = None,
     registers_manager: Any = None,
     recipe_manager: Any = None,
     display_registry: Any = None,
@@ -58,20 +60,20 @@ def make_pipeline_services(
     в presenter и inspector.
 
     Task F.4: recipe_manager транслируется в FakeRecipeStore с raw-данными.
-    Если recipe_manager — MagicMock с get_active/read_recipe, то raw-store
-    наполняется из mock'а. Если recipe_manager=None — пустой store.
+    Task F.5: plugin_specs (dict[str, PluginSpec]) заполняет FakePluginCatalog
+    для wire-валидации через PluginCatalog Protocol (вместо raw _registry bridge).
+    plugin_registry сохранён для sandbox-тестов (bridge by design).
 
     Args:
-        topology: dict topology для config. По умолчанию — 2 процесса + 1 wire.
+        topology: dict topology для config. По умолчанию -- 2 процесса + 1 wire.
         action_bus: legacy ActionBus mock для undo/redo bridge.
-        plugin_registry: raw _PluginRegistry для wire-валидации bridge.
+        plugin_registry: raw _PluginRegistry для sandbox bridge (by design).
+        plugin_specs: dict[str, PluginSpec] для FakePluginCatalog (wire-валидация).
         registers_manager: legacy RegistersManager для inspector bridge.
         recipe_manager: legacy RecipeManager (mock или реальный) для recipe-данных.
-            Если имеет get_active/read_recipe — FakeRecipeStore наполняется
-            из этих методов. Иначе — пустой store.
-        display_registry: legacy DisplayRegistry (если нужен _get_display_entries bridge).
+        display_registry: legacy DisplayRegistry.
         config_extra: дополнительные ключи для ConfigStore.
-        auth: Fake AuthFacade (по умолчанию — all_permissions=True).
+        auth: Fake AuthFacade (по умолчанию -- all_permissions=True).
     """
     topo = topology if topology is not None else dict(_DEFAULT_TOPOLOGY)
     config_data: dict[str, Any] = {"topology": topo}
@@ -89,8 +91,9 @@ def make_pipeline_services(
     if action_bus is not None:
         commands.action_bus = lambda: action_bus  # type: ignore[attr-defined]
 
-    # Plugins: навесить _registry bridge для wire-валидации
-    plugins = FakePluginCatalog()
+    # Plugins: F.5 — FakePluginCatalog с PluginSpec для wire-валидации через Protocol.
+    # plugin_registry навешивается как _registry bridge для sandbox (by design).
+    plugins = FakePluginCatalog(specs=plugin_specs) if plugin_specs else FakePluginCatalog()
     if plugin_registry is not None:
         plugins._registry = plugin_registry  # type: ignore[attr-defined]
 
@@ -99,7 +102,7 @@ def make_pipeline_services(
     if registers_manager is not None:
         registers._rm = registers_manager  # type: ignore[attr-defined]
 
-    # Recipes: Task F.4 — строим FakeRecipeStore из recipe_manager данных
+    # Recipes: Task F.4 -- строим FakeRecipeStore из recipe_manager данных
     recipes = _build_recipe_store(recipe_manager)
 
     # Displays: если нужен raw registry bridge

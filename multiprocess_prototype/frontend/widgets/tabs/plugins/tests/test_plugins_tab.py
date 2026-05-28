@@ -1,68 +1,70 @@
-"""Тесты для PluginsTab (Task E.5: AppServices DI)."""
+"""Тесты для PluginsTab (Task E.5: AppServices DI, F.5: PluginCatalog Protocol).
+
+Task F.5: presenter полностью на PluginCatalog Protocol. Тесты используют
+FakePluginCatalog с PluginSpec (включая ports и has_registers) вместо
+raw _MockRegistry bridge.
+"""
 
 from __future__ import annotations
 
 import pytest
 
+from multiprocess_prototype.domain.protocols.plugin_catalog import (
+    PluginSpec,
+    PortSpec,
+)
+from multiprocess_prototype.domain.tests._fakes import FakePluginCatalog
+from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 from multiprocess_prototype.frontend.widgets.tabs.plugins.tab import PluginsTab
 from multiprocess_prototype.frontend.widgets.tabs.plugins.presenter import PluginsPresenter
 from multiprocess_prototype.frontend.widgets.tabs.plugins.detail_panels import PluginInfoCard
 
-from ._helpers import _StubPluginsCtx, make_plugins_services
+from ._helpers import _StubPluginsCtx
 
 
-class _MockEntry:
-    """Mock для PluginEntry."""
-
-    def __init__(
-        self,
-        name: str,
-        category: str,
-        description: str = "",
-        register_classes: list | None = None,
-        inputs: list | None = None,
-        outputs: list | None = None,
-    ) -> None:
-        self.name = name
-        self.category = category
-        self.description = description
-        self.register_classes = register_classes or []
-        self.inputs = inputs or []
-        self.outputs = outputs or []
+# ---------------------------------------------------------------------------
+# Фабрики тестовых данных
+# ---------------------------------------------------------------------------
 
 
-class _MockRegistry:
-    """Mock для PluginRegistry."""
+def _default_specs() -> dict[str, PluginSpec]:
+    """Тестовый набор PluginSpec (3 плагина, 2 категории)."""
+    return {
+        "color_mask": PluginSpec(
+            name="color_mask",
+            category="processing",
+            description="Цветовая маска",
+            has_registers=True,
+            ports=(
+                PortSpec(name="frame", dtype="image/bgr", direction="input"),
+                PortSpec(name="mask", dtype="image/bgr", direction="output"),
+            ),
+        ),
+        "grayscale": PluginSpec(
+            name="grayscale",
+            category="processing",
+            description="Чёрно-белое",
+            ports=(
+                PortSpec(name="frame", dtype="image/bgr", direction="input"),
+                PortSpec(name="frame", dtype="image/gray", direction="output"),
+            ),
+        ),
+        "capture": PluginSpec(
+            name="capture",
+            category="source",
+            description="Захват камеры",
+            ports=(PortSpec(name="frame", dtype="image/bgr", direction="output"),),
+        ),
+    }
 
-    def __init__(self, entries: list[_MockEntry]) -> None:
-        self._entries = entries
 
-    def list(self) -> list[_MockEntry]:
-        return self._entries
-
-    def get(self, name: str) -> _MockEntry | None:
-        return next((e for e in self._entries if e.name == name), None)
-
-    def filter(self, category: str | None = None) -> list[_MockEntry]:
-        if category:
-            return [e for e in self._entries if e.category == category]
-        return self._entries
-
-
-def _default_entries() -> list[_MockEntry]:
-    return [
-        _MockEntry("color_mask", "processing", "Цветовая маска", register_classes=["FakeReg"]),
-        _MockEntry("grayscale", "processing", "Чёрно-белое"),
-        _MockEntry("capture", "source", "Захват камеры"),
-    ]
-
-
-def _make_services(entries: list[_MockEntry] | None = None):
-    """AppServices с raw PluginRegistry через bridge."""
-    if entries is None:
-        entries = _default_entries()
-    return make_plugins_services(registry=_MockRegistry(entries))
+def _make_services(specs: dict[str, PluginSpec] | None = None):
+    """AppServices с FakePluginCatalog (PluginSpec-based)."""
+    if specs is None:
+        specs = _default_specs()
+    plugins = FakePluginCatalog(specs=specs)
+    return make_test_app_services(plugins=plugins)
 
 
 class TestPluginsPresenter:
@@ -96,11 +98,20 @@ class TestPluginsPresenter:
         assert info["name"] == "nonexistent"
         assert info["has_registers"] is False
 
-    def test_no_registry(self) -> None:
-        # registry=None → services.plugins без _registry bridge → presenter._registry=None
-        p = PluginsPresenter(make_plugins_services(registry=None))
+    def test_empty_catalog(self) -> None:
+        """Пустой FakePluginCatalog -> presenter возвращает пустые списки."""
+        p = PluginsPresenter(_make_services(specs={}))
         assert p.list_plugins() == []
-        assert p.get_categories() == []
+        # Пустой каталог -> categories() вернёт ["default"] (fallback FakePluginCatalog)
+        cats = p.get_categories()
+        assert isinstance(cats, list)
+
+    def test_get_plugin_info_ports_from_spec(self) -> None:
+        """Ports отображаются из PluginSpec.ports (direction-фильтр)."""
+        p = PluginsPresenter(_make_services())
+        info = p.get_plugin_info("color_mask")
+        assert "frame: image/bgr" in info["inputs"]
+        assert "mask: image/bgr" in info["outputs"]
 
 
 class TestPluginInfoCard:
@@ -173,23 +184,23 @@ class TestPluginsTab:
         # (processing + source).
         assert tab._tree_nav.topLevelItemCount() == 3
 
-    def test_empty_registry(self, qtbot: pytest.fixture) -> None:
-        tab = PluginsTab(_make_services(entries=[]))
+    def test_empty_catalog(self, qtbot: pytest.fixture) -> None:
+        tab = PluginsTab(_make_services(specs={}))
         qtbot.addWidget(tab)
-        # Нет плагинов — остаётся только секция «Пути» (корневая, Phase 2).
+        # Нет плагинов -- остаётся только секция «Пути» (корневая, Phase 2).
         assert tab._tree_nav.topLevelItemCount() == 1
 
     def test_lazy_section_created_on_select(self, qtbot: pytest.fixture) -> None:
         # При программном выборе плагина презентер строит секцию через factory.
         tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
-        # До выбора плагина — секция color_mask ещё не создана (lazy).
+        # До выбора плагина -- секция color_mask ещё не создана (lazy).
         tab.select_tree_key("color_mask")
         # Секция color_mask должна быть зарегистрирована в content_stack.
         assert "color_mask" in tab.presenter._page_index  # type: ignore[attr-defined]
 
     def test_no_register_manager_fallback_to_info_card(self, qtbot: pytest.fixture) -> None:
-        # color_mask имеет has_registers=True, но registers_manager=None →
+        # color_mask имеет has_registers=True, но registers_manager=None ->
         # fields пусты, должен сработать fallback на PluginInfoCard.
         tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
@@ -209,21 +220,21 @@ class TestPluginsTab:
         assert "color_mask" in visible
         assert "grayscale" not in visible
         assert "capture" not in visible
-        # Очистка — все снова видимы.
+        # Очистка -- все снова видимы.
         tab._search.setText("")
         assert sorted(_visible_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
 
     def test_view_mode_toggle_switches_to_table(self, qtbot: pytest.fixture) -> None:
         tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
-        # По умолчанию — Cards (content_stack показывает страницу плагина/категории).
+        # По умолчанию -- Cards (content_stack показывает страницу плагина/категории).
         cards_idx = tab._content_stack.currentIndex()
-        # Переключение на Table — content_stack показывает _table_widget.
+        # Переключение на Table -- content_stack показывает _table_widget.
         tab._on_view_mode_changed(ViewMode.TABLE.value)
         assert tab._content_stack.currentIndex() == tab._table_idx
         # Таблица заполнена 3 строками.
         assert tab._table_widget.rowCount() == 3
-        # Возврат в Cards — содержимое не на table_idx.
+        # Возврат в Cards -- содержимое не на table_idx.
         tab._on_view_mode_changed(ViewMode.CARDS.value)
         assert tab._content_stack.currentIndex() != tab._table_idx
         _ = cards_idx

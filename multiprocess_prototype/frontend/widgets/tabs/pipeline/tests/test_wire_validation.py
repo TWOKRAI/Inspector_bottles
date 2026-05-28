@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Тесты валидации wire через PluginRegistry.are_ports_compatible.
-Task E.1: мигрировано на AppServices. Wire-валидация использует bridge _registry.
+"""Тесты валидации wire через PluginCatalog Protocol + are_ports_compatible.
+
+Task F.5: wire-валидация переведена с raw _registry bridge на PluginCatalog
+Protocol (resolve -> PluginSpec.ports -> PortSpec -> Port -> are_ports_compatible).
 
 Сценарии:
-- test_compatible_image_image_wire_ok: image/bgr → image/bgr → wire OK
-- test_incompatible_image_tensor_wire_blocked: image/bgr → tensor/float32 → блокируется
-- test_wildcard_image_compatible: image/bgr → image/* → wire OK
-- test_display_target_accepts_image_bgr: wire к display.* с image/bgr выходом → OK
-- test_display_target_rejects_tensor: wire к display.* с tensor/float32 выходом → блокируется
-- test_no_registry_skips_validation: registry=None → graceful, wire OK
-- test_unknown_plugin_skips_validation: registry.get() → None → warning + wire OK
+- test_compatible_image_image_wire_ok: image/bgr -> image/bgr -> wire OK
+- test_incompatible_image_tensor_wire_blocked: image/bgr -> tensor/float32 -> блокируется
+- test_wildcard_image_compatible: image/bgr -> image/* -> wire OK
+- test_display_target_accepts_image_bgr: wire к display.* с image/bgr выходом -> OK
+- test_display_target_rejects_tensor: wire к display.* с tensor/float32 выходом -> блокируется
+- test_no_plugins_skips_validation: пустой каталог -> graceful, wire OK
+- test_unknown_plugin_skips_validation: catalog.resolve() -> None -> warning + wire OK
 
 Запуск:
     python -m pytest multiprocess_prototype/frontend/widgets/tabs/pipeline/tests/test_wire_validation.py -v
@@ -17,9 +19,12 @@ Task E.1: мигрировано на AppServices. Wire-валидация ис�
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from multiprocess_framework.modules.process_module.plugins.port import Port
+from multiprocess_prototype.domain.protocols.plugin_catalog import (
+    PluginSpec,
+    PortSpec,
+)
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import (
     PipelinePresenter,
 )
@@ -32,31 +37,27 @@ from ._helpers import make_pipeline_services
 # ---------------------------------------------------------------------------
 
 
-def _make_plugin_entry(name: str, inputs: list[Port], outputs: list[Port]) -> MagicMock:
-    """Создать mock PluginEntry с заданными портами."""
-    entry = MagicMock()
-    entry.name = name
-    entry.inputs = inputs
-    entry.outputs = outputs
-    return entry
+def _make_plugin_spec(
+    name: str,
+    inputs: list[PortSpec] | None = None,
+    outputs: list[PortSpec] | None = None,
+) -> PluginSpec:
+    """Создать PluginSpec с заданными портами."""
+    ports = tuple(inputs or []) + tuple(outputs or [])
+    return PluginSpec(
+        name=name,
+        category="processing",
+        ports=ports,
+    )
 
 
-def _make_registry(plugins: dict[str, MagicMock]) -> MagicMock:
-    """Создать mock PluginRegistry.
-
-    Args:
-        plugins: словарь {plugin_name: mock_entry}
-    """
-    registry = MagicMock()
-    registry.get.side_effect = lambda name: plugins.get(name)
-    return registry
-
-
-def _make_presenter_with_processes(registry=None) -> PipelinePresenter:
+def _make_presenter_with_processes(
+    plugin_specs: dict[str, PluginSpec] | None = None,
+) -> PipelinePresenter:
     """Создать PipelinePresenter с двумя процессами в модели."""
     services = make_pipeline_services(
         topology={"processes": [], "wires": []},
-        plugin_registry=registry,
+        plugin_specs=plugin_specs,
     )
     presenter = PipelinePresenter(services)
 
@@ -76,15 +77,16 @@ class TestWireValidationCompatible:
     """Тесты совместимых wire-соединений."""
 
     def test_compatible_image_image_wire_ok(self):
-        """image/bgr → image/bgr: wire добавляется в модель."""
-        port_out = Port(name="frame", dtype="image/bgr", shape="(H, W, 3)")
-        port_in = Port(name="frame", dtype="image/bgr", shape="(H, W, 3)")
+        """image/bgr -> image/bgr: wire добавляется в модель."""
+        port_out = PortSpec(name="frame", dtype="image/bgr", direction="output", shape="(H, W, 3)")
+        port_in = PortSpec(name="frame", dtype="image/bgr", direction="input", shape="(H, W, 3)")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_a": entry_a, "plugin_b": entry_b})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.frame", "proc_b.plugin_b.frame")
@@ -100,15 +102,16 @@ class TestWireValidationCompatible:
         assert wires[0]["target"] == "proc_b.plugin_b.frame"
 
     def test_wildcard_image_compatible(self):
-        """image/bgr → image/*: wildcard совместим, wire добавляется."""
-        port_out = Port(name="out", dtype="image/bgr", shape="")
-        port_in = Port(name="in", dtype="image/*", shape="")
+        """image/bgr -> image/*: wildcard совместим, wire добавляется."""
+        port_out = PortSpec(name="out", dtype="image/bgr", direction="output")
+        port_in = PortSpec(name="in", dtype="image/*", direction="input")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_a": entry_a, "plugin_b": entry_b})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.out", "proc_b.plugin_b.in")
@@ -121,15 +124,16 @@ class TestWireValidationIncompatible:
     """Тесты несовместимых wire-соединений."""
 
     def test_incompatible_image_tensor_wire_blocked(self):
-        """image/bgr → tensor/float32: wire блокируется, QMessageBox.warning показывается."""
-        port_out = Port(name="frame", dtype="image/bgr", shape="(H, W, 3)")
-        port_in = Port(name="tensor", dtype="tensor/float32", shape="(N, 4)")
+        """image/bgr -> tensor/float32: wire блокируется, QMessageBox.warning показывается."""
+        port_out = PortSpec(name="frame", dtype="image/bgr", direction="output", shape="(H, W, 3)")
+        port_in = PortSpec(name="tensor", dtype="tensor/float32", direction="input", shape="(N, 4)")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_a": entry_a, "plugin_b": entry_b})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.frame", "proc_b.plugin_b.tensor")
@@ -144,14 +148,15 @@ class TestWireValidationIncompatible:
 
     def test_incompatible_wire_message_contains_dtypes(self):
         """Сообщение об ошибке содержит типы несовместимых портов."""
-        port_out = Port(name="data", dtype="dict", shape="")
-        port_in = Port(name="frame", dtype="image/bgr", shape="")
+        port_out = PortSpec(name="data", dtype="dict", direction="output")
+        port_in = PortSpec(name="frame", dtype="image/bgr", direction="input")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_a": entry_a, "plugin_b": entry_b})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             presenter.add_wire("proc_a.plugin_a.data", "proc_b.plugin_b.frame")
@@ -166,15 +171,16 @@ class TestWireValidationDisplay:
     """Тесты валидации wire к display-узлам."""
 
     def test_display_target_accepts_image_bgr(self):
-        """Wire к display.* с image/bgr выходом → OK (wildcard image/*)."""
-        port_out = Port(name="frame", dtype="image/bgr", shape="(H, W, 3)")
+        """Wire к display.* с image/bgr выходом -> OK (wildcard image/*)."""
+        port_out = PortSpec(name="frame", dtype="image/bgr", direction="output", shape="(H, W, 3)")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        registry = _make_registry({"plugin_a": entry_a})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+        }
 
         services = make_pipeline_services(
             topology={"processes": [], "wires": []},
-            plugin_registry=registry,
+            plugin_specs=specs,
         )
         presenter = PipelinePresenter(services)
         presenter._model.add_process("proc_a", "plugin_a", "processing")
@@ -187,15 +193,16 @@ class TestWireValidationDisplay:
         mock_warn.assert_not_called()
 
     def test_display_target_accepts_image_gray(self):
-        """Wire к display.* с image/gray выходом → OK (wildcard image/*)."""
-        port_out = Port(name="mask", dtype="image/gray", shape="(H, W)")
+        """Wire к display.* с image/gray выходом -> OK (wildcard image/*)."""
+        port_out = PortSpec(name="mask", dtype="image/gray", direction="output", shape="(H, W)")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        registry = _make_registry({"plugin_a": entry_a})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+        }
 
         services = make_pipeline_services(
             topology={"processes": [], "wires": []},
-            plugin_registry=registry,
+            plugin_specs=specs,
         )
         presenter = PipelinePresenter(services)
         presenter._model.add_process("proc_a", "plugin_a", "processing")
@@ -208,15 +215,16 @@ class TestWireValidationDisplay:
         mock_warn.assert_not_called()
 
     def test_display_target_rejects_tensor(self):
-        """Wire к display.* с tensor/float32 выходом → блокируется (не image-тип)."""
-        port_out = Port(name="out", dtype="tensor/float32", shape="(N, 4)")
+        """Wire к display.* с tensor/float32 выходом -> блокируется (не image-тип)."""
+        port_out = PortSpec(name="out", dtype="tensor/float32", direction="output", shape="(N, 4)")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        registry = _make_registry({"plugin_a": entry_a})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+        }
 
         services = make_pipeline_services(
             topology={"processes": [], "wires": []},
-            plugin_registry=registry,
+            plugin_specs=specs,
         )
         presenter = PipelinePresenter(services)
         presenter._model.add_process("proc_a", "plugin_a", "processing")
@@ -229,15 +237,16 @@ class TestWireValidationDisplay:
         mock_warn.assert_called_once()
 
     def test_display_target_rejects_dict(self):
-        """Wire к display.* с dict выходом → блокируется."""
-        port_out = Port(name="stats", dtype="dict", shape="")
+        """Wire к display.* с dict выходом -> блокируется."""
+        port_out = PortSpec(name="stats", dtype="dict", direction="output")
 
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        registry = _make_registry({"plugin_a": entry_a})
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+        }
 
         services = make_pipeline_services(
             topology={"processes": [], "wires": []},
-            plugin_registry=registry,
+            plugin_specs=specs,
         )
         presenter = PipelinePresenter(services)
         presenter._model.add_process("proc_a", "plugin_a", "processing")
@@ -251,11 +260,11 @@ class TestWireValidationDisplay:
 
 
 class TestWireValidationGracefulDegradation:
-    """Тесты graceful degradation — wire не блокируется при недоступном registry."""
+    """Тесты graceful degradation -- wire не блокируется при пустом каталоге."""
 
-    def test_no_registry_skips_validation(self):
-        """services.plugins без _registry: валидация пропускается, wire создаётся."""
-        presenter = _make_presenter_with_processes(registry=None)
+    def test_no_plugins_skips_validation(self):
+        """Пустой FakePluginCatalog: валидация пропускается, wire создаётся."""
+        presenter = _make_presenter_with_processes(plugin_specs=None)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.frame", "proc_b.plugin_b.frame")
@@ -264,12 +273,14 @@ class TestWireValidationGracefulDegradation:
         mock_warn.assert_not_called()
 
     def test_unknown_source_plugin_skips_validation(self):
-        """registry.get(src_plugin) → None: лог warning + wire добавляется (legacy compat)."""
-        port_in = Port(name="frame", dtype="image/bgr", shape="")
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_b": entry_b})
+        """catalog.resolve(src_plugin) -> None: лог warning + wire добавляется (legacy compat)."""
+        port_in = PortSpec(name="frame", dtype="image/bgr", direction="input")
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        specs = {
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
+
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.frame", "proc_b.plugin_b.frame")
@@ -278,12 +289,14 @@ class TestWireValidationGracefulDegradation:
         mock_warn.assert_not_called()
 
     def test_unknown_target_plugin_skips_validation(self):
-        """registry.get(tgt_plugin) → None: лог warning + wire добавляется (legacy compat)."""
-        port_out = Port(name="frame", dtype="image/bgr", shape="")
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_out])
-        registry = _make_registry({"plugin_a": entry_a})
+        """catalog.resolve(tgt_plugin) -> None: лог warning + wire добавляется (legacy compat)."""
+        port_out = PortSpec(name="frame", dtype="image/bgr", direction="output")
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_out]),
+        }
+
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.frame", "proc_b.plugin_b.frame")
@@ -293,13 +306,16 @@ class TestWireValidationGracefulDegradation:
 
     def test_unknown_source_port_skips_validation(self):
         """Порт 'frame' не найден в outputs плагина: пропуск, wire добавляется."""
-        port_wrong = Port(name="out", dtype="image/bgr", shape="")
-        entry_a = _make_plugin_entry("plugin_a", inputs=[], outputs=[port_wrong])
-        port_in = Port(name="frame", dtype="image/bgr", shape="")
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_a": entry_a, "plugin_b": entry_b})
+        # plugin_a имеет output 'out' (не 'frame')
+        port_wrong = PortSpec(name="out", dtype="image/bgr", direction="output")
+        port_in = PortSpec(name="frame", dtype="image/bgr", direction="input")
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        specs = {
+            "plugin_a": _make_plugin_spec("plugin_a", outputs=[port_wrong]),
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
+
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warn:
             result = presenter.add_wire("proc_a.plugin_a.frame", "proc_b.plugin_b.frame")
@@ -309,11 +325,13 @@ class TestWireValidationGracefulDegradation:
 
     def test_malformed_source_endpoint_skips_validation(self):
         """Некорректный source endpoint (без точек): пропуск, wire попытается добавиться."""
-        port_in = Port(name="frame", dtype="image/bgr", shape="")
-        entry_b = _make_plugin_entry("plugin_b", inputs=[port_in], outputs=[])
-        registry = _make_registry({"plugin_b": entry_b})
+        port_in = PortSpec(name="frame", dtype="image/bgr", direction="input")
 
-        presenter = _make_presenter_with_processes(registry=registry)
+        specs = {
+            "plugin_b": _make_plugin_spec("plugin_b", inputs=[port_in]),
+        }
+
+        presenter = _make_presenter_with_processes(plugin_specs=specs)
 
         with patch("PySide6.QtWidgets.QMessageBox.warning"):
             presenter.add_wire("invalid", "proc_b.plugin_b.frame")

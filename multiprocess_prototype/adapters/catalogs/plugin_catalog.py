@@ -74,6 +74,7 @@ def _entry_to_spec(entry: PluginEntry) -> PluginSpec:
         description=getattr(entry, "description", ""),
         config_schema=config_schema,
         ports=ports,
+        has_registers=bool(entry.register_classes),
     )
 
 

@@ -1,15 +1,19 @@
-"""SandboxPresenter — бизнес-логика sandbox-теста плагина.
+"""SandboxPresenter -- бизнес-логика sandbox-теста плагина.
 
 Pure Python (без PySide6). Определяет совместимость плагина с sandbox-режимом
 и выполняет plugin.process() на одном кадре.
+
+By design: sandbox требует живой Python plugin_class (entry.plugin_class)
+для инстанцирования плагина -- не покрывается PluginCatalog (метаданные).
+Bridge _registry остаётся навсегда. Q-F2=C (owner-decision 2026-05-28).
 
 Совместимые плагины (stateless, single-frame, single-input):
 - processing: grayscale, color_mask, flip, resize, negative и т.п.
 
 Несовместимые:
-- source — источники данных, используйте ServicesTab
-- runtime / control — требуют pipeline-контекст
-- multi-input / stitcher — семантика N:1 (fan-in), требует несколько потоков
+- source -- источники данных, используйте ServicesTab
+- runtime / control -- требуют pipeline-контекст
+- multi-input / stitcher -- семантика N:1 (fan-in), требует несколько потоков
 """
 
 from __future__ import annotations
@@ -71,8 +75,8 @@ class SandboxPresenter:
                  services.plugins._registry bridge (plugin_class не покрыт Protocol).
         """
         self._services = services
-        # TODO Phase F: PluginCatalog Protocol не покрывает plugin_class/inputs —
-        # bridge на raw registry для инстанцирования плагина в sandbox.
+        # By design: sandbox требует живой Python plugin_class/register_class/service --
+        # не покрывается PluginCatalog (метаданные). Q-F2=C (owner-decision 2026-05-28).
         self._registry = getattr(services.plugins, "_registry", None)
 
     # ------------------------------------------------------------------ #

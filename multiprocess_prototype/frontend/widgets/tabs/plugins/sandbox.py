@@ -1,15 +1,20 @@
-"""PluginSandboxWidget — GUI-виджет для тестирования плагина на одном кадре.
+"""PluginSandboxWidget -- GUI-виджет для тестирования плагина на одном кадре.
 
 Vertical slice (Task 6.2 + Task 6.3):
   - ISandboxView Protocol
-  - PluginSandboxWidget: выбор файла / webcam snapshot → before-preview → «Применить» → after-preview
+  - PluginSandboxWidget: выбор файла / webcam snapshot -> before-preview -> «Применить» -> after-preview
   - Зона параметров: динамические QSpinBox/QDoubleSpinBox по register_class.model_fields
-  - run_once выполняется в QThreadPool (_SandboxWorker) — UI не замораживается
-  - Конвертация BGR numpy → QPixmap через cv2.cvtColor + QImage
+  - run_once выполняется в QThreadPool (_SandboxWorker) -- UI не замораживается
+  - Конвертация BGR numpy -> QPixmap через cv2.cvtColor + QImage
   - show_error (красный QLabel), set_running (disable + текст)
 
 MVP-паттерн: ISandboxView (Protocol) + PluginSandboxWidget (реализует Protocol).
 SandboxPresenter инжектируется снаружи.
+
+By design: sandbox требует живой Python plugin_class (entry.register_classes[0]),
+а webcam требует живой service entry (svc_registry.get("webcam_camera")) --
+не покрывается PluginCatalog/ServiceManager Protocol (метаданные).
+Bridge _registry остаётся навсегда. Q-F2=C (owner-decision 2026-05-28).
 """
 
 from __future__ import annotations
@@ -217,8 +222,9 @@ class PluginSandboxWidget(QWidget):
         super().__init__(parent)
         self._presenter = presenter
         self._plugin_name = plugin_name
-        # TODO Phase F: PluginCatalog/ServiceManager Protocol не покрывают
-        # register_classes / service entry (status, get_current_frame) — raw bridge.
+        # By design: sandbox требует живой Python register_classes[0] (Pydantic model)
+        # и живой service entry (status, get_current_frame) -- не покрывается
+        # PluginCatalog/ServiceManager Protocol (метаданные). Q-F2=C (owner-decision 2026-05-28).
         self._registry = getattr(services.plugins, "_registry", None) if services is not None else None
         self._svc_registry = getattr(services.services, "_registry", None) if services is not None else None
         self._current_frame: np.ndarray | None = None  # текущий загруженный кадр

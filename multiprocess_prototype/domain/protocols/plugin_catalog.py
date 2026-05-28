@@ -40,6 +40,7 @@ class PluginSpec:
     description   — человекочитаемое описание плагина (соответствует PluginEntry.description).
     config_schema — схема конфигурации в виде dict (опциональная).
     ports         — tuple входных/выходных портов.
+    has_registers — плагин регистрирует доменные классы (bool(entry.register_classes)).
     """
 
     name: str
@@ -47,6 +48,7 @@ class PluginSpec:
     description: str = ""
     config_schema: dict[str, Any] = field(default_factory=dict)
     ports: tuple[PortSpec, ...] = ()
+    has_registers: bool = False
 
 
 class PluginCatalog(Protocol):

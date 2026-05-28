@@ -58,21 +58,33 @@ class FakePluginCatalog:
     """In-memory PluginCatalog с настраиваемым набором известных плагинов.
 
     По умолчанию — пустой каталог (no known plugins).
+
+    Принимает:
+    - known: set[str] — обратная совместимость (Phase B-E тесты).
+    - specs: dict[str, PluginSpec] — полный контроль (Phase F+).
     """
 
-    def __init__(self, known: set[str] | None = None) -> None:
-        self._known: set[str] = known or set()
+    def __init__(
+        self,
+        known: set[str] | None = None,
+        *,
+        specs: dict[str, PluginSpec] | None = None,
+    ) -> None:
+        self._specs: dict[str, PluginSpec] = {}
+        if specs is not None:
+            self._specs = dict(specs)
+        elif known is not None:
+            self._specs = {n: PluginSpec(name=n, category="default") for n in known}
 
     def list_plugins(self) -> tuple[PluginSpec, ...]:
-        return tuple(PluginSpec(name=n, category="default") for n in sorted(self._known))
+        return tuple(self._specs[k] for k in sorted(self._specs))
 
     def resolve(self, plugin_name: str) -> PluginSpec | None:
-        if plugin_name in self._known:
-            return PluginSpec(name=plugin_name, category="default")
-        return None
+        return self._specs.get(plugin_name)
 
     def categories(self) -> tuple[str, ...]:
-        return ("default",)
+        cats = sorted({s.category for s in self._specs.values()}) or ["default"]
+        return tuple(cats)
 
 
 # Явное объявление соответствия Protocol для статического контроля
