@@ -233,9 +233,9 @@ class TestMigrateV1toV2:
 
         assert len(result["display_bindings"]) == 1
         binding = result["display_bindings"][0]
-        assert binding["source"] == "capture_proc.resize.out"
-        # display — последний сегмент target
-        assert binding["display"] == "main_output"
+        assert binding["node_id"] == "capture_proc.resize.out"
+        # display_id — последний сегмент target
+        assert binding["display_id"] == "main_output"
 
     def test_migrate_v1_missing_topology_graceful(self) -> None:
         """Dict без topology → graceful fallback, не исключение."""

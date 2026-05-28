@@ -115,7 +115,7 @@ class TestDemoRecipeRoundtrip:
         raw = _load_yaml(recipe_path)
 
         # Recipe.from_dict поддерживает формат с name/version на верхнем уровне
-        # и live-формат display_bindings (source/display)
+        # display_bindings в формате v3 (node_id/display_id)
         recipe = Recipe.from_dict(raw)
 
         # Проверяем meta
@@ -133,14 +133,11 @@ class TestDemoRecipeRoundtrip:
         # Проверяем active_services
         assert "webcam_camera" in recipe.active_services
 
-    def test_demo_recipe_display_bindings_normalized(self, fixtures_dir: Path) -> None:
-        """display_bindings из live-формата (source/display) корректно нормализуются.
+    def test_demo_recipe_display_bindings_v3(self, fixtures_dir: Path) -> None:
+        """display_bindings в формате v3 (node_id/display_id) загружаются напрямую.
 
-        Live-формат YAML использует ключи source/display (не node_id/display_id).
-        Recipe.from_dict() выполняет нормализацию через _normalize_display_binding().
-        После нормализации DisplayInstance имеет node_id и display_id.
-
-        TODO(Phase F): Удалить поддержку live-формата после миграции рецептов.
+        YAML использует ключи node_id/display_id — нормализация не требуется.
+        DisplayInstance создаётся напрямую через from_dict.
         """
         recipe_path = fixtures_dir / "recipes" / "demo_webcam_split_merge.yaml"
         raw = _load_yaml(recipe_path)
@@ -149,13 +146,27 @@ class TestDemoRecipeRoundtrip:
         assert len(recipe.display_bindings) == 2
 
         binding0 = recipe.display_bindings[0]
-        # node_id соответствует полю source из live-формата
         assert binding0.node_id == "merge_proc.render_overlay.rendered_frame"
         assert binding0.display_id == "main_output"
 
         binding1 = recipe.display_bindings[1]
         assert binding1.node_id == "capture_proc.resize.frame"
         assert binding1.display_id == "debug_input"
+
+    def test_legacy_source_display_format_rejected(self) -> None:
+        """Устаревший формат display_bindings (source/display) отклоняется.
+
+        Recipe.from_dict с ключами source/display вместо node_id/display_id
+        вызывает ValidationError — forcing function для когерентности формата v3.
+        """
+        legacy_data = {
+            "name": "legacy_test",
+            "version": 3,
+            "blueprint": {"processes": [], "wires": []},
+            "display_bindings": [{"source": "proc.plugin.port", "display": "main"}],
+        }
+        with pytest.raises((ValidationError, EntityValidationError)):
+            Recipe.from_dict(legacy_data)
 
     def test_demo_recipe_roundtrip_idempotent(self, fixtures_dir: Path) -> None:
         """Recipe.from_dict(raw) → to_dict() → from_dict() даёт те же ключевые поля."""

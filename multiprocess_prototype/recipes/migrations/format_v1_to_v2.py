@@ -10,9 +10,9 @@
         }
     }
 
-Формат v2 (blueprint-based, Phase 5+):
+Формат v2/v3 (blueprint-based, Phase 5+):
     {
-        "version": 2,
+        "version": 3,
         "name": "cup_inspection",
         "description": "...",
         "blueprint": {
@@ -20,7 +20,7 @@
             "wires": [...]
         },
         "active_services": [...],
-        "display_bindings": [{"source": "...", "display": "..."}]
+        "display_bindings": [{"node_id": "...", "display_id": "..."}]
     }
 
 Внимание: эта миграция — другая, чем backend/state/recipes/migrations/v1_to_v2.py
@@ -68,13 +68,13 @@ def _extract_display_bindings(wires: list[Any]) -> list[dict[str, str]]:
     """Извлекает display_bindings из списка wires.
 
     Ищет wire-записи с target вида *.display.* или display_* и
-    формирует список {source, display}.
+    формирует список {node_id, display_id}.
 
     Args:
         wires: список wire-записей из topology.
 
     Returns:
-        Список dict {source, display}.
+        Список dict {node_id, display_id}.
     """
     bindings: list[dict[str, str]] = []
 
@@ -99,7 +99,7 @@ def _extract_display_bindings(wires: list[Any]) -> list[dict[str, str]]:
             parts = target.split(".")
             display_name = parts[-1] if len(parts) > 1 else target
 
-            bindings.append({"source": source, "display": display_name})
+            bindings.append({"node_id": source, "display_id": display_name})
 
     return bindings
 

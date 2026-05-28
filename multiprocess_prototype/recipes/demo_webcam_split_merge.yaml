@@ -1,4 +1,4 @@
-version: 2
+version: 3
 name: demo_webcam_split_merge
 description: webcam -> split ROI -> parallel processing -> merge -> display
 
@@ -44,7 +44,7 @@ active_services:
 
 display_bindings:
   # render_overlay output port: rendered_frame (не frame)
-  - source: merge_proc.render_overlay.rendered_frame
-    display: main_output
-  - source: capture_proc.resize.frame
-    display: debug_input
+  - node_id: merge_proc.render_overlay.rendered_frame
+    display_id: main_output
+  - node_id: capture_proc.resize.frame
+    display_id: debug_input

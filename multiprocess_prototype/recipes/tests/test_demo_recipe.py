@@ -115,7 +115,7 @@ def test_demo_recipe_loads_via_manager() -> None:
     # Верхнеуровневые обязательные поля
     assert "blueprint" in recipe_dict, f"Рецепт должен содержать ключ 'blueprint'. Ключи: {list(recipe_dict.keys())}"
     assert "version" in recipe_dict, f"Рецепт должен содержать ключ 'version'. Ключи: {list(recipe_dict.keys())}"
-    assert recipe_dict["version"] == 2, f"Ожидается version=2, получено: {recipe_dict['version']}"
+    assert recipe_dict["version"] == 3, f"Ожидается version=3, получено: {recipe_dict['version']}"
 
     # Blueprint содержит processes и wires
     blueprint = recipe_dict["blueprint"]
@@ -234,7 +234,7 @@ def test_demo_recipe_has_display_bindings() -> None:
     assert isinstance(bindings, list), "display_bindings должен быть списком"
     assert len(bindings) == 2, f"Ожидается 2 display_binding, получено: {len(bindings)}"
 
-    # Проверяем структуру каждого binding
+    # Проверяем структуру каждого binding (формат v3: node_id/display_id)
     for binding in bindings:
-        assert "source" in binding, f"display_binding без 'source': {binding}"
-        assert "display" in binding, f"display_binding без 'display': {binding}"
+        assert "node_id" in binding, f"display_binding без 'node_id': {binding}"
+        assert "display_id" in binding, f"display_binding без 'display_id': {binding}"

@@ -198,22 +198,22 @@ class TestDisplayBindingsFormat:
     """display_binding имеет правильную структуру."""
 
     def test_display_bindings_format(self) -> None:
-        """Каждая запись display_bindings содержит ключи source и display."""
+        """Каждая запись display_bindings содержит ключи node_id и display_id (v3)."""
         model = _make_model_full()
         _, bindings, _ = graph_to_blueprint(model)
 
         assert len(bindings) == 1
         binding = bindings[0]
 
-        assert "source" in binding, "Отсутствует ключ 'source' в binding"
-        assert "display" in binding, "Отсутствует ключ 'display' в binding"
+        assert "node_id" in binding, "Отсутствует ключ 'node_id' в binding"
+        assert "display_id" in binding, "Отсутствует ключ 'display_id' в binding"
 
-        # source — строка вида "proc.plugin.port"
-        assert isinstance(binding["source"], str)
-        assert binding["source"].count(".") >= 2
+        # node_id — строка вида "proc.plugin.port" (источник-эндпоинт)
+        assert isinstance(binding["node_id"], str)
+        assert binding["node_id"].count(".") >= 2
 
-        # display — display_id (строка)
-        assert binding["display"] == "main_output"
+        # display_id — идентификатор дисплея (строка)
+        assert binding["display_id"] == "main_output"
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +345,8 @@ class TestOrphanDisplayBindingNoCrash:
             "processes": [],
             "wires": [],
         }
-        # Binding ссылается на несуществующий процесс
-        bindings = [{"source": "ghost_proc.ghost_plugin.frame", "display": "missing_display"}]
+        # Binding ссылается на несуществующий процесс (формат v3)
+        bindings = [{"node_id": "ghost_proc.ghost_plugin.frame", "display_id": "missing_display"}]
 
         model = PipelineModel()
 
@@ -368,7 +368,7 @@ class TestOrphanDisplayBindingNoCrash:
             "processes": [],
             "wires": [],
         }
-        bindings = [{"source": "proc.plugin.port", "display": "some_display"}]
+        bindings = [{"node_id": "proc.plugin.port", "display_id": "some_display"}]
 
         model = PipelineModel()
 

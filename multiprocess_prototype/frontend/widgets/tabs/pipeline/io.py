@@ -8,7 +8,7 @@
         → None  (мутирует model)
 
 display_bindings — список dict'ов вида:
-    {"source": "process.plugin.port", "display": "<display_id>"}
+    {"node_id": "process.plugin.port", "display_id": "<display_id>"}
 
 gui_positions — dict вида:
     {"<node_id>": [x, y]}  (для всех узлов, включая display)
@@ -47,7 +47,7 @@ def graph_to_blueprint(
         - blueprint_dict: dict, совместимый с SystemBlueprint.model_validate().
           Содержит ключи: name, description, processes, wires.
           Wire'ы к display-узлам исключены — они попадают в display_bindings.
-        - display_bindings: list[dict] вида {"source": ..., "display": ...}.
+        - display_bindings: list[dict] вида {"node_id": ..., "display_id": ...}.
           Каждая запись соответствует wire process→display.
         - gui_positions: dict вида {"<node_id>": [x, y]} для всех узлов.
           Заполняется из topology["gui_positions"] если ключ присутствует.
@@ -79,8 +79,8 @@ def graph_to_blueprint(
             display_id = display_index.get(node_id, node_id)  # fallback на node_id
             display_bindings.append(
                 {
-                    "source": source,
-                    "display": display_id,
+                    "node_id": source,
+                    "display_id": display_id,
                 }
             )
         else:
@@ -131,7 +131,7 @@ def blueprint_to_graph(
 
     Args:
         blueprint: dict с ключами name/description/processes/wires.
-        display_bindings: list[dict] вида {"source": ..., "display": ...}.
+        display_bindings: list[dict] вида {"node_id": ..., "display_id": ...}.
         model: модель для заполнения (будет очищена).
         gui_positions: dict {node_id: [x, y]} — если передан, записывается в topology.
         display_registry: опциональный реестр для получения display_name по display_id.
@@ -202,8 +202,8 @@ def blueprint_to_graph(
     for binding in display_bindings:
         if not isinstance(binding, dict):
             continue
-        source: str = binding.get("source", "")
-        display_id: str = binding.get("display", "")
+        source: str = binding.get("node_id", "")
+        display_id: str = binding.get("display_id", "")
         if not display_id:
             logger.warning("blueprint_to_graph: binding без display_id — пропущен")
             continue

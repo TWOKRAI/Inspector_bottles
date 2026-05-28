@@ -5,15 +5,13 @@ RecipeMeta и Recipe — entities для рецептов системы.
 RecipeMeta хранит метаданные рецепта (имя, версия, дата создания).
 Recipe агрегирует meta + blueprint (Topology) + активные сервисы + привязки дисплеев.
 
-Заметка о формате display_bindings (DEPRECATION ALLOWANCE):
-    Текущий live-формат YAML-рецептов использует ключи «source»/«display»:
-        display_bindings:
-          - source: merge_proc.render_overlay.rendered_frame
-            display: main_output
-    Нормализованный формат domain entity использует «node_id»/«display_id».
-    Recipe.from_dict() принимает ОБА формата через _normalize_display_binding().
-    Live-формат «source»/«display» считается устаревшим и будет убран в Phase F
-    при версионировании форматов рецептов. Зафиксировано в README пакета.
+Формат display_bindings (v3):
+    display_bindings:
+      - node_id: merge_proc.render_overlay.rendered_frame
+        display_id: main_output
+    Единственный принимаемый формат — «node_id»/«display_id».
+    Устаревший формат «source»/«display» больше НЕ принимается
+    (DisplayInstance extra='forbid' бросит ValidationError).
 
     gui_positions в YAML хранится как dict[str, [x, y]] (list из двух float).
     from_dict() конвертирует list[float, float] → tuple[float, float].
@@ -42,7 +40,7 @@ class RecipeMeta(SchemaBase):
     )
 
     name: Annotated[str, FieldMeta("Уникальное имя рецепта (slug)")]
-    version: Annotated[int, FieldMeta("Версия формата рецепта")] = 2
+    version: Annotated[int, FieldMeta("Версия формата рецепта")] = 3
     description: Annotated[str, FieldMeta("Описание рецепта")] = ""
     created_at: Annotated[str, FieldMeta("Дата создания (ISO 8601)")] = ""
 
@@ -54,29 +52,6 @@ class RecipeMeta(SchemaBase):
     def to_dict(self) -> dict[str, Any]:
         """Сериализовать в dict."""
         return self.model_dump(mode="json")
-
-
-def _normalize_display_binding(item: dict[str, Any]) -> dict[str, Any]:
-    """Нормализует словарь display_binding в формат domain entity.
-
-    Поддерживает два формата:
-      - Нормализованный: {"node_id": ..., "display_id": ...}
-      - Live-формат (устаревший): {"source": ..., "display": ...}
-
-    Live-формат «source»/«display» будет убран в Phase F.
-    """
-    if "node_id" in item or "display_id" in item:
-        # Уже нормализованный формат
-        return item
-    # Устаревший live-формат
-    normalized: dict[str, Any] = {}
-    if "source" in item:
-        normalized["node_id"] = item["source"]
-    if "display" in item:
-        normalized["display_id"] = item["display"]
-    if "display_name" in item:
-        normalized["display_name"] = item["display_name"]
-    return normalized
 
 
 class Recipe(SchemaBase):
@@ -128,13 +103,17 @@ class Recipe(SchemaBase):
     @field_validator("display_bindings", mode="before")
     @classmethod
     def _coerce_display_bindings(cls, v: Any) -> tuple[DisplayInstance, ...]:
-        """Конвертирует list[dict] → tuple[DisplayInstance, ...] с нормализацией формата."""
+        """Конвертирует list[dict] → tuple[DisplayInstance, ...].
+
+        Принимает только формат v3: {"node_id": ..., "display_id": ...}.
+        Устаревший формат {"source": ..., "display": ...} вызовет
+        ValidationError (DisplayInstance extra='forbid').
+        """
         if isinstance(v, (list, tuple)):
             items: list[DisplayInstance] = []
             for item in v:
                 if isinstance(item, dict):
-                    normalized = _normalize_display_binding(item)
-                    items.append(DisplayInstance.from_dict(normalized))
+                    items.append(DisplayInstance.from_dict(item))
                 elif isinstance(item, DisplayInstance):
                     items.append(item)
                 else:
@@ -164,13 +143,16 @@ class Recipe(SchemaBase):
     def from_dict(cls, data: dict[str, Any]) -> Self:
         """Создать Recipe из словаря.
 
-        Поддерживает оба формата display_bindings (нормализованный и live-формат
-        с ключами source/display). Автоматически строит RecipeMeta из полей
-        верхнего уровня, если поле 'meta' отсутствует.
+        display_bindings принимает только формат v3 (node_id/display_id).
+        Устаревший формат source/display НЕ поддерживается — вызовет
+        ValidationError через DisplayInstance(extra='forbid').
 
-        Формат рецептов v2 (live YAML):
+        Автоматически строит RecipeMeta из полей верхнего уровня,
+        если поле 'meta' отсутствует.
+
+        Формат рецептов v3 (YAML):
             name: <slug>
-            version: 2
+            version: 3
             description: ...
             blueprint:
               name: ...       ← мета blueprint, перемещается в Topology.metadata

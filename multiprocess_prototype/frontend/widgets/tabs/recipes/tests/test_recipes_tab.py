@@ -37,7 +37,7 @@ def _make_recipe_raw(slug: str = "cup") -> dict:
             "wires": [],
         },
         "active_services": ["webcam"],
-        "display_bindings": [{"source": "s", "display": "d"}],
+        "display_bindings": [{"node_id": "s", "display_id": "d"}],
     }
 
 
@@ -98,7 +98,7 @@ class TestRecipesTabQt:
                 "wires": [],
             },
             "active_services": ["webcam"],
-            "display_bindings": [{"source": "s", "display": "d"}],
+            "display_bindings": [{"node_id": "s", "display_id": "d"}],
         }
         tab.show_recipe("test_recipe", data)
 

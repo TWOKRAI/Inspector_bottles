@@ -40,10 +40,10 @@ _DEMO_YAML = Path(__file__).resolve().parents[2] / "recipes" / "demo_webcam_spli
 
 
 def _minimal_recipe_dict() -> dict[str, Any]:
-    """Минимальный dict рецепта в live-формате (top-level name/version)."""
+    """Минимальный dict рецепта в формате v3 (top-level name/version)."""
     return {
         "name": "test-recipe",
-        "version": 2,
+        "version": 3,
         "description": "Тестовый рецепт для unit-тестов",
         "created_at": "2026-05-27T12:00:00",
         "blueprint": {
@@ -57,7 +57,7 @@ def _minimal_recipe_dict() -> dict[str, Any]:
         },
         "active_services": ["webcam_camera"],
         "display_bindings": [
-            {"source": "capture_proc.capture.frame", "display": "main_output"},
+            {"node_id": "capture_proc.capture.frame", "display_id": "main_output"},
         ],
     }
 
@@ -250,7 +250,7 @@ def test_write_backward_compatible_format(
 
     # Значения совпадают с оригиналом
     assert raw["name"] == "test-recipe"
-    assert raw["version"] == 2
+    assert raw["version"] == 3
     assert raw["description"] == "Тестовый рецепт для unit-тестов"
 
 
@@ -497,7 +497,7 @@ def test_read_raw_returns_dict(
 
     assert isinstance(result, dict)
     assert result["name"] == "test-recipe"
-    assert result["version"] == 2
+    assert result["version"] == 3
     assert "blueprint" in result
 
 

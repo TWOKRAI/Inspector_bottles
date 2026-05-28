@@ -94,26 +94,25 @@ Layer-rules не нарушены: `multiprocess_framework → ... → multiproc
 `tuple[..., ...]`. Validators `field_validator(..., mode="before")` автоматически
 конвертируют `list` → `tuple` при `model_validate(dict)` (YAML десериализует как list).
 
-### display_bindings: deprecation allowance для live-формата
-Текущий live-формат YAML-рецептов использует ключи `source`/`display`:
+### display_bindings: формат v3 (node_id/display_id)
+YAML-рецепты используют формат v3 с ключами `node_id`/`display_id`:
 
 ```yaml
 display_bindings:
-  - source: merge_proc.render_overlay.rendered_frame
-    display: main_output
+  - node_id: merge_proc.render_overlay.rendered_frame
+    display_id: main_output
 ```
 
-Domain entity `DisplayInstance` использует `node_id`/`display_id`.
-`Recipe.from_dict()` нормализует оба формата через `_normalize_display_binding()`.
-Live-формат `source`/`display` считается **устаревшим** — будет удалён в Phase F
-при версионировании форматов рецептов.
+Domain entity `DisplayInstance` использует `node_id`/`display_id` (формат v3).
+Устаревший формат `source`/`display` больше **НЕ принимается** —
+`DisplayInstance(extra='forbid')` бросит `ValidationError`.
 
 ### Topology.from_dict: extra-поля → metadata
 `Topology.from_dict()` перемещает неизвестные ключи (например, `name`, `description`
 из blueprint-заголовка) в `Topology.metadata`, не нарушая `extra="forbid"`.
 
-### Recipe.from_dict: нормализация v2 формата
-Формат рецептов v2 хранит `name`/`version`/`description` на верхнем уровне YAML.
+### Recipe.from_dict: нормализация v3 формата
+Формат рецептов v3 хранит `name`/`version`/`description` на верхнем уровне YAML.
 `Recipe.from_dict()` собирает их в `RecipeMeta` и убирает с верхнего уровня
 перед валидацией, чтобы не нарушать `extra="forbid"`.
 

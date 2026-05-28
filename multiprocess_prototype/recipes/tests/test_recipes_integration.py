@@ -105,8 +105,13 @@ def test_create_activate_recipe_smoke(tmp_path: Path) -> None:
     mock_view = MagicMock()
     mock_view.confirm_delete.return_value = True
 
+    # F.4: RecipesPresenter работает с RecipeStore Protocol — оборачиваем реальный
+    # RecipeManager в adapter (сохраняем integration-характер: реальный engine+manager).
+    from multiprocess_prototype.adapters.stores.recipe_store import RecipeStoreFromManager
+
+    store = RecipeStoreFromManager(manager, tmp_path)
     presenter = RecipesPresenter(
-        recipe_manager=manager,
+        store=store,
         view=mock_view,
         replace_blueprint_fn=_mock_replace,
     )

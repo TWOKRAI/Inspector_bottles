@@ -92,7 +92,7 @@ class TestSaveToActiveRecipeWritesBlueprint:
         assert "display_bindings" in data
         assert len(data["display_bindings"]) == 1
         binding = data["display_bindings"][0]
-        assert binding["display"] == "main_output"
+        assert binding["display_id"] == "main_output"
 
         assert data.get("active_services") == ["camera_service"]
 
