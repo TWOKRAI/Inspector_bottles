@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """PipelineTab — визуальный конструктор pipeline на едином columnar-шаблоне.
 
+Task E.1: мигрирован на AppServices DI. Принимает services: AppServices как
+основной параметр. create() принимает AppContext для TabFactory bridge (Phase F удалит).
+
 3 колонки + мастер-скролл через ``DiffScrollTabLayout``:
 
 - **action-колонка (1-я)**: все кнопки управления (Delete / Layout / Validate /
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
@@ -64,10 +68,10 @@ class PipelineTab(QWidget):
 
     _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe", "launch_recipe"})
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
+    def __init__(self, services: AppServices, *, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._ctx = ctx
-        self._presenter = PipelinePresenter(ctx)
+        self._services = services
+        self._presenter = PipelinePresenter(services)
 
         self._tab_layout = DiffScrollTabLayout(
             title="Pipeline",
@@ -99,8 +103,10 @@ class PipelineTab(QWidget):
         # в её собственный wheelEvent (zoom).
         self._view.viewport().removeEventFilter(self._tab_layout)
 
-        # Undo/Redo в статичной зоне.
-        bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
+        # Undo/Redo в статичной зоне (legacy ActionBus bridge).
+        # TODO Phase F: полностью заменить ActionBus на domain commands
+        _bus_accessor = getattr(services.commands, "action_bus", None)
+        bus = _bus_accessor() if callable(_bus_accessor) else None
         self._tab_layout.enable_undo_redo(bus)
 
         # Передать scene и inspector в presenter.
@@ -131,7 +137,14 @@ class PipelineTab(QWidget):
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "PipelineTab":
-        return cls(ctx)
+        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+
+        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
+        """
+        assert ctx.app_services is not None, (
+            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
+        )
+        return cls(ctx.app_services)
 
     # ------------------------------------------------------------------ #
     #  Build helpers                                                       #
@@ -167,8 +180,10 @@ class PipelineTab(QWidget):
         action_layout.addStretch(1)
 
         # Permission gating: mutating actions (delete/auto_layout/save_recipe).
-        _auth = getattr(self._ctx, "auth", None)
-        auth_state = getattr(_auth, "state", None) if _auth is not None else None
+        # AuthFacade Protocol покрывает has_permission(), но install_permission_aware_enable
+        # нуждается в AuthState (state.access_context_changed signal). Bridge через adapter.
+        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating.
+        auth_state = getattr(self._services.auth, "_state", None)
         for aid in ("delete", "auto_layout", "save_recipe", "launch_recipe"):
             install_permission_aware_enable(
                 self._action_buttons[aid],
@@ -196,30 +211,20 @@ class PipelineTab(QWidget):
             self._view.fit_to_view()
 
     def _load_palette(self) -> None:
-        """Загрузить плагины в палитру."""
-        registry = self._ctx.plugin_registry()
-        if not registry:
+        """Загрузить плагины в палитру через services.plugins (PluginCatalog)."""
+        plugin_specs = self._services.plugins.list_plugins()
+        if not plugin_specs:
             return
 
         plugins = []
-        if hasattr(registry, "items"):
-            for name, entry in registry.items():
-                plugins.append(
-                    {
-                        "name": name,
-                        "category": getattr(entry, "category", "utility"),
-                        "description": getattr(entry, "description", ""),
-                    }
-                )
-        elif hasattr(registry, "list_plugins"):
-            for entry in registry.list_plugins():
-                plugins.append(
-                    {
-                        "name": getattr(entry, "name", ""),
-                        "category": getattr(entry, "category", "utility"),
-                        "description": getattr(entry, "description", ""),
-                    }
-                )
+        for spec in plugin_specs:
+            plugins.append(
+                {
+                    "name": spec.name,
+                    "category": spec.category,
+                    "description": spec.description,
+                }
+            )
 
         if plugins:
             self._palette.load_plugins(plugins)
@@ -230,11 +235,7 @@ class PipelineTab(QWidget):
 
     def _can_edit(self) -> bool:
         """Имеет ли текущий пользователь право на mutation в pipeline."""
-        _auth = self._ctx.auth
-        auth_state = _auth.state if _auth is not None else None
-        if auth_state is None:
-            return True
-        return auth_state.access_context.has_permission("tabs.pipeline.edit")
+        return self._services.auth.has_permission("tabs.pipeline.edit")
 
     # ------------------------------------------------------------------ #
     #  Action handlers                                                     #
@@ -269,11 +270,15 @@ class PipelineTab(QWidget):
                 self._presenter.remove_selected(selected)
                 self._inspector.clear()
         elif action_id == "undo":
-            bus = self._ctx.action_bus()
+            # TODO Phase F: domain command для undo
+            _bus_accessor = getattr(self._services.commands, "action_bus", None)
+            bus = _bus_accessor() if callable(_bus_accessor) else None
             if bus:
                 bus.undo()
         elif action_id == "redo":
-            bus = self._ctx.action_bus()
+            # TODO Phase F: domain command для redo
+            _bus_accessor = getattr(self._services.commands, "action_bus", None)
+            bus = _bus_accessor() if callable(_bus_accessor) else None
             if bus:
                 bus.redo()
 

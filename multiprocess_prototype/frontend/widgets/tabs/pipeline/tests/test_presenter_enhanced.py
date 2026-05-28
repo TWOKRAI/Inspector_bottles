@@ -1,4 +1,4 @@
-"""Тесты Enhanced PipelinePresenter — Phase 13.6.
+"""Тесты Enhanced PipelinePresenter — Phase 13.6, мигрировано на AppServices (Task E.1).
 
 Проверяют координацию PipelineModel + ActionBus + GraphScene + TopologyHolder.
 Без Qt — все зависимости замоканы.
@@ -11,34 +11,7 @@ from unittest.mock import MagicMock
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
 
-
-# ------------------------------------------------------------------ #
-#  Фикстуры                                                           #
-# ------------------------------------------------------------------ #
-
-
-def _make_enhanced_ctx(topology=None):
-    """Создать mock AppContext с полным набором extras."""
-    ctx = MagicMock()
-    ctx.config = {
-        "topology": topology
-        or {
-            "processes": [
-                {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
-                {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
-            ],
-            "wires": [
-                {"source": "camera.capture.frame", "target": "processor.color_mask.frame"},
-            ],
-        },
-    }
-    ctx.extras = {}
-    ctx.plugin_registry.return_value = None
-    ctx.bindings.return_value = None
-    ctx.action_bus.return_value = None
-    ctx.topology_holder.return_value = None
-    ctx.topology_bridge.return_value = None
-    return ctx
+from ._helpers import make_pipeline_services
 
 
 # ------------------------------------------------------------------ #
@@ -49,8 +22,8 @@ def _make_enhanced_ctx(topology=None):
 class TestLoad:
     def test_load_topology(self):
         """load_topology_from_config загружает процессы в модель."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         nodes, edges = p.load_topology_from_config()
 
         assert len(nodes) == 2
@@ -61,8 +34,8 @@ class TestLoad:
 
     def test_model_round_trip(self):
         """model.to_topology_dict() содержит загруженные данные."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         topo = p.model.to_topology_dict()
@@ -78,8 +51,8 @@ class TestLoad:
 class TestMutations:
     def test_add_process_from_plugin(self):
         """add_process_from_plugin добавляет процесс в модель."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         name = p.add_process_from_plugin("my_plugin", x=100.0, y=200.0)
@@ -88,8 +61,8 @@ class TestMutations:
 
     def test_add_process_unique_name(self):
         """Дубликат имени → автоинкремент."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         name1 = p.add_process_from_plugin("test_plugin")
@@ -100,8 +73,8 @@ class TestMutations:
 
     def test_remove_selected(self):
         """remove_selected удаляет процесс из модели."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         p.remove_selected(["camera"])
@@ -111,8 +84,8 @@ class TestMutations:
 
     def test_remove_selected_display_node(self):
         """remove_selected различает display-узел и удаляет его через remove_display."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         # Добавляем display-узел и wire к нему
@@ -133,7 +106,7 @@ class TestMutations:
 
     def test_add_wire(self):
         """add_wire добавляет wire через модель."""
-        ctx = _make_enhanced_ctx(
+        services = make_pipeline_services(
             topology={
                 "processes": [
                     {"process_name": "a", "plugins": []},
@@ -142,7 +115,7 @@ class TestMutations:
                 "wires": [],
             }
         )
-        p = PipelinePresenter(ctx)
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         result = p.add_wire("a.out.data", "b.in.data")
@@ -151,7 +124,7 @@ class TestMutations:
 
     def test_add_wire_cycle_rejected(self):
         """Цикл → add_wire возвращает False."""
-        ctx = _make_enhanced_ctx(
+        services = make_pipeline_services(
             topology={
                 "processes": [
                     {"process_name": "a", "plugins": []},
@@ -162,7 +135,7 @@ class TestMutations:
                 ],
             }
         )
-        p = PipelinePresenter(ctx)
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         # b → a создаёт цикл
@@ -178,8 +151,8 @@ class TestMutations:
 class TestValidation:
     def test_validate(self):
         """validate() возвращает список ошибок через модель."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         errors = p.validate()
@@ -196,8 +169,8 @@ class TestValidation:
 class TestAutoLayout:
     def test_auto_layout(self, qtbot):
         """auto_layout_scene не падает (с mock scene)."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         scene = MagicMock()
@@ -216,8 +189,8 @@ class TestAutoLayout:
 class TestSignalSuppression:
     def test_block_signals(self):
         """_block_signals подавляет и восстанавливает флаг."""
-        ctx = _make_enhanced_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
 
         assert not p.is_suppressed
         with p._block_signals():
@@ -226,8 +199,8 @@ class TestSignalSuppression:
 
     def test_on_topology_changed_external(self):
         """Внешнее изменение topology обновляет модель."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         new_topo = {
@@ -242,8 +215,8 @@ class TestSignalSuppression:
 
     def test_external_change_suppressed(self):
         """Подавленный callback не обновляет модель."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         with p._block_signals():
@@ -267,9 +240,11 @@ class TestActionBus:
     def test_add_process_with_action_bus(self):
         """ActionBus.execute вызывается при add_process_from_plugin."""
         mock_bus = MagicMock()
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        ctx.action_bus.return_value = mock_bus
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(
+            topology={"processes": [], "wires": []},
+            action_bus=mock_bus,
+        )
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         p.add_process_from_plugin("my_plugin")
@@ -284,8 +259,8 @@ class TestActionBus:
 class TestGuiPositions:
     def test_gui_positions_stored(self):
         """add_process_from_plugin сохраняет позицию в _gui_positions."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         p.add_process_from_plugin("test_plugin", x=150.0, y=250.0)
@@ -293,8 +268,8 @@ class TestGuiPositions:
 
     def test_on_node_moved(self):
         """on_node_moved обновляет позицию."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         p.add_process_from_plugin("test_plugin")
@@ -303,8 +278,8 @@ class TestGuiPositions:
 
     def test_on_node_moved_suppressed(self):
         """on_node_moved не обновляет при suppression."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
         p.add_process_from_plugin("test_plugin")
 
@@ -323,8 +298,8 @@ class TestGuiPositions:
 class TestSceneIntegration:
     def test_scene_updated_on_add(self):
         """scene.add_node вызывается при add_process_from_plugin."""
-        ctx = _make_enhanced_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         mock_scene = MagicMock()

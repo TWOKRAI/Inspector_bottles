@@ -1,4 +1,9 @@
-"""NodeInspectorPanel — панель параметров выбранного узла pipeline."""
+"""NodeInspectorPanel — панель параметров выбранного узла pipeline.
+
+Task E.1: мигрирован на AppServices DI. set_services(services) вместо
+set_context(ctx). RegistersManager и form_context() не покрыты AppServices
+Protocol — оставлены как bridge через adapter с TODO Phase F.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from multiprocess_prototype.domain.app_services import AppServices
     from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 
 from ..graph.constants import CATEGORY_COLORS
@@ -63,8 +68,8 @@ class NodeInspectorPanel(QWidget):
         self._field_editors: dict[str, Any] = {}
         # Флаг: используем типизированные виджеты из CardsFieldFactory
         self._use_cards: bool = False
-        # AppContext — задаётся через set_context()
-        self._ctx: AppContext | None = None
+        # AppServices — задаётся через set_services()
+        self._services: AppServices | None = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
         # Combo «Процесс назначения» (для plugin-узлов)
@@ -73,9 +78,19 @@ class NodeInspectorPanel(QWidget):
         self._display_id_combo: QComboBox | None = None
         self._init_ui()
 
-    def set_context(self, ctx: "AppContext") -> None:
-        """Передать AppContext для доступа к RegistersManager и DisplayRegistry."""
-        self._ctx = ctx
+    def set_services(self, services: "AppServices") -> None:
+        """Передать AppServices для доступа к registers, displays, recipes."""
+        self._services = services
+
+    def set_context(self, ctx: object) -> None:
+        """Legacy bridge для backward compatibility. Deprecated.
+
+        Если ctx имеет app_services — используем его. Иначе — сохраняем как fallback.
+        TODO Phase F: удалить после полной миграции.
+        """
+        app_services = getattr(ctx, "app_services", None)
+        if app_services is not None:
+            self._services = app_services
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -387,14 +402,17 @@ class NodeInspectorPanel(QWidget):
     def _get_process_names_from_recipe(self) -> list[str]:
         """Получить имена процессов из активного рецепта.
 
+        TODO Phase F: RecipeStore Protocol работает с Recipe entities.
+        Здесь нужен raw dict доступ — используем legacy bridge через adapter.
+
         Returns:
             Список имён процессов или пустой список если недоступно.
         """
-        if self._ctx is None:
+        if self._services is None:
             return []
 
-        # recipe_manager — это property в AppContext, не метод
-        rm = getattr(self._ctx, "recipe_manager", None)
+        # Получаем legacy recipe_manager через adapter bridge
+        rm = getattr(self._services.recipes, "_rm", None)
         if rm is None:
             return []
 
@@ -427,21 +445,23 @@ class NodeInspectorPanel(QWidget):
             return []
 
     def _get_display_entries(self) -> list[Any]:
-        """Получить список DisplayEntry из DisplayRegistry.
+        """Получить список DisplaySpec из DisplayCatalog (services.displays).
 
         Returns:
-            Список DisplayEntry или пустой список если реестр недоступен.
+            Список DisplaySpec-like объектов или пустой список если недоступно.
         """
-        if self._ctx is None:
-            return []
-
-        # display_registry — атрибут (не метод) в AppContext
-        registry = getattr(self._ctx, "display_registry", None)
-        if registry is None:
+        if self._services is None:
             return []
 
         try:
-            return registry.list()
+            specs = self._services.displays.list_displays()
+            # DisplaySpec имеет display_id и display_name. Combo использует .id и .name.
+            # Создаём thin wrapper для backward compatibility с combo код.
+            result = []
+            for spec in specs:
+                wrapper = type("_DisplayEntry", (), {"id": spec.display_id, "name": spec.display_name})()
+                result.append(wrapper)
+            return result
         except Exception:
             logger.debug("Не удалось получить список дисплеев из реестра", exc_info=True)
             return []
@@ -484,10 +504,13 @@ class NodeInspectorPanel(QWidget):
         Returns:
             True если виджеты успешно созданы, False — нужен fallback.
         """
-        if self._ctx is None:
+        if self._services is None:
             return False
 
-        rm = self._ctx.registers_manager()
+        # TODO Phase F: RegistersBackend Protocol имеет другую сигнатуру
+        # (get_field_specs(process_name, plugin_index) вместо get_fields(process_name)).
+        # Используем legacy RegistersManager через adapter bridge.
+        rm = getattr(self._services.registers, "_rm", None)
         if rm is None:
             return False
 
@@ -498,9 +521,9 @@ class NodeInspectorPanel(QWidget):
 
         from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
 
-        # Получить form_ctx для binding-aware editors (plugin-bound узлы pipeline).
-        # Если AppContext не содержит RM/ActionBus — form_ctx=None → legacy путь.
-        form_ctx = self._ctx.form_context()
+        # TODO Phase F: form_context() не покрыт AppServices Protocol.
+        # Для binding-aware editors нужен form_ctx. Пока — None (legacy путь).
+        form_ctx = None
 
         for field_info in fields:
             editor = CardsFieldFactory.create(

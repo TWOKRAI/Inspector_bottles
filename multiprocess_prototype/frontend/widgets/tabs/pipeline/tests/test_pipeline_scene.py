@@ -1,7 +1,6 @@
-"""Тесты для Pipeline Tab -- сцена, узлы, связи."""
+"""Тесты для Pipeline Tab -- сцена, узлы, связи. Task E.1: AppServices."""
 
 from __future__ import annotations
-from unittest.mock import MagicMock
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData, NodeItem
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.edge_item import EdgeData, EdgeItem
@@ -9,6 +8,8 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene imp
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_view import GraphView
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.tab import PipelineTab
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
+
+from ._helpers import make_pipeline_services
 
 
 class TestNodeItem:
@@ -175,37 +176,17 @@ class TestGraphView:
         assert view._current_zoom < old_zoom
 
 
-def _make_mock_ctx(topology=None):
-    ctx = MagicMock()
-    ctx.config = {
-        "topology": topology
-        or {
-            "processes": [
-                {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
-                {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
-            ],
-            "wires": [
-                {"source": "camera.capture.frame", "target": "processor.color_mask.frame"},
-            ],
-        },
-    }
-    ctx.extras = {}
-    ctx.plugin_registry.return_value = None
-    ctx.bindings.return_value = None
-    return ctx
-
-
 class TestPipelinePresenter:
     def test_load_from_config(self):
-        ctx = _make_mock_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         nodes, edges = p.load_topology_from_config()
         assert len(nodes) == 2
         assert len(edges) == 1
 
     def test_empty_topology(self):
-        ctx = _make_mock_ctx(topology={"processes": [], "wires": []})
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        p = PipelinePresenter(services)
         nodes, edges = p.load_topology_from_config()
         assert len(nodes) == 0
         assert len(edges) == 0
@@ -213,28 +194,28 @@ class TestPipelinePresenter:
 
 class TestPipelineTab:
     def test_create(self, qtbot):
-        ctx = _make_mock_ctx()
-        tab = PipelineTab.create(ctx)
+        services = make_pipeline_services()
+        tab = PipelineTab(services)
         qtbot.addWidget(tab)
         assert tab is not None
 
     def test_scene_populated(self, qtbot):
-        ctx = _make_mock_ctx()
-        tab = PipelineTab(ctx)
+        services = make_pipeline_services()
+        tab = PipelineTab(services)
         qtbot.addWidget(tab)
         assert tab._scene.node_count() == 2
         assert tab._scene.edge_count() == 1
 
     def test_toolbar_zoom(self, qtbot):
-        ctx = _make_mock_ctx()
-        tab = PipelineTab(ctx)
+        services = make_pipeline_services()
+        tab = PipelineTab(services)
         qtbot.addWidget(tab)
         tab._on_toolbar_action("zoom_in")
         tab._on_toolbar_action("zoom_out")
         tab._on_toolbar_action("fit")
 
     def test_empty_topology(self, qtbot):
-        ctx = _make_mock_ctx(topology={"processes": [], "wires": []})
-        tab = PipelineTab(ctx)
+        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        tab = PipelineTab(services)
         qtbot.addWidget(tab)
         assert tab._scene.node_count() == 0

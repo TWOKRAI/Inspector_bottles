@@ -1,11 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты сохранения pipeline-графа в рецепт через PipelinePresenter.save_to_active_recipe.
-
-4 smoke/integration-теста:
-- test_save_to_active_recipe_writes_blueprint: YAML обновляется blueprint/display_bindings
-- test_save_no_active_recipe_warns: без активного рецепта → False, не падает
-- test_save_no_recipe_manager_warns: ctx.recipe_manager is None → False
-- test_save_handles_exception: recipe_mgr.save поднимает Exception → False
+Task E.1: мигрировано на AppServices. RecipeManager bridge через adapter._rm.
 
 Запуск:
     python -m pytest multiprocess_prototype/frontend/widgets/tabs/pipeline/tests/test_save_recipe.py -v
@@ -21,6 +16,8 @@ import yaml
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import (
     PipelinePresenter,
 )
+
+from ._helpers import make_pipeline_services
 
 
 # ---------------------------------------------------------------------------
@@ -56,27 +53,14 @@ def _make_recipe_manager_mock(recipes_dir: Path, slug: str) -> MagicMock:
     """Создать mock RecipeManager с реальным read_recipe из tmp_path."""
     from multiprocess_prototype.recipes.manager import RecipeManager
 
-    # Создаём файл рецепта в tmp_dir
     _write_recipe_file(recipes_dir, slug)
 
-    # Mock engine, чтобы get_active и recipes_dir работали
     engine_mock = MagicMock()
     engine_mock.get_active.return_value = slug
     engine_mock.recipes_dir = recipes_dir
 
     mgr = RecipeManager(engine=engine_mock)
     return mgr
-
-
-def _make_ctx(recipe_manager=None) -> MagicMock:
-    """Создать минимальный mock AppContext."""
-    ctx = MagicMock()
-    ctx.config = {"topology": {}}
-    ctx.action_bus.return_value = None
-    ctx.topology_holder.return_value = None
-    ctx.plugin_registry.return_value = None
-    ctx.recipe_manager = recipe_manager
-    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -94,8 +78,8 @@ class TestSaveToActiveRecipeWritesBlueprint:
         slug = "my_recipe"
 
         mgr = _make_recipe_manager_mock(recipes_dir, slug)
-        ctx = _make_ctx(recipe_manager=mgr)
-        presenter = PipelinePresenter(ctx)
+        services = make_pipeline_services(recipe_manager=mgr)
+        presenter = PipelinePresenter(services)
 
         # Добавляем процессы и display в модель
         presenter._model.add_process("cam", plugin_name="CapturePlugin", category="source")
@@ -104,7 +88,6 @@ class TestSaveToActiveRecipeWritesBlueprint:
         presenter._model.add_display("disp1", "main_output", display_name="Главный")
         presenter._model.add_wire("proc.MaskPlugin.result", "display.disp1.frame")
 
-        # Мокаем QMessageBox чтобы не открывать GUI
         from PySide6.QtWidgets import QMessageBox
 
         monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
@@ -115,32 +98,28 @@ class TestSaveToActiveRecipeWritesBlueprint:
 
         assert result is True
 
-        # Читаем записанный YAML и проверяем содержимое
         recipe_path = recipes_dir / f"{slug}.yaml"
-        assert recipe_path.exists(), "Файл рецепта не создан"
+        assert recipe_path.exists()
 
         with open(recipe_path, "r", encoding="utf-8") as f:
             saved = yaml.safe_load(f)
 
-        assert "data" in saved, "Нет секции 'data' в YAML"
+        assert "data" in saved
         data = saved["data"]
 
-        # blueprint.processes содержит наши процессы
-        assert "blueprint" in data, "Нет секции 'blueprint' в data"
+        assert "blueprint" in data
         bp = data["blueprint"]
         assert "processes" in bp
         process_names = [p["process_name"] for p in bp["processes"]]
         assert "cam" in process_names
         assert "proc" in process_names
 
-        # display_bindings содержит запись к main_output
-        assert "display_bindings" in data, "Нет 'display_bindings' в data"
+        assert "display_bindings" in data
         assert len(data["display_bindings"]) == 1
         binding = data["display_bindings"][0]
         assert binding["display"] == "main_output"
 
-        # Существующая секция active_services не потерялась
-        assert data.get("active_services") == ["camera_service"], "Существующие данные рецепта были уничтожены"
+        assert data.get("active_services") == ["camera_service"]
 
     def test_save_updates_gui_positions(self, tmp_path: Path, monkeypatch) -> None:
         """gui_positions записываются в секцию data['gui_positions']."""
@@ -149,8 +128,8 @@ class TestSaveToActiveRecipeWritesBlueprint:
         slug = "pos_recipe"
 
         mgr = _make_recipe_manager_mock(recipes_dir, slug)
-        ctx = _make_ctx(recipe_manager=mgr)
-        presenter = PipelinePresenter(ctx)
+        services = make_pipeline_services(recipe_manager=mgr)
+        presenter = PipelinePresenter(services)
 
         presenter._model.add_process("node_a", plugin_name="PA", category="source")
         presenter._gui_positions["node_a"] = (100.0, 200.0)
@@ -168,7 +147,7 @@ class TestSaveToActiveRecipeWritesBlueprint:
             saved = yaml.safe_load(f)
 
         gui_pos = saved["data"].get("gui_positions", {})
-        assert "node_a" in gui_pos, "gui_positions для node_a не сохранены"
+        assert "node_a" in gui_pos
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +156,9 @@ class TestSaveToActiveRecipeWritesBlueprint:
 
 
 class TestSaveNoActiveRecipe:
-    """Без активного рецепта — warning, метод возвращает False."""
+    """Без активного рецепта — warning, False."""
 
     def test_save_no_active_recipe_warns(self, monkeypatch) -> None:
-        """Если get_active() возвращает None — показать warning и вернуть False."""
         engine_mock = MagicMock()
         engine_mock.get_active.return_value = None
         engine_mock.recipes_dir = Path("/tmp/fake")
@@ -189,8 +167,8 @@ class TestSaveNoActiveRecipe:
 
         mgr = RecipeManager(engine=engine_mock)
 
-        ctx = _make_ctx(recipe_manager=mgr)
-        presenter = PipelinePresenter(ctx)
+        services = make_pipeline_services(recipe_manager=mgr)
+        presenter = PipelinePresenter(services)
 
         warnings_shown = []
 
@@ -207,7 +185,7 @@ class TestSaveNoActiveRecipe:
         result = presenter.save_to_active_recipe(parent=None)
 
         assert result is False
-        assert len(warnings_shown) == 1, "Ожидалось ровно одно warning"
+        assert len(warnings_shown) == 1
         assert "рецепт" in warnings_shown[0].lower() or "active" in warnings_shown[0].lower()
 
 
@@ -217,12 +195,11 @@ class TestSaveNoActiveRecipe:
 
 
 class TestSaveNoRecipeManager:
-    """Если ctx.recipe_manager is None — warning и False."""
+    """services.recipes без _rm bridge → warning, False."""
 
     def test_save_no_recipe_manager_warns(self, monkeypatch) -> None:
-        """ctx.recipe_manager is None → QMessageBox.warning, return False."""
-        ctx = _make_ctx(recipe_manager=None)
-        presenter = PipelinePresenter(ctx)
+        services = make_pipeline_services(recipe_manager=None)
+        presenter = PipelinePresenter(services)
 
         warnings_shown = []
 
@@ -241,32 +218,28 @@ class TestSaveNoRecipeManager:
 
 
 # ---------------------------------------------------------------------------
-# Тест 4: запись в файл вызывает исключение → critical, return False
+# Тест 4: запись вызывает исключение → critical, return False
 # ---------------------------------------------------------------------------
 
 
 class TestSaveHandlesException:
-    """Исключение при записи YAML → QMessageBox.critical, return False."""
+    """Исключение при записи YAML → critical, False."""
 
     def test_save_handles_exception(self, tmp_path: Path, monkeypatch) -> None:
-        """Если read_recipe возвращает None — presenter показывает critical и возвращает False."""
         recipes_dir = tmp_path / "recipes"
         recipes_dir.mkdir()
         slug = "fail_recipe"
 
-        # Создаём engine_mock у которого get_active возвращает slug,
-        # а RecipeManager.read_recipe возвращает None (файл не найден или невалиден)
         engine_mock = MagicMock()
         engine_mock.get_active.return_value = slug
         engine_mock.recipes_dir = recipes_dir
-        # НЕ создаём файл рецепта — read_recipe вернёт None
 
         from multiprocess_prototype.recipes.manager import RecipeManager
 
         mgr = RecipeManager(engine=engine_mock)
 
-        ctx = _make_ctx(recipe_manager=mgr)
-        presenter = PipelinePresenter(ctx)
+        services = make_pipeline_services(recipe_manager=mgr)
+        presenter = PipelinePresenter(services)
 
         criticals_shown = []
 
@@ -283,17 +256,16 @@ class TestSaveHandlesException:
         result = presenter.save_to_active_recipe(parent=None)
 
         assert result is False
-        assert len(criticals_shown) == 1, "Ожидалось одно critical-сообщение"
+        assert len(criticals_shown) == 1
 
     def test_save_handles_write_exception(self, tmp_path: Path, monkeypatch) -> None:
-        """Если запись файла поднимает OSError — presenter ловит, возвращает False."""
         recipes_dir = tmp_path / "recipes"
         recipes_dir.mkdir()
         slug = "ioerr_recipe"
 
         mgr = _make_recipe_manager_mock(recipes_dir, slug)
-        ctx = _make_ctx(recipe_manager=mgr)
-        presenter = PipelinePresenter(ctx)
+        services = make_pipeline_services(recipe_manager=mgr)
+        presenter = PipelinePresenter(services)
 
         criticals_shown = []
 
@@ -307,7 +279,6 @@ class TestSaveHandlesException:
             staticmethod(lambda *a, **kw: criticals_shown.append(a[2] if len(a) > 2 else "critical")),
         )
 
-        # Делаем файл read-only, чтобы запись вызвала OSError
         recipe_file = recipes_dir / f"{slug}.yaml"
         recipe_file.chmod(0o444)
 
@@ -315,8 +286,7 @@ class TestSaveHandlesException:
             result = presenter.save_to_active_recipe(parent=None)
 
             assert result is False
-            assert len(criticals_shown) == 1, "Ожидалось одно critical-сообщение"
+            assert len(criticals_shown) == 1
             assert "ошибка" in criticals_shown[0].lower() or "Ошибка" in criticals_shown[0]
         finally:
-            # Восстанавливаем права чтобы pytest мог убрать tmp_path
             recipe_file.chmod(0o644)

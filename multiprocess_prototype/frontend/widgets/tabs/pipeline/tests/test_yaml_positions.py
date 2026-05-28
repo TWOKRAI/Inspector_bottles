@@ -1,38 +1,15 @@
-"""Тесты round-trip YAML с позициями нод."""
-
-from unittest.mock import MagicMock
+"""Тесты round-trip YAML с позициями нод. Task E.1: AppServices."""
 
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 
-
-def _make_ctx(topology=None):
-    ctx = MagicMock()
-    ctx.config = {
-        "topology": topology
-        or {
-            "processes": [
-                {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
-                {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
-            ],
-            "wires": [
-                {"source": "camera.capture.frame", "target": "processor.color_mask.frame"},
-            ],
-        },
-    }
-    ctx.extras = {}
-    ctx.plugin_registry.return_value = None
-    ctx.bindings.return_value = None
-    ctx.action_bus.return_value = None
-    ctx.topology_holder.return_value = None
-    ctx.topology_bridge.return_value = None
-    return ctx
+from ._helpers import make_pipeline_services
 
 
 class TestYamlPositions:
     def test_export_includes_gui_positions(self):
         """export_topology_with_positions включает позиции."""
-        ctx = _make_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         # Установить позиции
@@ -47,8 +24,8 @@ class TestYamlPositions:
 
     def test_round_trip_positions(self):
         """Позиции сохраняются и восстанавливаются."""
-        ctx1 = _make_ctx()
-        p1 = PipelinePresenter(ctx1)
+        services1 = make_pipeline_services()
+        p1 = PipelinePresenter(services1)
         p1.load_topology_from_config()
         p1._gui_positions["camera"] = (150.0, 250.0)
         p1._gui_positions["processor"] = (400.0, 250.0)
@@ -56,8 +33,8 @@ class TestYamlPositions:
         exported = p1.export_topology_with_positions()
 
         # Загрузить в новый presenter
-        ctx2 = _make_ctx(topology=exported)
-        p2 = PipelinePresenter(ctx2)
+        services2 = make_pipeline_services(topology=exported)
+        p2 = PipelinePresenter(services2)
         p2.load_topology_from_config()
 
         assert p2._gui_positions["camera"] == (150.0, 250.0)
@@ -65,33 +42,32 @@ class TestYamlPositions:
 
     def test_export_without_positions(self):
         """Экспорт без позиций — пустой gui_positions."""
-        ctx = _make_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p.load_topology_from_config()
 
         topo = p.export_topology_with_positions()
-        # gui_positions может быть пустым если позиции не установлены
         assert "metadata" in topo
 
     def test_load_without_metadata(self):
         """Загрузка topology без metadata — нет ошибок."""
-        ctx = _make_ctx(
+        services = make_pipeline_services(
             topology={
                 "processes": [{"process_name": "test", "plugins": []}],
                 "wires": [],
             }
         )
-        p = PipelinePresenter(ctx)
+        p = PipelinePresenter(services)
         nodes, edges = p.load_topology_from_config()
         assert len(nodes) == 1
 
     def test_positions_in_node_data(self):
         """Позиции передаются в NodeData при конвертации."""
-        ctx = _make_ctx()
-        p = PipelinePresenter(ctx)
+        services = make_pipeline_services()
+        p = PipelinePresenter(services)
         p._gui_positions["camera"] = (100.0, 200.0)
 
-        topology = ctx.config["topology"]
+        topology = services.config.get("topology", {})
         nodes, edges = p._topology_to_graph(topology)
 
         camera_node = next(n for n in nodes if n.node_id == "camera")

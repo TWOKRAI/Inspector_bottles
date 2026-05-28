@@ -288,7 +288,7 @@ class TabFactory:
 
 
 # ---------------------------------------------------------------------------
-# Standalone factory — Task D.5 (Phase D)
+# Standalone factories — Task D.5 (Phase D), Task E.1 (Phase E)
 # ---------------------------------------------------------------------------
 
 
@@ -310,3 +310,20 @@ def create_settings_tab(ctx: "AppContext") -> "QWidget":
         "Убедитесь, что Task D.1 factory вызван в run_gui() до создания TabFactory."
     )
     return SettingsTab(ctx.app_services, auth_ctx=ctx.auth)
+
+
+def create_pipeline_tab(ctx: "AppContext") -> "QWidget":
+    """Создать PipelineTab из AppContext через AppServices DI (Task E.1).
+
+    Precondition: ctx.app_services не None (инициализирован в run_gui(), Task D.1).
+
+    Используется в custom_factories TabFactory:
+        factory = TabFactory(ctx, custom_factories={..., "pipeline": create_pipeline_tab})
+    """
+    from .widgets.tabs.pipeline.tab import PipelineTab
+
+    assert ctx.app_services is not None, (
+        "AppServices не инициализирован в ctx. "
+        "Убедитесь, что Task D.1 factory вызван в run_gui() до создания TabFactory."
+    )
+    return PipelineTab(ctx.app_services)

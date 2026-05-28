@@ -1,6 +1,11 @@
 """PipelinePresenter -- центральный координатор Pipeline Editor.
 
-Координирует: PipelineModel (SSOT) + ActionBus + GraphScene + TopologyHolder + Bridge.
+Task E.1: мигрирован на AppServices DI. Принимает services: AppServices.
+ActionBus bridge оставлен через getattr(services.commands, "action_bus", ...)
+для undo/redo (ActionBus API не покрыт CommandDispatcher Protocol).
+TopologyHolder.on_changed оставлен как fallback — typed events в Phase G.
+
+Координирует: PipelineModel (SSOT) + ActionBus/Commands + GraphScene + TopologyRepo.
 Signal suppression предотвращает циклы при programmatic update.
 """
 
@@ -10,6 +15,8 @@ import logging
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
+
+from multiprocess_prototype.domain.app_services import AppServices
 
 from .graph.node_item import NodeData
 from .graph.edge_item import EdgeData
@@ -21,7 +28,6 @@ from .telemetry import WireMetricsModel
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
-    from multiprocess_prototype.frontend.app_context import AppContext
     from .graph.graph_scene import GraphScene
     from .inspector.inspector_panel import NodeInspectorPanel
 
@@ -39,8 +45,8 @@ class PipelinePresenter:
     - TopologyBridge — IPC (опционально)
     """
 
-    def __init__(self, ctx: "AppContext") -> None:
-        self._ctx = ctx
+    def __init__(self, services: AppServices) -> None:
+        self._services = services
         self._model = PipelineModel()
         self._scene: GraphScene | None = None
         self._suppress = False
@@ -54,9 +60,17 @@ class PipelinePresenter:
 
         self._topo = TopologyPresenter()
 
-        # Подписка на TopologyHolder (если доступен)
-        holder = ctx.topology_holder()
-        if holder:
+        # ActionBus bridge: CommandDispatcherOrchestrator не покрывает
+        # undo/redo/execute — получаем legacy ActionBus через adapter.
+        # TODO Phase F: полностью заменить ActionBus на domain commands
+        _bus_accessor = getattr(services.commands, "action_bus", None)
+        self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
+
+        # TODO Phase G: перейти на typed events (ProcessAdded, WireConnected и т.п.)
+        # Пока — TopologyRepository adapter может хранить ссылку на holder,
+        # подписываемся через getattr fallback для scene reload.
+        holder = getattr(services.topology, "_holder", None)
+        if holder is not None and hasattr(holder, "on_changed"):
             holder.on_changed(self._on_topology_changed_external)
 
     def set_scene(self, scene: "GraphScene") -> None:
@@ -66,10 +80,10 @@ class PipelinePresenter:
     def set_inspector(self, panel: "NodeInspectorPanel") -> None:
         """Привязать NodeInspectorPanel и настроить интеграцию с ActionBus.
 
-        Передаёт AppContext в panel и подписывается на field_changed,
+        Передаёт AppServices в panel и подписывается на field_changed,
         target_process_changed, display_id_changed.
         """
-        panel.set_context(self._ctx)
+        panel.set_services(self._services)
         panel.field_changed.connect(self._on_inspector_field_changed)
         panel.target_process_changed.connect(self._on_target_process_changed)
         panel.display_id_changed.connect(self._on_display_id_changed)
@@ -87,8 +101,12 @@ class PipelinePresenter:
         - Иначе: прямой вызов rm.set_value() если rm доступен.
         - Warning если ни ActionBus ни rm недоступны.
         """
-        rm = self._ctx.registers_manager()
-        bus = self._ctx.action_bus()
+        # TODO Phase F: заменить legacy RegistersManager API на services.registers Protocol.
+        # RegistersBackend Protocol имеет другую сигнатуру (process_name, plugin_index, field),
+        # но здесь нужен get_register(process_name) для получения old_value.
+        # Используем legacy rm через getattr bridge.
+        rm = getattr(self._services.registers, "_rm", None)
+        bus = self._action_bus
 
         # Получить старое значение для undo
         old_value: Any = None
@@ -184,16 +202,14 @@ class PipelinePresenter:
 
         displays = self._model._topology.get("displays", [])
 
-        # Получить display_name из реестра если доступен
+        # Получить display_name из реестра (services.displays — DisplayCatalog Protocol)
         new_display_name = ""
-        registry = getattr(self._ctx, "display_registry", None)
-        if registry is not None:
-            try:
-                entry = registry.get(new_display_id)
-                if entry is not None:
-                    new_display_name = getattr(entry, "name", "")
-            except Exception:
-                logger.debug("Не удалось получить имя display '%s' из реестра", new_display_id, exc_info=True)
+        try:
+            spec = self._services.displays.resolve(new_display_id)
+            if spec is not None:
+                new_display_name = spec.display_name
+        except Exception:
+            logger.debug("Не удалось получить имя display '%s' из реестра", new_display_id, exc_info=True)
 
         found = False
         for disp in displays:
@@ -249,8 +265,8 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def load_topology_from_config(self) -> tuple[list[NodeData], list[EdgeData]]:
-        """Загрузить topology из AppContext.config."""
-        topology = self._ctx.config.get("topology", {})
+        """Загрузить topology из config (через services.config)."""
+        topology = self._services.config.get("topology", {})
         self._model.from_topology_dict(topology)
 
         # Восстановить позиции из metadata
@@ -309,54 +325,43 @@ class PipelinePresenter:
             name = f"{base_name}_{counter}"
             counter += 1
 
-        # Определить категорию и собрать port_schemas
+        # Определить категорию и собрать port_schemas через services.plugins (PluginCatalog)
         category = "utility"
         port_schemas: list[PortSchema] | None = None
-        registry = self._ctx.plugin_registry()
-        if registry:
-            entry = registry.get(plugin_name)
-            if entry:
-                category = getattr(entry, "category", "utility")
-                # Graceful fallback: если entry недоступен — port_schemas=None
-                try:
-                    schemas: list[PortSchema] = []
-                    for port in entry.inputs:
-                        schemas.append(
-                            PortSchema(
-                                name=port.name,
-                                direction="input",
-                                dtype=port.dtype,
-                                optional=port.optional,
-                            )
+        spec = self._services.plugins.resolve(plugin_name)
+        if spec is not None:
+            category = spec.category
+            # PluginSpec хранит ports как tuple[PortSpec, ...] (inputs+outputs вместе)
+            try:
+                schemas: list[PortSchema] = []
+                for port_spec in spec.ports:
+                    schemas.append(
+                        PortSchema(
+                            name=port_spec.name,
+                            direction="input",  # PortSpec не различает direction; fallback
+                            dtype=port_spec.dtype,
+                            optional=port_spec.optional,
                         )
-                    for port in entry.outputs:
-                        schemas.append(
-                            PortSchema(
-                                name=port.name,
-                                direction="output",
-                                dtype=port.dtype,
-                                optional=port.optional,
-                            )
-                        )
-                    port_schemas = schemas if schemas else None
-                except Exception:
-                    port_schemas = None
+                    )
+                port_schemas = schemas if schemas else None
+            except Exception:
+                port_schemas = None
 
         old_topo, new_topo = self._model.add_process(name, plugin_name, category)
         self._gui_positions[name] = (x, y)
 
-        # ActionBus
-        bus = self._ctx.action_bus()
+        # ActionBus (legacy bridge, TODO Phase F: domain commands)
+        bus = self._action_bus
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 
             action = V2ActionBuilder.process_add(old_topo, new_topo, name)
             bus.execute(action)
         else:
-            # Без ActionBus — прямое обновление holder
-            holder = self._ctx.topology_holder()
-            if holder:
-                holder.set_topology(new_topo)
+            # Без ActionBus — прямое обновление через TopologyRepository
+            from multiprocess_prototype.domain.entities.topology import Topology
+
+            self._services.topology.save(Topology.from_dict(new_topo))
 
         # Обновить scene
         if self._scene:
@@ -381,9 +386,9 @@ class PipelinePresenter:
 
             self._gui_positions.pop(node_id, None)
 
-            # ActionBus undo/redo поддержан только для process_remove (legacy)
+            # ActionBus undo/redo поддержан только для process_remove (legacy bridge)
             if not is_display:
-                bus = self._ctx.action_bus()
+                bus = self._action_bus
                 if bus:
                     from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 
@@ -420,7 +425,7 @@ class PipelinePresenter:
             logger.warning("Wire rejected: %s", e)
             return False
 
-        bus = self._ctx.action_bus()
+        bus = self._action_bus
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 
@@ -457,9 +462,13 @@ class PipelinePresenter:
             are_ports_compatible,
         )
 
-        # Шаг 1: получить registry (graceful degradation если None)
-        registry = self._ctx.plugin_registry()
-        if registry is None:
+        # Шаг 1: получить registry через services.plugins (PluginCatalog)
+        # Для валидации портов нужен доступ к raw Port объектам (inputs/outputs),
+        # которые PluginCatalog Protocol не предоставляет (только PortSpec).
+        # TODO Phase F: расширить PluginCatalog Protocol для валидации портов
+        # или вынести логику в domain. Пока — bridge через adapter._registry.
+        _raw_registry = getattr(self._services.plugins, "_registry", None)
+        if _raw_registry is None:
             return True
 
         # Шаг 2: разобрать source endpoint → (process, plugin, port)
@@ -472,7 +481,7 @@ class PipelinePresenter:
         src_port_name = src_parts[2]
 
         # Шаг 3: найти выходной порт источника
-        out_entry = registry.get(src_plugin_name)
+        out_entry = _raw_registry.get(src_plugin_name)
         if out_entry is None:
             logger.warning(
                 "_validate_wire_ports: плагин '%s' не найден в registry (source=%s), пропуск",
@@ -513,7 +522,7 @@ class PipelinePresenter:
             tgt_plugin_name = tgt_parts[1]
             tgt_port_name = tgt_parts[2]
 
-            in_entry = registry.get(tgt_plugin_name)
+            in_entry = _raw_registry.get(tgt_plugin_name)
             if in_entry is None:
                 logger.warning(
                     "_validate_wire_ports: плагин '%s' не найден в registry (target=%s), пропуск",
@@ -569,7 +578,7 @@ class PipelinePresenter:
         old_x, old_y = self._gui_positions.get(node_id, (0.0, 0.0))
         self._gui_positions[node_id] = (new_x, new_y)
 
-        bus = self._ctx.action_bus()
+        bus = self._action_bus
         if bus:
             from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
 
@@ -648,7 +657,6 @@ class PipelinePresenter:
         edges = []
 
         processes = topo_dict.get("processes", [])
-        registry = self._ctx.plugin_registry()
 
         for proc in processes:
             if isinstance(proc, dict):
@@ -659,16 +667,16 @@ class PipelinePresenter:
                 plugins = getattr(proc, "plugins", [])
 
             category = "utility"
-            if plugins and registry:
+            if plugins:
                 pname = (
                     plugins[0].get("plugin_name", "")
                     if isinstance(plugins[0], dict)
                     else getattr(plugins[0], "plugin_name", "")
                 )
                 if pname:
-                    entry = registry.get(pname)
-                    if entry:
-                        category = getattr(entry, "category", "utility")
+                    spec = self._services.plugins.resolve(pname)
+                    if spec is not None:
+                        category = spec.category
 
             # Восстановить позицию из gui_positions
             x, y = self._gui_positions.get(name, (0.0, 0.0))
@@ -726,8 +734,11 @@ class PipelinePresenter:
 
         from .io import graph_to_blueprint
 
-        # Шаг 1: проверить RecipeManager
-        recipe_mgr = self._ctx.recipe_manager
+        # Шаг 1: проверить RecipeManager (legacy bridge).
+        # TODO Phase F: RecipeStore Protocol (services.recipes) работает с Recipe entities,
+        # но save_to_active_recipe нуждается в raw dict доступе и прямой записи YAML.
+        # Получаем legacy RecipeManager через adapter bridge.
+        recipe_mgr = getattr(self._services.recipes, "_rm", None)
         if recipe_mgr is None:
             QMessageBox.warning(parent, "Сохранение рецепта", "RecipeManager недоступен")
             return False
@@ -799,8 +810,9 @@ class PipelinePresenter:
         """
         from PySide6.QtWidgets import QMessageBox
 
-        # Шаг 1: проверить RecipeManager
-        recipe_mgr = self._ctx.recipe_manager
+        # Шаг 1: проверить RecipeManager (legacy bridge, аналог save_to_active_recipe)
+        # TODO Phase F: использовать services.recipes (RecipeStore Protocol)
+        recipe_mgr = getattr(self._services.recipes, "_rm", None)
         if recipe_mgr is None:
             QMessageBox.warning(parent, "Запуск рецепта", "RecipeManager недоступен")
             return False
@@ -828,19 +840,14 @@ class PipelinePresenter:
             return False
 
         # Шаг 5: найти ProcessManager-proxy
+        # TODO Phase F: process_manager_proxy не покрыт AppServices Protocol.
+        # Останется тихим bridge через config или отдельный Protocol.
         proxy = None
 
-        # Вариант 1: явный proxy в ctx.extras
-        extras = getattr(self._ctx, "extras", {}) or {}
-        proxy = extras.get("process_manager_proxy") or extras.get("system_launcher")
-
-        # Вариант 2: специальный метод на ctx
-        if proxy is None and hasattr(self._ctx, "process_manager"):
-            pm = self._ctx.process_manager
-            if callable(pm):
-                pm = pm()
-            if pm is not None:
-                proxy = pm
+        # Попытка получить proxy через config extras (не deprecated ключи)
+        pm_proxy = self._services.config.get("process_manager_proxy")
+        if pm_proxy is not None:
+            proxy = pm_proxy
 
         if proxy is None or not hasattr(proxy, "replace_blueprint"):
             QMessageBox.warning(
