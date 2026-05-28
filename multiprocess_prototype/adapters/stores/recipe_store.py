@@ -5,18 +5,21 @@ adapters/stores/recipe_store.py — RecipeStoreFromManager: domain RecipeStore a
 Реализует Protocol RecipeStore из domain/protocols/recipe_store.py
 поверх существующего RecipeManager.
 
-Решение Q2 (Variant A): при write() денормализует meta → top-level
+Решение Q2 (Variant A): при write() денормализует meta -> top-level
 для backward-compat с live YAML reader'ами (legacy формат v2).
 
 Write обходит RecipeManager.save() намеренно — тот выполняет snapshot
 config-store ветвей через TreeStore, что неприменимо для domain entity write.
-Вместо этого YAML записывается напрямую в recipe_dir / f"{slug}.yaml".
 
 Read делегирует RecipeManager.read_recipe(), который уже читает YAML
 и возвращает raw dict. Recipe.from_dict() понимает оба формата
 (с meta: и без — top-level name/version/...).
 
+Phase F: + read_raw/save_raw/duplicate/deactivate, set_active -> bool.
+Прямой доступ к engine._active_name убран — через RecipeManager.deactivate().
+
 Refs: plans/2026-05-27_cross-tab-architecture/phase-c-adapters.md (Task C.5)
+      plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md (Task F.4)
 """
 
 from __future__ import annotations
@@ -35,17 +38,13 @@ if TYPE_CHECKING:
 class RecipeStoreFromManager:
     """Adapter поверх RecipeManager для domain RecipeStore Protocol.
 
-    Q2 (Variant A): при write денормализует meta → top-level
+    Q2 (Variant A): при write денормализует meta -> top-level
     для backward-compat с live YAML reader'ами.
 
     Read использует RecipeManager.read_recipe() (он уже понимает оба формата).
     Write обходит RecipeManager.save() — пишет YAML напрямую.
 
-    set_active(None): RecipeManager.set_active() не поддерживает None (только str).
-    Adapter обращается к engine._active_name напрямую и обновляет state_proxy
-    через RecipeManager._update_active_in_state(None). Это осознанный компромисс
-    Phase C — adapter является bridge и знает реализацию RecipeManager.
-    В Phase F RecipeManager будет расширен методом deactivate().
+    Phase F: set_active(None) делегирует в RecipeManager.deactivate() (публичный API).
     """
 
     def __init__(self, recipe_manager: RecipeManager, recipe_dir: Path) -> None:
@@ -53,7 +52,7 @@ class RecipeStoreFromManager:
         self._dir = Path(recipe_dir)
 
     # ------------------------------------------------------------------
-    # CRUD
+    # CRUD (Recipe entity)
     # ------------------------------------------------------------------
 
     def list(self) -> tuple[str, ...]:
@@ -72,7 +71,7 @@ class RecipeStoreFromManager:
         return Recipe.from_dict(raw)
 
     def write(self, slug: str, recipe: Recipe) -> None:
-        """Записать рецепт в YAML, денормализуя meta → top-level (Q2 Variant A).
+        """Записать рецепт в YAML, денормализуя meta -> top-level (Q2 Variant A).
 
         Обходит RecipeManager.save() — тот делает snapshot config-store,
         а нам нужно записать domain entity как есть.
@@ -92,6 +91,27 @@ class RecipeStoreFromManager:
         path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
+    # Raw dict I/O (Phase F)
+    # ------------------------------------------------------------------
+
+    def read_raw(self, slug: str) -> dict | None:
+        """Прочитать raw YAML dict (полная структура) через RecipeManager.read_recipe()."""
+        return self._rm.read_recipe(slug)
+
+    def save_raw(self, slug: str, data: dict) -> None:
+        """Записать raw dict в YAML-файл (без денормализации — данные как есть).
+
+        Используется presenter'ами для сохранения полной YAML-структуры
+        (blueprint/display_bindings/gui_positions и т.д.).
+        """
+        self._dir.mkdir(parents=True, exist_ok=True)
+        target = self._dir / f"{slug}.yaml"
+        target.write_text(
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
+    # ------------------------------------------------------------------
     # Active recipe
     # ------------------------------------------------------------------
 
@@ -99,22 +119,28 @@ class RecipeStoreFromManager:
         """Вернуть slug активного рецепта через RecipeManager.get_active()."""
         return self._rm.get_active()
 
-    def set_active(self, slug: str | None) -> None:
+    def set_active(self, slug: str | None) -> bool:
         """Установить активный рецепт.
 
-        slug != None: делегирует RecipeManager.set_active(slug) (вызывает load + state).
-        slug == None: сбрасывает active напрямую через engine._active_name + state_proxy.
-
-        Компромисс Phase C: RecipeManager не имеет deactivate().
-        Adapter обращается к protected attrs engine. Phase F добавит deactivate().
+        slug != None: делегирует RecipeManager.set_active(slug) -> bool.
+        slug == None: делегирует RecipeManager.deactivate() -> True.
         """
         if slug is not None:
-            self._rm.set_active(slug)
-        else:
-            # Сброс активного рецепта — RecipeManager не поддерживает deactivate(),
-            # поэтому обращаемся к engine напрямую (bridge-компромисс Phase C)
-            self._rm._engine._active_name = None
-            self._rm._update_active_in_state(None)
+            return self._rm.set_active(slug)
+        self._rm.deactivate()
+        return True
+
+    def deactivate(self) -> None:
+        """Сбросить активный рецепт через RecipeManager.deactivate()."""
+        self._rm.deactivate()
+
+    # ------------------------------------------------------------------
+    # Duplicate (Phase F)
+    # ------------------------------------------------------------------
+
+    def duplicate(self, slug: str, new_slug: str) -> bool:
+        """Дублировать рецепт через RecipeManager.duplicate()."""
+        return self._rm.duplicate(slug, new_slug)
 
     # ------------------------------------------------------------------
     # Денормализация (Q2 Variant A)
@@ -122,7 +148,7 @@ class RecipeStoreFromManager:
 
     @staticmethod
     def _denormalize(data: dict[str, Any]) -> dict[str, Any]:
-        """Денормализовать meta → top-level для backward-compat с live YAML.
+        """Денормализовать meta -> top-level для backward-compat с live YAML.
 
         Recipe.to_dict() выдаёт: {"meta": {"name": ..., "version": ..., ...}, "blueprint": ..., ...}
         Live YAML формат (v2):   {"name": ..., "version": ..., "blueprint": ..., ...}

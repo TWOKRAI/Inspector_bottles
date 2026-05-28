@@ -364,13 +364,15 @@ class TestPresenterInspectorIntegration:
 
 
 def _make_services_with_recipe(process_names: list[str]):
-    """AppServices с RecipeManager bridge, возвращающим процессы из рецепта."""
-    rm_mock = MagicMock()
-    rm_mock.get_active.return_value = "test_recipe"
-    blueprint_processes = [{"process_name": name} for name in process_names]
-    rm_mock.read_recipe.return_value = {"blueprint": {"processes": blueprint_processes, "wires": []}}
+    """AppServices с FakeRecipeStore, содержащим процессы из рецепта."""
+    from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
+    from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 
-    return make_pipeline_services(recipe_manager=rm_mock)
+    blueprint_processes = [{"process_name": name} for name in process_names]
+    raw = {"test_recipe": {"blueprint": {"processes": blueprint_processes, "wires": []}}}
+    recipes = FakeRecipeStore(raw=raw, active="test_recipe")
+
+    return make_test_app_services(recipes=recipes)
 
 
 def _make_display_entry(display_id: str, name: str):

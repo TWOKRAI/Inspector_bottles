@@ -48,14 +48,14 @@ class RecipesTab(BaseListNavTab):
     """Таб «Рецепты» v2 — BaseListNavTab + MVP (RecipesPresenter + IRecipesView).
 
     Task E.3: мигрирован на AppServices DI. Принимает ``services: AppServices``.
-    RecipeManager берётся через ``services.recipes._rm`` bridge — RecipeStore
-    Protocol не покрывает богатый legacy API (read_recipe→dict, duplicate,
-    recipes_dir, replace_blueprint). TODO Phase F: расширить RecipeStore Protocol.
+    Task F.4: presenter работает через RecipeStore Protocol (services.recipes).
+    Bridge ``services.recipes._rm`` убран — RecipeStore Protocol покрывает
+    read_raw/save_raw/duplicate/deactivate/set_active->bool.
 
     Реализует IRecipesView через structural subtyping:
     ``isinstance(tab, IRecipesView)`` → True без явного наследования.
 
-    Nav-колонка: динамический список slug'ов рецептов из RecipeManager.list().
+    Nav-колонка: динамический список slug'ов рецептов из RecipeStore.list().
     Content-колонка: RecipeFormWidget с метаданными + сводкой blueprint.
     Action-колонка: кнопки CRUD + «Открыть в Pipeline» (disabled).
     """
@@ -91,23 +91,19 @@ class RecipesTab(BaseListNavTab):
         self._setup_actions()
 
         # Presenter инициализируется после UI (view уже готов).
-        # Если recipe_manager недоступен — показываем сообщение и не создаём presenter.
-        # TODO Phase F: RecipeStore Protocol не покрывает read_recipe→dict / duplicate /
-        # recipes_dir — presenter работает с legacy RecipeManager через _rm bridge.
-        recipe_manager = getattr(services.recipes, "_rm", None)
+        # Task F.4: presenter работает через RecipeStore Protocol (services.recipes).
         self._presenter: RecipesPresenter | None = None
 
-        if recipe_manager is None:
-            # Показываем информационное сообщение в content-области
-            _unavailable_label = QLabel("RecipeManager недоступен")
+        if services.recipes is None:
+            # Защитная проверка (AppServices.recipes не должен быть None, но на всякий случай)
+            _unavailable_label = QLabel("RecipeStore недоступен")
             _unavailable_label.setStyleSheet("color: gray; font-style: italic;")
             self._content_stack.addWidget(_unavailable_label)
             self._content_stack.setCurrentWidget(_unavailable_label)
-            # Все кнопки CRUD остаются disabled (уже по умолчанию disabled кроме «Создать»)
             self._create_btn.setEnabled(False)
         else:
             self._presenter = RecipesPresenter(
-                recipe_manager=recipe_manager,
+                store=services.recipes,
                 view=self,
             )
             self._presenter.load()

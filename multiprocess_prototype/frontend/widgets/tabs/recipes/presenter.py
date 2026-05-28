@@ -1,27 +1,28 @@
 # -*- coding: utf-8 -*-
 """RecipesPresenter — бизнес-логика таба рецептов (MVP).
 
-Pure Python, без Qt-импортов. Управляет CRUD над RecipeManager:
+Pure Python, без Qt-импортов. Управляет CRUD через RecipeStore Protocol:
 - load() / on_select() / on_create() / on_duplicate()
 - on_delete() / on_set_active() / on_open_in_pipeline()
+
+Task F.4: перешёл с RecipeManager на RecipeStore Protocol.
+Presenter больше не трогает файловую систему — вся I/O через store.
 
 «Dict at Boundary»: replace_blueprint_fn принимает и возвращает dict.
 Логирование: if self._logger: self._logger.log_info(...) — silent при logger=None.
 
 Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.6
+      plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md Task F.4
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-import yaml
-
-from multiprocess_prototype.recipes.manager import RecipeManager
-
 if TYPE_CHECKING:
+    from multiprocess_prototype.domain.protocols.recipe_store import RecipeStore
+
     from .view import IRecipesView
 
 
@@ -60,18 +61,20 @@ class RecipesPresenter:
     View получает обновления только через методы IRecipesView.
     Qt-зависимостей нет — presenter полностью тестируется без QApplication.
 
+    Task F.4: работает через RecipeStore Protocol (не RecipeManager напрямую).
+
     Attributes:
-        _recipe_manager: RecipeManager (CRUD поверх RecipeEngine).
+        _store: RecipeStore Protocol (CRUD + raw dict + duplicate).
         _view: реализация IRecipesView (Qt-виджет или mock в тестах).
-        _replace_blueprint_fn: callback replace_blueprint → dict result.
-                               None → set_active работает без перезапуска процессов.
+        _replace_blueprint_fn: callback replace_blueprint -> dict result.
+                               None -> set_active работает без перезапуска процессов.
         _logger: опциональный логгер (LoggerManager или совместимый).
         _selected_slug: текущий выбранный slug в nav-списке.
     """
 
     def __init__(
         self,
-        recipe_manager: RecipeManager,
+        store: "RecipeStore",
         view: "IRecipesView",
         replace_blueprint_fn: Callable[[dict], dict] | None = None,
         logger: Any | None = None,
@@ -79,14 +82,14 @@ class RecipesPresenter:
         """Инициализировать presenter.
 
         Args:
-            recipe_manager: RecipeManager с доступом к CRUD и engine.
+            store: RecipeStore Protocol с доступом к CRUD и raw-dict I/O.
             view: реализация IRecipesView.
             replace_blueprint_fn: опциональный callback для замены blueprint
-                при set_active (ProcessManager.replace_blueprint). None →
+                при set_active (ProcessManager.replace_blueprint). None ->
                 только state обновляется без перезапуска процессов.
             logger: опциональный менеджер логирования (silent при None).
         """
-        self._recipe_manager = recipe_manager
+        self._store = store
         self._view = view
         self._replace_blueprint_fn = replace_blueprint_fn
         self._logger = logger
@@ -118,9 +121,9 @@ class RecipesPresenter:
     def load(self) -> None:
         """Загрузить список рецептов и обновить nav в view.
 
-        Сбрасывает выбор (set_buttons_state → False, False).
+        Сбрасывает выбор (set_buttons_state -> False, False).
         """
-        slugs = self._recipe_manager.list()
+        slugs = list(self._store.list())
         self._view.refresh_list(slugs)
         self._view.set_buttons_state(False, False)
         self._log_info(f"RecipesPresenter.load: {len(slugs)} рецептов")
@@ -143,15 +146,15 @@ class RecipesPresenter:
 
         self._selected_slug = slug
 
-        # Читаем YAML через публичный API RecipeManager (не трогаем _engine)
-        data = self._recipe_manager.read_recipe(slug)
+        # Читаем raw YAML через RecipeStore Protocol
+        data = self._store.read_raw(slug)
         if data is None:
             self._view.show_recipe(slug, None)
             self._view.show_error("Рецепт не найден")
             self._log_warning(f"RecipesPresenter.on_select: '{slug}' не найден или нечитаем")
             return
 
-        active = self._recipe_manager.get_active()
+        active = self._store.get_active()
         self._view.show_recipe(slug, data)
         self._view.set_buttons_state(True, slug == active)
         self._log_info(f"RecipesPresenter.on_select: выбран '{slug}', active='{active}'")
@@ -163,8 +166,8 @@ class RecipesPresenter:
     def on_create(self, name: str, description: str) -> None:
         """Создать новый рецепт из имени и описания.
 
-        Генерирует slug из name (slugify), создаёт YAML с пустым blueprint,
-        затем вызывает load() для обновления списка.
+        Генерирует slug из name (slugify), создаёт raw dict с пустым blueprint,
+        записывает через store.save_raw(), затем вызывает load() для обновления.
 
         Args:
             name: человекочитаемое имя рецепта.
@@ -176,11 +179,8 @@ class RecipesPresenter:
             self._log_warning(f"RecipesPresenter.on_create: пустой slug из name='{name}'")
             return
 
-        # Используем публичное свойство recipes_dir (не _engine)
-        recipes_dir: Path = self._recipe_manager.recipes_dir
-        target_path = recipes_dir / f"{slug}.yaml"
-
-        if target_path.exists():
+        # Проверяем существование через read_raw
+        if self._store.read_raw(slug) is not None:
             self._view.show_error(f"Рецепт '{slug}' уже существует")
             self._log_warning(f"RecipesPresenter.on_create: '{slug}' уже существует")
             return
@@ -199,8 +199,7 @@ class RecipesPresenter:
         }
 
         try:
-            with open(target_path, "w", encoding="utf-8") as f:
-                yaml.dump(recipe_data, f, default_flow_style=False, allow_unicode=True)
+            self._store.save_raw(slug, recipe_data)
         except OSError as exc:
             self._view.show_error(f"Ошибка создания рецепта: {exc}")
             self._log_error(f"RecipesPresenter.on_create: ошибка записи '{slug}': {exc}")
@@ -224,12 +223,12 @@ class RecipesPresenter:
         # Auto-increment: пробуем _copy, _copy_2 ... _copy_99
         new_slug: str | None = None
         base_copy = f"{target_slug}_copy"
-        if self._recipe_manager.read_recipe(base_copy) is None:
+        if self._store.read_raw(base_copy) is None:
             new_slug = base_copy
         else:
             for n in range(2, 100):
                 candidate = f"{target_slug}_copy_{n}"
-                if self._recipe_manager.read_recipe(candidate) is None:
+                if self._store.read_raw(candidate) is None:
                     new_slug = candidate
                     break
 
@@ -238,10 +237,10 @@ class RecipesPresenter:
             self._log_warning(f"RecipesPresenter.on_duplicate: все суффиксы заняты для '{target_slug}'")
             return
 
-        result = self._recipe_manager.duplicate(target_slug, new_slug)
+        result = self._store.duplicate(target_slug, new_slug)
 
         if result:
-            self._log_info(f"RecipesPresenter.on_duplicate: '{target_slug}' → '{new_slug}'")
+            self._log_info(f"RecipesPresenter.on_duplicate: '{target_slug}' -> '{new_slug}'")
             self.load()
         else:
             self._view.show_error(f"Не удалось дублировать рецепт '{target_slug}'")
@@ -264,7 +263,7 @@ class RecipesPresenter:
             self._log_info(f"RecipesPresenter.on_delete: '{target_slug}' — удаление отменено")
             return
 
-        self._recipe_manager.delete(target_slug)
+        self._store.delete(target_slug)
 
         # Сбрасываем выбор если удалили выбранный
         if self._selected_slug == target_slug:
@@ -277,10 +276,10 @@ class RecipesPresenter:
         """Сделать рецепт активным и вызвать replace_blueprint если задан.
 
         Порядок:
-        1. recipe_manager.set_active(slug).
-        2. Если _replace_blueprint_fn задан — читает blueprint из YAML и вызывает его.
-        3. Если result["success"] → load() + set_buttons_state(True, True).
-        4. Если ошибка → view.show_error.
+        1. store.set_active(slug) -> bool.
+        2. Если _replace_blueprint_fn задан — читает blueprint из raw dict и вызывает его.
+        3. Если result["success"] -> load() + set_buttons_state(True, True).
+        4. Если ошибка -> view.show_error.
 
         Args:
             slug: slug для активации. Если None — использует _selected_slug.
@@ -291,8 +290,8 @@ class RecipesPresenter:
             self._log_warning("RecipesPresenter.on_set_active: нет выбранного рецепта")
             return
 
-        # Активируем через RecipeManager
-        success = self._recipe_manager.set_active(target_slug)
+        # Активируем через RecipeStore Protocol
+        success = self._store.set_active(target_slug)
         if not success:
             self._view.show_error(f"Рецепт '{target_slug}' не найден")
             self._log_warning(f"RecipesPresenter.on_set_active: set_active=False для '{target_slug}'")
@@ -302,8 +301,8 @@ class RecipesPresenter:
 
         # Если задан replace_blueprint_fn — выполняем горячую замену
         if self._replace_blueprint_fn is not None:
-            # Читаем через публичный API RecipeManager (не _engine)
-            recipe_data = self._recipe_manager.read_recipe(target_slug)
+            # Читаем raw YAML через RecipeStore Protocol
+            recipe_data = self._store.read_raw(target_slug)
             if recipe_data is None:
                 self._view.show_error(f"Ошибка чтения blueprint рецепта '{target_slug}'")
                 self._log_error(f"RecipesPresenter.on_set_active: не удалось прочитать '{target_slug}'")

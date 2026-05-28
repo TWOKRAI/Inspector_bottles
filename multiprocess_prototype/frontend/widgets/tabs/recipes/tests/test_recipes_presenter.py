@@ -8,6 +8,7 @@
 - test_on_select_active_disables_button
 - test_on_duplicate_success
 - test_on_duplicate_failure
+- test_on_create_via_store
 - test_on_delete_with_confirm
 - test_on_delete_no_confirm
 - test_on_set_active_calls_replace
@@ -16,19 +17,21 @@
 
 Presenter тестируется без Qt-зависимостей.
 IRecipesView мокируется через MagicMock(spec=IRecipesView).
-RecipeManager мокируется через MagicMock или FakeRecipeManager с tmp_path.
+RecipeStore реализован через FakeRecipeStore с raw-хранилищем.
+
+Task F.4: перешёл с _FakeRecipeManager на FakeRecipeStore (RecipeStore Protocol).
 
 Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.6
+      plans/2026-05-27_cross-tab-architecture/phase-f-legacy-removal.md Task F.4
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import yaml
 
+from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
 from multiprocess_prototype.frontend.widgets.tabs.recipes.presenter import (
     RecipesPresenter,
 )
@@ -48,8 +51,8 @@ def _make_view() -> MagicMock:
     return view
 
 
-def _make_recipe_data(slug: str = "cup", active_slug: str | None = None) -> dict:
-    """Минимальный v2-рецепт dict."""
+def _make_recipe_raw(slug: str = "cup") -> dict:
+    """Минимальный v2-рецепт raw dict."""
     return {
         "version": 2,
         "name": slug,
@@ -63,63 +66,16 @@ def _make_recipe_data(slug: str = "cup", active_slug: str | None = None) -> dict
     }
 
 
-def _write_recipe(recipes_dir: Path, slug: str, data: dict | None = None) -> None:
-    """Записать YAML рецепта в директорию."""
-    recipe_data = data or _make_recipe_data(slug)
-    path = recipes_dir / f"{slug}.yaml"
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(recipe_data, f, default_flow_style=False, allow_unicode=True)
-
-
-class _FakeRecipeManager:
-    """Fake RecipeManager с реальным recipes_dir для тестов, требующих YAML.
-
-    Поддерживает настраиваемые возвращаемые значения через атрибуты.
-    Реализует публичный API RecipeManager: recipes_dir property + read_recipe().
-    """
-
-    def __init__(self, recipes_dir: Path, active: str | None = None) -> None:
-        self._active = active
-        self._recipes_dir = recipes_dir
-        self._list: list[str] = []
-        self._duplicate_result: bool = True
-        self._set_active_result: bool = True
-
-    @property
-    def recipes_dir(self) -> Path:
-        """Директория с YAML-файлами рецептов."""
-        return self._recipes_dir
-
-    def read_recipe(self, slug: str) -> dict | None:
-        """Прочитать YAML рецепта по slug через публичный API."""
-        recipe_path = self._recipes_dir / f"{slug}.yaml"
-        if not recipe_path.exists():
-            return None
-        try:
-            with open(recipe_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            return data if isinstance(data, dict) else None
-        except (yaml.YAMLError, OSError):
-            return None
-
-    def list(self) -> list[str]:
-        return list(self._list)
-
-    def get_active(self) -> str | None:
-        return self._active
-
-    def set_active(self, slug: str) -> bool:
-        if self._set_active_result:
-            self._active = slug
-        return self._set_active_result
-
-    def duplicate(self, source_slug: str, new_slug: str) -> bool:
-        return self._duplicate_result
-
-    def delete(self, slug: str) -> bool:
-        if slug in self._list:
-            self._list.remove(slug)
-        return True
+def _make_store(
+    slugs: list[str] | None = None,
+    active: str | None = None,
+) -> FakeRecipeStore:
+    """Создать FakeRecipeStore с raw-рецептами."""
+    raw: dict[str, dict] = {}
+    if slugs:
+        for slug in slugs:
+            raw[slug] = _make_recipe_raw(slug)
+    return FakeRecipeStore(raw=raw, active=active)
 
 
 # ---------------------------------------------------------------------------
@@ -128,48 +84,40 @@ class _FakeRecipeManager:
 
 
 @pytest.fixture()
-def recipes_dir(tmp_path: Path) -> Path:
-    """Временная директория для рецептов."""
-    d = tmp_path / "recipes"
-    d.mkdir()
-    return d
-
-
-@pytest.fixture()
 def mock_view() -> MagicMock:
     return _make_view()
 
 
 @pytest.fixture()
-def fake_manager(recipes_dir: Path) -> _FakeRecipeManager:
-    return _FakeRecipeManager(recipes_dir=recipes_dir)
+def store() -> FakeRecipeStore:
+    return _make_store()
 
 
 @pytest.fixture()
-def presenter(fake_manager: _FakeRecipeManager, mock_view: MagicMock) -> RecipesPresenter:
-    return RecipesPresenter(recipe_manager=fake_manager, view=mock_view)
+def presenter(store: FakeRecipeStore, mock_view: MagicMock) -> RecipesPresenter:
+    return RecipesPresenter(store=store, view=mock_view)
 
 
 # ---------------------------------------------------------------------------
-# Тест 1: load() → view.refresh_list вызван со списком из recipe_manager.list()
+# Тест 1: load() -> view.refresh_list вызван со списком из store.list()
 # ---------------------------------------------------------------------------
 
 
 def test_load_calls_refresh_list(
-    presenter: RecipesPresenter,
-    fake_manager: _FakeRecipeManager,
     mock_view: MagicMock,
 ) -> None:
-    """load() → view.refresh_list вызван с актуальным списком slug'ов."""
-    fake_manager._list = ["cup", "bottle"]
+    """load() -> view.refresh_list вызван с актуальным списком slug'ов."""
+    store = _make_store(slugs=["bottle", "cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
     presenter.load()
 
-    mock_view.refresh_list.assert_called_once_with(["cup", "bottle"])
+    # FakeRecipeStore.list() возвращает sorted tuple
+    mock_view.refresh_list.assert_called_once_with(["bottle", "cup"])
 
 
 # ---------------------------------------------------------------------------
-# Тест 2: load() → view.set_buttons_state(False, False) вызван
+# Тест 2: load() -> view.set_buttons_state(False, False) вызван
 # ---------------------------------------------------------------------------
 
 
@@ -177,25 +125,23 @@ def test_load_resets_buttons(
     presenter: RecipesPresenter,
     mock_view: MagicMock,
 ) -> None:
-    """load() → view.set_buttons_state(False, False) вызван (сброс выбора)."""
+    """load() -> view.set_buttons_state(False, False) вызван (сброс выбора)."""
     presenter.load()
 
     mock_view.set_buttons_state.assert_called_once_with(False, False)
 
 
 # ---------------------------------------------------------------------------
-# Тест 3: on_select('cup') → view.show_recipe вызван с данными рецепта
+# Тест 3: on_select('cup') -> view.show_recipe вызван с данными рецепта
 # ---------------------------------------------------------------------------
 
 
 def test_on_select_shows_recipe(
-    presenter: RecipesPresenter,
-    fake_manager: _FakeRecipeManager,
     mock_view: MagicMock,
-    recipes_dir: Path,
 ) -> None:
-    """on_select('cup') → view.show_recipe('cup', data) вызван."""
-    _write_recipe(recipes_dir, "cup")
+    """on_select('cup') -> view.show_recipe('cup', data) вызван."""
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
     presenter.on_select("cup")
 
@@ -203,11 +149,11 @@ def test_on_select_shows_recipe(
     mock_view.show_recipe.assert_called_once()
     call_args = mock_view.show_recipe.call_args
     assert call_args[0][0] == "cup"  # slug
-    assert isinstance(call_args[0][1], dict)  # data — dict из YAML
+    assert isinstance(call_args[0][1], dict)  # data — dict из raw store
 
 
 # ---------------------------------------------------------------------------
-# Тест 4: on_select(None) → show_recipe(None, None) и set_buttons_state(False, False)
+# Тест 4: on_select(None) -> show_recipe(None, None) и set_buttons_state(False, False)
 # ---------------------------------------------------------------------------
 
 
@@ -215,7 +161,7 @@ def test_on_select_none_clears(
     presenter: RecipesPresenter,
     mock_view: MagicMock,
 ) -> None:
-    """on_select(None) → view.show_recipe(None, None) и set_buttons_state(False, False)."""
+    """on_select(None) -> view.show_recipe(None, None) и set_buttons_state(False, False)."""
     presenter.on_select(None)
 
     mock_view.show_recipe.assert_called_once_with(None, None)
@@ -223,18 +169,16 @@ def test_on_select_none_clears(
 
 
 # ---------------------------------------------------------------------------
-# Тест 5: on_select с активным slug → set_buttons_state(True, True)
+# Тест 5: on_select с активным slug -> set_buttons_state(True, True)
 # ---------------------------------------------------------------------------
 
 
 def test_on_select_active_disables_button(
-    recipes_dir: Path,
     mock_view: MagicMock,
 ) -> None:
-    """Выбрать slug == активный → set_buttons_state(True, True)."""
-    _write_recipe(recipes_dir, "cup")
-    manager = _FakeRecipeManager(recipes_dir=recipes_dir, active="cup")
-    presenter = RecipesPresenter(recipe_manager=manager, view=mock_view)
+    """Выбрать slug == активный -> set_buttons_state(True, True)."""
+    store = _make_store(slugs=["cup"], active="cup")
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
     presenter.on_select("cup")
 
@@ -243,123 +187,133 @@ def test_on_select_active_disables_button(
 
 
 # ---------------------------------------------------------------------------
-# Тест 6: on_duplicate успешный → load() вызван (через refresh_list)
+# Тест 6: on_duplicate успешный -> load() вызван (через refresh_list)
 # ---------------------------------------------------------------------------
 
 
 def test_on_duplicate_success(
-    presenter: RecipesPresenter,
-    fake_manager: _FakeRecipeManager,
     mock_view: MagicMock,
-    recipes_dir: Path,
 ) -> None:
-    """duplicate возвращает True → load() вызывается (refresh_list вызван)."""
-    fake_manager._list = ["cup"]
-    fake_manager._duplicate_result = True
-    _write_recipe(recipes_dir, "cup")
+    """duplicate возвращает True -> load() вызывается (refresh_list вызван)."""
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
     presenter._selected_slug = "cup"
     presenter.on_duplicate()
 
-    # После on_duplicate → load() → refresh_list должен быть вызван
+    # После on_duplicate -> load() -> refresh_list должен быть вызван
     mock_view.refresh_list.assert_called()
+    # И в store должна появиться копия
+    assert "cup_copy" in store._raw
 
 
 # ---------------------------------------------------------------------------
-# Тест 7: on_duplicate() при ошибке → view.show_error вызван
+# Тест 7: on_duplicate() при ошибке -> view.show_error вызван
 # ---------------------------------------------------------------------------
 
 
 def test_on_duplicate_failure(
-    presenter: RecipesPresenter,
-    fake_manager: _FakeRecipeManager,
     mock_view: MagicMock,
-    recipes_dir: Path,
 ) -> None:
-    """duplicate возвращает False → view.show_error вызван."""
-    fake_manager._duplicate_result = False
-    _write_recipe(recipes_dir, "cup")
+    """duplicate не удаётся (slug не существует) -> view.show_error вызван."""
+    store = _make_store()  # пустой
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
-    presenter._selected_slug = "cup"
+    presenter._selected_slug = "nonexistent"
     presenter.on_duplicate()
 
     mock_view.show_error.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# Тест 8: on_delete с confirm=True → recipe_manager.delete вызван
+# Тест 7b: on_create через store.save_raw (без файловой системы)
+# ---------------------------------------------------------------------------
+
+
+def test_on_create_via_store(
+    mock_view: MagicMock,
+) -> None:
+    """on_create записывает через store.save_raw, не трогая файловую систему."""
+    store = _make_store()
+    presenter = RecipesPresenter(store=store, view=mock_view)
+
+    presenter.on_create("Test Recipe", "описание")
+
+    # slug = test_recipe
+    assert "test_recipe" in store._raw
+    raw = store._raw["test_recipe"]
+    assert raw["version"] == 2
+    assert raw["name"] == "Test Recipe"
+    assert raw["description"] == "описание"
+    mock_view.refresh_list.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Тест 8: on_delete с confirm=True -> store.delete вызван
 # ---------------------------------------------------------------------------
 
 
 def test_on_delete_with_confirm(
-    presenter: RecipesPresenter,
-    fake_manager: _FakeRecipeManager,
     mock_view: MagicMock,
 ) -> None:
-    """confirm_delete → True → recipe_manager.delete('cup') вызван."""
+    """confirm_delete -> True -> рецепт удалён из store."""
     mock_view.confirm_delete.return_value = True
-    fake_manager._list = ["cup"]
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
     presenter._selected_slug = "cup"
     presenter.on_delete()
 
-    # Проверяем что delete был вызван с 'cup'
-    # fake_manager.delete убирает из списка — список теперь пустой
-    assert "cup" not in fake_manager.list()
+    # Рецепт удалён из raw-хранилища
+    assert "cup" not in store._raw
 
 
 # ---------------------------------------------------------------------------
-# Тест 9: on_delete с confirm=False → recipe_manager.delete НЕ вызван
+# Тест 9: on_delete с confirm=False -> рецепт НЕ удалён
 # ---------------------------------------------------------------------------
 
 
 def test_on_delete_no_confirm(
-    presenter: RecipesPresenter,
-    fake_manager: _FakeRecipeManager,
     mock_view: MagicMock,
 ) -> None:
-    """confirm_delete → False → recipe_manager.delete НЕ вызывается."""
+    """confirm_delete -> False -> рецепт остаётся в store."""
     mock_view.confirm_delete.return_value = False
-    fake_manager._list = ["cup"]
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view)
 
     presenter._selected_slug = "cup"
     presenter.on_delete()
 
-    # Список не изменился — 'cup' на месте
-    assert "cup" in fake_manager.list()
+    # Рецепт на месте
+    assert "cup" in store._raw
 
 
 # ---------------------------------------------------------------------------
-# Тест 10: on_set_active → replace_blueprint_fn вызывается с blueprint dict
+# Тест 10: on_set_active -> replace_blueprint_fn вызывается с blueprint dict
 # ---------------------------------------------------------------------------
 
 
 def test_on_set_active_calls_replace(
     mock_view: MagicMock,
-    recipes_dir: Path,
 ) -> None:
-    """on_set_active вызывает replace_blueprint_fn с blueprint dict из YAML."""
+    """on_set_active вызывает replace_blueprint_fn с blueprint dict."""
     blueprint_data = {
         "processes": [{"process_name": "worker_1", "class": "Worker", "plugins": []}],
         "wires": [],
     }
-    _write_recipe(
-        recipes_dir,
-        "cup",
-        data={
-            "version": 2,
-            "name": "cup",
-            "description": "test",
-            "blueprint": blueprint_data,
-            "active_services": [],
-            "display_bindings": [],
-        },
-    )
+    raw = {
+        "version": 2,
+        "name": "cup",
+        "description": "test",
+        "blueprint": blueprint_data,
+        "active_services": [],
+        "display_bindings": [],
+    }
+    store = FakeRecipeStore(raw={"cup": raw})
 
-    manager = _FakeRecipeManager(recipes_dir=recipes_dir)
     replace_fn = MagicMock(return_value={"success": True, "replaced": ["worker_1"]})
     presenter = RecipesPresenter(
-        recipe_manager=manager,
+        store=store,
         view=mock_view,
         replace_blueprint_fn=replace_fn,
     )
@@ -376,21 +330,19 @@ def test_on_set_active_calls_replace(
 
 
 # ---------------------------------------------------------------------------
-# Тест 11: on_set_active без replace_fn → set_active вызывается без ошибки
+# Тест 11: on_set_active без replace_fn -> set_active работает без ошибки
 # ---------------------------------------------------------------------------
 
 
 def test_on_set_active_no_replace_fn(
     mock_view: MagicMock,
-    recipes_dir: Path,
 ) -> None:
-    """_replace_blueprint_fn = None → on_set_active работает без ошибки (деградация)."""
-    _write_recipe(recipes_dir, "cup")
-    manager = _FakeRecipeManager(recipes_dir=recipes_dir)
+    """_replace_blueprint_fn = None -> on_set_active работает без ошибки."""
+    store = _make_store(slugs=["cup"])
     presenter = RecipesPresenter(
-        recipe_manager=manager,
+        store=store,
         view=mock_view,
-        replace_blueprint_fn=None,  # явный None
+        replace_blueprint_fn=None,
     )
 
     presenter._selected_slug = "cup"
@@ -404,20 +356,18 @@ def test_on_set_active_no_replace_fn(
 
 
 # ---------------------------------------------------------------------------
-# Тест 12: on_set_active с replace_fn → ошибка → view.show_error вызван
+# Тест 12: on_set_active с replace_fn -> ошибка -> view.show_error вызван
 # ---------------------------------------------------------------------------
 
 
 def test_on_set_active_replace_error(
     mock_view: MagicMock,
-    recipes_dir: Path,
 ) -> None:
-    """replace_blueprint_fn возвращает success=False → view.show_error вызван."""
-    _write_recipe(recipes_dir, "cup")
-    manager = _FakeRecipeManager(recipes_dir=recipes_dir)
+    """replace_blueprint_fn возвращает success=False -> view.show_error вызван."""
+    store = _make_store(slugs=["cup"])
     replace_fn = MagicMock(return_value={"success": False, "error": "Процесс не стартовал"})
     presenter = RecipesPresenter(
-        recipe_manager=manager,
+        store=store,
         view=mock_view,
         replace_blueprint_fn=replace_fn,
     )

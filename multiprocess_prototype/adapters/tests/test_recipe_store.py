@@ -344,6 +344,11 @@ def test_satisfies_protocol(store: RecipeStoreFromManager) -> None:
     assert callable(store.delete)
     assert callable(store.get_active)
     assert callable(store.set_active)
+    # Phase F: новые методы Protocol
+    assert callable(store.read_raw)
+    assert callable(store.save_raw)
+    assert callable(store.duplicate)
+    assert callable(store.deactivate)
 
 
 # ---------------------------------------------------------------------------
@@ -468,3 +473,158 @@ def test_live_demo_yaml_roundtrip(
     assert len(recipe_v2.blueprint.wires) == len(recipe_v1.blueprint.wires)
     assert recipe_v2.active_services == recipe_v1.active_services
     assert len(recipe_v2.display_bindings) == len(recipe_v1.display_bindings)
+
+
+# ===========================================================================
+# Phase F: тесты read_raw / save_raw / duplicate / deactivate / set_active->bool
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Тест 16: read_raw возвращает raw dict
+# ---------------------------------------------------------------------------
+
+
+def test_read_raw_returns_dict(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """read_raw() возвращает dict из YAML (без конвертации в Recipe entity)."""
+    slug = "raw-test"
+    _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
+
+    result = store.read_raw(slug)
+
+    assert isinstance(result, dict)
+    assert result["name"] == "test-recipe"
+    assert result["version"] == 2
+    assert "blueprint" in result
+
+
+# ---------------------------------------------------------------------------
+# Тест 17: read_raw для несуществующего slug -> None
+# ---------------------------------------------------------------------------
+
+
+def test_read_raw_unknown_slug_returns_none(store: RecipeStoreFromManager) -> None:
+    """read_raw() для несуществующего slug возвращает None."""
+    assert store.read_raw("phantom") is None
+
+
+# ---------------------------------------------------------------------------
+# Тест 18: save_raw -> read_raw round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_save_raw_roundtrip(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """save_raw(slug, data) -> read_raw(slug) возвращает эквивалентный dict."""
+    slug = "raw-roundtrip"
+    data = {
+        "version": 2,
+        "name": "round",
+        "data": {
+            "blueprint": {"processes": [{"process_name": "p1"}], "wires": []},
+            "gui_positions": {"p1": [100, 200]},
+        },
+    }
+
+    store.save_raw(slug, data)
+    loaded = store.read_raw(slug)
+
+    assert loaded is not None
+    assert loaded["version"] == 2
+    assert loaded["name"] == "round"
+    assert loaded["data"]["gui_positions"]["p1"] == [100, 200]
+
+
+# ---------------------------------------------------------------------------
+# Тест 19: duplicate создаёт копию
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_creates_copy(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """duplicate() создаёт копию рецепта с обновлённым именем."""
+    slug = "original"
+    _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
+
+    result = store.duplicate(slug, "cloned")
+
+    assert result is True
+    assert (recipe_dir / "cloned.yaml").exists()
+    # Оригинал на месте
+    assert (recipe_dir / f"{slug}.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# Тест 20: duplicate несуществующего -> False
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_nonexistent_returns_false(store: RecipeStoreFromManager) -> None:
+    """duplicate() для несуществующего source -> False."""
+    assert store.duplicate("phantom", "new") is False
+
+
+# ---------------------------------------------------------------------------
+# Тест 21: deactivate сбрасывает active
+# ---------------------------------------------------------------------------
+
+
+def test_deactivate_clears_active(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """deactivate() -> get_active() == None."""
+    slug = "active-test"
+    _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
+
+    store.set_active(slug)
+    assert store.get_active() == slug
+
+    store.deactivate()
+    assert store.get_active() is None
+
+
+# ---------------------------------------------------------------------------
+# Тест 22: set_active возвращает bool
+# ---------------------------------------------------------------------------
+
+
+def test_set_active_returns_bool(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """set_active() возвращает True при успехе, False при отсутствии рецепта."""
+    slug = "bool-test"
+    _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
+
+    assert store.set_active(slug) is True
+    assert store.get_active() == slug
+
+    assert store.set_active("nonexistent") is False
+
+
+# ---------------------------------------------------------------------------
+# Тест 23: set_active(None) сбрасывает через deactivate, возвращает True
+# ---------------------------------------------------------------------------
+
+
+def test_set_active_none_returns_true(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """set_active(None) -> True и active сброшен."""
+    slug = "deact-test"
+    _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
+    store.set_active(slug)
+
+    result = store.set_active(None)
+
+    assert result is True
+    assert store.get_active() is None

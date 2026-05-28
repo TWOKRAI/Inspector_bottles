@@ -725,8 +725,11 @@ class PipelinePresenter:
         """Сохранить текущий граф в активный рецепт.
 
         Вызывает graph_to_blueprint для сериализации модели,
-        читает текущий YAML рецепта, обновляет секции blueprint/display_bindings/
-        gui_positions и записывает файл напрямую через recipes_dir.
+        читает текущий YAML рецепта через store.read_raw(), обновляет секции
+        blueprint/display_bindings/gui_positions и записывает через store.save_raw().
+
+        Task F.4: использует RecipeStore Protocol (services.recipes) вместо
+        legacy bridge через adapter._rm.
 
         Args:
             parent: родительский виджет для QMessageBox (может быть None).
@@ -734,27 +737,19 @@ class PipelinePresenter:
         Returns:
             True при успешном сохранении, False при любой ошибке.
         """
-        import yaml
         from PySide6.QtWidgets import QMessageBox
 
         from .io import graph_to_blueprint
 
-        # Шаг 1: проверить RecipeManager (legacy bridge).
-        # TODO Phase F: RecipeStore Protocol (services.recipes) работает с Recipe entities,
-        # но save_to_active_recipe нуждается в raw dict доступе и прямой записи YAML.
-        # Получаем legacy RecipeManager через adapter bridge.
-        recipe_mgr = getattr(self._services.recipes, "_rm", None)
-        if recipe_mgr is None:
-            QMessageBox.warning(parent, "Сохранение рецепта", "RecipeManager недоступен")
-            return False
+        store = self._services.recipes
 
-        # Шаг 2: проверить активный рецепт
-        active_slug = recipe_mgr.get_active()
+        # Шаг 1: проверить активный рецепт
+        active_slug = store.get_active()
         if active_slug is None:
             QMessageBox.warning(parent, "Сохранение рецепта", "Не выбран активный рецепт")
             return False
 
-        # Шаг 3: сериализовать модель
+        # Шаг 2: сериализовать модель
         bp_dict, bindings, gui_positions = graph_to_blueprint(self._model)
 
         # Обновить gui_positions из scene (если привязана)
@@ -762,13 +757,13 @@ class PipelinePresenter:
             self._gui_positions.update(self._scene.get_all_node_positions())
         gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
 
-        # Шаг 4: прочитать текущий YAML рецепта
-        raw_recipe = recipe_mgr.read_recipe(active_slug)
+        # Шаг 3: прочитать текущий YAML рецепта через RecipeStore Protocol
+        raw_recipe = store.read_raw(active_slug)
         if raw_recipe is None:
             QMessageBox.critical(parent, "Сохранение рецепта", "Не удалось прочитать рецепт")
             return False
 
-        # Шаг 5: обновить секции в data-части рецепта
+        # Шаг 4: обновить секции в data-части рецепта
         try:
             recipe_data = raw_recipe.get("data", {})
             if not isinstance(recipe_data, dict):
@@ -780,13 +775,10 @@ class PipelinePresenter:
 
             raw_recipe["data"] = recipe_data
 
-            # Записать YAML напрямую через recipes_dir (обходя TreeStore)
-            recipes_dir = recipe_mgr.recipes_dir
-            file_path = recipes_dir / f"{active_slug}.yaml"
-            with open(file_path, "w", encoding="utf-8") as f:
-                yaml.dump(raw_recipe, f, default_flow_style=False, allow_unicode=True)
+            # Записать через RecipeStore Protocol
+            store.save_raw(active_slug, raw_recipe)
 
-            logger.info("Pipeline сохранён в рецепт '%s': %s", active_slug, file_path)
+            logger.info("Pipeline сохранён в рецепт '%s'", active_slug)
         except Exception as exc:
             logger.exception("Ошибка при сохранении рецепта '%s'", active_slug)
             QMessageBox.critical(parent, "Сохранение рецепта", f"Ошибка: {exc}")
@@ -806,6 +798,8 @@ class PipelinePresenter:
         ``proxy.replace_blueprint(blueprint)`` — горячую замену процессов
         без остановки GUI.
 
+        Task F.4: использует RecipeStore Protocol (services.recipes).
+
         Args:
             parent: родительский виджет для QMessageBox (может быть None).
 
@@ -815,21 +809,16 @@ class PipelinePresenter:
         """
         from PySide6.QtWidgets import QMessageBox
 
-        # Шаг 1: проверить RecipeManager (legacy bridge, аналог save_to_active_recipe)
-        # TODO Phase F: использовать services.recipes (RecipeStore Protocol)
-        recipe_mgr = getattr(self._services.recipes, "_rm", None)
-        if recipe_mgr is None:
-            QMessageBox.warning(parent, "Запуск рецепта", "RecipeManager недоступен")
-            return False
+        store = self._services.recipes
 
-        # Шаг 2: проверить активный рецепт
-        active_slug = recipe_mgr.get_active()
+        # Шаг 1: проверить активный рецепт
+        active_slug = store.get_active()
         if active_slug is None:
             QMessageBox.warning(parent, "Запуск рецепта", "Не выбран активный рецепт")
             return False
 
-        # Шаг 3: прочитать рецепт
-        current = recipe_mgr.read_recipe(active_slug)
+        # Шаг 2: прочитать рецепт через RecipeStore Protocol
+        current = store.read_raw(active_slug)
         if current is None:
             QMessageBox.critical(parent, "Запуск рецепта", "Не удалось прочитать рецепт")
             return False

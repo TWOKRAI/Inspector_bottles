@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-domain/protocols/recipe_store.py — Protocol для CRUD-доступа к рецептам.
+domain/protocols/recipe_store.py — Protocol для доступа к рецептам.
 
-RecipeStore — минимальный контракт для работы с Recipe entities.
-Domain работает исключительно с Recipe entity (не с raw-dict).
-Phase C создаст адаптер RecipeManagerAdapter поверх существующего RecipeManager.
+RecipeStore предоставляет ДВА уровня доступа:
+  1. Recipe entity (денормализованный вид) — read/write для domain-логики.
+  2. Raw dict (исходная YAML-структура) — read_raw/save_raw для blueprint-persistence,
+     где presenter'ам нужна полная YAML-структура (data/blueprint/display_bindings/
+     gui_positions/version/name/description).
+
+Phase C создал адаптер RecipeStoreFromManager поверх существующего RecipeManager.
+Phase F расширил Protocol: + read_raw/save_raw/duplicate/deactivate, set_active -> bool.
 """
 
 from __future__ import annotations
@@ -15,9 +20,9 @@ from ..entities.recipe import Recipe
 
 
 class RecipeStore(Protocol):
-    """Контракт CRUD-доступа к рецептам.
+    """Контракт доступа к рецептам (entity + raw dict).
 
-    Реализации: RecipeManagerAdapter (Phase C), _FakeRecipeStore (тесты).
+    Реализации: RecipeStoreFromManager (adapter), FakeRecipeStore (тесты).
     """
 
     def list(self) -> tuple[str, ...]:
@@ -25,11 +30,11 @@ class RecipeStore(Protocol):
         ...
 
     def read(self, slug: str) -> Recipe | None:
-        """Прочитать рецепт по slug. Возвращает None если не найден."""
+        """Прочитать рецепт по slug как Recipe entity. Возвращает None если не найден."""
         ...
 
     def write(self, slug: str, recipe: Recipe) -> None:
-        """Сохранить рецепт по slug (создать или перезаписать)."""
+        """Сохранить рецепт по slug (создать или перезаписать) — денормализованный формат."""
         ...
 
     def delete(self, slug: str) -> None:
@@ -40,8 +45,24 @@ class RecipeStore(Protocol):
         """Вернуть slug активного рецепта или None."""
         ...
 
-    def set_active(self, slug: str | None) -> None:
-        """Установить активный рецепт. slug=None сбрасывает активный."""
+    def set_active(self, slug: str | None) -> bool:
+        """Установить активный рецепт. slug=None сбрасывает (через deactivate). Вернуть True при успехе."""
+        ...
+
+    def deactivate(self) -> None:
+        """Сбросить активный рецепт."""
+        ...
+
+    def duplicate(self, slug: str, new_slug: str) -> bool:
+        """Дублировать рецепт. True если успех, False при ошибке."""
+        ...
+
+    def read_raw(self, slug: str) -> dict | None:
+        """Прочитать raw YAML dict (полная структура). None если не найден."""
+        ...
+
+    def save_raw(self, slug: str, data: dict) -> None:
+        """Записать raw dict в YAML-файл рецепта."""
         ...
 
 

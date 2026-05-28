@@ -204,18 +204,29 @@ del _d
 
 
 class FakeRecipeStore:
-    """In-memory RecipeStore. dict[slug, Recipe], get_active/set_active."""
+    """In-memory RecipeStore (entity + raw dict).
+
+    Поддерживает ОБА уровня доступа Protocol:
+      - Recipe entity: dict[slug, Recipe] (read/write/list)
+      - Raw dict: dict[slug, dict] (read_raw/save_raw)
+
+    Phase F: + duplicate/deactivate, set_active -> bool.
+    """
 
     def __init__(
         self,
         recipes: dict[str, Recipe] | None = None,
         active: str | None = None,
+        raw: dict[str, dict] | None = None,
     ) -> None:
         self._data: dict[str, Recipe] = recipes or {}
         self._active: str | None = active
+        self._raw: dict[str, dict] = raw or {}
 
     def list(self) -> tuple[str, ...]:
-        return tuple(self._data.keys())
+        # Объединяем slug'и из entity и raw хранилищ
+        all_slugs = set(self._data.keys()) | set(self._raw.keys())
+        return tuple(sorted(all_slugs))
 
     def read(self, slug: str) -> Recipe | None:
         return self._data.get(slug)
@@ -225,12 +236,57 @@ class FakeRecipeStore:
 
     def delete(self, slug: str) -> None:
         self._data.pop(slug, None)
+        self._raw.pop(slug, None)
 
     def get_active(self) -> str | None:
         return self._active
 
-    def set_active(self, slug: str | None) -> None:
+    def set_active(self, slug: str | None) -> bool:
+        """Установить активный рецепт. Вернуть True если slug есть в list или slug=None."""
+        if slug is None:
+            self._active = None
+            return True
+        all_slugs = set(self._data.keys()) | set(self._raw.keys())
+        if slug not in all_slugs:
+            return False
         self._active = slug
+        return True
+
+    def deactivate(self) -> None:
+        """Сбросить активный рецепт."""
+        self._active = None
+
+    def duplicate(self, slug: str, new_slug: str) -> bool:
+        """Дублировать рецепт. Если slug есть и new_slug нет — True; иначе False."""
+        import copy
+
+        all_slugs = set(self._data.keys()) | set(self._raw.keys())
+        if slug not in all_slugs:
+            return False
+        if new_slug in all_slugs:
+            return False
+        # Копируем Recipe entity если есть
+        if slug in self._data:
+            self._data[new_slug] = copy.deepcopy(self._data[slug])
+        # Копируем raw dict если есть
+        if slug in self._raw:
+            self._raw[new_slug] = copy.deepcopy(self._raw[slug])
+        return True
+
+    def read_raw(self, slug: str) -> dict | None:
+        """Вернуть копию raw dict или None."""
+        import copy
+
+        raw = self._raw.get(slug)
+        if raw is None:
+            return None
+        return copy.deepcopy(raw)
+
+    def save_raw(self, slug: str, data: dict) -> None:
+        """Сохранить копию raw dict."""
+        import copy
+
+        self._raw[slug] = copy.deepcopy(data)
 
 
 _r: RecipeStore = FakeRecipeStore()

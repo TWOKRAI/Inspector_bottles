@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Вспомогательные фабрики для pipeline-тестов (Task E.1).
+"""Вспомогательные фабрики для pipeline-тестов (Task E.1 -> F.4).
 
 Предоставляет make_pipeline_services() — специализированный builder
 поверх make_test_app_services(), добавляющий config с topology
 и (опционально) bridge-атрибуты на Fake-объектах для legacy API.
+
+Task F.4: recipe_manager больше не навешивается как _rm bridge.
+Вместо этого FakeRecipeStore наполняется через raw-хранилище.
 """
 
 from __future__ import annotations
@@ -50,16 +53,22 @@ def make_pipeline_services(
     """Создать AppServices для pipeline-тестов.
 
     Topology помещается в config под ключом "topology".
-    Bridge-атрибуты (action_bus, _registry, _rm и т.д.) навешиваются
+    Bridge-атрибуты (action_bus, _registry и т.д.) навешиваются
     на Fake-объекты через setattr для совместимости с legacy bridge
     в presenter и inspector.
+
+    Task F.4: recipe_manager транслируется в FakeRecipeStore с raw-данными.
+    Если recipe_manager — MagicMock с get_active/read_recipe, то raw-store
+    наполняется из mock'а. Если recipe_manager=None — пустой store.
 
     Args:
         topology: dict topology для config. По умолчанию — 2 процесса + 1 wire.
         action_bus: legacy ActionBus mock для undo/redo bridge.
         plugin_registry: raw _PluginRegistry для wire-валидации bridge.
         registers_manager: legacy RegistersManager для inspector bridge.
-        recipe_manager: legacy RecipeManager для save/launch bridge.
+        recipe_manager: legacy RecipeManager (mock или реальный) для recipe-данных.
+            Если имеет get_active/read_recipe — FakeRecipeStore наполняется
+            из этих методов. Иначе — пустой store.
         display_registry: legacy DisplayRegistry (если нужен _get_display_entries bridge).
         config_extra: дополнительные ключи для ConfigStore.
         auth: Fake AuthFacade (по умолчанию — all_permissions=True).
@@ -90,10 +99,8 @@ def make_pipeline_services(
     if registers_manager is not None:
         registers._rm = registers_manager  # type: ignore[attr-defined]
 
-    # Recipes: навесить _rm bridge для save/launch
-    recipes = FakeRecipeStore()
-    if recipe_manager is not None:
-        recipes._rm = recipe_manager  # type: ignore[attr-defined]
+    # Recipes: Task F.4 — строим FakeRecipeStore из recipe_manager данных
+    recipes = _build_recipe_store(recipe_manager)
 
     # Displays: если нужен raw registry bridge
     displays = FakeDisplayCatalog()
@@ -111,6 +118,62 @@ def make_pipeline_services(
         auth=_auth,
         topology=topology_repo,
     )
+
+
+def _build_recipe_store(recipe_manager: Any) -> FakeRecipeStore:
+    """Построить FakeRecipeStore из recipe_manager (mock или реальный).
+
+    Стратегия:
+    - recipe_manager=None -> пустой store.
+    - recipe_manager с get_active/read_recipe -> наполняем raw из read_recipe.
+    - Для реального RecipeManager: read_recipe возвращает dict из YAML.
+    - Для MagicMock: read_recipe.return_value предустановлен в тесте.
+    """
+    if recipe_manager is None:
+        return FakeRecipeStore()
+
+    active: str | None = None
+    raw: dict[str, dict] = {}
+
+    # Извлекаем active slug
+    if hasattr(recipe_manager, "get_active"):
+        try:
+            active = recipe_manager.get_active()
+        except Exception:
+            pass
+
+    # Извлекаем raw recipe для active slug
+    if active is not None and hasattr(recipe_manager, "read_recipe"):
+        try:
+            data = recipe_manager.read_recipe(active)
+            if isinstance(data, dict):
+                raw[active] = data
+        except Exception:
+            pass
+
+    # Также поддерживаем recipes_dir (для реальных RecipeManager с YAML на диске)
+    if hasattr(recipe_manager, "recipes_dir"):
+        try:
+            from pathlib import Path
+
+            recipes_dir = Path(recipe_manager.recipes_dir)
+            if recipes_dir.is_dir():
+                import yaml
+
+                for path in recipes_dir.glob("*.yaml"):
+                    slug = path.stem
+                    if slug not in raw:
+                        try:
+                            with open(path, encoding="utf-8") as f:
+                                data = yaml.safe_load(f)
+                            if isinstance(data, dict):
+                                raw[slug] = data
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    return FakeRecipeStore(raw=raw, active=active)
 
 
 __all__ = ["make_pipeline_services"]

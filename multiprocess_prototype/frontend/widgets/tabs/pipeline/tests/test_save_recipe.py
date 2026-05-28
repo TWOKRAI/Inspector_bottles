@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты сохранения pipeline-графа в рецепт через PipelinePresenter.save_to_active_recipe.
-Task E.1: мигрировано на AppServices. RecipeManager bridge через adapter._rm.
+Task E.1 -> F.4: мигрировано на RecipeStore Protocol (FakeRecipeStore).
 
 Запуск:
     python -m pytest multiprocess_prototype/frontend/widgets/tabs/pipeline/tests/test_save_recipe.py -v
@@ -8,11 +8,7 @@ Task E.1: мигрировано на AppServices. RecipeManager bridge чере
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock
-
-import yaml
-
+from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import (
     PipelinePresenter,
 )
@@ -25,8 +21,8 @@ from ._helpers import make_pipeline_services
 # ---------------------------------------------------------------------------
 
 
-def _make_recipe_yaml(slug: str = "test_recipe") -> dict:
-    """Создать минимальный v2-рецепт в формате RecipeEngine."""
+def _make_recipe_raw(slug: str = "test_recipe") -> dict:
+    """Создать минимальный v2-рецепт в формате RecipeEngine (raw dict)."""
     return {
         "meta": {
             "name": slug,
@@ -40,45 +36,28 @@ def _make_recipe_yaml(slug: str = "test_recipe") -> dict:
     }
 
 
-def _write_recipe_file(recipes_dir: Path, slug: str) -> Path:
-    """Записать тестовый YAML-файл рецепта в директорию."""
-    data = _make_recipe_yaml(slug)
-    path = recipes_dir / f"{slug}.yaml"
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
-    return path
-
-
-def _make_recipe_manager_mock(recipes_dir: Path, slug: str) -> MagicMock:
-    """Создать mock RecipeManager с реальным read_recipe из tmp_path."""
-    from multiprocess_prototype.recipes.manager import RecipeManager
-
-    _write_recipe_file(recipes_dir, slug)
-
-    engine_mock = MagicMock()
-    engine_mock.get_active.return_value = slug
-    engine_mock.recipes_dir = recipes_dir
-
-    mgr = RecipeManager(engine=engine_mock)
-    return mgr
+def _make_services_with_recipe(slug: str = "test_recipe") -> tuple:
+    """Создать services с FakeRecipeStore, содержащим рецепт. Вернуть (services, store)."""
+    raw = {slug: _make_recipe_raw(slug)}
+    store = FakeRecipeStore(raw=raw, active=slug)
+    services = make_pipeline_services(recipe_manager=None)
+    # Подменяем recipes на наш store (make_pipeline_services с None создаёт пустой)
+    object.__setattr__(services, "recipes", store)
+    return services, store
 
 
 # ---------------------------------------------------------------------------
-# Тест 1: успешное сохранение blueprint в YAML
+# Тест 1: успешное сохранение blueprint в raw store
 # ---------------------------------------------------------------------------
 
 
 class TestSaveToActiveRecipeWritesBlueprint:
-    """После save_to_active_recipe файл YAML содержит blueprint и display_bindings."""
+    """После save_to_active_recipe store содержит blueprint и display_bindings."""
 
-    def test_save_to_active_recipe_writes_blueprint(self, tmp_path: Path, monkeypatch) -> None:
-        """blueprint.processes и display_bindings записаны в YAML рецепта."""
-        recipes_dir = tmp_path / "recipes"
-        recipes_dir.mkdir()
+    def test_save_to_active_recipe_writes_blueprint(self, monkeypatch) -> None:
+        """blueprint.processes и display_bindings записаны в raw store рецепта."""
         slug = "my_recipe"
-
-        mgr = _make_recipe_manager_mock(recipes_dir, slug)
-        services = make_pipeline_services(recipe_manager=mgr)
+        services, store = _make_services_with_recipe(slug)
         presenter = PipelinePresenter(services)
 
         # Добавляем процессы и display в модель
@@ -98,12 +77,8 @@ class TestSaveToActiveRecipeWritesBlueprint:
 
         assert result is True
 
-        recipe_path = recipes_dir / f"{slug}.yaml"
-        assert recipe_path.exists()
-
-        with open(recipe_path, "r", encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-
+        # Проверяем raw-данные в store (не на диске)
+        saved = store._raw[slug]
         assert "data" in saved
         data = saved["data"]
 
@@ -121,14 +96,10 @@ class TestSaveToActiveRecipeWritesBlueprint:
 
         assert data.get("active_services") == ["camera_service"]
 
-    def test_save_updates_gui_positions(self, tmp_path: Path, monkeypatch) -> None:
+    def test_save_updates_gui_positions(self, monkeypatch) -> None:
         """gui_positions записываются в секцию data['gui_positions']."""
-        recipes_dir = tmp_path / "recipes"
-        recipes_dir.mkdir()
         slug = "pos_recipe"
-
-        mgr = _make_recipe_manager_mock(recipes_dir, slug)
-        services = make_pipeline_services(recipe_manager=mgr)
+        services, store = _make_services_with_recipe(slug)
         presenter = PipelinePresenter(services)
 
         presenter._model.add_process("node_a", plugin_name="PA", category="source")
@@ -143,15 +114,13 @@ class TestSaveToActiveRecipeWritesBlueprint:
         result = presenter.save_to_active_recipe(parent=None)
         assert result is True
 
-        with open(recipes_dir / f"{slug}.yaml", "r", encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-
+        saved = store._raw[slug]
         gui_pos = saved["data"].get("gui_positions", {})
         assert "node_a" in gui_pos
 
 
 # ---------------------------------------------------------------------------
-# Тест 2: без активного рецепта → warning, return False
+# Тест 2: без активного рецепта -> warning, return False
 # ---------------------------------------------------------------------------
 
 
@@ -159,15 +128,10 @@ class TestSaveNoActiveRecipe:
     """Без активного рецепта — warning, False."""
 
     def test_save_no_active_recipe_warns(self, monkeypatch) -> None:
-        engine_mock = MagicMock()
-        engine_mock.get_active.return_value = None
-        engine_mock.recipes_dir = Path("/tmp/fake")
-
-        from multiprocess_prototype.recipes.manager import RecipeManager
-
-        mgr = RecipeManager(engine=engine_mock)
-
-        services = make_pipeline_services(recipe_manager=mgr)
+        # Store без active рецепта
+        store = FakeRecipeStore()
+        services = make_pipeline_services()
+        object.__setattr__(services, "recipes", store)
         presenter = PipelinePresenter(services)
 
         warnings_shown = []
@@ -190,55 +154,18 @@ class TestSaveNoActiveRecipe:
 
 
 # ---------------------------------------------------------------------------
-# Тест 3: RecipeManager недоступен → warning, return False
+# Тест 3: read_raw возвращает None -> critical, return False
 # ---------------------------------------------------------------------------
 
 
-class TestSaveNoRecipeManager:
-    """services.recipes без _rm bridge → warning, False."""
+class TestSaveReadRawFails:
+    """store.read_raw вернул None -> critical, False."""
 
-    def test_save_no_recipe_manager_warns(self, monkeypatch) -> None:
-        services = make_pipeline_services(recipe_manager=None)
-        presenter = PipelinePresenter(services)
-
-        warnings_shown = []
-
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(
-            QMessageBox, "warning", staticmethod(lambda *a, **kw: warnings_shown.append(a[2] if len(a) > 2 else "w"))
-        )
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
-
-        result = presenter.save_to_active_recipe(parent=None)
-
-        assert result is False
-        assert len(warnings_shown) == 1
-
-
-# ---------------------------------------------------------------------------
-# Тест 4: запись вызывает исключение → critical, return False
-# ---------------------------------------------------------------------------
-
-
-class TestSaveHandlesException:
-    """Исключение при записи YAML → critical, False."""
-
-    def test_save_handles_exception(self, tmp_path: Path, monkeypatch) -> None:
-        recipes_dir = tmp_path / "recipes"
-        recipes_dir.mkdir()
-        slug = "fail_recipe"
-
-        engine_mock = MagicMock()
-        engine_mock.get_active.return_value = slug
-        engine_mock.recipes_dir = recipes_dir
-
-        from multiprocess_prototype.recipes.manager import RecipeManager
-
-        mgr = RecipeManager(engine=engine_mock)
-
-        services = make_pipeline_services(recipe_manager=mgr)
+    def test_save_read_raw_fails(self, monkeypatch) -> None:
+        # Active slug есть, но raw-данных нет
+        store = FakeRecipeStore(active="ghost")
+        services = make_pipeline_services()
+        object.__setattr__(services, "recipes", store)
         presenter = PipelinePresenter(services)
 
         criticals_shown = []
@@ -258,13 +185,28 @@ class TestSaveHandlesException:
         assert result is False
         assert len(criticals_shown) == 1
 
-    def test_save_handles_write_exception(self, tmp_path: Path, monkeypatch) -> None:
-        recipes_dir = tmp_path / "recipes"
-        recipes_dir.mkdir()
-        slug = "ioerr_recipe"
 
-        mgr = _make_recipe_manager_mock(recipes_dir, slug)
-        services = make_pipeline_services(recipe_manager=mgr)
+# ---------------------------------------------------------------------------
+# Тест 4: save_raw вызывает исключение -> critical, return False
+# ---------------------------------------------------------------------------
+
+
+class TestSaveHandlesException:
+    """Исключение при save_raw -> critical, False."""
+
+    def test_save_handles_exception(self, monkeypatch) -> None:
+        slug = "fail_recipe"
+        raw = {slug: _make_recipe_raw(slug)}
+        store = FakeRecipeStore(raw=raw, active=slug)
+
+        # Заменяем save_raw на бросающую исключение
+        def _raise(*args, **kwargs):
+            raise OSError("Disk full")
+
+        store.save_raw = _raise  # type: ignore[assignment]
+
+        services = make_pipeline_services()
+        object.__setattr__(services, "recipes", store)
         presenter = PipelinePresenter(services)
 
         criticals_shown = []
@@ -279,14 +221,8 @@ class TestSaveHandlesException:
             staticmethod(lambda *a, **kw: criticals_shown.append(a[2] if len(a) > 2 else "critical")),
         )
 
-        recipe_file = recipes_dir / f"{slug}.yaml"
-        recipe_file.chmod(0o444)
+        result = presenter.save_to_active_recipe(parent=None)
 
-        try:
-            result = presenter.save_to_active_recipe(parent=None)
-
-            assert result is False
-            assert len(criticals_shown) == 1
-            assert "ошибка" in criticals_shown[0].lower() or "Ошибка" in criticals_shown[0]
-        finally:
-            recipe_file.chmod(0o644)
+        assert result is False
+        assert len(criticals_shown) == 1
+        assert "ошибка" in criticals_shown[0].lower() or "Ошибка" in criticals_shown[0]

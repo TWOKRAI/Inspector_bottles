@@ -219,6 +219,16 @@ class RecipeManager:
         self._log_info(f"RecipeManager: дублирован рецепт '{source_slug}' → '{new_slug}'")
         return True
 
+    def deactivate(self) -> None:
+        """Сбросить активный рецепт (публичный API вместо прямого доступа к engine).
+
+        Устанавливает engine._active_name = None и обновляет state.recipes.active.
+        Idempotent: если рецепт уже не активен — no-op (state обновляется на None).
+        """
+        self._engine._active_name = None
+        self._update_active_in_state(None)
+        self._log_info("RecipeManager: активный рецепт сброшен")
+
     def set_active(self, slug: str) -> bool:
         """Установить рецепт активным.
 

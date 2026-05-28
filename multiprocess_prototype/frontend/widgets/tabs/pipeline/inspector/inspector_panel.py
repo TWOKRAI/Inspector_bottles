@@ -407,8 +407,7 @@ class NodeInspectorPanel(QWidget):
     def _get_process_names_from_recipe(self) -> list[str]:
         """Получить имена процессов из активного рецепта.
 
-        TODO Phase F: RecipeStore Protocol работает с Recipe entities.
-        Здесь нужен raw dict доступ — используем legacy bridge через adapter.
+        Task F.4: использует RecipeStore Protocol (services.recipes.read_raw).
 
         Returns:
             Список имён процессов или пустой список если недоступно.
@@ -416,17 +415,14 @@ class NodeInspectorPanel(QWidget):
         if self._services is None:
             return []
 
-        # Получаем legacy recipe_manager через adapter bridge
-        rm = getattr(self._services.recipes, "_rm", None)
-        if rm is None:
-            return []
+        store = self._services.recipes
 
         try:
-            active_slug = rm.get_active()
+            active_slug = store.get_active()
             if not active_slug:
                 return []
 
-            recipe_dict = rm.read_recipe(active_slug)
+            recipe_dict = store.read_raw(active_slug)
             if not isinstance(recipe_dict, dict):
                 return []
 

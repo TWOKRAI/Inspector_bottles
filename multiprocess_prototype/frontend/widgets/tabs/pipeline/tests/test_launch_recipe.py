@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты кнопки «Запустить активный рецепт» — PipelinePresenter.launch_active_recipe.
-Task E.1: мигрировано на AppServices. RecipeManager bridge через adapter._rm.
+Task E.1 -> F.4: мигрировано на RecipeStore Protocol (FakeRecipeStore).
 
 8 unit-тестов (см. docstrings в каждом классе).
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import (
     PipelinePresenter,
 )
@@ -27,69 +28,47 @@ from ._helpers import make_pipeline_services
 _SENTINEL = object()
 
 
-def _make_recipe_manager_mock(
+def _make_recipe_store(
     active_slug: str | None = "my_recipe",
     recipe_data=_SENTINEL,
-) -> MagicMock:
-    """Создать mock RecipeManager с нужным поведением."""
-    mgr = MagicMock()
-    mgr.get_active.return_value = active_slug
-    if recipe_data is _SENTINEL:
-        mgr.read_recipe.return_value = {
-            "meta": {"name": active_slug},
-            "data": {
-                "blueprint": {
-                    "processes": [{"process_name": "proc1"}],
-                    "wires": [],
-                }
-            },
-        }
-    else:
-        mgr.read_recipe.return_value = recipe_data
-    return mgr
+) -> FakeRecipeStore:
+    """Создать FakeRecipeStore с нужным поведением."""
+    raw: dict[str, dict] = {}
+    if active_slug is not None:
+        if recipe_data is _SENTINEL:
+            raw[active_slug] = {
+                "meta": {"name": active_slug},
+                "data": {
+                    "blueprint": {
+                        "processes": [{"process_name": "proc1"}],
+                        "wires": [],
+                    }
+                },
+            }
+        elif recipe_data is not None:
+            raw[active_slug] = recipe_data
+        # recipe_data=None -> slug в active но raw пуст (read_raw вернёт None)
+    return FakeRecipeStore(raw=raw, active=active_slug)
+
+
+def _make_services(store: FakeRecipeStore, config_extra: dict | None = None):
+    """Создать AppServices с FakeRecipeStore."""
+    services = make_pipeline_services(config_extra=config_extra)
+    object.__setattr__(services, "recipes", store)
+    return services
 
 
 # ---------------------------------------------------------------------------
-# Тест 1: RecipeManager недоступен → warning, return False
-# ---------------------------------------------------------------------------
-
-
-class TestLaunchNoRecipeManager:
-    """services.recipes без _rm bridge → QMessageBox.warning, return False."""
-
-    def test_launch_no_recipe_manager_warns(self, monkeypatch) -> None:
-        services = make_pipeline_services(recipe_manager=None)
-        presenter = PipelinePresenter(services)
-
-        warnings_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(
-            QMessageBox,
-            "warning",
-            staticmethod(lambda *a, **kw: warnings_shown.append(a[2] if len(a) > 2 else "w")),
-        )
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
-
-        result = presenter.launch_active_recipe(parent=None)
-
-        assert result is False
-        assert len(warnings_shown) == 1
-        assert "недоступен" in warnings_shown[0].lower() or "RecipeManager" in warnings_shown[0]
-
-
-# ---------------------------------------------------------------------------
-# Тест 2: нет активного рецепта → warning, return False
+# Тест 1: нет активного рецепта -> warning, return False
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchNoActiveRecipe:
-    """get_active() == None → warning, return False."""
+    """get_active() == None -> warning, return False."""
 
     def test_launch_no_active_recipe_warns(self, monkeypatch) -> None:
-        mgr = _make_recipe_manager_mock(active_slug=None)
-        services = make_pipeline_services(recipe_manager=mgr)
+        store = _make_recipe_store(active_slug=None)
+        services = _make_services(store)
         presenter = PipelinePresenter(services)
 
         warnings_shown = []
@@ -111,16 +90,16 @@ class TestLaunchNoActiveRecipe:
 
 
 # ---------------------------------------------------------------------------
-# Тест 3: read_recipe возвращает None → critical, return False
+# Тест 2: read_raw возвращает None -> critical, return False
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchRecipeReadFails:
-    """read_recipe() == None → QMessageBox.critical, return False."""
+    """read_raw() == None -> QMessageBox.critical, return False."""
 
     def test_launch_recipe_read_fails(self, monkeypatch) -> None:
-        mgr = _make_recipe_manager_mock(active_slug="broken", recipe_data=None)
-        services = make_pipeline_services(recipe_manager=mgr)
+        store = _make_recipe_store(active_slug="broken", recipe_data=None)
+        services = _make_services(store)
         presenter = PipelinePresenter(services)
 
         criticals_shown = []
@@ -141,19 +120,19 @@ class TestLaunchRecipeReadFails:
 
 
 # ---------------------------------------------------------------------------
-# Тест 4: рецепт без blueprint → warning, return False
+# Тест 3: рецепт без blueprint -> warning, return False
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchNoBlueprint:
-    """Рецепт без секции blueprint → warning, return False."""
+    """Рецепт без секции blueprint -> warning, return False."""
 
     def test_launch_no_blueprint_warns(self, monkeypatch) -> None:
-        mgr = _make_recipe_manager_mock(
+        store = _make_recipe_store(
             active_slug="empty_bp",
             recipe_data={"meta": {}, "data": {"active_services": []}},
         )
-        services = make_pipeline_services(recipe_manager=mgr)
+        services = _make_services(store)
         presenter = PipelinePresenter(services)
 
         warnings_shown = []
@@ -175,16 +154,16 @@ class TestLaunchNoBlueprint:
 
 
 # ---------------------------------------------------------------------------
-# Тест 5: нет proxy → warning, return False
+# Тест 4: нет proxy -> warning, return False
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchNoProxy:
-    """Нет proxy в config → warning, return False."""
+    """Нет proxy в config -> warning, return False."""
 
     def test_launch_no_proxy_warns(self, monkeypatch) -> None:
-        mgr = _make_recipe_manager_mock()
-        services = make_pipeline_services(recipe_manager=mgr)
+        store = _make_recipe_store()
+        services = _make_services(store)
         presenter = PipelinePresenter(services)
 
         warnings_shown = []
@@ -206,19 +185,19 @@ class TestLaunchNoProxy:
 
 
 # ---------------------------------------------------------------------------
-# Тест 6: успешный вызов replace_blueprint → information, return True
+# Тест 5: успешный вызов replace_blueprint -> information, return True
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchCallsReplaceBlueprint:
-    """Proxy замокан, replace_blueprint возвращает success=True → True."""
+    """Proxy замокан, replace_blueprint возвращает success=True -> True."""
 
     def test_launch_calls_replace_blueprint(self, monkeypatch) -> None:
         expected_blueprint = {
             "processes": [{"process_name": "proc1"}],
             "wires": [],
         }
-        mgr = _make_recipe_manager_mock(
+        store = _make_recipe_store(
             active_slug="demo_recipe",
             recipe_data={
                 "meta": {"name": "demo_recipe"},
@@ -235,10 +214,7 @@ class TestLaunchCallsReplaceBlueprint:
             "rolled_back": False,
         }
 
-        services = make_pipeline_services(
-            recipe_manager=mgr,
-            config_extra={"process_manager_proxy": proxy},
-        )
+        services = _make_services(store, config_extra={"process_manager_proxy": proxy})
         presenter = PipelinePresenter(services)
 
         info_shown = []
@@ -262,15 +238,15 @@ class TestLaunchCallsReplaceBlueprint:
 
 
 # ---------------------------------------------------------------------------
-# Тест 7: replace_blueprint возвращает success=False → critical, return False
+# Тест 6: replace_blueprint возвращает success=False -> critical, return False
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchHandlesReplaceBlueprintFailure:
-    """Proxy возвращает success=False → critical, return False."""
+    """Proxy возвращает success=False -> critical, return False."""
 
     def test_launch_handles_replace_blueprint_failure(self, monkeypatch) -> None:
-        mgr = _make_recipe_manager_mock()
+        store = _make_recipe_store()
         proxy = MagicMock()
         proxy.replace_blueprint.return_value = {
             "success": False,
@@ -280,10 +256,7 @@ class TestLaunchHandlesReplaceBlueprintFailure:
             "rolled_back": True,
         }
 
-        services = make_pipeline_services(
-            recipe_manager=mgr,
-            config_extra={"process_manager_proxy": proxy},
-        )
+        services = _make_services(store, config_extra={"process_manager_proxy": proxy})
         presenter = PipelinePresenter(services)
 
         criticals_shown = []
@@ -306,22 +279,19 @@ class TestLaunchHandlesReplaceBlueprintFailure:
 
 
 # ---------------------------------------------------------------------------
-# Тест 8: replace_blueprint поднимает исключение → critical, не падает
+# Тест 7: replace_blueprint поднимает исключение -> critical, не падает
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchHandlesException:
-    """proxy.replace_blueprint raises Exception → critical, return False."""
+    """proxy.replace_blueprint raises Exception -> critical, return False."""
 
     def test_launch_handles_exception(self, monkeypatch) -> None:
-        mgr = _make_recipe_manager_mock()
+        store = _make_recipe_store()
         proxy = MagicMock()
         proxy.replace_blueprint.side_effect = Exception("crash")
 
-        services = make_pipeline_services(
-            recipe_manager=mgr,
-            config_extra={"process_manager_proxy": proxy},
-        )
+        services = _make_services(store, config_extra={"process_manager_proxy": proxy})
         presenter = PipelinePresenter(services)
 
         criticals_shown = []
