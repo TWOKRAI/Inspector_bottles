@@ -1,4 +1,5 @@
 """Тесты PreAuthGuard — блокировка WriteAction до авторизации."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -134,6 +135,8 @@ class TestActionBusIntegration:
 
     def test_bus_with_hook_blocks_before_login(self, auth_state, qtbot):
         """ActionBus с хуком: execute(write_action) до login — apply не вызывается."""
+        import unittest.mock as mock_module
+
         rm = MagicMock()
         rm.set_field_value.return_value = (True, None)
         bus = ActionBus(rm, max_history=10)
@@ -147,7 +150,10 @@ class TestActionBusIntegration:
         bus.set_pre_execute_hook(guard.hook, on_blocked=guard.on_blocked)
 
         action = _make_action("field_set")
-        bus.execute(action)
+        # on_blocked показывает модальный QMessageBox («Требуется вход») —
+        # мокаем, иначе реальный диалог зависает в ожидании OK и блокирует прогон.
+        with mock_module.patch("PySide6.QtWidgets.QMessageBox.information"):
+            bus.execute(action)
 
         handler.apply.assert_not_called()
         assert bus.can_undo() is False
