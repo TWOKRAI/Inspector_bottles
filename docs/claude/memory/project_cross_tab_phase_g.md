@@ -9,7 +9,12 @@ metadata:
 
 **Phase G — финальная под-фаза** рефакторинга cross-tab-architecture (ветка `refactor/cross-tab-architecture`). Предшественник: [[project-cross-tab-phase-f]] (Phase F DONE).
 
-**СТАТУС (2026-05-28): Phase G IN PROGRESS.** Audit (investigator, Phase A-style) + decomposition G.0–G.6 записаны в `plans/2026-05-27_cross-tab-architecture/phase-g.md`. **G.0 DONE** (commit `ffeca3ba`). G.1–G.6 NOT DETAILED (детализируются по очереди — избегаем premature planning большого G.4).
+**СТАТУС (2026-05-28): Phase G IN PROGRESS.** Audit (investigator, Phase A-style) + decomposition G.0–G.6 записаны в `plans/2026-05-27_cross-tab-architecture/phase-g.md`. **G.0 DONE** (`ffeca3ba`), **G.1.1 DONE** (`75a6c41f`). G.1.2 + G.2–G.6 NOT DETAILED (детализируются по очереди — избегаем premature planning большого G.4).
+
+**G.1.1 (DONE `75a6c41f`):** Pipeline scene reload переведён с `getattr(services.topology,"_holder").on_changed` на typed EventBus. Решение: TopologyRepository Protocol намеренно минимален (load/save) → подписка через `services.events.subscribe(TopologyReplaced, ...)`, НЕ через метод repo. Publisher-мост в app.py (composition root): `topology_holder.on_changed(lambda _t: app_services.events.publish(TopologyReplaced(reason="topology_changed")))` — ловит ВСЕ set_topology (включая ActionBus). Handler `_on_topology_replaced` тянет dict из `services.topology.load().to_dict()` (TopologyReplaced несёт только reason). 🔴 silent-failure закрыт. Гранулярные события (ProcessAdded/WireConnected) — G.4. Helper `make_pipeline_services(events=...)` добавлен для wiring-тестов. Caveat: live multiprocess-GUI smoke не делался (qt-mcp недостижим), unit+wiring зелёные.
+**Урок коммитов:** commit-msg hook ОТКЛОНЯЕТ эмодзи (🔴 и т.п.) в теле сообщения — писать commit-messages только ASCII-текстом.
+
+**G.1.2 (next, NOT DETAILED):** TopologyBridge IPC sync (app.py:224 `topology_holder.on_changed(topology_bridge.on_topology_changed)`) → `services.events.subscribe(TopologyReplaced)`. После — единственный holder.on_changed-подписчик = publisher-мост → G.3 удаляет holder.
 
 **Why:** Phase G вобрала отложенный F.1 (suppress_legacy_notify), ActionBus→domain commands (#9, Q-F4), typed events вместо broadcast `holder.on_changed`, удаление TopologyHolder + AppContext/extras, 6 пунктов handoff-долга ретро-ревью F, UX-фишки brief §5.
 

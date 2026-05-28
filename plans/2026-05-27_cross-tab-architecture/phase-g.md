@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (2026-05-28, commit `ffeca3ba`); G.1–G.6 NOT DETAILED (детализируются по очереди, избегаем premature planning большого G.4).
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1.1 DONE (`75a6c41f`); G.1.2 + G.2–G.6 NOT DETAILED (детализируются по очереди, избегаем premature planning большого G.4).
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -94,7 +94,7 @@ G.1 typed events (ФУНДАМЕНТ) ──┬──> G.3 holder removal ──
 | Под-фаза | Описание | Scope | Зависит от | Статус |
 |---|---|---|---|---|
 | **G.0** | Quick-wins: RecipeEngine.deactivate(), удаление dead AdministrationSection, переквалификация 16 TODO, документирование bindings/RuntimeDeps | S (~10 файлов, мелкие) | — | **DONE** (`ffeca3ba`) |
-| **G.1** | Typed events в production: подписать PipelinePresenter + TopologyBridge на EventBus; typed-метод в TopologyRepository Protocol (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | NOT DETAILED |
+| **G.1** | Typed events в production: PipelinePresenter + TopologyBridge на EventBus (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | **G.1.1 DONE** (`75a6c41f`); G.1.2 NOT DETAILED |
 | **G.2** | RegistersBackend Protocol alignment: расширить Protocol, убрать 3 `_rm` getattr | M (4-5) | — | NOT DETAILED |
 | **G.3** | holder removal: активировать suppress_legacy_notify (F.1) / редуцировать-удалить TopologyHolder | M (3-4) | G.1 | NOT DETAILED |
 | **G.4** | ActionBus→domain commands: 11 call-sites + undo/redo поверх domain + register→domain mapping | **L (15-20)** | G.1, G.2, G.3 | NOT DETAILED (+audit-like подготовка) |
@@ -294,12 +294,17 @@ bindings числится как Phase G долг. Снять неоднозна
   тянуть `new_topology = self._services.topology.load().to_dict()`, сохранить `_suppress`-guard + `_block_signals`.
 - `frontend/widgets/tabs/pipeline/tests/` (`_helpers.py` + presenter-тесты) — topology-change через `events.publish(TopologyReplaced(...))` (Fake/builder EventBus), НЕ `holder.on_changed`/getattr.
 
-**Acceptance:**
-- [ ] `grep 'getattr(services.topology, "_holder"' pipeline/` = 0
-- [ ] presenter подписан через `services.events`; scene reload срабатывает при `publish(TopologyReplaced)`
-- [ ] эквивалентность: `services.topology.load().to_dict()` даёт те же nodes/edges, что `holder.topology`
-- [ ] `pytest multiprocess_prototype/frontend/widgets/tabs/pipeline/` зелёные; sentrux 9/9
-- [ ] Commit с Refs phase-g.md, `Layer: prototype`
+**Acceptance:** — DONE (2026-05-28, commit `75a6c41f`)
+- [x] `grep 'getattr(services.topology, "_holder"' pipeline/` = 0 (🔴 закрыт)
+- [x] presenter подписан через `services.events`; scene reload при `publish(TopologyReplaced)` (test_topology_replaced_via_eventbus, реальный EventBus)
+- [x] топология тянется из `services.topology.load().to_dict()` (test_on_topology_replaced)
+- [x] pipeline 321 + frontend/adapters 423 passed; sentrux 7135 / 9-9; ruff clean
+- [x] Commit `75a6c41f`, `Layer: prototype`
+
+> **Caveat верификации:** unit + wiring-тест (реальный EventBus) проходят. Полный end-to-end в живом
+> multiprocess-GUI (ActionBus→holder.set_topology→publisher→EventBus→scene) НЕ проверен — qt-mcp
+> недостижим до дочернего GUI-процесса (см. память feedback_qt_mcp_smoke_verification). Логика publisher-моста
+> — однострочник в composition root, тот же экземпляр bus у табов; риск низкий, но live-smoke рекомендован перед merge.
 
 **Out of scope:** TopologyBridge IPC sync (G.1.2); granular events ProcessAdded/WireConnected (G.4); удаление holder (G.3).
 **Edge cases:** пустая топология → load() даёт пустой Topology; `_suppress` во время собственных мутаций presenter'а — publish синхронный, guard срабатывает как раньше.
