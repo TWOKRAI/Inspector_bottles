@@ -333,10 +333,13 @@ class TopologyBridge:
 
     # --- Topology changes ---
 
-    def on_topology_changed(self, new_topology: dict[str, Any]) -> None:
-        """Topology изменилась — пересобрать каталог.
+    def on_topology_changed(self, _new_topology: dict[str, Any] | None = None) -> None:
+        """Topology изменилась — сбросить кэш slider-полей.
 
-        Вызывается через TopologyHolder.on_changed callback.
+        G.1.2: вызывается через подписку на typed event TopologyReplaced
+        (services.events), а не legacy TopologyHolder.on_changed. Аргумент
+        не используется (handler только инвалидирует кэш) — опционален для
+        совместимости с прямыми dict-вызовами в тестах.
         """
         # Очистить кэш slider-полей
         self._slider_fields.clear()

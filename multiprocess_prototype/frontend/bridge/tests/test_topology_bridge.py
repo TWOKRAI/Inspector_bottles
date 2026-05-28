@@ -380,10 +380,16 @@ class TestLifecycle:
 
 class TestTopologyChanged:
     def test_clears_slider_cache(self, bridge: TopologyBridge) -> None:
-        """on_topology_changed очищает кэш slider-полей."""
+        """on_topology_changed очищает кэш slider-полей (legacy dict-вызов)."""
         # Заполнить кэш
         bridge._slider_fields["color_mask"] = {"h_min"}
         bridge.on_topology_changed({"processes": []})
+        assert bridge._slider_fields == {}
+
+    def test_clears_slider_cache_no_arg(self, bridge: TopologyBridge) -> None:
+        """on_topology_changed без аргумента (G.1.2: вызов из EventBus-подписки)."""
+        bridge._slider_fields["color_mask"] = {"h_min"}
+        bridge.on_topology_changed()
         assert bridge._slider_fields == {}
 
     def test_rebuild_catalog(self, bridge: TopologyBridge) -> None:

@@ -220,8 +220,8 @@ def run_gui(process: "GuiProcess") -> None:
     ctx.extras["command_catalog"] = command_catalog
     ctx.extras["topology_bridge"] = topology_bridge
 
-    # Подписка: topology_holder.on_changed → bridge.on_topology_changed
-    topology_holder.on_changed(topology_bridge.on_topology_changed)
+    # IPC cache-invalidation bridge подписывается на typed EventBus в блоке 3h.1
+    # (ниже, после сборки app_services). Legacy holder.on_changed убран в G.1.2.
 
     # Phase 12: мультиплексор state_callback → bindings + topology_bridge
     # GuiStateBindings уже занял set_state_callback. Теперь ставим обёртку,
@@ -430,14 +430,19 @@ def run_gui(process: "GuiProcess") -> None:
         traceback.print_exc()
         sys.exit(1)
 
-    # 3h.1. G.1: publisher-мост legacy holder → typed EventBus.
-    # Любая замена topology (включая ActionBus-мутации через holder.set_topology)
-    # публикует TopologyReplaced — подписчики (PipelinePresenter) делают полный refresh
-    # через services.events, без прямого доступа к holder. Holder удаляется в G.3.
+    # 3h.1. G.1: typed EventBus вместо legacy holder.on_changed broadcast.
+    # Publisher-мост: любая замена topology (включая ActionBus-мутации через
+    # holder.set_topology) публикует TopologyReplaced. Подписчики работают через
+    # services.events, без прямого доступа к holder:
+    #   - PipelinePresenter (G.1.1) — полный scene reload,
+    #   - TopologyBridge (G.1.2) — инвалидация IPC cache.
+    # После G.1.1+G.1.2 единственный holder.on_changed-подписчик = publisher-мост,
+    # что разблокирует удаление holder в G.3.
     from multiprocess_prototype.domain.events import TopologyReplaced
 
     _events_bus = ctx.app_services.events
     topology_holder.on_changed(lambda _topo: _events_bus.publish(TopologyReplaced(reason="topology_changed")))
+    _events_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())
 
     # 4. Создать MainWindow
     window = MainWindow()

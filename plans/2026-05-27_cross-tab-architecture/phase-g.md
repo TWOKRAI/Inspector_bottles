@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1.1 DONE (`75a6c41f`); G.1.2 + G.2–G.6 NOT DETAILED (детализируются по очереди, избегаем premature planning большого G.4).
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (G.1.1 `75a6c41f` + G.1.2); G.2–G.6 NOT DETAILED (детализируются по очереди, избегаем premature planning большого G.4).
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -94,7 +94,7 @@ G.1 typed events (ФУНДАМЕНТ) ──┬──> G.3 holder removal ──
 | Под-фаза | Описание | Scope | Зависит от | Статус |
 |---|---|---|---|---|
 | **G.0** | Quick-wins: RecipeEngine.deactivate(), удаление dead AdministrationSection, переквалификация 16 TODO, документирование bindings/RuntimeDeps | S (~10 файлов, мелкие) | — | **DONE** (`ffeca3ba`) |
-| **G.1** | Typed events в production: PipelinePresenter + TopologyBridge на EventBus (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | **G.1.1 DONE** (`75a6c41f`); G.1.2 NOT DETAILED |
+| **G.1** | Typed events в production: PipelinePresenter + TopologyBridge на EventBus (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | **DONE** (G.1.1 `75a6c41f` + G.1.2) |
 | **G.2** | RegistersBackend Protocol alignment: расширить Protocol, убрать 3 `_rm` getattr | M (4-5) | — | NOT DETAILED |
 | **G.3** | holder removal: активировать suppress_legacy_notify (F.1) / редуцировать-удалить TopologyHolder | M (3-4) | G.1 | NOT DETAILED |
 | **G.4** | ActionBus→domain commands: 11 call-sites + undo/redo поверх domain + register→domain mapping | **L (15-20)** | G.1, G.2, G.3 | NOT DETAILED (+audit-like подготовка) |
@@ -309,12 +309,16 @@ bindings числится как Phase G долг. Снять неоднозна
 **Out of scope:** TopologyBridge IPC sync (G.1.2); granular events ProcessAdded/WireConnected (G.4); удаление holder (G.3).
 **Edge cases:** пустая топология → load() даёт пустой Topology; `_suppress` во время собственных мутаций presenter'а — publish синхронный, guard срабатывает как раньше.
 
-### Task G.1.2 — TopologyBridge IPC sync на EventBus (перед G.3)
+### Task G.1.2 — TopologyBridge IPC sync на EventBus — DONE (2026-05-28)
 
-**Level:** Middle+ — мигрировать `app.py:224` `topology_holder.on_changed(topology_bridge.on_topology_changed)`
-на `services.events.subscribe(TopologyReplaced, ...)` (bridge тянет dict из repo). После G.1.1+G.1.2 единственный
-подписчик `holder.on_changed` = publisher-мост → **G.3** заменяет хук на публикацию в преемнике `set_topology` и удаляет holder.
-NOT DETAILED (детализируется при подходе очереди).
+**Done:** `app.py` подписка `topology_holder.on_changed(topology_bridge.on_topology_changed)` перенесена
+и заменена на `services.events.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())`
+в блоке 3h.1 (после сборки app_services). `on_topology_changed(_new_topology=None)` — аргумент сделан
+опциональным (handler только инвалидирует кэш slider-полей, dict не использует). Находка: handler
+игнорировал topology dict → round-trip не нужен, миграция тривиальна.
+**Результат:** production `holder.on_changed` теперь = ОДИН подписчик (publisher-мост) → разблокирует **G.3**
+(замена хука на публикацию в преемнике set_topology + удаление holder).
+**Verify:** bridge+frontend+pipeline 805 passed; sentrux 7135 / 9-9; ruff clean. +test_clears_slider_cache_no_arg.
 
 ---
 
