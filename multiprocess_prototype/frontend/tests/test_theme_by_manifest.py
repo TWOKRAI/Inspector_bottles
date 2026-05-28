@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 
 from multiprocess_framework.modules.frontend_module.managers.theme_manager import ThemeManager
@@ -145,6 +146,10 @@ class TestApplyThemeByManifest:
         styles_dir = self._create_theme_files(tmp_path)
         tm = ThemeManager(styles_dir)
 
-        # QApplication не создан — должен вернуть False
-        result = tm.apply_theme_by_manifest("test_theme", [], {})
+        # QApplication.instance() == None. В полном suite singleton QApplication
+        # (его нельзя уничтожить в рамках процесса) протекает между тестами → мокаем
+        # детерминированно, иначе тест order-dependent (зелёный только изолированно).
+        with patch("multiprocess_framework.modules.frontend_module.managers.theme_manager.QApplication") as mock_qapp:
+            mock_qapp.instance.return_value = None
+            result = tm.apply_theme_by_manifest("test_theme", [], {})
         assert result is False
