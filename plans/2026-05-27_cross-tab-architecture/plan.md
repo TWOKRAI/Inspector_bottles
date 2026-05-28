@@ -24,7 +24,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
 | **B** | Domain skeleton (`multiprocess_prototype/domain/`) | **DONE** (2026-05-27, коммиты `83274ef8` → `e65f7158`, 233 теста, APPROVED) | [`phase-b-domain.md`](phase-b-domain.md) | A done |
 | **C** | Adapters (9 классов + расширения) | **DONE** (2026-05-27, 9/9 Tasks, коммиты `1f1d28ff`…`2884b971`, 113 adapter + 240 domain тестов) | [`phase-c-adapters.md`](phase-c-adapters.md) | B done |
 | **D** | `AppServices` DI + QtEventBus + ConfigStore + deprecation shim + Settings PoC | **DONE** (2026-05-27, 7/7 Tasks, коммиты `bfc71c10`, `12f57c44`, `7dfc27fd`, `79639cc3`, `931461a2`, `a876f73e`, `94983ed2` + D.6) | [`phase-d-app-services.md`](phase-d-app-services.md) | C done |
-| **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays) | **READY** (Pipeline = первый приоритет) | — | D done |
+| **E** | Per-tab migration (Pipeline → Processes → Recipes → Services → Plugins → Displays) | **IN PROGRESS** — E.1 DONE (`8566f994` + `e7bd3d97`), E.2 next | [`phase-e-per-tab-migration.md`](phase-e-per-tab-migration.md) | D done |
 | **F** | Удаление legacy (`config["topology"]`, `extras["topology"]`, fallback chains) | NOT PLANNED | — | E done |
 | **G** | UX-фишки (auto-reveal, domain-level validation, cross-tab linking, diff-view) | NOT PLANNED | — | F done |
 
@@ -47,6 +47,7 @@ Brief, раздел 5 — `## 5. Scope / план фаз`. Здесь дубли
   - **C.6** (Senior): CommandDispatcher без suppress_legacy_notify (double notification до Phase F — осознанный компромисс).
   - **C.7** (Middle): adapters/__init__.py + README + integration smoke.
 - **Phase D — DONE (2026-05-27, 7/7 Tasks).** AppServices factory + QtEventBus + ConfigStore Protocol + ProjectHolder + deprecation shim + Settings PoC + migration guide + sentrux baseline. Qt-MCP smoke прошёл: MainWindow + SettingsTab рендерятся, 25 widgets, no Qt warnings. ~1981 тест passed, 3 skipped (macOS SHM — known). Коммиты: D.2 `bfc71c10`, D.3 `12f57c44`, D.2b `7dfc27fd`, D.4 `79639cc3`, D.1 `931461a2`, D.5 `a876f73e` + `94983ed2`, D.6 текущий коммит. **Pipeline = первый Phase E** (главный consumer, валидирует архитектуру end-to-end).
+- **Phase E.1 — DONE (2026-05-28).** Pipeline tab мигрирован на AppServices DI. Коммиты: `8566f994` (initial migration, 14 файлов, +752/-777) + `e7bd3d97` (review fixes iteration 1: direction PortSpec, DRY ActionBus, TODO comments, dead code cleanup). Reviewer APPROVED (итерация 2/2). 322 теста pipeline зелёные, 54 adapters, 11 domain. Sentrux 7141 (-20 vs baseline 7161 — принято из-за объективной необходимости bridges, восстановится в Phase F). 8 TODO Phase F помечены в коде (ActionBus, RecipeManager raw dict, RegistersManager, form_context, process_manager_proxy, AuthFacade.auth_state, PluginCatalog raw Ports, holder.on_changed→typed Phase G). Qt-MCP smoke deferred к cumulative после E.6 (multiprocess: GUI в дочернем процессе, MCP не подключается). Direction-фикс через расширение PortSpec — ключевое улучшение domain-контракта. Phase E.2 (Processes, Middle) — следующая.
 - Архитектурный обзор Phase B (investigator-ревью 2026-05-27): 3 главных риска — двойная нотификация TopologyHolder+EventBus (HIGH), SchemaRegistry name collision (MEDIUM), RecipeStore adapter complexity (MEDIUM). Все учтены в Phase C/D планах.
 
 ## Известные ограничения и риски (вне Phase A)

@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-e
 - **Дата:** 2026-05-28
-- **Статус:** DRAFT — E.1 READY, E.2–E.6 HIGH-LEVEL
+- **Статус:** E.1 DONE (APPROVED), E.2 READY (next), E.3–E.6 HIGH-LEVEL
 - **Ветка:** `refactor/cross-tab-architecture` (та же ветка что Phase A–D; sub-branch не нужен — D.5 Settings tab коммитился прямо в неё, и Pipeline аналогично; отдельные sub-branch'и создаются только если параллельная работа по нескольким табам одновременно, что исключено правилом «таб за заходом»)
 
 ---
@@ -96,9 +96,14 @@ scene-reload с позициями узлов, undo/redo chain.
 
 ## Порядок выполнения
 
-### Phase E.1 — Pipeline tab [PENDING]
+### Phase E.1 — Pipeline tab [DONE] (2026-05-28, коммиты `8566f994` + `e7bd3d97`)
 
 - **Module contract:** public-api-change
+- **Review:** APPROVED (итерация 2/2 reviewer Opus)
+- **Тесты:** 322 passed (pipeline), 54 passed (adapters), 11 passed (domain)
+- **Sentrux:** 7141 (-20 vs baseline 7161, принято — bridges объективно нужны до Phase F)
+- **Qt-MCP smoke:** deferred to cumulative после E.6 (multiprocess архитектура — MCP не достучался до GUI процесса)
+- **TODO Phase F (8 items, все с явными комментариями в коде):** ActionBus→commands, RecipeManager raw dict, RegistersManager API, form_context, process_manager_proxy, AuthFacade.auth_state, PluginCatalog raw Ports, holder.on_changed→typed events (Phase G)
 
 ### Phase E.2 — Processes tab [PENDING] (зависит от E.1 approval)
 
