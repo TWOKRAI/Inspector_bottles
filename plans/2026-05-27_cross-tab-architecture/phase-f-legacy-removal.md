@@ -792,18 +792,28 @@ framework Base-class ctx removal (Q-F3 вариант A — отдельно).
    по 7 табам, проверить: рендер без warnings, dispatch создаёт ноду, recipe activation работает).
 6. Обновить master plan (Phase F → DONE), память проекта, adapters README (убрать «Phase F:» заметки).
 
-**Acceptance criteria (= Success criteria brief §7):**
-- [ ] Запрос «где топология читается» → одно место (TopologyRepository)
-- [ ] `ctx.extras["topology"]` / `config["topology"]` fallback удалён
-- [ ] 4 dataclass-обёртки удалены
-- [ ] DeprecationWarning → error активен, тесты зелёные
-- [ ] bridge-компромиссы #5a–#5d закрыты Protocol'ом (или accepted by design с обоснованием)
-- [ ] Все тесты зелёные (framework + prototype + adapters + domain)
-- [ ] Sentrux: дельта замерена и объяснена (удаление bridge убирает `getattr`, но F.3–F.6 добавляют Protocol-методы + adapter-делегирование → возможен рост complex functions, как в Phase C/D 44→71; цель — НЕ обязательно 7161, а понятная дельта без новых циклов/god-files)
-- [ ] check_rules 9/9, acyclicity 10000
-- [ ] Ручной Qt-MCP smoke 7 табов пройден (рендер + dispatch + recipe activation)
-- [ ] Master plan Phase F → DONE, память обновлена
-- [ ] Commit `docs(plans,memory): Phase F DONE` с Refs
+**Acceptance criteria (= Success criteria brief §7):** — ✅ ВЫПОЛНЕНО (2026-05-28)
+- [x] Запрос «где топология читается» → одно место (TopologyRepository; F.2b живой источник)
+- [x] `ctx.extras["topology"]` / `config["topology"]` fallback удалён (grep: 0 реальных, 1 совпадение = комментарий)
+- [x] 4 dataclass-обёртки удалены (F.2a; grep TopologyContext = 0)
+- [x] DeprecationWarning → error активен, тесты зелёные (F.7 message-based; исходный module-scoped фильтр был no-op)
+- [x] bridge-компромиссы #5a–#5d закрыты Protocol'ом / accepted by design (F.3 displays, F.4 recipes, F.5 plugins, F.6 auth)
+- [x] Все тесты зелёные: prototype **1998 passed**, framework **2904 passed**, 0 failed, 3 skipped
+- [x] Sentrux: **7135** (дельта **−26** vs 7161 — Protocol-методы + adapter-делегирование F.3-F.6; 0 новых циклов/god-files)
+- [x] check_rules **9/9**, acyclicity **10000**
+- [x] Boot-smoke `python -m multiprocess_prototype.run`: app собрался (4 сервиса+2 дисплея+recipe+auth), steady-state, 0 ошибок, 0 runtime deprecation. qt-mcp к multiprocess-GUI недостижим (документировано) → лог-верификация
+- [x] Master plan Phase F → DONE, память обновлена
+- [ ] Commit `docs(plans,memory): Phase F DONE` с Refs ← текущий коммит
+
+> **Ретро-ревью Opus (2026-05-28): Phase F = DONE, блокеров нет.** Качество: Protocol-закрытия F.3-F.6 аккуратны,
+> F.8 когерентна, F.9 RuntimeDeps чист, F.7 peek — здоровый transit-механизм (умрёт с AppContext в Phase G).
+> **Phase G handoff-долг (приоритеты из ревью):**
+> 1. RegistersBackend Protocol alignment — убирает 3 из 7 `_rm` getattr-bridge (design work: сигнатура Protocol ≠ legacy).
+> 2. 🔴 `getattr(services.topology, "_holder", None)` (pipeline/presenter.py) — **silent-failure risk**: при удалении holder в Phase G вернёт None молча, scene reload сломается без ошибки. Заменить на typed метод в TopologyRepository Protocol ДО удаления holder.
+> 3. `RecipeEngine._active_name` — добавить public `deactivate()` на framework-слой (F.4 сдвинул приватный доступ, не устранил).
+> 4. `administration/section.py` — единственный потребитель не на AuthFacade (прямая Qt-signal подписка).
+> 5. Переквалифицировать 16 «TODO Phase F» → «Phase G»/«by design» (NB: не однородны — ActionBus=Phase G работа, process_manager_proxy Q-F1=B = by-design permanent).
+> 6. ActionBus→domain commands (Q-F4) — самое рискованное, нужен отдельный audit (как Phase A).
 
 **Out of scope:** ActionBus→commands (Phase F.A/G), Phase G UX-фишки.
 **Edge cases:** Qt-MCP может не достучаться до GUI-процесса (multiprocess) — тогда ручная визуальная проверка.

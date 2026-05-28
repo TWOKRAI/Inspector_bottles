@@ -1,13 +1,24 @@
 ---
 name: project-cross-tab-phase-f
-description: "Phase F (удаление legacy + закрытие bridge) cross-tab-architecture — статус 7/9, решения Q-F1..Q-F4, F.1 перенос в G, остаток F.9/F.7/F.10"
+description: "Phase F (удаление legacy + закрытие bridge) cross-tab-architecture — DONE 2026-05-28 (ретро-ревью Opus, без блокеров), F.7 переосмыслен (peek), Q-F1..Q-F4, F.1→G, Phase G handoff-долг"
 metadata:
   type: project
 ---
 
 **Phase F — Удаление legacy + закрытие bridge-компромиссов** на ветке `refactor/cross-tab-architecture`. Предшественник: [[project-cross-tab-phase-e]] (Phase E DONE).
 
-**Прогресс: 7/9 задач (2026-05-28).** Все закоммичены, дерево чистое.
+**СТАТУС: Phase F DONE (2026-05-28).** Ретро-ревью Opus: DONE без блокеров. Верификация: prototype 1998 + framework 2904 passed/0 failed; sentrux 7135 (−26 vs 7161, acyclicity 10000, rules 9/9); live boot-smoke OK (0 ошибок, 0 runtime deprecation).
+
+**F.9 + F.7 + theme добиты:**
+- F.9 `5ea4b89e`+`a7bff8a6` — RuntimeDeps frozen dataclass, убран create(ctx) bridge из 7 табов (Q-F1=B).
+- F.7 `b6011f88` (+docs `1d24b104`) — **ПЕРЕОСМЫСЛЕН**: исходный module-scoped `ignore`-фильтр был **no-op** (stacklevel=3 → атрибуция вызывающему модулю; 109 warnings текли). Премиса «чтений extras нет» неверна (как F.1): все читатели — легитимные bridge. Решение (ревью Opus): `peek()`/`peek_required()` silent bridge-чтение + message-based `error:ctx\.extras.*deprecated`. См. `plans/2026-05-27_cross-tab-architecture/F7-approach-review.md`.
+- theme-fix `3ba2fb93` — pre-existing flaky (singleton QApplication leak в полном suite) → мок.
+
+**Phase G handoff-долг (из ретро-ревью Opus):** (1) RegistersBackend Protocol alignment (−3 `_rm` getattr); (2) 🔴 `getattr(services.topology,"_holder")` silent-failure risk — заменить typed-методом ДО удаления holder; (3) RecipeEngine public `deactivate()`; (4) administration на AuthFacade; (5) переквалифицировать 16 «TODO Phase F»→«Phase G»/«by design» (НЕ однородны: ActionBus=работа, process_manager_proxy Q-F1=B=permanent); (6) ActionBus→domain commands (Q-F4, риск, нужен audit) + F.1 suppress + удаление AppContext/extras + typed events.
+
+---
+
+**Историческая декомпозиция (7/9 на момент первой записи):** Все закоммичены.
 
 | Задача | Commit | Что |
 |--------|--------|-----|
