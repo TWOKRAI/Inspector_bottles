@@ -1,167 +1,111 @@
 """ServicesPresenter — бизнес-логика таба сервисов.
 
+Task E.4: мигрирован на AppServices DI. Принимает services: AppServices.
+Lifecycle (start/stop/restart/get_lifecycle/list) делегируется в
+services.services (ServiceManager Protocol) — адаптер владеет кэшем
+экземпляров и мутацией lifecycle. Presenter оборачивает DomainError → bool/None
+для UI. Пути директорий читаются из services.config.
+
 Pure Python (без Qt-импортов).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import yaml
-from loguru import logger
 
-from multiprocess_framework.modules.service_module import IService, ServiceLifecycle
-
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+from multiprocess_framework.modules.service_module import ServiceLifecycle
+from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.errors import DomainError
 
 
 class ServicesPresenter:
     """Presenter для ServicesTab.
 
-    Читает сервисы из ServiceRegistry через AppContext.
-    Управляет путями директорий сервисов (аналогично PluginsPresenter).
-    Кэширует запущенные экземпляры (_instances) для корректного stop/restart.
+    Делегирует lifecycle сервисов в services.services (ServiceManager Protocol).
+    Управляет путями директорий сервисов (read из services.config, write в yaml).
 
-    Примечание (MVP): статус читается напрямую из ServiceRegistry.get(name).lifecycle —
+    Примечание (MVP): lifecycle читается из ServiceManager.get_lifecycle() —
     StateProxy недоступен в GUI-процессе (он живёт только в ProcessModule-воркерах).
     IPC-синхронизация с воркерами — Phase 4+.
     """
 
-    def __init__(self, ctx: "AppContext") -> None:
-        self._ctx = ctx
-        # Кэш запущенных экземпляров: name → экземпляр IService.
-        # TODO (Phase 4+): инстанцирование через entry.cls() без параметров — MVP.
-        # Webcam-сервис в продакшне должен получать device_index через config dict.
-        self._instances: dict[str, IService] = {}
+    def __init__(self, services: AppServices) -> None:
+        self._services = services
 
     def list_services(self) -> "list[tuple[str, str, ServiceLifecycle]]":
-        """Список зарегистрированных сервисов из ServiceRegistry.
+        """Список зарегистрированных сервисов через ServiceManager Protocol.
 
         Returns:
             list[(name, title, lifecycle)] — тройка для построения секций.
-            Пустой список если registry не инициализирован или пуст.
+            Пустой список если сервисов нет.
         """
-        registry = self._ctx.service_registry()
-        if registry is None:
-            return []
-
-        result = []
-        for entry in registry.list():
-            # Если в meta есть title — используем его, иначе генерируем из name
-            title = entry.meta.get("title") or entry.name.replace("_", " ").title()
-            result.append((entry.name, title, entry.lifecycle))
+        manager = self._services.services
+        result: list[tuple[str, str, ServiceLifecycle]] = []
+        for spec in manager.list_services():
+            # Если в metadata есть title — используем его, иначе генерируем из id
+            title = spec.metadata.get("title") or spec.service_id.replace("_", " ").title()
+            try:
+                lifecycle = manager.get_lifecycle(spec.service_id)
+            except DomainError:
+                continue
+            result.append((spec.service_id, title, lifecycle))
         return result
 
     # ------------------------------------------------------------------ #
-    #  Управление lifecycle сервисов                                       #
+    #  Управление lifecycle сервисов (делегирование в ServiceManager)      #
     # ------------------------------------------------------------------ #
 
     def start_service(self, name: str) -> bool:
-        """Запустить сервис с указанным именем.
+        """Запустить сервис. Делегирует services.services.start(), DomainError → False.
 
-        Инстанцирует класс сервиса (если ещё не создан), вызывает start({}).
-        Обновляет entry.lifecycle в ServiceRegistry напрямую.
-
-        Args:
-            name: Имя сервиса из ServiceRegistry.
+        Адаптер инстанцирует cls(), вызывает start({}), кэширует экземпляр и
+        мутирует lifecycle (RUNNING/ERROR). Idempotent: уже RUNNING → no-op.
 
         Returns:
             True при успешном запуске, False при ошибке или отсутствии сервиса.
         """
-        registry = self._ctx.service_registry()
-        if registry is None:
-            return False
-
-        entry = registry.get(name)
-        if entry is None:
-            return False
-
-        # Инстанцируем если ещё нет в кэше
-        instance = self._instances.get(name)
-        if instance is None:
-            try:
-                instance = entry.cls()
-            except Exception as exc:
-                logger.error(f"ServicesPresenter: не удалось создать экземпляр {name}: {exc}")
-                entry.lifecycle = ServiceLifecycle.ERROR
-                return False
-            self._instances[name] = instance
-
         try:
-            ok = bool(instance.start({}))
-        except Exception as exc:
-            logger.error(f"ServicesPresenter: start({name}) выбросил исключение: {exc}")
-            entry.lifecycle = ServiceLifecycle.ERROR
+            self._services.services.start(name)
+            return True
+        except DomainError:
             return False
-
-        entry.lifecycle = ServiceLifecycle.RUNNING if ok else ServiceLifecycle.ERROR
-        return ok
 
     def stop_service(self, name: str) -> bool:
-        """Остановить сервис с указанным именем.
-
-        Если экземпляра нет в кэше — синхронизирует lifecycle → STOPPED без вызова stop().
-
-        Args:
-            name: Имя сервиса из ServiceRegistry.
+        """Остановить сервис. Делегирует services.services.stop(), DomainError → False.
 
         Returns:
             True при успешной остановке, False при ошибке.
         """
-        registry = self._ctx.service_registry()
-        if registry is None:
-            return False
-
-        entry = registry.get(name)
-        if entry is None:
-            return False
-
-        instance = self._instances.get(name)
-        if instance is None:
-            # Нечего останавливать — синхронизируем lifecycle
-            entry.lifecycle = ServiceLifecycle.STOPPED
-            return True
-
         try:
-            ok = bool(instance.stop())
-        except Exception as exc:
-            logger.error(f"ServicesPresenter: stop({name}) выбросил исключение: {exc}")
-            entry.lifecycle = ServiceLifecycle.ERROR
+            self._services.services.stop(name)
+            return True
+        except DomainError:
             return False
-
-        entry.lifecycle = ServiceLifecycle.STOPPED if ok else ServiceLifecycle.ERROR
-        return ok
 
     def restart_service(self, name: str) -> bool:
-        """Перезапустить сервис: stop() → start().
-
-        Args:
-            name: Имя сервиса из ServiceRegistry.
+        """Перезапустить сервис: stop() → start(). DomainError → False.
 
         Returns:
-            True если оба шага (stop и start) завершились успешно.
+            True если перезапуск завершился успешно.
         """
-        return self.stop_service(name) and self.start_service(name)
+        try:
+            self._services.services.restart(name)
+            return True
+        except DomainError:
+            return False
 
     def get_lifecycle(self, name: str) -> "ServiceLifecycle | None":
-        """Прочитать текущий lifecycle сервиса напрямую из ServiceRegistry.
-
-        Примечание: StateProxy не используется — он недоступен в GUI-процессе.
-        Прямое чтение из registry — MVP для Phase 3.
-
-        Args:
-            name: Имя сервиса.
+        """Прочитать текущий lifecycle сервиса через ServiceManager Protocol.
 
         Returns:
-            ServiceLifecycle или None если registry не инициализирован / сервис не найден.
+            ServiceLifecycle или None если сервис не найден.
         """
-        registry = self._ctx.service_registry()
-        if registry is None:
+        try:
+            return self._services.services.get_lifecycle(name)
+        except DomainError:
             return None
-        entry = registry.get(name)
-        return entry.lifecycle if entry is not None else None
 
     # ------------------------------------------------------------------ #
     #  Управление путями директорий сервисов                               #
@@ -171,10 +115,9 @@ class ServicesPresenter:
         """Текущий список директорий поиска сервисов.
 
         Returns:
-            Список строк-путей из конфига или [] если конфиг пустой.
+            Список строк-путей из конфига или ["Services"] по умолчанию.
         """
-        config = getattr(self._ctx, "config", {}) or {}
-        discovery = config.get("discovery", {}) or {}
+        discovery = self._services.config.get("discovery", {}) or {}
         paths = discovery.get("service_paths") or ["Services"]
         return [str(p) for p in paths]
 
@@ -209,12 +152,7 @@ class ServicesPresenter:
 
         Returns:
             Строка-сводка результата «Загружено: N, ошибок: M».
-            При отсутствии registry возвращает сообщение об ошибке.
         """
-        registry = self._ctx.service_registry()
-        if registry is None:
-            return "ServiceRegistry не инициализирован"
-
         from multiprocess_framework.modules.service_module.scanner import discover
         from multiprocess_prototype.main import PROJECT_ROOT
 

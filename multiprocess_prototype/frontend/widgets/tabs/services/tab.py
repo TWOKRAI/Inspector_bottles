@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTreeNavTab
+from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
@@ -39,17 +40,24 @@ class ServicesTab(BaseTreeNavTab):
     Структурно идентичен SettingsTab: tree-nav слева, action-кнопки секции
     в левой колонке, content-виджет секции — в правой; мастер-скролл общий.
 
-    Динамически читает сервисы из ServiceRegistry (не хардкод).
+    Динамически читает сервисы из ServiceManager (не хардкод).
     Подвкладка «Пути» (__service_paths__) управляет директориями.
+
+    Task E.4: мигрирован на AppServices DI. Принимает ``services: AppServices``.
     """
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        self._ctx = ctx
-        bus = ctx.action_bus()
+    def __init__(self, services: AppServices, *, parent: QWidget | None = None) -> None:
+        self._services = services
+        # ActionBus получаем из services.commands если поддерживает action_bus,
+        # иначе bus=None (graceful degradation для тестов).
+        # TODO Phase F: расширить CommandDispatcher Protocol методом action_bus().
+        bus = getattr(services.commands, "action_bus", None)
+        if callable(bus):
+            bus = bus()
         super().__init__(
             title="Сервисы",
-            sections=build_services_sections(ctx),
-            ctx=ctx,
+            sections=build_services_sections(services),
+            ctx=None,  # type: ignore[arg-type]  # BaseTreeNavTab legacy параметр (Phase F удалит)
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
             parent=parent,
@@ -60,8 +68,14 @@ class ServicesTab(BaseTreeNavTab):
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "ServicesTab":
-        """Фабричный метод для TabFactory."""
-        return cls(ctx)
+        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+
+        Phase F заменит AppContext на AppServices напрямую в register_all_tabs().
+        """
+        assert ctx.app_services is not None, (
+            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
+        )
+        return cls(ctx.app_services)
 
     def _tree_object_name(self) -> str:
         return "ServicesTreeNav"
@@ -88,6 +102,6 @@ class ServicesTab(BaseTreeNavTab):
         Вызывается по сигналу catalog_updated из ServicePathsSubtabWidget.
         Пересобирает _sections_specs и перезаполняет дерево навигации.
         """
-        new_sections = build_services_sections(self._ctx)
+        new_sections = build_services_sections(self._services)
         self._sections_specs = new_sections
         self.populate()

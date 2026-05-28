@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -32,11 +32,9 @@ from PySide6.QtWidgets import (
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
 from multiprocess_framework.modules.service_module import ServiceLifecycle
+from multiprocess_prototype.domain.app_services import AppServices
 
 from .presenter import ServicesPresenter
-
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
 
 
 # ---------------------------------------------------------------------------
@@ -92,13 +90,13 @@ class _ServiceSection:
 
     def __init__(
         self,
-        ctx: "AppContext",
+        services: AppServices,
         name: str,
         title: str,
         lifecycle: ServiceLifecycle,
         presenter: ServicesPresenter,
     ) -> None:
-        self._ctx = ctx
+        self._services = services
         self._key = name
         self._title = title
         self._initial_lifecycle = lifecycle
@@ -164,9 +162,10 @@ class _ServiceSection:
         # Установить начальное состояние disabled/enabled по lifecycle
         self._refresh_button_state()
 
-        # Привязать к permission system (если auth доступен)
-        _auth = getattr(self._ctx, "auth", None)
-        auth_state = getattr(_auth, "state", None) if _auth is not None else None
+        # Привязать к permission system (если auth доступен).
+        # TODO Phase F: расширить AuthFacade Protocol для runtime permission gating
+        # (access_context_changed signal — нужен для install_permission_aware_enable).
+        auth_state = getattr(self._services.auth, "_state", None)
         for btn in (self._btn_start, self._btn_stop, self._btn_restart):
             install_permission_aware_enable(btn, "tabs.services.edit", auth_state)
 
@@ -266,8 +265,8 @@ class _PlaceholderSection:
 class _ServicePathsSection:
     """Секция «Пути» — ServicePathsSubtabWidget."""
 
-    def __init__(self, ctx: "AppContext") -> None:
-        self._ctx = ctx
+    def __init__(self, services: AppServices) -> None:
+        self._services = services
         self._widget: QWidget | None = None
 
     @property
@@ -282,7 +281,7 @@ class _ServicePathsSection:
         if self._widget is None:
             from .paths_subtab import ServicePathsSubtabWidget
 
-            presenter = ServicesPresenter(self._ctx)
+            presenter = ServicesPresenter(self._services)
             self._widget = ServicePathsSubtabWidget(presenter)
         return self._widget
 
@@ -298,7 +297,11 @@ class _ServicePathsSection:
 # ---------------------------------------------------------------------------
 
 
-def _services_root_factory(_ctx: "AppContext") -> _PlaceholderSection:
+# BaseTreeNavTab вызывает factory(ctx_arg) с self._ctx (= None после миграции).
+# Фабрики игнорируют ctx_arg и замыкают services (паттерн Settings _make_factory).
+
+
+def _services_root_factory(_ctx_arg: object) -> _PlaceholderSection:
     return _PlaceholderSection(
         key="services_root",
         title="Сервисы",
@@ -306,7 +309,7 @@ def _services_root_factory(_ctx: "AppContext") -> _PlaceholderSection:
     )
 
 
-def _nn_placeholder_factory(_ctx: "AppContext") -> _PlaceholderSection:
+def _nn_placeholder_factory(_ctx_arg: object) -> _PlaceholderSection:
     return _PlaceholderSection(
         key="neural_networks",
         title="Нейронные сети",
@@ -314,20 +317,21 @@ def _nn_placeholder_factory(_ctx: "AppContext") -> _PlaceholderSection:
     )
 
 
-def _service_paths_factory(ctx: "AppContext") -> _ServicePathsSection:
-    return _ServicePathsSection(ctx)
+def _make_paths_factory(services: AppServices) -> "Callable[[object], _ServicePathsSection]":
+    return lambda _ctx_arg: _ServicePathsSection(services)
 
 
 def _make_service_factory(
+    services: AppServices,
     name: str,
     title: str,
     lifecycle: ServiceLifecycle,
-) -> "Callable[[AppContext], _ServiceSection]":
-    def factory(ctx: "AppContext") -> _ServiceSection:
-        # Presenter создаётся один раз на секцию и передаётся в _ServiceSection.
-        # Он владеет кэшем _instances для данного сервиса.
-        presenter = ServicesPresenter(ctx)
-        return _ServiceSection(ctx, name, title, lifecycle, presenter)
+) -> "Callable[[object], _ServiceSection]":
+    def factory(_ctx_arg: object) -> _ServiceSection:
+        # Presenter создаётся один раз на секцию и делегирует lifecycle в
+        # services.services (адаптер владеет кэшем экземпляров).
+        presenter = ServicesPresenter(services)
+        return _ServiceSection(services, name, title, lifecycle, presenter)
 
     return factory
 
@@ -337,20 +341,22 @@ def _make_service_factory(
 # ---------------------------------------------------------------------------
 
 
-def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]":
+def build_services_sections(services: AppServices) -> "list[SectionSpec]":
     """Сформировать декларацию секций ServicesTab.
+
+    Task E.4: принимает AppServices вместо AppContext.
 
     Структура:
         - «Сервисы» (services_root, родитель) — только если есть хотя бы один
-          сервис в ServiceRegistry. Иначе родительский узел не создаётся.
-        - Под ним — N сервисных секций (lazy) из ServiceRegistry.list().
+          сервис в ServiceManager. Иначе родительский узел не создаётся.
+        - Под ним — N сервисных секций (lazy) из services.services.list_services().
         - Top-level «Нейронные сети» — всегда присутствует как placeholder.
         - Top-level «Пути» (__service_paths__) — управление директориями.
     """
-    presenter = ServicesPresenter(ctx)
+    presenter = ServicesPresenter(services)
     service_data = presenter.list_services()  # [(name, title, lifecycle), ...]
 
-    sections: list[SectionSpec[AppContext]] = []
+    sections: list[SectionSpec] = []
 
     if service_data:
         sections.append(
@@ -365,7 +371,7 @@ def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
                 SectionSpec(
                     key=name,
                     title=title,
-                    factory=_make_service_factory(name, title, lifecycle),
+                    factory=_make_service_factory(services, name, title, lifecycle),
                     parent_key="services_root",
                     lazy=True,
                 )
@@ -382,7 +388,7 @@ def build_services_sections(ctx: "AppContext") -> "list[SectionSpec[AppContext]]
         SectionSpec(
             key="__service_paths__",
             title="Пути",
-            factory=_service_paths_factory,
+            factory=_make_paths_factory(services),
         )
     )
     return sections
