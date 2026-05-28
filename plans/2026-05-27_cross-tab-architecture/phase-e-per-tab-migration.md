@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-e
 - **Дата:** 2026-05-28
-- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 READY (next), E.4–E.6 HIGH-LEVEL
+- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 READY (next), E.5–E.6 HIGH-LEVEL
 - **Ветка:** `refactor/cross-tab-architecture` (та же ветка что Phase A–D; sub-branch не нужен — D.5 Settings tab коммитился прямо в неё, и Pipeline аналогично; отдельные sub-branch'и создаются только если параллельная работа по нескольким табам одновременно, что исключено правилом «таб за заходом»)
 
 ---
@@ -40,8 +40,8 @@ Settings tab уже мигрирован в D.5 и служит образцом
 |------|-----|--------|-----------|----------|-------------|--------|
 | **E.1** | Pipeline | ~14 | Senior+ | teamlead | D done | **DONE (APPROVED)** |
 | **E.2** | Processes | 6 | Middle | developer | E.1 approved | **DONE** |
-| **E.3** | Recipes | ~5 | Middle | developer | E.2 | READY (next) |
-| **E.4** | Services | ~4 | Middle | developer | E.3 | TBD |
+| **E.3** | Recipes | 3 | Middle | developer | E.2 | **DONE** |
+| **E.4** | Services | ~4 | Middle | developer | E.3 | READY (next) |
 | **E.5** | Plugins | ~11 | Middle+ | developer | E.4 | TBD |
 | **E.6** | Displays | ~3 | Junior | developer | E.5 | TBD |
 
@@ -117,9 +117,16 @@ scene-reload с позициями узлов, undo/redo chain.
   - **Runtime-deps вне AppServices** (command_sender, topology_bridge, bindings) — explicit kwargs (паттерн Settings `auth_ctx`). `create(ctx)` извлекает их из ctx. TODO Phase G: вынести в live-runtime aggregate.
 - **TODO Phase F/G (3 items):** command_sender/topology_bridge → runtime aggregate (Phase G); topology_bridge accessor deprecated в create() bridge (Phase F удалит ctx); AuthFacade Protocol для permission gating (Phase F).
 
-### Phase E.3 — Recipes tab [PENDING] (зависит от E.2)
+### Phase E.3 — Recipes tab [DONE] (2026-05-28, коммит `5f8c0a4e`)
 
 - **Module contract:** public-api-change
+- **Тесты:** 23 passed (recipes), 624 passed (все табы)
+- **Sentrux:** 7139 (−1 vs E.2 7140, шум)
+- **Объём:** 2 production-файла (только `tab.py` + новый `tests/_helpers.py`), 1 test-файл. **Presenter и его тесты не тронуты** — `RecipesPresenter(recipe_manager, view)` уже был декомпозирован от ctx (MVP).
+- **Решения:**
+  - RecipeManager берётся через `getattr(services.recipes, "_rm", None)` bridge — RecipeStore Protocol покрывает list/read→Recipe/write/delete/get_active/set_active, но **не** богатый legacy API (`read_recipe`→dict, `duplicate`, `recipes_dir`), который нужен presenter'у. TODO Phase F: расширить Protocol.
+  - `BaseListNavTab` принимает `ctx=None` (паттерн Settings/Processes).
+  - Follow-up #2 (`ConfigStore _firing guard`): **не применим** — Recipes вообще не использует `services.config`/reactive chains.
 
 ### Phase E.4 — Services tab [PENDING] (зависит от E.3)
 
@@ -297,10 +304,11 @@ scene-reload с позициями узлов, undo/redo chain.
 **Примечание:** grep при audit показал 0 legacy-вызовов в recipes/. Перед стартом — повторный grep для верификации (могли добавиться). Если 0 — E.3 сводится к обновлению сигнатуры и factory.
 
 **Acceptance criteria (высокий уровень):**
-- [ ] `RecipesTab.__init__(services: AppServices, *, parent=...)` без ctx
-- [ ] ConfigStore follow-up #2 (`_firing` guard) — проверить, использует ли RecipesTab reactive config chains; если да — добавить guard
-- [ ] Все тесты зелёные, builder
-- [ ] Qt-MCP smoke
+- [x] `RecipesTab.__init__(services: AppServices, *, parent=...)` без ctx
+- [x] ConfigStore follow-up #2 (`_firing` guard) — проверено: RecipesTab НЕ использует reactive config chains → guard не нужен
+- [x] Все тесты зелёные (23 recipes / 624 tabs), `make_recipes_services()` builder
+- [x] 0 DeprecationWarning из `_deprecated_extras`
+- [ ] Qt-MCP smoke — **deferred to cumulative после E.6**
 
 **Module contract:** public-api-change
 

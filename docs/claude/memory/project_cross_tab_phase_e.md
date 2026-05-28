@@ -10,7 +10,8 @@ metadata:
 **Прогресс (2026-05-28):**
 - E.1 Pipeline — **DONE** (Senior+, teamlead). Коммиты `8566f994` + `e7bd3d97`. Reviewer APPROVED итерация 2/2. 322 теста, sentrux 7141 (-20 принято).
 - E.2 Processes — **DONE** (Middle). 6 файлов, sentrux 7140 (−1, шум). 50 processes/624 tabs тестов зелёные. Реально было 7 legacy ctx-обращений (не 1 — audit устарел).
-- E.3 Recipes — **NEXT** (Middle). → E.4 Services (Middle) → E.5 Plugins (Middle+, 25 точек) → E.6 Displays (Junior).
+- E.3 Recipes — **DONE** (Middle). Маленький: только tab.py + tests/_helpers.py + test_recipes_tab.py. Presenter уже декомпозирован (MVP, принимает recipe_manager напрямую) — не тронут. RecipeManager через `services.recipes._rm` bridge. 23/624 тестов, sentrux 7139.
+- E.4 Services — **NEXT** (Middle, мутирует config lifecycle). → E.5 Plugins (Middle+, 25 точек) → E.6 Displays (Junior).
 
 **E.2 ключевой урок (важно для E.3–E.6):** topology в production живёт в `ctx.extras["topology"]`/holder, **не** в `ctx.config`. `build_app_services` оборачивает только `ctx.config` → читать topology надо через `services.topology.load()` (domain Topology entity), иначе регрессия (пустой список). Runtime-deps не покрытые AppServices (command_sender, topology_bridge, bindings) → explicit kwargs + извлечение в `create(ctx)` (паттерн Settings `auth_ctx`), НЕ через `self._ctx`. Базовый класс `BaseListNavTab`/`BaseColumnarTab` принимает `ctx=None` (как Settings D.5).
 
