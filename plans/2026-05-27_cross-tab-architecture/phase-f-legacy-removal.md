@@ -738,10 +738,24 @@ framework Base-class ctx removal (Q-F3 вариант A — отдельно).
 4. Прогнать полный suite.
 
 **Acceptance criteria:**
-- [ ] `pytest.ini` фильтрует `_deprecated_extras` DeprecationWarning как `error`
-- [ ] `python -m pytest multiprocess_prototype/` зелёные (нет необёрнутых deprecated-обращений)
-- [ ] `test_extras_deprecation.py` использует `pytest.warns`, проходит при `error::`
+- [x] `pyproject.toml` фильтрует deprecated extras как `error` (message-based, см. находку ниже)
+- [x] `python -m pytest multiprocess_prototype/` — нет deprecation-падений (1 pre-existing theme flaky, не F.7)
+- [x] `test_extras_deprecation.py` зелёный при `error::` (self-managed через pytest.warns/catch_warnings)
 - [ ] Commit с Refs
+
+> **🔴 Находка F.7 (2026-05-28) — реализация отклонилась от спеки, ревью Opus одобрил НОВЫЙ подход.**
+> Детали и сравнение: [`F7-approach-review.md`](F7-approach-review.md).
+> 1. **Исходный фильтр Phase D был no-op:** `ignore::DeprecationWarning:..._deprecated_extras` ничего не
+>    матчил (stacklevel=3 → атрибуция вызывающему модулю, не _deprecated_extras) — 109 warnings протекали.
+> 2. **Премиса «после F.3-F.9 production-чтений не осталось» неверна:** все читатели deprecated extras —
+>    легитимные bridge (build_app_services-builder, AppContext-аксессоры, tab_factory RuntimeDeps,
+>    administration action_bus=Phase G). Ловить «случайные» чтения нечего (как и у F.1).
+> 3. **Решение (НОВЫЙ подход):** shim получил silent-читатели `peek()`/`peek_required()` для bridge;
+>    фабрика + аксессоры читают молча; прямой `ctx.extras[...]`/`.get()` потребителя → message-based
+>    `error:ctx\.extras.*deprecated:DeprecationWarning`. 2 теста с raw `.get()` → через публичные аксессоры.
+> 4. Результат: warnings 109 → 3, forcing-функция реально активна (а не косметика).
+> 5. **theme-тест** `test_returns_false_without_qapplication` — pre-existing flaky (QApplication singleton
+>    протекает в полном suite), не связан с F.7, чинится отдельно (2-line mock).
 
 **Out of scope:** удаление `_DeprecatedExtrasDict` класса (safety net, пока AppContext жив).
 **Edge cases:** глобальный `-W error` сломал бы сторонние warnings — фильтр должен быть узким
