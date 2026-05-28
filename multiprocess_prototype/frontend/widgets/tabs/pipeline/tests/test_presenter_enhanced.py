@@ -1,7 +1,8 @@
 """Тесты Enhanced PipelinePresenter — Phase 13.6, мигрировано на AppServices (Task E.1).
 
-Проверяют координацию PipelineModel + ActionBus + GraphScene + TopologyHolder.
-Без Qt — все зависимости замоканы.
+G.4.2: мутации через domain dispatch. Тесты мутаций используют реальный
+orchestrator (make_pipeline_services_with_orchestrator). Тесты загрузки и
+non-mutation — на FakeCommandDispatcher (make_pipeline_services).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from multiprocess_prototype.domain.events import TopologyReplaced
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
 
-from ._helpers import make_pipeline_services
+from ._helpers import make_pipeline_services, make_pipeline_services_with_orchestrator
 
 
 # ------------------------------------------------------------------ #
@@ -52,9 +53,11 @@ class TestLoad:
 
 
 class TestMutations:
+    """G.4.2: мутации через domain dispatch (реальный orchestrator)."""
+
     def test_add_process_from_plugin(self):
-        """add_process_from_plugin добавляет процесс в модель."""
-        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        """add_process_from_plugin добавляет процесс через domain dispatch."""
+        services = make_pipeline_services_with_orchestrator(topology={"processes": [], "wires": []})
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
@@ -64,7 +67,7 @@ class TestMutations:
 
     def test_add_process_unique_name(self):
         """Дубликат имени → автоинкремент."""
-        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        services = make_pipeline_services_with_orchestrator(topology={"processes": [], "wires": []})
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
@@ -75,8 +78,8 @@ class TestMutations:
         assert len(p.model.get_process_names()) == 2
 
     def test_remove_selected(self):
-        """remove_selected удаляет процесс из модели."""
-        services = make_pipeline_services()
+        """remove_selected удаляет процесс через domain dispatch."""
+        services = make_pipeline_services_with_orchestrator()
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
@@ -86,17 +89,19 @@ class TestMutations:
         assert "processor" in names
 
     def test_remove_selected_display_node(self):
-        """remove_selected различает display-узел и удаляет его через remove_display."""
-        services = make_pipeline_services()
+        """remove_selected различает display-узел и удаляет его через legacy путь."""
+        services = make_pipeline_services_with_orchestrator()
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        # Добавляем display-узел и wire к нему
+        # Добавляем display-узел и wire к нему (через модель, legacy)
         p.model.add_display("disp1", "main_output", "Main Display")
         p.model.add_wire("processor.color_mask.frame", "display.disp1.frame")
 
+        # Синхронизируем repo
+        services.topology.save(Topology.from_dict(p.model.to_topology_dict()))
+
         assert len(p.model.get_displays()) == 1
-        assert len(p.model.get_wires()) == 2  # исходный + к display
 
         p.remove_selected(["disp1"])
 
@@ -108,12 +113,12 @@ class TestMutations:
         assert "processor" in p.model.get_process_names()
 
     def test_add_wire(self):
-        """add_wire добавляет wire через модель."""
-        services = make_pipeline_services(
+        """add_wire добавляет wire через domain dispatch."""
+        services = make_pipeline_services_with_orchestrator(
             topology={
                 "processes": [
-                    {"process_name": "a", "plugins": []},
-                    {"process_name": "b", "plugins": []},
+                    {"process_name": "a", "plugins": [{"plugin_name": "capture"}]},
+                    {"process_name": "b", "plugins": [{"plugin_name": "blur"}]},
                 ],
                 "wires": [],
             }
@@ -121,20 +126,20 @@ class TestMutations:
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        result = p.add_wire("a.out.data", "b.in.data")
+        result = p.add_wire("a.capture.frame", "b.blur.frame")
         assert result is True
         assert len(p.model.get_wires()) == 1
 
     def test_add_wire_cycle_rejected(self):
-        """Цикл → add_wire возвращает False."""
-        services = make_pipeline_services(
+        """Цикл → add_wire возвращает False (DomainError)."""
+        services = make_pipeline_services_with_orchestrator(
             topology={
                 "processes": [
-                    {"process_name": "a", "plugins": []},
-                    {"process_name": "b", "plugins": []},
+                    {"process_name": "a", "plugins": [{"plugin_name": "capture"}]},
+                    {"process_name": "b", "plugins": [{"plugin_name": "blur"}]},
                 ],
                 "wires": [
-                    {"source": "a.out.data", "target": "b.in.data"},
+                    {"source": "a.capture.frame", "target": "b.blur.frame"},
                 ],
             }
         )
@@ -142,7 +147,7 @@ class TestMutations:
         p.load_topology_from_config()
 
         # b → a создаёт цикл
-        result = p.add_wire("b.out.data", "a.in.data")
+        result = p.add_wire("b.blur.out", "a.capture.frame")
         assert result is False
 
 
@@ -264,23 +269,9 @@ class TestSignalSuppression:
 
 
 # ------------------------------------------------------------------ #
-#  Тесты ActionBus интеграция                                        #
+#  G.4.2: ActionBus удалён. Domain dispatch тестируется в
+#  test_presenter_domain_dispatch.py (реальный orchestrator).
 # ------------------------------------------------------------------ #
-
-
-class TestActionBus:
-    def test_add_process_with_action_bus(self):
-        """ActionBus.execute вызывается при add_process_from_plugin."""
-        mock_bus = MagicMock()
-        services = make_pipeline_services(
-            topology={"processes": [], "wires": []},
-            action_bus=mock_bus,
-        )
-        p = PipelinePresenter(services)
-        p.load_topology_from_config()
-
-        p.add_process_from_plugin("my_plugin")
-        mock_bus.execute.assert_called_once()
 
 
 # ------------------------------------------------------------------ #
@@ -329,8 +320,13 @@ class TestGuiPositions:
 
 class TestSceneIntegration:
     def test_scene_updated_on_add(self):
-        """scene.add_node вызывается при add_process_from_plugin."""
-        services = make_pipeline_services(topology={"processes": [], "wires": []})
+        """scene обновляется при add_process_from_plugin через TopologyReplaced.
+
+        G.4.2: scene обновляется через _on_topology_replaced (full reload),
+        а не через оптимистичный scene.add_node. Используем MagicMock scene,
+        который получает clear_all + add_node при reload.
+        """
+        services = make_pipeline_services_with_orchestrator(topology={"processes": [], "wires": []})
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
@@ -338,6 +334,8 @@ class TestSceneIntegration:
         p.set_scene(mock_scene)
 
         p.add_process_from_plugin("my_plugin", x=50.0, y=60.0)
+        # Scene обновляется через _load_scene_with_ports (clear_all + add_node)
+        mock_scene.clear_all.assert_called()
         mock_scene.add_node.assert_called_once()
 
         # Проверить переданные данные

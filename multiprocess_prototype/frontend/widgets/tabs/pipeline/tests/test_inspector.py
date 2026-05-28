@@ -307,29 +307,12 @@ class TestPresenterInspectorIntegration:
         # AppServices должен быть передан в panel
         assert panel._services is services
 
-    def test_field_changed_calls_action_bus(self, qtbot):
-        """field_changed → presenter → ActionBus.execute() вызывается."""
-        rm = MagicMock()
-        rm.get_fields.return_value = []
-        rm.get_register.return_value = None
+    def test_field_changed_calls_rm_set_value(self, qtbot):
+        """field_changed → presenter → rm.set_value() вызывается.
 
-        bus = MagicMock()
-
-        services = _make_presenter_services(bus=bus)
-        presenter = PipelinePresenter(services, registers_manager=rm)
-
-        panel = NodeInspectorPanel()
-        qtbot.addWidget(panel)
-
-        presenter.set_inspector(panel)
-        panel.show_node("camera", "source", params={"fps": "30"})
-
-        panel.field_changed.emit("camera", "fps", "60")
-
-        assert bus.execute.called
-
-    def test_field_changed_no_bus_calls_rm(self, qtbot):
-        """Если ActionBus=None, вызывается rm.set_value()."""
+        G.4.2: ActionBus удалён, field_changed идёт через RegistersManager.
+        G.4.3: будет мигрировано на domain SetPluginConfig.
+        """
         rm = MagicMock()
         rm.get_fields.return_value = []
         rm.get_register.return_value = None
@@ -341,12 +324,14 @@ class TestPresenterInspectorIntegration:
         qtbot.addWidget(panel)
 
         presenter.set_inspector(panel)
+        panel.show_node("camera", "source", params={"fps": "30"})
+
         panel.field_changed.emit("camera", "fps", "60")
 
         rm.set_value.assert_called_once_with("camera", "fps", "60")
 
-    def test_field_changed_no_bus_no_rm_logs_warning(self, qtbot, caplog):
-        """Если ни ActionBus ни rm — логируется warning."""
+    def test_field_changed_no_rm_logs_warning(self, qtbot, caplog):
+        """Если RegistersManager недоступен — логируется warning."""
         import logging
 
         services = _make_presenter_services(bus=None)

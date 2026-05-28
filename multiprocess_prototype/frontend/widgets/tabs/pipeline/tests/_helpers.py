@@ -192,4 +192,80 @@ def make_pipeline_runtime(*, registers_manager: Any = None) -> RuntimeDeps:
     return RuntimeDeps(registers_manager=registers_manager)
 
 
-__all__ = ["make_pipeline_services", "make_pipeline_runtime"]
+def make_pipeline_services_with_orchestrator(
+    *,
+    topology: dict[str, Any] | None = None,
+    plugin_specs: "dict[str, PluginSpec] | None" = None,
+    auth: FakeAuthFacade | None = None,
+) -> AppServices:
+    """Создать AppServices с реальным CommandDispatcherOrchestrator + TopologyRepositoryStore.
+
+    G.4.2: для интеграционных тестов domain dispatch — не MagicMock.
+    dispatch → Project.apply → topology_repo.save → EventBus.publish(TopologyReplaced).
+    Presenter подписан на TopologyReplaced → full scene reload.
+
+    Цепочка: dispatch → apply → store.save → publish TopologyReplaced → presenter reload.
+    """
+    from multiprocess_prototype.adapters.dispatch.command_dispatcher import (
+        CommandDispatcherOrchestrator,
+        ProjectHolder,
+    )
+    from multiprocess_prototype.adapters.stores.topology_repository import (
+        TopologyRepositoryStore,
+    )
+    from multiprocess_prototype.domain.entities.project import ApplyContext, Project
+    from multiprocess_prototype.domain.event_bus import EventBus
+
+    topo = topology if topology is not None else dict(_DEFAULT_TOPOLOGY)
+    config_data: dict[str, Any] = {"topology": topo}
+    config = FakeConfigStore(initial=config_data)
+
+    # EventBus — реальный (синхронный publish, как QtEventBus)
+    event_bus = EventBus()
+
+    # TopologyRepositoryStore — реальный store (владеет dict, публикует TopologyReplaced)
+    topology_store = TopologyRepositoryStore(initial=dict(topo), events=event_bus)
+
+    # Project + ProjectHolder
+    from multiprocess_prototype.domain.entities import Topology
+
+    project = Project(topology=Topology.from_dict(topo))
+    holder = ProjectHolder(initial=project)
+
+    # PluginCatalog
+    plugins = FakePluginCatalog(specs=plugin_specs) if plugin_specs else FakePluginCatalog()
+
+    # ApplyContext factory — каталоги для Project.apply валидации.
+    # Если specs пустой → plugins=None в ApplyContext (invariants пропускаются),
+    # чтобы тесты без explicit plugin_specs не падали на AddProcess валидации.
+    _ctx_plugins = plugins if plugins._specs else None
+
+    def _ctx_factory() -> ApplyContext:
+        return ApplyContext(
+            plugins=_ctx_plugins,
+        )
+
+    # Orchestrator с реальным undo/redo (G.4.1 ProjectHistory)
+    orchestrator = CommandDispatcherOrchestrator(
+        project_holder=holder,
+        topology_repo=topology_store,
+        event_bus=event_bus,
+        apply_context_factory=_ctx_factory,
+    )
+
+    _auth = auth if auth is not None else FakeAuthFacade(all_permissions=True)
+
+    return make_test_app_services(
+        plugins=plugins,
+        registers=FakeRegistersBackend(),
+        recipes=FakeRecipeStore(),
+        config=config,
+        commands=orchestrator,
+        displays=FakeDisplayCatalog(),
+        auth=_auth,
+        topology=topology_store,
+        events=event_bus,
+    )
+
+
+__all__ = ["make_pipeline_services", "make_pipeline_runtime", "make_pipeline_services_with_orchestrator"]

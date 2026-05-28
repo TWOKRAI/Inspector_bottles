@@ -29,7 +29,7 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import (
     PipelinePresenter,
 )
 
-from ._helpers import make_pipeline_services
+from ._helpers import make_pipeline_services, make_pipeline_services_with_orchestrator
 
 
 # ---------------------------------------------------------------------------
@@ -54,16 +54,24 @@ def _make_plugin_spec(
 def _make_presenter_with_processes(
     plugin_specs: dict[str, PluginSpec] | None = None,
 ) -> PipelinePresenter:
-    """Создать PipelinePresenter с двумя процессами в модели."""
-    services = make_pipeline_services(
-        topology={"processes": [], "wires": []},
+    """Создать PipelinePresenter с двумя процессами в topology.
+
+    G.4.2: используем реальный orchestrator, процессы создаются в topology
+    (а не через модель напрямую) — domain dispatch требует, чтобы процессы
+    были видны в topology_repo для ConnectWire-валидации.
+    """
+    services = make_pipeline_services_with_orchestrator(
+        topology={
+            "processes": [
+                {"process_name": "proc_a", "plugins": [{"plugin_name": "plugin_a"}]},
+                {"process_name": "proc_b", "plugins": [{"plugin_name": "plugin_b"}]},
+            ],
+            "wires": [],
+        },
         plugin_specs=plugin_specs,
     )
     presenter = PipelinePresenter(services)
-
-    # Добавить процессы напрямую в модель для тестов
-    presenter._model.add_process("proc_a", "plugin_a", "processing")
-    presenter._model.add_process("proc_b", "plugin_b", "processing")
+    presenter.load_topology_from_config()
 
     return presenter
 

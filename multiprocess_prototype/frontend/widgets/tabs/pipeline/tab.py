@@ -3,12 +3,12 @@
 
 Task E.1: мигрирован на AppServices DI. Принимает services: AppServices.
 Task F.9: create(services, runtime) — Q-F1=B. AppContext bridge убран.
+G.4.2: ActionBus bridge удалён; undo/redo через services.commands (domain dispatch).
 
 3 колонки + мастер-скролл через ``DiffScrollTabLayout``:
 
 - **action-колонка (1-я)**: все кнопки управления (Delete / Layout / Validate /
-  Fit / Zoom+ / Zoom-); Undo/Redo — в статичной зоне снизу через
-  ``enable_undo_redo``;
+  Fit / Zoom+ / Zoom-);
 - **nav-колонка (2-я)**: ``PluginPalette`` — дерево плагинов по категориям +
   поиск + D&D на canvas;
 - **content-колонка (3-я)**: вертикальный QSplitter с canvas (``GraphView``)
@@ -110,11 +110,12 @@ class PipelineTab(QWidget):
         # в её собственный wheelEvent (zoom).
         self._view.viewport().removeEventFilter(self._tab_layout)
 
-        # Undo/Redo в статичной зоне (legacy ActionBus bridge).
-        # TODO Phase G (G.4): полностью заменить ActionBus на domain commands
-        _bus_accessor = getattr(services.commands, "action_bus", None)
-        self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
-        self._tab_layout.enable_undo_redo(self._action_bus)
+        # G.4.2: ActionBus bridge удалён. enable_undo_redo(None) создаёт кнопки
+        # в disabled-состоянии (CommandDispatcher Protocol не реализует
+        # add_change_callback, который ожидает layout). Undo/redo по-прежнему
+        # работают через keyboard shortcuts Ctrl+Z/Y → _on_toolbar_action.
+        # G.4.4: добавить change-callback для auto-refresh enable-состояния кнопок.
+        self._tab_layout.enable_undo_redo(None)
 
         # Передать scene и inspector в presenter.
         self._presenter.set_scene(self._scene)
@@ -209,9 +210,14 @@ class PipelineTab(QWidget):
         self._inspector.field_changed.connect(self._on_inspector_field_changed)
 
     def _load_topology(self) -> None:
-        """Загрузить topology из AppContext и отобразить."""
+        """Загрузить topology из AppContext и отобразить.
+
+        G.4.2: используем presenter.load_topology_from_config() + _load_scene_with_ports()
+        для корректной установки port_schemas на нодах.
+        """
         nodes, edges = self._presenter.load_topology_from_config()
-        self._scene.load_from_data(nodes, edges)
+        # G.4.2: load_from_data не передаёт port_schemas — используем presenter-метод
+        self._presenter._load_scene_with_ports(nodes, edges)
         if nodes:
             self._view.fit_to_view()
 
@@ -275,13 +281,11 @@ class PipelineTab(QWidget):
                 self._presenter.remove_selected(selected)
                 self._inspector.clear()
         elif action_id == "undo":
-            # TODO Phase G (G.4): domain command для undo
-            if self._action_bus:
-                self._action_bus.undo()
+            # G.4.2: undo через domain CommandDispatcher (snapshot-based)
+            self._services.commands.undo()
         elif action_id == "redo":
-            # TODO Phase G (G.4): domain command для redo
-            if self._action_bus:
-                self._action_bus.redo()
+            # G.4.2: redo через domain CommandDispatcher (snapshot-based)
+            self._services.commands.redo()
 
     def _on_plugin_dropped(self, plugin_name: str, scene_pos: "QPointF") -> None:
         """D&D из палитры → создать процесс на canvas."""

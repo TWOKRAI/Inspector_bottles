@@ -1,11 +1,11 @@
 """PipelinePresenter -- центральный координатор Pipeline Editor.
 
 Task E.1: мигрирован на AppServices DI. Принимает services: AppServices.
-ActionBus bridge оставлен через getattr(services.commands, "action_bus", ...)
-для undo/redo (ActionBus API не покрыт CommandDispatcher Protocol).
+G.4.2: process-мутации и undo/redo — через domain dispatch
+(services.commands.dispatch / undo / redo). ActionBus bridge удалён.
 Scene reload — через typed event TopologyReplaced (services.events), Phase G G.1.
 
-Координирует: PipelineModel (SSOT) + ActionBus/Commands + GraphScene + TopologyRepo.
+Координирует: PipelineModel (проекция) + Commands (dispatch) + GraphScene + TopologyRepo.
 Signal suppression предотвращает циклы при programmatic update.
 """
 
@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.commands import AddProcess, ConnectWire, RemoveProcess
+from multiprocess_prototype.domain.entities.plugin import PluginInstance
+from multiprocess_prototype.domain.errors import DomainError
 from multiprocess_prototype.domain.events import TopologyReplaced
 
 from .graph.node_item import NodeData
@@ -38,14 +41,18 @@ logger = logging.getLogger(__name__)
 
 
 class PipelinePresenter:
-    """Enhanced presenter для Pipeline Editor Phase 13.
+    """Enhanced presenter для Pipeline Editor.
 
     Координирует:
-    - PipelineModel (SSOT) — все мутации через модель
-    - ActionBus — undo/redo для всех операций
+    - PipelineModel (проекция domain topology) — read-only модель
+    - services.commands (CommandDispatcher) — dispatch/undo/redo
     - GraphScene — визуализация
-    - services.topology (TopologyRepository) — load/save + TopologyReplaced events
+    - services.topology (TopologyRepository) — load + TopologyReplaced events
     - TopologyBridge — IPC (опционально)
+
+    G.4.2: process-мутации (add/remove/wire) через domain dispatch.
+    Scene обновляется из TopologyReplaced (unidirectional, без оптимистичных scene-апдейтов).
+    Display-мутации временно остаются на legacy PipelineModel+save пути (G.4.2b).
     """
 
     def __init__(
@@ -72,15 +79,9 @@ class PipelinePresenter:
 
         self._topo = TopologyPresenter()
 
-        # ActionBus bridge: CommandDispatcherOrchestrator не покрывает
-        # undo/redo/execute — получаем legacy ActionBus через adapter.
-        # TODO Phase G (G.4): полностью заменить ActionBus на domain commands
-        _bus_accessor = getattr(services.commands, "action_bus", None)
-        self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
-
-        # Scene reload через typed EventBus (G.1): publisher-мост в app.py публикует
-        # TopologyReplaced при каждой замене топологии (ловит и ActionBus-мутации).
-        # Гранулярные события (ProcessAdded/WireConnected для инкрементального update) — G.4.
+        # Scene reload через typed EventBus (G.1): store публикует TopologyReplaced
+        # при каждом save/set_topology (G.3). dispatch() внутри себя вызывает
+        # topology_repo.save() → publish → _on_topology_replaced (full reload).
         self._topology_sub = services.events.subscribe(TopologyReplaced, self._on_topology_replaced)
 
     def set_scene(self, scene: "GraphScene") -> None:
@@ -106,36 +107,14 @@ class PipelinePresenter:
     ) -> None:
         """Обработчик изменения поля из NodeInspectorPanel.
 
-        Получает old_value из RegistersManager, затем:
-        - Если ActionBus доступен: создаёт undoable Action через V2ActionBuilder.
-        - Иначе: прямой вызов rm.set_value() если rm доступен.
-        - Warning если ни ActionBus ни rm недоступны.
+        G.4.3: будет мигрирован на domain SetPluginConfig. Сейчас — прямой вызов
+        rm.set_value() если RegistersManager доступен (fallback-путь, без undo).
         """
         # G.2: live RegistersManager — explicit runtime-dep (через RuntimeDeps, Q-F1=B).
-        # Здесь нужен flat get_register(process_name) для old_value + no-bus fallback set_value.
-        # bus.execute(field_set) путь ниже остаётся для G.4 (ActionBus→domain commands).
+        # G.4.3: заменить на dispatch(SetPluginConfig(...)) + маппинг register→(process, plugin_index).
         rm = self._registers_manager
-        bus = self._action_bus
 
-        # Получить старое значение для undo
-        old_value: Any = None
         if rm is not None:
-            register = rm.get_register(process_name)
-            if register is not None:
-                old_value = getattr(register, field_name, None)
-
-        if bus is not None:
-            from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-            action = V2ActionBuilder.field_set_timed(
-                register_name=process_name,
-                field_name=field_name,
-                new_value=new_value,
-                old_value=old_value,
-                description=f"Изменить {process_name}.{field_name}",
-            )
-            bus.execute(action)
-        elif rm is not None:
             ok = rm.set_value(process_name, field_name, new_value)
             if not ok:
                 logger.warning(
@@ -146,7 +125,7 @@ class PipelinePresenter:
                 )
         else:
             logger.warning(
-                "field_changed: ни ActionBus ни RegistersManager недоступны для %s.%s = %s",
+                "field_changed: RegistersManager недоступен для %s.%s = %s",
                 process_name,
                 field_name,
                 new_value,
@@ -326,11 +305,14 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def add_process_from_plugin(self, plugin_name: str, x: float = 0.0, y: float = 0.0) -> str | None:
-        """Добавить процесс из палитры плагинов.
+        """Добавить процесс из палитры плагинов через domain dispatch.
+
+        G.4.2: dispatch(AddProcess) → store.save → TopologyReplaced → full scene reload.
+        Оптимистичные scene-апдейты убраны — scene обновляется из _on_topology_replaced.
 
         Returns: имя процесса или None если не удалось.
         """
-        # Генерировать уникальное имя
+        # Генерировать уникальное имя (модель синхронна после прошлого reload)
         base_name = plugin_name.replace("_", "-")
         existing = set(self._model.get_process_names())
         name = base_name
@@ -339,86 +321,65 @@ class PipelinePresenter:
             name = f"{base_name}_{counter}"
             counter += 1
 
-        # Определить категорию и собрать port_schemas через services.plugins (PluginCatalog)
+        # Определить категорию через PluginCatalog
         category = "utility"
-        port_schemas: list[PortSchema] | None = None
         spec = self._services.plugins.resolve(plugin_name)
         if spec is not None:
             category = spec.category
-            # PluginSpec хранит ports как tuple[PortSpec, ...] c direction
-            try:
-                schemas: list[PortSchema] = []
-                for port_spec in spec.ports:
-                    schemas.append(
-                        PortSchema(
-                            name=port_spec.name,
-                            direction=port_spec.direction,
-                            dtype=port_spec.dtype,
-                            optional=port_spec.optional,
-                        )
-                    )
-                port_schemas = schemas if schemas else None
-            except Exception:
-                port_schemas = None
 
-        old_topo, new_topo = self._model.add_process(name, plugin_name, category)
+        # Запомнить позицию ДО dispatch (reload читает gui_positions)
         self._gui_positions[name] = (x, y)
 
-        # ActionBus (legacy bridge, TODO Phase G (G.4): domain commands)
-        bus = self._action_bus
-        if bus:
-            from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+        # G.4.2: domain dispatch — AddProcess обязан нести плагин (иначе нода пустая)
+        cmd = AddProcess(
+            process_name=name,
+            plugins=(PluginInstance(plugin_name=plugin_name, category=category),),
+        )
+        try:
+            self._services.commands.dispatch(cmd)
+        except DomainError as exc:
+            logger.error("AddProcess отклонён: %s", exc)
+            self._gui_positions.pop(name, None)
+            return None
 
-            action = V2ActionBuilder.process_add(old_topo, new_topo, name)
-            bus.execute(action)
-        else:
-            # Без ActionBus — прямое обновление через TopologyRepository
-            from multiprocess_prototype.domain.entities.topology import Topology
-
-            self._services.topology.save(Topology.from_dict(new_topo))
-
-        # Обновить scene
-        if self._scene:
-            with self._block_signals():
-                node_data = NodeData(name, name, category, category, x, y)
-                self._scene.add_node(node_data, port_schemas=port_schemas)
-
+        # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
         return name
 
     def remove_selected(self, selected_node_ids: list[str]) -> None:
-        """Удалить выбранные ноды (включая display-узлы)."""
+        """Удалить выбранные ноды (включая display-узлы).
+
+        G.4.2: process-ноды → dispatch(RemoveProcess) (domain каскадит wires+displays).
+        G.4.2b: display-ноды временно остаются на legacy PipelineModel+save пути.
+        """
         # Множество известных display-узлов — чтобы развести process/display ветки
         display_node_ids = {d.get("node_id", "") for d in self._model.get_displays()}
 
         for node_id in selected_node_ids:
             is_display = node_id in display_node_ids
-
-            if is_display:
-                old_topo, new_topo = self._model.remove_display(node_id)
-            else:
-                old_topo, new_topo = self._model.remove_process(node_id)
-
             self._gui_positions.pop(node_id, None)
 
-            # ActionBus undo/redo поддержан только для process_remove (legacy bridge)
-            if not is_display:
-                bus = self._action_bus
-                if bus:
-                    from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+            if is_display:
+                # G.4.2b: display-путь временно legacy (см. phase-g.md)
+                old_topo, new_topo = self._model.remove_display(node_id)
+                from multiprocess_prototype.domain.entities.topology import Topology
 
-                    action = V2ActionBuilder.process_remove(old_topo, new_topo, node_id)
-                    bus.execute(action)
-
-            if self._scene:
-                with self._block_signals():
-                    self._scene.remove_node(node_id)
+                self._services.topology.save(Topology.from_dict(new_topo))
+                # Scene обновится из TopologyReplaced (store публикует при save)
+            else:
+                # G.4.2: process removal через domain dispatch
+                cmd = RemoveProcess(process_name=node_id)
+                try:
+                    self._services.commands.dispatch(cmd)
+                except DomainError as exc:
+                    logger.error("RemoveProcess отклонён: %s", exc)
+                # Scene обновится из _on_topology_replaced (синхронный)
 
     def add_wire(self, source: str, target: str, parent: "QWidget | None" = None) -> bool:
         """Добавить wire с валидацией совместимости портов.
 
-        Перед добавлением wire проверяет совместимость типов портов через
-        PluginRegistry.are_ports_compatible(). Если registry недоступен или
-        порты не найдены — graceful degradation (wire добавляется без блокировки).
+        G.4.2: process→process wire → dispatch(ConnectWire). Port-валидация (QMessageBox)
+        и guard дубликата сохраняются в presenter ДО dispatch.
+        G.4.2b: wire-to-display временно остаётся на legacy PipelineModel+save пути.
 
         Args:
             source: endpoint источника в формате "process.plugin.port"
@@ -429,30 +390,41 @@ class PipelinePresenter:
         Returns:
             True если wire создан, False если заблокирован.
         """
-        # --- Валидация совместимости портов ---
+        # --- Валидация совместимости портов (GUI-concern, остаётся в presenter) ---
         if not self._validate_wire_ports(source, target, parent):
             return False
 
+        is_display_target = target.split(".")[0] == "display"
+
+        if is_display_target:
+            # G.4.2b: display-путь временно legacy (см. phase-g.md)
+            try:
+                old_topo, new_topo = self._model.add_wire(source, target)
+            except ValueError as e:
+                logger.warning("Wire rejected (display legacy): %s", e)
+                return False
+            from multiprocess_prototype.domain.entities.topology import Topology
+
+            self._services.topology.save(Topology.from_dict(new_topo))
+            # Scene обновится из TopologyReplaced (store публикует при save)
+            return True
+
+        # G.4.2: process→process wire через domain dispatch
+        # Guard дубликата (domain не отвергает дубликаты, находка #5 аудита)
+        for w in self._model.get_wires():
+            if isinstance(w, dict) and w.get("source") == source and w.get("target") == target:
+                logger.warning("Wire %s -> %s уже существует (дубликат)", source, target)
+                return False
+
+        cmd = ConnectWire(source=source, target=target)
         try:
-            old_topo, new_topo = self._model.add_wire(source, target)
-        except ValueError as e:
-            logger.warning("Wire rejected: %s", e)
+            self._services.commands.dispatch(cmd)
+        except DomainError as exc:
+            # Цикл или dangling process → graceful return False, repo не мутирован
+            logger.warning("ConnectWire отклонён: %s", exc)
             return False
 
-        bus = self._action_bus
-        if bus:
-            from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-            action = V2ActionBuilder.wire_add(old_topo, new_topo, source, target)
-            bus.execute(action)
-
-        # Обновить scene
-        if self._scene:
-            with self._block_signals():
-                src_proc = source.split(".")[0]
-                tgt_proc = target.split(".")[0]
-                self._scene.add_edge(EdgeData(src_proc, tgt_proc, ""))
-
+        # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
         return True
 
     def _validate_wire_ports(
@@ -601,18 +573,14 @@ class PipelinePresenter:
         return True
 
     def on_node_moved(self, node_id: str, new_x: float, new_y: float) -> None:
-        """Обработчик перемещения ноды (для undo/redo через ActionBus)."""
+        """Обработчик перемещения ноды.
+
+        G.4.4: NODE_MOVE — GUI-only (позиции в _gui_positions/metadata),
+        не topology-domain. Остаётся на отдельном пути.
+        """
         if self._suppress:
             return
-        old_x, old_y = self._gui_positions.get(node_id, (0.0, 0.0))
         self._gui_positions[node_id] = (new_x, new_y)
-
-        bus = self._action_bus
-        if bus:
-            from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-            action = V2ActionBuilder.node_move(node_id, old_x, old_y, new_x, new_y)
-            bus.execute(action)
 
     # ------------------------------------------------------------------ #
     #  Topology sync                                                       #
@@ -624,6 +592,9 @@ class PipelinePresenter:
         TopologyReplaced несёт только reason, поэтому актуальную топологию тянем
         из repository (services.topology.load). Обновляет модель и scene с signal
         suppression.
+
+        G.4.2: после load_from_data поэлементно устанавливает port_schemas на нодах,
+        чтобы порты были на месте для wire-тяжения (находка #7 аудита).
         """
         if self._suppress:
             return
@@ -632,7 +603,39 @@ class PipelinePresenter:
             self._model.from_topology_dict(new_topology)
             if self._scene:
                 nodes, edges = self._topology_to_graph(new_topology)
-                self._scene.load_from_data(nodes, edges)
+                # G.4.2: load_from_data не поддерживает port_schemas, поэтому
+                # загружаем вручную: clear + add_node(port_schemas) + add_edge
+                self._load_scene_with_ports(nodes, edges)
+
+    def _load_scene_with_ports(
+        self,
+        nodes: list[NodeData],
+        edges: list[EdgeData],
+    ) -> None:
+        """Загрузить ноды с port_schemas и рёбра в scene.
+
+        G.4.2: замена scene.load_from_data(), которая не поддерживает port_schemas.
+        Для каждой ноды берёт port_schemas из _port_schemas_cache (заполненного
+        _topology_to_graph) и передаёт в scene.add_node.
+        """
+        if not self._scene:
+            return
+        from .graph.constants import GRID_SPACING_X, GRID_SPACING_Y
+
+        self._scene.clear_all()
+
+        # Авто-layout если координаты нулевые
+        need_layout = all(n.x == 0 and n.y == 0 for n in nodes)
+
+        for i, nd in enumerate(nodes):
+            if need_layout:
+                nd.x = (i % 4) * GRID_SPACING_X + 50
+                nd.y = (i // 4) * GRID_SPACING_Y + 50
+            ps = self._port_schemas_cache.get(nd.node_id)
+            self._scene.add_node(nd, port_schemas=ps)
+
+        for ed in edges:
+            self._scene.add_edge(ed)
 
     # ------------------------------------------------------------------ #
     #  Auto-layout                                                         #
@@ -684,9 +687,17 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def _topology_to_graph(self, topo_dict: dict) -> tuple[list[NodeData], list[EdgeData]]:
-        """Конвертировать topology dict → NodeData/EdgeData."""
+        """Конвертировать topology dict → NodeData/EdgeData.
+
+        G.4.2: реконструирует port_schemas из services.plugins.resolve() при reload,
+        чтобы ноды имели корректные порты после dispatch (находка #7 аудита).
+        port_schemas хранятся во внутреннем кэше _port_schemas_cache для передачи
+        в scene (load_from_data не поддерживает port_schemas напрямую, поэтому
+        порты устанавливаются поэлементно после load_from_data в _on_topology_replaced).
+        """
         nodes = []
         edges = []
+        self._port_schemas_cache: dict[str, list[PortSchema]] = {}
 
         processes = topo_dict.get("processes", [])
 
@@ -699,6 +710,7 @@ class PipelinePresenter:
                 plugins = getattr(proc, "plugins", [])
 
             category = "utility"
+            port_schemas: list[PortSchema] | None = None
             if plugins:
                 pname = (
                     plugins[0].get("plugin_name", "")
@@ -709,6 +721,25 @@ class PipelinePresenter:
                     spec = self._services.plugins.resolve(pname)
                     if spec is not None:
                         category = spec.category
+                        # G.4.2: реконструкция port_schemas из PluginCatalog
+                        try:
+                            schemas: list[PortSchema] = []
+                            for port_spec in spec.ports:
+                                schemas.append(
+                                    PortSchema(
+                                        name=port_spec.name,
+                                        direction=port_spec.direction,
+                                        dtype=port_spec.dtype,
+                                        optional=port_spec.optional,
+                                    )
+                                )
+                            port_schemas = schemas if schemas else None
+                        except Exception:
+                            port_schemas = None
+
+            # Кэшировать port_schemas для поэлементной установки после load_from_data
+            if port_schemas:
+                self._port_schemas_cache[name] = port_schemas
 
             # Восстановить позицию из gui_positions
             x, y = self._gui_positions.get(name, (0.0, 0.0))
