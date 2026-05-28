@@ -187,16 +187,35 @@ class _FakeDisplayEntry:
 
 
 class _FakeDisplayRegistry:
-    """Имитация DisplayRegistry с фиксированным набором дисплеев."""
+    """Имитация DisplayRegistry с CRUD-операциями (Phase F).
 
-    def __init__(self, entries: list[_FakeDisplayEntry]) -> None:
-        self._entries = {e.id: e for e in entries}
+    Поддерживает list/get/register/unregister/__contains__/persist.
+    persist() запоминает последний вызванный path для тест-проверки.
+    """
+
+    def __init__(self, entries: list[_FakeDisplayEntry] | None = None) -> None:
+        self._entries = {e.id: e for e in (entries or [])}
+        self.last_persist_path: object = None
 
     def list(self) -> list[_FakeDisplayEntry]:
         return list(self._entries.values())
 
     def get(self, display_id: str) -> _FakeDisplayEntry | None:
         return self._entries.get(display_id)
+
+    def register(self, entry: _FakeDisplayEntry) -> None:
+        if entry.id in self._entries:
+            raise ValueError(f"Display '{entry.id}' already registered")
+        self._entries[entry.id] = entry
+
+    def unregister(self, display_id: str) -> bool:
+        return self._entries.pop(display_id, None) is not None
+
+    def __contains__(self, display_id: str) -> bool:
+        return display_id in self._entries
+
+    def persist(self, path: object) -> None:
+        self.last_persist_path = path
 
 
 # ==============================================================================
@@ -714,8 +733,8 @@ class TestDisplayCatalogFromRegistry:
         assert resolved is not None
         assert entry.id == resolved.display_id
 
-    def test_display_catalog_metadata_contains_dimensions(self):
-        """Метаданные содержат width, height, format, fps_limit, ring_buffer_blocks."""
+    def test_display_catalog_first_class_fields(self):
+        """DisplaySpec содержит first-class поля width/height/format/fps_limit/ring_buffer_blocks."""
         entries = [
             _FakeDisplayEntry(
                 "main", "Main", width=1280, height=720, format="BGR", fps_limit=30.0, ring_buffer_blocks=3
@@ -725,14 +744,14 @@ class TestDisplayCatalogFromRegistry:
         spec = catalog.resolve("main")
 
         assert spec is not None
-        assert spec.metadata["width"] == 1280
-        assert spec.metadata["height"] == 720
-        assert spec.metadata["format"] == "BGR"
-        assert spec.metadata["fps_limit"] == 30.0
-        assert spec.metadata["ring_buffer_blocks"] == 3
+        assert spec.width == 1280
+        assert spec.height == 720
+        assert spec.format == "BGR"
+        assert spec.fps_limit == 30.0
+        assert spec.ring_buffer_blocks == 3
 
     def test_display_catalog_with_empty_registry_returns_empty(self):
-        """Пустой реестр → list_displays() возвращает пустой tuple."""
+        """Пустой реестр -> list_displays() возвращает пустой tuple."""
         catalog = self._make_adapter([])
         assert catalog.list_displays() == ()
 
@@ -751,6 +770,91 @@ class TestDisplayCatalogFromRegistry:
 
         with pytest.raises((AttributeError, TypeError)):
             spec.display_id = "changed"  # type: ignore[misc]
+
+    # ------------------------------------------------------------------ #
+    #  Phase F: write-методы (register/unregister/has/persist)             #
+    # ------------------------------------------------------------------ #
+
+    def test_display_catalog_register(self):
+        """register(spec) добавляет дисплей в registry."""
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        catalog = self._make_adapter([])
+        spec = DisplaySpec(display_id="new", display_name="New Display", width=800, height=600)
+        catalog.register(spec)
+
+        resolved = catalog.resolve("new")
+        assert resolved is not None
+        assert resolved.display_id == "new"
+        assert resolved.width == 800
+
+    def test_display_catalog_register_duplicate_raises(self):
+        """register() с дубликатом id бросает ValueError."""
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        catalog = self._make_adapter([_FakeDisplayEntry("existing", "Existing")])
+        spec = DisplaySpec(display_id="existing", display_name="Duplicate")
+
+        with pytest.raises(ValueError, match="already registered"):
+            catalog.register(spec)
+
+    def test_display_catalog_unregister(self):
+        """unregister() удаляет дисплей, возвращает True."""
+        catalog = self._make_adapter([_FakeDisplayEntry("d1", "Display 1")])
+
+        result = catalog.unregister("d1")
+        assert result is True
+        assert catalog.resolve("d1") is None
+
+    def test_display_catalog_unregister_unknown_returns_false(self):
+        """unregister() с неизвестным id возвращает False."""
+        catalog = self._make_adapter([])
+        assert catalog.unregister("unknown") is False
+
+    def test_display_catalog_has(self):
+        """has() возвращает True для существующего, False для нет."""
+        catalog = self._make_adapter([_FakeDisplayEntry("d1", "Display 1")])
+        assert catalog.has("d1") is True
+        assert catalog.has("unknown") is False
+
+    def test_display_catalog_persist(self):
+        """persist() делегирует registry.persist(yaml_path)."""
+        from pathlib import Path
+
+        registry = self._make_registry([_FakeDisplayEntry("d1", "D1")])
+        yaml_path = Path("/tmp/test_displays.yaml")
+        catalog = DisplayCatalogFromRegistry(registry, yaml_path=yaml_path)  # type: ignore[arg-type]
+        catalog.persist()
+
+        assert registry.last_persist_path == yaml_path
+
+    def test_display_catalog_spec_to_entry_roundtrip(self):
+        """Round-trip: spec -> entry -> spec сохраняет все поля."""
+        from multiprocess_prototype.adapters.catalogs.display_catalog import (
+            _entry_to_spec,
+            _spec_to_entry,
+        )
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        original = DisplaySpec(
+            display_id="rt",
+            display_name="Round-trip",
+            width=1920,
+            height=1080,
+            format="RGB",
+            fps_limit=60.0,
+            ring_buffer_blocks=5,
+        )
+        entry = _spec_to_entry(original)
+        back = _entry_to_spec(entry)
+
+        assert back.display_id == original.display_id
+        assert back.display_name == original.display_name
+        assert back.width == original.width
+        assert back.height == original.height
+        assert back.format == original.format
+        assert back.fps_limit == original.fps_limit
+        assert back.ring_buffer_blocks == original.ring_buffer_blocks
 
 
 # ==============================================================================

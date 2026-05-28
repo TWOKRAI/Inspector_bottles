@@ -84,8 +84,9 @@ def build_app_services(ctx: "AppContext") -> AppServices:
     # PluginCatalog: read-only реестр плагинов
     plugins = PluginCatalogFromRegistry(ctx.extras["plugin_registry"])
 
-    # DisplayCatalog: read-only реестр дисплеев
-    displays = DisplayCatalogFromRegistry(ctx.extras["display_registry"])
+    # DisplayCatalog: read+write реестр дисплеев (Phase F — writable store)
+    _displays_yaml = Path("multiprocess_prototype/backend/config/displays.yaml")
+    displays = DisplayCatalogFromRegistry(ctx.extras["display_registry"], yaml_path=_displays_yaml)
 
     # RecipeStore: CRUD-доступ к рецептам через RecipeManager
     recipe_manager = ctx.extras.get("recipe_manager")

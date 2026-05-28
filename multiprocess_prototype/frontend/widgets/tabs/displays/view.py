@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.display_module import DisplayEntry
+    from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
 
 
 @runtime_checkable
@@ -22,19 +22,19 @@ class IDisplaysView(Protocol):
     View никогда не вызывает бизнес-логику напрямую — только через presenter.
     """
 
-    def refresh_list(self, entries: "list[DisplayEntry]") -> None:
+    def refresh_list(self, specs: "list[DisplaySpec]") -> None:
         """Перестроить nav-список по новым записям реестра.
 
         Args:
-            entries: текущий список ``DisplayEntry`` из реестра.
+            specs: текущий список ``DisplaySpec`` из store.
         """
         ...
 
-    def show_entry(self, entry: "DisplayEntry | None") -> None:
+    def show_entry(self, spec: "DisplaySpec | None") -> None:
         """Заполнить форму данными записи или очистить при None.
 
         Args:
-            entry: запись дисплея или None для сброса формы.
+            spec: спецификация дисплея или None для сброса формы.
         """
         ...
 

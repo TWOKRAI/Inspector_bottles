@@ -145,18 +145,53 @@ del _s
 
 
 class FakeDisplayCatalog:
-    """In-memory DisplayCatalog с настраиваемым набором известных дисплеев."""
+    """In-memory DisplayCatalog (read+write CRUD store).
 
-    def __init__(self, known: set[str] | None = None) -> None:
-        self._known: set[str] = known or set()
+    Принимает начальный набор как:
+    - dict[str, DisplaySpec] — полный контроль (Phase F)
+    - set[str] — обратная совместимость с тестами Phase B-E (каждый id
+      становится DisplaySpec с display_name=id и дефолтными конфигурационными полями)
+
+    Оба варианта поддерживаются через единственный позиционный аргумент или
+    keyword ``specs=`` / ``known=``.
+    """
+
+    def __init__(
+        self,
+        specs: dict[str, DisplaySpec] | set[str] | None = None,
+        *,
+        known: set[str] | None = None,
+    ) -> None:
+        self._specs: dict[str, DisplaySpec] = {}
+        if specs is not None:
+            if isinstance(specs, set):
+                # Обратная совместимость: set[str] → dict[str, DisplaySpec]
+                self._specs = {d: DisplaySpec(display_id=d, display_name=d) for d in specs}
+            else:
+                self._specs = dict(specs)
+        elif known is not None:
+            # Обратная совместимость через keyword: set[str] → dict[str, DisplaySpec]
+            self._specs = {d: DisplaySpec(display_id=d, display_name=d) for d in known}
 
     def list_displays(self) -> tuple[DisplaySpec, ...]:
-        return tuple(DisplaySpec(display_id=d, display_name=d) for d in sorted(self._known))
+        return tuple(self._specs[k] for k in sorted(self._specs))
 
     def resolve(self, display_id: str) -> DisplaySpec | None:
-        if display_id in self._known:
-            return DisplaySpec(display_id=display_id, display_name=display_id)
-        return None
+        return self._specs.get(display_id)
+
+    def register(self, spec: DisplaySpec) -> None:
+        if spec.display_id in self._specs:
+            raise ValueError(f"Display '{spec.display_id}' already registered")
+        self._specs[spec.display_id] = spec
+
+    def unregister(self, display_id: str) -> bool:
+        return self._specs.pop(display_id, None) is not None
+
+    def has(self, display_id: str) -> bool:
+        return display_id in self._specs
+
+    def persist(self) -> None:
+        pass  # in-memory — no-op
 
 
 _d: DisplayCatalog = FakeDisplayCatalog()

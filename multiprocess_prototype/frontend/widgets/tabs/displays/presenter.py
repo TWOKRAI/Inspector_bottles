@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
 """DisplaysPresenter — бизнес-логика таба дисплеев (MVP).
 
-Pure Python, без Qt-импортов. Управляет CRUD над DisplayRegistry:
+Pure Python, без Qt-импортов. Управляет CRUD над DisplayCatalog (domain Protocol):
 - load() / on_select() / on_create() / on_delete() / on_duplicate() / on_open_preview()
 
-Персистентность — YAML через DisplayRegistry.persist(yaml_path).
+Персистентность — YAML через store.persist() (путь знает adapter).
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from multiprocess_framework.modules.display_module import DisplayEntry, DisplayRegistry
+from multiprocess_prototype.domain.protocols.display_catalog import (
+    DisplayCatalog,
+    DisplaySpec,
+)
 
 if TYPE_CHECKING:
     from .view import IDisplaysView
@@ -28,31 +30,27 @@ class DisplaysPresenter:
     View получает обновления только через методы IDisplaysView.
 
     Attributes:
-        _registry: реестр дисплеев (singleton DisplayRegistry).
+        _store: DisplayCatalog Protocol (read+write store).
         _view: ссылка на view (IDisplaysView protocol).
-        _yaml_path: путь к YAML для персистентности.
         _preview_callback: вызывается при on_open_preview (Task 4.7).
         _selected_id: текущий выбранный id дисплея.
     """
 
     def __init__(
         self,
-        registry: DisplayRegistry,
+        store: DisplayCatalog,
         view: "IDisplaysView",
-        yaml_path: Path,
-        preview_callback: Callable[[DisplayEntry], None] | None = None,
+        preview_callback: Callable[[DisplaySpec], None] | None = None,
     ) -> None:
         """Инициализировать presenter.
 
         Args:
-            registry: реестр дисплеев.
+            store: DisplayCatalog Protocol (read+write).
             view: реализация IDisplaysView.
-            yaml_path: путь к YAML-файлу для сохранения.
             preview_callback: опциональный callback для открытия превью (Task 4.7).
         """
-        self._registry = registry
+        self._store = store
         self._view = view
-        self._yaml_path = yaml_path
         self._preview_callback = preview_callback
         self._selected_id: str | None = None
 
@@ -61,12 +59,12 @@ class DisplaysPresenter:
     # ------------------------------------------------------------------ #
 
     def load(self) -> None:
-        """Загрузить дисплеи из реестра и обновить список в view.
+        """Загрузить дисплеи из store и обновить список в view.
 
-        Сбрасывает выбор (set_buttons_state → False).
+        Сбрасывает выбор (set_buttons_state -> False).
         """
-        entries = self._registry.list()
-        self._view.refresh_list(entries)
+        specs = list(self._store.list_displays())
+        self._view.refresh_list(specs)
         self._view.set_buttons_state(False)
         self._selected_id = None
 
@@ -85,8 +83,8 @@ class DisplaysPresenter:
             self._view.show_entry(None)
             self._view.set_buttons_state(False)
             return
-        entry = self._registry.get(display_id)
-        self._view.show_entry(entry)
+        spec = self._store.resolve(display_id)
+        self._view.show_entry(spec)
         self._view.set_buttons_state(True)
 
     # ------------------------------------------------------------------ #
@@ -96,7 +94,7 @@ class DisplaysPresenter:
     def on_create(self) -> None:
         """Создать новый дисплей из данных формы.
 
-        Читает view.get_form_data(), строит DisplayEntry, регистрирует,
+        Читает view.get_form_data(), строит DisplaySpec, регистрирует через store,
         сохраняет в YAML, обновляет список.
         При ValueError — показывает ошибку через view.show_error().
         """
@@ -108,9 +106,9 @@ class DisplaysPresenter:
             return
 
         try:
-            entry = DisplayEntry(
-                id=display_id,
-                name=data.get("name", display_id),
+            spec = DisplaySpec(
+                display_id=display_id,
+                display_name=data.get("name", display_id),
                 width=int(data.get("width", 1280)),
                 height=int(data.get("height", 720)),
                 format=str(data.get("format", "BGR")),
@@ -122,29 +120,29 @@ class DisplaysPresenter:
             return
 
         try:
-            self._registry.register(entry)
+            self._store.register(spec)
         except ValueError as exc:
             self._view.show_error(str(exc))
             return
 
         self._persist()
-        self._view.refresh_list(self._registry.list())
+        self._view.refresh_list(list(self._store.list_displays()))
         logger.info("DisplaysPresenter: создан дисплей '%s'", display_id)
 
     def on_delete(self, display_id: str) -> None:
-        """Удалить дисплей из реестра.
+        """Удалить дисплей из store.
 
         Args:
             display_id: id дисплея для удаления.
         """
-        removed = self._registry.unregister(display_id)
+        removed = self._store.unregister(display_id)
         if not removed:
             logger.warning("DisplaysPresenter: дисплей '%s' не найден для удаления", display_id)
             return
 
         self._persist()
         self._selected_id = None
-        self._view.refresh_list(self._registry.list())
+        self._view.refresh_list(list(self._store.list_displays()))
         self._view.show_entry(None)
         self._view.set_buttons_state(False)
         logger.info("DisplaysPresenter: удалён дисплей '%s'", display_id)
@@ -157,7 +155,7 @@ class DisplaysPresenter:
         Args:
             display_id: id исходного дисплея.
         """
-        source = self._registry.get(display_id)
+        source = self._store.resolve(display_id)
         if source is None:
             logger.warning("DisplaysPresenter: дисплей '%s' не найден для дублирования", display_id)
             return
@@ -165,9 +163,9 @@ class DisplaysPresenter:
         # Генерируем уникальный id с суффиксом _copy / _copy2 / ...
         new_id = self._generate_copy_id(display_id)
 
-        new_entry = DisplayEntry(
-            id=new_id,
-            name=f"{source.name} (копия)",
+        new_spec = DisplaySpec(
+            display_id=new_id,
+            display_name=f"{source.display_name} (копия)",
             width=source.width,
             height=source.height,
             format=source.format,
@@ -176,32 +174,29 @@ class DisplaysPresenter:
         )
 
         try:
-            self._registry.register(new_entry)
+            self._store.register(new_spec)
         except ValueError as exc:
             # Теоретически невозможно — id уже проверен, но на всякий случай
             self._view.show_error(str(exc))
             return
 
         self._persist()
-        self._view.refresh_list(self._registry.list())
-        logger.info("DisplaysPresenter: дублирован '%s' → '%s'", display_id, new_id)
+        self._view.refresh_list(list(self._store.list_displays()))
+        logger.info("DisplaysPresenter: дублирован '%s' -> '%s'", display_id, new_id)
 
     def on_open_preview(self, display_id: str) -> None:
         """Открыть превью канала дисплея.
 
-        В Phase 4 — заглушка: вызывает preview_callback если установлен,
-        иначе логирует. Реальное окно будет в Task 4.7.
-
         Args:
             display_id: id дисплея для превью.
         """
-        entry = self._registry.get(display_id)
-        if entry is None:
+        spec = self._store.resolve(display_id)
+        if spec is None:
             logger.warning("DisplaysPresenter: дисплей '%s' не найден для превью", display_id)
             return
 
         if self._preview_callback is not None:
-            self._preview_callback(entry)
+            self._preview_callback(spec)
         else:
             logger.info("DisplaysPresenter: открыть превью '%s' (заглушка Phase 4)", display_id)
 
@@ -221,19 +216,19 @@ class DisplaysPresenter:
             Первый свободный id с суффиксом _copy / _copy2 / ...
         """
         candidate = f"{source_id}_copy"
-        if candidate not in self._registry:
+        if not self._store.has(candidate):
             return candidate
 
         counter = 2
         while True:
             candidate = f"{source_id}_copy{counter}"
-            if candidate not in self._registry:
+            if not self._store.has(candidate):
                 return candidate
             counter += 1
 
     def _persist(self) -> None:
-        """Сохранить реестр в YAML. Логирует если yaml_path не задан."""
+        """Сохранить store в YAML. Логирует ошибку при исключении."""
         try:
-            self._registry.persist(self._yaml_path)
+            self._store.persist()
         except Exception as exc:
             logger.error("DisplaysPresenter: ошибка сохранения YAML: %s", exc)

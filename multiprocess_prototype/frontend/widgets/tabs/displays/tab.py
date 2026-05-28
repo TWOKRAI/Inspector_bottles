@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 """DisplaysTab v2 — CRUD-таб управления дисплеями (MVP pattern).
 
-Task E.6: мигрирован на AppServices DI. Принимает ``services: AppServices``.
-DisplayRegistry берётся через ``services.displays._registry`` bridge — DisplayCatalog
-Protocol покрывает только read-only list_displays/resolve (DisplaySpec), а presenter'у
-нужен полный CRUD + DisplayEntry (register/unregister/persist/__contains__).
-TODO Phase F: расширить DisplayCatalog до writable DisplayStore Protocol.
+Task E.6 + F.3: мигрирован на AppServices DI. Принимает ``services: AppServices``.
+DisplayCatalog Protocol (domain) покрывает полный read+write API (Phase F).
+Presenter получает ``store=services.displays`` без bridge.
 
 router_manager (превью SHM-канала) — runtime-объект вне AppServices, передаётся
 explicit-параметром (паттерн E.2/E.5).
@@ -39,7 +37,6 @@ explicit-параметром (паттерн E.2/E.5).
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -55,9 +52,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from multiprocess_framework.modules.display_module import DisplayEntry, DisplayRegistry
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
 )
@@ -72,9 +69,6 @@ logger = logging.getLogger(__name__)
 # Допустимые форматы пикселей
 _PIXEL_FORMATS = ["BGR", "RGB", "GRAY", "RGBA"]
 
-# Путь по умолчанию для персистентности дисплеев (совпадает с preload в app.py)
-_DEFAULT_YAML_PATH = Path("multiprocess_prototype/backend/config/displays.yaml")
-
 
 def _layout_factory() -> DiffScrollTabLayout:
     """Фабрика layout для DisplaysTab.
@@ -88,10 +82,10 @@ class DisplaysTab(BaseListNavTab):
     """Таб «Дисплеи» v2 — BaseListNavTab + MVP (DisplaysPresenter + IDisplaysView).
 
     Реализует IDisplaysView через structural subtyping:
-    ``isinstance(tab, IDisplaysView)`` → True без явного наследования.
+    ``isinstance(tab, IDisplaysView)`` -> True без явного наследования.
 
-    Левая панель: QListWidget с именами дисплеев из DisplayRegistry.
-    Правая панель: форма редактирования полей DisplayEntry.
+    Левая панель: QListWidget с именами дисплеев из DisplayCatalog.
+    Правая панель: форма редактирования полей DisplaySpec.
     Action-колонка: кнопки Создать / Удалить / Дублировать / Открыть превью.
     """
 
@@ -99,7 +93,6 @@ class DisplaysTab(BaseListNavTab):
         self,
         services: AppServices,
         *,
-        yaml_path: Path | None = None,
         router_manager: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -107,20 +100,11 @@ class DisplaysTab(BaseListNavTab):
 
         Args:
             services: типизированный DI-контейнер AppServices.
-            yaml_path: путь к YAML для персистентности (по умолчанию _DEFAULT_YAML_PATH).
             router_manager: RouterManager для превью SHM-канала (runtime-объект вне
                 AppServices, по умолчанию None — превью без подписки).
             parent: родительский виджет.
         """
         self._services = services
-        # TODO Phase F: DisplayCatalog Protocol покрывает только list_displays/resolve
-        # (read-only, DisplaySpec). Presenter'у нужен полный CRUD + DisplayEntry —
-        # берём реальный DisplayRegistry через bridge (паттерн E.5 plugins._registry).
-        registry = getattr(services.displays, "_registry", None)
-        if registry is None:
-            registry = DisplayRegistry()
-        self._registry: DisplayRegistry = registry
-        self._yaml_path = yaml_path if yaml_path is not None else _DEFAULT_YAML_PATH
         self._router_manager = router_manager
         self._selected_id: str | None = None
         # Индекс формы в content_stack (устанавливается после super().__init__)
@@ -145,11 +129,10 @@ class DisplaysTab(BaseListNavTab):
         # Список открытых окон превью (PreviewWindow) — предотвращаем GC
         self._preview_windows: list = []
 
-        # Presenter создаётся после setup (view уже готов)
+        # Presenter получает store=services.displays (DisplayCatalog Protocol)
         self._presenter = DisplaysPresenter(
-            registry=self._registry,
+            store=services.displays,
             view=self,
-            yaml_path=self._yaml_path,
             preview_callback=self._open_preview_window,
         )
         self._presenter.load()
@@ -206,14 +189,14 @@ class DisplaysTab(BaseListNavTab):
     #  IDisplaysView implementation                                        #
     # ------------------------------------------------------------------ #
 
-    def refresh_list(self, entries: list[DisplayEntry]) -> None:
-        """Перестроить nav-список по текущему состоянию реестра.
+    def refresh_list(self, specs: list[DisplaySpec]) -> None:
+        """Перестроить nav-список по текущему состоянию store.
 
         Очищает nav-список и заглушки в content_stack (не форму!),
-        добавляет каждый entry через add_item.
+        добавляет каждый spec через add_item.
 
         Args:
-            entries: список DisplayEntry из реестра.
+            specs: список DisplaySpec из store.
         """
         assert self._nav_widget is not None
 
@@ -242,24 +225,24 @@ class DisplaysTab(BaseListNavTab):
 
         self._nav_widget.blockSignals(False)
 
-        for entry in entries:
-            self.add_item(entry.id, entry.name)
+        for spec in specs:
+            self.add_item(spec.display_id, spec.display_name)
 
         # Сброс выбора после перестройки
         self._selected_id = None
 
-    def show_entry(self, entry: DisplayEntry | None) -> None:
+    def show_entry(self, spec: DisplaySpec | None) -> None:
         """Заполнить форму данными записи или очистить при None.
 
-        При entry=None — поля очищаются, id становится редактируемым
+        При spec=None — поля очищаются, id становится редактируемым
         (режим создания нового дисплея).
-        При entry!=None — поля заполняются, id становится read-only
+        При spec!=None — поля заполняются, id становится read-only
         (режим просмотра/редактирования существующего).
 
         Args:
-            entry: запись дисплея или None.
+            spec: спецификация дисплея или None.
         """
-        if entry is None:
+        if spec is None:
             self._id_edit.setReadOnly(False)
             self._id_edit.clear()
             self._name_edit.clear()
@@ -270,14 +253,14 @@ class DisplaysTab(BaseListNavTab):
             self._ring_spin.setValue(3)
         else:
             self._id_edit.setReadOnly(True)
-            self._id_edit.setText(entry.id)
-            self._name_edit.setText(entry.name)
-            self._width_spin.setValue(entry.width)
-            self._height_spin.setValue(entry.height)
-            fmt = entry.format if entry.format in _PIXEL_FORMATS else "BGR"
+            self._id_edit.setText(spec.display_id)
+            self._name_edit.setText(spec.display_name)
+            self._width_spin.setValue(spec.width)
+            self._height_spin.setValue(spec.height)
+            fmt = spec.format if spec.format in _PIXEL_FORMATS else "BGR"
             self._format_combo.setCurrentText(fmt)
-            self._fps_spin.setValue(entry.fps_limit)
-            self._ring_spin.setValue(entry.ring_buffer_blocks)
+            self._fps_spin.setValue(spec.fps_limit)
+            self._ring_spin.setValue(spec.ring_buffer_blocks)
 
     def set_buttons_state(self, has_selection: bool) -> None:
         """Включить/выключить кнопки мутации.
@@ -318,7 +301,7 @@ class DisplaysTab(BaseListNavTab):
     # ------------------------------------------------------------------ #
 
     def _build_form(self) -> None:
-        """Создать singleton-форму редактирования полей DisplayEntry.
+        """Создать singleton-форму редактирования полей DisplaySpec.
 
         Форма размещается в content_scroll через set_content_widget.
         Не привязана к content_stack — один виджет для всех записей.
@@ -427,7 +410,7 @@ class DisplaysTab(BaseListNavTab):
         self._tab_layout.set_action_widget(action_widget)
 
         # Permission gating: services.auth — AuthFacadeFromAuthState, реальный AuthState
-        # хранится в _state (паттерн E.4/E.5). Fake/тесты не имеют _state → None (no-op gate).
+        # хранится в _state (паттерн E.4/E.5). Fake/тесты не имеют _state -> None (no-op gate).
         auth_state = getattr(self._services.auth, "_state", None)
         install_permission_aware_enable(self._create_btn, "tabs.displays.edit", auth_state)
         install_permission_aware_enable(self._delete_btn, "tabs.displays.edit", auth_state)
@@ -460,21 +443,35 @@ class DisplaysTab(BaseListNavTab):
     #  Preview callback (Task 4.7)                                         #
     # ------------------------------------------------------------------ #
 
-    def _open_preview_window(self, entry: DisplayEntry) -> None:
+    def _open_preview_window(self, spec: DisplaySpec) -> None:
         """Открыть окно превью SHM-канала для дисплея.
 
         Вызывается из presenter через preview_callback.
-        router_manager берётся из explicit-параметра конструктора (None → без подписки).
+        router_manager берётся из explicit-параметра конструктора (None -> без подписки).
         Ссылка на окно сохраняется в ``_preview_windows`` для предотвращения GC.
 
+        open_for_display ожидает DisplayEntry (framework) — конвертируем spec -> entry
+        локально (tab — frontend-слой, может импортировать framework для превью).
+
         Args:
-            entry: конфигурация дисплея для превью.
+            spec: спецификация дисплея для превью.
         """
+        from multiprocess_framework.modules.display_module import DisplayEntry
         from multiprocess_prototype.frontend.widgets.displays import open_for_display
+
+        entry = DisplayEntry(
+            id=spec.display_id,
+            name=spec.display_name,
+            width=spec.width,
+            height=spec.height,
+            format=spec.format,
+            fps_limit=spec.fps_limit,
+            ring_buffer_blocks=spec.ring_buffer_blocks,
+        )
 
         window = open_for_display(entry, router_manager=self._router_manager, parent=None)
         # Сохраняем ссылку — без неё Qt удалит окно при GC
         self._preview_windows.append(window)
         # Подчищаем закрытые окна из списка
         self._preview_windows = [w for w in self._preview_windows if w.isVisible()]
-        logger.info("DisplaysTab: открыто превью '%s'", entry.id)
+        logger.info("DisplaysTab: открыто превью '%s'", spec.display_id)
