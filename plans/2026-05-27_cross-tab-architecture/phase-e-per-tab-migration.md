@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-e
 - **Дата:** 2026-05-28
-- **Статус:** E.1 DONE (APPROVED), E.2 READY (next), E.3–E.6 HIGH-LEVEL
+- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 READY (next), E.4–E.6 HIGH-LEVEL
 - **Ветка:** `refactor/cross-tab-architecture` (та же ветка что Phase A–D; sub-branch не нужен — D.5 Settings tab коммитился прямо в неё, и Pipeline аналогично; отдельные sub-branch'и создаются только если параллельная работа по нескольким табам одновременно, что исключено правилом «таб за заходом»)
 
 ---
@@ -38,9 +38,9 @@ Settings tab уже мигрирован в D.5 и служит образцом
 
 | Task | Tab | Файлов | Сложность | Assignee | Зависимости | Статус |
 |------|-----|--------|-----------|----------|-------------|--------|
-| **E.1** | Pipeline | ~14 | Senior+ | teamlead | D done | **READY (детализирован ниже)** |
-| **E.2** | Processes | ~3 | Middle | developer | E.1 approved | TBD после E.1 |
-| **E.3** | Recipes | ~5 | Middle | developer | E.2 | TBD |
+| **E.1** | Pipeline | ~14 | Senior+ | teamlead | D done | **DONE (APPROVED)** |
+| **E.2** | Processes | 6 | Middle | developer | E.1 approved | **DONE** |
+| **E.3** | Recipes | ~5 | Middle | developer | E.2 | READY (next) |
 | **E.4** | Services | ~4 | Middle | developer | E.3 | TBD |
 | **E.5** | Plugins | ~11 | Middle+ | developer | E.4 | TBD |
 | **E.6** | Displays | ~3 | Junior | developer | E.5 | TBD |
@@ -74,7 +74,7 @@ scene-reload с позициями узлов, undo/redo chain.
 
 Из [migration guide строки 267–286](../../docs/refactors/2026-05_phase_e_migration_guide.md):
 
-- [x] **Split ConfigStore decision** принят и задокументирован (Task E.1 review iteration 1): Pipeline только **читает** config через `services.config.get(...)` (topology, process_manager_proxy) — не пишет через `set()`. Текущий split (`Config(initial_data=dict(ctx.config))`) безопасен для E.1: read-only consumer не вызовет рассинхрон. **Открытый вопрос для E.4 Services:** Services tab будет мутировать config (lifecycle / overrides) — там должен быть shared backend. Решение перенесено на старт E.4.
+- [x] **Split ConfigStore decision** принят и задокументирован (Task E.1 review iteration 1): Pipeline только **читает** config через `services.config.get(...)` (topology, process_manager_proxy) — не пишет через `set()`. Текущий split (`Config(initial_data=dict(ctx.config))`) безопасен для E.1: read-only consumer не вызовет рассинхрон. **Открытый вопрос для E.4 Services:** Services tab будет мутировать config (lifecycle / overrides) — там должен быть shared backend. Решение перенесено на старт E.4. **E.2 Processes (2026-05-28):** split-вопрос не применим — Processes вообще не использует `services.config`, topology читается через `services.topology.load()` (TopologyRepository поверх holder, не config). Read-only consumer.
 - [ ] **ConfigStore `_firing: bool` guard** добавлен в `ConfigStore` impl — защита от бесконечной рекурсии при reactive chains (`set()` → subscriber.set() → ...). Добавить в том табе, который первым использует реактивные config-chains (ожидается E.3 Recipes или E.4 Services).
 - [ ] **InterfaceSection `ctx=None` graceful degradation** — кнопка «Обновить UI» логирует warning при `ctx=None`. Решено в рамках расширения какого-то Protocol (например `ProcessControlProtocol`) либо явно отложено в Phase G с обоснованием. Зафиксировать решение здесь.
 
@@ -105,9 +105,17 @@ scene-reload с позициями узлов, undo/redo chain.
 - **Qt-MCP smoke:** deferred to cumulative после E.6 (multiprocess архитектура — MCP не достучался до GUI процесса)
 - **TODO Phase F (8 items, все с явными комментариями в коде):** ActionBus→commands, RecipeManager raw dict, RegistersManager API, form_context, process_manager_proxy, AuthFacade.auth_state, PluginCatalog raw Ports, holder.on_changed→typed events (Phase G)
 
-### Phase E.2 — Processes tab [PENDING] (зависит от E.1 approval)
+### Phase E.2 — Processes tab [DONE] (2026-05-28, коммит `be462f59`)
 
 - **Module contract:** public-api-change
+- **Тесты:** 50 passed (processes), 624 passed (все табы — регрессий нет)
+- **Sentrux:** 7140 (−1 vs E.1 7141, уровень шума; acyclicity 10000 — новых циклов нет; гэп до baseline 7161 закроет Phase F при удалении bridges)
+- **Реальный объём legacy:** 5 ctx-обращений в presenter (config/extras topology, plugin_registry, topology_bridge, command_sender) + 2 в _panels (bindings) — план оценивал «1 + 2», audit был устаревшим
+- **Решения:**
+  - topology читается через `services.topology.load()` (domain Topology entity), **не** через `services.config` — в production topology живёт в `ctx.extras["topology"]`/holder, а `build_app_services` оборачивает только `ctx.config`; config-путь дал бы регрессию (пустой список процессов). Удалён extras-fallback (единый источник = TopologyRepository).
+  - category — через `services.plugins.resolve(name).category` (PluginCatalog Protocol), поведение сохранено.
+  - **Runtime-deps вне AppServices** (command_sender, topology_bridge, bindings) — explicit kwargs (паттерн Settings `auth_ctx`). `create(ctx)` извлекает их из ctx. TODO Phase G: вынести в live-runtime aggregate.
+- **TODO Phase F/G (3 items):** command_sender/topology_bridge → runtime aggregate (Phase G); topology_bridge accessor deprecated в create() bridge (Phase F удалит ctx); AuthFacade Protocol для permission gating (Phase F).
 
 ### Phase E.3 — Recipes tab [PENDING] (зависит от E.2)
 
@@ -262,10 +270,11 @@ scene-reload с позициями узлов, undo/redo chain.
 **Ожидаемый объём:** ~3 production-файла, ~1 test-файл. Простейший consumer — read-only topology.
 
 **Acceptance criteria (высокий уровень):**
-- [ ] `ProcessesTab.__init__(services: AppServices, *, parent=...)` без ctx
-- [ ] 0 legacy `ctx.plugin_registry()` / `ctx.topology_holder()` в production-коде
-- [ ] Все тесты зелёные, `make_test_app_services()` builder
-- [ ] Qt-MCP smoke: ProcessesTab рендерится без warnings
+- [x] `ProcessesTab.__init__(services: AppServices, *, ...)` без ctx (+ explicit runtime kwargs)
+- [x] 0 legacy `ctx.plugin_registry()` / `ctx.topology_holder()` в production-коде
+- [x] Все тесты зелёные (50 processes / 624 tabs), `make_processes_services()` builder поверх `make_test_app_services()`
+- [x] 0 DeprecationWarning из `_deprecated_extras` (`pytest -W always::DeprecationWarning`)
+- [ ] Qt-MCP smoke: ProcessesTab рендерится без warnings — **deferred to cumulative после E.6** (multiprocess: MCP не достучался до GUI-процесса, как в E.1)
 
 **Module contract:** public-api-change
 
