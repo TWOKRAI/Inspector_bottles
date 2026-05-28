@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** PLANNED (индекс G.0–G.6 + детальный G.0). G.1–G.6 детализируются по очереди (избегаем premature planning большого G.4).
+- **Статус:** G.0 DONE (2026-05-28, commit `ffeca3ba`); G.1–G.6 NOT DETAILED (детализируются по очереди, избегаем premature planning большого G.4).
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -93,7 +93,7 @@ G.1 typed events (ФУНДАМЕНТ) ──┬──> G.3 holder removal ──
 
 | Под-фаза | Описание | Scope | Зависит от | Статус |
 |---|---|---|---|---|
-| **G.0** | Quick-wins: RecipeEngine.deactivate(), удаление dead AdministrationSection, переквалификация 16 TODO, документирование bindings/RuntimeDeps | S (~10 файлов, мелкие) | — | **IN PROGRESS** |
+| **G.0** | Quick-wins: RecipeEngine.deactivate(), удаление dead AdministrationSection, переквалификация 16 TODO, документирование bindings/RuntimeDeps | S (~10 файлов, мелкие) | — | **DONE** (`ffeca3ba`) |
 | **G.1** | Typed events в production: подписать PipelinePresenter + TopologyBridge на EventBus; typed-метод в TopologyRepository Protocol (закрывает 🔴 `getattr(_holder)`) | M-L (5-8) | G.0 | NOT DETAILED |
 | **G.2** | RegistersBackend Protocol alignment: расширить Protocol, убрать 3 `_rm` getattr | M (4-5) | — | NOT DETAILED |
 | **G.3** | holder removal: активировать suppress_legacy_notify (F.1) / редуцировать-удалить TopologyHolder | M (3-4) | G.1 | NOT DETAILED |
@@ -254,13 +254,14 @@ bindings числится как Phase G долг. Снять неоднозна
 
 ---
 
-## G.0 cumulative acceptance + verification
+## G.0 cumulative acceptance + verification — ✅ DONE (2026-05-28, `ffeca3ba`)
 
-- [ ] `python -m pytest multiprocess_prototype/ multiprocess_framework/modules/state_store_module/recipes/` зелёные
-- [ ] `grep "TODO Phase F"` = 0; `grep "AdministrationSection"` = 0; `grep "_engine._active_name"` (prototype) = 0
-- [ ] `mcp__sentrux__check_rules` 9/9, acyclicity 10000
-- [ ] Commit(ы) с `Refs: plans/2026-05-27_cross-tab-architecture/phase-g.md`
-- [ ] Обновить master plan.md (G.0 DONE) + память при завершении волны
+- [x] `python -m pytest multiprocess_prototype/` + recipe_engine: **2025 passed, 3 skipped, 0 failed**
+- [x] `grep "TODO Phase F"` = 0; `grep "AdministrationSection"` = 0 (исходники); `grep "_engine._active_name"` (prototype) = 0
+- [x] `mcp__sentrux__check_rules` 9/9, 0 нарушений; quality **7136** (+1 vs F 7135)
+- [x] ruff clean на всех затронутых файлах
+- [x] Commit `ffeca3ba` с `Refs: phase-g.md`, `Layer: mixed`, `Why:`
+- [x] master plan.md (G → PLANNED, G.0 DONE) + память обновлены
 
 ---
 
