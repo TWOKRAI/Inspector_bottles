@@ -265,6 +265,54 @@ bindings числится как Phase G долг. Снять неоднозна
 
 ---
 
+## Wave 2 — G.1 (typed events foundation)
+
+Закрывает 🔴 silent-failure `getattr(services.topology, "_holder")` ([pipeline/presenter.py:72](../../multiprocess_prototype/frontend/widgets/tabs/pipeline/presenter.py#L72))
+и переводит scene-reload Pipeline на typed EventBus (`TopologyReplaced`), сохраняя поведение
+(полный refresh при замене топологии). Гранулярные события (`ProcessAdded`/`WireConnected` для
+инкрементального обновления вместо полной перерисовки) — **G.4** (когда ActionBus→commands начнёт их публиковать).
+
+**Архитектурные факты (audit):**
+- `TopologyRepository` Protocol намеренно минимален (load/save); подписки — через **EventBus** (решение phase-b). 🔴 закрываем через `services.events`, НЕ методом repo.
+- Production-путь мутаций: ActionBus handlers (`TopologyMutationHandler`/`RecipeApplyHandler`) → `holder.set_topology()`. `CommandDispatcher.dispatch()` и EventBus **без production-публикаторов**.
+- Поэтому publisher-мост `holder.on_changed → events.publish(TopologyReplaced)` ставится в composition root (app.py) — это ловит ВСЕ `set_topology` (включая ActionBus). consumer'ы переходят на `services.events.subscribe`.
+- `EventBus.subscribe` держит **сильную** ссылку на handler (не weakref) — подписка не умирает; `QtEventBus` публикует синхронно на main thread (сохраняется `_suppress`-guard семантика).
+- `TopologyReplaced(reason: str)` несёт только reason → handler тянет dict через `services.topology.load().to_dict()` (консистентно с F.2b, где presenter уже читает топологию из `services.topology.load()`).
+
+### Task G.1.1 — Publisher-мост + PipelinePresenter на EventBus
+
+**Level:** Senior (teamlead — трогает живой scene-reload Pipeline)
+**Goal:** presenter перестаёт читать `_holder` через getattr; подписывается на `TopologyReplaced` через
+`services.events`; app.py публикует `TopologyReplaced` при любом `holder.set_topology`.
+**Files:**
+- `frontend/app.py` — после `build_app_services` + создания `topology_holder`:
+  `topology_holder.on_changed(lambda _t: app_services.events.publish(TopologyReplaced(reason="topology_changed")))`
+  (тот же экземпляр `app_services.events`, что получает presenter).
+- `frontend/widgets/tabs/pipeline/presenter.py` — убрать `getattr(services.topology, "_holder", None)` + `on_changed` (72-74);
+  `self._topology_sub = services.events.subscribe(TopologyReplaced, self._on_topology_replaced)`;
+  переименовать `_on_topology_changed_external(new_topology: dict)` → `_on_topology_replaced(event: TopologyReplaced)`,
+  тянуть `new_topology = self._services.topology.load().to_dict()`, сохранить `_suppress`-guard + `_block_signals`.
+- `frontend/widgets/tabs/pipeline/tests/` (`_helpers.py` + presenter-тесты) — topology-change через `events.publish(TopologyReplaced(...))` (Fake/builder EventBus), НЕ `holder.on_changed`/getattr.
+
+**Acceptance:**
+- [ ] `grep 'getattr(services.topology, "_holder"' pipeline/` = 0
+- [ ] presenter подписан через `services.events`; scene reload срабатывает при `publish(TopologyReplaced)`
+- [ ] эквивалентность: `services.topology.load().to_dict()` даёт те же nodes/edges, что `holder.topology`
+- [ ] `pytest multiprocess_prototype/frontend/widgets/tabs/pipeline/` зелёные; sentrux 9/9
+- [ ] Commit с Refs phase-g.md, `Layer: prototype`
+
+**Out of scope:** TopologyBridge IPC sync (G.1.2); granular events ProcessAdded/WireConnected (G.4); удаление holder (G.3).
+**Edge cases:** пустая топология → load() даёт пустой Topology; `_suppress` во время собственных мутаций presenter'а — publish синхронный, guard срабатывает как раньше.
+
+### Task G.1.2 — TopologyBridge IPC sync на EventBus (перед G.3)
+
+**Level:** Middle+ — мигрировать `app.py:224` `topology_holder.on_changed(topology_bridge.on_topology_changed)`
+на `services.events.subscribe(TopologyReplaced, ...)` (bridge тянет dict из repo). После G.1.1+G.1.2 единственный
+подписчик `holder.on_changed` = publisher-мост → **G.3** заменяет хук на публикацию в преемнике `set_topology` и удаляет holder.
+NOT DETAILED (детализируется при подходе очереди).
+
+---
+
 ## Риски Phase G (общие)
 
 | Риск | Уровень | Митигация |

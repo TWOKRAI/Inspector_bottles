@@ -3,7 +3,7 @@
 Task E.1: мигрирован на AppServices DI. Принимает services: AppServices.
 ActionBus bridge оставлен через getattr(services.commands, "action_bus", ...)
 для undo/redo (ActionBus API не покрыт CommandDispatcher Protocol).
-TopologyHolder.on_changed оставлен как fallback — typed events в Phase G.
+Scene reload — через typed event TopologyReplaced (services.events), Phase G G.1.
 
 Координирует: PipelineModel (SSOT) + ActionBus/Commands + GraphScene + TopologyRepo.
 Signal suppression предотвращает циклы при programmatic update.
@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.events import TopologyReplaced
 
 from .graph.node_item import NodeData
 from .graph.edge_item import EdgeData
@@ -66,12 +67,10 @@ class PipelinePresenter:
         _bus_accessor = getattr(services.commands, "action_bus", None)
         self._action_bus = _bus_accessor() if callable(_bus_accessor) else None
 
-        # TODO Phase G: перейти на typed events (ProcessAdded, WireConnected и т.п.)
-        # Пока — TopologyRepository adapter может хранить ссылку на holder,
-        # подписываемся через getattr fallback для scene reload.
-        holder = getattr(services.topology, "_holder", None)
-        if holder is not None and hasattr(holder, "on_changed"):
-            holder.on_changed(self._on_topology_changed_external)
+        # Scene reload через typed EventBus (G.1): publisher-мост в app.py публикует
+        # TopologyReplaced при каждой замене топологии (ловит и ActionBus-мутации).
+        # Гранулярные события (ProcessAdded/WireConnected для инкрементального update) — G.4.
+        self._topology_sub = services.events.subscribe(TopologyReplaced, self._on_topology_replaced)
 
     def set_scene(self, scene: "GraphScene") -> None:
         """Привязать GraphScene для обновления визуализации."""
@@ -609,13 +608,16 @@ class PipelinePresenter:
     #  Topology sync                                                       #
     # ------------------------------------------------------------------ #
 
-    def _on_topology_changed_external(self, new_topology: dict) -> None:
-        """Callback от TopologyHolder — внешнее изменение topology.
+    def _on_topology_replaced(self, _event: "TopologyReplaced") -> None:
+        """Подписчик EventBus — топология заменена (полный refresh).
 
-        Обновляет модель и scene с signal suppression.
+        TopologyReplaced несёт только reason, поэтому актуальную топологию тянем
+        из repository (services.topology.load). Обновляет модель и scene с signal
+        suppression.
         """
         if self._suppress:
             return
+        new_topology = self._services.topology.load().to_dict()
         with self._block_signals():
             self._model.from_topology_dict(new_topology)
             if self._scene:

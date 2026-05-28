@@ -430,6 +430,15 @@ def run_gui(process: "GuiProcess") -> None:
         traceback.print_exc()
         sys.exit(1)
 
+    # 3h.1. G.1: publisher-мост legacy holder → typed EventBus.
+    # Любая замена topology (включая ActionBus-мутации через holder.set_topology)
+    # публикует TopologyReplaced — подписчики (PipelinePresenter) делают полный refresh
+    # через services.events, без прямого доступа к holder. Holder удаляется в G.3.
+    from multiprocess_prototype.domain.events import TopologyReplaced
+
+    _events_bus = ctx.app_services.events
+    topology_holder.on_changed(lambda _topo: _events_bus.publish(TopologyReplaced(reason="topology_changed")))
+
     # 4. Создать MainWindow
     window = MainWindow()
 

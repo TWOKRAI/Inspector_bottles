@@ -51,6 +51,7 @@ def make_pipeline_services(
     display_registry: Any = None,
     config_extra: dict[str, Any] | None = None,
     auth: FakeAuthFacade | None = None,
+    events: Any = None,
 ) -> AppServices:
     """Создать AppServices для pipeline-тестов.
 
@@ -74,6 +75,8 @@ def make_pipeline_services(
         display_registry: legacy DisplayRegistry.
         config_extra: дополнительные ключи для ConfigStore.
         auth: Fake AuthFacade (по умолчанию -- all_permissions=True).
+        events: EventBus для проверки typed-подписок (G.1). По умолчанию --
+            FakeEventBus (no-op publish); передай реальный EventBus для wiring-тестов.
     """
     topo = topology if topology is not None else dict(_DEFAULT_TOPOLOGY)
     config_data: dict[str, Any] = {"topology": topo}
@@ -120,6 +123,7 @@ def make_pipeline_services(
         displays=displays,
         auth=_auth,
         topology=topology_repo,
+        events=events,
     )
 
 

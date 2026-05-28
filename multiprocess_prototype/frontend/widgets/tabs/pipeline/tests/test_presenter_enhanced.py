@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from multiprocess_prototype.domain.entities import Topology
+from multiprocess_prototype.domain.event_bus import EventBus
+from multiprocess_prototype.domain.events import TopologyReplaced
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
 
@@ -197,38 +200,67 @@ class TestSignalSuppression:
             assert p.is_suppressed
         assert not p.is_suppressed
 
-    def test_on_topology_changed_external(self):
-        """Внешнее изменение topology обновляет модель."""
+    def test_on_topology_replaced(self):
+        """TopologyReplaced → handler тянет топологию из repo и обновляет модель."""
         services = make_pipeline_services(topology={"processes": [], "wires": []})
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        new_topo = {
-            "processes": [
-                {"process_name": "new_proc", "plugins": []},
-            ],
-            "wires": [],
-        }
-        p._on_topology_changed_external(new_topo)
+        # Меняем живой источник (repo), затем эмитим TopologyReplaced
+        services.topology.save(
+            Topology.from_dict(
+                {
+                    "processes": [{"process_name": "new_proc", "plugins": []}],
+                    "wires": [],
+                }
+            )
+        )
+        p._on_topology_replaced(TopologyReplaced(reason="test"))
 
         assert "new_proc" in p.model.get_process_names()
 
     def test_external_change_suppressed(self):
-        """Подавленный callback не обновляет модель."""
+        """Подавленный handler не обновляет модель (suppress guard)."""
         services = make_pipeline_services(topology={"processes": [], "wires": []})
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        with p._block_signals():
-            p._on_topology_changed_external(
+        services.topology.save(
+            Topology.from_dict(
                 {
                     "processes": [{"process_name": "x", "plugins": []}],
                     "wires": [],
                 }
             )
+        )
+        with p._block_signals():
+            p._on_topology_replaced(TopologyReplaced(reason="test"))
 
         # Модель не должна обновиться (suppress был активен)
         assert "x" not in p.model.get_process_names()
+
+    def test_topology_replaced_via_eventbus(self):
+        """Wiring: presenter подписан на TopologyReplaced через services.events.
+
+        Реальный EventBus: publish(TopologyReplaced) → handler presenter'а
+        срабатывает и тянет новую топологию из repo (проверяет саму подписку G.1).
+        """
+        bus = EventBus()
+        services = make_pipeline_services(topology={"processes": [], "wires": []}, events=bus)
+        p = PipelinePresenter(services)
+        p.load_topology_from_config()
+
+        services.topology.save(
+            Topology.from_dict(
+                {
+                    "processes": [{"process_name": "via_bus", "plugins": []}],
+                    "wires": [],
+                }
+            )
+        )
+        bus.publish(TopologyReplaced(reason="recipe_launch"))
+
+        assert "via_bus" in p.model.get_process_names()
 
 
 # ------------------------------------------------------------------ #
