@@ -115,23 +115,10 @@ class TestPhase15Smoke:
         assert action_bus is not None, "ActionBus создан"
         assert action_bus.can_undo() is False, "ActionBus пуст — undo недоступен"
 
-        # 9b. AppServices — собрать минимальный для TabFactory (Task F.9).
-        # Полный build_app_services(ctx) требует все extras (display_registry и т.п.),
-        # которые smoke-тест не инициализирует. Используем test builder с реальной
-        # topology и plugin catalog из шагов выше.
-        from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryFromHolder
-        from multiprocess_prototype.adapters import PluginCatalogFromRegistry
-        from multiprocess_prototype.domain.tests.conftest import make_test_app_services
-
-        _topo_repo = TopologyRepositoryFromHolder(holder)
-        _plugin_catalog = PluginCatalogFromRegistry(PluginRegistry)
-        ctx.app_services = make_test_app_services(
-            topology=_topo_repo,
-            plugins=_plugin_catalog,
-        )
-        assert ctx.app_services is not None, "AppServices собран для TabFactory"
-
         # 10. MainWindow + TabFactory — создание окна и всех табов
+        # Табы ленивые (LazyTabWidget) — create(services, runtime) вызывается только
+        # на showEvent, который в headless-тесте не наступает. Поэтому app_services
+        # здесь не разыменовывается; полный bootstrap проверяют per-tab create-тесты.
         window = MainWindow()
         qtbot.addWidget(window)
         window.set_action_bus(action_bus)
