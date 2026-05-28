@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-e
 - **Дата:** 2026-05-28
-- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 DONE, E.5 DONE, E.6 READY (last)
+- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 DONE, E.5 DONE, E.6 DONE — **Phase E ЗАВЕРШЕНА**
 - **Ветка:** `refactor/cross-tab-architecture` (та же ветка что Phase A–D; sub-branch не нужен — D.5 Settings tab коммитился прямо в неё, и Pipeline аналогично; отдельные sub-branch'и создаются только если параллельная работа по нескольким табам одновременно, что исключено правилом «таб за заходом»)
 
 ---
@@ -43,7 +43,7 @@ Settings tab уже мигрирован в D.5 и служит образцом
 | **E.3** | Recipes | 3 | Middle | developer | E.2 | **DONE** |
 | **E.4** | Services | 4 | Middle | developer | E.3 | **DONE** |
 | **E.5** | Plugins | 11 | Middle+ | developer | E.4 | **DONE** |
-| **E.6** | Displays | ~3 | Junior | developer | E.5 | READY (last) |
+| **E.6** | Displays | 3 | Junior | director | E.5 | **DONE** |
 
 **Почему Pipeline = Senior+:** 21 из 40 топологических чтений в кодовой базе. Пять слоёв
 взаимодействия: `tab.py` → `presenter.py` → `inspector/inspector_panel.py` → `palette/` → `telemetry/wire_metrics_controller.py`.
@@ -61,12 +61,12 @@ scene-reload с позициями узлов, undo/redo chain.
 
 После завершения E.6:
 
-- [ ] `grep -r "ctx\.extras\[" multiprocess_prototype/frontend/widgets/tabs/ --include="*.py"` → 0 результатов (или только явные `# TODO Phase F:` комментарии с обоснованием)
-- [ ] `python -m pytest multiprocess_prototype/frontend/widgets/tabs/ -W always::DeprecationWarning 2>&1 | grep "_deprecated_extras"` → 0 строк
-- [ ] Все 7 табов (Settings + 6 мигрированных) проходят Qt-MCP smoke: рендер без Qt warnings, базовые interactions (click toolbar, navigate nav)
-- [ ] Sentrux score ≥ baseline **7161/10000** (зафиксирован Phase D, коммит `94983ed2`)
-- [ ] 0 ad-hoc `MagicMock()` без spec в тест-файлах табов — везде `make_test_app_services()` builder из `multiprocess_prototype/domain/tests/_fakes.py`
-- [ ] Все checkbox'ы задач E.1–E.6 в этом файле отмечены `[x]` с хешами коммитов
+- [x] `grep -r "ctx\.extras\[" multiprocess_prototype/frontend/widgets/tabs/ --include="*.py"` → **0 результатов** в production-коде (2026-05-28)
+- [x] `python -m pytest multiprocess_prototype/frontend/widgets/tabs/ -W always::DeprecationWarning 2>&1 | grep "_deprecated_extras"` → **0 строк** (единственный warning — несвязанный `legacy_sync`)
+- [ ] Все 7 табов (Settings + 6 мигрированных) проходят Qt-MCP smoke — **deferred к ручной проверке перед merge в main:** multiprocess-архитектура (GUI в дочернем процессе) недостижима для MCP, подтверждено на E.1–E.5
+- [~] Sentrux score **7136/10000** vs baseline 7161 (−25): монотонный спад −1/таб от bridges (7141→7140→7139→7138→7137→7136). acyclicity **10000** (0 циклов), check_rules **9/9 pass**. Гэп закроет Phase F при удалении bridges и расширении Protocol'ов — **принято** (задокументировано в каждой задаче E.x)
+- [x] 0 ad-hoc `MagicMock()` без spec в тест-файлах табов — везде per-tab `make_*_services()` builder поверх `make_test_app_services()` из `_fakes.py` (presenter-тесты Displays/Recipes используют MagicMock для view-Protocol, что допустимо — это IDisplaysView mock, не AppServices)
+- [x] Все checkbox'ы задач E.1–E.6 отмечены `[x]`; хеши: E.1 `8566f994`+`e7bd3d97`, E.2 `be462f59`, E.3 `5f8c0a4e`, E.4 `27c72f64`, E.5 `62279a85`, E.6 — текущий коммит
 
 ---
 
@@ -154,9 +154,21 @@ scene-reload с позициями узлов, undo/redo chain.
 - **Прочее:** `form_context` → None (TODO Phase F, не покрыт Protocol); `auth` → `services.auth._state`; `action_bus` → `services.commands.action_bus` bridge; `log_warning` удалён (AppContext его не имел — всегда loguru). Sections: `build_plugin_sections(services, *, plugin_manager, open_sandbox_cb)` closures (паттерн Settings), кэш «Пути» по `id(services)`.
 - **Урок:** bridge vs Protocol зависит от полноты Protocol. E.4 Services → Protocol (адаптер покрывал API). E.5 Plugins → bridge (PluginSpec не покрывает plugin_class/register_classes). Оба honest; решает реальное покрытие.
 
-### Phase E.6 — Displays tab [PENDING] (зависит от E.5)
+### Phase E.6 — Displays tab [DONE] (2026-05-28)
 
 - **Module contract:** public-api-change
+- **Тесты:** 8 passed (displays, +1 bridge-тест), 624 passed (все табы — регрессий нет)
+- **Sentrux:** 7136 (−1 vs E.5 7137, шум; acyclicity 10000 — новых циклов нет; check_rules 9/9 pass)
+- **Объём:** 1 production-файл (`tab.py`) + новый `tests/_helpers.py` + `test_displays_tab.py`. Presenter **не тронут** (уже декомпозирован MVP, принимает `registry`/`yaml_path` напрямую — как E.3 Recipes).
+- **Реальный объём legacy (audit устарел):** план обещал «0 legacy ctx.xxx(), только create() factory». Фактически было 3 точки: `self._ctx.auth` (permission gating), `self._ctx.router_manager` (preview), + getattr-фолбэки в `create()`.
+- **Ключевое открытие:** AppContext **никогда** не имел атрибутов `display_registry` / `config_paths` / `router_manager` — старый `create()` всегда падал в фолбэки (singleton DisplayRegistry, `_DEFAULT_YAML_PATH`, router=None). Поэтому миграция **сохраняет точное production-поведение**: `create(ctx)` = `cls(ctx.app_services)`, yaml_path/router_manager → дефолты.
+- **Решения:**
+  - **Bridge, не Protocol** (как E.5 Plugins): DisplayCatalog Protocol покрывает только read-only `list_displays`/`resolve`→DisplaySpec, а presenter'у нужен полный CRUD + DisplayEntry (`register`/`unregister`/`persist`/`__contains__`). `registry = getattr(services.displays, "_registry", None)` с fallback на `DisplayRegistry()` singleton. TODO Phase F: writable DisplayStore Protocol.
+  - **router_manager** (preview SHM) — runtime-объект вне AppServices → explicit kwarg `router_manager=None` (паттерн E.2/E.5). В проде всегда был None.
+  - **yaml_path** — explicit kwarg с дефолтом `_DEFAULT_YAML_PATH` (совпадает с preload-путём в app.py).
+  - **auth** → `services.auth._state` (паттерн E.4/E.5); Fake не имеет `_state` → None (no-op gate).
+  - `BaseListNavTab(ctx=None)` (паттерн Settings/Recipes).
+- **Builder:** `make_displays_services(*, registry, auth)` навешивает реальный DisplayRegistry на FakeDisplayCatalog через `_registry` bridge.
 
 ---
 
@@ -401,11 +413,12 @@ scene-reload с позициями узлов, undo/redo chain.
 **Примечание:** grep показал 0 legacy `ctx.xxx()` вызовов в displays/. Основная работа — обновить `create()` factory: заменить `getattr(ctx, "display_registry", None)` на `services.displays` и `getattr(ctx, "config_paths", None)` на путь из `services.config` или явный параметр.
 
 **Acceptance criteria (высокий уровень):**
-- [ ] `DisplaysTab.__init__(registry, yaml_path, *, parent=...)` или `DisplaysTab(services: AppServices, *, parent=...)` — убрать `ctx=ctx` параметр
-- [ ] `create(ctx)` использует `ctx.app_services` а не `getattr` фолбэки
-- [ ] Все тесты зелёные
-- [ ] Qt-MCP smoke: displays CRUD без warnings
-- [ ] После E.6: запустить полный Phase E cumulative acceptance criteria (grep по всем табам, sentrux)
+- [x] `DisplaysTab(services: AppServices, *, yaml_path=None, router_manager=None, parent=...)` — `ctx` убран из сигнатуры
+- [x] `create(ctx)` использует `ctx.app_services` (assert), без `getattr`-фолбэков
+- [x] Все тесты зелёные (8 displays / 624 tabs), `make_displays_services()` builder
+- [x] 0 DeprecationWarning из `_deprecated_extras`
+- [ ] Qt-MCP smoke: displays CRUD — **deferred to ручная проверка перед merge** (multiprocess: MCP не достучался до GUI-процесса, как E.1–E.5)
+- [x] После E.6: запущен Phase E cumulative acceptance (grep по всем табам = 0, sentrux 7136, check_rules 9/9)
 
 **Module contract:** public-api-change
 
