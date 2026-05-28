@@ -601,10 +601,22 @@ AuthFacade Protocol покрывает `has_permission`/`current_user`, но gat
 **Goal:** Поднять формат рецептов до v3, убрав поддержку устаревшего live-формата `source`/`display`
 в `display_bindings` (нормализованный `node_id`/`display_id`), мигрировать существующий YAML.
 **Context:** Q2 Phase C + recipe.py TODO Phase F (стр. 16, 66) + test_entities_roundtrip.py:143.
-`Recipe.from_dict()` сейчас принимает ОБА формата через `_normalize_display_binding()`. Только
-`demo_webcam_split_merge.yaml:47-50` использует `source`/`display` для display_bindings.
+`Recipe.from_dict()` сейчас принимает ОБА формата через `_normalize_display_binding()`.
+
+> **🔴 НАХОДКА Director'а (2026-05-28, при старте F.8): F.8 БОЛЬШЕ планового — это полноценная
+> миграция формата, а не правка одного YAML.** `source/display` производит И потребляет
+> **`multiprocess_prototype/frontend/widgets/tabs/pipeline/io.py`** — `graph_to_blueprint()` ПИШЕТ
+> `display_bindings` как `[{"source":..., "display":...}]` (строки 50,80), `blueprint_to_graph()`
+> ЧИТАЕТ их (строки 134,202). Это рабочий формат сериализации **pipeline ↔ recipe round-trip**, не
+> только demo-yaml. Hard-cut в domain БЕЗ миграции io.py сломает цикл: pipeline-save (F.4 `save_raw`
+> пишет `bindings` из `graph_to_blueprint`) → recipe raw dict → `Recipe.from_dict` (без нормализации)
+> потеряет привязки. Два потребителя формата: (1) io.py raw round-trip, (2) domain Recipe entity.
+> **F.8 должна мигрировать io.py (producer+consumer) КОГЕРЕНТНО с domain + yaml**, иначе регрессия
+> recipe activation. Тщательно тестировать save→reload→apply. Оценка пересмотрена: **Middle+ → Senior**.
 
 **Files:**
+- `multiprocess_prototype/frontend/widgets/tabs/pipeline/io.py` — **graph_to_blueprint() писать
+  `node_id`/`display_id`; blueprint_to_graph() читать `node_id`/`display_id`** (главный producer/consumer)
 - `multiprocess_prototype/recipes/demo_webcam_split_merge.yaml` — мигрировать display_bindings
   `source/display` → `node_id/display_id`, поднять `version: 2` → `version: 3`
 - `multiprocess_prototype/domain/entities/recipe.py:59-79` — удалить `_normalize_display_binding`
@@ -613,6 +625,7 @@ AuthFacade Protocol покрывает `has_permission`/`current_user`, но gat
 - `multiprocess_prototype/domain/tests/test_entities_roundtrip.py:137-166` — обновить тест
   (live-формат больше не нормализуется ИЛИ тест на отказ)
 - `multiprocess_prototype/adapters/stores/recipe_store.py` — write пишет v3 формат
+- pipeline тесты round-trip (`test_yaml_positions`, save/launch recipe) — проверить формат bindings
 
 **Steps:**
 1. **ВНИМАНИЕ:** `source`/`display` в display_bindings ≠ wire `source` в topology. Только
