@@ -1,8 +1,6 @@
-"""Тесты для PluginsTab."""
+"""Тесты для PluginsTab (Task E.5: AppServices DI)."""
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,6 +8,8 @@ from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 from multiprocess_prototype.frontend.widgets.tabs.plugins.tab import PluginsTab
 from multiprocess_prototype.frontend.widgets.tabs.plugins.presenter import PluginsPresenter
 from multiprocess_prototype.frontend.widgets.tabs.plugins.detail_panels import PluginInfoCard
+
+from ._helpers import _StubPluginsCtx, make_plugins_services
 
 
 class _MockEntry:
@@ -50,69 +50,55 @@ class _MockRegistry:
         return self._entries
 
 
-def _make_mock_ctx(entries: list[_MockEntry] | None = None) -> MagicMock:
+def _default_entries() -> list[_MockEntry]:
+    return [
+        _MockEntry("color_mask", "processing", "Цветовая маска", register_classes=["FakeReg"]),
+        _MockEntry("grayscale", "processing", "Чёрно-белое"),
+        _MockEntry("capture", "source", "Захват камеры"),
+    ]
+
+
+def _make_services(entries: list[_MockEntry] | None = None):
+    """AppServices с raw PluginRegistry через bridge."""
     if entries is None:
-        entries = [
-            _MockEntry("color_mask", "processing", "Цветовая маска", register_classes=["FakeReg"]),
-            _MockEntry("grayscale", "processing", "Чёрно-белое"),
-            _MockEntry("capture", "source", "Захват камеры"),
-        ]
-
-    registry = _MockRegistry(entries)
-
-    ctx = MagicMock()
-    ctx.plugin_registry.return_value = registry
-    ctx.registers_manager.return_value = None  # нет RegistersManager в тестах
-    ctx.config = {}
-    ctx.extras = {}
-    ctx.bindings.return_value = None
-    # action_bus()/form_context() возвращают None → отключают undo/redo wiring
-    # и binding-aware builders (тогда RegisterView идёт по legacy-пути).
-    ctx.action_bus.return_value = None
-    ctx.form_context.return_value = None
-    return ctx
+        entries = _default_entries()
+    return make_plugins_services(registry=_MockRegistry(entries))
 
 
 class TestPluginsPresenter:
     def test_list_plugins(self) -> None:
-        ctx = _make_mock_ctx()
-        p = PluginsPresenter(ctx)
+        p = PluginsPresenter(_make_services())
         items = p.list_plugins()
         assert len(items) == 3
         names = [item[0] for item in items]
         assert "color_mask" in names
 
     def test_get_categories(self) -> None:
-        ctx = _make_mock_ctx()
-        p = PluginsPresenter(ctx)
+        p = PluginsPresenter(_make_services())
         cats = p.get_categories()
         assert "processing" in cats
         assert "source" in cats
 
     def test_get_plugin_info_with_registers(self) -> None:
-        ctx = _make_mock_ctx()
-        p = PluginsPresenter(ctx)
+        p = PluginsPresenter(_make_services())
         info = p.get_plugin_info("color_mask")
         assert info["name"] == "color_mask"
         assert info["has_registers"] is True
 
     def test_get_plugin_info_without_registers(self) -> None:
-        ctx = _make_mock_ctx()
-        p = PluginsPresenter(ctx)
+        p = PluginsPresenter(_make_services())
         info = p.get_plugin_info("grayscale")
         assert info["has_registers"] is False
 
     def test_get_plugin_info_unknown(self) -> None:
-        ctx = _make_mock_ctx()
-        p = PluginsPresenter(ctx)
+        p = PluginsPresenter(_make_services())
         info = p.get_plugin_info("nonexistent")
         assert info["name"] == "nonexistent"
         assert info["has_registers"] is False
 
     def test_no_registry(self) -> None:
-        ctx = MagicMock()
-        ctx.plugin_registry.return_value = None
-        p = PluginsPresenter(ctx)
+        # registry=None → services.plugins без _registry bridge → presenter._registry=None
+        p = PluginsPresenter(make_plugins_services(registry=None))
         assert p.list_plugins() == []
         assert p.get_categories() == []
 
@@ -174,14 +160,12 @@ def _visible_leaf_keys(tab: PluginsTab) -> list[str]:
 
 class TestPluginsTab:
     def test_create(self, qtbot: pytest.fixture) -> None:
-        ctx = _make_mock_ctx()
-        tab = PluginsTab.create(ctx)
+        tab = PluginsTab.create(_StubPluginsCtx(_make_services()))
         qtbot.addWidget(tab)
         assert tab is not None
 
     def test_plugins_listed_in_tree(self, qtbot: pytest.fixture) -> None:
-        ctx = _make_mock_ctx()
-        tab = PluginsTab(ctx)
+        tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
         # В дереве должны быть 3 плагина (под их категориями).
         assert sorted(_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
@@ -190,16 +174,14 @@ class TestPluginsTab:
         assert tab._tree_nav.topLevelItemCount() == 3
 
     def test_empty_registry(self, qtbot: pytest.fixture) -> None:
-        ctx = _make_mock_ctx(entries=[])
-        tab = PluginsTab(ctx)
+        tab = PluginsTab(_make_services(entries=[]))
         qtbot.addWidget(tab)
         # Нет плагинов — остаётся только секция «Пути» (корневая, Phase 2).
         assert tab._tree_nav.topLevelItemCount() == 1
 
     def test_lazy_section_created_on_select(self, qtbot: pytest.fixture) -> None:
         # При программном выборе плагина презентер строит секцию через factory.
-        ctx = _make_mock_ctx()
-        tab = PluginsTab(ctx)
+        tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
         # До выбора плагина — секция color_mask ещё не создана (lazy).
         tab.select_tree_key("color_mask")
@@ -209,8 +191,7 @@ class TestPluginsTab:
     def test_no_register_manager_fallback_to_info_card(self, qtbot: pytest.fixture) -> None:
         # color_mask имеет has_registers=True, но registers_manager=None →
         # fields пусты, должен сработать fallback на PluginInfoCard.
-        ctx = _make_mock_ctx()
-        tab = PluginsTab(ctx)
+        tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
         tab.select_tree_key("color_mask")
         idx = tab.presenter._page_index["color_mask"]  # type: ignore[attr-defined]
@@ -218,8 +199,7 @@ class TestPluginsTab:
         assert isinstance(widget, PluginInfoCard)
 
     def test_search_filter(self, qtbot: pytest.fixture) -> None:
-        ctx = _make_mock_ctx()
-        tab = PluginsTab(ctx)
+        tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
         # До фильтра все плагины видимы.
         assert sorted(_visible_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
@@ -234,8 +214,7 @@ class TestPluginsTab:
         assert sorted(_visible_leaf_keys(tab)) == ["capture", "color_mask", "grayscale"]
 
     def test_view_mode_toggle_switches_to_table(self, qtbot: pytest.fixture) -> None:
-        ctx = _make_mock_ctx()
-        tab = PluginsTab(ctx)
+        tab = PluginsTab(_make_services())
         qtbot.addWidget(tab)
         # По умолчанию — Cards (content_stack показывает страницу плагина/категории).
         cards_idx = tab._content_stack.currentIndex()
@@ -247,6 +226,4 @@ class TestPluginsTab:
         # Возврат в Cards — содержимое не на table_idx.
         tab._on_view_mode_changed(ViewMode.CARDS.value)
         assert tab._content_stack.currentIndex() != tab._table_idx
-        # При наличии выбранного элемента — должны вернуться на его страницу
-        # (или хотя бы не остаться на table); проверка через cards_idx излишне строга.
         _ = cards_idx

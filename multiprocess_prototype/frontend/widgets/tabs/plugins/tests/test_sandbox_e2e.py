@@ -18,6 +18,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from ._helpers import make_plugins_services
+
 
 # ---------------------------------------------------------------------------
 # Вспомогательные моки (аналог test_sandbox_presenter.py / test_sandbox_widget.py)
@@ -63,18 +65,9 @@ class _MockRegistry:
         return list(self._entries.values())
 
 
-def _make_ctx(registry=None, service_registry=None) -> MagicMock:
-    """Собрать минимальный mock AppContext."""
-    ctx = MagicMock()
-    ctx.plugin_registry.return_value = registry
-    ctx.service_registry.return_value = service_registry
-    ctx.registers_manager.return_value = None
-    ctx.config = {}
-    ctx.extras = {}
-    ctx.bindings.return_value = None
-    ctx.action_bus.return_value = None
-    ctx.form_context.return_value = None
-    return ctx
+def _make_ctx(registry=None, service_registry=None):
+    """AppServices с raw PluginRegistry / ServiceRegistry через bridge."""
+    return make_plugins_services(registry=registry, service_registry=service_registry)
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +354,7 @@ class TestSandboxWidgetApplyGrayscale:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         presenter = SandboxPresenter(ctx_with_real_registry)
-        widget = PluginSandboxWidget(presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Устанавливаем кадр напрямую (минуя QFileDialog)
@@ -401,7 +394,7 @@ class TestSandboxWidgetApplyGrayscale:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         presenter = SandboxPresenter(ctx_with_real_registry)
-        widget = PluginSandboxWidget(presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         widget._current_frame = minimal_bgr_frame.copy()
@@ -440,7 +433,7 @@ class TestSandboxNoErrorCrash:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         presenter = SandboxPresenter(ctx_with_real_registry)
-        widget = PluginSandboxWidget(presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Изначально error label скрыт
@@ -463,7 +456,7 @@ class TestSandboxNoErrorCrash:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         presenter = SandboxPresenter(ctx_with_real_registry)
-        widget = PluginSandboxWidget(presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         msg = "Не удалось прочитать изображение — файл повреждён"
@@ -482,7 +475,7 @@ class TestSandboxNoErrorCrash:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         presenter = SandboxPresenter(ctx_with_real_registry)
-        widget = PluginSandboxWidget(presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Показываем ошибку

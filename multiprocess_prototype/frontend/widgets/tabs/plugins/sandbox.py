@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
+    from multiprocess_prototype.domain.app_services import AppServices
     from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import (
         SandboxPresenter,
     )
@@ -202,7 +203,7 @@ class PluginSandboxWidget(QWidget):
     Args:
         presenter: SandboxPresenter — бизнес-логика sandbox.
         plugin_name: имя плагина для передачи в presenter.run_once().
-        ctx: AppContext для доступа к service_registry (опционально).
+        services: AppServices для доступа к registry/service_registry (опционально).
         parent: родительский виджет (опционально).
     """
 
@@ -210,13 +211,16 @@ class PluginSandboxWidget(QWidget):
         self,
         presenter: "SandboxPresenter",
         plugin_name: str,
-        ctx: Any = None,
+        services: "AppServices | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
         self._plugin_name = plugin_name
-        self._ctx = ctx
+        # TODO Phase F: PluginCatalog/ServiceManager Protocol не покрывают
+        # register_classes / service entry (status, get_current_frame) — raw bridge.
+        self._registry = getattr(services.plugins, "_registry", None) if services is not None else None
+        self._svc_registry = getattr(services.services, "_registry", None) if services is not None else None
         self._current_frame: np.ndarray | None = None  # текущий загруженный кадр
 
         # Словарь QSpinBox/QDoubleSpinBox: field_name → widget
@@ -404,13 +408,11 @@ class PluginSandboxWidget(QWidget):
         Returns:
             Класс register_class (Pydantic model) или None.
         """
-        if self._ctx is None:
+        if self._registry is None:
             return None
 
         try:
-            registry = self._ctx.plugin_registry()
-            if registry is None:
-                return None
+            registry = self._registry
             entry = registry.get(self._plugin_name)
             if entry is None:
                 return None
@@ -473,13 +475,10 @@ class PluginSandboxWidget(QWidget):
         Returns:
             True если сервис доступен и статус "running".
         """
-        if self._ctx is None:
+        if self._svc_registry is None:
             return False
         try:
-            svc_registry = self._ctx.service_registry()
-            if svc_registry is None:
-                return False
-            svc = svc_registry.get("webcam_camera")
+            svc = self._svc_registry.get("webcam_camera")
             if svc is None:
                 return False
             status = getattr(svc, "status", "stopped")
@@ -529,17 +528,15 @@ class PluginSandboxWidget(QWidget):
 
     def _on_webcam_snapshot(self) -> None:
         """Захватить кадр с веб-камеры через WebcamCameraService."""
-        if self._ctx is None:
-            self.show_error("AppContext недоступен")
+        if self._svc_registry is None:
+            self.show_error("Сервисы недоступны")
             return
 
         frame = None
         try:
-            svc_registry = self._ctx.service_registry()
-            if svc_registry is not None:
-                svc = svc_registry.get("webcam_camera")
-                if svc is not None and hasattr(svc, "get_current_frame"):
-                    frame = svc.get_current_frame()
+            svc = self._svc_registry.get("webcam_camera")
+            if svc is not None and hasattr(svc, "get_current_frame"):
+                frame = svc.get_current_frame()
         except Exception:  # noqa: BLE001  # nosec B110 — frame=None уже обработан ниже
             pass
 

@@ -10,25 +10,17 @@ import pytest
 from multiprocess_prototype.frontend.widgets.tabs.plugins.paths_subtab import PathsSubtabWidget
 from multiprocess_prototype.frontend.widgets.tabs.plugins.presenter import PluginsPresenter
 
+from ._helpers import make_plugins_services
+
 
 # ------------------------------------------------------------------ #
 #  Вспомогательные утилиты                                            #
 # ------------------------------------------------------------------ #
 
 
-def _make_mock_ctx() -> MagicMock:
-    """Создать минимальный mock AppContext для тестов PathsSubtabWidget."""
-    ctx = MagicMock()
-    ctx.plugin_registry.return_value = None
-    ctx.registers_manager.return_value = None
-    ctx.config = {}
-    ctx.extras = {}
-    ctx.bindings.return_value = None
-    ctx.action_bus.return_value = None
-    ctx.form_context.return_value = None
-    # По умолчанию plugin_manager возвращает None
-    ctx.plugin_manager.return_value = None
-    return ctx
+def _make_presenter(plugin_manager: MagicMock | None = None) -> PluginsPresenter:
+    """PluginsPresenter с plugin_manager (runtime dep) поверх AppServices."""
+    return PluginsPresenter(make_plugins_services(), plugin_manager=plugin_manager)
 
 
 def _make_mock_plugin_manager(plugin_paths: list[Path] | None = None) -> MagicMock:
@@ -45,11 +37,7 @@ def _make_mock_plugin_manager(plugin_paths: list[Path] | None = None) -> MagicMo
 
 def test_paths_subtab_creates_without_plugin_manager(qtbot: pytest.fixture) -> None:
     """Виджет создаётся без ошибок, список пустой, если PluginManager == None."""
-    ctx = _make_mock_ctx()
-    # plugin_manager() явно возвращает None
-    ctx.plugin_manager.return_value = None
-
-    widget = PathsSubtabWidget(PluginsPresenter(ctx))
+    widget = PathsSubtabWidget(_make_presenter(plugin_manager=None))
     qtbot.addWidget(widget)
 
     # Виджет создан, список путей пустой
@@ -58,11 +46,9 @@ def test_paths_subtab_creates_without_plugin_manager(qtbot: pytest.fixture) -> N
 
 def test_paths_subtab_shows_paths_from_manager(qtbot: pytest.fixture) -> None:
     """Список заполняется путями из PluginManager.plugin_paths."""
-    ctx = _make_mock_ctx()
     pm = _make_mock_plugin_manager(plugin_paths=[Path("/test/Plugins")])
-    ctx.plugin_manager.return_value = pm
 
-    widget = PathsSubtabWidget(PluginsPresenter(ctx))
+    widget = PathsSubtabWidget(_make_presenter(plugin_manager=pm))
     qtbot.addWidget(widget)
 
     # Ровно один элемент
@@ -76,8 +62,6 @@ def test_paths_subtab_shows_paths_from_manager(qtbot: pytest.fixture) -> None:
 
 def test_rescan_updates_status(qtbot: pytest.fixture) -> None:
     """После _on_rescan() статус-строка содержит количество загруженных плагинов."""
-    ctx = _make_mock_ctx()
-
     # Создаём mock результата rescan
     rescan_result = MagicMock()
     rescan_result.loaded = ["p1"]
@@ -87,9 +71,8 @@ def test_rescan_updates_status(qtbot: pytest.fixture) -> None:
     pm = _make_mock_plugin_manager()
     pm.rescan.return_value = rescan_result
     pm.plugin_paths = []
-    ctx.plugin_manager.return_value = pm
 
-    widget = PathsSubtabWidget(PluginsPresenter(ctx))
+    widget = PathsSubtabWidget(_make_presenter(plugin_manager=pm))
     qtbot.addWidget(widget)
 
     # Вызываем rescan программно
@@ -102,8 +85,6 @@ def test_rescan_updates_status(qtbot: pytest.fixture) -> None:
 
 def test_catalog_updated_emitted_on_rescan(qtbot: pytest.fixture) -> None:
     """После _on_rescan() сигнал catalog_updated emit'ится."""
-    ctx = _make_mock_ctx()
-
     # Настраиваем mock rescan — возвращает корректный объект
     rescan_result = MagicMock()
     rescan_result.loaded = []
@@ -113,9 +94,8 @@ def test_catalog_updated_emitted_on_rescan(qtbot: pytest.fixture) -> None:
     pm = _make_mock_plugin_manager()
     pm.rescan.return_value = rescan_result
     pm.plugin_paths = []
-    ctx.plugin_manager.return_value = pm
 
-    widget = PathsSubtabWidget(PluginsPresenter(ctx))
+    widget = PathsSubtabWidget(_make_presenter(plugin_manager=pm))
     qtbot.addWidget(widget)
 
     # Ожидаем сигнал catalog_updated при вызове _on_rescan()

@@ -20,6 +20,8 @@ from multiprocess_prototype.frontend.widgets.tabs.plugins._sections import (
 from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 from multiprocess_prototype.frontend.widgets.tabs.plugins.tab import PluginsTab
 
+from ._helpers import make_plugins_services
+
 
 # ---------------------------------------------------------------------------
 # Вспомогательные моки (аналог test_plugins_tab.py)
@@ -64,28 +66,15 @@ class _MockRegistry:
         return self._entries
 
 
-def _make_mock_ctx(entries: list[_MockEntry] | None = None) -> MagicMock:
-    """Собрать минимальный mock AppContext с нужными плагинами."""
+def _make_mock_ctx(entries: list[_MockEntry] | None = None):
+    """AppServices с raw PluginRegistry через bridge (service_registry=None)."""
     if entries is None:
         entries = [
             _MockEntry("grayscale", "processing", "Чёрно-белое"),
             _MockEntry("capture", "source", "Захват камеры"),
             _MockEntry("stitcher", "processing", "Сшивка кадров"),
         ]
-
-    registry = _MockRegistry(entries)
-
-    ctx = MagicMock()
-    ctx.plugin_registry.return_value = registry
-    ctx.registers_manager.return_value = None
-    ctx.config = {}
-    ctx.extras = {}
-    ctx.bindings.return_value = None
-    ctx.action_bus.return_value = None
-    ctx.form_context.return_value = None
-    # service_registry = None → кнопка webcam disabled, не падает
-    ctx.service_registry.return_value = None
-    return ctx
+    return make_plugins_services(registry=_MockRegistry(entries))
 
 
 # ---------------------------------------------------------------------------
@@ -93,9 +82,9 @@ def _make_mock_ctx(entries: list[_MockEntry] | None = None) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-def _get_test_button(ctx: MagicMock, plugin_name: str, open_sandbox_cb=None):
+def _get_test_button(services, plugin_name: str, open_sandbox_cb=None):
     """Создать _PluginSection и вернуть первую кнопку из action_buttons()."""
-    section = _PluginSection(ctx, plugin_name, plugin_name, open_sandbox_cb=open_sandbox_cb)
+    section = _PluginSection(services, plugin_name, plugin_name, open_sandbox_cb=open_sandbox_cb)
     buttons = section.action_buttons()
     assert len(buttons) == 1, f"Ожидали 1 кнопку, получили {len(buttons)}"
     return buttons[0]

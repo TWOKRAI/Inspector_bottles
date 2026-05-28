@@ -1,23 +1,31 @@
 """PluginsPresenter — бизнес-логика таба плагинов.
 
+Task E.5: мигрирован на AppServices DI. Принимает services: AppServices.
+PluginRegistry берётся через services.plugins._registry bridge (PluginCatalog
+Protocol не покрывает rich entry API: plugin_class, register_classes, inputs/outputs).
+RegistersManager — через services.registers._rm bridge.
+plugin_manager (discovery/hot-reload) — отдельный runtime-объект, не входит в
+AppServices, передаётся explicit-параметром.
+
 Pure Python (без Qt импортов).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import yaml
 
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+from multiprocess_prototype.domain.app_services import AppServices
 
 
 class PluginsPresenter:
     """Presenter для PluginsTab.
 
-    Работает с PluginRegistry и RegistersManager через AppContext.
+    Работает с PluginRegistry (через services.plugins._registry bridge) и
+    RegistersManager (через services.registers._rm bridge). Управление путями —
+    через plugin_manager (runtime-объект вне AppServices).
     """
 
     # Русские названия категорий
@@ -31,15 +39,23 @@ class PluginsPresenter:
         "service": "Сервисы",
     }
 
-    def __init__(self, ctx: "AppContext") -> None:
-        self._ctx = ctx
+    def __init__(self, services: AppServices, *, plugin_manager: Any = None) -> None:
+        self._services = services
+        # TODO Phase F: PluginCatalog Protocol не покрывает rich entry API
+        # (plugin_class, register_classes, inputs/outputs) — bridge на raw registry.
+        self._registry = getattr(services.plugins, "_registry", None)
+        # TODO Phase F: RegistersBackend Protocol имеет другую сигнатуру —
+        # get_fields() через raw RegistersManager bridge.
+        self._rm = getattr(services.registers, "_rm", None)
+        # plugin_manager (discovery/hot-reload) вне AppServices — runtime dep (Phase G).
+        self._plugin_manager = plugin_manager
 
     def list_plugins(self) -> list[tuple[str, str, str]]:
         """Список плагинов: (name, display_text, category).
 
         Формат для MasterDetailLayout.set_items().
         """
-        registry = self._ctx.plugin_registry()
+        registry = self._registry
         if registry is None:
             return []
 
@@ -52,7 +68,7 @@ class PluginsPresenter:
 
     def get_categories(self) -> list[str]:
         """Уникальные категории из реестра."""
-        registry = self._ctx.plugin_registry()
+        registry = self._registry
         if registry is None:
             return []
 
@@ -65,7 +81,7 @@ class PluginsPresenter:
         Returns:
             dict с ключами: name, category, description, inputs, outputs, has_registers
         """
-        registry = self._ctx.plugin_registry()
+        registry = self._registry
         if registry is None:
             return {
                 "name": name,
@@ -112,7 +128,7 @@ class PluginsPresenter:
         Returns:
             list[FieldInfo] или пустой список.
         """
-        rm = self._ctx.registers_manager()
+        rm = self._rm
         if rm is None:
             return []
         try:
@@ -130,7 +146,7 @@ class PluginsPresenter:
         Returns:
             Список строк-путей или [] если PluginManager не инициализирован.
         """
-        pm = self._ctx.plugin_manager()
+        pm = self._plugin_manager
         if pm is None:
             return []
         return [str(p) for p in pm.plugin_paths]
@@ -150,7 +166,7 @@ class PluginsPresenter:
         new_list = current + [path]
         self._save_paths_to_overrides(new_list)
         # Обновить пути в PluginManager без его пересоздания
-        pm = self._ctx.plugin_manager()
+        pm = self._plugin_manager
         if pm is not None:
             pm._plugin_paths = [Path(p).resolve() for p in new_list]
 
@@ -169,7 +185,7 @@ class PluginsPresenter:
         new_list = [p for p in current if p != path]
         self._save_paths_to_overrides(new_list)
         # Обновить пути в PluginManager без его пересоздания
-        pm = self._ctx.plugin_manager()
+        pm = self._plugin_manager
         if pm is not None:
             pm._plugin_paths = [Path(p).resolve() for p in new_list]
 
@@ -180,7 +196,7 @@ class PluginsPresenter:
             Строка-сводка результата в формате «Загружено: N, ошибок: M, новых: K».
             При отсутствии PluginManager возвращает «PluginManager не инициализирован».
         """
-        pm = self._ctx.plugin_manager()
+        pm = self._plugin_manager
         if pm is None:
             return "PluginManager не инициализирован"
         result = pm.rescan()

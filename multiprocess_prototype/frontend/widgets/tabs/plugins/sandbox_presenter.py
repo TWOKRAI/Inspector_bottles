@@ -15,13 +15,12 @@ Pure Python (без PySide6). Определяет совместимость п
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 from loguru import logger
 
-if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+from multiprocess_prototype.domain.app_services import AppServices
 
 
 @dataclass
@@ -64,14 +63,17 @@ class SandboxPresenter:
     Не импортирует PySide6 — полностью тестируем без Qt.
     """
 
-    def __init__(self, ctx: "AppContext") -> None:
+    def __init__(self, services: AppServices) -> None:
         """Инициализация presenter.
 
         Args:
-            ctx: AppContext — DI-контейнер приложения. Используется для
-                 доступа к plugin_registry().
+            services: AppServices DI-контейнер. PluginRegistry берётся через
+                 services.plugins._registry bridge (plugin_class не покрыт Protocol).
         """
-        self._ctx = ctx
+        self._services = services
+        # TODO Phase F: PluginCatalog Protocol не покрывает plugin_class/inputs —
+        # bridge на raw registry для инстанцирования плагина в sandbox.
+        self._registry = getattr(services.plugins, "_registry", None)
 
     # ------------------------------------------------------------------ #
     #  Классификатор совместимости                                          #
@@ -96,7 +98,7 @@ class SandboxPresenter:
             SandboxCompatibility с ok и причиной.
         """
         # Получаем registry из AppContext
-        registry = self._ctx.plugin_registry()
+        registry = self._registry
         if registry is None:
             return SandboxCompatibility(
                 ok=False,
@@ -177,7 +179,7 @@ class SandboxPresenter:
         from multiprocess_framework.modules.process_module.plugins import SubPluginContext
 
         # Получаем entry из registry
-        registry = self._ctx.plugin_registry()
+        registry = self._registry
         if registry is None:
             self._warn(f"SandboxPresenter: PluginRegistry недоступен, run_once({plugin_name}) пропущен")
             return None
@@ -214,9 +216,5 @@ class SandboxPresenter:
     # ------------------------------------------------------------------ #
 
     def _warn(self, msg: str) -> None:
-        """Логировать предупреждение через ctx.log_warning если доступен, иначе loguru."""
-        log_warning = getattr(self._ctx, "log_warning", None)
-        if callable(log_warning):
-            log_warning(msg)
-        else:
-            logger.warning(msg)
+        """Логировать предупреждение через loguru."""
+        logger.warning(msg)

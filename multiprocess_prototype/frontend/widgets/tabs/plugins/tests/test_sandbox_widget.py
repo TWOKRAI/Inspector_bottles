@@ -22,6 +22,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from ._helpers import make_plugins_services
+
 
 # ---------------------------------------------------------------------------
 # Вспомогательные моки
@@ -57,17 +59,14 @@ class _MockRegistry:
         return list(self._entries.values())
 
 
-def _make_ctx(registry=None, service_registry=None) -> MagicMock:
-    """Собрать минимальный mock AppContext.
+def _make_ctx(registry=None, service_registry=None):
+    """AppServices с raw PluginRegistry / ServiceRegistry через bridge.
 
     Args:
-        registry: возвращаемое значение ctx.plugin_registry().
-        service_registry: возвращаемое значение ctx.service_registry().
+        registry: raw PluginRegistry → services.plugins._registry.
+        service_registry: raw ServiceRegistry → services.services._registry.
     """
-    ctx = MagicMock()
-    ctx.plugin_registry.return_value = registry
-    ctx.service_registry.return_value = service_registry
-    return ctx
+    return make_plugins_services(registry=registry, service_registry=service_registry)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +135,7 @@ class TestPluginSandboxWidgetCreation:
         """Виджет для grayscale создаётся без исключений."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Виджет создан — заголовок содержит имя плагина
@@ -152,7 +151,7 @@ class TestPluginSandboxWidgetCreation:
         """Кнопка «Применить» должна быть disabled пока нет загруженного кадра."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # При старте _current_frame is None → кнопка disabled
@@ -168,7 +167,7 @@ class TestPluginSandboxWidgetCreation:
         """Начальный текст кнопки «Применить»."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         assert widget._btn_apply.text() == "Применить"
@@ -186,7 +185,7 @@ class TestShowResult:
         """show_result с двумя numpy-кадрами 10×10 → after_label.pixmap() не None."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Два реальных BGR кадра 10×10
@@ -210,7 +209,7 @@ class TestShowResult:
         """show_result(before, after=None) не бросает исключений, before показывается."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         before = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -239,7 +238,7 @@ class TestShowError:
         """После show_error('bad') — error label видим."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Изначально ошибки нет
@@ -260,7 +259,7 @@ class TestShowError:
         """show_error('') — label скрывается (не падает)."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Сначала показываем ошибку
@@ -284,7 +283,7 @@ class TestSetRunning:
         """set_running(True) — кнопка disabled + текст 'Применяется…'."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Имитируем загруженный кадр (чтобы кнопка была enabled)
@@ -305,7 +304,7 @@ class TestSetRunning:
         """set_running(False) после True — кнопка enabled + текст 'Применить'."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Загруженный кадр — чтобы set_running(False) мог включить кнопку
@@ -330,7 +329,7 @@ class TestApplyFlow:
         """Устанавливаем _current_frame вручную, вызываем apply → after_label.pixmap() не None."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx_with_real_registry)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx_with_real_registry)
         qtbot.addWidget(widget)
 
         # Устанавливаем кадр напрямую (минуя QFileDialog)
@@ -392,7 +391,7 @@ class TestWebcamButton:
 
         ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         # Кнопка должна быть disabled при stopped сервисе
@@ -416,7 +415,7 @@ class TestWebcamButton:
 
         ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         assert widget._btn_webcam.isEnabled()
@@ -432,7 +431,7 @@ class TestWebcamButton:
 
         ctx = _make_ctx(registry=real_registry, service_registry=None)
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         assert not widget._btn_webcam.isEnabled()
@@ -456,7 +455,7 @@ class TestWebcamButton:
 
         ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         widget._on_webcam_snapshot()
@@ -486,7 +485,7 @@ class TestWebcamButton:
 
         ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         widget._on_webcam_snapshot()
@@ -515,7 +514,7 @@ class TestParamsWidget:
 
         ctx = _make_ctx(registry=real_registry, service_registry=None)
 
-        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", ctx=ctx)
+        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", services=ctx)
         qtbot.addWidget(widget)
 
         # Должны быть спинбоксы для 6 полей
@@ -544,7 +543,7 @@ class TestParamsWidget:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
         ctx = _make_ctx(registry=real_registry, service_registry=None)
-        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", ctx=ctx)
+        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", services=ctx)
         qtbot.addWidget(widget)
 
         h_min_box = widget._param_widgets.get("h_min")
@@ -571,7 +570,7 @@ class TestParamsWidget:
 
         ctx = _make_ctx(registry=real_registry, service_registry=None)
 
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         # Нет параметров для grayscale
@@ -590,7 +589,7 @@ class TestParamsWidget:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
         ctx = _make_ctx(registry=real_registry, service_registry=None)
-        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", ctx=ctx)
+        widget = PluginSandboxWidget(color_mask_presenter, "color_mask", services=ctx)
         qtbot.addWidget(widget)
 
         # Установим конкретные значения в спинбоксах
@@ -617,7 +616,7 @@ class TestParamsWidget:
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
         ctx = _make_ctx(registry=real_registry, service_registry=None)
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", ctx=ctx)
+        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         overrides = widget._collect_config_overrides()

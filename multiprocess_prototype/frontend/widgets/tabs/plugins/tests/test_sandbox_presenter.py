@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from ._helpers import make_plugins_services
+
 
 # ---------------------------------------------------------------------------
 # Вспомогательные моки
@@ -50,11 +52,9 @@ class _MockRegistry:
         return list(self._entries.values())
 
 
-def _make_ctx(registry=None) -> MagicMock:
-    """Собрать минимальный mock AppContext."""
-    ctx = MagicMock()
-    ctx.plugin_registry.return_value = registry
-    return ctx
+def _make_ctx(registry=None):
+    """AppServices с raw PluginRegistry через bridge (имя _make_ctx сохранено для тестов)."""
+    return make_plugins_services(registry=registry)
 
 
 # ---------------------------------------------------------------------------

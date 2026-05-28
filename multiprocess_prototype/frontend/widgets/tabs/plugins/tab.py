@@ -45,6 +45,7 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTree
 from multiprocess_framework.modules.frontend_module.widgets.tabs.nav_tree_utils import (
     build_nav_tree_from_specs,
 )
+from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
@@ -54,6 +55,8 @@ from ._sections import build_plugin_sections
 from .presenter import PluginsPresenter
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from multiprocess_prototype.frontend.app_context import AppContext
 
 
@@ -79,19 +82,29 @@ class PluginsTab(BaseTreeNavTab):
     - action-колонка — ``ViewModeToggle`` поверх стандартного ``_action_stack``.
     """
 
-    def __init__(self, ctx: "AppContext", parent: QWidget | None = None) -> None:
-        self._presenter_local = PluginsPresenter(ctx)
+    def __init__(
+        self,
+        services: AppServices,
+        *,
+        plugin_manager: "Any" = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        self._services = services
+        self._plugin_manager = plugin_manager
+        self._presenter_local = PluginsPresenter(services, plugin_manager=plugin_manager)
         # Поле поиска создаётся в _build_nav_widget (вызывается из super().__init__).
         self._search: QLineEdit | None = None
         self._tree_nav: QTreeWidget | None = None  # type: ignore[assignment]
         # Текущий режим отображения (Cards/Table).
         self._view_mode: ViewMode = ViewMode.CARDS
 
-        bus = ctx.action_bus() if hasattr(ctx, "action_bus") else None
+        # ActionBus bridge (TODO Phase F: domain commands).
+        _bus_accessor = getattr(services.commands, "action_bus", None)
+        bus = _bus_accessor() if callable(_bus_accessor) else None
         super().__init__(
             title="Плагины",
-            sections=build_plugin_sections(ctx, open_sandbox_cb=self.open_sandbox),
-            ctx=ctx,
+            sections=build_plugin_sections(services, plugin_manager=plugin_manager, open_sandbox_cb=self.open_sandbox),
+            ctx=None,  # type: ignore[arg-type]  # BaseTreeNavTab legacy параметр (Phase F удалит)
             layout_factory=_layout_factory,
             bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
             parent=parent,
@@ -128,8 +141,16 @@ class PluginsTab(BaseTreeNavTab):
 
     @classmethod
     def create(cls, ctx: "AppContext") -> "PluginsTab":
-        """Фабричный метод для TabFactory."""
-        return cls(ctx)
+        """Адаптер для TabFactory — принимает AppContext, извлекает AppServices.
+
+        plugin_manager (discovery/hot-reload) не входит в AppServices —
+        извлекается из ctx как runtime-зависимость. Phase F заменит AppContext.
+        """
+        assert ctx.app_services is not None, (
+            "AppServices не инициализирован в ctx. Убедитесь что Task D.1 factory вызван в run_gui()."
+        )
+        # TODO Phase F: plugin_manager — runtime IPC, не покрыт AppServices Protocol.
+        return cls(ctx.app_services, plugin_manager=ctx.plugin_manager())
 
     # ------------------------------------------------------------------ #
     #  Task 2.6 — обновление каталога после rescan                        #
@@ -167,7 +188,9 @@ class PluginsTab(BaseTreeNavTab):
 
         # Пересобрать список секций с актуальным каталогом плагинов
         # Передаём open_sandbox как callback — секции получат кнопку «Тест».
-        self._sections_specs = build_plugin_sections(self._ctx, open_sandbox_cb=self.open_sandbox)
+        self._sections_specs = build_plugin_sections(
+            self._services, plugin_manager=self._plugin_manager, open_sandbox_cb=self.open_sandbox
+        )
 
         # Очистить дерево и перестроить заново
         self._tree_nav.clear()

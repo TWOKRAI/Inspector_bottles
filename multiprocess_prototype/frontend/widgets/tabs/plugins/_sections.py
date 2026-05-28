@@ -24,19 +24,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
+from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.forms import RegisterView
 
 from .detail_panels import PluginInfoCard
 from .presenter import PluginsPresenter
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
     from .paths_subtab import PathsSubtabWidget
 
 
@@ -58,8 +58,9 @@ class _PathsSection:
     Это важно для сохранения подписки catalog_updated (Task 2.6).
     """
 
-    def __init__(self, ctx: "AppContext") -> None:
-        self._ctx = ctx
+    def __init__(self, services: AppServices, plugin_manager: Any = None) -> None:
+        self._services = services
+        self._plugin_manager = plugin_manager
         self._widget: "PathsSubtabWidget | None" = None
 
     # -------- SectionProtocol --------
@@ -77,7 +78,7 @@ class _PathsSection:
         if self._widget is None:
             from .paths_subtab import PathsSubtabWidget
 
-            self._widget = PathsSubtabWidget(PluginsPresenter(self._ctx))
+            self._widget = PathsSubtabWidget(PluginsPresenter(self._services, plugin_manager=self._plugin_manager))
         return self._widget
 
     def action_buttons(self) -> list[QWidget]:
@@ -100,7 +101,7 @@ class _PluginSection:
     """Секция одного плагина: RegisterView или PluginInfoCard в content.
 
     Args:
-        ctx: AppContext — DI-контейнер приложения.
+        services: AppServices — DI-контейнер приложения.
         plugin_name: имя плагина (ключ в registry).
         title: отображаемый заголовок в дереве.
         open_sandbox_cb: callback для открытия sandbox-виджета в content-панели.
@@ -110,12 +111,12 @@ class _PluginSection:
 
     def __init__(
         self,
-        ctx: "AppContext",
+        services: AppServices,
         plugin_name: str,
         title: str,
         open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
     ) -> None:
-        self._ctx = ctx
+        self._services = services
         self._key = plugin_name
         self._title = title
         self._widget: QWidget | None = None
@@ -158,7 +159,7 @@ class _PluginSection:
         # Проверяем совместимость плагина с sandbox
         from .sandbox_presenter import SandboxPresenter
 
-        compat = SandboxPresenter(self._ctx).check_compatibility(self._key)
+        compat = SandboxPresenter(self._services).check_compatibility(self._key)
         if not compat.ok:
             btn.setEnabled(False)
             btn.setToolTip(compat.reason)
@@ -185,11 +186,11 @@ class _PluginSection:
             from .sandbox import PluginSandboxWidget
             from .sandbox_presenter import SandboxPresenter
 
-            presenter = SandboxPresenter(self._ctx)
+            presenter = SandboxPresenter(self._services)
             self._sandbox_widget = PluginSandboxWidget(
                 presenter=presenter,
                 plugin_name=self._key,
-                ctx=self._ctx,
+                services=self._services,
             )
 
         self._open_sandbox_cb(self._key, self._sandbox_widget)
@@ -203,14 +204,14 @@ class _PluginSection:
     # -------- Internal --------
 
     def _build_widget(self) -> None:
-        presenter = PluginsPresenter(self._ctx)
+        presenter = PluginsPresenter(self._services)
         info = presenter.get_plugin_info(self._key)
 
         if info.get("has_registers"):
             fields = presenter.get_register_fields(self._key)
             if fields:
-                form_ctx = self._ctx.form_context()
-                view = RegisterView(fields, form_ctx=form_ctx)
+                # TODO Phase F: form_context не покрыт AppServices Protocol'ами.
+                view = RegisterView(fields, form_ctx=None)
                 view.field_changed.connect(self._on_field_changed)
                 self._register_view = view
 
@@ -218,17 +219,23 @@ class _PluginSection:
                     bind_edit_permission,
                 )
 
-                _auth = getattr(self._ctx, "auth", None)
+                # TODO Phase F: AuthFacade Protocol для permission gating.
+                auth_state = getattr(self._services.auth, "_state", None)
                 bind_edit_permission(
                     view,
                     "tabs.plugins.edit",
-                    _auth.state if _auth is not None else None,
+                    auth_state,
                 )
                 self._widget = view
                 return
 
         # Fallback — информационная карточка.
         self._widget = PluginInfoCard(info)
+
+    def _get_bus(self) -> Any:
+        """ActionBus через services.commands bridge (TODO Phase F: domain commands)."""
+        accessor = getattr(self._services.commands, "action_bus", None)
+        return accessor() if callable(accessor) else None
 
     def _on_field_changed(
         self,
@@ -238,7 +245,7 @@ class _PluginSection:
         new_value: object,
     ) -> None:
         """Изменение параметра плагина → ActionBus.execute(field_set)."""
-        bus = self._ctx.action_bus()
+        bus = self._get_bus()
         if bus is None:
             return
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
@@ -254,7 +261,7 @@ class _PluginSection:
 
     def _on_bus_changed(self) -> None:
         """Callback от ActionBus — обновить RegisterView при undo/redo."""
-        bus = self._ctx.action_bus()
+        bus = self._get_bus()
         if bus is None or self._register_view is None:
             return
         event = bus.last_event
@@ -319,8 +326,12 @@ class _CategoryPlaceholder:
 # ---------------------------------------------------------------------------
 
 
-def _make_category_factory(category_title: str) -> Callable[["AppContext"], _CategoryPlaceholder]:
-    def factory(_ctx: "AppContext") -> _CategoryPlaceholder:
+# BaseTreeNavTab вызывает factory(ctx_arg) с self._ctx (= None после миграции).
+# Фабрики игнорируют ctx_arg и замыкают services (паттерн Settings _make_factory).
+
+
+def _make_category_factory(category_title: str) -> Callable[[object], _CategoryPlaceholder]:
+    def factory(_ctx_arg: object) -> _CategoryPlaceholder:
         return _CategoryPlaceholder(
             key=_cat_key(category_title),
             title=category_title,
@@ -331,12 +342,13 @@ def _make_category_factory(category_title: str) -> Callable[["AppContext"], _Cat
 
 
 def _make_plugin_factory(
+    services: AppServices,
     plugin_name: str,
     title: str,
     open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
-) -> "Callable[[AppContext], _PluginSection]":
-    def factory(ctx: "AppContext") -> _PluginSection:
-        return _PluginSection(ctx, plugin_name, title, open_sandbox_cb=open_sandbox_cb)
+) -> "Callable[[object], _PluginSection]":
+    def factory(_ctx_arg: object) -> _PluginSection:
+        return _PluginSection(services, plugin_name, title, open_sandbox_cb=open_sandbox_cb)
 
     return factory
 
@@ -346,25 +358,28 @@ def _make_plugin_factory(
 # ---------------------------------------------------------------------------
 
 
-# Модульный кэш singleton-секций «Пути» по id(ctx).
+# Модульный кэш singleton-секций «Пути» по id(services).
 # Замыкание в _make_paths_factory не работает между вызовами
 # build_plugin_sections() — каждый refresh_catalog() создавал бы новую секцию
 # с новым PathsSubtabWidget, что ломало бы подписку catalog_updated.
 _PATHS_SECTION_CACHE: "dict[int, _PathsSection]" = {}
 
 
-def _make_paths_factory(ctx: "AppContext") -> "Callable[[AppContext], _PathsSection]":
+def _make_paths_factory(
+    services: AppServices,
+    plugin_manager: Any = None,
+) -> "Callable[[object], _PathsSection]":
     """Фабрика singleton-секции «Пути».
 
-    Кэш по id(ctx) переживает повторные вызовы build_plugin_sections(),
+    Кэш по id(services) переживает повторные вызовы build_plugin_sections(),
     что гарантирует сохранение подписки catalog_updated после refresh_catalog().
     """
-    cache_key = id(ctx)
+    cache_key = id(services)
 
-    def factory(_ctx: "AppContext") -> _PathsSection:
+    def factory(_ctx_arg: object) -> _PathsSection:
         section = _PATHS_SECTION_CACHE.get(cache_key)
         if section is None:
-            section = _PathsSection(ctx)
+            section = _PathsSection(services, plugin_manager)
             _PATHS_SECTION_CACHE[cache_key] = section
         return section
 
@@ -372,10 +387,15 @@ def _make_paths_factory(ctx: "AppContext") -> "Callable[[AppContext], _PathsSect
 
 
 def build_plugin_sections(
-    ctx: "AppContext",
+    services: AppServices,
+    *,
+    plugin_manager: Any = None,
     open_sandbox_cb: "Callable[[str, QWidget], None] | None" = None,
-) -> "list[SectionSpec[AppContext]]":
+) -> "list[SectionSpec]":
     """Сформировать декларацию секций PluginsTab.
+
+    Task E.5: принимает AppServices вместо AppContext. plugin_manager —
+    runtime-объект вне AppServices (управление путями плагинов).
 
     Структура:
     1. Корневая секция «Пути» (__paths__) — управление директориями плагинов.
@@ -385,22 +405,23 @@ def build_plugin_sections(
     Порядок категорий — по сортированному списку из реестра.
 
     Args:
-        ctx: AppContext — DI-контейнер приложения.
+        services: AppServices — DI-контейнер приложения.
+        plugin_manager: PluginManager (discovery/hot-reload) — для секции «Пути».
         open_sandbox_cb: callback для открытия sandbox в content-панели.
             Сигнатура: ``(plugin_name: str, sandbox_widget: QWidget) -> None``.
             По умолчанию None — кнопка «Тест» disabled (обратная совместимость).
     """
-    presenter = PluginsPresenter(ctx)
+    presenter = PluginsPresenter(services)
     plugins = presenter.list_plugins()  # [(name, display, category), ...]
 
-    sections: list[SectionSpec[AppContext]] = []
+    sections: list[SectionSpec] = []
 
     # Первым добавляем секцию «Пути» (корневой элемент, без parent_key)
     sections.append(
         SectionSpec(
             key=_PATHS_KEY,
             title="Пути",
-            factory=_make_paths_factory(ctx),
+            factory=_make_paths_factory(services, plugin_manager),
         )
     )
 
@@ -429,7 +450,7 @@ def build_plugin_sections(
                 SectionSpec(
                     key=plugin_name,
                     title=plugin_title,
-                    factory=_make_plugin_factory(plugin_name, plugin_title, open_sandbox_cb),
+                    factory=_make_plugin_factory(services, plugin_name, plugin_title, open_sandbox_cb),
                     parent_key=cat_section_key,
                     lazy=True,
                 )
