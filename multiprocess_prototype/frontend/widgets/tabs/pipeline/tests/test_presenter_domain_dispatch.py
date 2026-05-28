@@ -191,7 +191,7 @@ class TestRemoveSelectedDomainDispatch:
         # QApplication уже создан pytest-qt (addWidget не нужен для GraphScene)
         p.set_scene(scene)
         p.load_topology_from_config()
-        p._load_scene_with_ports(*p._topology_to_graph(services.topology.load().to_dict()))
+        p.load_scene_with_ports(*p._topology_to_graph(services.topology.load().to_dict()))
 
         assert scene.node_count() == 2
         p.remove_selected(["camera"])

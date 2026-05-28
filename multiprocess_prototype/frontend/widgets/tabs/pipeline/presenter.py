@@ -70,6 +70,10 @@ class PipelinePresenter:
         self._scene: GraphScene | None = None
         self._suppress = False
         self._gui_positions: dict[str, tuple[float, float]] = {}
+        # G.4.2: кэш port_schemas (node_id → схемы), заполняется _topology_to_graph,
+        # читается load_scene_with_ports. Инициализируем здесь, чтобы метод рендера
+        # не падал AttributeError при вызове до первого _topology_to_graph.
+        self._port_schemas_cache: dict[str, list[PortSchema]] = {}
 
         # Модель телеметрии wire-соединений (Task 7b.3)
         self._wire_metrics_model = WireMetricsModel()
@@ -89,7 +93,7 @@ class PipelinePresenter:
         self._scene = scene
 
     def set_inspector(self, panel: "NodeInspectorPanel") -> None:
-        """Привязать NodeInspectorPanel и настроить интеграцию с ActionBus.
+        """Привязать NodeInspectorPanel.
 
         Передаёт AppServices в panel и подписывается на field_changed,
         target_process_changed, display_id_changed.
@@ -301,7 +305,7 @@ class PipelinePresenter:
             yaml.dump(topo, f, default_flow_style=False, allow_unicode=True)
 
     # ------------------------------------------------------------------ #
-    #  Мутации через PipelineModel + ActionBus                             #
+    #  Мутации через domain dispatch (process); display — legacy (G.4.2b)  #
     # ------------------------------------------------------------------ #
 
     def add_process_from_plugin(self, plugin_name: str, x: float = 0.0, y: float = 0.0) -> str | None:
@@ -593,8 +597,8 @@ class PipelinePresenter:
         из repository (services.topology.load). Обновляет модель и scene с signal
         suppression.
 
-        G.4.2: после load_from_data поэлементно устанавливает port_schemas на нодах,
-        чтобы порты были на месте для wire-тяжения (находка #7 аудита).
+        G.4.2: рендерит scene через load_scene_with_ports, чтобы порты были на месте
+        для wire-тяжения после reload (находка #7 аудита).
         """
         if self._suppress:
             return
@@ -603,39 +607,23 @@ class PipelinePresenter:
             self._model.from_topology_dict(new_topology)
             if self._scene:
                 nodes, edges = self._topology_to_graph(new_topology)
-                # G.4.2: load_from_data не поддерживает port_schemas, поэтому
-                # загружаем вручную: clear + add_node(port_schemas) + add_edge
-                self._load_scene_with_ports(nodes, edges)
+                self.load_scene_with_ports(nodes, edges)
 
-    def _load_scene_with_ports(
+    def load_scene_with_ports(
         self,
         nodes: list[NodeData],
         edges: list[EdgeData],
     ) -> None:
-        """Загрузить ноды с port_schemas и рёбра в scene.
+        """Отрисовать ноды (с port_schemas) и рёбра в scene.
 
-        G.4.2: замена scene.load_from_data(), которая не поддерживает port_schemas.
-        Для каждой ноды берёт port_schemas из _port_schemas_cache (заполненного
-        _topology_to_graph) и передаёт в scene.add_node.
+        G.4.2: тонкая обёртка над scene.load_from_data — передаёт _port_schemas_cache
+        (заполняется _topology_to_graph) как port_schemas_map, чтобы ноды получили
+        корректные порты. Layout-логика живёт в одном месте — в load_from_data.
+        Публичный метод: вызывается также из PipelineTab при initial load.
         """
         if not self._scene:
             return
-        from .graph.constants import GRID_SPACING_X, GRID_SPACING_Y
-
-        self._scene.clear_all()
-
-        # Авто-layout если координаты нулевые
-        need_layout = all(n.x == 0 and n.y == 0 for n in nodes)
-
-        for i, nd in enumerate(nodes):
-            if need_layout:
-                nd.x = (i % 4) * GRID_SPACING_X + 50
-                nd.y = (i // 4) * GRID_SPACING_Y + 50
-            ps = self._port_schemas_cache.get(nd.node_id)
-            self._scene.add_node(nd, port_schemas=ps)
-
-        for ed in edges:
-            self._scene.add_edge(ed)
+        self._scene.load_from_data(nodes, edges, port_schemas_map=self._port_schemas_cache)
 
     # ------------------------------------------------------------------ #
     #  Auto-layout                                                         #

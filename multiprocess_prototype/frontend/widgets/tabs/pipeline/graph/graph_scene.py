@@ -42,8 +42,14 @@ class GraphScene(QGraphicsScene):
         self,
         nodes: list[NodeData],
         edges: list[EdgeData],
+        port_schemas_map: dict[str, list[PortSchema]] | None = None,
     ) -> None:
-        """Построить граф из данных. Очищает предыдущее содержимое."""
+        """Построить граф из данных. Очищает предыдущее содержимое.
+
+        port_schemas_map (node_id → схемы портов) — опционально; если задан,
+        ноды строятся со Schema-Driven Ports (G.4.2: порты нужны для wire-тяжения
+        после reload из TopologyReplaced). None → backward compat (1 input + 1 output).
+        """
         self.clear_all()
 
         # Авто-layout если координаты нулевые
@@ -53,7 +59,8 @@ class GraphScene(QGraphicsScene):
             if need_layout:
                 nd.x = (i % 4) * GRID_SPACING_X + 50
                 nd.y = (i // 4) * GRID_SPACING_Y + 50
-            self.add_node(nd)
+            ps = port_schemas_map.get(nd.node_id) if port_schemas_map else None
+            self.add_node(nd, port_schemas=ps)
 
         for ed in edges:
             self.add_edge(ed)

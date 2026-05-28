@@ -334,14 +334,14 @@ class TestSceneIntegration:
         p.set_scene(mock_scene)
 
         p.add_process_from_plugin("my_plugin", x=50.0, y=60.0)
-        # Scene обновляется через _load_scene_with_ports (clear_all + add_node)
-        mock_scene.clear_all.assert_called()
-        mock_scene.add_node.assert_called_once()
+        # G.4.2: scene обновляется через load_scene_with_ports → scene.load_from_data
+        # (reload из синхронного TopologyReplaced)
+        mock_scene.load_from_data.assert_called_once()
 
-        # Проверить переданные данные
-        call_args = mock_scene.add_node.call_args
-        node_data = call_args[0][0]
+        # Проверить переданные данные (nodes — первый позиционный аргумент load_from_data)
+        call_args = mock_scene.load_from_data.call_args
+        nodes = call_args[0][0]
+        node_data = next(n for n in nodes if n.node_id == "my-plugin")
         assert isinstance(node_data, NodeData)
-        assert node_data.node_id == "my-plugin"
         assert node_data.x == 50.0
         assert node_data.y == 60.0

@@ -212,12 +212,12 @@ class PipelineTab(QWidget):
     def _load_topology(self) -> None:
         """Загрузить topology из AppContext и отобразить.
 
-        G.4.2: используем presenter.load_topology_from_config() + _load_scene_with_ports()
+        G.4.2: presenter.load_topology_from_config() + load_scene_with_ports()
         для корректной установки port_schemas на нодах.
         """
         nodes, edges = self._presenter.load_topology_from_config()
-        # G.4.2: load_from_data не передаёт port_schemas — используем presenter-метод
-        self._presenter._load_scene_with_ports(nodes, edges)
+        # G.4.2: рендер через presenter (port_schemas из PluginCatalog), не голый load_from_data
+        self._presenter.load_scene_with_ports(nodes, edges)
         if nodes:
             self._view.fit_to_view()
 
