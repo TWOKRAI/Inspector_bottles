@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-e
 - **Дата:** 2026-05-28
-- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 DONE, E.5 READY (next), E.6 HIGH-LEVEL
+- **Статус:** E.1 DONE (APPROVED), E.2 DONE, E.3 DONE, E.4 DONE, E.5 DONE, E.6 READY (last)
 - **Ветка:** `refactor/cross-tab-architecture` (та же ветка что Phase A–D; sub-branch не нужен — D.5 Settings tab коммитился прямо в неё, и Pipeline аналогично; отдельные sub-branch'и создаются только если параллельная работа по нескольким табам одновременно, что исключено правилом «таб за заходом»)
 
 ---
@@ -42,8 +42,8 @@ Settings tab уже мигрирован в D.5 и служит образцом
 | **E.2** | Processes | 6 | Middle | developer | E.1 approved | **DONE** |
 | **E.3** | Recipes | 3 | Middle | developer | E.2 | **DONE** |
 | **E.4** | Services | 4 | Middle | developer | E.3 | **DONE** |
-| **E.5** | Plugins | ~11 | Middle+ | developer | E.4 | READY (next) |
-| **E.6** | Displays | ~3 | Junior | developer | E.5 | TBD |
+| **E.5** | Plugins | 11 | Middle+ | developer | E.4 | **DONE** |
+| **E.6** | Displays | ~3 | Junior | developer | E.5 | READY (last) |
 
 **Почему Pipeline = Senior+:** 21 из 40 топологических чтений в кодовой базе. Пять слоёв
 взаимодействия: `tab.py` → `presenter.py` → `inspector/inspector_panel.py` → `palette/` → `telemetry/wire_metrics_controller.py`.
@@ -140,9 +140,19 @@ scene-reload с позициями узлов, undo/redo chain.
 - **Тесты lifecycle** переписаны на реальный `ServiceManagerFromRegistry` над stub-реестром (через `make_services_services()`) — проверяют настоящий Protocol-путь; `entry.lifecycle` и `services.services._instances` верифицируются вместо `presenter._instances`.
 - **Sections (BaseTreeNavTab):** `build_services_sections(services)` — closures захватывают services, factory'и игнорируют ctx-арг (паттерн Settings `_make_factory`); `_ServiceSection`/`_ServicePathsSection` принимают services; auth через `services.auth._state`.
 
-### Phase E.5 — Plugins tab [PENDING] (зависит от E.4)
+### Phase E.5 — Plugins tab [DONE] (2026-05-28, коммит `62279a85`)
 
 - **Module contract:** public-api-change
+- **Тесты:** 67 passed (plugins), 623 passed (все табы)
+- **Sentrux:** 7137 (−1 vs E.4 7138, шум)
+- **Объём:** 5 production-файлов (tab, presenter, sandbox, sandbox_presenter, _sections) + новый tests/_helpers.py; 6 тест-файлов переписаны.
+- **Ключевое решение — bridge, а не Protocol (в отличие от E.4):** PluginCatalog Protocol объективно недостаточен — presenter/sandbox используют `entry.plugin_class` (инстанцирование плагина в sandbox), `entry.register_classes`, `entry.inputs/outputs` — ничего из этого нет в PluginSpec. Поэтому raw bridge:
+  - `plugin_registry` → `getattr(services.plugins, "_registry")` (как Pipeline E.1)
+  - `registers_manager` → `getattr(services.registers, "_rm")` (get_fields)
+  - `service_registry` (sandbox webcam) → `getattr(services.services, "_registry")`
+- **plugin_manager (discovery/hot-reload) — runtime-объект ВНЕ AppServices:** `build_app_services` оборачивает только `plugin_registry`, а `plugin_manager` отдельный в `ctx.extras`. Передаётся explicit-параметром `PluginsPresenter(services, *, plugin_manager=...)` / `PluginsTab(services, *, plugin_manager=...)`; извлекается в `create(ctx)` из `ctx.plugin_manager()`. Нужен только секции «Пути».
+- **Прочее:** `form_context` → None (TODO Phase F, не покрыт Protocol); `auth` → `services.auth._state`; `action_bus` → `services.commands.action_bus` bridge; `log_warning` удалён (AppContext его не имел — всегда loguru). Sections: `build_plugin_sections(services, *, plugin_manager, open_sandbox_cb)` closures (паттерн Settings), кэш «Пути» по `id(services)`.
+- **Урок:** bridge vs Protocol зависит от полноты Protocol. E.4 Services → Protocol (адаптер покрывал API). E.5 Plugins → bridge (PluginSpec не покрывает plugin_class/register_classes). Оба honest; решает реальное покрытие.
 
 ### Phase E.6 — Displays tab [PENDING] (зависит от E.5)
 
@@ -366,11 +376,12 @@ scene-reload с позициями узлов, undo/redo chain.
 **Примечание:** 25 legacy-вызовов в 11 файлах — самый объёмный таб после Pipeline. `plugin_manager()` и `plugin_registry()` оба маппятся на `services.plugins` (PluginCatalog Protocol), проверить точность маппинга перед стартом. Sandbox может использовать `plugin_manager` для lifecycle (install/uninstall) — уточнить Protocol покрытие.
 
 **Acceptance criteria (высокий уровень):**
-- [ ] `PluginsTab.__init__(services: AppServices, *, parent=...)` без ctx
-- [ ] 0 `ctx.plugin_registry()` / `ctx.plugin_manager()` в production-коде
-- [ ] Sandbox presenter мигрирован (или содержит явные TODO Phase F при непокрытых Protocol'ах)
-- [ ] Все 6 тест-файлов зелёные, builder
-- [ ] Qt-MCP smoke: catalog + sandbox рендерятся
+- [x] `PluginsTab.__init__(services: AppServices, *, plugin_manager=None, parent=...)` без ctx
+- [x] 0 `ctx.plugin_registry()` / `ctx.plugin_manager()` в production-коде
+- [x] Sandbox presenter+widget мигрированы (raw bridge `_registry` + явные TODO Phase F)
+- [x] Все 6 тест-файлов зелёные (67 plugins / 623 tabs), `make_plugins_services()` builder
+- [x] 0 DeprecationWarning из `_deprecated_extras`
+- [ ] Qt-MCP smoke: catalog + sandbox — **deferred to cumulative после E.6**
 
 **Module contract:** public-api-change
 
