@@ -265,8 +265,13 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def load_topology_from_config(self) -> tuple[list[NodeData], list[EdgeData]]:
-        """Загрузить topology из config (через services.config)."""
-        topology = self._services.config.get("topology", {})
+        """Загрузить topology из живого источника (services.topology, TopologyRepository).
+
+        F.2b: ранее читалось из config["topology"] — устаревший стартовый snapshot,
+        который не обновлялся. Теперь источник один — TopologyRepository (живой).
+        Dict at Boundary: presenter работает с dict, поэтому .to_dict().
+        """
+        topology = self._services.topology.load().to_dict()
         self._model.from_topology_dict(topology)
 
         # Восстановить позиции из metadata

@@ -35,9 +35,15 @@ def _make_services_for_presenter(topology=None, display_registry=None):
     # Если передан display_registry — создаём services с custom displays
     if display_registry is not None:
         from multiprocess_prototype.domain.tests.conftest import make_test_app_services
-        from multiprocess_prototype.domain.tests._fakes import FakeConfigStore
+        from multiprocess_prototype.domain.tests._fakes import (
+            FakeConfigStore,
+            FakeTopologyRepository,
+        )
+        from multiprocess_prototype.domain.entities import Topology
 
         config = FakeConfigStore(initial={"topology": topo})
+        # F.2b: presenter читает топологию из services.topology — наполняем репозиторий.
+        topology_repo = FakeTopologyRepository(Topology.from_dict(topo))
 
         # Создаём mock DisplayCatalog с resolve поддержкой
         displays = MagicMock()
@@ -54,7 +60,7 @@ def _make_services_for_presenter(topology=None, display_registry=None):
         displays.resolve.side_effect = _resolve
         displays.list_displays.return_value = ()
 
-        return make_test_app_services(config=config, displays=displays)
+        return make_test_app_services(config=config, displays=displays, topology=topology_repo)
 
     return make_pipeline_services(topology=topo)
 

@@ -67,7 +67,7 @@ class TestYamlPositions:
         p = PipelinePresenter(services)
         p._gui_positions["camera"] = (100.0, 200.0)
 
-        topology = services.config.get("topology", {})
+        topology = services.topology.load().to_dict()
         nodes, edges = p._topology_to_graph(topology)
 
         camera_node = next(n for n in nodes if n.node_id == "camera")

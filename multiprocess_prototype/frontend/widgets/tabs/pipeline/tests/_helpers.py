@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.entities import Topology
 from multiprocess_prototype.domain.tests._fakes import (
     FakeAuthFacade,
     FakeCommandDispatcher,
@@ -19,6 +20,7 @@ from multiprocess_prototype.domain.tests._fakes import (
     FakePluginCatalog,
     FakeRecipeStore,
     FakeRegistersBackend,
+    FakeTopologyRepository,
 )
 from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 
@@ -69,6 +71,10 @@ def make_pipeline_services(
 
     config = FakeConfigStore(initial=config_data)
 
+    # F.2b: presenter читает топологию из живого источника (services.topology),
+    # поэтому TopologyRepository наполняется тем же dict, что и config.
+    topology_repo = FakeTopologyRepository(Topology.from_dict(topo))
+
     # Commands: навесить action_bus bridge если передан
     commands = FakeCommandDispatcher()
     if action_bus is not None:
@@ -103,6 +109,7 @@ def make_pipeline_services(
         commands=commands,
         displays=displays,
         auth=_auth,
+        topology=topology_repo,
     )
 
 
