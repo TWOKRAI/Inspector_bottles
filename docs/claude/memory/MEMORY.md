@@ -34,3 +34,4 @@
 - [Cross-tab Phase C adapters](project_cross_tab_phase_c.md) — Phase C DONE 9/9 (2026-05-27): 10 adapter-классов в multiprocess_prototype/adapters/, 113 tests + 240 domain, ruff 0. Ready for Phase D. Q1-Q7 + 7 documented compromises
 - [Cross-tab Phase D AppServices](project_cross_tab_phase_d.md) — Phase D DONE 7/7 (2026-05-27): AppServices factory + QtEventBus + ConfigStore + Settings PoC. Ready for Phase E.
 - [Cross-tab Phase E per-tab migration](project_cross_tab_phase_e.md) — Phase E IN PROGRESS (2026-05-28): E.1 Pipeline DONE (8566f994+e7bd3d97, APPROVED), E.2 Processes next. Bridge pattern с TODO Phase F допустим, sentrux -20 принято.
+- [Cross-tab Phase F legacy removal](project_cross_tab_phase_f.md) — 7/9 DONE (F.2a–F.6+F.8, коммиты 01044f62..957edb33), Q-F1..Q-F4 решены, F.1 перенесён в G (премиса неверна), остаток F.9/F.7/F.10 → новый чат
