@@ -5,8 +5,7 @@ adapters/catalogs/service_catalog.py — адаптер управления с�
 ServiceManagerFromRegistry оборачивает ServiceRegistry (из framework)
 и реализует domain Protocol ServiceManager (read + lifecycle).
 
-Phase C.1.6: расширение read-only ServiceCatalogFromRegistry до
-ServiceManagerFromRegistry с lifecycle методами (start/stop/restart/get_lifecycle).
+Phase C.1.6: ServiceManagerFromRegistry с lifecycle методами (start/stop/restart/get_lifecycle).
 
 Lifecycle-логика повторяет паттерн ServicesPresenter
 (multiprocess_prototype/frontend/widgets/tabs/services/presenter.py):
@@ -244,13 +243,9 @@ class ServiceManagerFromRegistry:
         return entry.lifecycle
 
 
-# Backward-compatible alias (Phase B / C.1 legacy)
-ServiceCatalogFromRegistry = ServiceManagerFromRegistry
-
 # Проверка structural subtyping (import-time)
 _: ServiceManager = ServiceManagerFromRegistry.__new__(ServiceManagerFromRegistry)  # type: ignore[assignment]
 
 __all__ = [
     "ServiceManagerFromRegistry",
-    "ServiceCatalogFromRegistry",
 ]

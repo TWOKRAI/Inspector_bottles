@@ -5,7 +5,6 @@ adapters/tests/test_catalogs.py — тесты для catalog адаптеров
 Покрываемые классы:
     - PluginCatalogFromRegistry  (plugin_catalog.py)
     - ServiceManagerFromRegistry (service_catalog.py) — read + lifecycle
-    - ServiceCatalogFromRegistry — backward-compatible alias
     - DisplayCatalogFromRegistry (display_catalog.py)
 
 Паттерн:
@@ -20,12 +19,11 @@ import pytest
 from multiprocess_prototype.domain.protocols.plugin_catalog import PluginCatalog, PluginSpec
 from multiprocess_framework.modules.service_module.interfaces import ServiceLifecycle
 from multiprocess_prototype.domain.errors import DomainError
-from multiprocess_prototype.domain.protocols.service_catalog import ServiceCatalog, ServiceManager
+from multiprocess_prototype.domain.protocols.service_catalog import ServiceManager
 from multiprocess_prototype.domain.protocols.display_catalog import DisplayCatalog
 
 from multiprocess_prototype.adapters.catalogs import (
     PluginCatalogFromRegistry,
-    ServiceCatalogFromRegistry,
     ServiceManagerFromRegistry,
     DisplayCatalogFromRegistry,
 )
@@ -444,93 +442,6 @@ class TestPluginCatalogFromRegistry:
 
 
 # ==============================================================================
-# Тесты ServiceCatalogFromRegistry
-# ==============================================================================
-
-
-class TestServiceCatalogFromRegistry:
-    """Тесты для ServiceCatalogFromRegistry."""
-
-    def _make_registry(self, entries: list[_FakeServiceEntry] | None = None) -> _FakeServiceRegistry:
-        return _FakeServiceRegistry(entries or [])
-
-    def _make_adapter(self, entries: list[_FakeServiceEntry] | None = None) -> ServiceCatalogFromRegistry:
-        return ServiceCatalogFromRegistry(self._make_registry(entries))  # type: ignore[arg-type]
-
-    def test_service_catalog_lists_known_services(self):
-        """Фейковый реестр с 2 сервисами → list_services() возвращает 2 ServiceSpec."""
-        entries = [
-            _FakeServiceEntry("webcam_camera", "WebcamCameraService"),
-            _FakeServiceEntry("hikvision", "HikvisionCameraService"),
-        ]
-        catalog = self._make_adapter(entries)
-        result = catalog.list_services()
-
-        assert len(result) == 2
-        ids = {spec.service_id for spec in result}
-        assert ids == {"webcam_camera", "hikvision"}
-
-    def test_service_catalog_returns_tuple(self):
-        """list_services() возвращает tuple (не list)."""
-        entries = [_FakeServiceEntry("svc1", "Svc1")]
-        catalog = self._make_adapter(entries)
-        assert isinstance(catalog.list_services(), tuple)
-
-    def test_service_catalog_resolve_known_service(self):
-        """resolve() с известным service_id возвращает ServiceSpec."""
-        entries = [_FakeServiceEntry("webcam_camera", "WebcamCameraService", meta={"vendor": "opencv"})]
-        catalog = self._make_adapter(entries)
-        spec = catalog.resolve("webcam_camera")
-
-        assert spec is not None
-        assert spec.service_id == "webcam_camera"
-
-    def test_service_catalog_resolve_unknown_returns_none(self):
-        """resolve() с неизвестным id возвращает None."""
-        catalog = self._make_adapter([])
-        assert catalog.resolve("no_such_service") is None
-
-    def test_service_catalog_resolve_roundtrip(self):
-        """Round-trip: entry.name == catalog.resolve(entry.name).service_id."""
-        entry = _FakeServiceEntry("my_service", "MyService")
-        catalog = self._make_adapter([entry])
-        resolved = catalog.resolve(entry.name)
-        assert resolved is not None
-        assert entry.name == resolved.service_id
-
-    def test_service_catalog_metadata_preserved(self):
-        """Метаданные из entry.meta попадают в spec.metadata."""
-        entries = [_FakeServiceEntry("svc", "Svc", meta={"vendor": "opencv", "version": "1.0"})]
-        catalog = self._make_adapter(entries)
-        spec = catalog.resolve("svc")
-
-        assert spec is not None
-        assert spec.metadata.get("vendor") == "opencv"
-        assert spec.metadata.get("version") == "1.0"
-
-    def test_service_catalog_with_empty_registry_returns_empty(self):
-        """Пустой реестр → list_services() возвращает пустой tuple."""
-        catalog = self._make_adapter([])
-        assert catalog.list_services() == ()
-
-    def test_service_catalog_satisfies_protocol(self):
-        """Adapter удовлетворяет ServiceCatalog Protocol (assignment-проверка)."""
-        catalog = self._make_adapter([])
-        _protocol_check: ServiceCatalog = catalog  # type: ignore[assignment]
-        assert _protocol_check is catalog
-
-    def test_service_catalog_spec_is_frozen(self):
-        """ServiceSpec заморожен — попытка изменить атрибут вызывает ошибку."""
-        entries = [_FakeServiceEntry("svc", "Svc")]
-        catalog = self._make_adapter(entries)
-        spec = catalog.resolve("svc")
-        assert spec is not None
-
-        with pytest.raises((AttributeError, TypeError)):
-            spec.service_id = "changed"  # type: ignore[misc]
-
-
-# ==============================================================================
 # Тесты ServiceManagerFromRegistry (lifecycle — Task C.1.6)
 # ==============================================================================
 
@@ -549,16 +460,6 @@ class TestServiceManagerFromRegistry:
         manager = self._make_adapter([])
         _protocol_check: ServiceManager = manager  # type: ignore[assignment]
         assert _protocol_check is manager
-
-    def test_service_catalog_alias_works(self):
-        """Backward-compat: ServiceCatalogFromRegistry alias работает как ServiceManager."""
-        entries = [_FakeServiceEntry("svc1", "Svc1")]
-        registry = self._make_registry(entries)
-        # Используем alias ServiceCatalogFromRegistry
-        adapter = ServiceCatalogFromRegistry(registry)  # type: ignore[arg-type]
-        assert adapter.list_services() is not None
-        _protocol_check: ServiceCatalog = adapter  # type: ignore[assignment]
-        assert _protocol_check is adapter
 
     def test_start_changes_lifecycle_to_running(self):
         """start() меняет lifecycle на RUNNING."""

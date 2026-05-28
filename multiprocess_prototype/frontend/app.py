@@ -174,7 +174,6 @@ def run_gui(process: "GuiProcess") -> None:
 
     topology_holder = TopologyHolder(_topology_dict)
     ctx.extras["topology_holder"] = topology_holder
-    ctx.extras["topology"] = _topology_dict  # обратная совместимость
 
     # 3a.1. Startup validation
     from .startup_checks import StartupChecker

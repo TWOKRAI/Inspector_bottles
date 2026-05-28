@@ -34,7 +34,6 @@ from multiprocess_prototype.adapters import (
     # Catalogs (read-only реестры)
     PluginCatalogFromRegistry,       # _PluginRegistry → PluginCatalog Protocol
     ServiceManagerFromRegistry,      # ServiceRegistry → ServiceManager Protocol
-    ServiceCatalogFromRegistry,      # backward-compatible alias для ServiceManagerFromRegistry
     DisplayCatalogFromRegistry,      # DisplayRegistry → DisplayCatalog Protocol
 
     # Stores (persistence)
@@ -66,7 +65,7 @@ adapters/
 ├── catalogs/
 │   ├── __init__.py
 │   ├── plugin_catalog.py            # PluginCatalogFromRegistry
-│   ├── service_catalog.py           # ServiceManagerFromRegistry + ServiceCatalogFromRegistry
+│   ├── service_catalog.py           # ServiceManagerFromRegistry
 │   └── display_catalog.py           # DisplayCatalogFromRegistry
 │
 ├── stores/
