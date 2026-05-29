@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps, 446 passed / sentrux 9-9 / 7133); G.5.2–G.5.3 next; G.6 NOT DETAILED.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps); **G.5.2 DONE** (`a4691aaf`, TabFactory(app_services,auth_ctx,runtime) + InterfaceSection request_ui_restart callback — мёртвая фича UI-restart восстановлена; 2054 passed / sentrux 9-9 / 7133); G.5.3 next; G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -892,14 +892,15 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 
 **Тесты:** `test_tab_factory.py` (rewrite на app_services+auth_ctx+runtime), `interface/section` тест (callback вызывается / None no-op).
 
-**Acceptance criteria:**
-- [ ] `grep "AppContext\|self._ctx\|ctx.auth\|ctx.app_services" frontend/tab_factory.py` → 0
-- [ ] permission-фильтрация работает через `auth_ctx` (тест login/logout видимости)
-- [ ] InterfaceSection «Обновить UI» вызывает `request_ui_restart` (фича восстановлена); None → no-op
-- [ ] pytest frontend/settings зелёные; ruff; sentrux 9/9
-- [ ] Commit `Refs`, `Layer: prototype`
+**Acceptance criteria:** — ✅ DONE (2026-05-29, `a4691aaf`)
+- [x] `grep "AppContext\|self._ctx\|ctx.auth\|ctx.app_services" frontend/tab_factory.py` → 0 (TabFactory без AppContext)
+- [x] permission-фильтрация работает через `auth_ctx` (`test_tab_factory.py` login/logout видимости — 5 permission-тестов зелёные)
+- [x] InterfaceSection «Обновить UI» вызывает `request_ui_restart` (фича восстановлена); None → no-op (`test_interface_section.py`, 3 теста)
+- [x] prototype **2054 passed / 3 skipped**; ruff clean; sentrux **9/9**, quality 7133
+- [x] Commit `a4691aaf` с `Refs`, `Layer: prototype`
 
 **Out of scope:** удаление AppContext (G.5.3).
+**Note (G.5.2):** app.py пока сохраняет `ctx` (источник `ctx.app_services`/`ctx.auth`/`ctx.command_sender` для сборки runtime) + `ctx.extras[...]` — удаляются в G.5.3.
 **Module contract:** public-api-change (TabFactory + InterfaceSection ctor).
 
 ---
