@@ -16,6 +16,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Runtime-бэкапы рецептов (recipe_engine создаёт *.yaml.bak при сохранении)
+*.yaml.bak
+
 # OS / IDE junk
 .DS_Store
 **/.DS_Store

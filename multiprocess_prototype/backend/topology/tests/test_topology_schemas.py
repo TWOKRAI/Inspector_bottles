@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]
+BASE_PATH = TOPOLOGY_DIR / "base.yaml"
 
 # Все рабочие topology (не TEMPLATE, не архив)
 ACTIVE_TOPOLOGIES = [
@@ -14,6 +15,13 @@ ACTIVE_TOPOLOGIES = [
     "multi_camera.yaml",
     "region_pipeline.yaml",
 ]
+
+
+def _base_process_names() -> set[str]:
+    """Имена процессов фундамента (base.yaml) — валидные цели chain_targets."""
+    with open(BASE_PATH, encoding="utf-8") as f:
+        base = yaml.safe_load(f) or {}
+    return {p["process_name"] for p in base.get("processes", [])}
 
 
 @pytest.fixture(params=ACTIVE_TOPOLOGIES)
@@ -50,11 +58,12 @@ class TestTopologySchema:
             assert isinstance(proc["plugins"], list)
 
     def test_chain_targets_reference_existing(self, topology):
-        """chain_targets ссылаются на существующие процессы."""
-        names = {p["process_name"] for p in topology["processes"]}
+        """chain_targets ссылаются на процессы pipeline ИЛИ фундамента (base.yaml)."""
+        # Процессы фундамента (gui и пр.) — валидные цели: суммируются при запуске.
+        names = {p["process_name"] for p in topology["processes"]} | _base_process_names()
         for proc in topology["processes"]:
             for target in proc.get("chain_targets", []):
-                assert target in names, f"Процесс {proc['process_name']}: chain_target '{target}' не найден в topology"
+                assert target in names, f"{proc['process_name']}: chain_target '{target}' нет в topology+base"
 
 
 class TestTemplateYaml:

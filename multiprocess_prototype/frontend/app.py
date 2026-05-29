@@ -169,8 +169,14 @@ def run_gui(process: "GuiProcess") -> None:
     from .qt_event_bus import QtEventBus
 
     try:
-        # Тот же pipeline, что грузит backend (общий манифест) — без расхождения GUI↔backend.
-        _topology_dict = _yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8"))
+        # Та же сборка, что грузит backend (фундамент ⊕ pipeline из общего манифеста)
+        # — GUI-редактор показывает то же, что реально бежит.
+        from multiprocess_prototype.backend.launch import merge_topologies
+
+        _topology_dict = _yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8")) or {}
+        if _manifest.base:
+            _base_dict = _yaml.safe_load(_manifest.base.read_text(encoding="utf-8")) or {}
+            _topology_dict = merge_topologies(_base_dict, _topology_dict)
     except Exception as e:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
         _topology_dict = {}

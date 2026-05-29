@@ -50,10 +50,9 @@ processes:
         plugin_name: grayscale
         category: processing
 
-  # GUI (отображение)
-  - process_name: gui
-    process_class: multiprocess_prototype.frontend.process.GuiProcess
-    plugins: []                       # GUI не требует плагинов
+  # GUI (отображение) — НЕ объявляется здесь: процесс `gui` живёт в фундаменте
+  # (backend/topology/base.yaml) и суммируется при запуске. Pipeline адресует
+  # его по имени через chain_targets: [gui] (см. процесс выше).
 
 # --- Менеджеры (опционально) ---
 # Конфигурация FW-менеджеров. Если не указано — используются defaults.

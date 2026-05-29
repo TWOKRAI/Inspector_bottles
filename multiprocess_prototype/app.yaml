@@ -10,10 +10,11 @@ styles:
   dir: frontend/styles/themes
   active: innotech_theme
 
-# Активный запускаемый pipeline (runnable-топология)
+# Фундамент (приватная топология): презентация + always-on. Суммируется с pipeline.
+base: backend/topology/base.yaml
+
+# Активный запускаемый pipeline (runnable-топология, без базовых процессов)
 pipeline: backend/topology/region_pipeline.yaml
 
 # Каталог GUI-редактируемых рецептов (editor-слой; запуском пока не используется)
 recipes: recipes
-
-# base: backend/topology/base.yaml   # фундамент (презентация + always-on) — Фаза 2

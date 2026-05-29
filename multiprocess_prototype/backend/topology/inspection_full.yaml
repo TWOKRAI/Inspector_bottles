@@ -100,8 +100,5 @@ processes:
         batch_size: 50
         flush_interval_sec: 1.0
 
-  # --- GUI: отображение финального кадра с результатами ---
-  - process_name: gui
-    protected: true
-    process_class: multiprocess_prototype.frontend.process.GuiProcess
-    plugins: []
+  # gui — в фундаменте (backend/topology/base.yaml), суммируется при запуске.
+  # Pipeline адресует его по имени (chain_targets: [gui]).

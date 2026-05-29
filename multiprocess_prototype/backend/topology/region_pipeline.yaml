@@ -126,10 +126,8 @@ processes:
           - region_default
 
   # --- GUI: отображение ---
-  - process_name: gui
-    protected: true
-    process_class: multiprocess_prototype.frontend.process.GuiProcess
-    plugins: []
+  # Процесс `gui` — НЕ здесь: он в фундаменте (backend/topology/base.yaml) и
+  # суммируется при запуске. Pipeline адресует его по имени (chain_targets: [gui]).
 
 wires:
   - source: camera_0.capture.frame
