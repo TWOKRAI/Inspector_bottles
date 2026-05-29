@@ -130,8 +130,10 @@ class PipelinePresenter:
         field-edit (графовая структура не меняется). coalesce_key объединяет
         slider-burst (десятки правок/сек) в одну undo-запись.
         """
-        # reviewer iter1 #1: входной _suppress-guard — защита от ре-входа
-        # (listener обновит rm → rm-observer → signal → re-enter presenter)
+        # Защитный re-entry guard: не запускать новый dispatch, пока presenter в
+        # suppressed-окне (собственный dispatch ниже либо full reload в
+        # _on_topology_replaced). Прямой rm→field_changed обратной связи сейчас нет,
+        # поэтому guard — дешёвая страховка, а не обязательная защита от живого пути.
         if self._suppress:
             return
 
