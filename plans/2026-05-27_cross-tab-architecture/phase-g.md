@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps); **G.5.2 DONE** (`a4691aaf`, TabFactory(app_services,auth_ctx,runtime) + InterfaceSection request_ui_restart callback — мёртвая фича UI-restart восстановлена; 2054 passed / sentrux 9-9 / 7133); G.5.3 next; G.6 NOT DETAILED.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps); **G.5.2 DONE** (`a4691aaf`, TabFactory(app_services,auth_ctx,runtime) + InterfaceSection request_ui_restart callback — мёртвая фича UI-restart восстановлена); **G.5.3 DONE** (`ea8f0f8d`, AppContext + _deprecated_extras удалены, composition root на локалах + AppServicesDeps/RuntimeDeps; 2012 passed / sentrux 9-9 / quality **7135** +2 / import_edges −15 / −919 LOC; live boot-smoke перед merge). **G.5 ЗАВЕРШЁН** — ожидает reviewer; G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -943,11 +943,11 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 
 **Тесты:** DELETE `test_app_context.py`, `test_extras_deprecation.py`; rewrite `test_phase15_smoke.py`, `test_phase10_integration.py` (если используют build_app_context).
 
-**Acceptance criteria:**
-- [ ] `grep -rn "AppContext\|build_app_context\|_DeprecatedExtrasDict\|_deprecated_extras\|ctx.extras\|_app_context" multiprocess_prototype/` → 0 (вне git-истории/комментариев-археологии)
-- [ ] `python -m pytest multiprocess_prototype/` зелёные (без регрессии vs G.5.2); ruff clean; sentrux check_rules 9/9
+**Acceptance criteria:** — ✅ DONE (2026-05-29, `ea8f0f8d`)
+- [x] real `import`/usage `AppContext`/`build_app_context`/`_DeprecatedExtrasDict`/`ctx.extras`/`_app_context` → 0 в `multiprocess_prototype/` (остались только комментарии-археология «AppServices вместо AppContext»; файлы app_context.py + _deprecated_extras.py удалены)
+- [x] `python -m pytest multiprocess_prototype/` **2012 passed / 3 skipped, 0 failed** (−42 vs G.5.2: удалены test_app_context + test_extras_deprecation + TestAppContextAppServicesField); ruff clean; sentrux check_rules **9/9**, quality **7135** (+2 vs 7133, import_edges −15)
 - [ ] live boot-smoke (qt-mcp/ручной) перед merge — composition root reorder ([[feedback-qt-mcp-smoke-verification]])
-- [ ] Commit `Refs`, `Layer: prototype` (+docs)
+- [x] Commit `ea8f0f8d` с `Refs`, `Layer: prototype` (+docs ARCHITECTURE.md)
 
 **Out of scope:** UX (G.6); удаление `frontend/actions/` (отложено G.4.4).
 **Риск:** **MEDIUM-HIGH** — финальный composition root reorder; митигация: G.5.1/G.5.2 уже сняли coupling, остаётся механическое удаление + live-smoke.
