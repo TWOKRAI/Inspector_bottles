@@ -101,6 +101,12 @@ validate: ## Валидация структуры (scripts/validate.py)
 stats: ## Статистика кода
 	$(PYTHON) -m scripts.code_stats
 
+# ── Запуск приложения ──
+
+.PHONY: run
+run: ## Запустить приложение (опц. PIPELINE=<имя>, напр. make run PIPELINE=inspection_basic)
+	$(PYTHON) $(PROTOTYPE)/run.py $(PIPELINE)
+
 # ── Очистка ──
 
 .PHONY: clean

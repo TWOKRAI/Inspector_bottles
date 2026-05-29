@@ -68,16 +68,19 @@ def run_gui(process: "GuiProcess") -> None:
         except ImportError:
             process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
 
-    # 1. Применить тему
-    apply_default_theme(app)
+    # 1. Загрузить главный конфиг (манифест) и применить тему из него
+    from multiprocess_prototype.backend.config.manifest import load_manifest
+    from multiprocess_prototype.main import PROJECT_ROOT, resolve_manifest_path
+
+    _manifest = load_manifest(resolve_manifest_path())
+    apply_default_theme(app, _manifest.styles.active)
 
     # 2. Сканировать плагины и построить RegistersManager
     from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
     from multiprocess_framework.modules.registers_module import RegistersManager
     from multiprocess_prototype.backend.config.schemas import load_system_config
-    from multiprocess_prototype.main import CONFIG_PATH, PROJECT_ROOT
 
-    _app_sys_config = load_system_config(CONFIG_PATH)
+    _app_sys_config = load_system_config(_manifest.system)
     _app_plugin_paths = [
         str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p
         for p in (_app_sys_config.discovery.plugin_paths if _app_sys_config.discovery.auto_discover else [])
@@ -162,12 +165,12 @@ def run_gui(process: "GuiProcess") -> None:
     # PipelinePresenter (scene reload) и TopologyBridge (cache). build_app_services получает
     # event_bus + topology_store через AppServicesDeps.
     import yaml as _yaml
-    from multiprocess_prototype.main import DEFAULT_BLUEPRINT
     from multiprocess_prototype.adapters import TopologyRepositoryStore
     from .qt_event_bus import QtEventBus
 
     try:
-        _topology_dict = _yaml.safe_load(DEFAULT_BLUEPRINT.read_text(encoding="utf-8"))
+        # Тот же pipeline, что грузит backend (общий манифест) — без расхождения GUI↔backend.
+        _topology_dict = _yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8"))
     except Exception as e:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
         _topology_dict = {}

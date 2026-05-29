@@ -42,6 +42,10 @@ dependencies = [
     "setuptools>=82.0.1",
 ]
 
+[project.scripts]
+# Единая команда запуска: venv-guard (run:launch) → main → главный конфиг app.yaml.
+inspector = "multiprocess_prototype.run:launch"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0",

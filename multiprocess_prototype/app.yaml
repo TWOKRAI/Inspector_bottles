@@ -1,0 +1,19 @@
+# Inspector Bottles — главный конфиг (манифест).
+# Единственный файл, который читает точка входа (main). Пути — от этого каталога.
+# Подробности: plans/config-driven-launch.md
+
+# Системные настройки + defaults для плагинов
+system: backend/config/system.yaml
+
+# Стили: каталог тем (стилевых рецептов) + активная тема
+styles:
+  dir: frontend/styles/themes
+  active: innotech_theme
+
+# Активный запускаемый pipeline (runnable-топология)
+pipeline: backend/topology/region_pipeline.yaml
+
+# Каталог GUI-редактируемых рецептов (editor-слой; запуском пока не используется)
+recipes: recipes
+
+# base: backend/topology/base.yaml   # фундамент (презентация + always-on) — Фаза 2

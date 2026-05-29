@@ -219,22 +219,23 @@ class TestFrozenBehaviour:
 
 
 class TestExtraForbid:
-    """Тесты extra='forbid' для entities."""
+    """Политика extra для entities: Wire=forbid; Process/PluginInstance сворачивают
+    плоские runtime-поля runnable-формата в metadata/config (без потери данных)."""
 
     def test_wire_extra_forbid(self) -> None:
         """Wire с unknown полем → ValidationError."""
         with pytest.raises(ValidationError):
             Wire(source="a", target="b", unknown_field="x")  # type: ignore[call-arg]
 
-    def test_process_extra_forbid(self) -> None:
-        """Process с неизвестным полем → ValidationError."""
-        with pytest.raises(ValidationError):
-            Process(process_name="p", plugins=(), unknown="x")  # type: ignore[call-arg]
+    def test_process_extra_folds_into_metadata(self) -> None:
+        """Process с плоским runtime-полем (runnable-формат) → сворачивается в metadata."""
+        p = Process(process_name="p", plugins=(), source_target_fps=25)  # type: ignore[call-arg]
+        assert p.metadata.get("source_target_fps") == 25
 
-    def test_plugin_instance_extra_forbid(self) -> None:
-        """PluginInstance с неизвестным полем → ValidationError."""
-        with pytest.raises(ValidationError):
-            PluginInstance(plugin_name="blur", extra_field="x")  # type: ignore[call-arg]
+    def test_plugin_instance_extra_folds_into_config(self) -> None:
+        """PluginInstance с плоским параметром (runnable-формат) → сворачивается в config."""
+        pi = PluginInstance(plugin_name="blur", radius=5)  # type: ignore[call-arg]
+        assert pi.config.get("radius") == 5
 
 
 # ==============================================================================

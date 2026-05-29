@@ -10,6 +10,7 @@
     - Если тема содержит components/ → manifest-сборка (base.qss + STYLE_MANIFEST)
     - Иначе → fallback на read_theme() (алфавитный порядок .qss файлов)
 """
+
 from __future__ import annotations
 
 import re
@@ -63,6 +64,7 @@ def _get_manifest() -> list[str] | None:
     """Загрузить STYLE_MANIFEST; None если модуль недоступен."""
     try:
         from multiprocess_prototype.frontend.styles.style_manifest import STYLE_MANIFEST
+
         return STYLE_MANIFEST
     except ImportError:
         return None
@@ -109,13 +111,16 @@ def _register_theme_fonts(theme_name: str) -> None:
             QFontDatabase.addApplicationFont(str(font_path))
 
 
-def apply_default_theme(app: "QApplication") -> None:
-    """Применить дефолтную тему innotech_theme к QApplication.
+def apply_default_theme(app: "QApplication", theme_name: str = "innotech_theme") -> None:
+    """Применить тему к QApplication (имя — из главного конфига app.yaml).
 
     Использует manifest-сборку если components/ доступна,
     иначе fallback через load_theme().
+
+    Args:
+        app:        QApplication.
+        theme_name: Имя темы (стилевого рецепта) из ``styles.active`` манифеста.
     """
-    theme_name = "innotech_theme"
     _register_theme_fonts(theme_name)
 
     manifest = _get_manifest()

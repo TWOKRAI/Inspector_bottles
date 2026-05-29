@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
@@ -72,6 +72,40 @@ class Process(SchemaBase):
     # ------------------------------------------------------------------
     # Валидаторы: конвертируем list → tuple для совместимости с YAML
     # ------------------------------------------------------------------
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_extra_into_metadata(cls, data: Any) -> Any:
+        """Свернуть плоские runtime-поля процесса в ``metadata``.
+
+        Runnable-топологии задают runtime-поля плоско (``source_target_fps`` …).
+        Domain-модель хранит их в ``metadata`` (passthrough). Сворачиваем без
+        потери данных, чтобы редактор открывал любой runnable-pipeline.
+        Явный ``metadata`` имеет приоритет.
+        """
+        if not isinstance(data, dict):
+            return data
+        known = {
+            "process_name",
+            "plugins",
+            "process_class",
+            "priority",
+            "target_process",
+            "chain_targets",
+            "description",
+            "protected",
+            "category",
+            "metadata",
+        }
+        extras = {k: v for k, v in data.items() if k not in known}
+        if not extras:
+            return data
+        result = {k: v for k, v in data.items() if k in known}
+        metadata = dict(result.get("metadata") or {})
+        for key, value in extras.items():
+            metadata.setdefault(key, value)
+        result["metadata"] = metadata
+        return result
 
     @field_validator("plugins", mode="before")
     @classmethod

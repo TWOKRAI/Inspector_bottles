@@ -39,14 +39,14 @@ def _same_interpreter(a: Path, b: Path) -> bool:
         return False
 
 
-def main() -> int:
+def launch() -> int:
+    """venv-guard: переключиться на проектный .venv и передать управление приложению."""
     venv_py = _venv_python()
     current_py = Path(sys.executable)
 
     if not venv_py.exists():
         print(
-            f"[run] ОШИБКА: не найден проектный venv: {venv_py}\n"
-            f"       Создай его: cd {PROJECT_ROOT} && uv sync",
+            f"[run] ОШИБКА: не найден проектный venv: {venv_py}\n       Создай его: cd {PROJECT_ROOT} && uv sync",
             file=sys.stderr,
         )
         return 1
@@ -54,7 +54,8 @@ def main() -> int:
     # Re-exec через проектный Python, если сейчас другой интерпретатор
     if not _same_interpreter(current_py, venv_py):
         print(f"[run] переключаюсь на {venv_py}", file=sys.stderr)
-        os.execv(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]])
+        # Re-exec в проектный venv — аргументы контролируемые (venv-python + этот файл + argv)
+        os.execv(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]])  # nosec B606
 
     # Уже в проектном venv — добавляем корень проекта в sys.path
     if str(PROJECT_ROOT) not in sys.path:
@@ -66,4 +67,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(launch())
