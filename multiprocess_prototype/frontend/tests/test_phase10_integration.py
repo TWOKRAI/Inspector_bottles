@@ -1,11 +1,10 @@
 """Smoke test Phase 10 — все 7 табов создаются и работают.
 
-Task F.9: фабрики принимают (AppServices, RuntimeDeps) вместо AppContext.
+Task F.9: фабрики принимают (AppServices, RuntimeDeps).
+G.5.3: TabFactory принимает explicit (app_services, auth_ctx, runtime) — без AppContext.
 """
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 from PySide6.QtWidgets import QTabWidget
 
@@ -15,34 +14,11 @@ from multiprocess_prototype.frontend.widgets.tabs import register_all_tabs
 from multiprocess_prototype.frontend.widgets.tabs.placeholder import PlaceholderTab
 
 
-def _make_mock_ctx():
-    """Создать mock AppContext для smoke-тестов.
-
-    TabFactory по-прежнему принимает ctx для permission-фильтрации.
-    app_services создаётся через make_test_app_services (реальный builder).
-    """
+def _make_app_services():
+    """Реальный AppServices через builder для smoke-тестов."""
     from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 
-    ctx = MagicMock()
-    ctx.app_services = make_test_app_services()
-    ctx.config = {
-        "topology": {
-            "processes": [
-                {"process_name": "camera_0", "plugins": [{"plugin_name": "capture"}]},
-                {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
-            ],
-            "wires": [
-                {"source": "camera_0.capture.frame", "target": "processor.color_mask.frame"},
-            ],
-        },
-    }
-    ctx.extras = {}
-    ctx.auth = None
-    ctx.command_sender = MagicMock()
-    ctx.topology_bridge.return_value = None
-    ctx.bindings.return_value = None
-    ctx.plugin_manager.return_value = None
-    return ctx
+    return make_test_app_services()
 
 
 class TestPhase10Integration:
@@ -70,9 +46,8 @@ class TestPhase10Integration:
 
     def test_tab_factory_no_placeholders(self, qtbot):
         """TabFactory с register_all_tabs() — ни одного PlaceholderTab."""
-        ctx = _make_mock_ctx()
         factories = register_all_tabs()
-        factory = TabFactory(ctx, custom_factories=factories)
+        factory = TabFactory(_make_app_services(), auth_ctx=None, custom_factories=factories)
 
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
@@ -87,9 +62,8 @@ class TestPhase10Integration:
 
     def test_tab_factory_titles_match(self, qtbot):
         """Заголовки табов соответствуют TAB_ORDER."""
-        ctx = _make_mock_ctx()
         factories = register_all_tabs()
-        factory = TabFactory(ctx, custom_factories=factories)
+        factory = TabFactory(_make_app_services(), auth_ctx=None, custom_factories=factories)
 
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)

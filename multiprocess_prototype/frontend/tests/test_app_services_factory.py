@@ -7,7 +7,6 @@ test_app_services_factory.py — интеграционные тесты AppServ
   2. dispatch(AddProcess) через services.commands — процесс появляется в topology.
   3. register_domain_schemas() вызывается ровно один раз (идемпотентность).
   4. factory fails loudly при отсутствии обязательных deps (recipe_manager/auth_state).
-  5. AppContext.app_services: opt-in, None по умолчанию.
 
 G.5.1: factory принимает explicit AppServicesDeps вместо AppContext —
 тесты строят deps напрямую (mock-объекты), без build_app_context.
@@ -205,6 +204,7 @@ class TestRegisterDomainSchemas:
 # ============================================================================
 # Тест 4: factory fails loudly при отсутствии обязательных deps
 # ============================================================================
+# G.5.3: класс TestAppContextAppServicesField удалён вместе с AppContext.
 
 
 class TestFactoryFailsLoudly:
@@ -223,39 +223,3 @@ class TestFactoryFailsLoudly:
 
         with pytest.raises(RuntimeError, match="auth_state"):
             build_app_services(deps)
-
-
-# ============================================================================
-# Тест 5: AppContext.app_services opt-in (None по умолчанию)
-# ============================================================================
-
-
-class TestAppContextAppServicesField:
-    """Поле app_services на AppContext: opt-in, backward-compat.
-
-    NB: AppContext удаляется в G.5.3 — этот класс уйдёт вместе с ним.
-    """
-
-    def test_app_services_default_none(self) -> None:
-        """app_services по умолчанию None (backward-compat с существующими тестами)."""
-        from multiprocess_prototype.frontend.app_context import build_app_context
-
-        process = MagicMock()
-        process.name = "gui_process"
-        process._bridge = MagicMock()
-        ctx = build_app_context(process)
-        assert ctx.app_services is None
-
-    def test_app_services_can_be_set(self, _deps: AppServicesDeps) -> None:
-        """app_services можно присвоить после build."""
-        from multiprocess_prototype.frontend.app_context import build_app_context
-
-        process = MagicMock()
-        process.name = "gui_process"
-        process._bridge = MagicMock()
-        ctx = build_app_context(process)
-
-        svc = build_app_services(_deps)
-        ctx.app_services = svc
-        assert ctx.app_services is svc
-        assert isinstance(ctx.app_services, AppServices)

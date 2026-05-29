@@ -1,7 +1,9 @@
 """Integration smoke test — воспроизводит реальный bootstrap из app.py.
 
 Проверяет что вся инициализация проходит без ошибок:
-AppContext -> RegistersManager -> TopologyBridge -> ActionBus -> TabFactory -> 7 табов.
+CommandSender -> RegistersManager -> TopologyBridge -> ActionBus -> TabFactory -> 7 табов.
+
+G.5.3: AppContext удалён — bootstrap собирает зависимости локальными переменными.
 """
 
 from __future__ import annotations
@@ -24,10 +26,9 @@ def topology_dict():
 
 @pytest.fixture
 def mock_process():
-    """Mock GuiProcess с минимальным API для build_app_context + CommandSender."""
+    """Mock GuiProcess с минимальным API для CommandSender + bridge."""
     process = MagicMock()
     process.name = "gui_test"
-    # build_app_context обращается к process._bridge
     process._bridge = MagicMock()
     process._bridge.set_state_callback = MagicMock()
     # CommandSender использует process.send_message
@@ -48,7 +49,7 @@ class TestPhase15Smoke:
         """Воспроизвести полный bootstrap из app.py."""
         from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
         from multiprocess_framework.modules.registers_module import RegistersManager
-        from multiprocess_prototype.frontend.app_context import build_app_context
+        from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
         from multiprocess_prototype.adapters.stores.topology_repository import TopologyRepositoryStore
         from multiprocess_prototype.frontend.qt_event_bus import QtEventBus
         from multiprocess_prototype.frontend.startup_checks import StartupChecker
@@ -72,21 +73,14 @@ class TestPhase15Smoke:
         rm = RegistersManager.from_registry(PluginRegistry)
         assert rm is not None, "RegistersManager создан"
 
-        # 3. AppContext — DI-контейнер
-        ctx = build_app_context(
-            mock_process,
-            plugin_registry=PluginRegistry,
-            registers_manager=rm,
-        )
-        assert ctx is not None, "AppContext создан"
-        assert ctx.command_sender is not None, "CommandSender инициализирован"
+        # 3. CommandSender — IPC-отправка команд (G.5.3: вместо AppContext-контейнера)
+        command_sender = CommandSender(mock_process)
+        assert command_sender is not None, "CommandSender инициализирован"
 
         # 4. EventBus + TopologyRepositoryStore (G.3): store владеет topology dict
         # и публикует TopologyReplaced (как в app.py composition root).
         event_bus = QtEventBus()
         topology_store = TopologyRepositoryStore(topology_dict, events=event_bus)
-        ctx.extras["event_bus"] = event_bus
-        ctx.extras["topology_store"] = topology_store
         assert topology_store.topology is not None, "TopologyRepositoryStore содержит topology"
 
         # 5. StartupChecker — валидация topology + плагинов
@@ -105,18 +99,16 @@ class TestPhase15Smoke:
 
         # 8. TopologyBridge — мост GUI <-> Runtime
         bridge = TopologyBridge(
-            command_sender=ctx.command_sender,
+            command_sender=command_sender,
             command_catalog=catalog,
             command_validator=validator,
             registers_manager=rm,
             topology_holder=topology_store,
         )
-        ctx.extras["topology_bridge"] = bridge
         assert bridge is not None, "TopologyBridge создан"
 
         # 9. ActionBus — undo/redo шина
         action_bus = create_action_bus(rm, topology_store, topology_bridge=bridge)
-        ctx.extras["action_bus"] = action_bus
         assert action_bus is not None, "ActionBus создан"
         assert action_bus.can_undo() is False, "ActionBus пуст — undo недоступен"
 
@@ -133,11 +125,11 @@ class TestPhase15Smoke:
         factories = register_all_tabs()
         assert len(factories) >= 7, f"Зарегистрировано >=7 tab factories: {len(factories)}"
 
-        # G.5.2: TabFactory принимает explicit (app_services, auth_ctx, runtime).
-        # Табы ленивые → app_services не разыменовывается в headless-тесте.
+        # G.5.2/G.5.3: TabFactory принимает explicit (app_services, auth_ctx, runtime).
+        # Табы ленивые → app_services не разыменовывается в headless-тесте (None ок).
         tab_factory = TabFactory(
-            ctx.app_services,
-            auth_ctx=ctx.auth,
+            None,
+            auth_ctx=None,
             custom_factories=factories,
         )
         tab_factory.create_tabs(window.tab_widget)

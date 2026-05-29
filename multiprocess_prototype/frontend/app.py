@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from .app_context import build_app_context
+from .auth_context import AuthContext
+from .bridge.command_sender import CommandSender
 from .windows.main_window import MainWindow
 from .widgets.image_panel import ImagePanelWidget
 from .tab_factory import TabFactory
@@ -98,18 +99,15 @@ def run_gui(process: "GuiProcess") -> None:
 
     registers_manager = RegistersManager.from_registry(PluginRegistry)
 
-    # 3. Создать AppContext
-    ctx = build_app_context(
-        process,
-        plugin_registry=PluginRegistry,
-        registers_manager=registers_manager,
-    )
-    ctx.extras["plugin_manager"] = _plugin_manager
+    # 3. CommandSender для IPC. G.5.3: AppContext-контейнер удалён — зависимости
+    # живут локальными переменными run_gui() (живы весь lifetime: app.exec() блокирует),
+    # AppServices собирается из них через AppServicesDeps, runtime — через RuntimeDeps.
+    command_sender = CommandSender(process)
 
     # 3b-pre. Bootstrap ServiceRegistry + ServiceStateAdapter (Task 3.6 / Phase 3)
     #
     # Порядок критичен (Reviewer zone of concern):
-    #   ServiceRegistry + discover() → AppContext.extras["service_registry"]
+    #   ServiceRegistry + discover() → AppServicesDeps.service_registry
     #   → ServiceStateAdapter.bind(state_proxy) → connect() → sync_domain_to_state()
     #
     # state_proxy создаётся позже (GuiStateBindings в шаге 3b), поэтому
@@ -130,8 +128,6 @@ def run_gui(process: "GuiProcess") -> None:
         )
     except Exception as e:
         process._log_warning(f"Не удалось выполнить service discovery: {e}", module="startup")
-
-    ctx.extras["service_registry"] = _service_registry
 
     # 3b-pre2. Preload DisplayRegistry из YAML до создания AppServices (Task C.1.5).
     #
@@ -159,13 +155,12 @@ def run_gui(process: "GuiProcess") -> None:
             f"display_registry: {_displays_yaml_path.name} не найден — singleton инициализирован пустым",
             module="startup",
         )
-    ctx.extras["display_registry"] = _display_registry
 
     # 3a. Загрузить topology для GUI + создать EventBus и TopologyRepositoryStore (G.3).
     # Store владеет topology dict и публикует TopologyReplaced на каждую мутацию.
     # EventBus создаётся рано (QApplication уже есть, app.py:54) — на него подписываются
-    # PipelinePresenter (scene reload) и TopologyBridge (cache). build_app_services читает
-    # event_bus + topology_store из extras (не создаёт их повторно).
+    # PipelinePresenter (scene reload) и TopologyBridge (cache). build_app_services получает
+    # event_bus + topology_store через AppServicesDeps.
     import yaml as _yaml
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
     from multiprocess_prototype.adapters import TopologyRepositoryStore
@@ -179,8 +174,6 @@ def run_gui(process: "GuiProcess") -> None:
 
     event_bus = QtEventBus()
     topology_store = TopologyRepositoryStore(_topology_dict, events=event_bus)
-    ctx.extras["event_bus"] = event_bus
-    ctx.extras["topology_store"] = topology_store
 
     # 3a.1. Startup validation
     from .startup_checks import StartupChecker
@@ -201,11 +194,10 @@ def run_gui(process: "GuiProcess") -> None:
         process._record_metric("startup.errors", len(_report.errors))
 
     # 3b. Создать GuiStateBindings — занимает слот bridge.set_state_callback
-    #     (Phase 10B: табы обращаются через ctx.bindings().bind(...))
+    #     (Phase 10B: табы получают bindings через RuntimeDeps.bindings)
     from .state.bindings import GuiStateBindings
 
     bindings = GuiStateBindings(process._bridge)
-    ctx.extras["bindings"] = bindings
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
     from .bridge.command_catalog import CommandCatalog
@@ -217,15 +209,12 @@ def run_gui(process: "GuiProcess") -> None:
     command_catalog = CommandCatalog.from_registry_and_map(PluginRegistry, connection_map)
     command_validator = CommandValidator(command_catalog, registers_manager)
     topology_bridge = TopologyBridge(
-        command_sender=ctx.command_sender,
+        command_sender=command_sender,
         command_catalog=command_catalog,
         command_validator=command_validator,
         registers_manager=registers_manager,
         topology_holder=topology_store,
     )
-
-    ctx.extras["command_catalog"] = command_catalog
-    ctx.extras["topology_bridge"] = topology_bridge
 
     # IPC cache-invalidation bridge подписывается на typed EventBus в блоке 3h.1
     # (ниже, после сборки app_services). Legacy holder.on_changed убран в G.1.2.
@@ -261,7 +250,6 @@ def run_gui(process: "GuiProcess") -> None:
         )
         # Попытка sync: не-op если proxy=None (adapter логирует warning)
         _service_adapter.sync_domain_to_state()
-        ctx.extras["service_state_adapter"] = _service_adapter
         process._log_info(
             "service_state_adapter: создан (proxy=None, sync no-op в GUI-процессе)",
             module="startup",
@@ -272,7 +260,7 @@ def run_gui(process: "GuiProcess") -> None:
     # 3g. RecipeManager + RecipeStateAdapter (Task 5.8 wire-up)
     #
     # Порядок: RecipeEngine (framework) → RecipeManager (prototype) →
-    #          RecipeStateAdapter → ctx.extras["recipe_manager"].
+    #          RecipeStateAdapter → AppServicesDeps.recipe_manager.
     #
     # state_proxy = None в GUI-процессе (аналогично ServiceStateAdapter выше).
     # RecipeStateAdapter.connect() не вызывается без proxy — graceful degradation.
@@ -312,9 +300,6 @@ def run_gui(process: "GuiProcess") -> None:
         )
         # sync_domain_to_state — no-op если proxy=None (adapter логирует warning)
         _recipe_adapter.sync_domain_to_state()
-
-        ctx.extras["recipe_manager"] = _recipe_manager
-        ctx.extras["recipe_state_adapter"] = _recipe_adapter
 
         process._log_info(
             f"recipe_manager: создан, recipes_dir={_recipes_dir}, доступно рецептов={len(_recipe_manager.list())}",
@@ -357,7 +342,6 @@ def run_gui(process: "GuiProcess") -> None:
         _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
         _dlg.exec()
         sys.exit(1)
-    ctx.extras["auth_manager"] = _auth_manager
 
     # Заполняем декларативный каталог permissions (tabs.*, users.*, roles.*).
     # Используется админ-панелью «Роли» и audit-трейлом (PR4).
@@ -366,7 +350,10 @@ def run_gui(process: "GuiProcess") -> None:
     register_all_permissions(_auth_manager.permissions)
 
     _auth_state = AuthState()
-    ctx.extras["auth_state"] = _auth_state
+
+    # G.5.3: auth_ctx собирается напрямую из локалов (раньше — ctx.auth property).
+    # audit_storage в GUI не инициализируется → audit=None (как было в ctx.auth).
+    auth_ctx = AuthContext(manager=_auth_manager, state=_auth_state, audit=None)
 
     # 3c-bis. Dev-mode автологин.
     # Источники (по приоритету): env-переменные → multiprocess_prototype/dev_settings.py → дефолты.
@@ -416,16 +403,18 @@ def run_gui(process: "GuiProcess") -> None:
     # доменов (forms binding-aware write через FormContext, roles ROLE_UPDATE,
     # system-settings field-undo) — их перевод запланирован отдельными задачами
     # (Phase G+; удаление frontend/actions/ — отдельный cleanup, big-bang здесь запрещён).
+    # G.5.3: после удаления ctx.extras прямых потребителей у шины нет (потребители
+    # отложенных доменов появятся при их миграции) — биндим в `_legacy_action_bus`
+    # (живёт весь lifetime: app.exec() блокирует) как retained-but-unbound infra.
     from .actions.bus_factory import create_action_bus
 
-    action_bus = create_action_bus(
+    _legacy_action_bus = create_action_bus(
         registers_manager,
         topology_store,
         topology_bridge=topology_bridge,
         auth_state=_auth_state,
         auth_manager=_auth_manager,
     )
-    ctx.extras["action_bus"] = action_bus
 
     # 3h. Phase D (Task D.1): AppServices factory — собирает 10 adapter'ов
     # в типизированный DI-контейнер. G.5.1: фабрика принимает explicit
@@ -440,13 +429,13 @@ def run_gui(process: "GuiProcess") -> None:
         display_registry=_display_registry,
         service_registry=_service_registry,
         registers_manager=registers_manager,
-        config=dict(ctx.config),
+        config={},
         recipe_manager=_recipe_manager,
         auth_state=_auth_state,
     )
 
     try:
-        ctx.app_services = build_app_services(_services_deps)
+        app_services = build_app_services(_services_deps)
     except Exception as exc:
         process._log_error(
             f"AppServices factory failed: {exc}",
@@ -501,14 +490,13 @@ def run_gui(process: "GuiProcess") -> None:
     # 4a. Привязать глобальные undo/redo shortcuts (Ctrl+Z / Ctrl+Y) к domain
     # CommandDispatcher — единая шина undo (G.4.4). app_services.commands
     # удовлетворяет UndoRedoController (undo/redo/can_undo/can_redo/add_change_callback).
-    window.set_undo_controller(ctx.app_services.commands)
+    window.set_undo_controller(app_services.commands)
 
     # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
-    if (auth := ctx.auth) is not None:
-        from .widgets.chrome.login_button import LoginButton
+    from .widgets.chrome.login_button import LoginButton
 
-        _login_btn = LoginButton(auth.state, auth.manager)
-        window.header.set_login_button(_login_btn)
+    _login_btn = LoginButton(auth_ctx.state, auth_ctx.manager)
+    window.header.set_login_button(_login_btn)
 
     # 4a2. Phase 12: StatusBar live bindings
     window.connect_bindings(bindings)
@@ -528,24 +516,22 @@ def run_gui(process: "GuiProcess") -> None:
         process._restart_ui = True
         app.quit()
 
-    _auth_ctx = ctx.auth
     _runtime = RuntimeDeps(
-        command_sender=ctx.command_sender,
+        command_sender=command_sender,
         topology_bridge=topology_bridge,
         bindings=bindings,
         plugin_manager=_plugin_manager,
         registers_manager=registers_manager,
-        auth_ctx=_auth_ctx,
+        auth_ctx=auth_ctx,
         request_ui_restart=_request_ui_restart,
     )
 
     tab_factory = TabFactory(
-        ctx.app_services,
-        auth_ctx=_auth_ctx,
+        app_services,
+        auth_ctx=auth_ctx,
         runtime=_runtime,
         custom_factories=register_all_tabs(),
     )
-    ctx.extras["tab_factory"] = tab_factory
     tab_factory.create_tabs(window.tab_widget)
 
     # 5a. Подключить dirty-индикатор Settings → StatusBar
@@ -562,8 +548,7 @@ def run_gui(process: "GuiProcess") -> None:
     # MainWindow автоматически реагирует на login/logout/смену роли.
     from .widgets.access import propagate_access_context_to_tree
 
-    _auth_for_tree = ctx.auth
-    propagate_access_context_to_tree(window, _auth_for_tree.state if _auth_for_tree is not None else None)
+    propagate_access_context_to_tree(window, auth_ctx.state)
 
     # 6. Подключить bridge callbacks
     _setup_bridge_callbacks(process, image_panel, window)
@@ -571,9 +556,8 @@ def run_gui(process: "GuiProcess") -> None:
     # 7. Запустить таймеры (fps, safety)
     _setup_timers(app, process, window)
 
-    # 8. Сохранить ссылки в process
+    # 8. Сохранить ссылку на окно в process
     process._window = window
-    process._app_context = ctx
 
     window.show()
     app.exec()

@@ -268,23 +268,39 @@ class PluginsTab(QWidget):
             )
 ```
 
-#### 2. AppContext (DI-контейнер)
+#### 2. AppServices + RuntimeDeps (DI без контейнера-обёртки)
+
+> **G.5 (cross-tab-architecture):** монолитный `AppContext`/`ctx.extras` удалён.
+> Composition root (`app.py:run_gui`) держит зависимости локальными переменными
+> (живы весь lifetime — `app.exec()` блокирует) и собирает два явных DI-контейнера:
+> **AppServices** (editor-state: каталоги/реестры/команды) и **RuntimeDeps**
+> (runtime-layer: IPC-мосты, bindings, callbacks). Табы получают `(services, runtime)`.
 
 ```python
-ctx = build_app_context(
-    process=gui_process,
-    plugin_registry=PluginRegistry,
-    registers_manager=registers_mgr,
+# Composition root (app.py)
+app_services = build_app_services(AppServicesDeps(
+    event_bus=event_bus, topology_store=topology_store,
+    plugin_registry=PluginRegistry, display_registry=display_registry,
+    service_registry=service_registry, registers_manager=registers_mgr,
+    config={}, recipe_manager=recipe_manager, auth_state=auth_state,
+))
+runtime = RuntimeDeps(
+    command_sender=command_sender, topology_bridge=topology_bridge,
+    bindings=bindings, plugin_manager=plugin_manager,
+    registers_manager=registers_mgr, auth_ctx=auth_ctx,
+    request_ui_restart=lambda: ...,  # узкий callback для InterfaceSection
 )
+tab_factory = TabFactory(app_services, auth_ctx=auth_ctx, runtime=runtime,
+                         custom_factories=register_all_tabs())
 
-# Использование в табах
+# Использование в табах: фабрика create(services, runtime)
 class MyTab(QWidget):
-    def __init__(self, ctx):
-        self._ctx = ctx
-        # ctx.command_sender — отправка команд
-        # ctx.registers_manager() — доступ к конфигам плагинов
-        # ctx.bindings() — реактивные подписки
-        # ctx.plugin_registry — реестр плагинов
+    @classmethod
+    def create(cls, services: AppServices, runtime: RuntimeDeps):
+        # services.topology / services.commands / services.plugins — editor-state
+        # runtime.command_sender — IPC; runtime.registers_manager — live-регистры
+        # runtime.bindings — реактивные подписки
+        return cls(services, runtime=runtime)
 ```
 
 #### 3. ActionBus (Undo/Redo)
