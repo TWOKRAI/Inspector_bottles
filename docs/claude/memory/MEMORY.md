@@ -35,5 +35,5 @@
 - [Cross-tab Phase D AppServices](project_cross_tab_phase_d.md) — Phase D DONE 7/7 (2026-05-27): AppServices factory + QtEventBus + ConfigStore + Settings PoC. Ready for Phase E.
 - [Cross-tab Phase E per-tab migration](project_cross_tab_phase_e.md) — Phase E IN PROGRESS (2026-05-28): E.1 Pipeline DONE (8566f994+e7bd3d97, APPROVED), E.2 Processes next. Bridge pattern с TODO Phase F допустим, sentrux -20 принято.
 - [Cross-tab Phase F legacy removal](project_cross_tab_phase_f.md) — DONE 2026-05-28 (ретро-ревью Opus, без блокеров); F.7 переосмыслен (peek bridge-readers, no-op фильтр найден); F.1+ActionBus→G; Phase G handoff-долг зафиксирован
-- [Cross-tab Phase G final](project_cross_tab_phase_g.md) — IN PROGRESS 2026-05-29: G.0–G.3 + G.4.1/G.4.2/G.4.2b/G.4.3 DONE (5dc97751, FIELD_SET→SetPluginConfig Pipeline Inspector, Y1+rm-sync listener), reviewer APPROVED. G.4.4 + G.5–G.6 next
+- [Cross-tab Phase G final](project_cross_tab_phase_g.md) — ЗАВЕРШЕНА 2026-05-29: все G.0–G.6 DONE. G.6 UX (auto-reveal/validation/selection/diff + RecipeActivated prod вариант A + cross-tab Services-highlight); 2035 passed/sentrux 9-9/quality 7136; reviewer G.6 + boot-smoke — долг перед merge
 - [Commit message format](feedback_commit_msg_format.md) — каждый trailer (Why/Layer/...) одной строкой (перенос ломает парсер); pre-commit ruff-format → re-stage + re-commit
