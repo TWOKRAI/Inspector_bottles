@@ -53,7 +53,9 @@ class PluginInstance(SchemaBase):
         """
         if not isinstance(data, dict):
             return data
-        known = {"plugin_name", "plugin_class", "category", "config"}
+        # known выводим из модели (см. Process._fold_extra_into_metadata) —
+        # никакого хардкода списка полей.
+        known = set(cls.model_fields)
         extras = {k: v for k, v in data.items() if k not in known}
         if not extras:
             return data

@@ -63,7 +63,7 @@ processes:
         plugin_name: color_mask
         category: processing
         h_min: 0
-        h_max: 180
+        h_max: 179
         s_min: 50
         s_max: 255
         v_min: 50

@@ -85,18 +85,10 @@ class Process(SchemaBase):
         """
         if not isinstance(data, dict):
             return data
-        known = {
-            "process_name",
-            "plugins",
-            "process_class",
-            "priority",
-            "target_process",
-            "chain_targets",
-            "description",
-            "protected",
-            "category",
-            "metadata",
-        }
+        # known выводим из самой модели: при добавлении нового поля в Process
+        # его не нужно дублировать здесь, иначе оно молча уходило бы в metadata
+        # (валидаторы без alias-полей — ключи model_fields == ключи YAML).
+        known = set(cls.model_fields)
         extras = {k: v for k, v in data.items() if k not in known}
         if not extras:
             return data
