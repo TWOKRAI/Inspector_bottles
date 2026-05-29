@@ -307,45 +307,175 @@ class TestPresenterInspectorIntegration:
         # AppServices должен быть передан в panel
         assert panel._services is services
 
-    def test_field_changed_calls_rm_set_value(self, qtbot):
-        """field_changed → presenter → rm.set_value() вызывается.
 
-        G.4.2: ActionBus удалён, field_changed идёт через RegistersManager.
-        G.4.3: будет мигрировано на domain SetPluginConfig.
-        """
-        rm = MagicMock()
-        rm.get_fields.return_value = []
-        rm.get_register.return_value = None
+# ------------------------------------------------------------------ #
+#  G.4.3: field_changed → dispatch(SetPluginConfig) + undo/redo       #
+# ------------------------------------------------------------------ #
 
-        services = _make_presenter_services(bus=None)
-        presenter = PipelinePresenter(services, registers_manager=rm)
 
-        panel = NodeInspectorPanel()
-        qtbot.addWidget(panel)
+class TestFieldDispatch:
+    """G.4.3: field_changed → dispatch(SetPluginConfig) → персист + undo/redo.
 
-        presenter.set_inspector(panel)
-        panel.show_node("camera", "source", params={"fps": "30"})
+    Используем реальный orchestrator+store+EventBus (make_pipeline_services_with_orchestrator),
+    НЕ MagicMock(spec=AppContext).
+    """
 
-        panel.field_changed.emit("camera", "fps", "60")
+    def _make_services_and_presenter(self, qtbot, *, config=None):
+        """Сервисы с процессом 'camera' (plugin 'capture', config) + presenter."""
+        from ._helpers import make_pipeline_services_with_orchestrator
 
-        rm.set_value.assert_called_once_with("camera", "fps", "60")
-
-    def test_field_changed_no_rm_logs_warning(self, qtbot, caplog):
-        """Если RegistersManager недоступен — логируется warning."""
-        import logging
-
-        services = _make_presenter_services(bus=None)
+        topo = {
+            "processes": [
+                {
+                    "process_name": "camera",
+                    "plugins": [
+                        {
+                            "plugin_name": "capture",
+                            "config": config or {"threshold": 100, "brightness": 50},
+                        }
+                    ],
+                },
+            ],
+            "wires": [],
+        }
+        services = make_pipeline_services_with_orchestrator(topology=topo)
         presenter = PipelinePresenter(services)
 
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-
         presenter.set_inspector(panel)
 
-        with caplog.at_level(logging.WARNING):
-            panel.field_changed.emit("camera", "fps", "60")
+        return services, presenter, panel
 
-        assert any("warning" in r.levelname.lower() or r.levelno >= logging.WARNING for r in caplog.records)
+    def test_field_edit_persists_in_topology(self, qtbot):
+        """field_changed → SetPluginConfig → значение в topology_repo (персист)."""
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        panel.field_changed.emit("camera", "threshold", 200)
+
+        # Значение должно быть в domain (editor-топология — SSOT)
+        topo = services.topology.load().to_dict()
+        proc = next(p for p in topo["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 200
+
+    def test_field_edit_no_scene_reload(self, qtbot):
+        """field-edit НЕ вызывает full scene reload (_suppress сработал)."""
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        # Подставим scene-mock для счёта reload
+        scene = MagicMock()
+        presenter.set_scene(scene)
+        # Делаем initial load чтобы scene был инициализирован
+        presenter.load_topology_from_config()
+        scene.reset_mock()
+
+        panel.field_changed.emit("camera", "threshold", 200)
+
+        # scene.load_from_data НЕ вызван (dispatch обёрнут в _block_signals,
+        # _on_topology_replaced гасится _suppress)
+        scene.load_from_data.assert_not_called()
+
+    def test_undo_redo_field_roundtrip(self, qtbot):
+        """Undo/redo field-config: и domain откатан, и повторён."""
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        # Начальное значение
+        topo_before = services.topology.load().to_dict()
+        proc = next(p for p in topo_before["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 100
+
+        # Правка
+        panel.field_changed.emit("camera", "threshold", 200)
+        topo_after = services.topology.load().to_dict()
+        proc = next(p for p in topo_after["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 200
+
+        # Undo
+        ok = services.commands.undo()
+        assert ok is True
+        topo_undone = services.topology.load().to_dict()
+        proc = next(p for p in topo_undone["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 100
+
+        # Redo
+        ok = services.commands.redo()
+        assert ok is True
+        topo_redo = services.topology.load().to_dict()
+        proc = next(p for p in topo_redo["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 200
+
+    def test_undo_field_emits_plugin_config_changed(self, qtbot):
+        """G.4.3 Y1: undo field → PluginConfigChanged с откатанным значением.
+
+        rm-sync listener (app.py) подпишется на это событие и вызовет rm.set_value.
+        """
+        from multiprocess_prototype.domain.events import PluginConfigChanged
+
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        config_events: list = []
+        services.events.subscribe(PluginConfigChanged, lambda ev: config_events.append(ev))
+
+        panel.field_changed.emit("camera", "threshold", 200)
+        config_events.clear()
+
+        services.commands.undo()
+
+        assert len(config_events) == 1
+        assert config_events[0].field == "threshold"
+        assert config_events[0].value == 100
+
+    def test_coalesce_slider_burst(self, qtbot):
+        """Серия правок одного поля → одна undo-запись (coalesce_key)."""
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        # Серия slider-тиков (все с одним coalesce_key: set_config:camera:threshold)
+        for v in [110, 120, 130, 140, 150]:
+            panel.field_changed.emit("camera", "threshold", v)
+
+        # Один undo откатывает всю серию
+        topo = services.topology.load().to_dict()
+        proc = next(p for p in topo["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 150
+
+        ok = services.commands.undo()
+        assert ok is True
+        topo = services.topology.load().to_dict()
+        proc = next(p for p in topo["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 100
+
+        # Больше undo нет (всё в одной записи)
+        assert services.commands.can_undo() is False
+
+    def test_domain_error_graceful(self, qtbot, caplog):
+        """DomainError (несуществующий процесс) → warning, repo не мутирован."""
+        import logging
+
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        topo_before = services.topology.load().to_dict()
+
+        with caplog.at_level(logging.WARNING):
+            panel.field_changed.emit("nonexistent_process", "foo", 42)
+
+        # Repo не изменился
+        topo_after = services.topology.load().to_dict()
+        assert topo_before == topo_after
+
+        # Warning залогирован
+        assert any("SetPluginConfig" in r.message for r in caplog.records)
+
+    def test_suppress_prevents_reentry(self, qtbot):
+        """Если _suppress=True — field_changed → no-op (guard от ре-входа)."""
+        services, presenter, panel = self._make_services_and_presenter(qtbot)
+
+        presenter._suppress = True
+        panel.field_changed.emit("camera", "threshold", 999)
+
+        # Значение НЕ должно измениться
+        topo = services.topology.load().to_dict()
+        proc = next(p for p in topo["processes"] if p["process_name"] == "camera")
+        assert proc["plugins"][0]["config"]["threshold"] == 100
 
 
 # ------------------------------------------------------------------ #

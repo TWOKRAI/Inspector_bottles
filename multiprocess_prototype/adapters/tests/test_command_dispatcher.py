@@ -29,6 +29,7 @@ from multiprocess_prototype.adapters.dispatch.command_dispatcher import (
 from multiprocess_prototype.domain.commands import (
     AddProcess,
     RemoveProcess,
+    SetPluginConfig,
 )
 from multiprocess_prototype.domain.entities.project import ApplyContext, Project
 from multiprocess_prototype.domain.entities.topology import Topology
@@ -36,6 +37,7 @@ from multiprocess_prototype.domain.errors import DomainError
 from multiprocess_prototype.domain.event_bus import EventBus
 from multiprocess_prototype.domain.events import (
     DisplayUnbound,
+    PluginConfigChanged,
     ProcessAdded,
     ProcessRemoved,
     ProjectEvent,
@@ -572,3 +574,102 @@ def test_history_returns_entries_with_labels() -> None:
     assert isinstance(entries[0], HistoryEntry)
     assert entries[0].command_type == "AddProcess"
     assert "cam" in entries[0].label
+
+
+# ===========================================================================
+# G.4.3 — undo/redo field-config переигрывает PluginConfigChanged (Y1)
+# ===========================================================================
+
+
+def _orchestrator_with_process(config: dict | None = None):
+    """Orchestrator с одним процессом (cam + capture plugin с начальным config).
+
+    Возвращает (dispatcher, holder, bus, config_events).
+    """
+    from multiprocess_prototype.adapters.stores.topology_repository import (
+        TopologyRepositoryStore,
+    )
+    from multiprocess_prototype.domain.entities.plugin import PluginInstance
+    from multiprocess_prototype.domain.entities.process import Process
+
+    initial_config = config if config is not None else {"threshold": 100}
+    topo = Topology(
+        processes=(
+            Process(
+                process_name="cam",
+                plugins=(PluginInstance(plugin_name="capture", config=initial_config),),
+            ),
+        ),
+    )
+    project = Project(topology=topo)
+    holder = ProjectHolder(initial=project)
+    bus = EventBus()
+
+    config_events: list[PluginConfigChanged] = []
+    bus.subscribe(PluginConfigChanged, lambda ev: config_events.append(ev))
+
+    store = TopologyRepositoryStore(project.topology.to_dict(), events=bus)
+    dispatcher = CommandDispatcherOrchestrator(
+        project_holder=holder,
+        topology_repo=store,
+        event_bus=bus,
+        apply_context_factory=_default_ctx_factory,
+    )
+    return dispatcher, holder, bus, config_events
+
+
+def test_undo_field_config_emits_plugin_config_changed() -> None:
+    """G.4.3 Y1: undo SetPluginConfig → _emit_config_diff → PluginConfigChanged.
+
+    Подписчик (например rm-sync listener) получает откатанное значение.
+    """
+    dispatcher, holder, _bus, config_events = _orchestrator_with_process({"threshold": 100})
+
+    # dispatch: threshold 100 → 200
+    dispatcher.dispatch(SetPluginConfig(process_name="cam", plugin_index=0, field="threshold", value=200))
+    assert len(config_events) == 1
+    assert config_events[0].value == 200
+    config_events.clear()
+
+    # undo → threshold 200 → 100, _emit_config_diff эмитит PluginConfigChanged(100)
+    ok = dispatcher.undo()
+    assert ok is True
+    assert len(config_events) == 1
+    assert config_events[0].process_name == "cam"
+    assert config_events[0].field == "threshold"
+    assert config_events[0].value == 100
+
+    # domain-состояние — config откатан
+    proc = holder.get().topology.find_process("cam")
+    assert proc is not None
+    assert proc.plugins[0].config["threshold"] == 100
+
+
+def test_redo_field_config_emits_plugin_config_changed() -> None:
+    """G.4.3 Y1: redo после undo → PluginConfigChanged с повторённым значением."""
+    dispatcher, holder, _bus, config_events = _orchestrator_with_process({"threshold": 100})
+
+    dispatcher.dispatch(SetPluginConfig(process_name="cam", plugin_index=0, field="threshold", value=200))
+    dispatcher.undo()
+    config_events.clear()
+
+    ok = dispatcher.redo()
+    assert ok is True
+    assert len(config_events) == 1
+    assert config_events[0].value == 200
+
+    proc = holder.get().topology.find_process("cam")
+    assert proc is not None
+    assert proc.plugins[0].config["threshold"] == 200
+
+
+def test_undo_structural_command_no_config_events() -> None:
+    """G.4.3 Y1: undo AddProcess не эмитит PluginConfigChanged (нет config-дифф)."""
+    dispatcher, _holder, _bus, config_events = _orchestrator_with_process()
+
+    dispatcher.dispatch(AddProcess(process_name="extra"))
+    config_events.clear()
+
+    dispatcher.undo()
+    # Структурная мутация (добавление/удаление процесса) — не config-дифф
+    assert len(config_events) == 0

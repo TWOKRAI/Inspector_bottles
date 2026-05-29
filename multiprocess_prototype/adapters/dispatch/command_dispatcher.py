@@ -34,7 +34,7 @@ from collections.abc import Callable
 
 from multiprocess_prototype.domain.commands import ProjectCommand
 from multiprocess_prototype.domain.entities.project import ApplyContext, Project
-from multiprocess_prototype.domain.events import ProjectEvent
+from multiprocess_prototype.domain.events import PluginConfigChanged, ProjectEvent
 from multiprocess_prototype.domain.protocols import EventBusProtocol, HistoryEntry
 from multiprocess_prototype.domain.protocols import TopologyRepository
 
@@ -200,8 +200,57 @@ class CommandDispatcherOrchestrator:
 
         Порядок (save → set) зеркалит dispatch: store.save() публикует
         TopologyReplaced синхронно; подписчики читают актуальную topology из repo.
-        Granular-события (ProcessAdded/...) при undo НЕ переигрываются — TopologyReplaced
-        достаточно для full reload (семантика legacy ActionBus сохранена).
+
+        G.4.3 (Y1): после save+set переигрываем PluginConfigChanged по config-диффу
+        (current vs target). Это нужно для синхронизации rm (RegistersManager) при
+        undo/redo field-edit — иначе форма и живой процесс остаются со старым значением.
+        Порядок: TopologyReplaced (save) → set holder → PluginConfigChanged (дифф).
+        Соответствует порядку dispatch (save шаг 4 → set шаг 5 → events шаг 6).
         """
+        # Текущий project ДО восстановления — для config-diff (reviewer iter1 #2)
+        current = self._holder.get()
+
         self._topology_repo.save(project.topology)
         self._holder.set(project)
+
+        # G.4.3 (Y1): переиграть PluginConfigChanged по config-диффу
+        self._emit_config_diff(current, project)
+
+    def _emit_config_diff(self, old: Project, new: Project) -> None:
+        """Переиграть PluginConfigChanged по config-дифф (G.4.3 Y1).
+
+        Сравнивает config каждого плагина в каждом процессе: если значение поля
+        отличается — эмитит PluginConfigChanged. Порядок: по процессам, по плагинам,
+        по полям (детерминированный). Поля, отсутствующие в одном из snapshot'ов,
+        тоже считаются изменёнными (добавление/удаление ключа).
+
+        Вызывается из _restore (undo/redo). Не вызывается из dispatch —
+        там Project.apply сам эмитит granular-события.
+        """
+        old_procs = {p.process_name: p for p in old.topology.processes}
+        new_procs = {p.process_name: p for p in new.topology.processes}
+
+        # Итерируем по процессам, присутствующим в ОБОИХ (добавленные/удалённые
+        # процессы — не config-дифф, а структурная мутация; TopologyReplaced достаточно).
+        for pname in sorted(old_procs.keys() & new_procs.keys()):
+            old_plugins = old_procs[pname].plugins
+            new_plugins = new_procs[pname].plugins
+            for idx in range(min(len(old_plugins), len(new_plugins))):
+                old_cfg = old_plugins[idx].config
+                new_cfg = new_plugins[idx].config
+                if old_cfg == new_cfg:
+                    continue
+                # Дифф по ключам (union — ловим удалённые/добавленные ключи)
+                all_keys = set(old_cfg.keys()) | set(new_cfg.keys())
+                for field in sorted(all_keys):
+                    old_val = old_cfg.get(field)
+                    new_val = new_cfg.get(field)
+                    if old_val != new_val:
+                        self._event_bus.publish(
+                            PluginConfigChanged(
+                                process_name=pname,
+                                plugin_index=idx,
+                                field=field,
+                                value=new_val,
+                            )
+                        )

@@ -103,9 +103,8 @@ class PluginsTab(BaseTreeNavTab):
         # Текущий режим отображения (Cards/Table).
         self._view_mode: ViewMode = ViewMode.CARDS
 
-        # ActionBus bridge (TODO Phase G (G.4): domain commands).
-        _bus_accessor = getattr(services.commands, "action_bus", None)
-        bus = _bus_accessor() if callable(_bus_accessor) else None
+        # G.4.3: ActionBus bridge удалён (был мёртвый — action_bus=None в production).
+        # Plugins = превью/песочница, без topology-привязки.
         super().__init__(
             title="Плагины",
             sections=build_plugin_sections(
@@ -116,7 +115,7 @@ class PluginsTab(BaseTreeNavTab):
             ),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
-            bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
+            bus_change_subscriber=None,
             parent=parent,
         )
 
@@ -137,7 +136,9 @@ class PluginsTab(BaseTreeNavTab):
         action_layout.addWidget(self._action_stack, 1)
         self._tab_layout.set_action_widget(new_action_widget)
 
-        self.enable_undo_redo(bus)
+        # G.4.3: ActionBus удалён — undo/redo через ActionBus больше не работает.
+        # Plugins = превью/песочница. enable_undo_redo(None) → кнопки disabled.
+        self.enable_undo_redo(None)
         self.populate()
 
         # Task 2.6 — подписать каталог на сигнал catalog_updated от секции «Пути».

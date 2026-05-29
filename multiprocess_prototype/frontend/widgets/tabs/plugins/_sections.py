@@ -19,7 +19,8 @@
   ``PluginInfoCard`` (иначе);
 - ``action_buttons()`` возвращает кнопку «Тест» (sandbox), если передан
   ``open_sandbox_cb``; для несовместимых плагинов — disabled с tooltip.
-- ``bus_change_callback`` обновляет редактор при undo/redo через ActionBus.
+- G.4.3: мёртвая ActionBus-ветка (bus_change_callback, _on_field_changed) удалена.
+  Plugins = превью/песочница, field-edit не персистится и не даёт undo.
 """
 
 from __future__ import annotations
@@ -198,12 +199,6 @@ class _PluginSection:
 
         self._open_sandbox_cb(self._key, self._sandbox_widget)
 
-    # -------- SectionWithEvents (bus подписка через BaseTreeNavTab) --------
-
-    def bus_change_callback(self) -> Callable[[], None] | None:
-        """Callback для подписки на ActionBus — обновлять editor при undo/redo."""
-        return self._on_bus_changed
-
     # -------- Internal --------
 
     def _build_widget(self) -> None:
@@ -213,9 +208,10 @@ class _PluginSection:
         if info.get("has_registers"):
             fields = presenter.get_register_fields(self._key)
             if fields:
-                # TODO Phase G (G.4): form_context не покрыт AppServices Protocol'ами.
+                # Plugins = превью/песочница, без привязки к topology-домену (G.4.3).
+                # field_changed НЕ подключается — правки в этой вкладке не персистятся
+                # и не дают undo. Для topology-привязки используйте Pipeline Inspector.
                 view = RegisterView(fields, form_ctx=None)
-                view.field_changed.connect(self._on_field_changed)
                 self._register_view = view
 
                 from multiprocess_prototype.frontend.widgets.access import (
@@ -233,54 +229,6 @@ class _PluginSection:
 
         # Fallback — информационная карточка.
         self._widget = PluginInfoCard(info)
-
-    def _get_bus(self) -> Any:
-        """ActionBus через services.commands bridge (TODO Phase G (G.4): domain commands)."""
-        accessor = getattr(self._services.commands, "action_bus", None)
-        return accessor() if callable(accessor) else None
-
-    def _on_field_changed(
-        self,
-        register_name: str,
-        field_name: str,
-        old_value: object,
-        new_value: object,
-    ) -> None:
-        """Изменение параметра плагина → ActionBus.execute(field_set)."""
-        bus = self._get_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-        action = V2ActionBuilder.field_set_timed(
-            register_name,
-            field_name,
-            new_value,
-            old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.execute(action)
-
-    def _on_bus_changed(self) -> None:
-        """Callback от ActionBus — обновить RegisterView при undo/redo."""
-        bus = self._get_bus()
-        if bus is None or self._register_view is None:
-            return
-        event = bus.last_event
-        if event is None:
-            return
-        event_type, action = event
-        if event_type not in ("undo", "redo"):
-            return
-        if action.action_type != "field_set":
-            return
-        register_name = action.register_name or ""
-        if register_name != self._key:
-            return
-        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
-        key = f"{register_name}.{action.field_name}"
-        if key in self._register_view.editors():
-            self._register_view.set_editor_value(key, value)
 
 
 # ---------------------------------------------------------------------------

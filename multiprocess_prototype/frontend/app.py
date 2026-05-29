@@ -445,6 +445,32 @@ def run_gui(process: "GuiProcess") -> None:
 
     event_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())
 
+    # 3h.2. G.4.3 (Y1): rm-sync listener — синхронизация RegistersManager из domain.
+    # При dispatch(SetPluginConfig) или undo/redo field-config orchestrator публикует
+    # PluginConfigChanged → listener вызывает rm.set_value → IPC в живой процесс.
+    # ПОРЯДОК ПОДПИСЧИКОВ (reviewer iter1 #3): EventBus вызывает handler'ы в порядке
+    # регистрации. TopologyReplaced (save, шаг 4) приходит ПЕРЕД PluginConfigChanged
+    # (шаг 6 dispatch / шаг _emit_config_diff undo). Порядок: presenter reload
+    # (suppressed при field-edit) + bridge cache reset → затем rm-sync → IPC. Не
+    # переставлять без анализа.
+    from multiprocess_prototype.domain.events import PluginConfigChanged
+
+    def _on_plugin_config_changed(event: PluginConfigChanged) -> None:
+        """rm-sync: domain → RegistersManager → IPC (G.4.3 Y1)."""
+        if registers_manager is not None:
+            ok = registers_manager.set_value(event.process_name, event.field, event.value)
+            if not ok:
+                import logging as _logging
+
+                _logging.getLogger(__name__).warning(
+                    "rm-sync: не удалось установить %s.%s = %s",
+                    event.process_name,
+                    event.field,
+                    event.value,
+                )
+
+    event_bus.subscribe(PluginConfigChanged, _on_plugin_config_changed)
+
     # 4. Создать MainWindow
     window = MainWindow()
 

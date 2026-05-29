@@ -22,6 +22,7 @@ from multiprocess_prototype.domain.commands import (
     BindDisplay,
     ConnectWire,
     RemoveProcess,
+    SetPluginConfig,
     UnbindDisplay,
 )
 from multiprocess_prototype.domain.entities.plugin import PluginInstance
@@ -121,28 +122,38 @@ class PipelinePresenter:
     ) -> None:
         """Обработчик изменения поля из NodeInspectorPanel.
 
-        G.4.3: будет мигрирован на domain SetPluginConfig. Сейчас — прямой вызов
-        rm.set_value() если RegistersManager доступен (fallback-путь, без undo).
-        """
-        # G.2: live RegistersManager — explicit runtime-dep (через RuntimeDeps, Q-F1=B).
-        # G.4.3: заменить на dispatch(SetPluginConfig(...)) + маппинг register→(process, plugin_index).
-        rm = self._registers_manager
+        G.4.3: dispatch(SetPluginConfig) → domain персистит config в editor-топологию
+        + undo/redo. rm-sync выполняет отдельный listener (app.py) по событию
+        PluginConfigChanged → rm.set_value → IPC в живой процесс.
 
-        if rm is not None:
-            ok = rm.set_value(process_name, field_name, new_value)
-            if not ok:
-                logger.warning(
-                    "Не удалось установить %s.%s = %s через RegistersManager",
-                    process_name,
-                    field_name,
-                    new_value,
+        _suppress гасит TopologyReplaced → scene full reload НЕ происходит при
+        field-edit (графовая структура не меняется). coalesce_key объединяет
+        slider-burst (десятки правок/сек) в одну undo-запись.
+        """
+        # reviewer iter1 #1: входной _suppress-guard — защита от ре-входа
+        # (listener обновит rm → rm-observer → signal → re-enter presenter)
+        if self._suppress:
+            return
+
+        cmd = SetPluginConfig(
+            process_name=process_name,
+            plugin_index=0,
+            field=field_name,
+            value=new_value,
+        )
+        try:
+            with self._block_signals():
+                self._services.commands.dispatch(
+                    cmd,
+                    coalesce_key=f"set_config:{process_name}:{field_name}",
                 )
-        else:
+        except DomainError as exc:
             logger.warning(
-                "field_changed: RegistersManager недоступен для %s.%s = %s",
+                "SetPluginConfig отклонён для %s.%s = %s: %s",
                 process_name,
                 field_name,
                 new_value,
+                exc,
             )
 
     def _on_target_process_changed(self, node_id: str, new_process: str) -> None:
