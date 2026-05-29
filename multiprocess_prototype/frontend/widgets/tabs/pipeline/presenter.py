@@ -135,6 +135,9 @@ class PipelinePresenter:
         if self._suppress:
             return
 
+        # Convention: один плагин на процесс (AddProcess создаёт процесс с единственным
+        # PluginInstance) → plugin_index=0. Multi-plugin (index > 0) — вне scope G.4.3,
+        # см. plans/2026-05-27_cross-tab-architecture/phase-g.md.
         cmd = SetPluginConfig(
             process_name=process_name,
             plugin_index=0,

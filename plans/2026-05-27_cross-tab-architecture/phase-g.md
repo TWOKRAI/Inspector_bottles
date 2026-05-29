@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 реализовано** (2026-05-29, `5dc97751`, Y1 — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; verify ✓ 2048 passed / sentrux 9-9 / quality 7133; ожидает reviewer); G.4.4 NOT DETAILED; G.5–G.6 NOT DETAILED.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); G.4.4 NOT DETAILED; G.5–G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -717,7 +717,7 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 - (только Y1) `adapters/tests/test_command_dispatcher.py`: undo field-config переигрывает `PluginConfigChanged` (подписчик получает откатанное значение).
 - `plugins/tests/`: после удаления dead-ветки field-edit во вкладке Plugins ничего не ломает (секции строятся, permission-gating цел); регрессия отсутствует.
 
-**Acceptance criteria:** — реализовано 2026-05-29 (`5dc97751`, Y1; verify ✓, ожидает reviewer)
+**Acceptance criteria:** — ✅ DONE (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — 1 non-blocking nit закрыт: plugin_index=0 assumption задокументирован)
 - [x] `grep "rm.set_value" pipeline/presenter.py` (в `_on_inspector_field_changed`) → 0 (только в docstring; прямой путь убран, rm синхронится listener'ом)
 - [x] field-edit Pipeline Inspector → `dispatch(SetPluginConfig)`; значение **персистится** в topology_repo (`test_field_edit_persists_in_topology`) — находка #3 закрыта
 - [x] IPC в живой процесс работает (rm-sync listener `app.py` → `registers_manager.set_value` → send_callback)
