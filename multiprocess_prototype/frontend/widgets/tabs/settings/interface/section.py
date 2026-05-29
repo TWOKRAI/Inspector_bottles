@@ -19,7 +19,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
-    QApplication,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -29,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.app_context import AppContext
+    from collections.abc import Callable
 
 _logger = logging.getLogger(__name__)
 
@@ -40,9 +39,9 @@ class InterfaceSection(QWidget):
     Реализует SectionProtocol: key, title, widget(), action_buttons(),
     on_activated(), on_deactivated().
 
-    Task D.5: принимает ctx как Optional для backward compat. Если ctx=None —
+    G.5.2: принимает узкий callback `request_ui_restart` (Interface Segregation —
+    секция знает только «перезапусти UI», не GuiProcess). Если None —
     кнопка «Обновить UI» показывается, но не выполняет перезапуск (graceful degradation).
-    TODO Phase G (G.5): передавать ProcessControl Protocol через AppServices/RuntimeDeps.
     """
 
     # SectionProtocol — идентификаторы секции
@@ -51,11 +50,11 @@ class InterfaceSection(QWidget):
 
     def __init__(
         self,
-        ctx: "AppContext | None" = None,
+        request_ui_restart: "Callable[[], None] | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._ctx = ctx
+        self._request_ui_restart = request_ui_restart
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -114,19 +113,13 @@ class InterfaceSection(QWidget):
     # ------------------------------------------------------------------
 
     def _on_rebuild_ui(self) -> None:
-        """Перезапустить UI: ставим флаг на процессе и закрываем QApplication.
+        """Перезапустить UI через injected callback.
 
-        Если ctx=None (Task D.5 / тесты без полного AppContext) — graceful no-op.
-        TODO Phase G (G.5): ProcessControl Protocol в AppServices устранит этот guard.
+        Если callback=None (тесты без runtime) — graceful no-op (G.5.2).
         """
-        if self._ctx is None:
-            _logger.warning("[InterfaceSection] ctx=None — перезапуск UI недоступен")
+        if self._request_ui_restart is None:
+            _logger.warning("[InterfaceSection] request_ui_restart=None — перезапуск UI недоступен")
             return
 
-        process = self._ctx.process
-        process._restart_ui = True
         _logger.info("[InterfaceSection] Перезапуск UI по запросу пользователя")
-
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
+        self._request_ui_restart()

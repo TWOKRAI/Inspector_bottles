@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from multiprocess_framework.modules.registers_module import RegistersManager
     from multiprocess_prototype.frontend.auth_context import AuthContext
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
@@ -50,6 +52,10 @@ class RuntimeDeps:
             value-семантику (FieldSpec), но forms-слой строит виджеты из framework FieldInfo,
             который domain не может экспонировать (запрет импорта framework). G.2 / Q-F1=B.
         auth_ctx: AuthContext (manager+state+audit) для admin-панелей (SettingsTab).
+        request_ui_restart: узкий callback «перезапустить UI» для InterfaceSection
+            (G.5.2). Заменяет прямой доступ к GuiProcess._restart_ui (Interface
+            Segregation — секция знает только «перезапусти UI», не GuiProcess).
+            None → кнопка «Обновить UI» = graceful no-op.
     """
 
     command_sender: "CommandSender | None" = None
@@ -58,3 +64,4 @@ class RuntimeDeps:
     plugin_manager: Any = None
     registers_manager: "RegistersManager | None" = None
     auth_ctx: "AuthContext | None" = None
+    request_ui_restart: "Callable[[], None] | None" = None

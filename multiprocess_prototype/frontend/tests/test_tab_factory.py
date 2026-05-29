@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QTabWidget, QWidget
 from multiprocess_framework.modules.frontend_module.managers.access_context import (
     AccessContext,
 )
+from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.tab_factory import (
     TAB_ORDER,
     LazyTabWidget,
@@ -23,36 +24,32 @@ from multiprocess_prototype.frontend.widgets.tabs.placeholder import Placeholder
 # ---------------------------------------------------------------------------
 
 
-def _make_ctx(auth_state: object | None = None) -> MagicMock:
-    """Создать mock AppContext.
+def _make_tab_factory(
+    auth_state: object | None = None,
+    custom_factories: dict | None = None,
+) -> TabFactory:
+    """Создать TabFactory с explicit (app_services, auth_ctx, runtime).
 
-    По умолчанию `ctx.auth` is None — фабрика работает в legacy-режиме
+    G.5.2: TabFactory принимает explicit аргументы вместо AppContext.
+    По умолчанию `auth_ctx` is None — фабрика работает в legacy-режиме
     без фильтрации по permissions (все табы видны). Для тестов фильтрации
     передавай stub AuthState с атрибутом `access_context` и сигналом
     `access_context_changed`.
-
-    Task F.9: app_services создаётся через make_test_app_services,
-    TabFactory собирает RuntimeDeps из ctx в __init__.
     """
     from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 
-    ctx = MagicMock()
-    ctx.app_services = make_test_app_services()
-    # legacy API (для старого кода)
-    ctx.auth_state.return_value = auth_state
-    # new API: ctx.auth = AuthContext | None
+    app_services = make_test_app_services()
     if auth_state is None:
-        ctx.auth = None
+        auth_ctx = None
     else:
-        _auth = MagicMock()
-        _auth.state = auth_state
-        ctx.auth = _auth
-    # runtime accessor'ы (TabFactory._build_runtime_deps вызывает их)
-    ctx.topology_bridge.return_value = None
-    ctx.bindings.return_value = None
-    ctx.plugin_manager.return_value = None
-    ctx.command_sender = None
-    return ctx
+        auth_ctx = MagicMock()
+        auth_ctx.state = auth_state
+    return TabFactory(
+        app_services,
+        auth_ctx=auth_ctx,
+        runtime=RuntimeDeps(),
+        custom_factories=custom_factories,
+    )
 
 
 class _StubAuthState(QObject):
@@ -114,9 +111,8 @@ class TestTabFactoryCreateTabs:
         """create_tabs добавляет ровно 7 табов в QTabWidget."""
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
-        ctx = _make_ctx()
 
-        factory = TabFactory(ctx)
+        factory = _make_tab_factory()
         factory.create_tabs(tab_widget)
 
         assert tab_widget.count() == 7
@@ -126,7 +122,7 @@ class TestTabFactoryCreateTabs:
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
 
-        factory = TabFactory(_make_ctx())
+        factory = _make_tab_factory()
         factory.create_tabs(tab_widget)
 
         expected_titles = ["Settings", "Recipes", "Processes", "Services", "Plugins", "Pipeline", "Displays"]
@@ -138,7 +134,7 @@ class TestTabFactoryCreateTabs:
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
 
-        factory = TabFactory(_make_ctx())
+        factory = _make_tab_factory()
         factory.create_tabs(tab_widget)
 
         for i in range(tab_widget.count()):
@@ -152,7 +148,7 @@ class TestTabFactoryCreateTabs:
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
 
-        factory = TabFactory(_make_ctx())
+        factory = _make_tab_factory()
         factory.create_tabs(tab_widget)
 
         for i, tab_info in enumerate(TAB_ORDER):
@@ -169,7 +165,7 @@ class TestTabFactoryCreateTabs:
         qtbot.addWidget(mock_widget)
         settings_factory = MagicMock(return_value=mock_widget)
 
-        factory = TabFactory(_make_ctx(), custom_factories={"settings": settings_factory})
+        factory = _make_tab_factory(custom_factories={"settings": settings_factory})
         factory.create_tabs(tab_widget)
 
         # Первый таб — settings — должен быть LazyTabWidget (не PlaceholderTab)
@@ -255,13 +251,13 @@ class TestTabFactoryCreateTab:
 
     def test_unknown_id_returns_none(self, qtbot):
         """create_tab с неизвестным id возвращает None."""
-        factory = TabFactory(_make_ctx())
+        factory = _make_tab_factory()
         result = factory.create_tab("nonexistent_tab")
         assert result is None
 
     def test_known_id_without_custom_factory_returns_placeholder(self, qtbot):
         """create_tab для известного id без custom factory → PlaceholderTab."""
-        factory = TabFactory(_make_ctx())
+        factory = _make_tab_factory()
         result = factory.create_tab("settings")
         if result is not None:
             qtbot.addWidget(result)
@@ -271,23 +267,22 @@ class TestTabFactoryCreateTab:
     def test_custom_factory_called_directly(self, qtbot):
         """create_tab вызывает custom factory напрямую (без LazyTabWidget).
 
-        Task F.9: factory получает (app_services, RuntimeDeps), не ctx.
+        G.5.2: factory получает (app_services, RuntimeDeps).
         """
         custom_widget = QWidget()
         qtbot.addWidget(custom_widget)
         factory_fn = MagicMock(return_value=custom_widget)
 
-        ctx = _make_ctx()
-        factory = TabFactory(ctx, custom_factories={"recipes": factory_fn})
+        factory = _make_tab_factory(custom_factories={"recipes": factory_fn})
         result = factory.create_tab("recipes")
 
-        factory_fn.assert_called_once_with(ctx.app_services, factory._runtime)
+        factory_fn.assert_called_once_with(factory._services, factory._runtime)
         assert result is custom_widget
 
     def test_custom_factory_returns_none_falls_back_to_placeholder(self, qtbot):
         """Если custom factory вернула None — используется PlaceholderTab."""
         factory_fn = MagicMock(return_value=None)
-        factory = TabFactory(_make_ctx(), custom_factories={"processes": factory_fn})
+        factory = _make_tab_factory(custom_factories={"processes": factory_fn})
 
         result = factory.create_tab("processes")
         if result is not None:
@@ -302,7 +297,7 @@ class TestTabFactoryCreateTab:
         def bad_factory(services, runtime):
             raise ValueError("Намеренная ошибка")
 
-        factory = TabFactory(_make_ctx(), custom_factories={"plugins": bad_factory})
+        factory = _make_tab_factory(custom_factories={"plugins": bad_factory})
         result = factory.create_tab("plugins")
         if result is not None:
             qtbot.addWidget(result)
@@ -312,7 +307,7 @@ class TestTabFactoryCreateTab:
 
     def test_all_known_ids_return_widget(self, qtbot):
         """create_tab для всех известных id возвращает QWidget (не None)."""
-        factory = TabFactory(_make_ctx())
+        factory = _make_tab_factory()
         for tab_info in TAB_ORDER:
             result = factory.create_tab(tab_info["id"])
             assert result is not None, f"create_tab({tab_info['id']!r}) вернул None"
@@ -343,7 +338,7 @@ class TestTabFactoryPermissions:
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
 
-        factory = TabFactory(_make_ctx(auth_state=None))
+        factory = _make_tab_factory(auth_state=None)
         factory.create_tabs(tab_widget)
 
         assert _visible_tab_ids(tab_widget) == [t["id"] for t in TAB_ORDER]
@@ -354,7 +349,7 @@ class TestTabFactoryPermissions:
         qtbot.addWidget(tab_widget)
 
         stub = _StubAuthState()  # default AccessContext() — permissions=frozenset()
-        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory = _make_tab_factory(auth_state=stub)
         factory.create_tabs(tab_widget)
 
         # Все 7 табов имеют view_permission → ни один не виден
@@ -370,7 +365,7 @@ class TestTabFactoryPermissions:
             role_name="viewer",
         )
         stub = _StubAuthState(ctx)
-        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory = _make_tab_factory(auth_state=stub)
         factory.create_tabs(tab_widget)
 
         assert _visible_tab_ids(tab_widget) == ["recipes", "pipeline"]
@@ -382,7 +377,7 @@ class TestTabFactoryPermissions:
 
         ctx = AccessContext(permissions=frozenset({"*"}), role_name="dev")
         stub = _StubAuthState(ctx)
-        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory = _make_tab_factory(auth_state=stub)
         factory.create_tabs(tab_widget)
 
         assert _visible_tab_ids(tab_widget) == [t["id"] for t in TAB_ORDER]
@@ -393,7 +388,7 @@ class TestTabFactoryPermissions:
         qtbot.addWidget(tab_widget)
 
         stub = _StubAuthState()  # старт без permissions
-        factory = TabFactory(_make_ctx(auth_state=stub))
+        factory = _make_tab_factory(auth_state=stub)
         factory.create_tabs(tab_widget)
         assert _visible_tab_ids(tab_widget) == []
 

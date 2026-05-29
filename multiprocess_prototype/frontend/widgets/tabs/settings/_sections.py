@@ -28,6 +28,8 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionS
 from multiprocess_prototype.domain.app_services import AppServices
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from multiprocess_framework.modules.frontend_module.widgets.tabs.section_protocol import (
         SectionProtocol,
     )
@@ -151,18 +153,18 @@ def _system_presenter_factory(services: AppServices, auth_ctx: "AuthContext | No
     return SystemSettingsPresenter(view=section, rm=None, ui=None, services=services)
 
 
-def _interface_factory(services: AppServices, auth_ctx: "AuthContext | None") -> "SectionProtocol":
+def _interface_factory(
+    services: AppServices,
+    request_ui_restart: "Callable[[], None] | None" = None,
+) -> "SectionProtocol":
     """Фабрика InterfaceSection — настройки интерфейса.
 
-    InterfaceSection использует process._restart_ui — нет в AppServices Protocol.
-    TODO Phase G (G.5): добавить ProcessControl Protocol в AppServices или оставить
-    как separate dependency injection.
-    Для D.5 передаём None как AppContext fallback — InterfaceSection работает
-    без ctx (кнопка «Обновить UI» не функциональна, но не падает).
+    G.5.2: InterfaceSection получает узкий `request_ui_restart` callback через
+    RuntimeDeps (не AppContext.process). None → кнопка «Обновить UI» = no-op.
     """
     from .interface import InterfaceSection
 
-    return InterfaceSection(ctx=None)  # type: ignore[arg-type]
+    return InterfaceSection(request_ui_restart=request_ui_restart)
 
 
 def _appearance_factory(services: AppServices, auth_ctx: "AuthContext | None") -> "SectionProtocol":
@@ -228,10 +230,12 @@ def build_settings_sections(
     services: AppServices,
     *,
     auth_ctx: "AuthContext | None" = None,
+    request_ui_restart: "Callable[[], None] | None" = None,
 ) -> "list[SectionSpec]":
     """Вернуть список SectionSpec для SettingsTab.
 
     Task D.5: принимает AppServices + auth_ctx вместо AppContext.
+    G.5.2: + request_ui_restart callback для InterfaceSection (runtime-зависимость).
 
     Порядок секций зафиксирован baseline-phase2.md:
     1. admin_dashboard (раскрывающаяся ветка) → users / roles / sessions / audit_log
@@ -285,7 +289,7 @@ def build_settings_sections(
         SectionSpec(
             key="interface_settings",
             title="Настройка интерфейса",
-            factory=_make_factory(_interface_factory, services, auth_ctx),
+            factory=lambda _ctx_arg, _rr=request_ui_restart: _interface_factory(services, _rr),
         ),
         SectionSpec(
             key="appearance",

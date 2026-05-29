@@ -1,23 +1,24 @@
 """TabFactory — фабрика табов с ленивой инициализацией, фильтрацией по permissions и заглушками.
 
 Использование:
-    factory = TabFactory(ctx, custom_factories=register_all_tabs())
+    factory = TabFactory(app_services, auth_ctx=auth_ctx, runtime=runtime,
+                         custom_factories=register_all_tabs())
     factory.create_tabs(tab_widget)
 
 custom_factories: dict[tab_id -> Callable[[AppServices, RuntimeDeps], QWidget]]
     Если id отсутствует — создаётся PlaceholderTab.
 
-Task F.9: фабрики принимают (AppServices, RuntimeDeps) вместо AppContext.
-TabFactory по-прежнему хранит ctx для permission-фильтрации (ctx.auth.state),
-но при вызове фабрик собирает RuntimeDeps из ctx и передаёт services + runtime.
+G.5.2: TabFactory принимает explicit (app_services, auth_ctx, runtime) вместо
+AppContext. RuntimeDeps собирается в composition root (app.py) и передаётся готовым;
+фабрики получают (services, runtime).
 
 Фильтрация по permissions:
-    После создания всех табов фабрика читает `ctx.auth.state.access_context`
+    После создания всех табов фабрика читает `auth_ctx.state.access_context`
     и скрывает табы, у которых `view_permission` не выдан текущему пользователю
     (через `QTabBar.setTabVisible`). Подписывается на `access_context_changed`
     и пере-применяет видимость при login/logout/смене роли.
 
-    Если в AppContext нет `auth_state` — все табы видимы (legacy-режим).
+    Если `auth_ctx` is None — все табы видимы (legacy-режим).
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ from .runtime_deps import RuntimeDeps
 from .widgets.tabs.placeholder import PlaceholderTab
 
 if TYPE_CHECKING:
-    from .app_context import AppContext
+    from .auth_context import AuthContext
+    from multiprocess_prototype.domain.app_services import AppServices
     from multiprocess_framework.modules.frontend_module.managers.access_context import (
         AccessContext,
     )
@@ -151,30 +153,37 @@ class LazyTabWidget(QWidget):
 class TabFactory:
     """Фабрика табов с поддержкой custom factories, ленивой инициализации и permissions.
 
+    G.5.2: принимает explicit (app_services, auth_ctx, runtime) вместо AppContext.
+
     Args:
-        ctx: AppContext — используется для permission-фильтрации (ctx.auth.state)
-            и сборки RuntimeDeps. Если `ctx.auth` не None — фабрика подписывается
-            на `access_context_changed` и применяет видимость табов по
-            `view_permission` каждой записи `TAB_ORDER`.
+        app_services: AppServices — editor-state DI-контейнер, передаётся фабрикам табов.
+        auth_ctx: AuthContext | None — для permission-фильтрации (auth_ctx.state).
+            Если не None — фабрика подписывается на `access_context_changed` и
+            применяет видимость табов по `view_permission` каждой записи `TAB_ORDER`.
+            None → все табы видимы (legacy-режим, для тестов без RBAC).
+        runtime: RuntimeDeps — runtime-зависимости (IPC-мосты, bindings, callbacks),
+            передаётся вторым параметром фабрикам (Q-F1=B). None → RuntimeDeps().
         custom_factories: опциональный dict[tab_id -> factory(services, runtime) -> QWidget]
-            Task F.9: фабрики принимают (AppServices, RuntimeDeps), не AppContext.
             Если передан factory для tab_id, таб создаётся через LazyTabWidget.
             Иначе используется PlaceholderTab.
     """
 
     def __init__(
         self,
-        ctx: "AppContext",
+        app_services: "AppServices",
+        *,
+        auth_ctx: "AuthContext | None" = None,
+        runtime: "RuntimeDeps | None" = None,
         custom_factories: dict[str, Callable] | None = None,
     ) -> None:
-        self._ctx = ctx
+        self._services = app_services
+        self._auth_ctx = auth_ctx
+        self._runtime = runtime if runtime is not None else RuntimeDeps()
         self._custom_factories: dict[str, Callable] = custom_factories or {}
         # Сохраняем целевой QTabWidget для re-apply при смене access_context
         self._tab_widget: QTabWidget | None = None
         # Соответствие tab_id → индекс в QTabWidget (порядок TAB_ORDER)
         self._tab_index: dict[str, int] = {}
-        # RuntimeDeps собирается один раз из ctx (Q-F1=B)
-        self._runtime = self._build_runtime_deps()
 
     def create_tabs(self, tab_widget: QTabWidget) -> None:
         """Создать все табы согласно TAB_ORDER и добавить в QTabWidget.
@@ -188,7 +197,7 @@ class TabFactory:
         self._tab_widget = tab_widget
         self._tab_index = {}
 
-        services = self._ctx.app_services
+        services = self._services
         runtime = self._runtime
 
         for tab_info in TAB_ORDER:
@@ -227,7 +236,7 @@ class TabFactory:
 
         if tab_id in self._custom_factories:
             try:
-                result = self._custom_factories[tab_id](self._ctx.app_services, self._runtime)
+                result = self._custom_factories[tab_id](self._services, self._runtime)
                 return result if result is not None else self._make_placeholder(tab_info)
             except Exception:
                 logger.exception("Ошибка создания таба %s", tab_id)
@@ -241,8 +250,7 @@ class TabFactory:
 
     def _wire_auth_state(self) -> None:
         """Подписаться на смену AccessContext в AuthState."""
-        _auth = self._ctx.auth if hasattr(self._ctx, "auth") else None
-        auth_state = _auth.state if _auth is not None else None
+        auth_state = self._auth_ctx.state if self._auth_ctx is not None else None
         if auth_state is None:
             return
         # Реагируем на login/logout/смену роли — реалогиниваем видимость
@@ -255,14 +263,13 @@ class TabFactory:
     def _apply_permissions(self) -> None:
         """Скрыть/показать табы по `view_permission` текущего AccessContext.
 
-        Если в AppContext нет `auth_state` — все табы остаются видимыми
+        Если `auth_ctx` is None — все табы остаются видимыми
         (legacy-режим, для тестов без RBAC).
         """
         if self._tab_widget is None:
             return
 
-        _auth = self._ctx.auth if hasattr(self._ctx, "auth") else None
-        auth_state = _auth.state if _auth is not None else None
+        auth_state = self._auth_ctx.state if self._auth_ctx is not None else None
         if auth_state is None:
             return
 
@@ -295,20 +302,4 @@ class TabFactory:
             tab_id=tab_info["id"],
             title=tab_info["title"],
             description=tab_info.get("description", ""),
-        )
-
-    def _build_runtime_deps(self) -> RuntimeDeps:
-        """Собрать RuntimeDeps из AppContext (Q-F1=B).
-
-        Вызывается один раз в __init__. Все runtime-accessor'ы AppContext
-        вызываются здесь и замораживаются в frozen dataclass.
-        """
-        ctx = self._ctx
-        return RuntimeDeps(
-            command_sender=getattr(ctx, "command_sender", None),
-            topology_bridge=ctx.topology_bridge() if hasattr(ctx, "topology_bridge") else None,
-            bindings=ctx.bindings() if hasattr(ctx, "bindings") else None,
-            plugin_manager=ctx.plugin_manager() if hasattr(ctx, "plugin_manager") else None,
-            registers_manager=ctx.registers_manager() if hasattr(ctx, "registers_manager") else None,
-            auth_ctx=ctx.auth if hasattr(ctx, "auth") else None,
         )

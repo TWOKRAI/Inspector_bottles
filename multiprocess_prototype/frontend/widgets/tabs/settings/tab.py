@@ -22,6 +22,8 @@ from .presenter import SettingsPresenter
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from multiprocess_prototype.frontend.auth_context import AuthContext
 
 
@@ -44,6 +46,7 @@ class SettingsTab(BaseTreeNavTab):
         services: AppServices,
         *,
         auth_ctx: "AuthContext | None" = None,
+        request_ui_restart: "Callable[[], None] | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         # G.4.4: undo/redo на domain CommandDispatcher (services.commands
@@ -57,7 +60,7 @@ class SettingsTab(BaseTreeNavTab):
 
         super().__init__(
             title="Настройки",
-            sections=build_settings_sections(services, auth_ctx=auth_ctx),
+            sections=build_settings_sections(services, auth_ctx=auth_ctx, request_ui_restart=request_ui_restart),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             bus_change_subscriber=lambda cb: commands.add_change_callback(cb),
@@ -92,9 +95,13 @@ class SettingsTab(BaseTreeNavTab):
         """Фабричный метод для register_all_tabs() / TabFactory.
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
-        auth_ctx берётся из runtime.auth_ctx.
+        auth_ctx + request_ui_restart берутся из runtime (G.5.2).
         """
-        return cls(services, auth_ctx=runtime.auth_ctx)
+        return cls(
+            services,
+            auth_ctx=runtime.auth_ctx,
+            request_ui_restart=runtime.request_ui_restart,
+        )
 
     def _tree_object_name(self) -> str:
         return "SettingsTreeNav"

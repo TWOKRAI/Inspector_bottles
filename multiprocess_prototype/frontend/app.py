@@ -518,9 +518,33 @@ def run_gui(process: "GuiProcess") -> None:
     window.set_image_panel(image_panel)
 
     # 5. Создать TabFactory и заполнить табы (Phase 10: все 7 табов)
+    # G.5.2: RuntimeDeps + auth_ctx собираются здесь (composition root) и
+    # передаются TabFactory явно — фабрика больше не зависит от AppContext.
     from .widgets.tabs import register_all_tabs
+    from .runtime_deps import RuntimeDeps
 
-    tab_factory = TabFactory(ctx, custom_factories=register_all_tabs())
+    def _request_ui_restart() -> None:
+        """Узкий callback для InterfaceSection — перезапуск UI без перезапуска процесса."""
+        process._restart_ui = True
+        app.quit()
+
+    _auth_ctx = ctx.auth
+    _runtime = RuntimeDeps(
+        command_sender=ctx.command_sender,
+        topology_bridge=topology_bridge,
+        bindings=bindings,
+        plugin_manager=_plugin_manager,
+        registers_manager=registers_manager,
+        auth_ctx=_auth_ctx,
+        request_ui_restart=_request_ui_restart,
+    )
+
+    tab_factory = TabFactory(
+        ctx.app_services,
+        auth_ctx=_auth_ctx,
+        runtime=_runtime,
+        custom_factories=register_all_tabs(),
+    )
     ctx.extras["tab_factory"] = tab_factory
     tab_factory.create_tabs(window.tab_widget)
 

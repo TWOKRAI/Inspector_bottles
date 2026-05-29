@@ -133,7 +133,13 @@ class TestPhase15Smoke:
         factories = register_all_tabs()
         assert len(factories) >= 7, f"Зарегистрировано >=7 tab factories: {len(factories)}"
 
-        tab_factory = TabFactory(ctx, custom_factories=factories)
+        # G.5.2: TabFactory принимает explicit (app_services, auth_ctx, runtime).
+        # Табы ленивые → app_services не разыменовывается в headless-тесте.
+        tab_factory = TabFactory(
+            ctx.app_services,
+            auth_ctx=ctx.auth,
+            custom_factories=factories,
+        )
         tab_factory.create_tabs(window.tab_widget)
 
         # 11. Проверить что все 7 табов созданы
