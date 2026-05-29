@@ -50,8 +50,18 @@ class CommandDispatcher(Protocol):
     (store-publishes, G.3) → подписчики (презентеры) делают full reload.
     """
 
-    def dispatch(self, command: ProjectCommand) -> list[ProjectEvent]:
-        """Выполнить команду. Возвращает список эмитированных событий."""
+    def dispatch(
+        self,
+        command: ProjectCommand,
+        *,
+        coalesce_key: str | None = None,
+        undoable: bool = True,
+    ) -> list[ProjectEvent]:
+        """Выполнить команду. Возвращает список эмитированных событий.
+
+        coalesce_key — группировка undo-записей (серия slider-тиков → одна запись).
+        undoable — False для команд вне undo-истории (например, переключение рецепта).
+        """
         ...
 
     def undo(self) -> bool:

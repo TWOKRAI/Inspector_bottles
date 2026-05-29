@@ -102,6 +102,7 @@ class RecipesTab(BaseListNavTab):
             self._presenter = RecipesPresenter(
                 store=services.recipes,
                 view=self,
+                commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
             )
             self._presenter.load()
 

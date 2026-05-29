@@ -382,7 +382,13 @@ class FakeCommandDispatcher:
         self.last_command: ProjectCommand | None = None
         self.dispatched: list[ProjectCommand] = []
 
-    def dispatch(self, command: ProjectCommand) -> list[ProjectEvent]:
+    def dispatch(
+        self,
+        command: ProjectCommand,
+        *,
+        coalesce_key: str | None = None,
+        undoable: bool = True,
+    ) -> list[ProjectEvent]:
         self.last_command = command
         self.dispatched.append(command)
         return []

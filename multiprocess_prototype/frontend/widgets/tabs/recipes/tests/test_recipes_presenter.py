@@ -31,7 +31,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
+from multiprocess_prototype.domain.commands import ActivateRecipe
+from multiprocess_prototype.domain.errors import DomainError
+from multiprocess_prototype.domain.tests._fakes import FakeCommandDispatcher, FakeRecipeStore
 from multiprocess_prototype.frontend.widgets.tabs.recipes.presenter import (
     RecipesPresenter,
 )
@@ -378,3 +380,65 @@ def test_on_set_active_replace_error(
     mock_view.show_error.assert_called_once()
     error_msg = mock_view.show_error.call_args[0][0]
     assert "Процесс не стартовал" in error_msg
+
+
+# ---------------------------------------------------------------------------
+# G.6.5: on_set_active → dispatch(ActivateRecipe) когда commands задан
+# ---------------------------------------------------------------------------
+
+
+class _RecordingDispatcher(FakeCommandDispatcher):
+    """FakeCommandDispatcher, запоминающий kwargs последнего dispatch."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.dispatch_kwargs: dict = {}
+
+    def dispatch(self, command, *, coalesce_key=None, undoable=True):  # type: ignore[override]
+        self.dispatch_kwargs = {"coalesce_key": coalesce_key, "undoable": undoable}
+        return super().dispatch(command)
+
+
+class _RaisingDispatcher(FakeCommandDispatcher):
+    """Dispatcher, бросающий DomainError на dispatch (невалидный blueprint)."""
+
+    def dispatch(self, command, *, coalesce_key=None, undoable=True):  # type: ignore[override]
+        raise DomainError("recipe blueprint invalid")
+
+
+def test_on_set_active_dispatches_activate_recipe(mock_view: MagicMock) -> None:
+    """commands задан → on_set_active dispatch'ит ActivateRecipe(slug)."""
+    store = _make_store(slugs=["cup"])
+    commands = _RecordingDispatcher()
+    presenter = RecipesPresenter(store=store, view=mock_view, commands=commands)
+
+    presenter.on_set_active("cup")
+
+    assert isinstance(commands.last_command, ActivateRecipe)
+    assert commands.last_command.slug == "cup"
+    # undoable=False — переключение рецепта не попадает в Ctrl+Z историю
+    assert commands.dispatch_kwargs["undoable"] is False
+    # persist флага активного рецепта выполнен
+    assert store.get_active() == "cup"
+
+
+def test_on_set_active_domain_error_graceful(mock_view: MagicMock) -> None:
+    """DomainError из dispatch → show_error, set_active НЕ выполнен."""
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view, commands=_RaisingDispatcher())
+
+    presenter.on_set_active("cup")
+
+    mock_view.show_error.assert_called_once()
+    assert store.get_active() is None  # persist не произошёл (return до set_active)
+
+
+def test_on_set_active_no_commands_skips_dispatch(mock_view: MagicMock) -> None:
+    """commands=None → legacy-путь: dispatch не зовётся, set_active выполнен."""
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view)  # commands=None
+
+    presenter.on_set_active("cup")
+
+    assert store.get_active() == "cup"
+    mock_view.show_error.assert_not_called()

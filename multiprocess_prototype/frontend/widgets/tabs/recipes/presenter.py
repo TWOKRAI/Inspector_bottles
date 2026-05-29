@@ -20,7 +20,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
+from multiprocess_prototype.domain.commands import ActivateRecipe
+from multiprocess_prototype.domain.errors import DomainError
+
 if TYPE_CHECKING:
+    from multiprocess_prototype.domain.protocols.command_dispatcher import CommandDispatcher
     from multiprocess_prototype.domain.protocols.recipe_store import RecipeStore
 
     from .view import IRecipesView
@@ -78,6 +82,7 @@ class RecipesPresenter:
         view: "IRecipesView",
         replace_blueprint_fn: Callable[[dict], dict] | None = None,
         logger: Any | None = None,
+        commands: "CommandDispatcher | None" = None,
     ) -> None:
         """Инициализировать presenter.
 
@@ -88,11 +93,17 @@ class RecipesPresenter:
                 при set_active (ProcessManager.replace_blueprint). None ->
                 только state обновляется без перезапуска процессов.
             logger: опциональный менеджер логирования (silent при None).
+            commands: domain CommandDispatcher (G.6.5). При наличии активация
+                рецепта идёт через dispatch(ActivateRecipe) — валидирует blueprint,
+                загружает топологию рецепта в editor (Pipeline reload) и эмитит
+                RecipeActivated (cross-tab linking, G.6.6). None → legacy-путь
+                (только set_active, без загрузки в editor).
         """
         self._store = store
         self._view = view
         self._replace_blueprint_fn = replace_blueprint_fn
         self._logger = logger
+        self._commands = commands
         self._selected_slug: str | None = None
 
     # ------------------------------------------------------------------
@@ -289,6 +300,20 @@ class RecipesPresenter:
             self._view.show_error("Рецепт не выбран")
             self._log_warning("RecipesPresenter.on_set_active: нет выбранного рецепта")
             return
+
+        # G.6.5 (Вариант A): domain dispatch ДО persist — валидирует blueprint
+        # рецепта (плагины/дисплеи/циклы), загружает топологию рецепта в editor
+        # (Pipeline scene reload через TopologyReplaced) и эмитит RecipeActivated
+        # (cross-tab linking, G.6.6). undoable=False — переключение рецепта это
+        # смена контекста, а не правка топологии (не попадает в Ctrl+Z-историю).
+        # DomainError (рецепт ссылается на неизвестный плагин и т.п.) → graceful.
+        if self._commands is not None:
+            try:
+                self._commands.dispatch(ActivateRecipe(slug=target_slug), undoable=False)
+            except DomainError as exc:
+                self._view.show_error(f"Не удалось активировать рецепт: {exc}")
+                self._log_error(f"RecipesPresenter.on_set_active: ActivateRecipe отклонён: {exc}")
+                return
 
         # Активируем через RecipeStore Protocol
         success = self._store.set_active(target_slug)

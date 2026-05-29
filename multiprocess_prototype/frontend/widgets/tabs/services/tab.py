@@ -17,7 +17,11 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseTreeNavTab
+from multiprocess_framework.modules.frontend_module.widgets.tabs.nav_tree_utils import (
+    find_tree_item,
+)
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.events import RecipeActivated
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
@@ -61,6 +65,11 @@ class ServicesTab(BaseTreeNavTab):
         self.populate()
         self._connect_paths_signal()
 
+        # G.6.6 cross-tab linking: при активации рецепта подсветить его сервисы.
+        # Подписка хранится в self (EventBus держит сильную ссылку на handler).
+        self._highlighted_service_keys: list[str] = []
+        self._recipe_activated_sub = services.events.subscribe(RecipeActivated, self._on_recipe_activated)
+
     @classmethod
     def create(
         cls,
@@ -102,3 +111,40 @@ class ServicesTab(BaseTreeNavTab):
         new_sections = build_services_sections(self._services)
         self._sections_specs = new_sections
         self.populate()
+
+    # ------------------------------------------------------------------ #
+    #  G.6.6 cross-tab linking                                            #
+    # ------------------------------------------------------------------ #
+
+    def _on_recipe_activated(self, event: RecipeActivated) -> None:
+        """Подсветить сервисы активированного рецепта (active_services).
+
+        Читает active_services из рецепта (оба формата: верхний уровень / data).
+        Пустой список или нечитаемый рецепт → снимает прежнюю подсветку.
+        """
+        active_services: list[str] = []
+        recipes = self._services.recipes
+        raw = recipes.read_raw(event.slug) if recipes is not None else None
+        if isinstance(raw, dict):
+            svc = raw.get("active_services")
+            if svc is None:
+                svc = raw.get("data", {}).get("active_services") if isinstance(raw.get("data"), dict) else None
+            if isinstance(svc, list):
+                active_services = [str(s) for s in svc]
+        self.highlight_active_services(active_services)
+
+    def highlight_active_services(self, service_ids: list[str]) -> None:
+        """Жирным выделить tree-nav узлы указанных сервисов; снять прежнюю подсветку."""
+        for key in self._highlighted_service_keys:
+            self._set_item_bold(key, False)
+        self._highlighted_service_keys = [sid for sid in service_ids if self._set_item_bold(sid, True)]
+
+    def _set_item_bold(self, key: str, bold: bool) -> bool:
+        """Установить/снять bold для tree-nav узла по ключу. True если узел найден."""
+        item = find_tree_item(self._tree_nav.invisibleRootItem(), key)
+        if item is None:
+            return False
+        font = item.font(0)
+        font.setBold(bold)
+        item.setFont(0, font)
+        return True
