@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DETAILED** (2026-05-29, FIELD_SET → SetPluginConfig, scope = только Pipeline Inspector, DESIGN LOCKED владелец); G.4.4 NOT DETAILED; G.5–G.6 NOT DETAILED.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 реализовано** (2026-05-29, `5dc97751`, Y1 — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; verify ✓ 2048 passed / sentrux 9-9 / quality 7133; ожидает reviewer); G.4.4 NOT DETAILED; G.5–G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -717,16 +717,16 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 - (только Y1) `adapters/tests/test_command_dispatcher.py`: undo field-config переигрывает `PluginConfigChanged` (подписчик получает откатанное значение).
 - `plugins/tests/`: после удаления dead-ветки field-edit во вкладке Plugins ничего не ломает (секции строятся, permission-gating цел); регрессия отсутствует.
 
-**Acceptance criteria:**
-- [ ] `grep "rm.set_value" pipeline/presenter.py` (в `_on_inspector_field_changed`) → 0 (прямой путь убран; rm синхронится listener'ом)
-- [ ] field-edit Pipeline Inspector → `dispatch(SetPluginConfig)`; значение **персистится** в topology_repo (раньше терялось — находка #3)
-- [ ] IPC в живой процесс работает (rm.set_value через listener дёргает send_callback) — поведение не хуже текущего
-- [ ] **undo/redo field-config**: и domain, и `rm` (форма + живой процесс) откатываются согласованно (находка #4 закрыта)
-- [ ] full scene reload НЕ происходит на каждый field-edit (`_suppress` — нет мерцания/потери фокуса, находка #5); slider-burst = одна undo-запись (coalesce)
-- [ ] `grep "bus.execute\|_get_bus\|action_bus" plugins/_sections.py` → 0 (dead-ветка field_set убрана)
-- [ ] `python -m pytest multiprocess_prototype/` зелёные (без регрессий vs ~2039 baseline); ruff clean; sentrux `check_rules` **9/9** без регрессии quality
-- [ ] live boot-smoke Pipeline Inspector (qt-mcp/ручной) перед merge — known caveat фазы ([[feedback-qt-mcp-smoke-verification]])
-- [ ] Commit с `Refs: plans/2026-05-27_cross-tab-architecture/phase-g.md`, `Layer: prototype` (или `mixed` если Y1 трогает adapters), `Why:`+`Tested:`
+**Acceptance criteria:** — реализовано 2026-05-29 (`5dc97751`, Y1; verify ✓, ожидает reviewer)
+- [x] `grep "rm.set_value" pipeline/presenter.py` (в `_on_inspector_field_changed`) → 0 (только в docstring; прямой путь убран, rm синхронится listener'ом)
+- [x] field-edit Pipeline Inspector → `dispatch(SetPluginConfig)`; значение **персистится** в topology_repo (`test_field_edit_persists_in_topology`) — находка #3 закрыта
+- [x] IPC в живой процесс работает (rm-sync listener `app.py` → `registers_manager.set_value` → send_callback)
+- [x] **undo/redo field-config**: и domain, и `rm` откатываются согласованно (`test_undo_redo_field_roundtrip`, `test_undo_field_emits_plugin_config_changed`; orchestrator `_emit_config_diff` на реальном store) — находка #4 закрыта
+- [x] full scene reload НЕ происходит на field-edit (`test_field_edit_no_scene_reload`, `_suppress`-guard, находка #5); slider-burst = одна undo-запись (`test_coalesce_slider_burst`)
+- [x] `grep "bus.execute\|_get_bus\|action_bus" plugins/_sections.py` → 0 (только в комментарии; dead-ветка field_set + tab.py bridge убраны)
+- [x] `python -m pytest multiprocess_prototype/` **2048 passed, 3 skipped, 0 failed** (+10 тестов); ruff clean; sentrux `check_rules` **9/9**, quality **7133** (без регрессии vs G.4.2b)
+- [ ] live boot-smoke Pipeline Inspector (qt-mcp/ручной) перед merge — known caveat фазы как G.1/G.3/G.4.2/G.4.2b ([[feedback-qt-mcp-smoke-verification]])
+- [x] Commit `5dc97751` с `Refs: phase-g.md`, `Layer: prototype`, `Why:`+`Tested:`
 
 **Out of scope:**
 - Вкладка Plugins как config-surface (она превью, без привязки) — только cleanup dead-ветки.
