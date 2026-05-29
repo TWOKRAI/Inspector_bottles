@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); G.5–G.6 NOT DETAILED.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps, 446 passed / sentrux 9-9 / 7133); G.5.2–G.5.3 next; G.6 NOT DETAILED.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -98,7 +98,7 @@ G.1 typed events (ФУНДАМЕНТ) ──┬──> G.3 holder removal ──
 | **G.2** | RegistersManager → RuntimeDeps (Q-F1=B): убрать 3 `_rm` getattr. **NB:** не «расширить Protocol» (domain не может FieldInfo) — provide RegistersManager как runtime-dep | M (8 prod + 3 test) | — | **DONE** (reviewer APPROVED) |
 | **G.3** | TopologyHolder removal → TopologyRepositoryStore (Design 2, store-publishes TopologyReplaced). suppress_legacy_notify оказался мёртв → удалён | **L (28 файлов)** | G.1 | **DONE** (reviewer APPROVED) |
 | **G.4** | ActionBus→domain commands: 11 call-sites + undo/redo поверх domain + register→domain mapping | **L (15-20)** | G.1, G.2, G.3 | **DETAILED** (Wave 5: G.4.1–G.4.4). G.4.1 foundation в работе |
-| **G.5** | AppContext removal: отвязать TabFactory/sections/factory от ctx, удалить AppContext + `_deprecated_extras` | M (5-7) | G.4 | NOT DETAILED |
+| **G.5** | AppContext removal: отвязать TabFactory/sections/factory от ctx, удалить AppContext + `_deprecated_extras` | M (5-7) | G.4 | **DETAILED** (Wave 6: G.5.1–G.5.3) |
 | **G.6** | UX: auto-reveal, real-time validation, cross-tab linking, diff-view | S-M каждая | G.1 | NOT DETAILED |
 
 **Антипаттерн brief §8 (запрет big-bang):** G.4 — самый рискованный, сопоставим со всей Phase E.
@@ -820,6 +820,112 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 **Edge cases:** пустая история → undo/redo no-op (False), кнопки disabled, History-таблица пуста, save/clear disabled; change-callback с исключением в одном подписчике не валит остальные; QShortcut Ctrl+Z при фокусе в QLineEdit — поведение как с legacy (глобальный перехват, не регрессия); undo сразу после load (стек пуст).
 **Риск:** **MEDIUM** — трогает центральный orchestrator (additive observer), framework layout Protocol (структурный, обратно совместим), живой MainWindow shortcuts + 5 табов. Главное: (а) рефреш кнопок не должен зацикливаться (change-callback → refresh не мутирует историю); (б) единый undo-путь не ломает per-tab поведение (глобальная история — by design); (в) live-smoke важен (#2). Митигация: тесты на реальном orchestrator, структурный Protocol сохраняет ActionBus-совместимость, явный defer big-bang.
 **Module contract:** public-api-change (additive: domain `CommandDispatcher.add_change_callback`, framework `UndoRedoController` Protocol, `enable_undo_redo` тип; `MainWindow.set_action_bus`→`set_undo_controller` rename — внутренний API); behaviour-change (единая шина undo; History на domain).
+
+---
+
+## Wave 6 — G.5 (AppContext removal)
+
+> Детализировано 2026-05-29 после reality-аудита (grep+read композиционного корня `app.py`). Премиса аудита 2026-05-28 (audit п.5) частично устарела — см. находки. Scope **M-L** (composition root + 3 consumer + 2 удаления + ~6 тестов). Декомпозиция на 3 под-волны (no-big-bang, brief §8).
+
+### Audit-уточнение (2026-05-29, grep+read реальности)
+
+1. **AppContext после G.4 = 3 роли:** (a) `ctx.extras` — scratch-dict аккумуляции 15 зависимостей в `app.py`, читается `build_app_services(ctx)`; (b) carrier `ctx.app_services`; (c) accessor-фасад (`ctx.auth` + runtime-аксессоры) для `tab_factory` + `app.py`.
+2. **`app.py` уже держит все зависимости в локальных переменных** (`_plugin_manager`, `_service_registry`, `event_bus`, `topology_store`, `bindings`, `topology_bridge`, `_recipe_manager`, `_auth_manager`, `_auth_state`, `action_bus`, `registers_manager`). `ctx.extras[...]` = копия локалов. `run_gui` блокируется на `app.exec()` → локалы живы весь lifetime приложения. ⇒ «GC-hold» назначение extras **избыточно**.
+3. **`build_app_services(ctx)` читает 8 ключей extras** (event_bus, topology_store, plugin_registry, display_registry, recipe_manager, service_registry, registers_manager, auth_state) + `ctx.config`. Единственный реальный bridge extras→AppServices.
+4. **TabFactory читает ctx:** `ctx.app_services` ([tab_factory.py:191,230](../../multiprocess_prototype/frontend/tab_factory.py#L191)), `ctx.auth` (244,264 permissions + 313 RuntimeDeps), `_build_runtime_deps` → `ctx.topology_bridge()/bindings()/plugin_manager()/registers_manager()/command_sender`.
+5. **InterfaceSection (`ctx.process` для `_restart_ui`) — МЁРТВ в prod:** [`_sections.py:165`](../../multiprocess_prototype/frontend/widgets/tabs/settings/_sections.py#L165) инстанцирует `InterfaceSection(ctx=None)` → кнопка «Обновить UI» = graceful no-op (logs warning) с D.5.
+6. **Фантом/GC-hold ключи без prod-потребителей** (уходят с ctx без миграции): `command_catalog` (accessor есть, 0 вызовов), `tab_factory` (self-ref, 0 чтений), `action_bus` (только в `ctx.form_context()` — 0 prod-вызовов, G.4.4 #5), `service_state_adapter`/`recipe_state_adapter` (locals достаточно).
+7. **`process._app_context` ([app.py:538](../../multiprocess_prototype/frontend/app.py#L538)) — write-only:** 0 prod-читателей. Удаляется.
+8. **`ctx.auth` property** строит `AuthContext` из extras (auth_manager+auth_state). После G.5 — app.py строит `AuthContext(manager=_auth_manager, state=_auth_state, audit=...)` напрямую из локалов.
+
+### Решение по InterfaceSection (без костылей)
+Восстановить мёртвую фичу через **узкий callback**, не таща весь `GuiProcess`: `RuntimeDeps.request_ui_restart: Callable[[], None] | None`. app.py: `request_ui_restart=lambda: (setattr(process, "_restart_ui", True), app.quit())`. `InterfaceSection(request_ui_restart=...)` вместо `ctx`; None → graceful no-op (как сейчас). Interface Segregation — секция знает только «перезапусти UI», не GuiProcess.
+
+### Декомпозиция G.5 (no-big-bang)
+
+| Под-волна | Описание | Scope | Зависит | Статус |
+|---|---|---|---|---|
+| **G.5.1** | `build_app_services` отвязан от AppContext: frozen `AppServicesDeps` (explicit deps). app.py передаёт локалы напрямую; фабрика не импортирует AppContext, не читает extras. | M (factory + app.py + 2 теста) | — | **DETAILED** |
+| **G.5.2** | TabFactory + InterfaceSection отвязаны от ctx: `TabFactory(app_services, auth_ctx, runtime)`; app.py строит RuntimeDeps + AuthContext напрямую; InterfaceSection ← `request_ui_restart` callback (восстановление фичи #5). | M (tab_factory + _sections + interface/section + app.py + тесты) | G.5.1 | **DETAILED** |
+| **G.5.3** | Удаление: `app_context.py`, `_deprecated_extras.py`, `build_app_context`, `process._app_context`, все `ctx.extras[...]` из app.py (только локалы). Delete `test_app_context`/`test_extras_deprecation`, rewrite остальные. ARCHITECTURE.md. | M (2 delete + app.py cleanup + ~4 теста) | G.5.2 | **DETAILED** |
+
+---
+
+### Task G.5.1 — build_app_services отвязан от AppContext (AppServicesDeps)
+
+**Level:** Senior (teamlead/director — центральный composition step + signature change)
+**Goal:** `build_app_services` перестаёт зависеть от `AppContext`/`ctx.extras` — принимает explicit frozen `AppServicesDeps`. Снимает coupling factory→AppContext (предпосылка удаления AppContext в G.5.3), без изменения собранного AppServices.
+
+**Файлы (prod):**
+- `frontend/app_services_factory.py` — NEW frozen `AppServicesDeps` dataclass (event_bus, topology_store, plugin_registry, display_registry, service_registry, registers_manager — required; recipe_manager, auth_state — `| None = None`; config: dict). `build_app_services(deps: AppServicesDeps) -> AppServices`: читать поля deps вместо `ctx.extras.peek*`; сохранить fail-loud RuntimeError для `recipe_manager is None` / `auth_state is None`. Убрать `if TYPE_CHECKING: import AppContext`.
+- `frontend/app.py` — `_recipe_manager = None` инициализировать ДО try (3g); собрать `AppServicesDeps(...)` из локалов; `ctx.app_services = build_app_services(deps)`. `ctx.extras[...]` оставить как есть (удаляются в G.5.3).
+
+**Тесты:**
+- `frontend/tests/test_app_services_factory.py` — фикстура строит `AppServicesDeps` напрямую (mock-deps), без `build_app_context`. Fail-loud: оставить 2 теста (recipe_manager=None → RuntimeError, auth_state=None → RuntimeError); KeyError-on-extras тесты убрать (контракт extras уходит). `TestAppContextAppServicesField` — оставить (тестирует поле AppContext, не factory).
+- `frontend/tests/test_phase15_smoke.py` — если зовёт build_app_services — обновить на AppServicesDeps.
+
+**Acceptance criteria:** — ✅ DONE (2026-05-29, `63e303b6`)
+- [x] `grep "AppContext\|ctx.extras\|build_app_context" frontend/app_services_factory.py` → 0
+- [x] `build_app_services(AppServicesDeps(...))` собирает AppServices с 10 не-None полями (`test_all_10_fields_not_none`)
+- [x] fail-loud: recipe_manager/auth_state None → RuntimeError (`test_missing_recipe_manager`/`test_missing_auth_state`)
+- [x] dispatch(AddProcess) round-trip через собранный AppServices зелёный (`test_dispatch_add_process`)
+- [x] frontend+adapters **446 passed / 2 skipped**; ruff clean; sentrux check_rules **9/9**, quality 7133
+- [x] Commit `63e303b6` с `Refs: phase-g.md`, `Layer: prototype`
+
+**Out of scope:** TabFactory/InterfaceSection отвязка (G.5.2); удаление AppContext (G.5.3).
+**Edge cases:** recipe-build упал в app.py try → `_recipe_manager=None` → RuntimeError fail-loud (как сейчас).
+**Module contract:** public-api-change (signature `build_app_services`: ctx → AppServicesDeps).
+
+---
+
+### Task G.5.2 — TabFactory + InterfaceSection отвязаны от ctx
+
+**Level:** Senior (teamlead/director — живой TabFactory + permission-проводка + composition root)
+**Goal:** `TabFactory` принимает `(app_services, auth_ctx, runtime)` вместо `ctx`; app.py строит `RuntimeDeps` + `AuthContext` напрямую из локалов; `InterfaceSection` получает `request_ui_restart` callback (восстановление мёртвой фичи #5). После — `tab_factory.py` не импортирует/не читает AppContext.
+
+**Файлы (prod):**
+- `frontend/runtime_deps.py` — поле `request_ui_restart: "Callable[[], None] | None" = None` + docstring.
+- `frontend/tab_factory.py` — `__init__(self, app_services, auth_ctx, runtime)` (или `(services, *, auth_ctx, runtime)`); убрать `self._ctx`, `_build_runtime_deps` (runtime приходит готовый); `_apply_permissions`/`_wire_auth_state` читают `auth_ctx` (не `ctx.auth`); `create_tabs/create_tab` используют `self._services` + `self._runtime`.
+- `frontend/app.py` — построить `RuntimeDeps(...)` напрямую из локалов (command_sender, topology_bridge, bindings, plugin_manager, registers_manager, auth_ctx, request_ui_restart); `auth_ctx = AuthContext(...)` из `_auth_manager`/`_auth_state`; `TabFactory(ctx.app_services, auth_ctx=auth_ctx, runtime=runtime)`.
+- `frontend/widgets/tabs/settings/interface/section.py` — `InterfaceSection(request_ui_restart=None)` вместо `ctx`; `_on_rebuild_ui` зовёт callback.
+- `frontend/widgets/tabs/settings/_sections.py:165` — `InterfaceSection(request_ui_restart=runtime.request_ui_restart)` (проводка через section-фабрику; проверить как _interface_factory получает runtime).
+
+**Тесты:** `test_tab_factory.py` (rewrite на app_services+auth_ctx+runtime), `interface/section` тест (callback вызывается / None no-op).
+
+**Acceptance criteria:**
+- [ ] `grep "AppContext\|self._ctx\|ctx.auth\|ctx.app_services" frontend/tab_factory.py` → 0
+- [ ] permission-фильтрация работает через `auth_ctx` (тест login/logout видимости)
+- [ ] InterfaceSection «Обновить UI» вызывает `request_ui_restart` (фича восстановлена); None → no-op
+- [ ] pytest frontend/settings зелёные; ruff; sentrux 9/9
+- [ ] Commit `Refs`, `Layer: prototype`
+
+**Out of scope:** удаление AppContext (G.5.3).
+**Module contract:** public-api-change (TabFactory + InterfaceSection ctor).
+
+---
+
+### Task G.5.3 — Удаление AppContext + _deprecated_extras
+
+**Level:** Senior (teamlead/director — финальная чистка composition root)
+**Goal:** Удалить `AppContext`, `_DeprecatedExtrasDict`, `build_app_context`, `process._app_context`, все `ctx.extras[...]` из app.py (зависимости — только локалы). Удалить осиротевшие тесты, переписать зависящие. Обновить ARCHITECTURE.md.
+
+**Файлы (prod):**
+- DELETE `frontend/app_context.py`, `frontend/_deprecated_extras.py`.
+- `frontend/app.py` — убрать `build_app_context` import + вызов; убрать ВСЕ `ctx.extras[...]` (локалы достаточно); убрать `process._app_context = ctx`; `command_sender` строить локально (`CommandSender(process)`); `ctx.app_services` → локальная `app_services`; `ctx.auth` (493,527) → локальный `auth_ctx`.
+- `frontend/auth_context.py` — если re-export AppContext (line 8 в app_context) — проверить, что AuthContext самодостаточен (он отдельный модуль, ок).
+- `multiprocess_prototype/ARCHITECTURE.md` — обновить раздел «AppContext (DI-контейнер)» → AppServices + RuntimeDeps.
+
+**Тесты:** DELETE `test_app_context.py`, `test_extras_deprecation.py`; rewrite `test_phase15_smoke.py`, `test_phase10_integration.py` (если используют build_app_context).
+
+**Acceptance criteria:**
+- [ ] `grep -rn "AppContext\|build_app_context\|_DeprecatedExtrasDict\|_deprecated_extras\|ctx.extras\|_app_context" multiprocess_prototype/` → 0 (вне git-истории/комментариев-археологии)
+- [ ] `python -m pytest multiprocess_prototype/` зелёные (без регрессии vs G.5.2); ruff clean; sentrux check_rules 9/9
+- [ ] live boot-smoke (qt-mcp/ручной) перед merge — composition root reorder ([[feedback-qt-mcp-smoke-verification]])
+- [ ] Commit `Refs`, `Layer: prototype` (+docs)
+
+**Out of scope:** UX (G.6); удаление `frontend/actions/` (отложено G.4.4).
+**Риск:** **MEDIUM-HIGH** — финальный composition root reorder; митигация: G.5.1/G.5.2 уже сняли coupling, остаётся механическое удаление + live-smoke.
+**Module contract:** public-api-change (удаление публичного `AppContext`/`build_app_context`).
 
 ---
 
