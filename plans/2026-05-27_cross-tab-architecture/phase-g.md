@@ -823,6 +823,31 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 
 ---
 
+## Follow-up из независимого ревью G.4 (2026-05-29)
+
+> Повторное независимое ревью всей G.4 (3 reviewer-агента Opus + ручная проверка ядра undo/redo, rm-sync diff, dual-undo): **APPROVED, 0 блокеров.** Подтверждены snapshot-undo/redo (frozen Project), rm-sync diff на undo (Y1), fan-out identity по паре `(node_id, display_id)`, единая шина undo (баг #2 закрыт), phantom-cleanup (0 `getattr action_bus`), слои framework→prototype не нарушены. Тесты 208 (ядро) + 345 (pipeline) + 24 (cross-tab) зелёные. Ниже — единственная содержательная находка (LOW) и сделанная мелкая правка.
+
+**Сделано в ходе ревью:** [presenter.py `_on_inspector_field_changed`](../../multiprocess_prototype/frontend/widgets/tabs/pipeline/presenter.py#L133) — переписан вводящий в заблуждение комментарий re-entry guard (описывал несуществующий путь `rm-observer → field_changed → re-enter`; проводки rm→inspector нет). Comment-only, 63 теста зелёные, ruff clean.
+
+**Нит-долг (low, не блокирует, можно закрыть пакетно при случае):** `_describe()` `if val:` → `is not None` ([command_dispatcher.py:53](../../multiprocess_prototype/adapters/dispatch/command_dispatcher.py#L53)); Protocol `CommandDispatcher` без `remove_change_callback`; коммент про `min(len)` plugin-tail в `_emit_config_diff`; коммент-контракт «change-callback не мутирует историю»; idempotent-no-op `_apply_unbind_display` (асимметрия с `DisconnectWire`) — задокументировать; подписка `_topology_sub` без `unsubscribe`/dispose (утечки нет при текущем lifetime таба, всплывёт при динамическом создании табов).
+
+### Task G.4.5 (deferred) — Сохранение выделения ноды через scene reload + refresh inspector
+
+**Level:** Senior (teamlead — живой Pipeline editor, центральный путь reload)
+**Assignee:** teamlead (после approval), затем reviewer
+**Goal:** При undo/redo (и любом dispatch с reload) сохранять выделение ноды и обновлять inspector «на месте», а не сбрасывать в placeholder.
+**Контекст (находка ревью, severity LOW — данные корректны, UX-полировка):** `_on_topology_replaced` → `load_scene_with_ports` → `graph_scene.load_from_data` → `clear_all()` ([graph_scene.py:60](../../multiprocess_prototype/frontend/widgets/tabs/pipeline/graph/graph_scene.py#L60)) чистит сцену → теряется выделение → `tab._on_selection_changed` → `inspector.clear()`. Карточки читают значения из `rm` (синхронного на undo через `PluginConfigChanged`), поэтому после переселекта значение корректно — но без переселекта форма очищается. `inspector_panel.update_field` ([inspector_panel.py:588](../../multiprocess_prototype/frontend/widgets/tabs/pipeline/inspector/inspector_panel.py#L588), помечен «programmatically (undo/redo)») — **мёртвый код**, не вызывается. Поведение общее для любого undo (топология тоже), не специфично для поля.
+**Files:** `pipeline/presenter.py` (`_on_topology_replaced` — capture selected node_ids ДО reload, restore ПОСЛЕ), `pipeline/tab.py` / `graph/graph_scene.py` (API восстановления выделения). Решить судьбу `update_field` (подключить для in-place refresh либо удалить как dead code).
+**Acceptance criteria:**
+- [ ] undo/redo сохраняет выделение существующей ноды; inspector показывает откатанные значения без переселекта
+- [ ] re-select удалённой ноды (после undo RemoveProcess) → graceful (placeholder, не падение)
+- [ ] `update_field` либо подключён (in-place refresh), либо удалён как dead code
+- [ ] pytest pipeline зелёные + 🔴 **live qt-mcp boot-smoke ОБЯЗАТЕЛЕН** — поведение видно только в живом GUI ([[feedback-qt-mcp-smoke-verification]])
+**Риск:** MEDIUM — трогает центральный путь reload (каждый dispatch/undo/redo). Митигация: тесты на реальной QGraphicsScene + обязательный live-smoke.
+**Out of scope:** гранулярные scene-апдейты вместо full reload (G.6). Может быть свёрнут в G.6 (UX), если та берётся раньше.
+
+---
+
 ## Wave 6 — G.5 (AppContext removal)
 
 > Детализировано 2026-05-29 после reality-аудита (grep+read композиционного корня `app.py`). Премиса аудита 2026-05-28 (audit п.5) частично устарела — см. находки. Scope **M-L** (composition root + 3 consumer + 2 удаления + ~6 тестов). Декомпозиция на 3 под-волны (no-big-bang, brief §8).
